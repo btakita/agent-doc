@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 agent_doc_pipeline:
   run_id: cycle-1781420754344
   step: write_applied
@@ -146,7 +146,30 @@ Commits pushed:
 - Parent pointer: `c8a886e1e` (`efs: update deal pipeline board polish`) to `btakita/agent-loop:main`.
 
 Commit message used for the code change: `admin pipeline: add compact collapsible board controls`.
-<!-- agent:boundary:636346a3 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed the EFS worker to Cloudflare. The Deal Pipeline width work (triage views `0dd1f15`, collapsible/compact polish `da452b8`) was already committed and pushed, so this cycle shipped the live deployment of that code — no new source change, nothing to commit/push.
+
+Deploy (`bun run deploy:worker` in `src/equityfundingsource-dev`):
+- Remote D1 migrations: `✅ No migrations to apply!` (0025/0026 already applied).
+- Worker uploaded and deployed: 1 new static asset, total 908.70 KiB / gzip 211.05 KiB, startup 17 ms.
+- URL: https://equityfundingsource.brian-takita.workers.dev
+- Scheduled trigger preserved: `0 * * * *` (hourly tmo-sync).
+- Current Version ID: `e28a3536-2a0d-4555-951c-872a3c5fb729`.
+- All bindings intact (D1 `equityfundingsource`, R2 assets/documents/tmo-cache, BorrowerChatRoom/AdminEventsRoom Durable Objects, Access env vars).
+
+Smoke check:
+- `GET /` → 200
+- `GET /funded-deals` → 200
+
+Verification scope: deploy only — no code, test, or build-logic change this cycle, so I did not rerun the full Bun suite (prior cycle: 674 tests + app/worker build green). Cloudflare auth confirmed via `cf:whoami` (account `1e7e194f…`, `brian.takita@gmail.com`).
+<!-- agent:boundary:b4f9197d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -154,9 +177,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~Implement the recommended path for the Deal Pipeline horizontal width improvements.~~
-- ~~Add #2 + #5 polish for the Deal Pipeline horizontal width improvements~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

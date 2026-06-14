@@ -183,18 +183,32 @@ pub(crate) fn deferred_backlog_ids_scoped(
         .or_else(|| file.parent().map(std::path::Path::to_path_buf))
         .map(|root| crate::ipc_socket::is_listener_active(&root))
         .unwrap_or(false);
-    deferred_backlog_ids_with_ipc_scoped(content, live_ipc, scope)
+    // `#freshgrant`: only the in-loop [`DrainScope::Loop`] consults fresh-context
+    // grants — when the supervisor force-`/clear`s + re-dispatches a
+    // `[clean-session]` head, the freshly-cleared in-loop agent IS the fresh
+    // session the tag asks for, so it drains the granted head instead of
+    // deferring under the live editor-IPC listener. The supervisor scope already
+    // drains clean-session unconditionally, so grants are irrelevant there.
+    let granted_ids = match scope {
+        DrainScope::Loop => active_clean_session_grant_ids(file),
+        DrainScope::Supervisor => std::collections::HashSet::new(),
+    };
+    deferred_backlog_ids_with_ipc_scoped(content, live_ipc, scope, &granted_ids)
 }
 
-/// Pure, scoped core of the deferred-set computation (`#cleandrainsup`). For
-/// [`DrainScope::Loop`] a `[clean-session]` item is deferred under a live editor-IPC
-/// listener (the in-session loop cannot self-clean); for [`DrainScope::Supervisor`]
-/// it stays drainable because the supervisor force-`/clear`s before dispatch.
-/// `[operator-verify]` is deferred in both scopes.
+/// Pure, scoped core of the deferred-set computation (`#cleandrainsup` /
+/// `#freshgrant`). For [`DrainScope::Loop`] a `[clean-session]` item is deferred
+/// under a live editor-IPC listener (the in-session loop cannot self-clean)
+/// UNLESS its id carries a fresh-context grant in `granted_ids` (the supervisor
+/// force-`/clear`ed + re-dispatched THIS head to give it the fresh session the
+/// tag asks for). For [`DrainScope::Supervisor`] clean-session stays drainable
+/// because the supervisor force-`/clear`s before dispatch. `[operator-verify]`
+/// is deferred in both scopes regardless of any grant.
 pub(crate) fn deferred_backlog_ids_with_ipc_scoped(
     content: &str,
     live_ipc: bool,
     scope: DrainScope,
+    granted_ids: &std::collections::HashSet<String>,
 ) -> std::collections::HashSet<String> {
     let mut deferred = std::collections::HashSet::new();
     let Ok(components) = crate::component::parse(content) else {
@@ -212,8 +226,18 @@ pub(crate) fn deferred_backlog_ids_with_ipc_scoped(
         }
         let body = &content[comp.open_end..comp.close_start];
         for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
-            if ctx.operator_verify_required || (ctx.clean_session_required && defer_clean_session) {
-                deferred.insert(id.to_ascii_lowercase());
+            let id_l = id.to_ascii_lowercase();
+            if ctx.operator_verify_required {
+                // `[operator-verify]` genuinely needs a human — never drainable by
+                // any agent scope, grant or no grant.
+                deferred.insert(id_l);
+            } else if ctx.clean_session_required
+                && defer_clean_session
+                && !granted_ids.contains(&id_l)
+            {
+                // `#freshgrant`: a granted clean-session head is NOT deferred — the
+                // supervisor just gave the in-loop agent a fresh session for it.
+                deferred.insert(id_l);
             }
         }
     }
@@ -823,6 +847,137 @@ pub fn clear_cooldown_active(file: &Path) -> Result<bool> {
     }
 }
 
+/// TTL for a clean-session fresh-context grant (`#freshgrant`). The operator
+/// directive (2026-06-14): "redefine `[clean-session]` as a fresh agent session
+/// — if the loop restarted, it should run." The supervisor writes a grant when
+/// it force-`/clear`s + re-dispatches a `[clean-session]` head to a freshly-cleared
+/// in-loop agent; the grant lets the in-session [`DrainScope::Loop`] drain THAT
+/// head (the fresh agent IS the clean session the tag asks for) instead of
+/// deferring it under a live editor-IPC listener. Bounded so a grant that is
+/// never drained (the fresh agent declined for another reason and the session
+/// then accreted) cannot keep enabling in-loop clean-session drains in a stale
+/// session — after the TTL it reverts to the deferral fail-safe.
+const CLEAN_SESSION_GRANT_TTL_SECS: u64 = 600;
+
+/// Durable record that the supervisor granted a fresh agent session for one or
+/// more `[clean-session]` queue heads (`#freshgrant`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+struct CleanSessionGrant {
+    granted_ids: Vec<String>,
+    written_at: u64,
+}
+
+fn clean_session_grant_path(file: &Path) -> Result<Option<PathBuf>> {
+    let Some(root) = crate::fs_util::find_project_root(file) else {
+        return Ok(None);
+    };
+    let hash = crate::snapshot::doc_hash(file)?;
+    Ok(Some(
+        root.join(".agent-doc/clean-session-grants")
+            .join(format!("{hash}.json")),
+    ))
+}
+
+fn load_clean_session_grant(path: &Path) -> Result<Option<CleanSessionGrant>> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(serde_json::from_str(&content).ok()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
+    }
+}
+
+/// Record that the supervisor granted a fresh agent session for `[clean-session]`
+/// head `head` (an `#id` / `do [#id]` / raw prompt). Merges into any existing,
+/// non-expired grant set and refreshes the timestamp. No-op when the head has no
+/// extractable `#id` (`#freshgrant`).
+pub fn write_clean_session_grant_for_head(file: &Path, head: &str) -> Result<()> {
+    let Some(id) = extract_head_id(head) else {
+        return Ok(());
+    };
+    let id = id.to_ascii_lowercase();
+    let Some(path) = clean_session_grant_path(file)? else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let mut grant = load_clean_session_grant(&path)?.unwrap_or_default();
+    // Drop an already-expired set before merging so a stale grant cannot resurrect.
+    if grant.written_at != 0
+        && now_secs().saturating_sub(grant.written_at) > CLEAN_SESSION_GRANT_TTL_SECS
+    {
+        grant.granted_ids.clear();
+    }
+    if !grant.granted_ids.iter().any(|g| g == &id) {
+        grant.granted_ids.push(id);
+    }
+    grant.written_at = now_secs();
+    let json = serde_json::to_string_pretty(&grant).context("serialize clean-session grant")?;
+    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+/// Active (non-expired) clean-session fresh-context grant ids (lowercase) for
+/// `file` (`#freshgrant`). An expired grant marker is removed and treated as
+/// empty (fail-safe). Consulted by the in-loop [`DrainScope::Loop`] deferral so a
+/// supervisor-granted head drains in the freshly-cleared agent instead of being
+/// deferred under a live editor-IPC listener.
+pub fn active_clean_session_grant_ids(file: &Path) -> std::collections::HashSet<String> {
+    let path = match clean_session_grant_path(file) {
+        Ok(Some(path)) => path,
+        Ok(None) => return std::collections::HashSet::new(),
+        Err(err) => {
+            eprintln!(
+                "[queue-continuation] WARNING: failed to resolve clean-session grant path for {}: {}",
+                file.display(),
+                err
+            );
+            return std::collections::HashSet::new();
+        }
+    };
+    let grant = match load_clean_session_grant(&path) {
+        Ok(Some(grant)) => grant,
+        Ok(None) => return std::collections::HashSet::new(),
+        Err(err) => {
+            eprintln!(
+                "[queue-continuation] WARNING: failed to read clean-session grant {}: {}",
+                path.display(),
+                err
+            );
+            return std::collections::HashSet::new();
+        }
+    };
+    if grant.written_at == 0
+        || now_secs().saturating_sub(grant.written_at) > CLEAN_SESSION_GRANT_TTL_SECS
+    {
+        // Expired — clean it up so it cannot mislead a later accreted session.
+        if let Err(err) = std::fs::remove_file(&path)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!(
+                "[queue-continuation] WARNING: failed to remove expired clean-session grant {}: {}",
+                path.display(),
+                err
+            );
+        }
+        return std::collections::HashSet::new();
+    }
+    grant.granted_ids.into_iter().collect()
+}
+
+/// Remove the clean-session fresh-context grant marker for `file` (e.g. after the
+/// granted head is completed). No-op when absent (`#freshgrant`).
+pub fn clear_clean_session_grants(file: &Path) -> Result<()> {
+    let Some(path) = clean_session_grant_path(file)? else {
+        return Ok(());
+    };
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| format!("remove {}", path.display())),
+    }
+}
+
 /// A clear that an operator command deferred because the pane was busy under an
 /// active auto-queue loop (`#autoloop-command-preemption` Phase 2b). The
 /// supervisor idle-queue watch delivers `clear_command` at the next idle gap,
@@ -1100,15 +1255,54 @@ mod tests {
                 "- [ ] [#c] plain",
             ],
         );
-        let live = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Loop);
+        let none = std::collections::HashSet::new();
+        let live = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Loop, &none);
         assert!(live.contains("a"));
         assert!(live.contains("b"));
         assert!(!live.contains("c"));
 
-        let clean = deferred_backlog_ids_with_ipc_scoped(&content, false, DrainScope::Loop);
+        let clean = deferred_backlog_ids_with_ipc_scoped(&content, false, DrainScope::Loop, &none);
         assert!(!clean.contains("a"), "clean-session drains in a clean session");
         assert!(clean.contains("b"), "operator-verify always deferred");
         assert!(!clean.contains("c"));
+    }
+
+    #[test]
+    fn loop_drains_granted_clean_session_under_live_ipc() {
+        // #freshgrant: a supervisor fresh-context grant makes the in-loop Loop
+        // scope drain THAT clean-session head even under a live editor-IPC
+        // listener, while a non-granted clean-session head stays deferred and
+        // operator-verify is always deferred regardless of any grant.
+        let content = doc_with_backlog(
+            &["do [#a]", "do [#b]", "do [#e]"],
+            &[
+                "- [ ] [#a] [clean-session] granted",
+                "- [ ] [#b] [operator-verify] live drive",
+                "- [ ] [#e] [clean-session] not granted",
+            ],
+        );
+        let mut granted = std::collections::HashSet::new();
+        granted.insert("a".to_string());
+        let live = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Loop, &granted);
+        assert!(
+            !live.contains("a"),
+            "granted clean-session head drains in-loop even under live IPC (#freshgrant)"
+        );
+        assert!(
+            live.contains("b"),
+            "operator-verify is never drainable, grant or no grant"
+        );
+        assert!(
+            live.contains("e"),
+            "a non-granted clean-session head stays deferred under live IPC"
+        );
+
+        // A grant is irrelevant to the Supervisor scope (it already drains
+        // clean-session); only operator-verify stays deferred there.
+        let sup = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Supervisor, &granted);
+        assert!(!sup.contains("a"));
+        assert!(!sup.contains("e"));
+        assert!(sup.contains("b"));
     }
 
     #[test]
@@ -1126,19 +1320,55 @@ mod tests {
             ],
         );
 
-        let loop_live = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Loop);
+        let none = std::collections::HashSet::new();
+        let loop_live = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Loop, &none);
         assert!(loop_live.contains("a"), "loop defers clean-session under live IPC");
         assert!(loop_live.contains("b"), "operator-verify always deferred");
         assert!(!loop_live.contains("c"));
 
         let sup_live =
-            deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Supervisor);
+            deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Supervisor, &none);
         assert!(
             !sup_live.contains("a"),
             "supervisor drains clean-session even under live IPC (#cleandrainsup)"
         );
         assert!(sup_live.contains("b"), "operator-verify still deferred for the supervisor");
         assert!(!sup_live.contains("c"));
+    }
+
+    #[test]
+    fn clean_session_grant_roundtrips_filters_and_expires() {
+        // #freshgrant: the supervisor writes a grant keyed by the head id; the
+        // in-loop accessor returns it while fresh, scopes it to a real `#id`, and
+        // treats an expired marker as empty (fail-safe revert to deferral).
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#a]"], true, true);
+
+        assert!(
+            active_clean_session_grant_ids(&doc).is_empty(),
+            "no grant before a write"
+        );
+        // A head with no extractable id is a no-op (no spurious grant).
+        write_clean_session_grant_for_head(&doc, "some free-text head").unwrap();
+        assert!(active_clean_session_grant_ids(&doc).is_empty());
+
+        write_clean_session_grant_for_head(&doc, "do [#a]").unwrap();
+        let ids = active_clean_session_grant_ids(&doc);
+        assert!(ids.contains("a"), "granted head id is active while fresh");
+
+        // Simulate an expired grant by back-dating the marker past the TTL.
+        let path = clean_session_grant_path(&doc).unwrap().unwrap();
+        let mut grant = load_clean_session_grant(&path).unwrap().unwrap();
+        grant.written_at = now_secs().saturating_sub(CLEAN_SESSION_GRANT_TTL_SECS + 60);
+        std::fs::write(&path, serde_json::to_string_pretty(&grant).unwrap()).unwrap();
+        assert!(
+            active_clean_session_grant_ids(&doc).is_empty(),
+            "expired grant reverts to deferral and is cleaned up"
+        );
+        assert!(!path.exists(), "expired grant marker is removed");
+
+        // Clearing an absent marker is a no-op.
+        clear_clean_session_grants(&doc).unwrap();
     }
 
     #[test]

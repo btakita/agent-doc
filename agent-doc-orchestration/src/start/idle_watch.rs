@@ -903,6 +903,36 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 last_dispatched = None;
                                 awaiting_clear_settle = true;
                                 clear_settle_idle_ticks = 0;
+                                // `#freshgrant`: when this `/clear` was forced because
+                                // the head is `[clean-session]` (#cleandrainsup), record
+                                // a fresh-context grant so the freshly-cleared in-loop
+                                // agent's preflight (DrainScope::Loop) drains THIS head
+                                // instead of deferring it under the live editor-IPC
+                                // listener (operator directive 2026-06-14: a restarted
+                                // loop IS the fresh session a clean-session head asks for).
+                                if active_head_is_clean_session
+                                    && let Some(head_text) = active_head.as_deref()
+                                {
+                                    match crate::queue_continuation::write_clean_session_grant_for_head(
+                                        &path, head_text,
+                                    ) {
+                                        Ok(()) => crate::ops_log::log_op(
+                                            &path,
+                                            &format!(
+                                                "clean_session_fresh_context_grant file={} head={:?} (#freshgrant)",
+                                                path.display(),
+                                                head_text
+                                            ),
+                                        ),
+                                        Err(err) => log_event(
+                                            &mut session_log,
+                                            &format!(
+                                                "clean_session_fresh_context_grant_failed head={head_text:?} error={:?}",
+                                                err.to_string()
+                                            ),
+                                        ),
+                                    }
+                                }
                                 record_context_clear_prompt_for_hooks(
                                     &shared,
                                     &path,

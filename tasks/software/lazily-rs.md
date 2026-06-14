@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -111,7 +111,7 @@ Queue drained.
 Acknowledged — you removed `go` from the queue marker, so go-mode (auto-drain) is off. The queue is empty (preset `#spec-test-build-install-commit-push`, no items), so nothing is pending and I won't auto-loop.
 
 Two preflight notes: the route-owned host supervisor (pid 3711158) is running a stale build (File Cache Conflict / IPC-drift source) — restart with `agent-doc session restart-supervisor tasks/software/lazily-rs.md --force` when convenient. The two semantic-completion hints (#57by↔#shuttleeval, #h6qb↔#yxjw) are informational; both stay gated as operator-drive review items, not real duplicates.
-<!-- agent:boundary:9dbf9de0 -->
+<!-- agent:boundary:d9ee224f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -119,7 +119,8 @@ Two preflight notes: the route-owned host supervisor (pid 3711158) is running a 
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- #advance-review
 <!-- /agent:queue -->
 
 ## Backlog

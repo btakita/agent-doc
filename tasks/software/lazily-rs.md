@@ -105,9 +105,11 @@ All 7 remaining `agent:review` items are **operator-gated**, not agent-drainable
 - **`#h6qb`** Str0mNet cross-host e2e — needs two live hosts + the deployed signaling Worker
 - **`#xccx`** Holons integration — blocked on Steve Melville's 7 open-question answers
 - **`#57by`** Shuttle async model — NO-GO per `#shuttleeval` (defer)
+- **Trusted Publishing (OIDC):** your release conventions already publish PyPI via `.github/workflows/pypi.yml` on `release: published` — that path needs no login or token at all. (This is how tsift's `opencode-tsift` npm publish was set up; PyPI trusted publishing is the same idea.)
+- **API token:** username `__token__`, password `pypi-…` token — no OTP per upload.
 
 No code, build, or publish steps are agent-runnable until you supply the gated tokens/answers/live endpoints above. Nothing else to do this cycle.
-<!-- agent:boundary:1def9fee -->
+<!-- agent:boundary:9d8df0a2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,6 +118,8 @@ No code, build, or publish steps are agent-runnable until you supply the gated t
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- Create a github pages site for lazily-spec
+- Create a github pages site for lazily-rs
 <!-- /agent:queue -->
 
 ## Backlog

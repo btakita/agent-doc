@@ -90,20 +90,32 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 ```
 
 I'm not restarting it from inside this cycle — that would race my own finalize on the very stale supervisor that's hosting it (`#ipcdrift`). Once it's on a fresh binary in a clean session, the `[clean-session]` heads (`#jbrestale`, `#compactqattr`, `#0kjc`, `#fcc0`…) are workable.
-<!-- agent:boundary:a1339c40 -->
+
+### Re: queue curated to #qchurn — supervisor is now fresh, but the heads stay clean-session — opus-4-8
+
+Two things changed since my last two responses, so let me correct the record first.
+
+**The supervisor is no longer stale.** This session is being served by pid **2524189**, started **04:05:28** today — *after* the installed binary (mtime **03:44:16**, `agent-doc 0.34.0`). My previous two answers were written against the old pid 1562136, which predated the binary. Whatever restart happened at session start brought up a fresh supervisor on the current code, so the "stale-supervisor / binary-skew" blocker I described is **cleared**. The File-Cache-Conflict / `live_prompt_drift` churn you were seeing came from that skew; it should not recur on this supervisor unless something re-stales it.
+
+**Why that still doesn't make the queue drainable here.** You curated the queue down to `- [#qchurn]` (plus the remaining free-text reports). `#qchurn` — and every other head preflight skipped (15 of them, `#goqueuestall`) — is a `[clean-session]` fix to agent-doc's own write/drain path. Working one means editing `src/agent-doc` and `make install`, and that install would make **this** live supervisor (2524189) stale mid-session and race my own finalize — the exact `#no-mid-session-install` failure that produced the churn in the first place. So a *fresh* supervisor doesn't unblock them; the blocker was never only "the binary is old," it's "don't rewrite the live write path from inside a session that depends on it." They need a dedicated clean session.
+
+**On `#qchurn` specifically:** it already captures precisely what you're experiencing — a go-mode queue whose only remaining prompts are non-`do #id` free-text bug reports keeps `queue_active=true`, and the idle-watch re-injects `queue_trigger=auto` every idle boundary → repeated no-op `/agent-doc` cycles. The fix (treat a free-text-only queue as not-drainable and stop re-dispatching) is planned in `tasks/agent-doc/plan-go-queue-stall.md`. Nothing new to add to the backlog — pointing the queue at `#qchurn` is the right call.
+
+**Not auto-looping.** Preflight already marks the 15 heads agent-undrainable, and `#qchurn` is literally the fix for this churn — auto-looping over it would *be* the bug. To actually land `#qchurn` (and the sibling `[clean-session]` heads), restart into a clean session:
+
+```
+cd src/agent-doc && make install
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+
+then open a fresh `/agent-doc` and drain there.
+<!-- agent:boundary:5cf4ba0d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-~~~done
-JB `Run Agent Doc` should red/green deploy the new supervisor and switch over to the new supervisor automatically...in Claude Code, Codex, Opencode
-```
-resync: pruned 8 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3455
-```
-~~~
+---
 JB `Run Agent Doc` should self-heal and complete the dispatch. There was no `- #advance-review` line. Seems to be stuck in an old state.
 ```
 [sync] recovered live pane %25 for session b26b9957 via supervisor pid 1562136
@@ -140,12 +152,7 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ```
 ---
 - This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
-- :pushpin: :round_pushpin: do [#4myd]
 - If there is a `:round_pushpin:` and when upgrading to a `:pushpin:`, drop the `:round_pushpin:` instead of having both. So instead of `:pushpin: :round_pushpin:` we should have `:pushpin:`.
-- :pushpin: :round_pushpin: do [#fcc0]
-- :pushpin: :round_pushpin: do [#rtwbcast]
-- :pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
-- :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
 ---
 :pushpin: JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equityfundingsource.md`
 ```

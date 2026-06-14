@@ -125,14 +125,35 @@ Deployed. Both queued changes from this drain are now live:
 `deploy:worker:no-migrate` (no schema change) → version `7c1f462f`, https://equityfundingsource.brian-takita.workers.dev.
 
 Remaining in the queue: `do [#c7cs]` — extend click-to-view to the admin/investor/broker/lender document **tables**. That's the next drain cycle.
-<!-- agent:boundary:e69aebb7 -->
+
+### Re: do [#c7cs] — extend click-to-view to admin/investor document surfaces — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#c7cs]
+
+
+Done (EFS `5f5e504`). Extended the in-browser document viewer to the remaining download-only surfaces, so **every uploaded file across the portals is now viewable by clicking it**:
+
+- **shared/ui.tsx** — added `DocumentViewActionButton` (eye icon-button for table action columns) and a `class` prop on `DocumentFileLink` for button-styled links.
+- **admin/documents.tsx** — table action columns open the in-page viewer instead of a new tab (removed the `inline_document_url_`/`view_url` new-tab indirection).
+- **admin/document_request_detail.tsx**, **investor/documents.tsx** — provided-document cards open the viewer on click.
+- **admin/deal_documents.tsx** — "View" now opens the in-page modal *and* runs the href through the HTTPS guard (it previously opened a raw href in a new tab — a small security tightening).
+- **admin/upload_detail.tsx**, **investor/available_deals.tsx** — added a **View** action beside Download.
+
+**Left as-is:** lender documents already ship their own stacked-modal previewer (`LenderDocumentPreviewModal`, #doc-stack-esc) — untouched.
+
+**Per `#spec-test-commit-push`:** `document-viewer.test.ts` asserts each surface offers click-to-view; `download-security.test.ts` updated for the now-centralized HTTPS guard. `bun run check` green (657 tests), worker build clean. Committed + pushed.
+
+That drains the queue. Note: a stale route-owned supervisor (pid 861902, pre-current binary) is still throwing the recurring File-Cache-Conflict / IPC-drift dialogs this session — restart it with `agent-doc session restart-supervisor tasks/professional/equityfundingsource.md --force` (or restart the session) to clear them; it doesn't affect the shipped code.
+<!-- agent:boundary:6357bd21 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

@@ -51,6 +51,12 @@ const DEFAULT_LAYOUT_SCOPE: &str = "default";
 const LOCK_FILE: &str = "controller-launch.lock";
 const CONNECT_WAIT: Duration = Duration::from_secs(3);
 const CONNECT_POLL: Duration = Duration::from_millis(50);
+/// How long a contended launch waits for the current holder to finish before
+/// giving up. Sized above `CONNECT_WAIT` so a waiter outlasts the holder's full
+/// `launch_detached` + `wait_for_controller` window and can then adopt the
+/// controller the holder published instead of failing the start (#suprecyclelock).
+const LAUNCH_LOCK_WAIT: Duration = Duration::from_secs(8);
+const LAUNCH_LOCK_POLL: Duration = Duration::from_millis(50);
 #[cfg(not(any(test, feature = "test-support")))]
 const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(any(test, feature = "test-support"))]
@@ -920,7 +926,27 @@ pub struct LaunchLock {
 }
 
 impl LaunchLock {
+    /// Non-blocking acquire: fails immediately if another launch holds the lock.
     pub fn acquire(project_root: &Path) -> Result<Self> {
+        Self::acquire_inner(project_root, None)
+    }
+
+    /// Bounded blocking acquire. Launch-lock contention is **not** a hard error:
+    /// it means another agent-doc process (a concurrent `start`, a sibling
+    /// document's controller launch on the same project-root lock, or a
+    /// freshly-`execve`'d self-recycle racing its predecessor) is mid-launch.
+    /// Failing fast turned that benign race into a `start` failure that surfaced
+    /// `controller launch already in progress ... (os error 11)` on the pane —
+    /// observed when a `next_queue_item` supervisor hot-reload re-ran `start`
+    /// while another launcher still held the lock (#suprecyclelock). Wait up to
+    /// `timeout` for the holder to finish so the caller's double-checked
+    /// `status` + `connect` can adopt the controller the holder published; only a
+    /// genuinely wedged holder (timeout exceeded) returns the error.
+    pub fn acquire_blocking(project_root: &Path, timeout: Duration) -> Result<Self> {
+        Self::acquire_inner(project_root, Some(timeout))
+    }
+
+    fn acquire_inner(project_root: &Path, timeout: Option<Duration>) -> Result<Self> {
         let path = launch_lock_path(project_root);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -932,10 +958,29 @@ impl LaunchLock {
             .write(true)
             .open(&path)
             .with_context(|| format!("failed to open {}", path.display()))?;
-        file.try_lock_exclusive().with_context(|| {
-            format!("controller launch already in progress: {}", path.display())
-        })?;
-        Ok(Self { _file: file })
+        let deadline = timeout.map(|t| Instant::now() + t);
+        loop {
+            match file.try_lock_exclusive() {
+                Ok(()) => return Ok(Self { _file: file }),
+                Err(err) => {
+                    let contended = err.kind() == std::io::ErrorKind::WouldBlock;
+                    match deadline {
+                        Some(deadline) if contended && Instant::now() < deadline => {
+                            std::thread::sleep(LAUNCH_LOCK_POLL);
+                            continue;
+                        }
+                        _ => {
+                            return Err(err).with_context(|| {
+                                format!(
+                                    "controller launch already in progress: {}",
+                                    path.display()
+                                )
+                            });
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -2636,6 +2681,29 @@ mod tests {
         assert!(second.is_err());
         drop(first);
         assert!(LaunchLock::acquire(dir.path()).is_ok());
+    }
+    #[test]
+    fn blocking_launch_lock_waits_for_holder_then_acquires() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let first = LaunchLock::acquire(dir.path()).unwrap();
+        let root = dir.path().to_path_buf();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            drop(first);
+        });
+        // Times out far enough above the holder's release that contention resolves
+        // into a successful acquire rather than an error.
+        let acquired = LaunchLock::acquire_blocking(dir.path(), Duration::from_secs(2));
+        assert!(acquired.is_ok(), "blocking acquire should wait out the holder");
+        releaser.join().unwrap();
+        let _ = root;
+    }
+    #[test]
+    fn blocking_launch_lock_times_out_when_holder_never_releases() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let _held = LaunchLock::acquire(dir.path()).unwrap();
+        let acquired = LaunchLock::acquire_blocking(dir.path(), Duration::from_millis(100));
+        assert!(acquired.is_err(), "a wedged holder must time out");
     }
     #[test]
     fn bootstrap_state_round_trips_launch_mode_and_epoch() {

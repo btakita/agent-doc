@@ -1570,7 +1570,29 @@ pub fn connect_or_launch(
         return connect(project_root);
     }
 
-    let _lock = LaunchLock::acquire(project_root)?;
+    // Block (bounded) on launch-lock contention instead of failing fast: another
+    // launcher (concurrent start, sibling document, or a just-execve'd self-recycle
+    // racing its predecessor) is mid-launch on the shared project-root lock, and the
+    // double-checked `status` + `connect` below adopts whatever it publishes
+    // (#suprecyclelock). Only a genuinely wedged holder returns an error — and even
+    // then, adopt a live matching controller it may have published before wedging.
+    let _lock = match LaunchLock::acquire_blocking(project_root, LAUNCH_LOCK_WAIT) {
+        Ok(lock) => lock,
+        Err(err) => {
+            if let Ok(active_status) = status(project_root)
+                && active_status.active
+                && controller_status_matches_current_binary(&active_status).unwrap_or(false)
+            {
+                reap_stale_duplicate_controllers(
+                    project_root,
+                    active_status.pid,
+                    active_status.controller_generation.unwrap_or(1),
+                );
+                return connect(project_root);
+            }
+            return Err(err);
+        }
+    };
     // Self-heal: kill any predecessor wedged in `Preparing`/`Promoted` past the
     // threshold *before* we adopt or promote, so a stuck controller cannot keep
     // re-corrupting the working tree and respawn the `1002 → 1004 → 1006`

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -153,7 +153,7 @@ What I verified on this machine:
 To make posts go out: schedule them (the item then shows in `corky schedule list`), and the `corky-schedule.timer` will pick them up within 5 minutes and run `corky schedule run`. *[recommended]* After scheduling, confirm with `corky schedule list` (should show the item) and watch one timer cycle land it.
 
 (Note: this question is unrelated to the lazily-rs doc it was queued in; answering inline since it came through this session's queue. Exchange is large but an active queue is draining, so leaving it as-is.)
-<!-- agent:boundary:38796382 -->
+<!-- agent:boundary:5d1486dc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -162,6 +162,7 @@ To make posts go out: schedule them (the item then shows in `corky schedule list
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Did the Linked in post go out?
 <!-- /agent:queue -->
 
 ## Backlog

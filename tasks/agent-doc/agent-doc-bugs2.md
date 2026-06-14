@@ -37,7 +37,38 @@ queue: start
 Compacted content:
 - Archived 8 response topic(s): do [#anw0]; monsterrodholders.md; stale-supervisor restart failed + already-captured churn reports; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:99ecfca9 -->
+
+### Re: stale-supervisor churn (red/green deploy, backlog→queue, post-compact attr wipe) — opus-4-8
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` should red/green deploy the new supervisor and switch over to the new supervisor automatically...in Claude Code, Codex, Opencode
+> ```
+> resync: pruned 8 stale session(s)
+> [route] target tmux session: 0
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3455
+> ```
+
+
+All three queued reports share one root cause, and this session is sitting on top of it: the route-owned host **supervisor (pid 1562136) is stale**. It started 02:32 today, *before* the currently-installed binary, and `~/.cargo/bin/agent-doc` + cdylib + `target/release` themselves **predate source commit `e9cf3b74`**. That doubly-stale supervisor is what produces the File Cache Conflict dialogs, the `live_prompt_drift` / IPC churn, the `dispatch blocked … halting churn until supervisor recycled` errors you pasted (lazily-rs / efs), and the compaction that couldn't commit. I cleared the compaction-commit wedge this cycle (`reset --from-current --preserve-session` → HEAD now matches the post-compact disk).
+
+Per-report status — **all three are already captured as `[clean-session]` backlog items**, so nothing is lost:
+
+1. **JB `Run Agent Doc` should red/green-deploy + auto-switch the supervisor** (CC/Codex/OpenCode) → `#jbrestale`. This is exactly the self-healing that would have prevented this whole session: detect a stale/churn-stopped supervisor, drain-and-supersede to a fresh one, switch over automatically instead of failing closed. The lazily-rs `failed_stage=queue_paused … stale route-owned supervisor (pid 968752)` error is the same class.
+2. **backlog `priority queue` items not flowing into `agent:queue`** → tracked, and preflight reports the go-mode path *is* now appending fresh backlog `queue`-attr ids (`#backlog-queue-attr-populates-in-go-mode`); the batch you listed maps to `#4myd`, `#pushpinaccum` (`:pushpin:`/`:round_pushpin:` dedup), `#fcc0`, `#rtwbcast`, `#recyclerestart`, and `#0kjc` (markdown-AST tags-in-strings/code-spans-are-content).
+3. **Post-compaction wiped all `agent:queue` attributes** (`preset`, `priority`) in monsterrodholders.md → `#compactqattr`.
+
+Why I did **not** drain them this cycle: they are `[clean-session]` code fixes in `src/agent-doc`, and writing/finalizing those fixes through the live stale supervisor races it and corrupts the document (the churn you're already seeing). They need a fresh supervisor.
+
+**Recovery to unblock a clean drain** (run from a fresh terminal, not through this session):
+```
+cd src/agent-doc && make install
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+`make install` rebuilds the binary + cdylib to `e9cf3b74`+; `restart-supervisor --force` retires pid 1562136 and brings up a fresh supervisor on the new binary so client and supervisor no longer skew. Then re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` in a clean session and the `[clean-session]` heads become drainable.
+
+Not auto-looping — the queue heads are agent-undrainable under the live stale supervisor (`#goqueuestall`).
+<!-- agent:boundary:c5f4e90c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -51,7 +82,7 @@ resync: pruned 8 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3455
 ```
 ---
-- agent-doc sync .../monsterrodholders.md is not opening the tmux pane for monsterrodholders.md. I previously closed the session and ran `kill-pane` to start a new supervisor version.
+- ~~agent-doc sync .../monsterrodholders.md is not opening the tmux pane for monsterrodholders.md. I previously closed the session and ran `kill-pane` to start a new supervisor version.~~
 ---
 JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
 ```

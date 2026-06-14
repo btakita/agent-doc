@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -288,7 +288,7 @@ Correcting the two earlier "queued / not blocked on" notes: the **first** deploy
 - The same pointer bump also published the sibling featured post `2026-06-14-lazily-architecture-overview.md`.
 
 The post is fully deployed as a featured article. (The earlier `live_prompt_drift` IPC churn was a wedged route-owned supervisor running a pre-`e9cf3b74` binary — preflight's `stale_install` warning; recommend `make install` in `src/agent-doc` + a session restart to clear it durably.)
-<!-- agent:boundary:d952eb9a -->
+<!-- agent:boundary:d9c8f8e3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -297,6 +297,7 @@ The post is fully deployed as a featured article. (The earlier `live_prompt_drif
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Edit the 2 recent lazily-rs blog posts to use mermaid or SVG diagrams instead of ascii diagrams. deploy
 <!-- /agent:queue -->
 
 ## Backlog

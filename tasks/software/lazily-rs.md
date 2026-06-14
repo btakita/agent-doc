@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -119,7 +119,37 @@ assert_eq!(doubled.get(&ctx), 10);
 **CI:** run `27490089664` is **queued** at push time — recording as pending per the test-bearing workflow; closing out on local `make check` evidence.
 
 **Follow-up queued:** `#lzsignalparity` [recommended] — extend `Signal` to `ThreadSafeContext` and `AsyncContext`, which still expose only lazy slots/memo.
-<!-- agent:boundary:a79e1c56 -->
+
+### Re: do [#3dmm] — extend eager Signal to ThreadSafeContext + AsyncContext — opus-4-8
+
+> **Queue prompt (preset `#spec-test-build-install-commit-push`):**
+>
+> do [#3dmm] — `#lzsignalparity`: extend the eager `Signal` primitive (`src/signal.rs`, `ctx.signal`) to `ThreadSafeContext` and `AsyncContext`.
+
+Done. All three context types now expose the eager `Signal` primitive with the same `memo-slot + puller-effect` composition. Committed `38b18e4`, pushed to `origin/main`.
+
+**ThreadSafeContext** (`src/thread_safe.rs`)
+- `signal` / `get_signal` / `dispose_signal` / `is_signal_active` + a new `ThreadSafeSignalHandle<T>` (Copy/Send/Sync, with `.get`/`.dispose`/`.is_active(&ctx)` aliases).
+- A new private `refresh_signal_slot` registers the puller→slot dependency and refreshes the memo without deep-cloning the value (the thread-safe read API has no `Rc`/`Arc` accessor, so this avoids forcing `Clone` at creation).
+- Semantics are identical to single-threaded: eager recompute during the invalidation flush before `set_cell`/`batch` returns, memo-guarded (equal recompute = no downstream churn), batch-coalesced, diamond glitch-free. Type bounds add `Send + Sync`.
+
+**AsyncContext** (`src/async_context.rs`)
+- `signal_async` / `get_signal` (non-blocking `Option<T>` snapshot) / `get_signal_async` (awaits up-to-date) / `dispose_signal` / `is_signal_active` + `AsyncSignalHandle<T>`.
+- Backed by `memo_async` + an `effect_async` puller that awaits the slot after every invalidation. Added `AsyncComputeContext::get_signal_async` so async signals can be **chained** or observed by downstream computeds/effects (the in-callback context only had `get_cell`/`get_async`).
+- `AsyncComputeContext::get_async` gained precise RPIT capturing (`use<T>`) + a handle copy so the puller future is self-contained (no borrow of caller locals).
+
+**Two honest async caveats** (documented in SPEC):
+- **Eagerness is runtime-driven** — resolution is async, so the puller drives the recompute to completion on the runtime shortly after the write, not synchronously within it.
+- **Propagation is not suppressed on an equal recompute** — async invalidation force-reruns effect dependents on every upstream change. The *value* stays correct and no glitch value is ever observed, but unlike the sync/thread-safe graph the run-count is not memo-suppressed. This matches the pre-existing `async_context_memo_blocks_downstream_on_equal` behavior (`memo_async` already does not suppress downstream propagation), so the signal inherits it rather than introducing it.
+
+**Spec + tests + build**
+- `SPEC.md`: new `#### Signal across context types` subsection covering both variants, the API surfaces, type bounds, and the async nuance.
+- `tests/signal.rs`: +9 `thread_safe` tests mirroring the single-threaded suite (eager init, eager recompute without a read, v1→v2 no-unset, memo guard, chained, diamond glitch-free, batch coalescing, dispose-reverts-to-lazy, equal no-op) plus a cross-thread `Send` test.
+- `tests/async_integration.rs`: +6 async signal tests (eager init, eager recompute snapshot, glitch-free-but-not-suppressed propagation, chained, dispose, `get_async`).
+- `make check` green (fmt/clippy/build, default + tokio + async + loom + benchmark checks); release build clean.
+
+**CI:** run `27490746680` is **pending** at push time — recorded per the test-bearing workflow; closing out on local `make check` evidence.
+<!-- agent:boundary:6a8048c4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,7 +158,6 @@ assert_eq!(doubled.get(&ctx), 10);
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#3dmm]
 <!-- /agent:queue -->
 
 ## Backlog

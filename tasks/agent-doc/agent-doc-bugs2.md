@@ -255,22 +255,31 @@ Logged as another live repro of the stale-supervisor stall class — not a new b
 **I am not restarting the lazily.rs supervisor from here.** It's a different live session; touching its supervisor mid-flight races its own writes (the exact #ipcdrift multi-owner hazard). That's an operator action "when convenient," or it gets auto-handled once #jbrestale lands.
 
 **Same flag on THIS doc:** preflight warns this session's own supervisor (pid 2715614) is also stale (#fcc0). When convenient: `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`.
-<!-- agent:boundary:f898e259 -->
+
+### Re: lazily.rs stalled (stale supervisor pid 2482535) — opus-4-8
+
+Checked liveness before acting: **the referenced stale supervisor (pid 2482535) is no longer alive**, and the child resync recovered this cycle for `tasks/software/lazily-rs.md` (pid 580927) is gone too. So there is nothing to restart right now — the stall cleared when the stale process exited. If lazily.rs wedges again with a *live* stale supervisor, the remediation is exactly the note's command: `agent-doc session restart-supervisor tasks/software/lazily-rs.md --force`.
+
+The underlying class — a supervisor that keeps running a stale build and becomes the source of recurring File Cache Conflict / IPC-drift dialogs with no auto-self-heal — is already tracked here, so no new backlog item:
+
+- **#jbrestale** — `Run Agent Doc` should auto-restart / red-green-deploy a stale or churn-stopped supervisor and switch over automatically instead of failing closed (the durable fix for this exact symptom).
+- the **#suprecyclestall** live-verify family (#aazp / #4myd / #1j8q) — operator-drive proofs that the recycle-on-stale-binary path promotes the fresh build.
+
+No agent-drainable work in this prompt (informational standing note), and `queue_continuation_required` is false, so I'm not looping.
+<!-- agent:boundary:4facdf24 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: If you stall with `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`, you must fix the root cause of the stall.~~
-- ~~:pushpin: [#qchurn]~~
----
+~~~done
 :pushpin: agent-doc lazily.rs stalled
 ```
   One standing note (not blocking): preflight/session-check keep flagging that the host supervisor (pid 2482535) is
   running a stale build and is the source of the recurring File Cache Conflict / IPC-drift dialogs. When convenient,
   restart it with agent-doc session restart-supervisor tasks/software/lazily-rs.md --force to pick up the latest fixes.
 ```
----
+~~~
 - :pushpin: [#anw0verify]
 - :pushpin: [#jbrestale]
 - :pushpin: [#mphaseloop]

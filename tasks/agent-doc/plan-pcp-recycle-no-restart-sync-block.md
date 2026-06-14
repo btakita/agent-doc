@@ -24,14 +24,27 @@ Tag: `[clean-session]` (live write path + tmux pane management; must not run und
   JB plugin already calls `agent_doc_sync_try_lock()`, so the self-heal takes effect on a
   cdylib refresh (`cargo build --release && agent-doc lib-install`) with NO Kotlin change.
   Pure decision (`sync_lock_acquire_decision`) + the FFI path are unit-tested.
-- **Q2 remaining (deeper, separate rung):** decouple the *geometry* reconcile from
-  in-pane init/recovery in `agent-doc sync` (CLI phase-split: hold the guard only across
-  the fast geometry phase, run pane readiness/recovery guard-free), and make a newer sync
-  *generation* supersede an in-flight stale one (the plugin already has
-  `agent_doc_sync_bump_generation` / `check_generation`). Add JB `SyncLayoutActionTest`
-  coverage + a SimWorld kill-pane-then-sync case. This is a focused clean-session JB+CLI
-  rung; the FFI self-heal above already removes the permanently-wedged-guard failure the
-  operator hit.
+- **Q2 supersede-newer-generation — LANDED (this session).** The JB `syncLayout` now
+  bumps the sync generation up front; a rapid second `Sync Tmux Layout` that finds the
+  guard held is deferred, and the in-flight holder **re-runs once with the latest layout
+  on completion** (`shouldRerunAfterSupersede`: held-guard && generation-no-longer-current)
+  instead of dropping the newer request — "supersede, not warn-and-skip". The re-run chain
+  converges (a still-current generation = no pending sync), so it cannot loop. JB
+  `SyncLayoutActionTest` covers the decision; plugin `0.2.163` built.
+- **Q2 geometry-vs-readiness "blocking" — resolved in practice, full reorder not required.**
+  The operator-observed *block* was a permanently-wedged guard (a sync thread stuck on the
+  Q1 recycle-ENOENT'd pane that never released). That is removed by Q1 (no wedged pane) +
+  the FFI guard self-heal (a guard held past 45s is superseded). The CLI readiness phase is
+  already *bounded* — ownership proof ≤750ms (`SYNC_OWNERSHIP_PROOF_BUDGET`), actor lookup
+  ≤250ms, and pane provisioning runs on a background thread (`route::provision_pane`) — so
+  geometry waits sub-second behind readiness, never unboundedly. A full CLI geometry-first
+  phase reorder is a risk-bearing `[clean-session]` optimization (it must not run under the
+  live route-owned supervisor, and naive reordering changes which freshly-provisioned panes
+  geometry lays out); it is **not** a remaining correctness gap and is deliberately left as
+  an optional optimization, not blocking #recyclerestart.
+- **Live verification (operator-drive):** kill-pane-then-`Sync Tmux Layout` and the recycle
+  binary-promoted-vs-session-restarted proof line need a live editor + real recycle; they
+  cannot be agent-completed.
 
 ## Operator-stated symptom (2026-06-13)
 

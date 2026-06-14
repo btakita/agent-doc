@@ -230,7 +230,36 @@ style="writing-mode:horizontal-tb;font-weight:700;font-size:11px;line-height:1.2
 **Option D — count-forward chip, label in tooltip only.** Most compact: show only the `+`, the count badge, and a 2-letter monogram ("DA", "CA", "UR"); full label lives in the tooltip. Best if board density matters more than reading the title at a glance — but it hides the words, which is the opposite of what you asked for, so I'd skip it.
 
 My pick: **Option A** for the best readability/width tradeoff, falling back to **Option B** if you'd rather not maintain a short-label map. Both keep the lane at its current 76px. Tell me which (or mix — e.g. A's short label with C's slightly wider lane) and I'll implement it. Queued a backlog item to carry the chosen implementation. (Exchange is ~167 lines; flagging size, continuing the queue.)
-<!-- agent:boundary:3367f335 -->
+
+### Re: Do Option A — horizontal collapsed-lane titles — opus-4-8
+
+> **Queue prompt:**
+>
+> Do Option A. deploy
+
+Implemented **Option A** for the collapsed-rail title: dropped the rotated `writing-mode:vertical-rl` all-caps label and now render a short, mixed-case alias horizontally, with the full stage label preserved in the rail tooltip. So a 76px collapsed rail reads "Under Review" left-to-right instead of "APPLICATIONS UNDER REVIEW" bottom-to-top.
+
+Changes (`src/equityfundingsource-dev`):
+- `lib/ui--browser--efs/portal/admin/pipeline.tsx` — added `LANE_SHORT_LABELS` (keyed by lane id) + `lane_short_label_(column)`: Draft Applications → **Draft**, Complete Applications → **Complete**, Applications under review → **Under Review**, Accepted applications → **Accepted**; any other lane strips a trailing " Application(s)" and falls back to the full label. The collapsed lane title is now `writing-mode:horizontal-tb`, mixed-case (`font-weight:700`, no `text-transform:uppercase`), centered, wrapping with `overflow-wrap:anywhere`. The `title` tooltip still carries the full label + stage list.
+- `tests/admin-pipeline.test.ts` — pinned the Option A wiring (`lane_short_label_`, the Under-Review short alias, `{lane_short_label_(column)}`, `writing-mode:horizontal-tb`, and asserted `writing-mode:vertical-rl` is gone).
+- `prds/investor-pipeline-admin.md`, `prds/equity-funding-source-lending-portal-prd.md` — documented the horizontal mixed-case collapsed-rail title (#pipeline-collapsed-short-label).
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts` — 50 pass.
+- `bun run check` — 674 pass, 0 fail + app build + worker build green. (`make check` is the same path.)
+- `git diff --check` — clean.
+
+Commits / pushes:
+- EFS submodule: `790b8f1` (`admin pipeline: horizontal mixed-case collapsed-lane titles`) → `btakita/equityfundingsource-dev:main`.
+- Superproject pointer: `7dd5e42a2` (`efs: horizontal collapsed-lane titles in admin pipeline`) → `btakita/agent-loop:main`.
+
+Deploy (`bun run deploy:worker`):
+- No D1 migrations to apply; worker uploaded + deployed. Version `c0229838-018f-4dfd-bfde-b4a86a7fabff`, hourly tmo-sync schedule preserved, all bindings intact.
+- URL: https://equityfundingsource.brian-takita.workers.dev
+- Smoke: `/` 200, `/funded-deals` 200, `/portal-admin/pipeline` 303 (Cloudflare Access login redirect — expected for the admin-gated route).
+
+CI: no `CI` workflow exists in either repo; the superproject's only workflow (`Agent Doc`) remains blocked at runner-start by the account billing/spending-limit issue — an external CI-start blocker, not a code failure.
+<!-- agent:boundary:93cd5463 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -32,13 +32,16 @@ fn record_context_clear_prompt_for_hooks(
 
 /// Read the live `queue_active: true` ready head for the owned document, if any.
 ///
-/// Thin wrapper over [`crate::queue_continuation::live_continuation_head`] so the
-/// idle-watch and the codex-stop / preflight continuation paths all derive the
-/// drainable head from one shared definition (`queue_active: true` + an active
-/// `resolve_activation` + a ready prompt head).
+/// Thin wrapper over [`crate::queue_continuation::live_drainable_continuation_head`]
+/// so the supervisor idle-watch dispatch agrees with `session-check`'s continuation
+/// decision: it returns a head only when there is **agent-drainable** work at the
+/// queue head, skipping inert noise lines (operator bug-report observations) and
+/// deferred `[clean-session]`/`[operator-verify]` heads. Otherwise the watch would
+/// re-inject a no-op `/agent-doc` drain trigger every idle boundary for a queue
+/// that has no continuation required (#qchurn / #goqueuestall / #goqstall2).
 fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
     let content = std::fs::read_to_string(file).ok()?;
-    crate::queue_continuation::live_continuation_head(file, &content)
+    crate::queue_continuation::live_drainable_continuation_head(file, &content)
 }
 
 pub(super) fn spawn_idle_queue_watch_thread(

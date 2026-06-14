@@ -1367,6 +1367,43 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
         return false;
     }
 
+    // #clearexchstale / #dvre: the disk check above proves DISK still matches the
+    // bad state, but the live editor buffer can diverge from disk while disk lags
+    // (the plugin applies edits to the in-memory Document first). When the operator
+    // has freshly edited the buffer — e.g. cleared the exchange or deleted a typed
+    // prompt — redelivering the stale snapshot over it REVIVES the deleted content.
+    // Fail closed on a proven live-buffer divergence from the bad state: the
+    // operator's unsaved edits win over a stale repair. `live_buffer_diverges_from_content`
+    // is provenance-aware (it ignores a buffer digest that merely lags a newer disk
+    // write), so this only suppresses genuine unsaved editor edits ahead of disk.
+    let indicator_path = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    if let Some(live) =
+        crate::debounce::live_buffer_diverges_from_content(&indicator_path, expected_bad_state)
+    {
+        eprintln!(
+            "[write] {} editor repair skipped: live editor buffer has unsaved edits ahead of the bad state",
+            kind.label()
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "{}_editor_redelivery_skipped file={} patch_id={} skip=live_buffer_diverges expected_len={} expected_hash={} live_len={} live_hash={}",
+                kind.label(),
+                file.display(),
+                source_patch_id.unwrap_or("-"),
+                expected_bad_state.len(),
+                crate::ops_log::content_hash(expected_bad_state),
+                live.len,
+                live.hash
+            ),
+        );
+        return false;
+    }
+
     match try_ipc_full_content_response_fallback_from_source(
         file,
         repaired_content,
@@ -2665,6 +2702,61 @@ Done.
                 && ops_log.contains("skip=stale_bad_state")
                 && ops_log.contains("sidecar_normalization_fallback_editor_redelivery_skipped"),
             "stale proof skip should be logged for narrow and full-content fallback:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn redelivery_skips_when_live_buffer_diverges_from_bad_state() {
+        // #clearexchstale: disk still equals the bad state (so the disk-divergence
+        // guard passes), but the operator has freshly cleared/edited the live editor
+        // buffer (a smaller cleared exchange reported via the live-buffer sidecar).
+        // Redelivering the stale snapshot would REVIVE the cleared content, so the
+        // redeliver must fail closed on the proven live-buffer divergence.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let bad_state = "\
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Stale response that the operator cleared.
+<!-- /agent:exchange -->
+";
+        // Disk still holds the bad state (the redeliver's disk check will pass).
+        std::fs::write(&doc, bad_state).unwrap();
+
+        // The operator cleared the exchange in the editor — the live buffer diverges
+        // from the bad state and from disk. Record it via the live-buffer sidecar the
+        // plugin maintains, using the same canonicalized path the guard consults.
+        let indicator_path = doc
+            .canonicalize()
+            .unwrap_or_else(|_| doc.clone())
+            .to_string_lossy()
+            .to_string();
+        let cleared_buffer = "\
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+";
+        crate::debounce::record_live_buffer_digest_content(&indicator_path, cleared_buffer).unwrap();
+
+        let repaired = bad_state; // the stale snapshot the repair would re-apply
+        let delivered =
+            redeliver_ipc_dedupe_to_editor(&doc, repaired, bad_state);
+
+        assert!(
+            !delivered,
+            "redelivery must skip when the live editor buffer has unsaved edits ahead of the bad state"
+        );
+        // Disk must be left untouched (the guard returns before any write).
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), bad_state);
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("skip=live_buffer_diverges"),
+            "live-buffer divergence skip should be logged:\n{ops_log}"
         );
     }
 

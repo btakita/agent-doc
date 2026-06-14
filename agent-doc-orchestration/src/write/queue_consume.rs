@@ -511,6 +511,29 @@ pub(crate) fn response_targets_synthetic_queue_head_id(file: &Path, response: &s
         .any(|topic| topic_resolves_to_exact_id(topic, &head_id)))
 }
 
+/// True when `head_id` matches a registered `prompt_presets` key in the
+/// document frontmatter and does NOT also name a tracked backlog/review/icebox
+/// directive item (#qpresetstrike).
+///
+/// A queue head that is a bare prompt-preset token (`#advance-review` drawn from
+/// frontmatter `prompt_presets`) has no backlog row, so no `--done`/`--pending-gate`
+/// closeout can record a completion outcome for it: `--done advance-review` fails
+/// with "id not found in backlog/icebox", and the leading `#` made the old
+/// classifier route `queue consume` to `--done` and wedge the head. Such a head is
+/// a *synthetic* prompt completed by being answered (like a free-text head), so it
+/// is strikeable through `queue consume` and the free-text finalize heuristic. A
+/// preset token that ALSO happens to be a tracked backlog/review id stays id-backed
+/// (the tracked-item check wins) so it keeps its explicit `--done` reap path.
+pub(crate) fn head_id_is_registered_preset(content: &str, head_id: &str) -> bool {
+    if head_id_names_tracked_directive_item(content, head_id) {
+        return false;
+    }
+    let Ok((fm, _)) = frontmatter::parse(content) else {
+        return false;
+    };
+    crate::frontmatter::resolve_prompt_preset_key(&fm.prompt_presets, head_id).is_some()
+}
+
 /// True when `head_id` names an item tracked in `agent:backlog` or `agent:review`.
 /// These ids are id-backed directives requiring an explicit
 /// `--done`/`--pending-gate`/`--pending-edit` closeout — distinct from a
@@ -572,6 +595,14 @@ pub(crate) fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
     if let Some(id) = queue_prompt_done_id(&normalized_head)
         && topic_resolves_to_exact_id(&normalized_head, &id)
     {
+        // #qpresetstrike: a head that resolves to exactly a registered
+        // `prompt_presets` token (and is not also a tracked backlog/review id) has
+        // no `--done` reap path — it is a synthetic prompt completed by being
+        // answered, so treat it as free text (strikeable by `queue consume` and the
+        // free-text finalize heuristic) rather than wedging it as id-backed.
+        if head_id_is_registered_preset(content, &id) {
+            return Ok(true);
+        }
         return Ok(false);
     }
     if crate::diff::detect_queue_trigger(&normalized_head) {
@@ -1780,7 +1811,9 @@ mod core_tests {
             !queue_head_is_free_text_prompt(pinned_do).unwrap(),
             "a pinned do[#id] head is still id-backed, not free text"
         );
-        // A #preset head carries an #id, so it is not free text either.
+        // A #-token head that is NOT a registered preset (no `prompt_presets`
+        // frontmatter) carries an #id with no backlog row, so it stays id-backed
+        // (cannot be silently struck without an explicit signal).
         let preset = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:queue auto -->\n",
@@ -1822,6 +1855,59 @@ mod core_tests {
             queue_head_is_free_text_prompt(verb_prefixed).unwrap(),
             "a prose head mentioning a single #id is still free text"
         );
+    }
+    #[test]
+    fn registered_preset_head_is_strikeable_like_free_text() {
+        // #qpresetstrike: a bare queue head that is a registered `prompt_presets`
+        // token has no backlog row, so `--done <id>` fails and `queue consume`
+        // used to route it there and wedge the head. With the preset registered in
+        // frontmatter, it is a synthetic prompt completed by being answered →
+        // free text, strikeable by `queue consume` and the finalize heuristic.
+        let registered = concat!(
+            "---\nqueue_active: true\n",
+            "prompt_presets:\n",
+            "  '#advance-review': Go through the review items.\n",
+            "---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- #advance-review\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            queue_head_is_free_text_prompt(registered).unwrap(),
+            "a registered preset-token head completes on being answered (free text)"
+        );
+        assert!(head_id_is_registered_preset(registered, "advance-review"));
+
+        // A registered preset token that ALSO names a tracked backlog id stays
+        // id-backed (the tracked-item reap path wins).
+        let preset_and_tracked = concat!(
+            "---\nqueue_active: true\n",
+            "prompt_presets:\n",
+            "  '#advance-review': Go through the review items.\n",
+            "---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- #advance-review\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#advance-review] tracked directive that shadows the preset name\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert!(
+            !queue_head_is_free_text_prompt(preset_and_tracked).unwrap(),
+            "a preset token that is also a tracked backlog id stays id-backed"
+        );
+        assert!(!head_id_is_registered_preset(preset_and_tracked, "advance-review"));
+
+        // An unregistered #-token (preset name not in frontmatter) is NOT treated
+        // as a preset — it stays id-backed so it is never struck blind.
+        let unregistered = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- #advance-review\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(!queue_head_is_free_text_prompt(unregistered).unwrap());
+        assert!(!head_id_is_registered_preset(unregistered, "advance-review"));
     }
     #[test]
     fn queue_consume_reconciles_diverged_snapshot_instead_of_bailing() {

@@ -116,27 +116,7 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
     // continuation is NOT required so the session does not perpetually re-converge
     // an undrainable queue.
     let deferred_ids = deferred_backlog_ids(file, content);
-    let head = activation
-        .entries_after
-        .iter()
-        .find_map(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => {
-                // #goqstall2: a bulleted free-text line that is not an actionable
-                // drain target (a pasted bug-report observation / stale console
-                // evidence with no `#id`, directive, or question) is inert noise —
-                // skip it like a deferred head so it does not churn no-op closeouts.
-                if !is_drainable_queue_head(&prompt.text) {
-                    return None;
-                }
-                let id = extract_head_id(&prompt.text);
-                let deferred = id
-                    .as_deref()
-                    .map(|id| deferred_ids.contains(&id.to_ascii_lowercase()))
-                    .unwrap_or(false);
-                if deferred { None } else { Some(prompt) }
-            }
-            _ => None,
-        });
+    let head = first_drainable_head(&activation.entries_after, &deferred_ids);
     let Some(head) = head else {
         return Ok(None);
     };
@@ -257,6 +237,70 @@ pub fn live_continuation_head(file: &Path, content: &str) -> Option<String> {
         return None;
     }
     let head = crate::queue::first_prompt(&activation.entries_after)?;
+    Some(extract_head_id(&head.text).unwrap_or_else(|| head.text.trim().to_string()))
+}
+
+/// Pick the first DRAINABLE, non-deferred head prompt from an active queue's
+/// post-activation entries, applying the same `#goqueuestall` / `#goqstall2`
+/// filtering [`detect`] uses: skip inert noise lines (a bulleted free-text
+/// observation with no `#id`, directive verb, or question) and skip heads whose
+/// backlog id is deferred (`[operator-verify]` always, `[clean-session]` under a
+/// live editor-IPC listener). Single source of truth for "is there agent-drainable
+/// work at the queue head" so the supervisor idle-watch dispatch and `session-check`
+/// continuation agree.
+fn first_drainable_head<'a>(
+    entries_after: &'a [crate::queue::QueueEntry],
+    deferred_ids: &std::collections::HashSet<String>,
+) -> Option<&'a crate::queue::QueuePrompt> {
+    entries_after.iter().find_map(|entry| match entry {
+        crate::queue::QueueEntry::Prompt(prompt) => {
+            if !is_drainable_queue_head(&prompt.text) {
+                return None;
+            }
+            let id = extract_head_id(&prompt.text);
+            let deferred = id
+                .as_deref()
+                .map(|id| deferred_ids.contains(&id.to_ascii_lowercase()))
+                .unwrap_or(false);
+            if deferred { None } else { Some(prompt) }
+        }
+        _ => None,
+    })
+}
+
+/// The live **drainable** continuation head of a document string.
+///
+/// Like [`live_continuation_head`] but returns `Some` only when the active queue
+/// has a head the agent can actually drain in the current session — applying the
+/// same drainability + deferred filtering as [`detect`] (without the snapshot-edit
+/// comparison). A queue whose only remaining heads are inert noise lines
+/// (operator bug-report observations with no `#id`/directive/question) or deferred
+/// `[clean-session]`/`[operator-verify]` items returns `None`.
+///
+/// The supervisor idle-queue watch uses this (not the unfiltered
+/// [`live_continuation_head`]) so it does not re-inject a no-op `/agent-doc` drain
+/// trigger every idle boundary for a queue `session-check` already reports as
+/// having no continuation required (#qchurn).
+pub fn live_drainable_continuation_head(file: &Path, content: &str) -> Option<String> {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let (fm, _) = crate::frontmatter::parse_for_file_with_context(content, file, &rc).ok()?;
+    if fm.queue_active != Some(true) {
+        return None;
+    }
+    let components = crate::component::parse(content).ok()?;
+    let queue_component = components.iter().find(|c| c.name == "queue")?;
+    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries = crate::queue::parse(body).ok()?;
+    let activation = crate::queue::resolve_activation(&entries, has_auto, false, true);
+    if !activation.active
+        || crate::queue::has_stop_fence_at_head(&activation.entries_after)
+        || crate::queue::time_gate_at_head(&activation.entries_after).is_some()
+    {
+        return None;
+    }
+    let deferred_ids = deferred_backlog_ids(file, content);
+    let head = first_drainable_head(&activation.entries_after, &deferred_ids)?;
     Some(extract_head_id(&head.text).unwrap_or_else(|| head.text.trim().to_string()))
 }
 
@@ -1028,6 +1072,55 @@ mod tests {
             "only-noise queue must not require continuation"
         );
         assert_eq!(queue_stale_noise_lines(&doc), 2);
+    }
+
+    #[test]
+    fn live_drainable_head_skips_noise_and_lands_on_directive() {
+        // #qchurn: the supervisor idle-watch dispatch head must skip inert noise
+        // lines and land on a real directive — matching detect(), so the watch does
+        // not churn no-op /agent-doc cycles when the only ready head is noise.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(
+            dir.path(),
+            &[
+                "I'm still seeing JB File Cache Conflict dialogs. There should be 0.",
+                "Fix the submit bug and add coverage",
+            ],
+            true,
+            true,
+        );
+        let content = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            live_drainable_continuation_head(&doc, &content).as_deref(),
+            Some("Fix the submit bug and add coverage"),
+        );
+    }
+
+    #[test]
+    fn live_drainable_head_none_when_only_noise() {
+        // #qchurn: a queue of only bare bug-report observations yields NO drainable
+        // idle-watch head, so the supervisor stops re-dispatching. The unfiltered
+        // live_continuation_head still returns the first head — proving the new
+        // filter is what quiesces the churn.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(
+            dir.path(),
+            &[
+                "I'm still seeing JB File Cache Conflict dialogs. There should be 0.",
+                "JB Compact Exchange has a partially uncommitted response.",
+            ],
+            true,
+            true,
+        );
+        let content = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            live_drainable_continuation_head(&doc, &content).is_none(),
+            "only-noise queue must not yield a drainable idle-watch head"
+        );
+        assert!(
+            live_continuation_head(&doc, &content).is_some(),
+            "unfiltered head still returns the first noise line (the old churn source)"
+        );
     }
 
     #[test]

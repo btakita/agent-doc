@@ -19,10 +19,14 @@ use crate::snapshot;
 enum HeadKind {
     /// No queue component, or no live prompt to strike.
     None,
-    /// A free-text head (a plain question/instruction) — strikable here.
+    /// A free-text head (a plain question/instruction) — strikable here. Also
+    /// covers a bare registered `prompt_presets` token head (`#advance-review`)
+    /// that is not a tracked backlog/review id: it has no `--done` reap path, so
+    /// it strikes here like free text (#qpresetstrike).
     FreeText,
-    /// An id-backed head (`#id`, `[#id]`, `do [#id]`, `#preset`, or a queue
-    /// trigger) that must be reaped via its id, never struck blind.
+    /// An id-backed head (`#id`, `[#id]`, `do [#id]`, or a queue trigger) that
+    /// names a tracked backlog/review/icebox directive and must be reaped via its
+    /// id, never struck blind.
     IdBacked,
 }
 

@@ -1176,6 +1176,8 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         queue_start_at: queue_state.queue_start_at,
         queue_trigger: queue_state.queue_trigger,
         queue_halted: queue_state.queue_halted,
+        queue_drainable_head_count: queue_state.queue_drainable_head_count,
+        queue_continuation_required: queue_state.queue_continuation_required,
         session_accretion,
         pipeline,
     };

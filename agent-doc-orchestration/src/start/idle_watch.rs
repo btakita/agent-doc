@@ -59,6 +59,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut last_context_clear_at: Option<u64> = None;
             let mut last_context_reset_head: Option<String> = None;
             let mut clear_cooldown_logged = false;
+            // `#cleardecisionflood`: the `[s760] clear-decision …` diagnostic is
+            // recomputed on every idle poll while `agent_doc_queue_context_reset`
+            // is opted in. Logging it unconditionally floods ops.log (observed
+            // 126 MB, thousands of identical lines/sec on a steady-state idle
+            // queue). Only emit when the diagnostic string actually changes so the
+            // decision stays observable without the runaway.
+            let mut last_clear_decision_diagnostic: Option<String> = None;
             let mut idle_busy_ticks: u32 = 0;
             // `#clearcontresume`: consecutive idle-prompt polls observed while a
             // manual clear cooldown is active and a go-mode head is waiting.
@@ -648,7 +655,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     let pct = live_transcript_context_pct(&path, &harness);
                     let threshold = crate::session_accretion::clear_threshold_for_doc(&path);
                     let decision = crate::context_pct::clear_decision(true, pct, threshold);
-                    crate::ops_log::log_op(&path, &decision.diagnostic);
+                    // `#cleardecisionflood`: dedupe identical consecutive
+                    // decisions so a steady-state idle queue does not flood
+                    // ops.log every poll tick.
+                    if last_clear_decision_diagnostic.as_deref() != Some(decision.diagnostic.as_str())
+                    {
+                        crate::ops_log::log_op(&path, &decision.diagnostic);
+                        last_clear_decision_diagnostic = Some(decision.diagnostic.clone());
+                    }
                     if crate::input_diag::verbose_enabled() {
                         eprintln!("[agent-doc] idle-queue watch: {}", decision.diagnostic);
                     }

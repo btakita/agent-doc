@@ -304,6 +304,63 @@ pub fn live_drainable_continuation_head(file: &Path, content: &str) -> Option<St
     Some(extract_head_id(&head.text).unwrap_or_else(|| head.text.trim().to_string()))
 }
 
+/// Count of agent-drainable heads in `content`'s active queue (`#cleardrainsignal`).
+///
+/// Applies the SAME `#goqueuestall` / `#goqstall2` filtering as
+/// [`live_drainable_continuation_head`] / [`first_drainable_head`]: a head counts
+/// only when it is a real directive/`#id`/question (not inert noise) AND its
+/// backlog id is not deferred (`[operator-verify]` always, `[clean-session]` under
+/// a live editor-IPC listener). Returns 0 when the queue is inactive, stop-fenced,
+/// time-gated, or every remaining head is deferred/noise.
+///
+/// Preflight surfaces this so the agent and the Claude Code auto-loop have an
+/// authoritative "nothing is agent-drainable, do not loop" signal that does NOT
+/// depend on the route-owned supervisor being on the latest binary — the same
+/// drainability the supervisor idle-watch already enforces (#qchurn).
+pub fn drainable_head_count(file: &Path, content: &str) -> usize {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let Ok((fm, _)) = crate::frontmatter::parse_for_file_with_context(content, file, &rc) else {
+        return 0;
+    };
+    if fm.queue_active != Some(true) {
+        return 0;
+    }
+    let Ok(components) = crate::component::parse(content) else {
+        return 0;
+    };
+    let Some(queue_component) = components.iter().find(|c| c.name == "queue") else {
+        return 0;
+    };
+    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let Ok(entries) = crate::queue::parse(body) else {
+        return 0;
+    };
+    let activation = crate::queue::resolve_activation(&entries, has_auto, false, true);
+    if !activation.active
+        || crate::queue::has_stop_fence_at_head(&activation.entries_after)
+        || crate::queue::time_gate_at_head(&activation.entries_after).is_some()
+    {
+        return 0;
+    }
+    let deferred_ids = deferred_backlog_ids(file, content);
+    activation
+        .entries_after
+        .iter()
+        .filter(|entry| match entry {
+            crate::queue::QueueEntry::Prompt(prompt) => {
+                if !is_drainable_queue_head(&prompt.text) {
+                    return false;
+                }
+                extract_head_id(&prompt.text)
+                    .map(|id| !deferred_ids.contains(&id.to_ascii_lowercase()))
+                    .unwrap_or(true)
+            }
+            _ => false,
+        })
+        .count()
+}
+
 /// Recognized actionable directive verbs for go-mode drainability classification
 /// (`#goqstall2`). Word-matched anywhere in a normalized head — conservative in the
 /// SAFE direction: a head that looks even loosely directive stays drainable; only a
@@ -922,6 +979,49 @@ mod tests {
             "all-deferred heads must not require continuation"
         );
         assert_eq!(deferred_head_count(&doc), 2);
+    }
+
+    #[test]
+    fn drainable_head_count_zero_when_only_deferred_heads_remain() {
+        // #cleardrainsignal: the preflight no-stall signal must read 0 drainable
+        // heads when every remaining head is undrainable (operator-verify always),
+        // so the agent / Claude Code auto-loop never loops a #qchurn no-op cycle.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let content = doc_with_backlog(
+            &["do [#b]", "do [#d]"],
+            &[
+                "- [ ] [#b] [operator-verify] live drive",
+                "- [ ] [#d] [operator-verify] also live",
+            ],
+        );
+        std::fs::write(&doc, &content).unwrap();
+        assert_eq!(drainable_head_count(&doc, &content), 0);
+    }
+
+    #[test]
+    fn drainable_head_count_counts_only_real_drainable_heads() {
+        // #cleardrainsignal: a deferred head + an inert noise observation are
+        // excluded; only the genuine directive head counts.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let content = doc_with_backlog(
+            &[
+                "do [#b]",
+                "the kanban is missing the accepted application section",
+                "do [#c]",
+            ],
+            &[
+                "- [ ] [#b] [operator-verify] live drive",
+                "- [ ] [#c] plain drainable",
+            ],
+        );
+        std::fs::write(&doc, &content).unwrap();
+        // #b deferred (operator-verify), the bare observation is inert noise,
+        // only #c is a real drainable head.
+        assert_eq!(drainable_head_count(&doc, &content), 1);
     }
 
     #[test]

@@ -436,6 +436,19 @@ pub struct PreflightOutput {
     /// When halted, `queue_prompts` is empty and `queue_active` is `false`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_halted: Option<String>,
+    /// `#cleardrainsignal`: count of agent-drainable heads (not deferred/noise) at
+    /// the active queue head. Always emitted. `0` while `queue_active == true` means
+    /// every remaining head is `[clean-session]` (under live IPC) / `[operator-verify]`
+    /// / inert noise — a no-op `#qchurn` churn cycle.
+    #[serde(default)]
+    pub queue_drainable_head_count: usize,
+    /// `#cleardrainsignal`: whether the queue has agent-drainable continuation work
+    /// this session. Always emitted. The Claude Code auto-loop and the agent must
+    /// NOT loop/dispatch when this is `false`, even if `queue_active == true` and a
+    /// `queue_trigger` is present — the authoritative no-stall signal that does not
+    /// depend on the route-owned supervisor being on the latest binary.
+    #[serde(default)]
+    pub queue_continuation_required: bool,
     /// Bounded session-growth / churn advisory derived from local exchange and
     /// per-document cycle/session logs.
     #[serde(default, skip_serializing_if = "Option::is_none")]

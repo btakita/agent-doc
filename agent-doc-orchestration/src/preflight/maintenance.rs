@@ -906,6 +906,13 @@ pub(crate) struct QueueState {
     pub(crate) queue_start_at: Option<String>,
     pub(crate) queue_trigger: Option<crate::queue::QueueTrigger>,
     pub(crate) queue_halted: Option<String>,
+    /// `#cleardrainsignal`: count of agent-drainable heads (not deferred/noise) in
+    /// the active queue. 0 while `queue_active` is `Some(true)` means a no-op churn
+    /// cycle — the agent/auto-loop must NOT loop.
+    pub(crate) queue_drainable_head_count: usize,
+    /// `#cleardrainsignal`: whether the queue has agent-drainable continuation work
+    /// this session. False when inactive OR every remaining head is deferred/noise.
+    pub(crate) queue_continuation_required: bool,
     pub(crate) synced_queue_ids: Vec<String>,
     pub(crate) warnings: Vec<PreflightWarning>,
 }
@@ -1688,6 +1695,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 queue_start_at: None,
                 queue_trigger: activation.trigger,
                 queue_halted: Some("stop_fence".into()),
+                queue_drainable_head_count: 0,
+                queue_continuation_required: false,
                 synced_queue_ids,
                 warnings: Vec::new(),
             });
@@ -1703,6 +1712,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 queue_start_at: Some(dt.to_string()),
                 queue_trigger: activation.trigger,
                 queue_halted: None,
+                queue_drainable_head_count: 0,
+                queue_continuation_required: false,
                 synced_queue_ids,
                 warnings: Vec::new(),
             });
@@ -1826,6 +1837,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                         queue_start_at: None,
                         queue_trigger: activation.trigger,
                         queue_halted: Some("item_modified".into()),
+                        queue_drainable_head_count: 0,
+                        queue_continuation_required: false,
                         synced_queue_ids,
                         warnings: Vec::new(),
                     });
@@ -2033,6 +2046,20 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         vec![]
     };
 
+    // `#cleardrainsignal`: count heads the agent can actually drain this session,
+    // applying the same `#goqueuestall`/`#goqstall2` deferred/noise filtering the
+    // supervisor idle-watch uses. When the queue is active but this is 0, the
+    // remaining heads are all `[clean-session]` (under live IPC) / `[operator-verify]`
+    // / inert noise — a no-op churn cycle. Surfacing it lets the agent and the
+    // Claude Code auto-loop stop without re-deriving drainability from prose, even
+    // when the route-owned supervisor predates the idle-watch filter (#qchurn).
+    let queue_drainable_head_count = if activation.active {
+        crate::queue_continuation::drainable_head_count(file, &content)
+    } else {
+        0
+    };
+    let queue_continuation_required = activation.active && queue_drainable_head_count > 0;
+
     Ok(QueueState {
         queue_prompts,
         queue_active: if activation.active {
@@ -2048,6 +2075,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         queue_start_at: activation.start_at,
         queue_trigger: activation.trigger,
         queue_halted: None,
+        queue_drainable_head_count,
+        queue_continuation_required,
         synced_queue_ids,
         warnings: queue_warnings,
     })

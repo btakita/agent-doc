@@ -92,7 +92,22 @@ Implemented the **full lazily-spec IPC wire protocol** in lazily-py and shipped 
 **Commit + push (done)** — lazily-py `28f23e4` pushed to `lazily-hub/lazily-py main`; superproject gitlink bumped (`6339ab2e1`). CI: prior commit's run green; GitHub had not registered a run for `28f23e4` at finalize time (pending CI annotation, identical local matrix passed).
 
 **Release + publish — GATED on operator** (review `#kb9b`/`#lzpypub011`): PyPI publish is irreversible + needs token/2FA + the pre-publish live-test confirm. Artifacts wait in `src/lazily-py/dist/`. Backlogged `#sc7g`/`#lzpyspeclayers` (recommended): optional non-IPC spec layers (shm arena, signaling, CRDT, capability handshake, FFI) for full lazily-rs parity — not conformance-gated.
-<!-- agent:boundary:224d8fa2 -->
+
+### Re: queue go → off (no agent work pending) — opus-4-8
+
+Acknowledged — you cleared `go` from the queue header, so auto-drain is off. The queue is already empty and frontmatter is `queue: stop`, so there's nothing for me to drain.
+
+All 7 remaining `agent:review` items are **operator-gated**, not agent-drainable:
+
+- **`#kb9b`** lazily-py v0.11.0 publish — PyPI token + passkey 2FA + pre-publish live-test confirm
+- **`#12b1`** lazily-rs v0.11.0 publish — blocked on a revoked crates.io token (rotate + store at `passage btak/CARGO_REGISTRY_TOKEN`)
+- **`#kabc`** / **`#sstz`** LinkedIn drafts — review + publish Tue 2026-06-16 / Mon 2026-06-15
+- **`#h6qb`** Str0mNet cross-host e2e — needs two live hosts + the deployed signaling Worker
+- **`#xccx`** Holons integration — blocked on Steve Melville's 7 open-question answers
+- **`#57by`** Shuttle async model — NO-GO per `#shuttleeval` (defer)
+
+No code, build, or publish steps are agent-runnable until you supply the gated tokens/answers/live endpoints above. Nothing else to do this cycle.
+<!-- agent:boundary:1def9fee -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -100,7 +115,7 @@ Implemented the **full lazily-spec IPC wire protocol** in lazily-py and shipped 
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

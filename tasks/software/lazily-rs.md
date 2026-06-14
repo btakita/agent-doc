@@ -39,7 +39,29 @@ queue: start
 Compacted content:
 - Archived 2 response topic(s): Ensure Signal type is represented in lazily-spec; Make lazily-zig compliant with lazily-spec
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:5aad8c19 -->
+
+### Re: release lazily-zig — opus-4-8
+
+> **Queue prompt:**
+>
+> release lazily-zig
+
+
+Released **lazily-zig v0.1.0** (first release).
+
+**Spec + tests** — already current. SPEC.md documents the lazily-spec Signal wire representation ("Signals are not a separate IPC variant... eager Signal represented as the backing slot node, deltas using `SlotValue`"), matching `lazily-spec/protocol.md`. The IPC conformance commit `ba7e965` had already landed it. `zig build test` → **33/33 tests pass** on Zig 0.16.0-dev.
+
+**Build + install** — `zig build` succeeds (16/16 steps); library builds clean.
+
+**Commit + push** — working tree was clean and HEAD already matched `origin/main`. Fast-forwarded local `main` 5094889 → `ba7e965` and pushed (was up-to-date on remote).
+
+**Release** —
+- Corrected the submodule `origin` remote from `btakita/lazily-zig` → `lazily-hub/lazily-zig` (the GitHub repo-transfer to `lazily-hub` completed 2026-06-09 per the INBOX notice; `.gitmodules` already pointed there).
+- Tagged **v0.1.0** (annotated; manifest `version = "0.1.0"`, no prior tag) and pushed.
+- Created GitHub release: https://github.com/lazily-hub/lazily-zig/releases/tag/v0.1.0
+
+Submodule gitlink SHA is unchanged (`ba7e965`), so no superproject update was needed. Next queue item: make lazily-py compliant with lazily-spec, release + publish.
+<!-- agent:boundary:8fd1c6ff -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +70,7 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- release lazily-zig
+- ~~release lazily-zig~~
 - Make lazily-py compliant with the lazily-spec. release + publish
 <!-- /agent:queue -->
 

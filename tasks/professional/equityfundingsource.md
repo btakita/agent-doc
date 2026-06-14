@@ -87,7 +87,29 @@ The empty-state label ("Drop a file here or click to choose") was left as-is —
 Per `#spec-test-commit-push`: added a `multi-upload.test.ts` assertion that both files render the new label and no longer contain the old one. `bun run check` green (649 tests), worker build clean. Committed + pushed to `main`.
 
 Not deployed — this preset is commit+push only; the `deploy` item later in the queue will push it live.
-<!-- agent:boundary:1e759505 -->
+
+### Re: Make each uploaded file viewable by clicking it (in-browser viewer) — opus-4-8
+
+> **Queue prompt:**
+>
+> Can we make each uploaded file viewable by clicking on it? Can we have open a viewer of each supported file type?
+
+Yes — shipped a shared in-browser document viewer (EFS `c636ea8`). Clicking an uploaded file now opens an in-page modal that renders the file inline instead of forcing a download.
+
+**How it works** (`shared/ui.tsx`):
+- `document_view_kind_()` classifies each file → **image** (`<img>`), **PDF** (`<iframe>`), **text/CSV/JSON/MD/XML** (`<pre>`), or **unsupported**. HEIC/HEIF/TIFF have image content-types but no broad browser support, so they're treated as download-only.
+- `use_document_viewer_()` + `DocumentFileLink` (a drop-in for the old `<a href download>` filename links). The file is **fetched as a blob and shown via an object URL**, so the server's `Content-Disposition: attachment` can't force a download and the *same* secured href serves both the inline view and the modal's **Download** button. Modified-clicks (⌘/Ctrl/middle-click) still download natively. Unsupported types and load errors fall back to a Download link.
+
+**Wired this cycle (borrower-facing uploaded files):**
+- Loan-application **Documents** rows (borrower full application + admin/shared application detail) — click the filename to view.
+- Borrower **Documents** page — uploaded-doc cards get a **View** action; public-document cards open the viewer.
+
+**Per `#spec-test-commit-push`:** new `document-viewer.test.ts` (classifier + wiring) and updated `download-security.test.ts` to assert the HTTPS guard is now centralized in the shared component. `bun run check` green (656 tests), worker build clean. Committed + pushed to `main`.
+
+**Follow-up (queued `#docview-tables`):** the admin/investor/broker/lender document **tables** still use download-only buttons — those are a distinct set of table-action surfaces (`shared/table_actions.tsx` + ~7 files). Added a "View" action to each is tracked as actionable backlog so this cycle stays a coherent, tested unit.
+
+Not deployed — this preset is commit+push only; the `deploy` item next in the queue will push it live.
+<!-- agent:boundary:a8dd9e65 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,8 +118,9 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~"Drop or choose a replacement file" should be "Drop file or click to select file".~~
-- Can we make each uploaded file viewable by clicking on it? Can we have open a viewer of each supported file type?
+- ~~Can we make each uploaded file viewable by clicking on it? Can we have open a viewer of each supported file type?~~
 - deploy
+- do [#c7cs]
 <!-- /agent:queue -->
 
 ## Backlog

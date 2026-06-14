@@ -32,108 +32,18 @@ queue: start
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260614-073904.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260614-081444.md`*
 
 Compacted content:
-- Archived 8 response topic(s): do [#anw0]; monsterrodholders.md; stale-supervisor restart failed + already-captured churn reports; 5 more
+❯ - Archived 4 response topic(s): stale-supervisor churn (red/green deploy, backlog→queue, post-compact attr wipe); queue cleanup + remaining heads still blocked on the stale supervisor; queue curated to #qchurn; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: stale-supervisor churn (red/green deploy, backlog→queue, post-compact attr wipe) — opus-4-8
-
-> **Queue prompt:**
->
-> JB `Run Agent Doc` should red/green deploy the new supervisor and switch over to the new supervisor automatically...in Claude Code, Codex, Opencode
-> ```
-> resync: pruned 8 stale session(s)
-> [route] target tmux session: 0
-> Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3455
-> ```
-
-
-All three queued reports share one root cause, and this session is sitting on top of it: the route-owned host **supervisor (pid 1562136) is stale**. It started 02:32 today, *before* the currently-installed binary, and `~/.cargo/bin/agent-doc` + cdylib + `target/release` themselves **predate source commit `e9cf3b74`**. That doubly-stale supervisor is what produces the File Cache Conflict dialogs, the `live_prompt_drift` / IPC churn, the `dispatch blocked … halting churn until supervisor recycled` errors you pasted (lazily-rs / efs), and the compaction that couldn't commit. I cleared the compaction-commit wedge this cycle (`reset --from-current --preserve-session` → HEAD now matches the post-compact disk).
-
-Per-report status — **all three are already captured as `[clean-session]` backlog items**, so nothing is lost:
-
-1. **JB `Run Agent Doc` should red/green-deploy + auto-switch the supervisor** (CC/Codex/OpenCode) → `#jbrestale`. This is exactly the self-healing that would have prevented this whole session: detect a stale/churn-stopped supervisor, drain-and-supersede to a fresh one, switch over automatically instead of failing closed. The lazily-rs `failed_stage=queue_paused … stale route-owned supervisor (pid 968752)` error is the same class.
-2. **backlog `priority queue` items not flowing into `agent:queue`** → tracked, and preflight reports the go-mode path *is* now appending fresh backlog `queue`-attr ids (`#backlog-queue-attr-populates-in-go-mode`); the batch you listed maps to `#4myd`, `#pushpinaccum` (`:pushpin:`/`:round_pushpin:` dedup), `#fcc0`, `#rtwbcast`, `#recyclerestart`, and `#0kjc` (markdown-AST tags-in-strings/code-spans-are-content).
-3. **Post-compaction wiped all `agent:queue` attributes** (`preset`, `priority`) in monsterrodholders.md → `#compactqattr`.
-
-Why I did **not** drain them this cycle: they are `[clean-session]` code fixes in `src/agent-doc`, and writing/finalizing those fixes through the live stale supervisor races it and corrupts the document (the churn you're already seeing). They need a fresh supervisor.
-
-**Recovery to unblock a clean drain** (run from a fresh terminal, not through this session):
-```
-cd src/agent-doc && make install
-agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
-```
-`make install` rebuilds the binary + cdylib to `e9cf3b74`+; `restart-supervisor --force` retires pid 1562136 and brings up a fresh supervisor on the new binary so client and supervisor no longer skew. Then re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` in a clean session and the `[clean-session]` heads become drainable.
-
-Not auto-looping — the queue heads are agent-undrainable under the live stale supervisor (`#goqueuestall`).
-
-### Re: queue cleanup + remaining heads still blocked on the stale supervisor — opus-4-8
-
-Recorded your queue cleanup — the 3 already-struck items (`agent-doc sync monsterrodholders.md`, `do [#8rg3]`, `do [#mb98]`) are removed.
-
-Still **not draining** the 4 remaining queue heads, and not auto-looping. Reason: preflight flags the supervisor serving this doc (pid 1562136) as **stale** (`supervisor_binary_stale` — started before the installed 0.34.0 binary), and every remaining head is a `[clean-session]`/`[operator-verify]` report already captured as a backlog/review id. Draining them against a stale supervisor is the exact `#dupcontent` corruption path (adopting a stale `content_ours` snapshot → duplicate component blocks on disk), so I'm holding:
-
-- "red/green deploy the new supervisor automatically" → **#jbrestale** (backlog, clean-session)
-- "efs Run Agent Doc should self-heal" → **#qpresetstrike** (review) + spent-preset auto-strike
-- "Compact Exchange bails / out-of-band typed_component_drift" → **#c2b6** (operator-verify)
-- "backlog not added to queue / `:round_pushpin:` dedup / AST tags in quotes+code" → **#4myd**, **#pushpinaccum**, **#0kjc** (+ `#fcc0`/`#rtwbcast`/`#recyclerestart`)
-- "compaction wiped agent:queue attributes (blast radius)" → **#compactqattr**
-
-Nothing new to add — all of it is already in backlog/review.
-
-**To unblock (operator-driven):** restart the supervisor so a clean session runs the current binary, then re-run:
-
-```
-agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
-```
-
-I'm not restarting it from inside this cycle — that would race my own finalize on the very stale supervisor that's hosting it (`#ipcdrift`). Once it's on a fresh binary in a clean session, the `[clean-session]` heads (`#jbrestale`, `#compactqattr`, `#0kjc`, `#fcc0`…) are workable.
-
-### Re: queue curated to #qchurn — supervisor is now fresh, but the heads stay clean-session — opus-4-8
-
-Two things changed since my last two responses, so let me correct the record first.
-
-**The supervisor is no longer stale.** This session is being served by pid **2524189**, started **04:05:28** today — *after* the installed binary (mtime **03:44:16**, `agent-doc 0.34.0`). My previous two answers were written against the old pid 1562136, which predated the binary. Whatever restart happened at session start brought up a fresh supervisor on the current code, so the "stale-supervisor / binary-skew" blocker I described is **cleared**. The File-Cache-Conflict / `live_prompt_drift` churn you were seeing came from that skew; it should not recur on this supervisor unless something re-stales it.
-
-**Why that still doesn't make the queue drainable here.** You curated the queue down to `- [#qchurn]` (plus the remaining free-text reports). `#qchurn` — and every other head preflight skipped (15 of them, `#goqueuestall`) — is a `[clean-session]` fix to agent-doc's own write/drain path. Working one means editing `src/agent-doc` and `make install`, and that install would make **this** live supervisor (2524189) stale mid-session and race my own finalize — the exact `#no-mid-session-install` failure that produced the churn in the first place. So a *fresh* supervisor doesn't unblock them; the blocker was never only "the binary is old," it's "don't rewrite the live write path from inside a session that depends on it." They need a dedicated clean session.
-
-**On `#qchurn` specifically:** it already captures precisely what you're experiencing — a go-mode queue whose only remaining prompts are non-`do #id` free-text bug reports keeps `queue_active=true`, and the idle-watch re-injects `queue_trigger=auto` every idle boundary → repeated no-op `/agent-doc` cycles. The fix (treat a free-text-only queue as not-drainable and stop re-dispatching) is planned in `tasks/agent-doc/plan-go-queue-stall.md`. Nothing new to add to the backlog — pointing the queue at `#qchurn` is the right call.
-
-**Not auto-looping.** Preflight already marks the 15 heads agent-undrainable, and `#qchurn` is literally the fix for this churn — auto-looping over it would *be* the bug. To actually land `#qchurn` (and the sibling `[clean-session]` heads), restart into a clean session:
-
-```
-cd src/agent-doc && make install
-agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
-```
-
-then open a fresh `/agent-doc` and drain there.
-
-### Re: queue curation + two new free-text reports — captured, still clean-session-blocked — opus-4-8
-
-The queue edits this cycle are curation plus two free-text reports. Triage:
-
-**`:pushpin:` normalization across the heads** — noted, no action from me. I'm deliberately *not* hand-editing the queue block to drop the leftover `:round_pushpin:` on `#4myd`/`#fcc0`/`#rtwbcast` (lines 122/125/126): mutating the live queue from inside a cycle on a stale supervisor is exactly what corrupts it. That mixed-marker case is itself the bug you filed — `#pushpinaccum` (idempotent pushpin/bullet prefix) — so it's already tracked, not something to fix by hand here.
-
-**"Ensure the markdown AST handles quoted strings + code blocks"** — already captured as **`#0kjc` / `#mdastquote`** (backlog line 220): mask quoted-string and code-span/fence regions before component/tag extraction, same family as `#lintfence`. Pointing the queue at it is the right call; nothing new to add.
-
-**"upgrade dependencies"** — this one *was* new, so I captured it as **`#upgradedeps`** (backlog top). I tagged it `[clean-session]` for the same reason every other head here is blocked: a dependency bump forces a `make install` + rebuild, which re-stales **this** live route-owned supervisor mid-session (`#no-mid-session-install` / `#fcc0` churn). I assumed the target is the agent-doc submodule (this doc's project) — confirm if you meant a different repo.
-
-**Still not auto-looping.** Preflight skipped all 15 heads as agent-undrainable (`#goqueuestall`: `[clean-session]` / `[operator-verify]`), and `user_intent_prompt_changes` is empty — the queue edits classify as bookkeeping, not a preempting prompt. There is zero agent-drainable work in this queue from this session. To land any of it (`#qchurn`, `#0kjc`, `#upgradedeps`, the rest), restart into a clean session on a fresh binary:
-
-```
-cd src/agent-doc && make install
-agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
-```
-
-then drain from a fresh `/agent-doc`.
-<!-- agent:boundary:c84b69aa -->
+<!-- agent:boundary:461cae89 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: Update agent-doc to fully run + install a `[clean-session]` either in a subagent or in a restarted session or in a `/clear` session.
 - :pushpin: [#qchurn]
 - :pushpin: [#anw0verify]
 - :pushpin: [#jbrestale]

@@ -148,20 +148,50 @@ Note: I'd started to hand this to a sub-agent (your `#mphaseloop` directive expl
 - **The superproject submodule pointer bump to `b8ffd36e` is deferred** — the dirty submodule (that same `#supselfheal` WIP) only lets git record a `-dirty` pointer, so a clean bump waits until `#supselfheal` lands or is stashed. The append-stable commit is safely on `origin/agent-doc` regardless.
 
 Live-binary caveat: the running supervisor (pid 1562136) still serves the prior build until `agent-doc admin recycle --all-projects` or a restart — session-check is already nagging about it.
-<!-- agent:boundary:e50b9d62 -->
+
+### Re: do [#8rg3] + [#mb98] — supselfheal landed — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc`. This should auto-repair.
+> ```
+> resync: pruned 10 stale session(s)
+> [route] target tmux session: 0
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3426
+> ```
+
+
+Both queued items drained. **`#supselfheal` is now committed + pushed** (agent-doc `e9cf3b74`, superproject pointer `62d0de82a`).
+
+**Key finding: the behavioral flip was already at HEAD.** `resolve_supervisor_auto_recycle` already returns `unwrap_or(true)` (default ON) in committed `rpc.rs` — the breaking change shipped in a prior commit. The dirty WIP I just landed was the surrounding *alignment* that proves and documents it, not the flip itself:
+
+- **SimWorld baseline** flips to `auto_recycle: true` to match production; adds a `DisableSupervisorAutoRecycle` command for the opt-out path.
+- **Tests**: renamed `non_dogfood_document_clears_and_drains_without_auto_recycle` → `opted_out_document_clears_and_drains_without_auto_recycle` (explicit opt-out), and added `stale_supervisor_self_recycles_at_turn_boundary_by_default` covering the headline self-heal.
+- **Comments/logs** (`decisions.rs`, `idle_watch.rs`) now describe default-ON-with-opt-out; the stale-detect `eprintln`/`log_event` say `auto_recycle=opted_out` + "clear the falsey knob" instead of "set the knob".
+- **`specs/06-config.md`** documents `agent_doc_supervisor_auto_recycle` as an opt-OUT knob (default **ON**, `#supselfheal`).
+- **`VERSIONS.md`** Unreleased: `BREAKING CHANGE: supervisor auto-recycle defaults ON.`
+
+`make check` green (clippy `-D warnings` clean, 0 FAILED across the suite). Committed + pushed both repos.
+
+**1. `do [#8rg3]` — DONE (code landed).** The land-decision was the queued `do`; since the resolver flip was already at HEAD, landing this is low-risk test/doc consistency, not introducing the breaking behavior. The two things I deliberately did **not** do this cycle, both operator-drive:
+   - **No `cargo install` mid-session.** The supervisor serving this doc (pid 1562136) is already a stale build (preflight `supervisor_binary_stale`); installing a newer client mid-session is the exact handoff/recycle-mid-write drift class we keep hitting. Defer the install to post-session or restart the supervisor immediately after.
+   - **Live recycle proof is operator-drive** and folds into the existing **`#anw0verify`**: install (`cargo build --release && cargo install --path . && agent-doc lib-install`), restart this supervisor once onto a `#supselfheal` build (bootstrap caveat — a pre-`#supselfheal` supervisor cannot self-heal retroactively), then drive a turn boundary and confirm ops.log shows the self-recycle instead of repeated `supervisor_binary_stale_detected`.
+
+**2. `do [#mb98]` — DONE (resolved by #8rg3).** The request was "make mid-session install deferrable OR red/green so a newer finalize client doesn't outrun the supervisor." That is exactly what `#supselfheal` automates: the supervisor self-recycles onto the freshly-installed binary at a turn/inter-queue boundary via the blue/green `execve` that preserves the live child + pane (zero-gap), keeping client and supervisor aligned. Landing `#supselfheal` **is** the red/green-install solution. Until a `#supselfheal` supervisor is running, the interim rule stands: defer installs to post-session or restart the supervisor right after.
+<!-- agent:boundary:77aca023 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
----
+~~~done
 :pushpin: JB `Run Agent Doc`. This should auto-repair.
 ```
 resync: pruned 10 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3426
 ```
----
+~~~
 :pushpin: In tsift.md, I had a queue:
 ```
 &gt;!-- agent:queue preset="#spec-test-build-install-commit-push" go --&lt;
@@ -213,6 +243,8 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ---
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
 ---
+- ~~:pushpin: do [#8rg3]~~
+- ~~do [#mb98]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -242,8 +274,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#mb98] Operator request (recovered from a drift-dropped queue edit, #queue-user-edit-overwrite): make the mid-session agent-doc install deferrable (into a subagent, or after a refresh / clean run) OR red/green, so installing a newer binary does not make the finalize client newer than the running supervisor and trigger handoff/recycle mid-write drift -- the exact class hit this very cycle. ANSWER: this is precisely what #supselfheal (#8rg3) automates -- the supervisor self-recycles onto the freshly-installed binary at an idle / inter-queue boundary via a blue/green execve that preserves the live child + pane (zero-gap), so client and supervisor stay aligned. So landing #supselfheal IS the red/green-install solution; until then, defer installs to post-session or restart the supervisor immediately after install. Lesson applied: do NOT cargo install mid-session against a live stale supervisor.
-- [ ] [#8rg3] #supselfheal WIP is build-complete but UNCOMMITTED in src/agent-doc (VERSIONS.md, start/decisions.rs, start/idle_watch.rs, specs/06-config.md, sim_world.rs, sim_world/engine.rs): it flips supervisor auto-recycle default to ON (BREAKING) to self-heal the stale-binary File Cache Conflict / IPC-drift loop (#fcc0/#ipcdrift). make check is green. This cycle I did NOT commit it and did NOT ship it to the live binary (stashed it out during the append-stable install). Needs operator land-decision + live recycle verify before shipping; the dirty submodule also blocks the superproject pointer bump to b8ffd36e.
 - [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#dupcontent] [clean-session] Duplicate-content / malformed-attribute document corruption when finalize adopts a stale-supervisor `content_ours` snapshot. LIVE 2026-06-14 (monsterrodholders.md, stale route-owned supervisor pid1328300 started 02:15:48 < binary mtime 02:28:10, session-check `#fcc0`): `finalize --stream` hit `mid-turn cycle rotation ... #adoc-compact-during-turn-response-loss` then `live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar content_ours_len=40827 > candidate 39216` then `snapshot from content_ours`. The adopted buffer was CORRUPT and written to disk: 273 lines vs 181 in clean HEAD, TWO `agent:queue` blocks (held one at ~88 PLUS a stale re-armed `preset="#spec-test-commit-push" priority go` block at ~181) and a truncated marker `<!-- agent:queue tasks=" -->`. The lint-gate caught `empty-attr-value` only AFTER the corrupt content already landed on disk (interrupt, no commit; HEAD stayed clean). Repair: `git checkout HEAD -- <file>` + `reset --from-current --preserve-session`. ROOT CAUSE (hypothesis): `content_ours`/`ack_content_sidecar` buffer is adopted verbatim as the snapshot base without structural validation, so a bad prior CRDT merge (duplicate singleton component blocks + attribute split across a merge boundary) is taken as truth and written before the lint-gate runs; the known-stale supervisor is still trusted as an IPC content source. FIX: (1) structurally validate before adopting any content_ours snapshot — reject/repair >1 open marker for a singleton component (exchange/status/queue/backlog/review/icebox/done) or a malformed/unterminated attribute, falling back to candidate/HEAD; (2) fail closed when the serving supervisor is already classified `supervisor_binary_stale` (#fcc0) — do not ingest its buffer; (3) run the structural/lint check on the candidate BEFORE the disk write, not after; (4) de-dup singleton blocks on parse instead of concatenating. CLEAN session (snapshot-adoption / converge write path). Related #fcc0/#compactqattr/#adoc-compact-during-turn-response-loss. Plan: tasks/agent-doc/plan-content-ours-duplicate-corruption.md
 - [ ] [#mphaseloop] [clean-session] Multi-phase task auto-loop policy (operator directive 2026-06-14): go-mode drain must continuously advance a multi-phase task until it is DONE or legitimately blocked (clean-session / operator-verify / external outage). "Needs review" is NOT a terminal stop — when a phase needs review, move it to agent:review (gated [/]) and KEEP draining the remaining phases/queue; never halt the whole queue just because one phase needs review. Codifies SKILL #drain-no-defer + "complete over gate" into the drain/finalize loop: only done/blocked terminate the drain; a review-routed phase emits its review item and the drain continues to the next drainable head. FIX: in the go-mode drain/finalize path, on a review-routed phase do not treat review as queue-terminal — emit the review item + advance to the next drainable head; proof line drain_continue_after_review next_head=... CLEAN session (drain/queue path).

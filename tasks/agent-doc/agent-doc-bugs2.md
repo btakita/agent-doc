@@ -173,7 +173,19 @@ Pinned `#mphaseloop` as the lead open queue head. It is `[clean-session]` (the m
 Every remaining materialized head is `[clean-session]` (`#mphaseloop`, `#qmisstrike`, `#fcc0`, `#rtwbcast`, `#recyclerestart`, `#pushpinaccum`, `#0kjc`, `#compactqattr`, `#dupcontent`) or `[operator-verify]` (`#4myd`, `#aazp`, `#c2b6`). The clean-session heads are handed to the supervisor idle-watch, which force-`/clear`s and re-dispatches each one to a freshly-cleared agent (`#cleandrainsup`); the operator-verify heads need a live editor/recycle. So I am not auto-looping — stopping here hands `#mphaseloop` to the supervisor rather than stalling it.
 
 Note: exchange accretion is high (`block` level, 21 cycles / 16 no-op closeouts in 30 min) — a `JB Compact Exchange` would help, but I am not stalling the active queue to compact without an explicit opt-in.
-<!-- agent:boundary:239f8784 -->
+
+### Re: re-materialized `:pushpin: [#mphaseloop]` head — opus-4-8
+
+`#mphaseloop` re-surfaced as the lead queue head (go-mode re-materializes backlog `queue`-attr ids; `#backlog-queue-attr-populates-in-go-mode`). It is `[clean-session]` and **not loop-drainable from here** — the binary confirms `queue_drainable_head_count: 0` / `queue_continuation_required: false`.
+
+The constraint is live, not theoretical: `admin list` shows this doc's route-owned session on **pane %25 (alive, pid 939094)**. `#mphaseloop` is the go-mode drain/finalize policy fix — its implementation IS the live write path that hosts this supervisor, so rebuild + `make install` mid-turn would re-stale it (`#no-mid-session-install` / `#fcc0`). That is why the tag asks for a clean session.
+
+Per `#cleandrainsup`, stopping here hands `#mphaseloop` to the supervisor idle-watch, which force-`/clear`s and re-dispatches it to a freshly-cleared agent — it is not abandoned. Not auto-looping.
+
+**Remaining heads** (all supervisor-drained `[clean-session]` or operator-gated): `#mphaseloop`, `#qmisstrike`, `#fcc0`, `#rtwbcast`, `#recyclerestart`, `#pushpinaccum`, `#0kjc`, `#compactqattr`, `#dupcontent` (clean-session); `#4myd`, `#aazp`, `#c2b6` (operator-verify). Nothing in-session-drainable.
+
+Exchange accretion is at `block` level (17 no-op closeouts / 30 min) — a `JB Compact Exchange` would help, but I'm not stalling the active queue to compact without an explicit opt-in.
+<!-- agent:boundary:156838c5 -->
 <!-- /agent:exchange -->
 
 ## Queue

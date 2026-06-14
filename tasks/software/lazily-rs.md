@@ -254,7 +254,22 @@ Done — the live Cloudflare Pages deploy is triggered. This was the one outward
 **Scope note** — the pointer bump to `b713281` also publishes the sibling featured post `2026-06-14-lazily-architecture-overview.md` (`#ny9k`, also `featured: true`), since it was committed between `9008263` and the blog HEAD. Both 2026-06-14 lazily posts go live in this deploy. If only the slot-cell-signal post should have shipped, say so and I can rewind, but both were already pushed on the blog `origin/main` and are part of the same lazily content batch, so I treated shipping both as intended.
 
 The LinkedIn draft remains a draft (`mail/drafts/linkedin/2026-06-14-lazily-slot-cell-signal.md`) — that step was explicitly deferred and is not part of this deploy.
-<!-- agent:boundary:51f26920 -->
+
+### Re: Deploy 2026-06-14-lazily-slot-cell-signal-composition.md (re-presented after IPC merge drop) — opus-4-8
+
+> **Queue prompt (re-added):**
+>
+> Deploy 2026-06-14-lazily-slot-cell-signal-composition.md to briantakita.me...as a featured article.
+
+Already done in this turn — re-confirming, not re-deploying. The first finalize hit `live_prompt_drift_after_preflight`; the content_ours recovery committed my deploy response to HEAD but dropped this queue head from the visible doc without recording the consume (`#queue-user-edit-overwrite`), so I re-added it to consume it cleanly here.
+
+State, unchanged from the deploy response above:
+- Blog post committed with `featured: true` at blog HEAD `b713281` (pushed).
+- Superproject `briantakita.me-dev` pointer bumped `9008263 → b713281`, committed `554a9c2`, pushed `714e949..554a9c2` to `main`.
+- Cloudflare Pages deploy workflow triggered — run `27492049100` (queued at push time). Not blocked on.
+
+No deploy commands were re-run for this acknowledgment.
+<!-- agent:boundary:200ac06f -->
 <!-- /agent:exchange -->
 ###
 <!--

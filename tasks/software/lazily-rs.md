@@ -72,7 +72,27 @@ Released **lazily-zig v0.1.0** (first release).
 - `IpcMessage` (`Snapshot` | `Delta`), externally-tagged like serde
 
 Submodule gitlink SHA is unchanged (`ba7e965`), so no superproject update was needed. Next queue item: make lazily-py compliant with lazily-spec, release + publish.
-<!-- agent:boundary:d4545e7a -->
+
+### Re: Make lazily-py compliant with the lazily-spec (release + publish) — opus-4-8
+
+> **Queue prompt:**
+>
+> Make lazily-py compliant with the lazily-spec. release + publish
+
+Implemented the **full lazily-spec IPC wire protocol** in lazily-py and shipped it as **v0.11.0**. (You picked "Full IPC wire impl" — it fit in one cycle.)
+
+**New `lazily.ipc` module** — JSON byte-compatible with the Rust (`lazily-rs`) and Zig bindings: `IpcMessage` (`Snapshot`|`Delta`, externally-tagged), `Snapshot`/`NodeSnapshot`/`EdgeSnapshot`/`NodeState` (Payload|SharedBlob|Opaque), `Delta` + all **7 `DeltaOp`** variants, `IpcValue` (Inline|SharedBlob), `ShmBlobRef`, epoch sequencing (`is_next_after`/`apply_status` resync), and a default-deny `PeerPermissions` boundary whose `filter_readable` **omits** (never redacts) non-readable nodes (read/write/trigger_effect gated independently). `encode_json`/`decode_json` move transport-agnostic bytes.
+
+**Conformance** — `tests/test_conformance.py` parses all **6 canonical `lazily-spec/conformance` fixtures**, asserts the language-agnostic checks, and round-trips byte-for-byte (the same contract rs/zig run); fixtures vendored under `tests/conformance/` for standalone CI.
+
+**Eager `Signal`** — added the third member of the `Slot -> Cell -> Signal` family (`signal`/`signal_def`): eager compute at creation, eager recompute with a memo guard, `dispose()` reverts to lazy. `Slot`/`Cell.touch` now snapshot their subscriber set so an eager subscriber can re-subscribe mid-notification.
+
+**Verification** — `poe precommit` (ty + ruff + run_readme + tests) fully green: **57 tests** (was 20). `uv build` produced wheel + sdist; editable install imports at `0.11.0`.
+
+**Commit + push (done)** — lazily-py `28f23e4` pushed to `lazily-hub/lazily-py main`; superproject gitlink bumped (`6339ab2e1`). CI: prior commit's run green; GitHub had not registered a run for `28f23e4` at finalize time (pending CI annotation, identical local matrix passed).
+
+**Release + publish — GATED on operator** (review `#kb9b`/`#lzpypub011`): PyPI publish is irreversible + needs token/2FA + the pre-publish live-test confirm. Artifacts wait in `src/lazily-py/dist/`. Backlogged `#sc7g`/`#lzpyspeclayers` (recommended): optional non-IPC spec layers (shm arena, signaling, CRDT, capability handshake, FFI) for full lazily-rs parity — not conformance-gated.
+<!-- agent:boundary:d3d2c2e3 -->
 <!-- /agent:exchange -->
 ###
 <!--

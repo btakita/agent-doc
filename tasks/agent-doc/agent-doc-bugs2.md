@@ -123,7 +123,22 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 After restart the supervisor comes up on the 15:01 build and its idle-watch `/clear`-and-drains each `[clean-session]` head on its own (`#cleandrainsup`: `#jbrestale`, `#mphaseloop`, `#qmisstrike`, `#fcc0`, `#rtwbcast`, `#dupcontent`, `#compactqattr`, `#0kjc`, `#pushpinaccum`, `#recyclerestart`). The `[operator-verify]` heads (`#4myd`, `#aazp`, `#c2b6`, `#1j8q`) stay with you — they need a live editor/pane proof.
 
 **Not auto-looping** — every materialized head is `[clean-session]` (handed to the post-restart supervisor) or `[operator-verify]` (yours). Stopping here hands the clean-session column to the supervisor; it does not abandon it.
-<!-- agent:boundary:6b6ad113 -->
+### Re: "this should not stall — I ran restart-supervisor but it still stalls" — root-caused + fixed — opus-4-8
+
+You were right that restart-supervisor wasn't fixing it. The reason is the opposite of what every prior turn (mine included) told you: **the supervisor was never actually stale.** The "stale supervisor" warning was a false positive, and chasing it is what produced the stall-feeling loop.
+
+**The live proof:**
+- Supervisor **pid 1654897** started **14:43:10** (before the 15:01:16 install).
+- But `/proc/1654897/exe` resolves to inode **95814559**, mtime **15:01:16** — the **exact same inode as the installed binary**. It already re-exec'd in place onto the fresh 0.34.0 build (`supervisor_binary_stale_self_recycled` in the session log). It is running current code.
+
+**Root cause** (`#fccsupwarn2`): `host_supervisor_is_stale` decided staleness from `process_start_secs < installed_mtime_secs`. But `execve` **preserves the process start time** — so a supervisor that *correctly* hot-reloaded onto the fresh binary still reports "started before the install" **forever**. Every preflight/session-check then printed "restart the stale supervisor," you restarted, the start time never changed, the warning came back, and the agent kept telling you to restart a healthy process. The warning is read-only (preflight + session-check only — it does **not** gate dispatch/recycle/drain), so the actual harm was the misleading signal driving the pointless restart loop, not a blocked queue.
+
+**Fix** (committed agent-doc submodule `5bf170d3`, `make check` green): staleness is now an **identity** check, not a time check — compare the inode the supervisor maps via `/proc/<pid>/exe` against the installed binary's inode. Same inode (original launch **or** in-place `execve`) ⇒ fresh; a different/old inode ⇒ stale. Fail-open when the running inode is unknown (non-Linux / unreadable `/proc`) so a read error can never spam the warning. Added `running_exe_inode_for_pid` + `inode_of_path`; rewrote the unit test for inode semantics.
+
+**Why restart-supervisor was a no-op for you:** there was nothing to restart. The supervisor self-recycled onto the new binary on its own; the only thing "stuck" was the warning, and the warning was lying.
+
+**What happens next:** this fix lands the same way the last one did — the supervisor's idle-watch auto-installs `5bf170d3` and recycles onto it at this turn's boundary. Once it's running the inode-based check, `/proc/<pid>/exe` == install inode ⇒ the `supervisor_binary_stale` warning stops firing. I queued **`#fccsupinode`** to confirm that at the next preflight after the recycle. (The 17 deferred queue heads remain `[clean-session]`/`[operator-verify]` — that's a separate, real-but-not-stalled state, not this bug.)
+<!-- agent:boundary:3d622e8b -->
 <!-- /agent:exchange -->
 
 ## Queue

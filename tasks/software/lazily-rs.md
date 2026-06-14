@@ -48,7 +48,16 @@ Compacted content:
 
 
 Added `#lipostslotcell` to the backlog: post the "Slot→Cell→Signal" LinkedIn post on **Mon 2026-06-15** (tomorrow). Tagged `[operator-drive]` since publishing is yours to drive — draft/publish via the `/linkedin` skill (corky) when you're ready.
-<!-- agent:boundary:acb5c01f -->
+
+### Re: Backlog the Lazily architecture LinkedIn post — opus-4-8
+
+> **Queue prompt:**
+>
+> Please add a backlog for me to post the Lazily architecture linkedin post tuesday. 
+
+
+Added `#lipostlazilyarch` to the backlog: post the "Lazily architecture" LinkedIn post on **Tue 2026-06-16**. Tagged `[operator-drive]`, grouped with `#lipostslotcell` (Mon) — draft/publish via the `/linkedin` skill (corky) when you're ready.
+<!-- agent:boundary:5bb3536c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -57,13 +66,15 @@ Added `#lipostslotcell` to the backlog: post the "Slot→Cell→Signal" LinkedIn
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Please add a backlog for me to post the Slot->Cell->Signal linkedin post tomorrow/monday.~~ 
-- Please add a backlog for me to post the Lazily architecture linkedin post tuesday. 
+- ~~Please add a backlog for me to post the Slot->Cell->Signal linkedin post tomorrow/monday.~~
+- ~~Please add a backlog for me to post the Lazily architecture linkedin post tuesday. ~~
+- do [#sstz]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#kabc] #lipostlazilyarch=[operator-drive] Post the "Lazily architecture" LinkedIn post on Tue 2026-06-16. Draft/publish via the /linkedin skill (corky).
 - [ ] [#sstz] #lipostslotcell=[operator-drive] Post the "Slot→Cell→Signal" LinkedIn post on Mon 2026-06-15 (tomorrow). Draft/publish via the /linkedin skill (corky).
 <!-- /agent:backlog -->
 

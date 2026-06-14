@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -288,7 +288,28 @@ Correcting the two earlier "queued / not blocked on" notes: the **first** deploy
 - The same pointer bump also published the sibling featured post `2026-06-14-lazily-architecture-overview.md`.
 
 The post is fully deployed as a featured article. (The earlier `live_prompt_drift` IPC churn was a wedged route-owned supervisor running a pre-`e9cf3b74` binary — preflight's `stale_install` warning; recommend `make install` in `src/agent-doc` + a session restart to clear it durably.)
-<!-- agent:boundary:d9c8f8e3 -->
+
+### Re: Convert ASCII diagrams to SVG in the 2 recent lazily posts + deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> Edit the 2 recent lazily-rs blog posts to use mermaid or SVG diagrams instead of ascii diagrams. deploy
+
+
+Done. Converted all **8 ASCII box-drawing diagrams** across the two newest lazily posts to inline SVG, then deployed.
+
+**Format choice — SVG, not mermaid.** The site renders markdown through `marked` (v17) with no mermaid client script wired in, so a ` ```mermaid ` block would render as a literal code block. Raw SVG passes through `marked` verbatim and renders everywhere with zero new dependencies. Verified with the project's exact marked config: **4 `<svg>` emitted per post, 0 escaped**.
+
+**Files (`app/briantakita.me/post/content/`):**
+- `2026-06-14-lazily-architecture-overview.md` — 4 SVGs: the 4-layer stack, the Cell→Slot(pull)/Signal(push) split, the single-thread→ThreadSafe→Async progression, and the wire-plane fan-out (permission filter → Snapshot/Delta → FFI/IPC/WebSocket/WebRTC + signaling Worker).
+- `2026-06-14-lazily-slot-cell-signal-composition.md` — 4 SVGs: the Cell→Slot→Signal three-column progression, the lazy-slot read-triggers-recompute timing, the eager-signal write-is-the-trigger timing, and the Signal-composition box (memo + puller Effect).
+
+**Theme-aware & accessible.** Each SVG draws from the site's CSS theme variables (`--color-card`, `--color-border`, `--color-text-base`, `--color-accent`) so it adapts to light/dark mode, scales responsively (`width:100%`, `max-width`, `viewBox`), and carries an `aria-label` describing the diagram. No box-drawing characters remain; the only remaining fences are the `rust`/`bash` code samples.
+
+**Verification:** `bun ./build.ts` succeeds; marked render-test confirms passthrough.
+
+**Deploy:** pushed both submodule levels — `briantakita.me` `b713281→ef6cbbc`, superproject `briantakita.me-dev` `b4969aa→d8db4a4`. The push triggered the **Deploy to Cloudflare Pages** workflow (run `27492520972`), which is in progress; it runs its own live smoke test on completion.
+<!-- agent:boundary:dfecda2e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -297,7 +318,6 @@ The post is fully deployed as a featured article. (The earlier `live_prompt_drif
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Edit the 2 recent lazily-rs blog posts to use mermaid or SVG diagrams instead of ascii diagrams. deploy
 <!-- /agent:queue -->
 
 ## Backlog

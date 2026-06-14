@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,72 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260614-090218.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260614-165245.md`*
 
 Compacted content:
-- Archived 8 response topic(s): Wide Deal Pipeline kanban; Deal Pipeline horizontal width improvements; Deal Pipeline #2 + #5 polish; 5 more
+❯ - Archived 3 response topic(s): deploy; Fix the formatting of the address in this pipeline card; do [#aww2]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-Deployed the EFS worker to production. The `#spec-test-commit-push` preset portions were no-ops — the `equityfundingsource-dev` submodule working tree was already clean (HEAD `7d0d691`, no unpushed commits), so there was nothing to update/commit/push.
-
-**Deploy (`bun run deploy:worker`):**
-- D1 remote migrations: none to apply (already current)
-- Worker build + upload: 1 new asset uploaded (43 already present), 908.70 KiB total / 211.05 KiB gzip
-- Live at `https://equityfundingsource.brian-takita.workers.dev` — version `ed889adb-fa2f-444d-9e89-207081a6a1aa`, hourly cron `0 * * * *` active
-- Bindings intact: DB (D1), R2 assets/documents/tmo-cache, BorrowerChatRoom + AdminEventsRoom DOs, upload rate limiter
-
-**Smoke check:** `/` → 200, `/funded-deals` → 200.
-
-This ships the latest committed admin/lender pipeline work (collapsible lanes + compact density board controls, `7d0d691`).
-
-Note: a concurrent compaction had truncated the working-tree session doc to a stale snapshot before this write; recovered via `reset --from-current --preserve-session` + `commit` (`3843a096c`) so the compaction landed before this response.
-
-### Re: Fix the formatting of the address in this pipeline card — opus-4-8
-
-> **Queue prompt:**
->
-> Fix the formatting of the address in this card ![img_14.png](img_14.png) on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline
-
-
-Fixed. The `Application Received` card heading was rendering the **entire** borrower address wrapped one word per line (`PO Box 571, North Grosvenordale, CT, 06255 - Takita, Brian`). Two compounding causes:
-
-1. **Content** — the EFS fallback dumped the full multi-part address into the title's `{property address short}` slot (the spec says *short*).
-2. **Layout** — the nowrap stage pill (`APPLICATION RECEIVED`) + `Aging 0d` badge shared the title's flex row and starved it of width, collapsing the heading to a ~60px column so even short text broke word-by-word.
-
-**Fix (`#pipeline-card-address-fmt`, committed + pushed):**
-- `repo.ts` — new `pipeline_card_street_line_` collapses a full `{street}, {city}, {state} {zip}` address to just its street line (segment before the first comma); a bare street is unchanged. `pipeline_card_title_` now uses it, so the heading is `PO Box 571 - Takita, Brian` for both TMO and EFS-fallback data. The full address still shows in the card footer.
-- `pipeline.tsx` — the loan card heading now owns a full-width header row (title + actions menu only), with the stage/aging chips moved to a following `flex-wrap` row, and the title allows `overflow-wrap:anywhere`. The nowrap chips can no longer squeeze it.
-- `shared.ts` re-export + PRD Phase H + tests for the collapse and the layout.
-
-**Verification:** full suite green (680 pass, incl. 52 pipeline tests), `bun run build` + `build:worker` clean. No D1 migration. The EFS repo has no CI workflow configured.
-
-**Not yet live:** the preset was `#spec-test-commit-push` (no deploy), so this is on `main` (submodule `30c208c`, superproject `b4c2c4853`) but not yet on the workers.dev URL. Queued a recommended `bun run deploy:worker` backlog item to ship it.
-
-### Re: do [#aww2] — deploy the card-heading fix — opus-4-8
-
-> **Queue prompt:**
->
-> do [#aww2]
-
-
-Deployed. The `#pipeline-card-address-fmt` fix is now live on the URL you linked.
-
-**Deploy (`bun run deploy:worker`):**
-- New browser bundle `/index.browser-BRFYNUZM.js` (carries the pipeline card change) uploaded; 43 assets already present.
-- Total 908.81 KiB / 211.06 KiB gzip. Worker startup 22ms.
-- Live at `https://equityfundingsource.brian-takita.workers.dev` — version `f5623d81-248d-4a1c-8944-16e6cd9dafaf`, hourly cron `0 * * * *` active. Bindings intact (D1, R2 assets/documents/tmo-cache, BorrowerChatRoom + AdminEventsRoom DOs, upload rate limiter).
-
-**Smoke check:** `/` → 200, `/funded-deals` → 200.
-
-Reload `https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline` (hard-refresh to bust the old JS bundle) — the card heading is now the short `PO Box 571 - Takita, Brian` on its own full-width row, with the `APPLICATION RECEIVED` / `Aging` chips on the row below and the full address in the footer.
-<!-- agent:boundary:c2fd6c07 -->
+<!-- agent:boundary:6fac8140 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -106,6 +46,9 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: Rename "Applications received" tag to "Accepted applications".
+- :pushpin: Accepted application dialog component in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline and https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f Uploaded Documents should open preview dialog when clicked.
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

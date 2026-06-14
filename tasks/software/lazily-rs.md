@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -199,7 +199,7 @@ Done. Wrote a focused blog post and a LinkedIn draft on the `Cell → Slot → S
 - LinkedIn draft: `mail` repo → `b53fb6d`, pushed.
 
 **Held for you — live publish is the one outward-facing action.** Pushing the **superproject** `briantakita.me-dev` to `main` triggers `.github/workflows/deploy.yml` → Cloudflare Pages, i.e. it publishes the post live and public. I left the superproject submodule-pointer bump to your normal flow (consistent with the prior docs-cycle handling), so nothing is live until you bump + push it. The LinkedIn item was explicitly a *draft*, so I treated the blog the same way for the irreversible step. To go live: in `briantakita.me-dev`, `git add app/briantakita.me && git commit` the pointer bump → push (auto-deploys). LinkedIn: review the draft, then `/linkedin post mail/drafts/linkedin/2026-06-14-lazily-slot-cell-signal.md` after attaching a rendered diagram image.
-<!-- agent:boundary:ae58812d -->
+<!-- agent:boundary:3379125b -->
 <!-- /agent:exchange -->
 ###
 <!--

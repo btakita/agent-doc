@@ -140,7 +140,34 @@ After it comes up on the current binary, a clean session can actually drain the 
 **Your edits.** Fencing the resolved churn-stop block in `~~~done … ~~~` is the right manual mitigation for `#0kjc`/`#mdastquote` — it stops that pasted console output (with its `:pushpin:`/`[route]` tokens) from being re-parsed and re-injected as queue heads. Un-striking `#qpresetstrike` keeps it as an open work item; it stays a clean-session fix (preset-token heads are unstrikeable by any agent path), so I'm not touching it under the live IPC supervisor.
 
 No agent-drainable head this cycle; not auto-looping (churn-stopped, live-IPC supervisor); not doing queue/review surgery while the stale supervisor is active (it races + corrupts). Recycle first, then re-run on a clean session.
-<!-- agent:boundary:e856f6cf -->
+
+### Re: spent-preset auto-repair already landed (ce339055) — only the supervisor recycle remains — opus-4-8
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc`. This should auto-repair.
+> ```
+> resync: pruned 10 stale session(s)
+> [route] target tmux session: 0
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3426
+> ```
+
+
+This queue head duplicates the answer already committed above (the `### Re: JB Run Agent Doc on a spent #advance-review preset head` section). The `go` queue keeps re-presenting it because the live supervisor can't strike a spent preset head — which is the bug itself. The status delta worth recording:
+
+**The fix already landed.** `#qpresetstrike` is committed in the agent-doc submodule at `ce339055` — *"fix(queue): strikeable preset heads, idle-watch drainability agreement, clear-revival guard"*. The installed binary (`~/.cargo/bin/agent-doc`, rebuilt 22:59:14) includes it. So the code change the prior cycle filed (auto-strike the spent preset head + re-dispatch, instead of failing closed with a manual "clear the `- #advance-review` line" remedy) is **done**, not pending.
+
+**Why the churn continues anyway.** The route-owned supervisor for this doc — `pid 2825163`, started `19:10:21` — predates the 22:59:14 rebuild, so it still executes the **pre-fix** binary. It can't strike the spent preset, so it re-injects this head every idle boundary (this doc closed 18 cycles / 8 no-ops in 30 min, accretion = block, all of it this). Preflight's `supervisor_binary_stale` warning is the same finding.
+
+**The one operator-gated step left** (not recycling mid-cycle and racing my own finalize):
+```
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+# or, all docs: agent-doc admin recycle --all-projects
+```
+Once it comes up on `ce339055`, the spent `#advance-review` head strikes cleanly and the queue drains/closes instead of looping. That recycle is also the live proof for `#qpresetstrike` (and the same recycle `#aazp`/`#4myd` want — check `ops.log` for `supervisor_binary_stale_self_recycled` / `supervisor_reexec_failed fallback=continue_current_binary`).
+
+Not mutating queue/backlog state this cycle (surgery under the live stale supervisor races + corrupts), and not auto-looping — the only remaining action is the operator recycle.
+<!-- agent:boundary:7d6d3c24 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -164,7 +191,7 @@ JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equ
 ```
 ---
 :pushpin: - [#qchurn]
-- :pushpin: [#qpresetstrike]
+- ~~:pushpin: [#qpresetstrike]~~
 - :pushpin: [#clearexchstale]
 - :pushpin: [#qdedup]
 - :pushpin: :round_pushpin: do [#c2b6]

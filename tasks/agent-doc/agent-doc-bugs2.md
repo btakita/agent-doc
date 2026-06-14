@@ -59,7 +59,35 @@ You moved `#qpresetstrike`, `#clearexchstale`, `#qdedup` to the head of the go-q
 agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 ```
 After it comes up on the current binary, a clean session can actually drain the clean-session queue (#qpresetstrike / #clearexchstale / #qdedup all have plans under `tasks/agent-doc/plan-*.md`). I'm not restarting it mid-cycle unilaterally or auto-looping — clean-session heads aren't agent-completable here, and looping would just reproduce the churn.
-<!-- agent:boundary:863086d6 -->
+
+### Re: JB `Run Agent Doc` should auto-restart the supervisor (churn-stop dispatch block) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc`. This should automatically restart the supervisor.
+> ```
+> [route] target tmux session: 0
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain receipt_id=3420
+> ```
+
+
+Filed as a bug + plan, not fixed live (clean-session code path; restarting the live supervisor is operator-drive).
+
+**What happened.** JB `Run Agent Doc` dispatched but failed closed:
+`failed_stage=queue_paused reason=churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain`. The churn-stop *reason text itself* prescribes the remedy ("needs operator recycle") — yet the dispatch path surfaces it as a terminal error and does nothing, so you'd have to recycle by hand.
+
+**Root cause.** A stale supervisor re-injects an operator-verify head → churn detector PAUSES the queue (`queue_paused`/`churn-stop`). The supervisor self-recycle that already exists (`supervisor_binary_stale_self_recycled`, #aazp/#4myd) is gated on the **idle / next-queue-item** boundary — which a churn-stopped queue never reaches. So the recycle machinery is present but unreachable from a dispatch-blocked entry, and it wedges until you recycle manually. Same stale-binary root as #fcc0/#ipcdrift.
+
+**The fix (queued, clean-session).** New backlog `#jbrestale` + plan `tasks/agent-doc/plan-jb-run-restart-stale-supervisor.md`: in the JB Run dispatch handler, classify a churn-stop whose reason is a stale supervisor, branch to `restart-supervisor --force` (proof `route_dispatch_recovery action=restart_supervisor … result=restarted|reexec_failed`), lift the stale-injected pause, re-dispatch **once** (no loop), keep operator-verify heads deferred (#goqueuestall), and on `reexec_failed` fail closed but keep the pane alive with the manual hint. SimWorld: stale-cause recovers once; non-stale churn still fails closed; reexec-failed stays alive. Touches route/dispatch + recycle → must land in a clean session.
+
+**Immediate workaround (your call — I'm not restarting the live supervisor mid-cycle).** This session's host supervisor (`pid 2825163`) is itself stale (predates the installed binary), which is what's generating the churn:
+```
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+Preflight also flags `stale_install` (`target/release/agent-doc` predates `ce339055`) — if you want the *restarted* supervisor on current code, run `make install` in `src/agent-doc` first, then restart. After that a clean session can actually drain the clean-session queue.
+
+No agent-drainable work this cycle beyond filing this; not auto-looping (churn-stopped queue, live-IPC supervisor).
+<!-- agent:boundary:9b5ff8c6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -72,7 +100,7 @@ After it comes up on the current binary, a clean session can actually drain the 
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain receipt_id=3420
 ```
 ---
-- [#qchurn]
+- ~~[#qchurn]~~
 - :pushpin: [#qpresetstrike]
 - :pushpin: [#clearexchstale]
 - :pushpin: [#qdedup]
@@ -147,6 +175,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#jbrestale] [clean-session] JB `Run Agent Doc` should auto-restart a stale/churn-stopped supervisor instead of failing closed. Operator pressed Run Agent Doc expecting a supervisor restart; dispatch returned `failed_stage=queue_paused reason=churn-stop: ... re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain`. The churn-stop reason itself prescribes a recycle, but the dispatch path treats it as terminal. ROOT CAUSE: the supervisor self-recycle (`supervisor_binary_stale_self_recycled`, #aazp/#4myd) is gated on the idle/next-queue-item boundary, which a churn-stopped queue never reaches. FIX: in the JB Run Agent Doc dispatch handler, classify a churn-stop whose reason is a stale supervisor (`supervisor_binary_stale`/`pre-<ver>`) and branch to restart-supervisor (proof `route_dispatch_recovery action=restart_supervisor … result=restarted|reexec_failed`), lift the stale-injected pause, re-dispatch ONCE (no loop), keep operator-verify heads deferred (#goqueuestall), fail closed + keep pane alive on reexec_failed. CLEAN session (route/dispatch + recycle path). Related #recyclerestart/#aazp/#4myd/#qchurn/#fcc0. Plan: tasks/agent-doc/plan-jb-run-restart-stale-supervisor.md
 - [ ] [#0kjc] #mdastquote [clean-session] Markdown AST must treat tags inside quoted strings ("...") and code spans/blocks (backtick / triple-backtick) as CONTENT, not document tags. Operator report: agent:*/#id-looking tokens inside quotes or fenced code are being parsed as real document component markers. Same family as #lintfence (fenced agent:* markers break lint + parser). FIX: tagpath/agent-doc markdown tokenizer must mask quoted-string and code-span/code-fence regions before component/tag extraction. CLEAN session (parser path).
 - [ ] [#pushpinaccum] [clean-session] Queue `:pushpin:` annotations accumulate/nest in the wrong place: a head already starting `- :pushpin:` gets another `:pushpin:` prepended -> `:pushpin: - :pushpin: ...` (operator corrected one live 2026-06-13). The queue head-grouping/annotation formatter prepends the pushpin marker without checking for an existing leading pushpin/bullet. FIX: make the queue-head annotation prefix idempotent (single :pushpin:/bullet). CLEAN session (queue formatter path).
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.

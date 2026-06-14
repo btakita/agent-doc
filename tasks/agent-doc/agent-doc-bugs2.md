@@ -103,25 +103,19 @@ Once promoted, the generation-closed reject stops recurring and the `File Cache 
 - monsterrodholders compaction wiped `agent:queue` attrs → **#compactqattr** (answered last cycle).
 
 **Not auto-looping (#qchurn).** The struck `do [#anw0]` was the only drainable head; everything remaining is `[clean-session]` / `[operator-verify]` (deferred per #goqueuestall) or free-text dupes — zero agent-drainable work. Recycle the supervisor, then the clean-session implementation items (#fcc0 TOP, #anw0 p3, #qmisstrike, #compactqattr…) can run in a fresh session on the promoted binary.
-<!-- agent:boundary:1f6b0609 -->
+<!-- agent:boundary:913e9991 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-JB `Run Agent Doc`. This should auto-repair.
+---
+:pushpin: JB `Run Agent Doc`. This should auto-repair.
 ```
 resync: pruned 10 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3426
 ```
-~~~done
-:pushpin:
-```
- agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
-****Error: project controller command `operator_command` failed: operator command `session_restart` rejected for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 354 is closed receipt_id=3429
-```
-~~~
 ---
 :pushpin: In tsift.md, I had a queue:
 ```
@@ -163,7 +157,7 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 - :pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
 - :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
 ---
-JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equityfundingsource.md`
+:pushpin: JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equityfundingsource.md`
 ```
 ~/work/btakita/agent-loop main ⇡20 *5 !41 ?11                                                     agent-loop 23:02:05
                                                                                                                       ❯ /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equityfundingsource.md

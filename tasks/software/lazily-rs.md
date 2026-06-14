@@ -149,7 +149,29 @@ Done. All three context types now expose the eager `Signal` primitive with the s
 - `make check` green (fmt/clippy/build, default + tokio + async + loom + benchmark checks); release build clean.
 
 **CI:** run `27490746680` is **pending** at push time — recorded per the test-bearing workflow; closing out on local `make check` evidence.
-<!-- agent:boundary:6a8048c4 -->
+
+### Re: do [#x7sp] — document Signal in the architecture + protocol — opus-4-8
+
+> **Queue prompt (preset `#spec-test-build-install-commit-push`):**
+>
+> do [#x7sp] — Update documentation for inclusion of Signal into the architecture. Update the protocol as well.
+
+Done. Folded the eager **`Signal`** primitive into the public docs now that it ships on all three context types. Committed `f73511d`, pushed to `origin/main`.
+
+**Architecture docs**
+- **README.md** — Signal added to the Overview primitives (now five), the lazy-vs-eager intro rewritten as "lazy by default, eager on demand" via the `Slot -> Cell -> Signal` progression, a new **Core Concepts → Signal** section (eager semantics, the memo-slot + puller-effect composition, glitch-freedom, type bounds, disposal, and the thread-safe/async variants), four new **API table** rows (`ctx.signal`, `signal.get`, `signal.dispose`, `signal.is_active`), a note under "Why Lazy?" that both modes share one graph, and a Design bullet.
+- **AGENTS.md** (and `CLAUDE.md`, its symlink) — `src/signal.rs` and `tests/signal.rs` (19 tests) added to Architecture; the "Lazy, not eager" Key Design Decision broadened to "lazy by default, eager when asked."
+
+**Protocol**
+- **PROTOCOL.md** — new **Eager Signal Nodes** section plus a consistency invariant. The key wire fact: a Signal is **not a new wire type** — only its backing memo slot is graph state, so it appears as an ordinary slot node. Because it is eagerly materialized at flush time it always emits a concrete `SlotValue` on change (never a bare `Invalidate`, unlike a lazy slot not yet read), the memo guard still suppresses equal recomputes, and the puller effect is local (no `TriggerEffect` op, not serialized). Remote peers need no protocol change to consume signals from an eager producer.
+
+**Scope / verification**
+- Documentation-only cycle. The preset's "update spec + tests" was already satisfied: `SPEC.md`'s Signal section and `tests/signal.rs` landed in the prior `66dcdbc`/`38b18e4` cycles. No source changed, so no new tests are warranted.
+- `cargo build` clean (no recompile — docs-only). Full `make check` not re-run since no code/test/build-logic surface changed this cycle.
+- The lazily-rs submodule pointer bump in the superproject is left to the operator's normal submodule-pointer flow (many submodules are already ahead in the worktree); the lazily-rs repo itself is committed + pushed.
+
+**Note:** preflight flagged the route-owned host supervisor (pid 968752) as running a stale pre-current build (#fcc0/#ipcdrift). If File Cache Conflict / drift dialogs appear, restart it with `agent-doc session restart-supervisor tasks/software/lazily-rs.md --force`.
+<!-- agent:boundary:d27366b2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -163,7 +185,6 @@ Done. All three context types now expose the eager `Signal` primitive with the s
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#x7sp] Update documentation for inclusion of Signal into the architecture. Update the protocol as well.
 - [ ] [#vzk9] Create a briantakita.me blog post + linkedin summary draft explaining the lazily Slot->Cell->Signal composition. Include use cases. Add diagrams to post to linkedin.
 - [ ] [#ny9k] Create a briantakita.me blog + linkedin summary draft explaining the full lazily architecture. Include use cases. Add diagrams to post to linkedin.
 <!-- /agent:backlog -->

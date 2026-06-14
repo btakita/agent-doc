@@ -75,38 +75,53 @@ Captured as **#compactqattr** `[clean-session]`. Real bug, agreed the blast radi
 Working hypothesis (not yet reproduced): the post-compact CRDT refresh (`compact.rs` — "CRDT state refreshed from post-compact content") re-serializes component opening tags from parsed structure and drops the inline attributes. Fix is to preserve the verbatim opening marker for every non-archived component, with coverage asserting a compact leaves an attribute-bearing `agent:queue` marker unchanged. Queued for a clean session (touches the compaction/CRDT path that's currently fragile).
 
 Not fixing this cycle and not auto-looping: the live supervisor (pid 870839) is still on the stale pre-fix binary (`supervisor_binary_stale` warning persists) — recycle it (`agent-doc admin recycle --all-projects` or `session restart-supervisor <FILE> --force`) to promote the #anw0 build before the next implementation pass.
-<!-- agent:boundary:4c5951c8 -->
+
+### Re: stale-supervisor restart failed + already-captured churn reports — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin:
+> ```
+>  agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+> ****Error: project controller command `operator_command` failed: operator command `session_restart` rejected for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 354 is closed receipt_id=3429
+> ```
+
+
+**No new bugs — all four queue prompts map to already-captured backlog/review items; the one new signal is your failed `restart-supervisor`, which is itself an open bug.**
+
+**`session restart-supervisor … --force` → "generation 354 is closed" (receipt 3429).** This is exactly **#jbrestale / #anw0 part 3**: the PCP `operator_command` path hard-rejects a command issued against a closed generation instead of redirecting it to retry against the current generation N+1. The stale supervisor (pid 870839, 42-min uptime — predates the installed 0.34.0 binary) is churning generations, so the agent/operator-initiated restart can't promote the new binary — the very failure those items are filed to fix (`project_controller/rpc.rs`, `[clean-session]`).
+
+**Working promotion path (operator-drive).** Recycle the stale supervisor out-of-band so it picks up the freshly-installed binary (which already carries #anw0 parts 1+2 drain-and-supersede reexec + the #fcc0 write path):
+- `agent-doc admin recycle --all-projects` (controller-mediated, not generation-gated), **or**
+- restart the IDE / session.
+
+Once promoted, the generation-closed reject stops recurring and the `File Cache Conflict` / IPC-drift dialogs clear.
+
+**The other three prompts are dupes of captured items — no new captures:**
+- tsift.md "struck the next open item after I deleted the struck ones" → **#qmisstrike** (finalize strike heuristic over-advances onto an unanswered head; `[clean-session]`, plan-finalize-misstrike-next-head.md).
+- `do [#4myd] / [#fcc0] / [#rtwbcast]`, `#recyclerestart` stall, markdown-AST-in-quotes/code → **#4myd / #fcc0 / #rtwbcast** (backlog), **#recyclerestart**, **#0kjc/#mdastquote** — all already queued.
+- monsterrodholders compaction wiped `agent:queue` attrs → **#compactqattr** (answered last cycle).
+
+**Not auto-looping (#qchurn).** The struck `do [#anw0]` was the only drainable head; everything remaining is `[clean-session]` / `[operator-verify]` (deferred per #goqueuestall) or free-text dupes — zero agent-drainable work. Recycle the supervisor, then the clean-session implementation items (#fcc0 TOP, #anw0 p3, #qmisstrike, #compactqattr…) can run in a fresh session on the promoted binary.
+<!-- agent:boundary:1f6b0609 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:round_pushpin: do [#anw0]~~
-~~~done
-:pushpin: auto-recycle stalled
-```
-❯ [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve────────────────────────────────────────────────────────────────────────────────────────────────────
-  Opus 4.8 ctx:21% ~[start] harness resolved: binary=claude source=frontmatter env=default
-  ⏵⏵ bypass permissions on (shift+tab to cycle)                                           Registered session b26b9957 → pane %25
-        Error: controller launch already in progress: /home/brian/work/btakita/agent-loop/.agent-doc/locks/controller-launch.lock
-
-         Caused by:
-                       Resource temporarily unavailable (os error 11)
-```
-~~~
 JB `Run Agent Doc`. This should auto-repair.
 ```
 resync: pruned 10 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3426
 ```
----
+~~~done
 :pushpin:
 ```
  agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 ****Error: project controller command `operator_command` failed: operator command `session_restart` rejected for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 354 is closed receipt_id=3429
 ```
----
+~~~
 ---
 :pushpin: In tsift.md, I had a queue:
 ```

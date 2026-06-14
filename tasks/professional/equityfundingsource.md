@@ -116,7 +116,37 @@ GitHub Actions:
 No new actionable follow-up item was created by this cycle; the next queued item already covers the optional #2 + #5 polish.
 
 Note: preflight also warned the installed `agent-doc` binary is stale relative to source; I did not rebuild it because this cycle was scoped to EFS pipeline work.
-<!-- agent:boundary:1590f0ae -->
+
+### Re: Deal Pipeline #2 + #5 polish — gpt-5
+
+> **Queue prompt:**
+>
+> Add #2 + #5 polish for the Deal Pipeline horizontal width improvements
+
+
+Implemented the Deal Pipeline horizontal-width polish requested for queue item #2 by combining the #2 and #5 board improvements:
+
+- Added collapsible phase lanes in `lib/ui--browser--efs/portal/admin/pipeline.tsx`. Empty lanes now auto-collapse into narrow count rails, and each expanded lane has a collapse control while each rail has an expand control. The collapsed rails still accept drops.
+- Added a board-only Density segmented control with Roomy/Compact modes. Compact mode is persisted with `?density=compact`, narrows lane widths/gaps, tightens card padding, and renders one-line compact card summaries so more lanes/cards fit horizontally.
+- Kept the card action menu/details behavior available in compact mode, including the modal/detail flows and existing publish/close/delete menu affordances.
+- Updated `tests/admin-pipeline.test.ts` to pin the new lane-collapse and card-density UI wiring.
+- Updated `prds/investor-pipeline-admin.md` and `prds/equity-funding-source-lending-portal-prd.md` to document collapsible rails, empty-lane auto-collapse, compact density, and the `?density=compact` URL state.
+
+Verification:
+
+- `git diff --check` passed.
+- `bun test tests/admin-pipeline.test.ts tests/application-status-ui.test.ts tests/portal-table-dialog.test.ts` passed: 73 tests.
+- `bun run check` passed: 674 tests plus app build and worker build.
+- `make check` passed: delegates to the same full Bun test/build/worker check.
+- `gh run list --workflow CI --limit 1` reports no workflow named `CI` in either `btakita/equityfundingsource-dev` or the parent `btakita/agent-loop` repo. `gh workflow list` shows no workflows in the EFS repo and only `Agent Doc` in the parent repo.
+
+Commits pushed:
+
+- EFS submodule: `da452b8438b273f8906ce53a90e42894be7fb1ce` (`admin pipeline: add compact collapsible board controls`) to `btakita/equityfundingsource-dev:main`.
+- Parent pointer: `c8a886e1e` (`efs: update deal pipeline board polish`) to `btakita/agent-loop:main`.
+
+Commit message used for the code change: `admin pipeline: add compact collapsible board controls`.
+<!-- agent:boundary:636346a3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,7 +155,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~Implement the recommended path for the Deal Pipeline horizontal width improvements.~~
-- Add #2 + #5 polish for the Deal Pipeline horizontal width improvements
+- ~~Add #2 + #5 polish for the Deal Pipeline horizontal width improvements~~
 - deploy
 <!-- /agent:queue -->
 

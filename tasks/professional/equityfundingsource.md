@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -69,7 +69,7 @@ Replace the horizontal columns with a vertical left rail of stages + counts; cli
 **Recommended path:** ship **#1 (phase grouping) + #4 (default "active" filter) + #3 (List toggle)** together — phase grouping fixes the structural width, the active filter trims the working set, and the List view is the escape hatch for power triage. #2 and #5 are low-cost polish to layer on after. This stays inside the existing #67v2 kanban work rather than a rewrite.
 
 This is a discussion, so I haven't changed code. If you want, say the word and I'll queue the chosen combination as an implementation item against #67v2.
-<!-- agent:boundary:d2dd0245 -->
+<!-- agent:boundary:99f96512 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,6 +77,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Implement the recommended path for the Deal Pipeline horizontal width improvements.
+- Add #2 + #5 polish for the Deal Pipeline horizontal width improvements
 <!-- /agent:queue -->
 
 ## Backlog

@@ -165,7 +165,27 @@ Done all three. "The issue" is the supervisor hot-reload `controller launch alre
 **3. Added it to the queue.** `agent-doc queue sync` pulled the new `queue`-attr backlog id in — `- do [#suprehotreload]` is now a queue head (19 backlog ids → 27 queue prompts, append mode).
 
 No Rust source changed this turn (runbook + backlog/queue only), so the instruction-surface verification is `audit-docs`, not the full Rust suite; the SimWorld test itself is the queued `#suprehotreload` work. Note the route-owned host supervisor (pid 2715614) is still on a **stale** build, so this closeout went `--force-disk` to sidestep its IPC drift — restart it (`agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`) to pick up the latest fixes.
-<!-- agent:boundary:3b1b3516 -->
+
+### Re: #qchurn churn — paused the flood (receipt 43) — opus-4-8
+
+This cycle is `#qchurn` reproducing yet again, so this time I broke the loop instead of emitting another no-op response that would just re-trigger.
+
+**What happened:** The only diff was go-mode re-injecting `:pushpin: [#qchurn]` into the queue (`queue_trigger=auto`, `op_affectedness.turn_affected=false`, `user_intent_prompt_changes` empty, "no changes detected between snapshot and document"). All 16 backlog heads are `[clean-session]`/`[operator-verify]` and preflight deferred every one as agent-undrainable (`#goqueuestall`). Zero drainable work — exactly the no-op churn `#qchurn` describes.
+
+**Action taken:** Paused the queue via the controller-mediated, IPC-safe path — `agent-doc admin queue pause … --observed-generation 373` → **`queue_paused accepted receipt_id=43`**. This is the same remedy `#qchurn` itself records (the live halt at receipt 27/gen 338) and stops the supervisor idle-watch from re-injecting `queue_trigger=auto` each idle boundary. I did **not** edit queue state in the file (that races the live IPC supervisor) and I am **not** auto-looping.
+
+**Still blocked on the stale supervisor.** The route-owned host supervisor (pid 2715614) predates the installed binary, so it keeps producing File Cache Conflict / IPC-drift dialogs (`#fcc0`/`#ipcdrift`) and I will not `make install` against it mid-session (`#no-mid-session-install`). Every remaining clean-session head — including the `#qchurn` fix itself (go-mode should treat an all-undrainable queue as not-drainable and stop re-dispatching, per `tasks/agent-doc/plan-go-queue-stall.md`) — edits `src/agent-doc` and needs a rebuild+install, which can only run from a fresh session.
+
+**To drain the backlog:** restart onto a fresh binary, then resume + drain from a clean session:
+
+```
+cd src/agent-doc && make install
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+agent-doc admin queue resume tasks/agent-doc/agent-doc-bugs2.md --observed-generation <current>
+```
+
+then `/agent-doc tasks/agent-doc/agent-doc-bugs2.md`. (The restart-onto-fresh-binary path resumes draining on its own; the explicit `resume` is only needed if you do not restart.)
+<!-- agent:boundary:85edcb5b -->
 <!-- /agent:exchange -->
 
 ## Queue

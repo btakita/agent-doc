@@ -140,33 +140,36 @@ After it comes up on the current binary, a clean session can actually drain the 
 **Your edits.** Fencing the resolved churn-stop block in `~~~done … ~~~` is the right manual mitigation for `#0kjc`/`#mdastquote` — it stops that pasted console output (with its `:pushpin:`/`[route]` tokens) from being re-parsed and re-injected as queue heads. Un-striking `#qpresetstrike` keeps it as an open work item; it stays a clean-session fix (preset-token heads are unstrikeable by any agent path), so I'm not touching it under the live IPC supervisor.
 
 No agent-drainable head this cycle; not auto-looping (churn-stopped, live-IPC supervisor); not doing queue/review surgery while the stale supervisor is active (it races + corrupts). Recycle first, then re-run on a clean session.
-<!-- agent:boundary:b3b91193 -->
+<!-- agent:boundary:0f6c05ed -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-~~~done
-:pushpin: JB `Run Agent Doc`. This should automatically restart the supervisor.
-```
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain receipt_id=3420
-```
-~~~
+---
 JB `Run Agent Doc`. This should auto-repair.
 ```
 resync: pruned 10 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3426
 ```
-~~~done
+---
+JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equityfundingsource.md`
+```
+~/work/btakita/agent-loop main ⇡20 *5 !41 ?11                                                     agent-loop 23:02:05
+                                                                                                                      ❯ /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equityfundingsource.md
+[start] harness resolved: binary=claude source=frontmatter env=default
+                                                                      Registered session 62fe1f41 → pane %33
+                                                                                                            Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
+```
+---
 :pushpin: - [#qchurn]
-- :pushpin: [#qpresetstrike]
+- ~~:pushpin: [#qpresetstrike]~~
 - :pushpin: [#clearexchstale]
 - :pushpin: [#qdedup]
 - :pushpin: :round_pushpin: do [#c2b6]
 - :pushpin: :round_pushpin: do [#aazp]
-~~~
+---
 :pushpin: In tsift.md, I had a queue:
 ```
 &gt;!-- agent:queue preset="#spec-test-build-install-commit-push" go --&lt;

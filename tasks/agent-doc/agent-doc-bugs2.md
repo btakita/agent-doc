@@ -92,14 +92,56 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 ```
 
 then re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md`.
-<!-- agent:boundary:73404d1b -->
+
+### Re: supervisor hot-reload — "controller launch already in progress (os error 11)" — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: An error occurred during supervisor hot-reloading.
+> ```
+> ❯ [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve────────────────────────────────────────────────────────────────────────────────────────────────────
+>   Opus 4.8 ctx:11% ~[start] harness resolved: binary=claude source=frontmatter env=default
+>   ⏵⏵ bypass permissions on (shift+tab to cycle)                                           Registered session b26b9957 → pane %25
+>         Error: controller launch already in progress: /home/brian/work/btakita/agent-loop/.agent-doc/locks/controller-launch.lock
+>
+>          Caused by:
+>                        Resource temporarily unavailable (os error 11)
+> ```
+
+
+Root-caused and fixed. The error fired during a `next_queue_item` supervisor self-recycle: at the queue-item boundary the supervisor `execve`'d onto the freshly-installed binary (preserving the live agent child), and the re-run `start` then called `ensure_controller_running` → `connect_or_launch` → `LaunchLock::acquire`.
+
+`LaunchLock::acquire` was a **non-blocking** `try_lock_exclusive` on the *shared per-project-root* `.agent-doc/locks/controller-launch.lock`. With several concurrent sessions in this superproject (equityfundingsource, tsift, lazily-rs, …), another launcher was already mid-launch holding that lock, so the just-`execve`'d supervisor failed immediately with `EWOULDBLOCK` (os error 11) and the whole `start` aborted to the pane. Launch-lock contention is a *benign* race ("someone else is launching right now"), not a fatal condition.
+
+**Fix** (`agent-doc-orchestration`):
+- `project_controller.rs` — added `LaunchLock::acquire_blocking(project_root, timeout)` (and refactored `acquire` to share `acquire_inner`). It polls `try_lock_exclusive` until the holder releases or the bounded `LAUNCH_LOCK_WAIT` (8s, sized above the 3s `CONNECT_WAIT` launch+wait window) elapses. Only a genuinely wedged holder returns the error.
+- `project_controller/rpc.rs` — `connect_or_launch` now uses `acquire_blocking`. When it finally gets the lock, its existing double-checked `status` + `connect` adopts the controller the other launcher just published. Even on timeout it makes one last attempt to adopt a live matching controller before erroring.
+
+Net effect: a concurrent/self-recycle launch waits out the in-flight launcher and connects to its controller instead of crashing the start.
+
+**Verification:** added two unit tests (`blocking_launch_lock_waits_for_holder_then_acquires`, `blocking_launch_lock_times_out_when_holder_never_releases`); `make check` green (exit 0, no FAILED); `cargo build --release` + `cargo install --path .` done (`~/.cargo/bin/agent-doc` and `.bin` → release both refreshed). Latest CI run is green; this change isn't pushed yet.
+
+Note: the supervisor currently serving this document (pid 2715614) predates the new binary, so the live proof — a real recycle race no longer surfacing the os-error-11 on the pane — is operator-drive (queued as `[operator-verify] #suprecyclelock`). Restart the supervisor to pick up the fix.
+<!-- agent:boundary:0ad1ef55 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: Update agent-doc to fully run + install a `[clean-session]` either in a subagent or in a restarted session or in a `/clear` session.~~
-- :pushpin: [#qchurn]
+---
+:pushpin: An error occurred during supervisor hot-reloading.
+```
+❯ [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 4.8 ctx:11% ~[start] harness resolved: binary=claude source=frontmatter env=default
+  ⏵⏵ bypass permissions on (shift+tab to cycle)                                           Registered session b26b9957 → pane %25
+        Error: controller launch already in progress: /home/brian/work/btakita/agent-loop/.agent-doc/locks/controller-launch.lock
+
+         Caused by:
+                       Resource temporarily unavailable (os error 11)
+```
+---
+- ~~:pushpin: [#qchurn]~~
 - :pushpin: [#anw0verify]
 - :pushpin: [#jbrestale]
 - :pushpin: [#mphaseloop]
@@ -195,6 +237,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.
 - [ ] [#ar27] #upgradedeps [clean-session] Upgrade agent-doc dependencies (cargo update + bump direct deps in src/agent-doc Cargo.toml where safe), rebuild + make install + lib-install, run make check, confirm CI green. CLEAN session: a dependency bump forces a rebuild/reinstall that re-stales THIS live route-owned supervisor mid-session (#no-mid-session-install / #fcc0 churn), so it cannot run from the session it would destabilize. Scope assumed = the agent-doc submodule (this doc's project); confirm target if a different repo was intended.
 - [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#dupcontent] [clean-session] Duplicate-content / malformed-attribute document corruption when finalize adopts a stale-supervisor `content_ours` snapshot. LIVE 2026-06-14 (monsterrodholders.md, stale route-owned supervisor pid1328300 started 02:15:48 < binary mtime 02:28:10, session-check `#fcc0`): `finalize --stream` hit `mid-turn cycle rotation ... #adoc-compact-during-turn-response-loss` then `live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar content_ours_len=40827 > candidate 39216` then `snapshot from content_ours`. The adopted buffer was CORRUPT and written to disk: 273 lines vs 181 in clean HEAD, TWO `agent:queue` blocks (held one at ~88 PLUS a stale re-armed `preset="#spec-test-commit-push" priority go` block at ~181) and a truncated marker `<!-- agent:queue tasks=" -->`. The lint-gate caught `empty-attr-value` only AFTER the corrupt content already landed on disk (interrupt, no commit; HEAD stayed clean). Repair: `git checkout HEAD -- <file>` + `reset --from-current --preserve-session`. ROOT CAUSE (hypothesis): `content_ours`/`ack_content_sidecar` buffer is adopted verbatim as the snapshot base without structural validation, so a bad prior CRDT merge (duplicate singleton component blocks + attribute split across a merge boundary) is taken as truth and written before the lint-gate runs; the known-stale supervisor is still trusted as an IPC content source. FIX: (1) structurally validate before adopting any content_ours snapshot — reject/repair >1 open marker for a singleton component (exchange/status/queue/backlog/review/icebox/done) or a malformed/unterminated attribute, falling back to candidate/HEAD; (2) fail closed when the serving supervisor is already classified `supervisor_binary_stale` (#fcc0) — do not ingest its buffer; (3) run the structural/lint check on the candidate BEFORE the disk write, not after; (4) de-dup singleton blocks on parse instead of concatenating. CLEAN session (snapshot-adoption / converge write path). Related #fcc0/#compactqattr/#adoc-compact-during-turn-response-loss. Plan: tasks/agent-doc/plan-content-ours-duplicate-corruption.md

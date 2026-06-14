@@ -166,7 +166,7 @@ Done (EFS `dcfca4e`). Phase B of the admin loan pipeline (#67v2) now records the
 **Per `#spec-test-commit-push`:** updated the PRD Phase B section (`prds/67v2-admin-loan-pipeline-kanban.md`) with the implementation block; added 5 tests to `tests/admin-pipeline.test.ts` (outbox row shape, no-loan-number skip, non-fatal failure, status-PUT wiring order, replay-gated guard). `bun run check` green (662 tests), worker build clean. Committed + pushed to `main` (submodule pointer bumped to `dcfca4e`).
 
 Not deployed — this preset is commit+push only. Remaining queue: `do [#67v2d]` (admin dashboard pipeline summary) then `#advance-review`.
-<!-- agent:boundary:6de402a5 -->
+<!-- agent:boundary:b56b1ada -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -175,6 +175,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - #advance-review
+- do [#67v2d]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -212,6 +212,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         "persist-closeout.md",
         include_str!("../runbooks/persist-closeout.md"),
     ),
+    (
+        "dogfood-supervisor-refresh.md",
+        include_str!("../runbooks/dogfood-supervisor-refresh.md"),
+    ),
 ];
 
 /// Current binary version (from Cargo.toml).

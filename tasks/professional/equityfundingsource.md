@@ -59,7 +59,29 @@ Done. The lane/column was already relabeled (`repo.ts` → `'Accepted applicatio
 **Verification:** full suite green (680 pass / 0 fail), `bun run build` clean. Superproject pointer already bumped to `3fa1537` by the session supervisor sweep.
 
 **Not yet live:** preset is `#spec-test-commit-push` (no deploy), so this is on `main` only — the queued `deploy` item at the tail will ship it to `workers.dev`.
-<!-- agent:boundary:f9ab6bed -->
+
+### Re: Accepted-application dialog — Uploaded Documents open a preview dialog — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Accepted application dialog component in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline and https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f Uploaded Documents should open preview dialog when clicked.
+
+
+> **Queue prompt:**
+>
+> :pushpin: Accepted application dialog component in `/portal-admin/pipeline` and `/portal-admin/loans/45ddae53-…` — Uploaded Documents should open preview dialog when clicked.
+
+Done. The accepted-application dialog already existed (`PipelineCardModal` → embeds `AdminLoanDetail`, the same component the standalone `/portal-admin/loans/:id` page renders), so the missing piece was making its **Uploaded Documents** grid clickable. Both surfaces share one component, so one fix covers both.
+
+**Fix (`equityfundingsource-dev` `ee5bdee`, committed + pushed to `main`):**
+- `loan_detail.tsx` — wired the existing shared in-browser viewer (`use_document_viewer_`, `#doc-viewer`) into `AdminLoanDetail`. Each `DocCard`'s preview + meta is now a `<button>` that opens the preview modal (image/PDF/text inline, unsupported → download), fetching the file via `/api/dropbox/download?path=…` as a blob. One `DocumentViewer` instance is hoisted to the grid parent. The Dropbox-path copy footer stays separate so copying doesn't trigger a preview.
+- `tests/document-viewer.test.ts` — new assertion that the loan-detail surface offers click-to-view.
+- `docs/current_progress.md` — noted the behavior under Loan Application Management (`#loan-docs-viewer`).
+
+**Verification:** full suite green (**681 pass / 0 fail**, +1 new test), `bun run build` clean. The `tsc --noEmit` errors are pre-existing repo-wide baseline noise (`dist/`, `bin/`, unrelated `app/` files) — none reference the changed files.
+
+**Not yet live:** preset is `#spec-test-commit-push` (no deploy), so this is on `main` only. The queued `:pushpin: deploy` item at the tail will ship it to `workers.dev`.
+<!-- agent:boundary:b7b87e53 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,7 +90,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: Rename "Applications received" tag to "Accepted applications".~~
-- :pushpin: Accepted application dialog component in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline and https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f Uploaded Documents should open preview dialog when clicked.
+- ~~:pushpin: Accepted application dialog component in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline and https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f Uploaded Documents should open preview dialog when clicked.~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

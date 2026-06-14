@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Session History
@@ -171,7 +171,7 @@ Commits and push:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:a5a50e3f -->
+<!-- agent:boundary:409428f9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -182,6 +182,7 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Please review /home/brian/work/btakita/agent-loop/mail/drafts/linkedin/2026-06-15-slot-cell-signal.md. Is it correctly formatted for the post and the first comment?
 <!-- /agent:queue -->
 
 ## Backlog

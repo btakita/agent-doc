@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -285,14 +285,15 @@ Commits / pushes (no deploy — preset was commit + push):
 - Superproject pointer: `dd9288e07` (`efs: lender pipeline collapsible/compact board controls`) → `btakita/agent-loop:main`.
 
 CI: no `CI` workflow exists in either repo; the superproject's only workflow (`Agent Doc`) stays blocked at runner-start by the account billing/spending-limit issue — an external CI-start blocker, not a code failure. (Exchange is large at ~230 lines but the queue is active, so I'm continuing the drain rather than pausing to compact.)
-<!-- agent:boundary:05f0593f -->
+<!-- agent:boundary:17f66153 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,72 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260614-165245.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260614-190908.md`*
 
 Compacted content:
-❯ - Archived 3 response topic(s): deploy; Fix the formatting of the address in this pipeline card; do [#aww2]
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Rename "Applications received" tag to "Accepted applications" — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Rename "Applications received" tag to "Accepted applications".
-
-
-> **Queue prompt:**
->
-> Rename "Applications received" tag to "Accepted applications".
-
-Done. The lane/column was already relabeled (`repo.ts` → `'Accepted applications'`, commit `895ace3`), but the **per-card stage pill** still rendered the raw TMO status `'Application Received'` (uppercased to `APPLICATION RECEIVED`) — that's the "tag" still showing the old name.
-
-**Fix (`equityfundingsource-dev` `3fa1537`, committed + pushed):**
-- `pipeline.tsx` — added `STAGE_DISPLAY_LABELS` (`'Application Received' → 'Accepted applications'`) + `stage_display_label_()`, applied **inside** `PipelineStageChip` so both the board card and table pills show the relabeled stage. The underlying TMO status string is unchanged (consistent with the existing `repo.ts` comment), and the existing test asserting the call site `<PipelineStageChip label={card.status} />` still holds.
-- `tests/admin-pipeline.test.ts` — coverage for the override map, helper, and chip usage.
-
-**Verification:** full suite green (680 pass / 0 fail), `bun run build` clean. Superproject pointer already bumped to `3fa1537` by the session supervisor sweep.
-
-**Not yet live:** preset is `#spec-test-commit-push` (no deploy), so this is on `main` only — the queued `deploy` item at the tail will ship it to `workers.dev`.
-
-### Re: Accepted-application dialog — Uploaded Documents open a preview dialog — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Accepted application dialog component in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline and https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f Uploaded Documents should open preview dialog when clicked.
-
-
-> **Queue prompt:**
->
-> :pushpin: Accepted application dialog component in `/portal-admin/pipeline` and `/portal-admin/loans/45ddae53-…` — Uploaded Documents should open preview dialog when clicked.
-
-Done. The accepted-application dialog already existed (`PipelineCardModal` → embeds `AdminLoanDetail`, the same component the standalone `/portal-admin/loans/:id` page renders), so the missing piece was making its **Uploaded Documents** grid clickable. Both surfaces share one component, so one fix covers both.
-
-**Fix (`equityfundingsource-dev` `ee5bdee`, committed + pushed to `main`):**
-- `loan_detail.tsx` — wired the existing shared in-browser viewer (`use_document_viewer_`, `#doc-viewer`) into `AdminLoanDetail`. Each `DocCard`'s preview + meta is now a `<button>` that opens the preview modal (image/PDF/text inline, unsupported → download), fetching the file via `/api/dropbox/download?path=…` as a blob. One `DocumentViewer` instance is hoisted to the grid parent. The Dropbox-path copy footer stays separate so copying doesn't trigger a preview.
-- `tests/document-viewer.test.ts` — new assertion that the loan-detail surface offers click-to-view.
-- `docs/current_progress.md` — noted the behavior under Loan Application Management (`#loan-docs-viewer`).
-
-**Verification:** full suite green (**681 pass / 0 fail**, +1 new test), `bun run build` clean. The `tsc --noEmit` errors are pre-existing repo-wide baseline noise (`dist/`, `bin/`, unrelated `app/` files) — none reference the changed files.
-
-**Not yet live:** preset is `#spec-test-commit-push` (no deploy), so this is on `main` only. The queued `:pushpin: deploy` item at the tail will ship it to `workers.dev`.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-Deployed to `workers.dev`. The two committed-but-unshipped fixes are now live:
-- `3fa1537` — pipeline card stage pill shows `'Accepted applications'`
-- `ee5bdee` — admin loan-detail Uploaded Documents grid opens the in-browser preview viewer (`#loan-docs-viewer`)
-
-**Deploy (`bun run deploy:worker`):**
-- `cf:d1:migrate:remote` — `No migrations to apply` (0025/0026 already applied per `#next-steps`).
-- `wrangler deploy` — uploaded 1 new asset (`index.browser-L5A5LJTW.js`, 43 already cached), 908.81 KiB total / 211 KiB gzip, 22 ms worker startup.
-- Live: `https://equityfundingsource.brian-takita.workers.dev` — **Version ID `85dce809-70ca-485a-9548-c05cebda6cd4`**, scheduled trigger `0 * * * *` intact, all bindings (D1, R2 x3, Durable Objects, Access env vars) present.
-
-Queue drained. The parked questions in the exchange comment (borrower-portal message admin + email round-trip) are already tracked as review `#xcvg`.
-<!-- agent:boundary:88e0dbc9 -->
+- Archived 3 response topic(s): Rename "Applications received" tag to "Accepted applications"; Accepted-application dialog; deploy
+- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db...
+<!-- agent:boundary:9dd9eabf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -106,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Add a Published deal tag and a Published deals column in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline
 <!-- /agent:queue -->
 
 ## Backlog

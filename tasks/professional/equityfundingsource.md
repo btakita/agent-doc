@@ -151,14 +151,38 @@ This ships both go-mode features to production:
 - **#deal-dialog-full** — the dashboard Available-deal dialog now opens the full Deal page content (loan details, documents, deal summary, commit funding, sign documents) instead of a stripped summary.
 
 Queue fully drained. To eyeball the live behavior you'd want a logged-in investor session — without a lender account you'll see the gate on `/portal-investor/available-deals` and the prompt on the dashboard; with one, the dashboard Available-deal card opens the full deal modal.
-<!-- agent:boundary:fad5746f -->
+
+### Re: Browse deals first, apply on selection — opus-4-8
+
+> **Queue prompt (#spec-test-commit-push):**
+>
+> Let's show the deals even if the funder has not completed their application or their application has not been approved. If they select an Available Deal they are interested in, there should be a 2nd part of the submission for them to fill out their application. Please keep the notice that their application is not complete or is awaiting review the EFS staff. deploy
+
+Done — shipped, tested, committed, pushed, and deployed. This relaxes the #lender-gate so deals are **browsable without** a completed/approved lender application; the application becomes a **second step** surfaced once the investor picks a deal, and a persistent notice keeps explaining the incomplete / awaiting-review state.
+
+**What changed** (frontend-only — `/api/investor/deals` already returns both the deals and the lender payload, so no backend change was needed):
+
+- **`lender_account.tsx`** — added `LenderApplicationNotice` (the persistent banner) + `lender_application_status_message_()` covering the not-started / pending / denied states. Re-framed `LenderAccountGate` as "Complete your lender account application" (the second part), now described as the funding prerequisite rather than a view prerequisite.
+- **Available deals page** (`available_deals.tsx`) — removed the early-return that hid the whole list behind the gate. Deals always render; an amber notice sits above them while the application is incomplete. On the **featured (selected) deal**, the right column shows the lender application form in place of the commitment calculator until the lender account is active.
+- **Investor dashboard** (`dashboard.tsx`) — the Available-deals preview no longer swaps deal cards for a prompt; it shows the cards plus the application notice. (Removed the now-dead `LenderAccountPrompt`.) Clicking a card opens the deal dialog, which hosts the application form.
+- **Deal detail** (`deal_detail.tsx`) — the Deal Summary now always shows; when there's no lender account the dead-end "Go to Available deals" card is replaced by the inline notice + application form (`on_change` updates the live profile). This is what powers the dashboard dialog's second step.
+
+A registered lender account is still the prerequisite to **commit funding** — only the *viewing* gate was removed.
+
+**Verification:** `bun run check` green — **691 tests pass, 0 fail**, browser + worker builds clean. Rewrote `tests/lender-account-gate.test.ts` to assert the new deal-first flow (deals shown, notice present, gate surfaced on selection, old prompt gone) and added a `lender_application_status_message_` unit test. Updated `docs/current_progress.md`. (equityfundingsource-dev has no GitHub Actions CI workflow, so local check is the verification of record.)
+
+**Shipped:**
+- `equityfundingsource-dev` commit `9a54501`, pushed to `origin/main`.
+- Superproject pointer bump `a7cba3ee3`.
+- Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `16d23ecb`).
+<!-- agent:boundary:c544a389 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

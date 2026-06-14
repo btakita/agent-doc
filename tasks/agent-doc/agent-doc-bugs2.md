@@ -345,21 +345,25 @@ I made it mirror the `#ctlrecycle` auto-recycle resolution exactly, so the two s
 Added the matching `agent_doc_supervisor_auto_install` frontmatter + project-config knobs; runbook and plan updated to default-ON; precedence unit test updated.
 
 Still operator-drive for the live proof + release (bump/push/install/restart) — tracked under `#supautoinstall`. And the existing live supervisor (pid 575771) only picks this up after it's built+installed+restarted (or, once released, it self-installs on the next dogfood edit since that's now the default).
-<!-- agent:boundary:93453732 -->
+
+### Re: install and auto-recycle this supervisor — opus-4-8
+
+Installed the new binary + cdylib and now recycling this supervisor.
+
+- `cargo build --release` — green (2m32s).
+- `cargo install --path . --force` — replaced `~/.cargo/bin/agent-doc` (0.34.0 with the `#supautoinstall` code, submodule `56075947`).
+- `agent-doc lib-install` — refreshed `~/.cargo/bin/libagent_doc-0.34.0.so` for JB hot-reload.
+
+This is the one-time manual bootstrap: the running supervisor (pid 575771) predates `#supautoinstall`, so it couldn't self-install — going forward a dogfood supervisor on this build self-installs after a source-editing finalize (default ON).
+
+This response was written with `--force-disk` to avoid new-client/old-supervisor IPC drift, since the installed binary is now newer than pid 575771. Next I run `agent-doc session restart-supervisor --force`, which recycles this session onto the new binary. Expect the pane to restart; preflight should no longer warn `supervisor_binary_stale` afterward.
+<!-- agent:boundary:ef318d45 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-~~~done
-:pushpin: agent-doc lazily.rs stalled
-```
-  One standing note (not blocking): preflight/session-check keep flagging that the host supervisor (pid 2482535) is
-  running a stale build and is the source of the recurring File Cache Conflict / IPC-drift dialogs. When convenient,
-  restart it with agent-doc session restart-supervisor tasks/software/lazily-rs.md --force to pick up the latest fixes.
-```
-~~~
-- ~~:pushpin: [#anw0verify]~~
+- [#r18j]
 - :pushpin: [#jbrestale]
 - :pushpin: [#mphaseloop]
 - :round_pushpin: do [#4myd]

@@ -57,7 +57,24 @@ Added `#lipostslotcell` to the backlog: post the "Slot→Cell→Signal" LinkedIn
 
 
 Added `#lipostlazilyarch` to the backlog: post the "Lazily architecture" LinkedIn post on **Tue 2026-06-16**. Tagged `[operator-drive]`, grouped with `#lipostslotcell` (Mon) — draft/publish via the `/linkedin` skill (corky) when you're ready.
-<!-- agent:boundary:5bb3536c -->
+
+### Re: do [#sstz] — drafted the Slot→Cell→Signal post — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#sstz]
+
+
+Drafted the **Slot→Cell→Signal** LinkedIn post → `mail/drafts/linkedin/2026-06-15-slot-cell-signal.md`. It frames the three primitives as a lazy→eager progression (Slot = lazy/cached, Cell = PartialEq-guarded mutable, Signal = eager Slot+puller-effect), lands on "laziness is the default, eagerness is opt-in per value," and pushes the repo link + the 8ns cached-read number to the first comment (LinkedIn suppresses reach on posts with outbound URLs).
+
+I drafted but did **not** publish — posting to public social stays operator-gated (no auto-send). Gated `#sstz` as awaiting your publish. To ship it Monday:
+
+- Review now: `mail/drafts/linkedin/2026-06-15-slot-cell-signal.md`
+- Publish: `corky linkedin post mail/drafts/linkedin/2026-06-15-slot-cell-signal.md`
+- Or schedule: `corky schedule add --platform linkedin --time "2026-06-15T09:00" mail/drafts/linkedin/2026-06-15-slot-cell-signal.md`
+
+Next up in the queue: `do [#kabc]` (the Lazily architecture post for Tuesday).
+<!-- agent:boundary:a6c6a5b9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,20 +84,21 @@ Added `#lipostlazilyarch` to the backlog: post the "Lazily architecture" LinkedI
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Please add a backlog for me to post the Slot->Cell->Signal linkedin post tomorrow/monday.~~
-- ~~Please add a backlog for me to post the Lazily architecture linkedin post tuesday. ~~
-- do [#sstz]
+- ~~Please add a backlog for me to post the Lazily architecture linkedin post tuesday.~~
+- ~~do [#sstz]~~
+- do [#kabc]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#kabc] #lipostlazilyarch=[operator-drive] Post the "Lazily architecture" LinkedIn post on Tue 2026-06-16. Draft/publish via the /linkedin skill (corky).
-- [ ] [#sstz] #lipostslotcell=[operator-drive] Post the "Slot→Cell→Signal" LinkedIn post on Mon 2026-06-15 (tomorrow). Draft/publish via the /linkedin skill (corky).
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#sstz] #lipostslotcell=[operator-drive] DRAFT READY: mail/drafts/linkedin/2026-06-15-slot-cell-signal.md (Slot->Cell->Signal). Operator: review + publish Mon 2026-06-15 via `corky linkedin post <file>` or `corky schedule add --platform linkedin`.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet networked backend through the LIVE #yxjw signaling Worker (two real hosts / NAT, not localhost). The localhost two-socket round trip (tests/str0m_net.rs) already proves the real UDP/DTLS/SCTP/timer path in-process; this remaining slice needs two live endpoints + the deployed Worker so it cannot be agent-run headless. Wire SignalingClient offer/answer/ice to Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} and confirm a Snapshot crosses between hosts.
 - [/] [#12b1] #lzpub011=[operator-drive] Finish lazily-rs v0.11.0 publish — crates.io upload + GitHub Release are BLOCKED on a revoked crates.io token (403 auth failed on both the env CARGO_REGISTRY_TOKEN and passage btak/CARGO_REGISTRY_TOKEN; both are the same expired cio-prefixed token). Operator: rotate the crates.io token (browser/passkey 2FA), store at passage btak/CARGO_REGISTRY_TOKEN, then from src/lazily-rs run: CARGO_REGISTRY_TOKEN=$(passage btak/CARGO_REGISTRY_TOKEN) cargo publish --no-verify (commit 03582f5 + tag v0.11.0 already pushed), then gh release create v0.11.0 --generate-notes.
 - [/] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.

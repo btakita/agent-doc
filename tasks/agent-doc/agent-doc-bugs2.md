@@ -122,7 +122,7 @@ Net effect: a concurrent/self-recycle launch waits out the in-flight launcher an
 **Verification:** added two unit tests (`blocking_launch_lock_waits_for_holder_then_acquires`, `blocking_launch_lock_times_out_when_holder_never_releases`); `make check` green (exit 0, no FAILED); `cargo build --release` + `cargo install --path .` done (`~/.cargo/bin/agent-doc` and `.bin` → release both refreshed). Latest CI run is green; this change isn't pushed yet.
 
 Note: the supervisor currently serving this document (pid 2715614) predates the new binary, so the live proof — a real recycle race no longer surfacing the os-error-11 on the pane — is operator-drive (queued as `[operator-verify] #suprecyclelock`). Restart the supervisor to pick up the fix.
-<!-- agent:boundary:0ad1ef55 -->
+<!-- agent:boundary:b4783d4e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -141,7 +141,7 @@ Note: the supervisor currently serving this document (pid 2715614) predates the 
                        Resource temporarily unavailable (os error 11)
 ```
 ---
-- ~~:pushpin: [#qchurn]~~
+- :pushpin: [#qchurn]
 - :pushpin: [#anw0verify]
 - :pushpin: [#jbrestale]
 - :pushpin: [#mphaseloop]

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -128,7 +128,32 @@ So, for your use case:
 Bottom line: `corky watch` is *one* way (the convenient way) to drive `corky schedule`, not a hard prerequisite. If you're already running `corky watch` for inbound mail, scheduled publishing comes along with it and you need nothing else.
 
 (Note: this is a discussion answer — no code/repo changes. Also flagging: preflight warns the route-owned supervisor pid 2482535 is a stale pre-install build producing File-Cache-Conflict/IPC-drift dialogs; restart it with `agent-doc session restart-supervisor tasks/software/lazily-rs.md --force` when convenient.)
-<!-- agent:boundary:984d0ad0 -->
+
+### Re: corky watch and auto-posts — opus-4-8
+
+> **Queue prompt:**
+>
+> corky watch is running. Are the auto-posts scheduled and will they work?
+
+
+Short answer: **no — nothing will auto-post right now**, and `corky watch` is the wrong mechanism for it.
+
+What I verified on this machine:
+
+1. **`corky watch` ≠ scheduler.** `corky watch` is the **IMAP polling daemon** (`corky watch --help` → "IMAP polling daemon"). It polls email; it does **not** publish scheduled social posts. (It also isn't currently running — no `corky watch` process in `ps`.) So even with it up, it would never fire an auto-post.
+
+2. **The real publisher *is* healthy.** Auto-posting is driven by a systemd **user timer**, not `watch`:
+   - `corky-schedule.timer` → `ExecStart=…/.bin/corky schedule run`, `OnUnitActiveSec=5min`, `Persistent=true`.
+   - Last run **04:55:48 EDT, exit 0/SUCCESS**; next fire **05:00:48**. So the every-5-minute publisher loop is working fine.
+
+3. **But there's nothing to publish.** `corky schedule list` → **"No scheduled items."** The queue is empty, so the healthy timer has nothing to post.
+
+**Bottom line:** the publishing pipeline is alive (the timer, not `watch`), but the schedule is empty — so no posts will go out until you actually queue some. `corky watch` running has no bearing on auto-posts either way.
+
+To make posts go out: schedule them (the item then shows in `corky schedule list`), and the `corky-schedule.timer` will pick them up within 5 minutes and run `corky schedule run`. *[recommended]* After scheduling, confirm with `corky schedule list` (should show the item) and watch one timer cycle land it.
+
+(Note: this question is unrelated to the lazily-rs doc it was queued in; answering inline since it came through this session's queue. Exchange is large but an active queue is draining, so leaving it as-is.)
+<!-- agent:boundary:38796382 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -137,7 +162,6 @@ Bottom line: `corky watch` is *one* way (the convenient way) to drive `corky sch
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- corky watch is running. Are the auto-posts scheduled and will they work?
 <!-- /agent:queue -->
 
 ## Backlog

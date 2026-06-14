@@ -136,19 +136,19 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
     }))
 }
 
-/// Which drain consumer is asking for the deferred set. The two consumers treat
-/// `[clean-session]` differently (`#cleandrainsup`):
+/// Which drain consumer is asking for the deferred set. As of `#qcontdrain` BOTH
+/// consumers treat `[clean-session]` the same way (drainable); the enum is retained
+/// for call-site clarity and the supervisor force-`/clear` path:
 ///
 /// - [`DrainScope::Loop`] — the in-session Claude Code `/loop`, the Codex Stop-hook
-///   continuation, and preflight `queue_continuation_required`. These run IN the
-///   current (accreting) session and cannot give a `[clean-session]` head the fresh
-///   context it asks for, so they defer clean-session items under a live editor-IPC
-///   listener (and stop, letting the supervisor drive them) — the original
-///   `#goqueuestall` behavior.
+///   continuation, and preflight `queue_continuation_required`. It now drains
+///   `[clean-session]` heads IN PLACE rather than deferring to the supervisor: a
+///   supervisor that was itself stalled left the queue stranded (`#qcontdrain`,
+///   operator override of the original `#goqueuestall`/`#cleandrainsup` deferral).
 /// - [`DrainScope::Supervisor`] — the supervisor idle-watch, which force-`/clear`s
-///   and re-dispatches the head to a freshly-cleared agent. It CAN provide the clean
-///   context a `[clean-session]` item asks for, so it drains those heads, deferring
-///   only `[operator-verify]` (which genuinely needs a human).
+///   and re-dispatches the head to a freshly-cleared agent before draining it.
+///
+/// Both scopes defer only `[operator-verify]` (which genuinely needs a human).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DrainScope {
     /// In-session `/loop` / Codex Stop-hook continuation / preflight signal.
@@ -157,11 +157,10 @@ pub enum DrainScope {
     Supervisor,
 }
 
-/// The set of active backlog ids (lowercase) that are NOT agent-drainable for the
-/// in-session [`DrainScope::Loop`] consumer (`#goqueuestall`): `[operator-verify]`
-/// items always, plus `[clean-session]` items when a live editor-IPC listener is
-/// active for `file`. Used to compute queue continuation over the drainable head
-/// set only.
+/// The set of active backlog ids (lowercase) that are NOT agent-drainable
+/// (`#qcontdrain`): `[operator-verify]` items only. `[clean-session]` is drainable
+/// in every scope now (the in-session `/loop` drains it in place). Used to compute
+/// queue continuation over the drainable head set only.
 ///
 /// `pub(crate)` so `session_check`'s queue-head guards reuse the SAME deferred set
 /// (`#goqueuestall`): a deferred head must not trip the "runnable head remained /
@@ -206,38 +205,35 @@ pub(crate) fn deferred_backlog_ids_scoped(
 /// is deferred in both scopes regardless of any grant.
 pub(crate) fn deferred_backlog_ids_with_ipc_scoped(
     content: &str,
-    live_ipc: bool,
-    scope: DrainScope,
-    granted_ids: &std::collections::HashSet<String>,
+    _live_ipc: bool,
+    _scope: DrainScope,
+    _granted_ids: &std::collections::HashSet<String>,
 ) -> std::collections::HashSet<String> {
     let mut deferred = std::collections::HashSet::new();
     let Ok(components) = crate::component::parse(content) else {
         return deferred;
     };
-    // The supervisor provides the fresh context a `[clean-session]` head asks for
-    // (force-`/clear` before dispatch), so it never defers clean-session.
-    let defer_clean_session = match scope {
-        DrainScope::Loop => live_ipc,
-        DrainScope::Supervisor => false,
-    };
+    // `#qcontdrain` (operator override of `#goqueuestall`/`#cleandrainsup`/`#freshgrant`):
+    // the in-session `/loop` now drains `[clean-session]` heads IN PLACE instead of
+    // deferring to the supervisor. Deferring stranded the queue whenever the
+    // supervisor idle-watch was itself stalled (the live failure this fixes), so
+    // `queue_continuation_required` must stay true while any non-`[operator-verify]`
+    // head remains. Both scopes therefore defer ONLY `[operator-verify]` (which
+    // genuinely needs a human); `[clean-session]` is always drainable now. The
+    // `_live_ipc` listener state, drain `_scope`, and `_granted_ids` (`#freshgrant`)
+    // no longer gate the deferred set — they are retained on the signature for
+    // call-site/telemetry stability and the supervisor force-`/clear` path that
+    // lives elsewhere.
     for comp in &components {
         if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
         for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
-            let id_l = id.to_ascii_lowercase();
             if ctx.operator_verify_required {
                 // `[operator-verify]` genuinely needs a human — never drainable by
-                // any agent scope, grant or no grant.
-                deferred.insert(id_l);
-            } else if ctx.clean_session_required
-                && defer_clean_session
-                && !granted_ids.contains(&id_l)
-            {
-                // `#freshgrant`: a granted clean-session head is NOT deferred — the
-                // supervisor just gave the in-loop agent a fresh session for it.
-                deferred.insert(id_l);
+                // any agent scope.
+                deferred.insert(id.to_ascii_lowercase());
             }
         }
     }
@@ -1244,9 +1240,11 @@ mod tests {
     }
 
     #[test]
-    fn deferred_backlog_ids_respects_session_type() {
-        // #goqueuestall: operator-verify is always deferred; clean-session only
-        // under a live editor-IPC listener.
+    fn deferred_backlog_ids_defers_only_operator_verify() {
+        // #qcontdrain: ONLY [operator-verify] is deferred. [clean-session] is
+        // always drainable now — the in-session /loop drains it in place rather
+        // than deferring to a possibly-stalled supervisor — so live IPC state no
+        // longer changes the deferred set.
         let content = doc_with_backlog(
             &["do [#a]", "do [#b]", "do [#c]"],
             &[
@@ -1257,60 +1255,43 @@ mod tests {
         );
         let none = std::collections::HashSet::new();
         let live = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Loop, &none);
-        assert!(live.contains("a"));
-        assert!(live.contains("b"));
+        assert!(!live.contains("a"), "clean-session drains in-loop (#qcontdrain)");
+        assert!(live.contains("b"), "operator-verify always deferred");
         assert!(!live.contains("c"));
 
-        let clean = deferred_backlog_ids_with_ipc_scoped(&content, false, DrainScope::Loop, &none);
-        assert!(!clean.contains("a"), "clean-session drains in a clean session");
-        assert!(clean.contains("b"), "operator-verify always deferred");
-        assert!(!clean.contains("c"));
+        // Live IPC state is irrelevant now — same result with the listener off.
+        let no_ipc = deferred_backlog_ids_with_ipc_scoped(&content, false, DrainScope::Loop, &none);
+        assert_eq!(no_ipc, live, "live IPC no longer gates the deferred set");
     }
 
     #[test]
-    fn loop_drains_granted_clean_session_under_live_ipc() {
-        // #freshgrant: a supervisor fresh-context grant makes the in-loop Loop
-        // scope drain THAT clean-session head even under a live editor-IPC
-        // listener, while a non-granted clean-session head stays deferred and
-        // operator-verify is always deferred regardless of any grant.
+    fn loop_drains_clean_session_regardless_of_grant_or_ipc() {
+        // #qcontdrain: clean-session heads now drain in-loop unconditionally, so a
+        // `#freshgrant` supervisor grant is no longer required and a "not granted"
+        // clean-session head is NO LONGER deferred. Only operator-verify defers.
         let content = doc_with_backlog(
             &["do [#a]", "do [#b]", "do [#e]"],
             &[
-                "- [ ] [#a] [clean-session] granted",
+                "- [ ] [#a] [clean-session] formerly granted",
                 "- [ ] [#b] [operator-verify] live drive",
-                "- [ ] [#e] [clean-session] not granted",
+                "- [ ] [#e] [clean-session] formerly not granted",
             ],
         );
-        let mut granted = std::collections::HashSet::new();
-        granted.insert("a".to_string());
-        let live = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Loop, &granted);
-        assert!(
-            !live.contains("a"),
-            "granted clean-session head drains in-loop even under live IPC (#freshgrant)"
-        );
+        let none = std::collections::HashSet::new();
+        let live = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Loop, &none);
+        assert!(!live.contains("a"), "clean-session drains in-loop, no grant needed");
+        assert!(!live.contains("e"), "every clean-session head drains in-loop now");
         assert!(
             live.contains("b"),
-            "operator-verify is never drainable, grant or no grant"
+            "operator-verify is never drainable by any agent scope"
         );
-        assert!(
-            live.contains("e"),
-            "a non-granted clean-session head stays deferred under live IPC"
-        );
-
-        // A grant is irrelevant to the Supervisor scope (it already drains
-        // clean-session); only operator-verify stays deferred there.
-        let sup = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Supervisor, &granted);
-        assert!(!sup.contains("a"));
-        assert!(!sup.contains("e"));
-        assert!(sup.contains("b"));
     }
 
     #[test]
-    fn deferred_scoped_supervisor_drains_clean_session_under_live_ipc() {
-        // #cleandrainsup: the supervisor force-`/clear`s before a clean-session
-        // head, so it drains clean-session items even under a live editor-IPC
-        // listener — only operator-verify stays deferred. The in-session Loop scope
-        // still defers clean-session under live IPC so the /loop stops.
+    fn loop_and_supervisor_both_drain_clean_session() {
+        // #qcontdrain: the in-session Loop scope now matches the Supervisor scope —
+        // both drain [clean-session] and defer only [operator-verify], even under a
+        // live editor-IPC listener.
         let content = doc_with_backlog(
             &["do [#a]", "do [#b]", "do [#c]"],
             &[
@@ -1322,18 +1303,13 @@ mod tests {
 
         let none = std::collections::HashSet::new();
         let loop_live = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Loop, &none);
-        assert!(loop_live.contains("a"), "loop defers clean-session under live IPC");
+        assert!(!loop_live.contains("a"), "loop drains clean-session in place (#qcontdrain)");
         assert!(loop_live.contains("b"), "operator-verify always deferred");
         assert!(!loop_live.contains("c"));
 
         let sup_live =
             deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Supervisor, &none);
-        assert!(
-            !sup_live.contains("a"),
-            "supervisor drains clean-session even under live IPC (#cleandrainsup)"
-        );
-        assert!(sup_live.contains("b"), "operator-verify still deferred for the supervisor");
-        assert!(!sup_live.contains("c"));
+        assert_eq!(loop_live, sup_live, "loop and supervisor deferred sets now match");
     }
 
     #[test]

@@ -2273,12 +2273,10 @@ fn no_response_active_queue_head_skips_operator_verify_deferred_head() {
     );
 }
 #[test]
-fn no_response_active_queue_head_skips_clean_session_head_under_live_ipc() {
-    // #goqueuestall: a `[clean-session]` head is deferred only under a live
-    // editor-IPC listener. Without a listener it is drainable (must INTERRUPT);
-    // with one it is deferred exactly like operator-verify (must stay quiet).
-    // Builds the deferred set the same way `queue_continuation` does
-    // (`is_listener_active`).
+fn no_response_active_queue_head_interrupts_on_clean_session_head_regardless_of_ipc() {
+    // #qcontdrain: a `[clean-session]` head is now ALWAYS drainable in-loop, so a
+    // committed-without-response active queue head on it must INTERRUPT whether or
+    // not a live editor-IPC listener is running — live IPC no longer defers it.
     let tmp = tempfile::TempDir::new().unwrap();
     let committed = concat!(
         "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
@@ -2297,7 +2295,7 @@ fn no_response_active_queue_head_skips_clean_session_head_under_live_ipc() {
     let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
     crate::cycle_state::record_reaped_pending_ids(&doc, &["alreadydone".to_string()]).unwrap();
 
-    // Without a live listener the clean-session head is drainable → still INTERRUPT.
+    // Without a live listener the clean-session head is drainable → INTERRUPT.
     match inspect(&doc).unwrap() {
         SessionCheckStatus::Interrupted(message) => {
             assert!(message.contains("#cleanhead"), "{message}");
@@ -2309,8 +2307,8 @@ fn no_response_active_queue_head_skips_clean_session_head_under_live_ipc() {
         other => panic!("expected interrupt for drainable clean-session head, got {other:?}"),
     }
 
-    // Start a live editor-IPC listener for the project root, then the same
-    // clean-session head becomes deferred and the guard must stay quiet.
+    // Start a live editor-IPC listener for the project root. The clean-session
+    // head stays drainable (#qcontdrain), so the guard must STILL interrupt.
     let root = tmp.path().to_path_buf();
     let root_clone = root.clone();
     let server = std::thread::spawn(move || {
@@ -2330,10 +2328,14 @@ fn no_response_active_queue_head_skips_clean_session_head_under_live_ipc() {
         crate::ipc_socket::is_listener_active(&root),
         "listener should be active for the project root"
     );
-    assert!(
-        matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
-        "a clean-session deferred head under a live IPC listener must not interrupt"
-    );
+    match inspect(&doc).unwrap() {
+        SessionCheckStatus::Interrupted(message) => {
+            assert!(message.contains("#cleanhead"), "{message}");
+        }
+        other => panic!(
+            "clean-session head must still interrupt under live IPC (#qcontdrain), got {other:?}"
+        ),
+    }
 
     let _ = std::fs::remove_file(crate::ipc_socket::socket_path(&root));
     drop(server);

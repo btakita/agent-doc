@@ -1076,22 +1076,20 @@ pub(crate) struct UndrainableSkip {
 pub(crate) fn partition_drainable_backlog_ids(
     backlog_ids: &[String],
     ctxs: &std::collections::HashMap<String, crate::pending::ExecutionContext>,
-    live_ipc: bool,
+    _live_ipc: bool,
 ) -> (Vec<String>, Vec<UndrainableSkip>) {
     let mut drainable = Vec::new();
     let mut skipped = Vec::new();
     for id in backlog_ids {
         let key = id.trim().to_ascii_lowercase();
         let ctx = ctxs.get(&key).copied().unwrap_or_default();
+        // `#qcontdrain`: only `[operator-verify]` is undrainable now. `[clean-session]`
+        // items are added to the go-mode queue and drained in-loop (matching the
+        // continuation signal), so live editor-IPC state no longer skips them.
         if ctx.operator_verify_required {
             skipped.push(UndrainableSkip {
                 id: key,
                 reason: "operator_verify",
-            });
-        } else if ctx.clean_session_required && live_ipc {
-            skipped.push(UndrainableSkip {
-                id: key,
-                reason: "clean_session",
             });
         } else {
             drainable.push(id.clone());
@@ -4431,11 +4429,11 @@ fn resolve_pipeline_state_cycle_state_wins_over_frontmatter() {
 }
 
 #[test]
-fn partition_drainable_backlog_ids_skips_clean_session_under_live_ipc() {
-    // #goqueuestall: a `[clean-session]` head is skipped (with reason
-    // clean_session) when a live editor-IPC listener is active, and queued when
-    // the session is clean; `[operator-verify]` is always skipped; plain ids
-    // always stay drainable.
+fn partition_drainable_backlog_ids_skips_only_operator_verify() {
+    // #qcontdrain: `[clean-session]` is now always drainable (added to the
+    // go-mode queue and drained in-loop); only `[operator-verify]` is skipped, and
+    // live editor-IPC state no longer changes the partition. Plain ids stay
+    // drainable.
     use std::collections::HashMap;
     let mut ctxs: HashMap<String, crate::pending::ExecutionContext> = HashMap::new();
     ctxs.insert(
@@ -4458,25 +4456,19 @@ fn partition_drainable_backlog_ids_skips_clean_session_under_live_ipc() {
         "splitmodswrite".to_string(),
     ];
 
-    // Live IPC: clean-session and operator-verify both skipped.
-    let (drainable, skipped) = partition_drainable_backlog_ids(&ids, &ctxs, true);
-    assert_eq!(drainable, vec!["splitmodswrite".to_string()]);
-    let reasons: Vec<(&str, &str)> = skipped
-        .iter()
-        .map(|s| (s.id.as_str(), s.reason))
-        .collect();
-    assert!(reasons.contains(&("fcc0", "clean_session")));
-    assert!(reasons.contains(&("qflood2", "operator_verify")));
-
-    // Clean session: clean-session re-queues; operator-verify still skipped.
-    let (drainable, skipped) = partition_drainable_backlog_ids(&ids, &ctxs, false);
-    assert_eq!(
-        drainable,
-        vec!["fcc0".to_string(), "splitmodswrite".to_string()]
-    );
-    assert_eq!(skipped.len(), 1);
-    assert_eq!(skipped[0].id, "qflood2");
-    assert_eq!(skipped[0].reason, "operator_verify");
+    // Identical result with live IPC on or off: clean-session drains, only
+    // operator-verify is skipped.
+    for live_ipc in [true, false] {
+        let (drainable, skipped) = partition_drainable_backlog_ids(&ids, &ctxs, live_ipc);
+        assert_eq!(
+            drainable,
+            vec!["fcc0".to_string(), "splitmodswrite".to_string()],
+            "live_ipc={live_ipc}: clean-session + plain drain (#qcontdrain)"
+        );
+        assert_eq!(skipped.len(), 1, "live_ipc={live_ipc}");
+        assert_eq!(skipped[0].id, "qflood2");
+        assert_eq!(skipped[0].reason, "operator_verify");
+    }
 }
 
 #[test]

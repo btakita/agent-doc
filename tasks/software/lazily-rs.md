@@ -105,7 +105,30 @@ Nothing is pending on the agent side. All 6 review items are operator-gated (`[/
 - `#57by` — async-Shuttle model, NO-GO per `#shuttleeval`.
 
 Heads-up: preflight flagged the route-owned supervisor (pid 2482535) is running a **stale build** (older than the installed binary) and is the source of the recurring File Cache Conflict / IPC-drift dialogs. When convenient, restart it: `agent-doc session restart-supervisor tasks/software/lazily-rs.md --force`.
-<!-- agent:boundary:10648ff0 -->
+
+### Re: corky schedule — does `corky watch` need to be running? — opus-4-8
+
+> **Queued prompt:**
+>
+> Use corky schedule. Does corky watch need to be running?
+
+Short answer: **not to *create* a scheduled item, but yes to *publish* it unattended at its due time** — unless you trigger `corky schedule run` yourself (cron/systemd timer).
+
+The two subsystems are related but independent:
+
+- **`corky schedule run`** is **one-shot**: it processes everything currently due (publish/send) and exits. `corky schedule list` shows pending items. Scheduling an item just writes it to the store — no daemon required for that step.
+- **`corky watch`** is the **long-running daemon**. Each poll iteration it does two things: (1) polls IMAP for inbound mail, and (2) calls `schedule_tick()` → `schedule::run()` to publish any now-due scheduled items (`src/watch.rs:291-292`). So the watch loop *is* the built-in scheduler tick — `README.md:49`/`:67` call out "poll IMAP **and** run scheduled publishing."
+
+So, for your use case:
+
+- **Want items to publish automatically at their scheduled time?** Something has to tick the scheduler. `corky watch` does this for free on every poll interval (`config.poll_interval`, override with `--interval N`). `schedule::run` also re-fires items whose due time was missed during downtime (it tolerates clock skew / cron drift), so a short gap won't drop a due item.
+- **Don't want to run `corky watch`?** Then put `corky schedule run` on a cron job or systemd timer instead — e.g. `* * * * * corky schedule run`. That gives you timed publishing without the IMAP daemon.
+- **Just publishing manually right now?** `corky schedule run` on demand is enough; no daemon at all.
+
+Bottom line: `corky watch` is *one* way (the convenient way) to drive `corky schedule`, not a hard prerequisite. If you're already running `corky watch` for inbound mail, scheduled publishing comes along with it and you need nothing else.
+
+(Note: this is a discussion answer — no code/repo changes. Also flagging: preflight warns the route-owned supervisor pid 2482535 is a stale pre-install build producing File-Cache-Conflict/IPC-drift dialogs; restart it with `agent-doc session restart-supervisor tasks/software/lazily-rs.md --force` when convenient.)
+<!-- agent:boundary:b2788d11 -->
 <!-- /agent:exchange -->
 ###
 <!--

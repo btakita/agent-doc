@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -85,7 +85,27 @@ Done. `SignalingClient` now drives a full `Str0mNet` handshake, committed in the
 **Verification** — `make check` green (full suite incl. loom + benchmarks, exit 0), targeted `cargo test --features "signaling-client webrtc-str0m" --test webrtc_signaling` passes, `fmt`/`clippy --all-features -D warnings` clean. Latest CI run is green.
 
 This is the agent-doable slice of #h6qb. The only remaining slice is the live two-host / NAT run through the deployed #yxjw Worker (#lzwebrtcnet-e2e), which stays operator-drive.
-<!-- agent:boundary:1a05c1b8 -->
+
+### Re: do [#lzpub011prep] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#lzpub011prep]
+
+
+Done — v0.11.0 release-tag drift resolved and the operator publish (#12b1) pre-staged. (My #lzwebrtcwire commit had pushed the tag a second commit behind, so the drift was two commits, not one.)
+
+**Decision (unpublished-tag convention).** crates.io tops out at **0.10.3** and there is no v0.11.0 on crates.io or GitHub Releases — v0.11.0 was tagged but never published. Per the convention, I moved the tag to HEAD rather than bumping. No 0.12.0 needed: `0.10.3 → 0.11.0` is already the minor, and it now correctly carries the networked WebRTC backend (#lzwebrtcnet) + signaling wire (#lzwebrtcwire).
+
+**What I did**
+- Moved `v0.11.0` → HEAD and pushed: tag (local + remote) and `origin/main` all at `2fb8e80`. No remaining drift.
+- `cargo publish --dry-run --no-verify` clean — packages 62 files, 220 KiB compressed, publish-ready.
+- Pre-staged **`RELEASE_NOTES_v0.11.0.md`** (committed `2fb8e80`) with the feature list and a publish checklist, so the operator step is one-shot: `gh release create v0.11.0 --notes-file RELEASE_NOTES_v0.11.0.md`.
+
+**Operator-gated remainder (#12b1).** The actual `cargo publish` + `gh release create` + crates.io token rotation stay with you — I prepped everything up to the token. Run `cargo publish` from `src/lazily-rs` (dry-run already verified), then the `gh release create` above.
+
+Queue drained.
+<!-- agent:boundary:e2290e06 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -94,14 +114,11 @@ This is the agent-doable slice of #h6qb. The only remaining slice is the live tw
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#lzwebrtcwire]~~
-- do [#lzpub011prep]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzpub011prep] #lzpub011prep=Resolve v0.11.0 release-tag drift before the operator publish (#12b1): lazily-rs HEAD 64c7f3f (#lzwebrtcnet networked str0m DataChannel backend) is ONE commit AHEAD of the unpublished tag v0.11.0 @ 03582f5. Decide per the unpublished-tag convention — move v0.11.0 -> HEAD, or bump to 0.12.0 if the networked backend warrants a minor. Then run `cargo publish --dry-run --no-verify` to confirm publish-readiness and pre-stage the gh release notes so the operator token rotation is a one-shot.
 <!-- /agent:backlog -->
 
 ## Review

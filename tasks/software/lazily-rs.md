@@ -61,7 +61,24 @@ No new prompt this session — recovered a wedged state instead.
 - The `agent:queue` block still holds an **unstruck** `- #advance-review` under a `priority go` marker, even though that item's response was already given and archived ("Archived 5 response topic(s): #advance-review…"). That re-presented it with go-mode auto. I did **not** re-answer it — that would be churn.
 - Paused queue dispatch IPC-safely (`admin queue pause`, receipt 40) to stop the stale-replay flood. Did **not** auto-loop.
 - To fully settle: remove the `go` token and strike/clear `#advance-review` from the queue block (its work is done), then `resume` if you want the queue live again. Holding off on editing the queue marker myself since the route-owned supervisor (pid 968752) is live and races queue mutations.
-<!-- agent:boundary:747a6e5f -->
+
+### Re: session recovery (stuck cycle + uncommitted compaction) — opus-4-8
+
+
+No new prompt this session — recovered a wedged state instead.
+
+**What was wrong**
+- A stuck cycle (`cycle-1781410314210`) sat in `write_applied`/discarded, blocking preflight. Its body was a duplicate `### Re: #advance-review` whose real response is already committed and archived.
+- The working tree carried a fresh compaction (archive `…-053050`) while HEAD was still pre-compact (the 4 `### Re:` responses) — the compaction stale-snapshot case.
+
+**Recovery (committed `7ca156478`)**
+- `reset --from-current --preserve-session` → `commit` (not plain `commit`, which would have un-compacted): landed the compacted exchange at HEAD and cleared the stuck cycle. Working tree now clean, 0 `### Re:` headings at HEAD.
+
+**Residual — operator territory (not re-run)**
+- The `agent:queue` block still holds an **unstruck** `- #advance-review` under a `priority go` marker, even though that item's response was already given and archived ("Archived 5 response topic(s): #advance-review…"). That re-presented it with go-mode auto. I did **not** re-answer it — that would be churn.
+- Paused queue dispatch IPC-safely (`admin queue pause`, receipt 40) to stop the stale-replay flood. Did **not** auto-loop.
+- To fully settle: remove the `go` token and strike/clear `#advance-review` from the queue block (its work is done), then `resume` if you want the queue live again. Holding off on editing the queue marker myself since the route-owned supervisor (pid 968752) is live and races queue mutations.
+<!-- agent:boundary:6d4a7f57 -->
 <!-- /agent:exchange -->
 ###
 <!--

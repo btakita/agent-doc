@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -241,7 +241,29 @@ Events sort **newest-first** with a deterministic kind tie-break; an unparseable
 This is the last EFS-local remainder of review **#vd8s** — I trimmed that review item down to its only open piece: rolling the TMO `AddLoanFunding` sync **state** into the Active lane, which stays gated on the writeback gate (#dzmm/#k2xg/#7a4d).
 
 Not deployed — this preset is commit+push only. Remaining queue: the `/portal-admin/pipeline` "Incomplete applications" split + "Applications"→"Accepted applications" rename, which ends in `deploy`.
-<!-- agent:boundary:212cb23d -->
+
+### Re: /portal-admin/pipeline — split Incomplete Applications, rename Applications — opus-4-8
+
+> **Queue prompt:**
+>
+> In /portal-admin/pipeline, split "Incomplete applications" to "Draft Applications", "Complete Applications", "Applications under review". Rename "Applications" to "Accepted applications". deploy
+
+
+Done and deployed. The admin pipeline board (`/portal-admin/pipeline`) now splits the single read-only **Incomplete Applications** column into three state-scoped columns, and the entry loan column **Applications** is renamed to **Accepted applications**.
+
+**Columns now (left to right):** Draft Applications · Complete Applications · Applications under review · Accepted applications · Processing · Documents · Underwriting · Funded · Closed · On Hold · Unassigned · Application Denied.
+
+**How the three funnel columns are populated** (`repo.ts` `application_pipeline_column_id_`):
+- **Draft Applications** — `draft` full applications + open prequalification leads (`new`/`contacted`). A lead has no draft application yet, so it sits in the earliest/most-incomplete column.
+- **Complete Applications** — borrower-`submitted` applications.
+- **Applications under review** — admin `in_review` applications.
+
+All three stay read-only (no `statuses`, not loan drop targets), exactly like the old single column. The **Accepted applications** rename is label-only — the underlying TMO status value is still `Application Received`, so loan routing/writeback is unchanged.
+
+**Changed:** `repo.ts` (column ids + status→column mapping + `incomplete_applications_pipeline_columns_` splitter), `loan_management/index.ts` (board assembly), `dashboard/index.ts` (action-needed set covers all three), `pipeline.tsx` (read-only empty-state), plus `admin-pipeline.test.ts` / `admin-dashboard.test.ts` coverage.
+
+**Verification:** full suite green (674 pass / 0 fail), `build` + `build:worker` clean, deployed to Cloudflare — version `22363580-512c-48cc-86b0-398054d00742` at https://equityfundingsource.brian-takita.workers.dev. Committed: submodule `895ace3`, superproject pointer `586ad1eef`.
+<!-- agent:boundary:2c9cce4f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -249,7 +271,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- In /portal-admin/pipeline, split "Incomplete applications" to "Draft Applications", "Complete Applications", "Applications under review". Rename "Applications" to "Accepted applications". deploy
 <!-- /agent:queue -->
 
 ## Backlog

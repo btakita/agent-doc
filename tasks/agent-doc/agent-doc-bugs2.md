@@ -185,7 +185,7 @@ Per `#cleandrainsup`, stopping here hands `#mphaseloop` to the supervisor idle-w
 **Remaining heads** (all supervisor-drained `[clean-session]` or operator-gated): `#mphaseloop`, `#qmisstrike`, `#fcc0`, `#rtwbcast`, `#recyclerestart`, `#pushpinaccum`, `#0kjc`, `#compactqattr`, `#dupcontent` (clean-session); `#4myd`, `#aazp`, `#c2b6` (operator-verify). Nothing in-session-drainable.
 
 Exchange accretion is at `block` level (17 no-op closeouts / 30 min) — a `JB Compact Exchange` would help, but I'm not stalling the active queue to compact without an explicit opt-in.
-<!-- agent:boundary:156838c5 -->
+<!-- agent:boundary:0db1f3e0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -290,6 +290,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#freshgrant] [operator-verify] #freshgrant live proof (code shipped agent-doc 86f306d3, install deferred to supervisor auto-install/recycle): with the new build installed, leave a [clean-session] head at the active queue head under a live IDE, let the supervisor idle-watch fire idle_queue_watch_context_reset (#cleandrainsup) + clean_session_fresh_context_grant (#freshgrant), then confirm the re-dispatched agent preflight reports queue_continuation_required:true for that head (drains it) instead of false. Cannot be agent-done: needs a live editor + real supervisor /clear+re-dispatch.
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#cleardrainsim] [clean-session] Add SimWorld/integration coverage asserting the full preflight JSON contract (not just the queue_continuation::drainable_head_count unit) emits queue_continuation_required=false + queue_drainable_head_count=0 for an active go-mode queue whose only materialized heads are [clean-session] (under a live editor-IPC listener) / [operator-verify] / inert-noise, and =true with the right count when a real drainable head remains. Locks the #cleardrainsignal contract the SKILL auto-loop now depends on. Landed: agent-doc 5c8b2891.
 - [ ] [#dfrefresh-retire] [clean-session] Retire the dogfood-supervisor-refresh runbook (runbooks/dogfood-supervisor-refresh.md + BUNDLED_RUNBOOKS entry + SKILL.md catalog line + 4 harness mirrors) once #jbrestale (JB Run Agent Doc auto-restarts a stale route-owned supervisor / red-green switchover) AND #recyclerestart (PCP recycle restarts the harness session) both land and prove the binary self-heals a stale supervisor without the manual make+install+restart bootstrap. The runbook is an explicit stopgap for the bootstrap gap (running supervisor predates its own self-recycle fix + is the live agent parent). Acceptance: with both landed, a stale-binary session auto-promotes onto the new build at the next idle/dispatch boundary; delete the runbook + dependent references in one cycle and re-run audit-docs. CLEAN session (skill/runbook surface).

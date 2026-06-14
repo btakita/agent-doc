@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -125,7 +125,7 @@ Deployed. Both queued changes from this drain are now live:
 `deploy:worker:no-migrate` (no schema change) → version `7c1f462f`, https://equityfundingsource.brian-takita.workers.dev.
 
 Remaining in the queue: `do [#c7cs]` — extend click-to-view to the admin/investor/broker/lender document **tables**. That's the next drain cycle.
-<!-- agent:boundary:68781885 -->
+<!-- agent:boundary:e69aebb7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,10 +133,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~"Drop or choose a replacement file" should be "Drop file or click to select file".~~
-- ~~Can we make each uploaded file viewable by clicking on it? Can we have open a viewer of each supported file type?~~
-- ~~deploy~~
-- do [#c7cs]
 <!-- /agent:queue -->
 
 ## Backlog

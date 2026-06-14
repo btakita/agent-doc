@@ -37,13 +37,35 @@ queue: start
 Compacted content:
 - Archived 17 response topic(s): compaction-wedge recovered + new queue line is truncated; #qchurn reproduced live; #qchurn closing-sentence edit; 14 more
 - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
-<!-- agent:boundary:e8fdd90c -->
+
+### Re: [#r18j] supervisor auto-install — operator-verify status — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#r18j]
+
+
+`#r18j` (`#supautoinstall`) is **CODE-COMPLETE and DEFAULT-ON** — both commits are in the agent-doc submodule: `7a70a4cf` (auto-install rung) + `56075947` (default-ON), `make check` green. No agent code is left to write here; gated `[/]` awaiting the operator live proof below.
+
+**Push/release state (the agent-doable gate):**
+- `origin/main` is at `7a70a4cf`; local HEAD is `56075947` → the **default-ON commit is committed but not yet pushed** (1 ahead).
+- Workspace version is still `0.34.0`; installed binary is `0.34.0`. No version bump / tag / GitHub release for these commits yet.
+
+**Why I'm not bumping/installing this cycle:** I'm running inside the live managed session for *this* document. A `cargo install` mid-session makes the finalize client newer than the running supervisor → `live_prompt_drift` exit-75 + dropped queue edits (`#no-mid-session-install`). The release's manual testing gate *is* the live proof below. So bump + install must run from a clean shell / subagent / post-session, not from here. I left the push undone too since the item is prefixed "Operator:" and bundles it with the version bump — say the word and I'll push `56075947` (git-only, safe) and do the bump + VERSIONS.md + tag from a non-live context.
+
+**Operator live proof (cannot be agent-done — needs a live editor + supervisor restart):**
+1. Clean shell: `cd src/agent-doc && cargo build --release && cargo install --path . && agent-doc lib-install`
+2. In a dogfood session, edit agent-doc source, then `finalize`.
+3. Confirm `ops.log` shows `supervisor_auto_install_started` → `supervisor_auto_install_succeeded` → `supervisor_binary_stale_self_recycled`, and the session continues on the new binary.
+
+**Queue:** no agent-drainable heads (`queue_drainable_head_count: 0`, `queue_continuation_required: false`) — every other pinned head (`#jbrestale`, `#mphaseloop`, `#4myd`, `#qmisstrike`, `#aazp`, `#fcc0`, `#rtwbcast`, `#c2b6`, `#recyclerestart`, …) is `[clean-session]` or `[operator-verify]`. The supervisor idle-watch drains the `[clean-session]` ones; the `[operator-verify]` ones are yours. Not auto-looping. (Exchange was just compacted from ~68KB to ~33KB this cycle — sidecars rebuilt via `reset --from-current --preserve-session`.)
+<!-- agent:boundary:28986249 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: [#r18j]
+- ~~:pushpin: [#r18j]~~
 - :pushpin: [#jbrestale]
 - :pushpin: [#mphaseloop]
 - :round_pushpin: do [#4myd]
@@ -142,7 +164,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#r18j] [operator-verify] #supautoinstall supervisor auto-installs agent-doc source after finalize — CODE-COMPLETE, now DEFAULT-ON (agent-doc submodule 7a70a4cf + 56075947, make check green; opt out via AGENT_DOC_SUPERVISOR_AUTO_INSTALL=0 or agent_doc_supervisor_auto_install frontmatter/project knob). Dogfood-only (never fires for non-dogfooding docs). Idle-boundary install rung precedes the #ctlrecycle recycle rung; runs in the idle supervisor, never the finalize client. Operator: bump version + push + release the submodule; then LIVE PROOF (cannot be agent-done against the live supervisor) — in a dogfood session edit agent-doc source, finalize, confirm ops.log supervisor_auto_install_started → _succeeded → supervisor_binary_stale_self_recycled and the session continues on the new binary. Plan: tasks/agent-doc/plan-supervisor-auto-install-after-finalize.md
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#cleardrainsim] [clean-session] Add SimWorld/integration coverage asserting the full preflight JSON contract (not just the queue_continuation::drainable_head_count unit) emits queue_continuation_required=false + queue_drainable_head_count=0 for an active go-mode queue whose only materialized heads are [clean-session] (under a live editor-IPC listener) / [operator-verify] / inert-noise, and =true with the right count when a real drainable head remains. Locks the #cleardrainsignal contract the SKILL auto-loop now depends on. Landed: agent-doc 5c8b2891.
 - [ ] [#dfrefresh-retire] [clean-session] Retire the dogfood-supervisor-refresh runbook (runbooks/dogfood-supervisor-refresh.md + BUNDLED_RUNBOOKS entry + SKILL.md catalog line + 4 harness mirrors) once #jbrestale (JB Run Agent Doc auto-restarts a stale route-owned supervisor / red-green switchover) AND #recyclerestart (PCP recycle restarts the harness session) both land and prove the binary self-heals a stale supervisor without the manual make+install+restart bootstrap. The runbook is an explicit stopgap for the bootstrap gap (running supervisor predates its own self-recycle fix + is the live agent parent). Acceptance: with both landed, a stale-binary session auto-promotes onto the new build at the next idle/dispatch boundary; delete the runbook + dependent references in one cycle and re-run audit-docs. CLEAN session (skill/runbook surface).
@@ -166,6 +187,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#r18j] [operator-verify] #supautoinstall supervisor auto-installs agent-doc source after finalize — CODE-COMPLETE, now DEFAULT-ON (agent-doc submodule 7a70a4cf + 56075947, make check green; opt out via AGENT_DOC_SUPERVISOR_AUTO_INSTALL=0 or agent_doc_supervisor_auto_install frontmatter/project knob). Dogfood-only (never fires for non-dogfooding docs). Idle-boundary install rung precedes the #ctlrecycle recycle rung; runs in the idle supervisor, never the finalize client. Operator: bump version + push + release the submodule; then LIVE PROOF (cannot be agent-done against the live supervisor) — in a dogfood session edit agent-doc source, finalize, confirm ops.log supervisor_auto_install_started → _succeeded → supervisor_binary_stale_self_recycled and the session continues on the new binary. Plan: tasks/agent-doc/plan-supervisor-auto-install-after-finalize.md
 - [/] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [/] [#qdedup] [clean-session] Between-queue-turn trigger enqueue must de-duplicate: successive between-turn enqueues concatenated into one garbled trigger (`/clear /agent-doc <FILE>/agent-doc <FILE>`). Operator: stop the drain once a turn completes, insert into the inactive agent between turns, enqueue UNIQUE (one /clear, one /agent-doc <FILE>) landing once in the PCP/Supervisor between-turn stage. Compose next trigger as a deduped set, gate strictly to the inter-turn boundary, proof line between_turn_enqueue deduped=N. Related #qflood2/#qchurn/#clearcontresume. CLEAN session. Plan: tasks/agent-doc/plan-between-turn-trigger-dedup.md
 - [/] [#clearexchstale] [clean-session] JB Clear Exchange clears the exchange but the content comes back (from a stale HEAD/snapshot replay); same session, a deleted+retyped prompt also revived. Same disk-vs-buffer convergence family as #fcc0: a redeliver/replay path re-applies HEAD/snapshot over the cleared buffer, and clear does not advance the durable merge base. FIX: route clear through converge_document_or_disk + advance merge base; gate redeliver on fresh editor-buffer proof (#dvre/#eprf). CLEAN session. Plan: tasks/agent-doc/plan-jb-clear-exchange-stale-head-revival.md

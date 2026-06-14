@@ -109,7 +109,26 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 ```
 
 then open a fresh `/agent-doc` and drain there.
-<!-- agent:boundary:80b11c14 -->
+
+### Re: queue curation + two new free-text reports — captured, still clean-session-blocked — opus-4-8
+
+The queue edits this cycle are curation plus two free-text reports. Triage:
+
+**`:pushpin:` normalization across the heads** — noted, no action from me. I'm deliberately *not* hand-editing the queue block to drop the leftover `:round_pushpin:` on `#4myd`/`#fcc0`/`#rtwbcast` (lines 122/125/126): mutating the live queue from inside a cycle on a stale supervisor is exactly what corrupts it. That mixed-marker case is itself the bug you filed — `#pushpinaccum` (idempotent pushpin/bullet prefix) — so it's already tracked, not something to fix by hand here.
+
+**"Ensure the markdown AST handles quoted strings + code blocks"** — already captured as **`#0kjc` / `#mdastquote`** (backlog line 220): mask quoted-string and code-span/fence regions before component/tag extraction, same family as `#lintfence`. Pointing the queue at it is the right call; nothing new to add.
+
+**"upgrade dependencies"** — this one *was* new, so I captured it as **`#upgradedeps`** (backlog top). I tagged it `[clean-session]` for the same reason every other head here is blocked: a dependency bump forces a `make install` + rebuild, which re-stales **this** live route-owned supervisor mid-session (`#no-mid-session-install` / `#fcc0` churn). I assumed the target is the agent-doc submodule (this doc's project) — confirm if you meant a different repo.
+
+**Still not auto-looping.** Preflight skipped all 15 heads as agent-undrainable (`#goqueuestall`: `[clean-session]` / `[operator-verify]`), and `user_intent_prompt_changes` is empty — the queue edits classify as bookkeeping, not a preempting prompt. There is zero agent-drainable work in this queue from this session. To land any of it (`#qchurn`, `#0kjc`, `#upgradedeps`, the rest), restart into a clean session on a fresh binary:
+
+```
+cd src/agent-doc && make install
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+
+then drain from a fresh `/agent-doc`.
+<!-- agent:boundary:c84b69aa -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -211,6 +230,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#ar27] #upgradedeps [clean-session] Upgrade agent-doc dependencies (cargo update + bump direct deps in src/agent-doc Cargo.toml where safe), rebuild + make install + lib-install, run make check, confirm CI green. CLEAN session: a dependency bump forces a rebuild/reinstall that re-stales THIS live route-owned supervisor mid-session (#no-mid-session-install / #fcc0 churn), so it cannot run from the session it would destabilize. Scope assumed = the agent-doc submodule (this doc's project); confirm target if a different repo was intended.
 - [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#dupcontent] [clean-session] Duplicate-content / malformed-attribute document corruption when finalize adopts a stale-supervisor `content_ours` snapshot. LIVE 2026-06-14 (monsterrodholders.md, stale route-owned supervisor pid1328300 started 02:15:48 < binary mtime 02:28:10, session-check `#fcc0`): `finalize --stream` hit `mid-turn cycle rotation ... #adoc-compact-during-turn-response-loss` then `live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar content_ours_len=40827 > candidate 39216` then `snapshot from content_ours`. The adopted buffer was CORRUPT and written to disk: 273 lines vs 181 in clean HEAD, TWO `agent:queue` blocks (held one at ~88 PLUS a stale re-armed `preset="#spec-test-commit-push" priority go` block at ~181) and a truncated marker `<!-- agent:queue tasks=" -->`. The lint-gate caught `empty-attr-value` only AFTER the corrupt content already landed on disk (interrupt, no commit; HEAD stayed clean). Repair: `git checkout HEAD -- <file>` + `reset --from-current --preserve-session`. ROOT CAUSE (hypothesis): `content_ours`/`ack_content_sidecar` buffer is adopted verbatim as the snapshot base without structural validation, so a bad prior CRDT merge (duplicate singleton component blocks + attribute split across a merge boundary) is taken as truth and written before the lint-gate runs; the known-stale supervisor is still trusted as an IPC content source. FIX: (1) structurally validate before adopting any content_ours snapshot — reject/repair >1 open marker for a singleton component (exchange/status/queue/backlog/review/icebox/done) or a malformed/unterminated attribute, falling back to candidate/HEAD; (2) fail closed when the serving supervisor is already classified `supervisor_binary_stale` (#fcc0) — do not ingest its buffer; (3) run the structural/lint check on the candidate BEFORE the disk write, not after; (4) de-dup singleton blocks on parse instead of concatenating. CLEAN session (snapshot-adoption / converge write path). Related #fcc0/#compactqattr/#adoc-compact-during-turn-response-loss. Plan: tasks/agent-doc/plan-content-ours-duplicate-corruption.md
 - [ ] [#mphaseloop] [clean-session] Multi-phase task auto-loop policy (operator directive 2026-06-14): go-mode drain must continuously advance a multi-phase task until it is DONE or legitimately blocked (clean-session / operator-verify / external outage). "Needs review" is NOT a terminal stop — when a phase needs review, move it to agent:review (gated [/]) and KEEP draining the remaining phases/queue; never halt the whole queue just because one phase needs review. Codifies SKILL #drain-no-defer + "complete over gate" into the drain/finalize loop: only done/blocked terminate the drain; a review-routed phase emits its review item and the drain continues to the next drainable head. FIX: in the go-mode drain/finalize path, on a review-routed phase do not treat review as queue-terminal — emit the review item + advance to the next drainable head; proof line drain_continue_after_review next_head=... CLEAN session (drain/queue path).

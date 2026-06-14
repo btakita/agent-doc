@@ -70,7 +70,24 @@ Deployed. Both pending declaration-label fixes are now live:
 `deploy:worker:no-migrate` (no schema change) → version `a0226791`, https://equityfundingsource.brian-takita.workers.dev.
 
 Note: my prior-cycle write-back for the `57e4475` work was lost to the stale-supervisor IPC drift (pid 2127718, pre-`5ccf1354` build), so it isn't a separate `### Re:` section here — but the code shipped and is verified (648 tests green). Restarting that supervisor (`agent-doc session restart-supervisor` or restart the session) will stop the recurring drift.
-<!-- agent:boundary:910a6590 -->
+
+### Re: "Drop or choose a replacement file" → "Drop file or click to select file" — opus-4-8
+
+> **Queue prompt:**
+>
+> "Drop or choose a replacement file" should be "Drop file or click to select file".
+
+Done (EFS `a8db25e`). The per-document-type upload zone showed **"Drop or choose a replacement file"** once a file already existed for that type. Reworded to **"Drop file or click to select file"** in both spots that render it:
+
+- `lib/ui--browser--efs/portal/borrower/full_application.tsx` — borrower loan-application Documents step.
+- `lib/ui--browser--efs/portal/shared/full_application_detail.tsx` — admin/shared application-detail Documents section.
+
+The empty-state label ("Drop a file here or click to choose") was left as-is — your note was specific to the replacement-file wording.
+
+Per `#spec-test-commit-push`: added a `multi-upload.test.ts` assertion that both files render the new label and no longer contain the old one. `bun run check` green (649 tests), worker build clean. Committed + pushed to `main`.
+
+Not deployed — this preset is commit+push only; the `deploy` item later in the queue will push it live.
+<!-- agent:boundary:fe0b7948 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +95,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- "Drop or choose a replacement file" should be "Drop file or click to select file".
+- ~~"Drop or choose a replacement file" should be "Drop file or click to select file".~~
 - Can we make each uploaded file viewable by clicking on it? Can we have open a viewer of each supported file type?
 - deploy
 <!-- /agent:queue -->

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,237 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-233442.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260614-065755.md`*
 
 Compacted content:
-- Archived 7 response topic(s): advance the review items; do [#tmopoll] + do [#xcvginbound]; Step 7 "Review & Sign" reverts to Step 6 on refresh; 4 more
+- Archived 11 response topic(s): Use proper label names on the Declarations summary; deploy; "Drop or choose a replacement file" → "Drop file or click to select file"; 8 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-- *M. Declared bankruptcy within the past 7 years?*
-- *D1. Applying for another mortgage on/before closing (not disclosed)?*
-- *A. Will you occupy the property as your primary residence?*
-
-### Re: Use proper label names on the Declarations summary — opus-4-8
-
-> **Queue prompt:**
->
-> Use proper label names ![img_12.png](img_12.png) Use the question presented to the user 
-
-
-Fixed (EFS `95ec5db`). The application detail's read-only **"Step 5 - Declarations"** summary was labeling each row with just the raw key letter (A, B, C, D1, D2 …) instead of the actual declaration question. It now maps each declaration through `DECLARATION_FIELDS` so the full question text shows in canonical order — e.g. *"A. Will occupy as primary residence?"*, *"D1. Applying for another mortgage?"*, *"M. Bankruptcy in past 7 years?"* — matching what the **Edit** mode already displays. Any unknown key falls back to the raw key.
-
-Verification: `bun run check` green (647 tests, incl. new `full-application-detail-declaration-labels.test.ts`), worker build clean.
-
-Not deployed — this prompt didn't say "deploy", and a deploy is outward-facing. The build is ready; say the word (or add "deploy") and I'll push it live via `deploy:worker:no-migrate` (no schema change).
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-Deployed. Both pending declaration-label fixes are now live:
-
-- `95ec5db` — Step 5 summary renders real declaration labels (not raw key letters A/B/C…).
-- `57e4475` — those labels are now the **exact questions presented to the borrower**, via a shared `shared/declarations.ts` source of truth (form + admin detail can't drift).
-
-`deploy:worker:no-migrate` (no schema change) → version `a0226791`, https://equityfundingsource.brian-takita.workers.dev.
-
-Note: my prior-cycle write-back for the `57e4475` work was lost to the stale-supervisor IPC drift (pid 2127718, pre-`5ccf1354` build), so it isn't a separate `### Re:` section here — but the code shipped and is verified (648 tests green). Restarting that supervisor (`agent-doc session restart-supervisor` or restart the session) will stop the recurring drift.
-
-### Re: "Drop or choose a replacement file" → "Drop file or click to select file" — opus-4-8
-
-> **Queue prompt:**
->
-> "Drop or choose a replacement file" should be "Drop file or click to select file".
-
-Done (EFS `a8db25e`). The per-document-type upload zone showed **"Drop or choose a replacement file"** once a file already existed for that type. Reworded to **"Drop file or click to select file"** in both spots that render it:
-
-- `lib/ui--browser--efs/portal/borrower/full_application.tsx` — borrower loan-application Documents step.
-- `lib/ui--browser--efs/portal/shared/full_application_detail.tsx` — admin/shared application-detail Documents section.
-
-The empty-state label ("Drop a file here or click to choose") was left as-is — your note was specific to the replacement-file wording.
-
-Per `#spec-test-commit-push`: added a `multi-upload.test.ts` assertion that both files render the new label and no longer contain the old one. `bun run check` green (649 tests), worker build clean. Committed + pushed to `main`.
-
-Not deployed — this preset is commit+push only; the `deploy` item later in the queue will push it live.
-
-### Re: Make each uploaded file viewable by clicking it (in-browser viewer) — opus-4-8
-
-> **Queue prompt:**
->
-> Can we make each uploaded file viewable by clicking on it? Can we have open a viewer of each supported file type?
-
-Yes — shipped a shared in-browser document viewer (EFS `c636ea8`). Clicking an uploaded file now opens an in-page modal that renders the file inline instead of forcing a download.
-
-**How it works** (`shared/ui.tsx`):
-- `document_view_kind_()` classifies each file → **image** (`<img>`), **PDF** (`<iframe>`), **text/CSV/JSON/MD/XML** (`<pre>`), or **unsupported**. HEIC/HEIF/TIFF have image content-types but no broad browser support, so they're treated as download-only.
-- `use_document_viewer_()` + `DocumentFileLink` (a drop-in for the old `<a href download>` filename links). The file is **fetched as a blob and shown via an object URL**, so the server's `Content-Disposition: attachment` can't force a download and the *same* secured href serves both the inline view and the modal's **Download** button. Modified-clicks (⌘/Ctrl/middle-click) still download natively. Unsupported types and load errors fall back to a Download link.
-
-**Wired this cycle (borrower-facing uploaded files):**
-- Loan-application **Documents** rows (borrower full application + admin/shared application detail) — click the filename to view.
-- Borrower **Documents** page — uploaded-doc cards get a **View** action; public-document cards open the viewer.
-
-**Per `#spec-test-commit-push`:** new `document-viewer.test.ts` (classifier + wiring) and updated `download-security.test.ts` to assert the HTTPS guard is now centralized in the shared component. `bun run check` green (656 tests), worker build clean. Committed + pushed to `main`.
-
-**Follow-up (queued `#docview-tables`):** the admin/investor/broker/lender document **tables** still use download-only buttons — those are a distinct set of table-action surfaces (`shared/table_actions.tsx` + ~7 files). Added a "View" action to each is tracked as actionable backlog so this cycle stays a coherent, tested unit.
-
-Not deployed — this preset is commit+push only; the `deploy` item next in the queue will push it live.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-Deployed. Both queued changes from this drain are now live:
-
-- `a8db25e` — per-type upload zone reworded to **"Drop file or click to select file"**.
-- `c636ea8` — **in-browser document viewer** (#doc-viewer): click an uploaded file to preview it inline (images, PDF, text/CSV/JSON) on the borrower application-documents rows and the borrower Documents page.
-
-`deploy:worker:no-migrate` (no schema change) → version `7c1f462f`, https://equityfundingsource.brian-takita.workers.dev.
-
-Remaining in the queue: `do [#c7cs]` — extend click-to-view to the admin/investor/broker/lender document **tables**. That's the next drain cycle.
-
-### Re: do [#c7cs] — extend click-to-view to admin/investor document surfaces — opus-4-8
-
-> **Queue prompt:**
->
-> do [#c7cs]
-
-
-Done (EFS `5f5e504`). Extended the in-browser document viewer to the remaining download-only surfaces, so **every uploaded file across the portals is now viewable by clicking it**:
-
-- **shared/ui.tsx** — added `DocumentViewActionButton` (eye icon-button for table action columns) and a `class` prop on `DocumentFileLink` for button-styled links.
-- **admin/documents.tsx** — table action columns open the in-page viewer instead of a new tab (removed the `inline_document_url_`/`view_url` new-tab indirection).
-- **admin/document_request_detail.tsx**, **investor/documents.tsx** — provided-document cards open the viewer on click.
-- **admin/deal_documents.tsx** — "View" now opens the in-page modal *and* runs the href through the HTTPS guard (it previously opened a raw href in a new tab — a small security tightening).
-- **admin/upload_detail.tsx**, **investor/available_deals.tsx** — added a **View** action beside Download.
-
-**Left as-is:** lender documents already ship their own stacked-modal previewer (`LenderDocumentPreviewModal`, #doc-stack-esc) — untouched.
-
-**Per `#spec-test-commit-push`:** `document-viewer.test.ts` asserts each surface offers click-to-view; `download-security.test.ts` updated for the now-centralized HTTPS guard. `bun run check` green (657 tests), worker build clean. Committed + pushed.
-
-That drains the queue. Note: a stale route-owned supervisor (pid 861902, pre-current binary) is still throwing the recurring File-Cache-Conflict / IPC-drift dialogs this session — restart it with `agent-doc session restart-supervisor tasks/professional/equityfundingsource.md --force` (or restart the session) to clear them; it doesn't affect the shipped code.
-
-### Re: do [#67v2b] — Admin pipeline drag-to-change-status TMO writeback outbox — opus-4-8
-
-> **Queue prompt:**
->
-> do [#67v2b]
-
-Done (EFS `dcfca4e`). Phase B of the admin loan pipeline (#67v2) now records the **EFS → TMO loan-status writeback** durably, so a drag between columns is captured for TMO sync once the writeback gate clears.
-
-**What was already there:** the drag-between-columns UI and the loan-dialog status dropdown both already PUT `/api/admin/loans/:id/status` with an optimistic card move + rollback-on-error (`change_loan_status_`, `pipeline_card_move_`). That EFS-local half shipped in an earlier cycle.
-
-**What this phase adds (the gated TMO-writeback half):**
-- `tmo_loan_status_outbox_enqueue_` (`lib/tmo-api/index.ts`, re-exported via `admin/shared.ts`) inserts a `tmo_cache_outbox` row — `entity_type='loan'`, `operation='update_loan_status'`, `status='pending'`, `payload_json={ loan_number, loan_status, short_name, tmo_rec_id }` — mirroring the `add_loan_funding` outbox precedent. Returns `null` (non-fatal) when the loan has no TMO loan number or the insert fails, so the EFS-local status change always stands.
-- `admin_loans_by_id_status_PUT_` calls the enqueue right after `admin_loan_status_update_`, ahead of the legacy direct `tmo_loan_status_sync_`. The outbox is the durable gated-replay record; the direct sync stays as the pre-existing config-gated path.
-
-**Replay stays gated (#7a4d / #dzmm):** no consumer drains `update_loan_status` rows yet — they accumulate as `pending` until the TMO write field map (#7a4d) + sync direction (#dzmm/#k2xg) are confirmed. A regression test guards that no premature replay worker was added.
-
-**Per `#spec-test-commit-push`:** updated the PRD Phase B section (`prds/67v2-admin-loan-pipeline-kanban.md`) with the implementation block; added 5 tests to `tests/admin-pipeline.test.ts` (outbox row shape, no-loan-number skip, non-fatal failure, status-PUT wiring order, replay-gated guard). `bun run check` green (662 tests), worker build clean. Committed + pushed to `main` (submodule pointer bumped to `dcfca4e`).
-
-Not deployed — this preset is commit+push only. Remaining queue: `do [#67v2d]` (admin dashboard pipeline summary) then `#advance-review`.
-
-### Re: do [#67v2d] — Admin dashboard pipeline summary (Phase D) — opus-4-8
-
-> **Queue prompt:**
->
-> do [#67v2d]
-
-Done (EFS `47fb134`, submodule pointer `1d1033685`). Phase D of the admin loan pipeline (#67v2) now surfaces a **per-stage pipeline summary with next-actions on the admin dashboard**, mirroring the `/portal-admin/pipeline` board.
-
-**No drift by construction:** the board's column build in `admin_pipeline_GET_` was extracted into a shared `admin_pipeline_columns_(auth, now_s)` (`lib/admin/loan_management/index.ts`). The board GET and the dashboard summary now consume the **same** columns + counts, so they can't diverge.
-
-**What shipped:**
-- `admin_dashboard_pipeline_summary_(columns)` (`lib/admin/dashboard/index.ts`) — pure, unit-tested builder mapping each board column to a stage `{ id, label, count, action_needed, href }`, plus `total` and `action_needed_count`. `action_needed` flags the **open funnel** (Incomplete Applications + Applications / Processing / Documents / Underwriting), mirroring the Deal Pipeline action badge; terminal/parked stages (Funded / Closed / On Hold / Unassigned / Application Denied) are not.
-- `GET /api/admin/dashboard` adds a `pipeline_summary` field (built in the existing `Promise.all`; a summary failure logs and degrades to an empty stage list — never a 500).
-- **Dashboard UI** (`portal/admin/dashboard.tsx`) renders a **Loan pipeline** section under the metric grid: a per-stage count grid with action-needed stages highlighted + an "Action" badge, plus an "Open pipeline board" link. Each stage card deep-links to `/portal-admin/pipeline?tab=pipeline&column=<id>`.
-- **Pipeline board** (`portal/admin/pipeline.tsx`) reads `?column=<id>` and scrolls the targeted stage column into view with a highlighted border, so the dashboard deep-link lands on the right stage.
-
-**Per `#spec-test-commit-push`:** updated the PRD Phase D section (`prds/67v2-admin-loan-pipeline-kanban.md` → ✅ shipped) and added tests to `tests/admin-dashboard.test.ts` (pure summary builder: stage order, action flags, totals, deep-link hrefs; endpoint wiring from the shared builder; UI deep-links + board `?column=` scroll). `bun run check` green (665 tests), worker build clean. Committed + pushed to `main`.
-
-Not deployed — this preset is commit+push only. Remaining queue: `#advance-review`.
-
-### Re: #advance-review — opus-4-8
-
-> **Queue prompt:**
->
-> #advance-review
-
-
-> **Queue prompt (preset `#advance-review`):**
->
-> Go through the review items. Add actionable backlog items to complete or advance the review items.
-
-Went through all 9 `agent:review` items. The portal is substantially built out, so most review items are **parked on external/operator dependencies** (no agent-actionable step), and a few describe work that has **already shipped**. I found **one** genuinely EFS-local, ungated next step and queued it; the rest are triaged below.
-
-**Queued (actionable, EFS-local):**
-- `#vd8s-timeline` — **Per-investor activity timeline** in the in-page investor detail modal (#vtx8): sign-up, accreditation decision, lender link, commitment, wire-confirmation, and distribution dates, all from existing D1 tables. No TMO gate. Plan: `prds/investor-pipeline-admin.md` (line 92). This is the only non-gated remainder of `#vd8s` — the drag-to-confirm-wire from the Committed lane it also mentions already shipped (`#vd8s-dragwire`: `ConfirmWireModal` + multi-pending-fund disambiguation in `investor_pipeline.tsx`).
-
-**Triage of the rest (no agent-actionable step right now):**
-- `#67v2` — **near-complete**: Phases A (board), B (status writeback outbox), D (dashboard summary, just shipped), E (leads funnel) are all done. The only remaining sub-phase is **C (per-stage requirement checklist + auto-advance)**, whose requirements list is TBD pending Robert/April (PRD Q3). Operator-gated, not codeable yet.
-- `#xcvg` — message **email** round-trip is gated on a verified Resend domain (`#f4rq`) + Google Workspace SMTP (`#m6ch`/`#p40t`). The in-app half (admin owner + unread-count badges) already ships in `admin/messages.tsx`.
-- `#37ah` — broker portal backend shipped (`#37ah-backend`); only the TMO writeback sync remains, gated on `#dzmm` (`#7a4d`/`#k2xg`).
-- `#dzmm` — TMO webhooks unavailable per operator; read-side polling shipped. EFS→TMO writeback (outbox replay) is gated on the `#7a4d` write field map + `#k2xg` support answers.
-- `#zwws` — remaining investor-dashboard phases are TMO-writeback-gated (`#dzmm`/`#k2xg`/`#7a4d`) + email-gated (`#f4rq`).
-- `#next-steps` — workers.dev prod is healthy; custom-domain cutover is intentionally deferred and true Google SSO is gated on Google admin creds.
-- `#jnzs` — awaiting Judith/EFS reviewer **human approval** on funded-deal copy/lien wording before launch sign-off.
-- `#dropbox-sync-adapter` — gated on Dropbox access being provisioned.
-
-So: 1 actionable item queued (`#vd8s-timeline`); the other 8 review items are correctly parked on TMO/Resend/Google/Dropbox/human-approval gates and stay in `agent:review`. (Exchange is at ~156 lines / 8 sections — noting size; queue stays active.)
-
-### Re: do [#vd8s-timeline] — Per-investor activity timeline in the detail modal — opus-4-8
-
-> **Queue prompt:**
->
-> do [#vd8s-timeline]
-
-Done (EFS `0eb8084`, submodule pointer `549876293`). The in-page investor detail modal (#vtx8) now renders a **newest-first activity timeline** beneath the accreditation control — the investor's whole lifecycle trail, derived entirely from existing D1 tables (EFS-local, no TMO gate).
-
-**Events** (`investor_timeline_events_`, a pure builder in `repo.ts`):
-- **Signed up** — `users.created_at`.
-- **Accreditation submitted** + **verified/rejected** — `investor_accreditation_verifications` (`created_at` for the submission; `verified_at` + `status` for the decision; a still-pending submission shows no decision line).
-- **Lender setup requested** + **Lender account linked** — `lender_requests` (`created_at`, then `completed_at` once `status='done'`, with the assigned `lender_account` in the caption).
-- **Committed $X** + **Wire confirmed · $X** — `funds` (commitment on `created_at` always; the wire only for `status='active'` on `accepted_at`), each with a borrower/loan caption.
-- **Distribution** — paid `loan_payments` across every loan the investor holds a fund in, dated by `due_date`.
-
-Events sort **newest-first** with a deterministic kind tie-break; an unparseable `due_date` row is skipped rather than NaN-sorted (`date_text_to_unix_s_` parses the `YYYY-MM-DD` text to unix seconds at UTC midnight so distributions sort against the second-precision timestamps).
-
-**Endpoint:** `GET /api/admin/users/:id/investor-timeline` (`admin_users_by_id_investor_timeline_GET_`) — read-only, admin-guarded; fetches the five row sets in one `Promise.all`, maps them into the builder, returns `{ events }`. A missing user is a 404 (not an empty timeline). The distributions query joins `loan_payments → loans → investment_deals → funds` for the investor's paid payments.
-
-**UI** (`investor_pipeline.tsx`): `InvestorActivityTimeline` renders a dotted vertical trail with a per-kind lane-palette accent, the label, an optional caption (borrower/loan or lender account), and the UTC date — with loading/error/empty states.
-
-**Per `#spec-test-commit-push`:** added PRD Phase 5 (`prds/investor-pipeline-admin.md`) and 7 tests to `tests/admin-investor-pipeline.test.ts` (date parser, per-kind surface/skip rules, money + caption formatting, newest-first ordering across kinds, registered + admin-guarded endpoint built from the pure builder, and the modal wiring). `bun run check` green (673 tests), worker build clean. Committed + pushed to `main`.
-
-This is the last EFS-local remainder of review **#vd8s** — I trimmed that review item down to its only open piece: rolling the TMO `AddLoanFunding` sync **state** into the Active lane, which stays gated on the writeback gate (#dzmm/#k2xg/#7a4d).
-
-Not deployed — this preset is commit+push only. Remaining queue: the `/portal-admin/pipeline` "Incomplete applications" split + "Applications"→"Accepted applications" rename, which ends in `deploy`.
-
-### Re: /portal-admin/pipeline — split Incomplete Applications, rename Applications — opus-4-8
-
-> **Queue prompt:**
->
-> In /portal-admin/pipeline, split "Incomplete applications" to "Draft Applications", "Complete Applications", "Applications under review". Rename "Applications" to "Accepted applications". deploy
-
-
-Done and deployed. The admin pipeline board (`/portal-admin/pipeline`) now splits the single read-only **Incomplete Applications** column into three state-scoped columns, and the entry loan column **Applications** is renamed to **Accepted applications**.
-
-**Columns now (left to right):** Draft Applications · Complete Applications · Applications under review · Accepted applications · Processing · Documents · Underwriting · Funded · Closed · On Hold · Unassigned · Application Denied.
-
-**How the three funnel columns are populated** (`repo.ts` `application_pipeline_column_id_`):
-- **Draft Applications** — `draft` full applications + open prequalification leads (`new`/`contacted`). A lead has no draft application yet, so it sits in the earliest/most-incomplete column.
-- **Complete Applications** — borrower-`submitted` applications.
-- **Applications under review** — admin `in_review` applications.
-
-All three stay read-only (no `statuses`, not loan drop targets), exactly like the old single column. The **Accepted applications** rename is label-only — the underlying TMO status value is still `Application Received`, so loan routing/writeback is unchanged.
-
-**Changed:** `repo.ts` (column ids + status→column mapping + `incomplete_applications_pipeline_columns_` splitter), `loan_management/index.ts` (board assembly), `dashboard/index.ts` (action-needed set covers all three), `pipeline.tsx` (read-only empty-state), plus `admin-pipeline.test.ts` / `admin-dashboard.test.ts` coverage.
-
-**Verification:** full suite green (674 pass / 0 fail), `build` + `build:worker` clean, deployed to Cloudflare — version `22363580-512c-48cc-86b0-398054d00742` at https://equityfundingsource.brian-takita.workers.dev. Committed: submodule `895ace3`, superproject pointer `586ad1eef`.
-<!-- agent:boundary:2c9cce4f -->
+<!-- agent:boundary:b8854a08 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -271,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- The Deal Pipeline kanban board is very wide...which can add friction to the admin workflow. What are some UX options to mitigate this issue? Discuss...
 <!-- /agent:queue -->
 
 ## Backlog

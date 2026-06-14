@@ -365,6 +365,34 @@ pub fn dispatch_error_is_coalesced(message: &str) -> bool {
     message.contains(DISPATCH_COALESCED_IN_FLIGHT_MARKER)
 }
 
+/// `#anw0` (#supkill-bg part 3): stable machine marker embedded in the
+/// `handle_dispatch` stale-generation bail when the current generation is itself
+/// dispatchable. A racing dispatcher holding a superseded generation handle (the
+/// loser of a recycle/restart supersede race) can then self-heal by retrying
+/// against the current generation instead of failing closed with a terminal
+/// `generation N is closed` reject. The marker survives `request_controller`'s
+/// `project controller command \`dispatch\` failed: …` IPC wrapping, exactly like
+/// the #qflood coalesce marker.
+pub const DISPATCH_STALE_GENERATION_REDIRECT_MARKER: &str = "stale_generation_redirect";
+
+/// `#anw0`: classify a failed dispatch as a stale-generation redirect and extract the
+/// current (N+1) generation to retry against. Returns `None` for every other failure —
+/// including a *terminal* stale_generation reject whose current actor is Closed/Blocked
+/// (a retry cannot help, so that bail carries no redirect marker) — so non-redirect
+/// failures stay terminal and never trigger a self-heal retry.
+pub fn dispatch_error_stale_generation_redirect_target(message: &str) -> Option<u64> {
+    if !message.contains(DISPATCH_STALE_GENERATION_REDIRECT_MARKER) {
+        return None;
+    }
+    message
+        .split("retry_generation=")
+        .nth(1)
+        .and_then(|rest| {
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            digits.parse::<u64>().ok()
+        })
+}
+
 pub fn authorize_dispatch(
     project_root: &Path,
     request: DispatchRequest,
@@ -404,25 +432,44 @@ pub fn authorize_dispatch(
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        return handle_dispatch(
-            &bootstrap,
-            None,
-            ControllerRequest {
-                command: "dispatch".to_string(),
-                file: Some(request.file),
-                session_id: Some(request.session_id),
-                pane_id: Some(request.pane_id),
-                window_id: None,
-                generation: Some(request.generation),
-                state: None,
-                caller: None,
-                reason: None,
-                supervisor_pid: None,
-                supervisor_socket: None,
-                command_kind: Some(request.command_kind),
-                diagnostic_payload: Some(request.diagnostic_payload),
-            },
-        );
+        let dispatch_request = |generation: u64| ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(request.file.clone()),
+            session_id: Some(request.session_id.clone()),
+            pane_id: Some(request.pane_id.clone()),
+            window_id: None,
+            generation: Some(generation),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some(request.command_kind.clone()),
+            diagnostic_payload: Some(request.diagnostic_payload.clone()),
+        };
+        match handle_dispatch(&bootstrap, None, dispatch_request(request.generation)) {
+            Err(err) => {
+                // `#anw0`: a racing dispatch that lost the supersede race against a
+                // newer dispatchable generation self-heals by retrying once against
+                // the redirect target. One retry only — bounded, never a loop.
+                if let Some(target) =
+                    dispatch_error_stale_generation_redirect_target(&format!("{err:#}"))
+                {
+                    crate::ops_log::log_op(
+                        &request.file,
+                        &format!(
+                            "dispatch_retry_after_stale_generation file={} prior_generation={} next_generation={}",
+                            request.file.display(),
+                            request.generation,
+                            target
+                        ),
+                    );
+                    return handle_dispatch(&bootstrap, None, dispatch_request(target));
+                }
+                return Err(err);
+            }
+            ok => return ok,
+        }
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -458,6 +505,26 @@ pub fn authorize_dispatch(
                     ),
                 );
                 request_controller(project_root, controller_request)
+            }
+            Err(err)
+                if dispatch_error_stale_generation_redirect_target(&err.to_string()).is_some() =>
+            {
+                // `#anw0`: the dispatch lost the supersede race against a newer
+                // dispatchable generation. Retry exactly once against the redirect
+                // target so racing dispatch self-heals instead of failing closed.
+                let target =
+                    dispatch_error_stale_generation_redirect_target(&err.to_string()).unwrap();
+                crate::ops_log::log_op(
+                    &request.file,
+                    &format!(
+                        "dispatch_retry_after_stale_generation file={} next_generation={}",
+                        request.file.display(),
+                        target
+                    ),
+                );
+                let mut redirected = controller_request.clone();
+                redirected.generation = Some(target);
+                request_controller(project_root, redirected)
             }
             other => other,
         }
@@ -1076,10 +1143,15 @@ pub(crate) fn recycle_idle_grace() -> Duration {
 /// force-disables. When it is unset or unrecognized, a per-document frontmatter
 /// opt-in/opt-out (`agent_doc_supervisor_auto_recycle`) decides; absent there, the
 /// project-config opt-in (`agent_doc_supervisor_auto_recycle` in
-/// `.agent-doc/config.toml`) decides; absent everywhere, the default is OFF (the
-/// `execve` hot-reload is high blast-radius, so a stale supervisor only logs
-/// `supervisor_binary_stale_detected` until a project, document, or operator opts
-/// in). Pure so the precedence is unit-testable.
+/// `.agent-doc/config.toml`) decides; absent everywhere, the default is ON
+/// (`#supselfheal`). A stale supervisor self-retires at the next turn/queue-item
+/// boundary via the blue/green `execve` hot-reload, which preserves the live
+/// harness child + pane (zero-gap binary upgrade). This is the hands-off self-heal
+/// for the freshly-`cargo install`ed-but-still-running-the-old-binary case that
+/// otherwise re-files File Cache Conflict / IPC-drift dialogs forever
+/// (`#fcc0`/`#ipcdrift`). Opt out with the env/frontmatter/project knob set falsey to
+/// restore the deliberate-operator-restart behavior. Pure so the precedence is
+/// unit-testable.
 pub(crate) fn resolve_supervisor_auto_recycle(
     env: Option<&str>,
     frontmatter: Option<bool>,
@@ -1092,12 +1164,13 @@ pub(crate) fn resolve_supervisor_auto_recycle(
             _ => {}
         }
     }
-    frontmatter.or(project).unwrap_or(false)
+    frontmatter.or(project).unwrap_or(true)
 }
 
 /// `#ctlrecycle` R3 / `#suprecyclequeue` — is supervisor auto-recycle enabled for the
 /// supervisor hosting `doc`? Reads the env override, the document's frontmatter, and
-/// its project config, then resolves via [`resolve_supervisor_auto_recycle`]. Default OFF.
+/// its project config, then resolves via [`resolve_supervisor_auto_recycle`]. Default ON
+/// (`#supselfheal`); opt out with a falsey env/frontmatter/project knob.
 pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
     let env = std::env::var(SUPERVISOR_AUTO_RECYCLE_ENV).ok();
     let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
@@ -2558,12 +2631,40 @@ pub(crate) fn handle_dispatch(
         ));
     } else if record.generation != generation {
         failed_stage = Some("stale_generation");
-        failure = Some(format!(
-            "dispatch rejected for {}: requested generation {}, current generation {}",
-            file.display(),
-            generation,
-            record.generation
-        ));
+        // `#anw0` (#supkill-bg part 3): a racing dispatcher holding a superseded
+        // generation should self-heal by retrying against the current generation
+        // rather than failing closed — BUT only when the current generation is itself
+        // dispatchable (a retry would actually be authorized). If the current actor is
+        // Closed/Blocked a retry cannot help, so keep the terminal reject with no
+        // redirect marker. `authorize_dispatch` consumes the marker and retries once.
+        let current_dispatchable = !matches!(
+            record.state,
+            crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed
+        );
+        if current_dispatchable {
+            crate::ops_log::log_op(
+                &file,
+                &format!(
+                    "dispatch_stale_generation_redirect session={} pane={} prior_generation={} next_generation={} kind={}",
+                    session_id, pane_id, generation, record.generation, command_kind
+                ),
+            );
+            failure = Some(format!(
+                "dispatch rejected for {}: requested generation {}, current generation {} ({} retry_generation={})",
+                file.display(),
+                generation,
+                record.generation,
+                DISPATCH_STALE_GENERATION_REDIRECT_MARKER,
+                record.generation
+            ));
+        } else {
+            failure = Some(format!(
+                "dispatch rejected for {}: requested generation {}, current generation {}",
+                file.display(),
+                generation,
+                record.generation
+            ));
+        }
     } else if matches!(
         record.state,
         crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed
@@ -4227,6 +4328,155 @@ mod tests {
         );
     }
     #[test]
+    fn anw0_stale_generation_redirect_marker_classifies_and_survives_ipc_wrapping() {
+        // The route caller only sees the controller error as a string across IPC,
+        // wrapped by `request_controller`. The redirect classifier must recognise the
+        // marker through that wrapping and extract the retry generation (mirrors the
+        // #qflood2 marker contract).
+        let wrapped = format!(
+            "project controller command `dispatch` failed: dispatch rejected for x: requested generation 1, current generation 2 ({} retry_generation=2) receipt_id=42",
+            DISPATCH_STALE_GENERATION_REDIRECT_MARKER
+        );
+        assert_eq!(
+            dispatch_error_stale_generation_redirect_target(&wrapped),
+            Some(2),
+            "a redirect bail must yield its retry generation across IPC wrapping"
+        );
+        // A terminal stale_generation reject (current actor Closed/Blocked) carries no
+        // marker, so it must stay terminal — never trigger a self-heal retry.
+        assert_eq!(
+            dispatch_error_stale_generation_redirect_target(
+                "dispatch rejected for x: requested generation 1, current generation 2 receipt_id=42"
+            ),
+            None,
+            "a marker-less stale_generation reject must stay terminal"
+        );
+        // An unrelated failure (e.g. a paused queue) is never a redirect.
+        assert_eq!(
+            dispatch_error_stale_generation_redirect_target(
+                "dispatch blocked for x: failed_stage=queue_paused"
+            ),
+            None
+        );
+    }
+    #[test]
+    fn anw0_stale_generation_redirect_emitted_only_when_current_dispatchable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/anw0.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-anw0\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        crate::session_actor::record_session_start_direct(&doc, "session-anw0", "%41", "@1", 1)
+            .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let stale_dispatch = || ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-anw0".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            // Requested generation 0 is superseded by the live generation 1.
+            generation: Some(0),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some("anw0 redirect test".to_string()),
+        };
+
+        // Current generation (1) is Ready ⇒ a retry would be authorized ⇒ structured
+        // redirect with the marker + retry target pointing at the current generation.
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-anw0",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+        let err = handle_dispatch(&bootstrap, None, stale_dispatch()).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("requested generation 0"), "{msg}");
+        assert_eq!(
+            dispatch_error_stale_generation_redirect_target(&msg),
+            Some(1),
+            "a dispatchable current generation must emit a retry-against-N+1 redirect: {msg}"
+        );
+
+        // Current generation (1) is Closed ⇒ a retry cannot help ⇒ terminal reject with
+        // NO redirect marker, so racing dispatch does not loop against a dead actor.
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-anw0",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Closed,
+            "supervisor",
+            "superseded",
+        )
+        .unwrap();
+        let err = handle_dispatch(&bootstrap, None, stale_dispatch()).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("requested generation 0"), "{msg}");
+        assert_eq!(
+            dispatch_error_stale_generation_redirect_target(&msg),
+            None,
+            "a closed current generation must stay a terminal stale_generation reject: {msg}"
+        );
+    }
+    #[test]
+    fn anw0_racing_dispatch_self_heals_against_new_generation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/anw0heal.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-anw0h\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        crate::session_actor::record_session_start_direct(&doc, "session-anw0h", "%41", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-anw0h",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        // A racing dispatcher still holds the superseded generation 0. `authorize_dispatch`
+        // must consume the redirect and retry ONCE against the live generation 1, landing
+        // the dispatch instead of failing closed.
+        let auth = authorize_dispatch(
+            dir.path(),
+            DispatchRequest {
+                file: doc.clone(),
+                session_id: "session-anw0h".to_string(),
+                pane_id: "%41".to_string(),
+                generation: 0,
+                command_kind: "managed_reopen".to_string(),
+                diagnostic_payload: "anw0 self-heal".to_string(),
+            },
+        )
+        .expect("a racing dispatch must self-heal by retrying against the current generation");
+        assert_eq!(
+            auth.record.generation, 1,
+            "the self-heal retry must land on the current (N+1) generation"
+        );
+    }
+    #[test]
     fn process_binary_is_stale_matches_and_differs() {
         // `#ctlrecycle` foundation. No recorded identity → never stale (fail-open).
         assert!(!process_binary_is_stale(None));
@@ -4261,9 +4511,11 @@ mod tests {
         // Frontmatter absent → project config decides.
         assert!(r(None, None, Some(true)));
         assert!(!r(None, None, Some(false)));
-        // Nothing set anywhere → default OFF.
-        assert!(!r(None, None, None));
-        assert!(!r(Some(""), None, None));
+        // `#supselfheal` — nothing set anywhere → default ON (turn-boundary
+        // blue/green self-recycle is the hands-off self-heal). Opt out via a
+        // falsey env/frontmatter/project knob (asserted above).
+        assert!(r(None, None, None));
+        assert!(r(Some(""), None, None));
     }
     #[test]
     fn pause_reason_stale_supervisor_churn_stop_classification() {

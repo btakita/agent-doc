@@ -18,10 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
-agent_doc_pipeline:
-  run_id: cycle-1781420754344
-  step: write_applied
+queue: stop
 ---
 
 ## Status
@@ -259,7 +256,36 @@ Deploy (`bun run deploy:worker`):
 - Smoke: `/` 200, `/funded-deals` 200, `/portal-admin/pipeline` 303 (Cloudflare Access login redirect — expected for the admin-gated route).
 
 CI: no `CI` workflow exists in either repo; the superproject's only workflow (`Agent Doc`) remains blocked at runner-start by the account billing/spending-limit issue — an external CI-start blocker, not a code failure.
-<!-- agent:boundary:93cd5463 -->
+
+### Re: Same collapse strategy on the Lender Pipeline — opus-4-8
+
+> **Queue prompt:**
+>
+> Do the same collapse strategy on the Lender Pipeline.
+
+
+Ported the Deal Pipeline horizontal-width collapse strategy to the **Lender Pipeline** board (`investor_pipeline.tsx`, `AdminInvestorPipeline` → `InvestorPipelineBoard`). The five lifecycle lanes (Signed Up → Accredited → Lender Ready → Committed → Active) still overflow narrower admin screens, so they now get the same controls the Deal Pipeline uses.
+
+What changed (`src/equityfundingsource-dev`):
+- **Collapsible lanes** — each expanded lane has a `-` collapse control; collapsed lanes become a thin **76px count rail** with a `+` expand control. Empty lanes **auto-collapse** by default (`investor_lane_is_collapsed_` = override ?? `count === 0`); an explicit click records a per-lane override that wins over the empty default.
+- **Horizontal collapsed-lane title** — the rail renders its title **horizontally in mixed-case** (`writing-mode:horizontal-tb`, no rotation, no all-caps), tinted with the lane accent, full label preserved in the tooltip. The five stage names are already short, so no short-alias map was needed.
+- **Card density toggle** — a board-level **Roomy / Compact** control persisted as `?density=compact`. Compact narrows lane width (280px → 238px), tightens lane gap + card padding, and condenses each card's routine email/accreditation/lender rows into one scannable line.
+- The collapsed **Active** rail keeps its drop target and the **awaiting-wire** block stays visible in both densities, so drag-to-confirm-wire (#vd8s-dragwire) survives collapse + compact.
+
+Spec + tests (per `#spec-test-commit-push`):
+- `prds/investor-pipeline-admin.md` — added **Phase 6 — horizontal-width collapse strategy (#lender-pipeline-collapse, shipped)**.
+- `tests/admin-investor-pipeline.test.ts` — 4 new tests: collapse helper + auto-collapse + expand/collapse controls; horizontal mixed-case rail title (asserts no `writing-mode:vertical-rl`); persisted density helpers + Roomy/Compact toggle + lane width/gap; compact one-line card while the awaiting-wire block is preserved.
+
+Verification:
+- `bun test tests/admin-investor-pipeline.test.ts` — 48 pass, 0 fail.
+- `make check` / `bun run check` — **678 pass, 0 fail** + app build + worker build green (the `d1 down` / tmo-outbox lines are expected error-path fixtures). `git diff --check` clean.
+
+Commits / pushes (no deploy — preset was commit + push):
+- EFS submodule: `7d0d691` (`lender pipeline: collapsible lanes + compact density board controls`) → `btakita/equityfundingsource-dev:main`.
+- Superproject pointer: `dd9288e07` (`efs: lender pipeline collapsible/compact board controls`) → `btakita/agent-loop:main`.
+
+CI: no `CI` workflow exists in either repo; the superproject's only workflow (`Agent Doc`) stays blocked at runner-start by the account billing/spending-limit issue — an external CI-start blocker, not a code failure. (Exchange is large at ~230 lines but the queue is active, so I'm continuing the drain rather than pausing to compact.)
+<!-- agent:boundary:05f0593f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -267,7 +293,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Do Option A. deploy
 <!-- /agent:queue -->
 
 ## Backlog

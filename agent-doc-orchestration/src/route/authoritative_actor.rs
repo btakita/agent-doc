@@ -324,17 +324,100 @@ pub(crate) fn authorize_controller_dispatch(
     diagnostic_payload: &str,
 ) -> Result<RouteDispatchAuthorization> {
     let base_dir = registry_base_dir_for_dispatch(file_path);
-    match crate::project_controller::authorize_dispatch(
-        &base_dir,
-        crate::project_controller::DispatchRequest {
-            file: file.to_path_buf(),
-            session_id: session_id.to_string(),
-            pane_id: actor.record.pane_id.clone(),
-            generation: actor.record.generation,
-            command_kind: command_kind.to_string(),
-            diagnostic_payload: diagnostic_payload.to_string(),
-        },
+    let generation = actor.record.generation;
+    let dispatch_request = || crate::project_controller::DispatchRequest {
+        file: file.to_path_buf(),
+        session_id: session_id.to_string(),
+        pane_id: actor.record.pane_id.clone(),
+        generation,
+        command_kind: command_kind.to_string(),
+        diagnostic_payload: diagnostic_payload.to_string(),
+    };
+    match crate::project_controller::authorize_dispatch(&base_dir, dispatch_request()) {
+        Ok(_authorization) => Ok(RouteDispatchAuthorization::Authorized),
+        Err(err) if crate::project_controller::dispatch_error_is_coalesced(&err.to_string()) => {
+            Ok(RouteDispatchAuthorization::CoalescedDeduped {
+                detail: err.to_string(),
+            })
+        }
+        // `#jbrestale`: a `queue_paused` bail whose pause was written by the churn
+        // detector because a STALE supervisor re-injected a head is recoverable —
+        // restart the supervisor once, lift the stale-injected pause, and re-dispatch a
+        // single time instead of failing closed and forcing a manual
+        // `session restart-supervisor --force`. A deliberate operator/spent-preset pause
+        // carries no marker and falls through to the terminal arm.
+        Err(err) => {
+            if let Some(stale_pid) =
+                crate::project_controller::dispatch_error_supervisor_restart_redirect(
+                    &err.to_string(),
+                )
+            {
+                recover_dispatch_via_supervisor_restart(
+                    file,
+                    session_id,
+                    &base_dir,
+                    generation,
+                    stale_pid,
+                    &dispatch_request,
+                    err,
+                )
+            } else {
+                Err(err)
+            }
+        }
+    }
+}
+
+/// `#jbrestale`: one-shot recovery for a dispatch blocked by a stale-supervisor
+/// churn-stop. Restart the supervisor (continue-mode, preserves the live child), lift
+/// the stale-injected queue pause, then re-dispatch exactly once. Bounded to a single
+/// restart + re-dispatch: a still-paused / re-injected queue (or a genuinely wedged one)
+/// surfaces the error to the caller, so there is no restart loop. When the restart could
+/// not even be issued, fail closed with the original bail (it carries the manual
+/// `session restart-supervisor --force` guidance) and keep the pane alive.
+fn recover_dispatch_via_supervisor_restart(
+    file: &Path,
+    session_id: &str,
+    base_dir: &Path,
+    generation: u64,
+    stale_pid: u32,
+    dispatch_request: &dyn Fn() -> crate::project_controller::DispatchRequest,
+    original_err: anyhow::Error,
+) -> Result<RouteDispatchAuthorization> {
+    if !restart_via_supervisor(file, session_id) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_recovery action=restart_supervisor cause=churn_stop_stale_supervisor stale_pid={stale_pid} result=reexec_failed"
+            ),
+        );
+        return Err(original_err);
+    }
+    // Lift the stale-injected pause so the re-dispatch is not re-blocked by the same
+    // churn-stop. Pass the observed generation (the dispatch target's) so the resume is
+    // not rejected as `missing_observed_generation`. A failed resume is non-fatal — the
+    // re-dispatch below simply fails closed again if the pause somehow survives.
+    match crate::project_controller::control_queue(
+        base_dir,
+        Some(file),
+        "resume",
+        Some(generation),
+        Some("#jbrestale: auto-resume after restarting stale supervisor"),
+        None,
     ) {
+        Ok(_) => {}
+        Err(e) => eprintln!(
+            "[route] warning: failed to lift stale-injected queue pause for {}: {e}",
+            file.display()
+        ),
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_dispatch_recovery action=restart_supervisor cause=churn_stop_stale_supervisor stale_pid={stale_pid} result=restarted"
+        ),
+    );
+    match crate::project_controller::authorize_dispatch(base_dir, dispatch_request()) {
         Ok(_authorization) => Ok(RouteDispatchAuthorization::Authorized),
         Err(err) if crate::project_controller::dispatch_error_is_coalesced(&err.to_string()) => {
             Ok(RouteDispatchAuthorization::CoalescedDeduped {

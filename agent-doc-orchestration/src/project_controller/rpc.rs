@@ -375,6 +375,40 @@ pub fn dispatch_error_is_coalesced(message: &str) -> bool {
 /// the #qflood coalesce marker.
 pub const DISPATCH_STALE_GENERATION_REDIRECT_MARKER: &str = "stale_generation_redirect";
 
+/// `#jbrestale`: marker a `queue_paused` dispatch bail carries when the pause was
+/// caused by a STALE supervisor re-injecting an already-answered/operator-verify head
+/// (a churn-stop). The route dispatch path (`authorize_controller_dispatch`) recognizes
+/// it, restarts the stale supervisor once, lifts the stale-injected pause, and
+/// re-dispatches a single time instead of failing closed and forcing the operator to
+/// run `session restart-supervisor --force` by hand. Like the stale-generation marker
+/// it survives `request_controller`'s `project controller command \`dispatch\` failed:
+/// …` IPC wrapping. The bail still carries the human reason + the manual hint, so a
+/// `reexec_failed` fallback stays actionable.
+pub const DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER: &str = "supervisor_restart_redirect";
+
+/// `#jbrestale`: classify a failed dispatch as a recoverable stale-supervisor
+/// churn-stop and extract the stale supervisor PID named in the bail (`stale_pid=<N>`,
+/// `0` when the pause reason did not name one) for the `route_dispatch_recovery …
+/// stale_pid=<pid>` proof line. Returns `None` for every other failure so a deliberate
+/// operator pause, a spent-preset pause, or a genuinely-wedged queue stays terminal and
+/// never triggers a restart. Pure and UTF-8 safe.
+pub fn dispatch_error_supervisor_restart_redirect(message: &str) -> Option<u32> {
+    if !message.contains(DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER) {
+        return None;
+    }
+    let pid = message
+        .split("stale_pid=")
+        .nth(1)
+        .map(|rest| {
+            rest.chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+        })
+        .and_then(|digits| digits.parse::<u32>().ok())
+        .unwrap_or(0);
+    Some(pid)
+}
+
 /// `#anw0`: classify a failed dispatch as a stale-generation redirect and extract the
 /// current (N+1) generation to retry against. Returns `None` for every other failure —
 /// including a *terminal* stale_generation reject whose current actor is Closed/Blocked
@@ -1202,7 +1236,6 @@ pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
 /// pure, testable half of that decision; it must NOT trigger recovery on its own — a
 /// misleading reason string must not start a restart loop without the live staleness
 /// confirmation. Wiring into the dispatch bail is the clean-session remainder of `#jbrestale`.
-#[allow(dead_code)] // seam-isolated groundwork; wired in the clean-session #jbrestale rung
 pub(crate) fn pause_reason_is_stale_supervisor_churn_stop(reason: &str) -> bool {
     let r = reason.to_ascii_lowercase();
     if r.contains("supervisor_binary_stale") || r.contains("stale supervisor") {
@@ -1219,7 +1252,6 @@ pub(crate) fn pause_reason_is_stale_supervisor_churn_stop(reason: &str) -> bool 
 /// `route_dispatch_recovery … stale_pid=<pid>` proof line. Returns `None` when no
 /// `pid<N>` / `pid <N>` token is present. Pure and UTF-8 safe (operates on the lowercased
 /// copy and slices only at ASCII boundaries via `split`).
-#[allow(dead_code)] // seam-isolated groundwork; wired in the clean-session #jbrestale rung
 pub(crate) fn stale_supervisor_pid_from_pause_reason(reason: &str) -> Option<u32> {
     let lower = reason.to_ascii_lowercase();
     let rest = lower.split("pid").nth(1)?;
@@ -2624,12 +2656,37 @@ pub(crate) fn handle_dispatch(
                 dispatch_receipt_id: Some(receipt.receipt_id),
             },
         )?;
+        // `#jbrestale`: a `queue_paused` whose pause was written by the churn detector
+        // because a STALE supervisor re-injected an already-answered/operator-verify
+        // head is recoverable by recycling the supervisor — not a terminal operator
+        // pause. Tag the bail with the restart-redirect marker + the named stale PID so
+        // the route dispatch path can restart the supervisor once, lift this pause, and
+        // re-dispatch instead of failing closed. A deliberate operator/spent-preset
+        // pause does not classify and stays terminal.
+        let recovery_suffix = if stage == "queue_paused"
+            && pause_reason_is_stale_supervisor_churn_stop(reason)
+        {
+            let stale_pid = stale_supervisor_pid_from_pause_reason(reason).unwrap_or(0);
+            crate::ops_log::log_op(
+                &file,
+                &format!(
+                    "dispatch_queue_paused_stale_supervisor file={} stale_pid={} marker={}",
+                    file.display(),
+                    stale_pid,
+                    DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER
+                ),
+            );
+            format!(" {DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER} stale_pid={stale_pid}")
+        } else {
+            String::new()
+        };
         anyhow::bail!(
-            "dispatch blocked for {}: failed_stage={} reason={} receipt_id={}",
+            "dispatch blocked for {}: failed_stage={} reason={} receipt_id={}{}",
             file.display(),
             stage,
             reason,
-            receipt.receipt_id
+            receipt.receipt_id,
+            recovery_suffix
         );
     }
     let mut failed_stage = None;
@@ -4569,6 +4626,32 @@ mod tests {
         );
         assert_eq!(p("stale supervisor (no pid named)"), None);
         assert_eq!(p("supervisor_binary_stale pane=%25"), None);
+    }
+    #[test]
+    fn dispatch_error_supervisor_restart_redirect_classification() {
+        use super::dispatch_error_supervisor_restart_redirect as r;
+        // `#jbrestale`: a queue_paused bail tagged with the restart-redirect marker is
+        // recoverable; the named stale pid is extracted for the proof line.
+        assert_eq!(
+            r("project controller command `dispatch` failed: dispatch blocked for x.md: failed_stage=queue_paused reason=churn-stop: stale supervisor pid1368698; needs operator recycle receipt_id=42 supervisor_restart_redirect stale_pid=1368698"),
+            Some(1368698)
+        );
+        // Marker present but no pid named → recoverable with pid 0 (proof line still emits).
+        assert_eq!(
+            r("dispatch blocked: failed_stage=queue_paused reason=supervisor_binary_stale receipt_id=7 supervisor_restart_redirect stale_pid=0"),
+            Some(0)
+        );
+        // No marker → terminal (a deliberate operator/spent-preset pause never restarts).
+        assert_eq!(
+            r("dispatch blocked for x.md: failed_stage=queue_paused reason=advance-review preset head is spent receipt_id=9"),
+            None
+        );
+        // A coalesce / stale-generation failure must not be misread as a restart redirect.
+        assert_eq!(r("dispatch coalesced for x.md (#qflood); receipt_id=3"), None);
+        assert_eq!(
+            r("dispatch rejected: requested generation 1, current generation 2 (stale_generation_redirect retry_generation=2)"),
+            None
+        );
     }
     #[test]
     fn recycle_debounce_decision_requires_continuous_idle_grace() {

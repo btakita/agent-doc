@@ -3766,6 +3766,117 @@ mod tests {
                     && operation.status == "accepted")
         );
     }
+
+    /// `#jbrestale`: a `queue_paused` dispatch bail whose pause reason is a stale-supervisor
+    /// churn-stop must carry the `supervisor_restart_redirect` marker + the named stale pid
+    /// (so the route path restarts + re-dispatches once), while a deliberate operator pause
+    /// must stay terminal (no marker → fail closed).
+    #[test]
+    fn dispatch_queue_paused_stale_supervisor_emits_restart_redirect_marker() {
+        fn paused_dispatch_error(pause_reason: &str) -> String {
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            let doc = dir.path().join("tasks/jbrestale.md");
+            std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+            std::fs::write(
+                &doc,
+                "---\nagent_doc_session: session-jbr\nagent: codex\n---\nBody\n",
+            )
+            .unwrap();
+            let bootstrap = test_bootstrap(&dir);
+            let mut should_stop = false;
+            crate::session_actor::record_session_start_direct(&doc, "session-jbr", "%52", "@1", 1)
+                .unwrap();
+            crate::session_actor::transition_state_direct(
+                &doc,
+                "session-jbr",
+                "%52",
+                Some(1),
+                crate::session_actor::ActorState::Ready,
+                "supervisor",
+                "prompt_ready",
+            )
+            .unwrap();
+            let pause = ControllerRequest {
+                command: "queue_control".to_string(),
+                file: Some(doc.clone()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: Some(1),
+                state: Some("pause".to_string()),
+                caller: Some("admin".to_string()),
+                reason: Some(pause_reason.to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: Some("pause".to_string()),
+                diagnostic_payload: None,
+            };
+            let response = handle_request(
+                &(serde_json::to_string(&pause).unwrap() + "\n"),
+                &bootstrap,
+                &mut should_stop,
+            )
+            .unwrap();
+            let envelope: ControllerEnvelope<ControllerAdminReceipt> =
+                serde_json::from_str(&response).unwrap();
+            assert_eq!(envelope.data.unwrap().status, "accepted");
+            let dispatch = ControllerRequest {
+                command: "dispatch".to_string(),
+                file: Some(doc.clone()),
+                session_id: Some("session-jbr".to_string()),
+                pane_id: Some("%52".to_string()),
+                window_id: None,
+                generation: Some(1),
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: Some("managed_reopen".to_string()),
+                diagnostic_payload: Some("jbrestale paused dispatch".to_string()),
+            };
+            let response = handle_request(
+                &(serde_json::to_string(&dispatch).unwrap() + "\n"),
+                &bootstrap,
+                &mut should_stop,
+            )
+            .unwrap();
+            let envelope: ControllerEnvelope<DispatchAuthorization> =
+                serde_json::from_str(&response).unwrap();
+            assert!(!envelope.ok);
+            envelope.error.unwrap_or_default()
+        }
+
+        // Stale-supervisor churn-stop → recoverable: marker + pid present so the route
+        // path restarts the supervisor and re-dispatches once.
+        let recoverable = paused_dispatch_error(
+            "churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain",
+        );
+        assert!(recoverable.contains("failed_stage=queue_paused"));
+        assert!(
+            recoverable.contains(crate::project_controller::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER),
+            "stale-supervisor pause must carry the restart-redirect marker: {recoverable}"
+        );
+        assert_eq!(
+            crate::project_controller::dispatch_error_supervisor_restart_redirect(&recoverable),
+            Some(1368698)
+        );
+
+        // Deliberate spent-preset pause → terminal: no marker, stays fail-closed.
+        let terminal = paused_dispatch_error(
+            "advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line",
+        );
+        assert!(terminal.contains("failed_stage=queue_paused"));
+        assert!(
+            !terminal.contains(crate::project_controller::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER),
+            "deliberate operator pause must NOT carry the restart-redirect marker: {terminal}"
+        );
+        assert_eq!(
+            crate::project_controller::dispatch_error_supervisor_restart_redirect(&terminal),
+            None
+        );
+    }
     #[test]
     fn controller_admin_handoff_and_reap_require_observed_generation() {
         let dir = tempfile::TempDir::new().unwrap();

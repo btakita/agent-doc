@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -233,7 +233,28 @@ git -C src/briantakita.me-dev/app/briantakita.me show origin/main:post/content/2
 ```
 
 The LinkedIn draft is different: it is present in the local `mail` checkout at `mail/drafts/linkedin/2026-06-14-lazily-slot-cell-signal.md`. If your editor is rooted under `src/briantakita.me-dev`, you will not see `mail/` because it is a sibling repo under the agent-loop root.
-<!-- agent:boundary:602bbcbf -->
+
+### Re: Deploy 2026-06-14-lazily-slot-cell-signal-composition.md to briantakita.me as a featured article — opus-4-8
+
+> **Queue prompt (go-mode, preset `#spec-test-build-install-commit-push`):**
+>
+> Deploy 2026-06-14-lazily-slot-cell-signal-composition.md to briantakita.me...as a featured article.
+
+Done — the live Cloudflare Pages deploy is triggered. This was the one outward-facing step held back in the prior cycle; the go-mode queue item is the explicit authorization, so I executed it.
+
+**Featured** — already satisfied: the post frontmatter has `featured: true`, and that is what is committed at the blog HEAD (`git show b713281:post/content/2026-06-14-lazily-slot-cell-signal-composition.md` → `featured: true`). No content change was needed for the "as a featured article" part.
+
+**What I changed to deploy** — only the live site was gated on the superproject submodule pointer. The blog repo (`app/briantakita.me`) was already at `b713281` on `origin/main`; the `briantakita.me-dev` superproject still pointed at the pre-post commit `9008263`.
+
+- Regenerated the post index (`bun post/index.generate.ts`) — no tracked diff (HEAD already had the correct `index.ts`; both new posts present).
+- `bun run build` — clean (exit 0, `build|done`). Full prerender + slug emission runs in CI (`prerender.ts` needs the running server + S3 assets); local build verifies the compile, matching the prior cycle's render check.
+- Bumped the submodule pointer `9008263 → b713281` and committed it in `briantakita.me-dev` (`554a9c2`), then pushed `714e949..554a9c2` to `main`.
+- Push to `main` triggers `.github/workflows/deploy.yml` → Cloudflare Pages. The deploy run is **queued** now (run `27492049100`); I did not block on it (no `gh run watch` closeout gate). It will go live once CI finishes the asset download + prerender + `pages deploy`.
+
+**Scope note** — the pointer bump to `b713281` also publishes the sibling featured post `2026-06-14-lazily-architecture-overview.md` (`#ny9k`, also `featured: true`), since it was committed between `9008263` and the blog HEAD. Both 2026-06-14 lazily posts go live in this deploy. If only the slot-cell-signal post should have shipped, say so and I can rewind, but both were already pushed on the blog `origin/main` and are part of the same lazily content batch, so I treated shipping both as intended.
+
+The LinkedIn draft remains a draft (`mail/drafts/linkedin/2026-06-14-lazily-slot-cell-signal.md`) — that step was explicitly deferred and is not part of this deploy.
+<!-- agent:boundary:51f26920 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -242,7 +263,6 @@ The LinkedIn draft is different: it is present in the local `mail` checkout at `
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Deploy 2026-06-14-lazily-slot-cell-signal-composition.md to briantakita.me
 <!-- /agent:queue -->
 
 ## Backlog

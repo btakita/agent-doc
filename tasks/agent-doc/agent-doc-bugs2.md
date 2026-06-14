@@ -122,7 +122,25 @@ Net effect: a concurrent/self-recycle launch waits out the in-flight launcher an
 **Verification:** added two unit tests (`blocking_launch_lock_waits_for_holder_then_acquires`, `blocking_launch_lock_times_out_when_holder_never_releases`); `make check` green (exit 0, no FAILED); `cargo build --release` + `cargo install --path .` done (`~/.cargo/bin/agent-doc` and `.bin` → release both refreshed). Latest CI run is green; this change isn't pushed yet.
 
 Note: the supervisor currently serving this document (pid 2715614) predates the new binary, so the live proof — a real recycle race no longer surfacing the os-error-11 on the pane — is operator-drive (queued as `[operator-verify] #suprecyclelock`). Restart the supervisor to pick up the fix.
-<!-- agent:boundary:b4783d4e -->
+
+### Re: supervisor hot-reload os-error-11 — fix now committed + pushed — opus-4-8
+
+The prior `#suprecyclelock` response root-caused this correctly but left the fix **uncommitted in the working tree** — it claimed "build + install done" yet never `git commit`ed, so the two-file `LaunchLock::acquire_blocking` change was sitting as `M` in `src/agent-doc`. That's the one genuinely agent-drainable thing this cycle, so I finished it:
+
+- Verified the working-tree change matches the described fix (`acquire_blocking` + `connect_or_launch` adopt-on-acquire + 2 unit tests).
+- `make check` green — real exit 0, zero `result: FAILED` (captured the real exit code, not the rtk-masked one).
+- Committed agent-doc **`ce7f3e7d`**, pushed to `origin/main`; superproject pointer **`484eadcfa`** committed + pushed.
+- agent-doc CI for `ce7f3e7d` is **in progress** (recorded as pending; closing out from green local evidence per the SKILL, not blocking on `gh run watch`).
+
+**Nothing else here is agent-drainable.** The live recycle-race proof is already tracked as `[operator-verify] #1j8q` — it can't be agent-done (needs a real concurrent-launcher race over a freshly-installed binary). Every other remaining head is `[clean-session]`/`[operator-verify]` and the route-owned host supervisor (pid 2715614) is still **stale** (predates the installed binary), so I am **not** installing against it mid-session (`#no-mid-session-install`/`#fcc0`) and **not** auto-looping (the queue's remaining free-text heads are `#qchurn` no-op churn). To land the clean-session backlog, restart onto a fresh binary:
+
+```
+cd src/agent-doc && make install
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+
+then drain from a fresh `/agent-doc`.
+<!-- agent:boundary:38094a1a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -141,7 +159,7 @@ Note: the supervisor currently serving this document (pid 2715614) predates the 
                        Resource temporarily unavailable (os error 11)
 ```
 ---
-- :pushpin: [#qchurn]
+- ~~:pushpin: [#qchurn]~~
 - :pushpin: [#anw0verify]
 - :pushpin: [#jbrestale]
 - :pushpin: [#mphaseloop]

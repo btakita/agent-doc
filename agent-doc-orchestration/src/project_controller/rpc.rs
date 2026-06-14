@@ -1109,6 +1109,59 @@ pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
     resolve_supervisor_auto_recycle(env.as_deref(), frontmatter, project)
 }
 
+/// `#jbrestale` — seam-isolated classifier (NOT yet wired into the dispatch bail).
+///
+/// Given a stored `queue_paused` pause `reason`, decide whether the pause was caused by a
+/// STALE supervisor re-injecting a head — a churn-stop that recycling the supervisor onto
+/// the freshly-installed binary would clear — as opposed to a deliberate operator pause
+/// (for example a spent prompt-preset pause) or a genuinely-wedged queue.
+///
+/// The dispatch path records whatever reason text was set when the pause was created. A
+/// stale-supervisor churn-stop carries one of the discriminators the churn detector /
+/// operator writes:
+///   - `supervisor_binary_stale`
+///   - `stale supervisor pid…`
+///   - an explicit `needs operator recycle` remedy on a `churn-stop`
+///
+/// When this returns true AND the live supervisor is actually stale (confirmed separately
+/// via [`process_binary_is_stale`] / [`current_binary_identity`]), the dispatch handler may
+/// branch to restart-supervisor + re-dispatch-once instead of failing closed. This is the
+/// pure, testable half of that decision; it must NOT trigger recovery on its own — a
+/// misleading reason string must not start a restart loop without the live staleness
+/// confirmation. Wiring into the dispatch bail is the clean-session remainder of `#jbrestale`.
+#[allow(dead_code)] // seam-isolated groundwork; wired in the clean-session #jbrestale rung
+pub(crate) fn pause_reason_is_stale_supervisor_churn_stop(reason: &str) -> bool {
+    let r = reason.to_ascii_lowercase();
+    if r.contains("supervisor_binary_stale") || r.contains("stale supervisor") {
+        return true;
+    }
+    // "needs operator recycle" only counts on a churn-stop (the remedy text the churn
+    // detector writes); a bare "recycle" mention elsewhere must not match.
+    let is_churn_stop = r.contains("churn-stop") || r.contains("churn_stop");
+    is_churn_stop && r.contains("needs operator recycle")
+}
+
+/// `#jbrestale` — best-effort extraction of the stale supervisor PID named in a churn-stop
+/// reason (for example `… re-injected by stale supervisor pid1368698 (pre-0.34.0) …`) for the
+/// `route_dispatch_recovery … stale_pid=<pid>` proof line. Returns `None` when no
+/// `pid<N>` / `pid <N>` token is present. Pure and UTF-8 safe (operates on the lowercased
+/// copy and slices only at ASCII boundaries via `split`).
+#[allow(dead_code)] // seam-isolated groundwork; wired in the clean-session #jbrestale rung
+pub(crate) fn stale_supervisor_pid_from_pause_reason(reason: &str) -> Option<u32> {
+    let lower = reason.to_ascii_lowercase();
+    let rest = lower.split("pid").nth(1)?;
+    let digits: String = rest
+        .trim_start_matches([' ', '=', ':', '#'])
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse().ok()
+    }
+}
+
 /// `#ctlrecycle` — pure debounce decision shared by controller (R1) and supervisor
 /// (R3). Given whether the process currently "wants recycle AND is idle", the
 /// instant staleness was first observed, the clock, and the grace window, returns
@@ -4184,6 +4237,37 @@ mod tests {
         // Nothing set anywhere → default OFF.
         assert!(!r(None, None, None));
         assert!(!r(Some(""), None, None));
+    }
+    #[test]
+    fn pause_reason_stale_supervisor_churn_stop_classification() {
+        use super::pause_reason_is_stale_supervisor_churn_stop as c;
+        // `#jbrestale` live-repro churn-stop reason → recoverable by recycle.
+        assert!(c("churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain"));
+        // Explicit discriminators (case-insensitive).
+        assert!(c("supervisor_binary_stale pane=%25"));
+        assert!(c("re-injected by Stale Supervisor PID 42"));
+        // `churn-stop` + the recycle remedy with no other signature still recovers.
+        assert!(c("churn-stop: repeated injection; needs operator recycle"));
+        // Deliberate spent-preset pause → NOT a stale-supervisor recovery (must fail closed).
+        assert!(!c("advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line"));
+        // Plain operator pause → not recoverable.
+        assert!(!c("operator paused for manual review"));
+        // A churn-stop with neither a stale signature nor the recycle remedy → not recoverable.
+        assert!(!c("churn-stop: repeated no-op closeouts"));
+    }
+    #[test]
+    fn stale_supervisor_pid_extraction() {
+        use super::stale_supervisor_pid_from_pause_reason as p;
+        assert_eq!(
+            p("re-injected by stale supervisor pid1368698 (pre-0.34.0)"),
+            Some(1368698)
+        );
+        assert_eq!(
+            p("stale supervisor pid 2825163; needs operator recycle"),
+            Some(2825163)
+        );
+        assert_eq!(p("stale supervisor (no pid named)"), None);
+        assert_eq!(p("supervisor_binary_stale pane=%25"), None);
     }
     #[test]
     fn recycle_debounce_decision_requires_continuous_idle_grace() {

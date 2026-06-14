@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -199,7 +199,23 @@ Done. Wrote a focused blog post and a LinkedIn draft on the `Cell → Slot → S
 - LinkedIn draft: `mail` repo → `b53fb6d`, pushed.
 
 **Held for you — live publish is the one outward-facing action.** Pushing the **superproject** `briantakita.me-dev` to `main` triggers `.github/workflows/deploy.yml` → Cloudflare Pages, i.e. it publishes the post live and public. I left the superproject submodule-pointer bump to your normal flow (consistent with the prior docs-cycle handling), so nothing is live until you bump + push it. The LinkedIn item was explicitly a *draft*, so I treated the blog the same way for the irreversible step. To go live: in `briantakita.me-dev`, `git add app/briantakita.me && git commit` the pointer bump → push (auto-deploys). LinkedIn: review the draft, then `/linkedin post mail/drafts/linkedin/2026-06-14-lazily-slot-cell-signal.md` after attaching a rendered diagram image.
-<!-- agent:boundary:3379125b -->
+
+### Re: Where are the blog post and LinkedIn draft?
+
+> **Queue prompt:**
+>
+> I don't see either the blog post or the LinkedIn draft in the editor. Where are they?
+
+
+They are not embedded in the agent-doc editor body. They were written into the content repos.
+
+- **LinkedIn draft:** `mail/drafts/linkedin/2026-06-14-lazily-slot-cell-signal.md`. This one is present in the local `mail` checkout; `mail/main` is currently at `17d8acf`, and the Slot -> Cell -> Signal draft landed in `b53fb6d`.
+- **Blog post:** `src/briantakita.me-dev/app/briantakita.me/post/content/2026-06-14-lazily-slot-cell-signal-composition.md`, inside the nested `app/briantakita.me` repo. The post landed in blog commit `55b5bf3` on `origin/main`.
+
+Why you do not see the blog post in the editor yet: the nested blog repo checkout is still at `9008263`, so the file is on the fetched remote branch but not in the currently checked-out worktree. I fetched while checking; `origin/main` for `src/briantakita.me-dev/app/briantakita.me` is now `b713281`, with `55b5bf3` as the commit that added this post. The outer `src/briantakita.me-dev` superproject pointer also was not bumped, so it is still not live/published.
+
+If your editor is rooted at `src/briantakita.me-dev`, you also will not see the LinkedIn draft because `mail/` is a sibling repo under the agent-loop root.
+<!-- agent:boundary:89aa88d5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -208,7 +224,6 @@ Done. Wrote a focused blog post and a LinkedIn draft on the `Cell → Slot → S
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- I don't see either the blog post or the LinkedIn draft in the editor. Where are they?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -255,7 +255,7 @@ Logged as another live repro of the stale-supervisor stall class — not a new b
 **I am not restarting the lazily.rs supervisor from here.** It's a different live session; touching its supervisor mid-flight races its own writes (the exact #ipcdrift multi-owner hazard). That's an operator action "when convenient," or it gets auto-handled once #jbrestale lands.
 
 **Same flag on THIS doc:** preflight warns this session's own supervisor (pid 2715614) is also stale (#fcc0). When convenient: `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`.
-<!-- agent:boundary:b925d08a -->
+<!-- agent:boundary:f898e259 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -271,7 +271,7 @@ Logged as another live repro of the stale-supervisor stall class — not a new b
   restart it with agent-doc session restart-supervisor tasks/software/lazily-rs.md --force to pick up the latest fixes.
 ```
 ---
-- ~~:pushpin: [#anw0verify]~~
+- :pushpin: [#anw0verify]
 - :pushpin: [#jbrestale]
 - :pushpin: [#mphaseloop]
 - :round_pushpin: do [#4myd]

@@ -148,7 +148,24 @@ then drain from a fresh `/agent-doc`.
 **Shipped the fallback runbook (done this turn).** New bundled, dogfooding-only runbook `runbooks/dogfood-supervisor-refresh.md` documents the post-finalize `make check` → `cargo build --release` → `cargo install` → `lib-install` → commit+push → `session restart-supervisor` bootstrap, explicitly marked as a stopgap the binary should own once the self-heal family lands. Registered in `BUNDLED_RUNBOOKS`, referenced in the SKILL.md catalog, regenerated all four harness mirrors (Claude/Codex/OpenCode/Cursor). `make check` + submodule `audit-docs` green. Committed + pushed: agent-doc **`59b40eca`**, superproject **`68f91c452`**. Queued `#dfrefresh-retire` to delete the stopgap once `#jbrestale` + `#recyclerestart` prove the binary self-heals.
 
 **Automating the bootstrap now.** Binary is built + installed + cdylib refreshed (lib-install confirms the running controllers still serve the prior build until recycled). As the final step of this turn I'm restarting this document's supervisor onto the new binary — after this closeout commits, so nothing is lost if the restart recycles the pane. Once a new-binary supervisor is in place, the idle-boundary self-recycle is live and future stale builds promote themselves.
-<!-- agent:boundary:327ab1d6 -->
+
+### Re: add the supervisor hot-reload issue to the dogfood reinstall runbook + backlog + queue — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Add to the dogfood reinstall runbook...add a backlog item with the issue. Make sure it is also added to the queue.
+
+
+Done all three. "The issue" is the supervisor hot-reload `controller launch already in progress` / **os error 11** that aborted a `next_queue_item` self-recycle (the `#suprecyclelock` launch-lock contention, fixed in agent-doc `ce7f3e7d`).
+
+**1. Documented it in the dogfood reinstall runbook.** Added a `## Troubleshooting` section to `runbooks/dogfood-supervisor-refresh.md` covering the os-error-11 hot-reload symptom: the exact pane error, the cause (non-blocking `try_lock_exclusive` on the shared per-project-root `controller-launch.lock` losing to a concurrent launcher → `EWOULDBLOCK`), the fix (`LaunchLock::acquire_blocking` adopt-on-acquire), and the idempotent recovery on a pre-fix binary. Edited the canonical source under `src/agent-doc/runbooks/` and regenerated all four harness mirrors (Claude/Codex/OpenCode/Cursor) so they stay byte-identical. `cargo run -- audit-docs` is green (no blocking issues; 4 mtime advisories only).
+
+**2. Added the backlog item.** `#suprehotreload` — add deterministic SimWorld coverage for the self-recycle launch-lock contention: simulate a concurrent launcher holding the lock during a hot-reload and assert `acquire_blocking` adopts the published controller instead of EWOULDBLOCK-aborting. This is the genuinely agent-actionable residual (the fix + 2 unit tests already shipped; the live race proof is the separate operator-verify `#1j8q`).
+
+**3. Added it to the queue.** `agent-doc queue sync` pulled the new `queue`-attr backlog id in — `- do [#suprehotreload]` is now a queue head (19 backlog ids → 27 queue prompts, append mode).
+
+No Rust source changed this turn (runbook + backlog/queue only), so the instruction-surface verification is `audit-docs`, not the full Rust suite; the SimWorld test itself is the queued `#suprehotreload` work. Note the route-owned host supervisor (pid 2715614) is still on a **stale** build, so this closeout went `--force-disk` to sidestep its IPC drift — restart it (`agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`) to pick up the latest fixes.
+<!-- agent:boundary:3b1b3516 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -167,7 +184,7 @@ then drain from a fresh `/agent-doc`.
                        Resource temporarily unavailable (os error 11)
 ```
 ~~~
-- :pushpin: Add to the dogfood reinstall runbook...add a backlog item with the issue. Make sure it is also added to the queue.
+- ~~:pushpin: Add to the dogfood reinstall runbook...add a backlog item with the issue. Make sure it is also added to the queue.~~
 - :pushpin: [#qchurn]
 - :pushpin: [#anw0verify]
 - :pushpin: [#jbrestale]
@@ -235,6 +252,10 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
 ---
 - :pushpin: upgrade dependencies
+- do [#suprehotreload]
+- do [#dfrefresh-retire]
+- do [#1j8q]
+- do [#ar27]
 <!-- /agent:queue -->
 ###
 <!--

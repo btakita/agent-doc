@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -59,7 +59,28 @@ Deployed the EFS worker to production. The `#spec-test-commit-push` preset porti
 This ships the latest committed admin/lender pipeline work (collapsible lanes + compact density board controls, `7d0d691`).
 
 Note: a concurrent compaction had truncated the working-tree session doc to a stale snapshot before this write; recovered via `reset --from-current --preserve-session` + `commit` (`3843a096c`) so the compaction landed before this response.
-<!-- agent:boundary:bd796647 -->
+
+### Re: Fix the formatting of the address in this pipeline card — opus-4-8
+
+> **Queue prompt:**
+>
+> Fix the formatting of the address in this card ![img_14.png](img_14.png) on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline
+
+
+Fixed. The `Application Received` card heading was rendering the **entire** borrower address wrapped one word per line (`PO Box 571, North Grosvenordale, CT, 06255 - Takita, Brian`). Two compounding causes:
+
+1. **Content** — the EFS fallback dumped the full multi-part address into the title's `{property address short}` slot (the spec says *short*).
+2. **Layout** — the nowrap stage pill (`APPLICATION RECEIVED`) + `Aging 0d` badge shared the title's flex row and starved it of width, collapsing the heading to a ~60px column so even short text broke word-by-word.
+
+**Fix (`#pipeline-card-address-fmt`, committed + pushed):**
+- `repo.ts` — new `pipeline_card_street_line_` collapses a full `{street}, {city}, {state} {zip}` address to just its street line (segment before the first comma); a bare street is unchanged. `pipeline_card_title_` now uses it, so the heading is `PO Box 571 - Takita, Brian` for both TMO and EFS-fallback data. The full address still shows in the card footer.
+- `pipeline.tsx` — the loan card heading now owns a full-width header row (title + actions menu only), with the stage/aging chips moved to a following `flex-wrap` row, and the title allows `overflow-wrap:anywhere`. The nowrap chips can no longer squeeze it.
+- `shared.ts` re-export + PRD Phase H + tests for the collapse and the layout.
+
+**Verification:** full suite green (680 pass, incl. 52 pipeline tests), `bun run build` + `build:worker` clean. No D1 migration. The EFS repo has no CI workflow configured.
+
+**Not yet live:** the preset was `#spec-test-commit-push` (no deploy), so this is on `main` (submodule `30c208c`, superproject `b4c2c4853`) but not yet on the workers.dev URL. Queued a recommended `bun run deploy:worker` backlog item to ship it.
+<!-- agent:boundary:83a7c9f7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,12 +88,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Fix the formatting of the address in this card ![img_14.png](img_14.png) on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#aww2] [recommended] Deploy the EFS worker so the #pipeline-card-address-fmt card-heading fix shows on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline (bun run deploy:worker). Committed+pushed but not yet deployed.
 <!-- /agent:backlog -->
 
 ## Review

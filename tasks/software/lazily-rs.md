@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -39,7 +39,32 @@ queue: start
 Compacted content:
 - Archived 4 response topic(s): release + publish; do [#12b1]; #advance-review; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:92d89161 -->
+
+### Re: #advance-review — opus-4-8
+
+> **Queue prompt:**
+>
+> #advance-review
+
+
+> **Queue prompt (preset `#advance-review`):** Go through the review items. Add actionable backlog items to complete or advance the review items.
+
+Recovered the session first — a `compact exchange` had left the working tree/snapshot compacted while HEAD was still pre-compact (`unsafe_user_content_drift`). Used `reset --from-current --preserve-session` → `commit` (not plain `commit`, which would have un-compacted) to land the compacted exchange at HEAD, then ran the review triage.
+
+Went through all 5 gated review items against the actual `src/lazily-rs` tree (HEAD `64c7f3f`):
+
+**Resolved — #jpf1 (`#webrtc-data`).** The data-channel transport is already shipped: `webrtc_transport.rs` (tagged `#webrtc2 / #jpf1`) defines the `DataChannel` trait, the permission-filtered `WebRtcSink`/`WebRtcSource` IPC bridge, and `InMemoryDataChannel`; `str0m_backend.rs` gives the concrete str0m loopback backend (`Str0mLoopback`/`Str0mChannel: DataChannel`, with a passing `loopback_datachannel_carries_a_snapshot` test); and `str0m_net.rs` (#lzwebrtcnet) adds the real networked backend (UDP/DTLS/SCTP). "Peer-to-peer IPC beyond signaling" is done — the only remaining slice is live cross-host validation, which is already tracked separately by #h6qb. Archived to `agent:done`.
+
+**Advanced — #h6qb (`#lzwebrtcnet-e2e`, operator-drive).** Confirmed the wiring gap is real: `signaling_client.rs` has **zero** references to `Str0mNet` / `accept_answer` / `add_remote_candidate`. The SignalingClient↔Str0mNet glue plus a localhost handshake test is pure agent work, so I split it out as actionable backlog **#lzwebrtcwire**. Once that lands, #h6qb shrinks to just the live two-host/NAT run through the deployed #yxjw Worker (genuinely operator-only).
+
+**Advanced — #12b1 (`#lzpub011`, operator-drive token rotation).** Found a release-tag hazard while inspecting the tree: HEAD `64c7f3f` (#lzwebrtcnet) sits **one commit ahead** of the unpublished `v0.11.0 @ 03582f5`, so the publish-when-token-rotates instruction in the review item would ship stale code. Captured **#lzpub011prep** to resolve the tag position (move-forward vs 0.12.0 bump) and run a `cargo publish --dry-run` readiness check, so the operator's eventual token rotation is a one-shot. The token rotation itself stays operator-gated.
+
+**Left gated, no agent-actionable advance:**
+- **#xccx (`#lzholons`)** — Phase 0 is blocked on Steve Melville answering the 7 open questions (holon identity/mapping/change-feed/conflict/permissions/transport/spec). External; nothing to advance until answers land.
+- **#57by (`#lzasyncshuttle`)** — decided NO-GO/defer per #shuttleeval; the trigger to revisit ("async graph grows more concurrency-critical paths") isn't met, so there's no action — left as the gated record of that decision.
+
+Backlog is now ordered **#lzwebrtcwire** (forward progress, unblocked) → **#lzpub011prep** (release prep, ahead of the operator token step). Top of backlog: **#lzwebrtcwire**.
+<!-- agent:boundary:89f35c25 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,12 +73,13 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- #advance-review
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzwebrtcwire] #lzwebrtcwire=Wire SignalingClient offer/answer/ICE <-> Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} (signaling_client.rs has ZERO Str0mNet refs today) + add a localhost two-endpoint integration test that drives the full handshake THROUGH SignalingClient over a loopback signaling channel. This is the agent-doable slice of #h6qb; leaves only the live two-host/NAT run via the deployed #yxjw Worker as operator-drive.
+- [ ] [#lzpub011prep] #lzpub011prep=Resolve v0.11.0 release-tag drift before the operator publish (#12b1): lazily-rs HEAD 64c7f3f (#lzwebrtcnet networked str0m DataChannel backend) is ONE commit AHEAD of the unpublished tag v0.11.0 @ 03582f5. Decide per the unpublished-tag convention — move v0.11.0 -> HEAD, or bump to 0.12.0 if the networked backend warrants a minor. Then run `cargo publish --dry-run --no-verify` to confirm publish-readiness and pre-stage the gh release notes so the operator token rotation is a one-shot.
 <!-- /agent:backlog -->
 
 ## Review
@@ -63,7 +89,6 @@ Compacted content:
 - [/] [#12b1] #lzpub011=[operator-drive] Finish lazily-rs v0.11.0 publish — crates.io upload + GitHub Release are BLOCKED on a revoked crates.io token (403 auth failed on both the env CARGO_REGISTRY_TOKEN and passage btak/CARGO_REGISTRY_TOKEN; both are the same expired cio-prefixed token). Operator: rotate the crates.io token (browser/passkey 2FA), store at passage btak/CARGO_REGISTRY_TOKEN, then from src/lazily-rs run: CARGO_REGISTRY_TOKEN=$(passage btak/CARGO_REGISTRY_TOKEN) cargo publish --no-verify (commit 03582f5 + tag v0.11.0 already pushed), then gh release create v0.11.0 --generate-notes.
 - [/] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.
 - [/] [#57by] #lzasyncshuttle=[operator-gated, NO-GO for now per #shuttleeval] Exhaustive Shuttle async-resolve-loop model. Spike result: Shuttle can model async (has an executor, unlike Loom) but is randomized-not-exhaustive, needs ~140 cfg-swaps + a custom notifier (no tokio::watch equiv) in the hot path, and the two #k03k windows are already deterministically covered. Defer until the async graph grows more concurrency-critical paths. See tasks/software/plan-lazily-async-loom.md.
-- [/] [#jpf1] #webrtc-data=WebRTC data channel transport for peer-to-peer IPC (beyond signaling)
 <!-- /agent:review -->
 
 ## Icebox

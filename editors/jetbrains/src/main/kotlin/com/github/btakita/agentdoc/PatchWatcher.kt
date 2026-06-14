@@ -433,11 +433,58 @@ class PatchWatcher(private val project: Project) : Disposable {
                 refreshVcs()
                 APPLY_APPLIED
             }
+            "save_document" -> {
+                // #jb-editor-save-resolves-drift: the binary detected the editor
+                // buffer is ahead of disk (unsaved edits causing
+                // live_prompt_drift_after_preflight). Flush our buffer to disk so
+                // disk catches up AND the editor's dirty flag clears, then hand the
+                // saved content back via the ack-content sidecar so the binary can
+                // adopt it as a clean on-disk snapshot instead of stalling.
+                val file = extractStringField(json, "file") ?: return APPLY_FAILED
+                val patchId = extractStringField(json, "patch_id")
+                if (saveDocumentViaDocument(file, patchId)) {
+                    APPLY_APPLIED
+                } else {
+                    APPLY_FAILED
+                }
+            }
             else -> {
                 LOG.warn("[socket] Unknown message type: $type")
                 APPLY_FAILED
             }
         }
+    }
+
+    /**
+     * Flush the live editor buffer for [filePath] to disk via
+     * [FileDocumentManager.saveDocument], resolving a `live_prompt_drift` where
+     * the editor holds unsaved edits ahead of disk. Writes the saved buffer to
+     * the ack-content sidecar (keyed by [patchId]) so the binary reads exactly
+     * what was persisted and adopts it as a clean snapshot. Saving also clears
+     * the editor's dirty flag, so the same drift does not recur next cycle and no
+     * File Cache Conflict fires when the binary later touches disk.
+     */
+    private fun saveDocumentViaDocument(filePath: String, patchId: String?): Boolean {
+        var savedContent: String? = null
+        ApplicationManager.getApplication().invokeAndWait {
+            val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
+                ?: run {
+                    LOG.warn("[socket] save_document: no VirtualFile for $filePath")
+                    return@invokeAndWait
+                }
+            val fdm = FileDocumentManager.getInstance()
+            val document = fdm.getDocument(targetFile)
+                ?: run {
+                    LOG.warn("[socket] save_document: no Document for $filePath")
+                    return@invokeAndWait
+                }
+            fdm.saveDocument(document)
+            savedContent = document.text
+            LOG.info("[socket] save_document: flushed ${document.textLength} chars to disk for $filePath")
+        }
+        val content = savedContent ?: return false
+        writeAckContent(patchId, content, filePath)
+        return true
     }
 
     /**

@@ -687,7 +687,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // refresh logs when it skipped the IPC push back to the IDE because no
         // listener was active or the plugin sent no ack after the HEAD-authoritative
         // working-tree repair (so the IDE stops writing the stale buffer back).
-        ("agent-doc-orchestration/src/git.rs", "reason=") => 7,
+        // +2 (`reason=clear_carry_forward_drift`, `reason={e}`): #jb-editor-save-resolves-drift
+        // post-commit editor flush logs whether it asked the live plugin to save its
+        // (carry-forward-superset) buffer to clear the dirty flag, or skipped/failed —
+        // routed through `flush_editor_buffer_to_clear_drift`.
+        ("agent-doc-orchestration/src/git.rs", "reason=") => 9,
         ("src/orchestrate.rs", "guard_") => 0,
         ("src/orchestrate/dag.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it

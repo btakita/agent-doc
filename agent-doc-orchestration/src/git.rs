@@ -2519,10 +2519,71 @@ fn emit_postcommit_worktree_check(file: &Path) {
             }
             return;
         }
+        // #jb-editor-save-resolves-drift: a carry-forward superset (the working
+        // tree preserves every committed line PLUS uncommitted user edits — the
+        // deliberate carry-forward invariant, not corruption) still leaves the
+        // live editor buffer dirty/divergent, so the same `live_prompt_drift`
+        // re-fires on the next cycle and a File Cache Conflict can pop. The
+        // editor buffer here is provably safe to persist (it lost no committed
+        // content), so ask the plugin to save it — flushing to disk and clearing
+        // the dirty flag — instead of letting the drift recur. HEAD is already
+        // authoritative and untouched; this only persists the visible buffer.
+        flush_editor_buffer_to_clear_drift(file);
         eprintln!(
             "[commit] WARNING postcommit_worktree_check match=false for {} — working tree drifted from HEAD (#postcommit-ipc-worktree-corruption)",
             file.display()
         );
+    }
+}
+
+/// Ask the live editor to save its buffer to disk after a commit so a dirty /
+/// divergent editor buffer does not re-trigger `live_prompt_drift` or a File
+/// Cache Conflict on the next cycle (`#jb-editor-save-resolves-drift`).
+///
+/// Best-effort and fail-open: only fires when an IPC socket listener is active.
+/// It does NOT change what was committed — HEAD is already authoritative — it is
+/// a pure editor-side flush + dirty-flag clear. Callers must only invoke it once
+/// the editor buffer is known safe to persist (it has lost no committed content);
+/// the `#pcwc` lost-content path skips it because it already pushed HEAD back to
+/// the editor via `refresh_content`.
+fn flush_editor_buffer_to_clear_drift(file: &Path) {
+    let canonical = match file.canonicalize() {
+        Ok(canonical) => canonical,
+        Err(e) => {
+            eprintln!(
+                "[commit] editor save-to-clear-drift skipped for {}: canonicalize failed: {e}",
+                file.display()
+            );
+            return;
+        }
+    };
+    let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
+    if !crate::ipc_socket::is_listener_active(&project_root) {
+        return;
+    }
+    let save_patch_id = uuid::Uuid::new_v4().to_string();
+    match crate::ipc_socket::send_save_document(
+        &project_root,
+        &canonical.to_string_lossy(),
+        &save_patch_id,
+    ) {
+        Ok(_) => crate::ops_log::log_op(
+            file,
+            &format!(
+                "postcommit_editor_save_flushed file={} save_patch_id={} reason=clear_carry_forward_drift",
+                file.display(),
+                save_patch_id,
+            ),
+        ),
+        Err(e) => crate::ops_log::log_op(
+            file,
+            &format!(
+                "postcommit_editor_save_skipped file={} save_patch_id={} reason={}",
+                file.display(),
+                save_patch_id,
+                e,
+            ),
+        ),
     }
 }
 
@@ -5557,6 +5618,84 @@ fn postcommit_worktree_preserves_carry_forward_superset() {
         superset,
         "the carried-forward user edit must be preserved untouched"
     );
+}
+#[test]
+fn postcommit_carry_forward_superset_flushes_editor_to_clear_drift() {
+    // #jb-editor-save-resolves-drift: a carry-forward superset leaves the live
+    // editor buffer dirty. With an IPC listener active, the post-commit check
+    // must ask the editor to save (clear the dirty flag) so the same
+    // live_prompt_drift does not recur — WITHOUT clobbering the preserved tree.
+    use std::fs;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    init_repo(root);
+    let _listener = start_fake_listener(root);
+    wait_for_listener(root);
+
+    let head_doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: topic\n\
+            response body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+    commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+    let doc = root.join("session.md");
+
+    let superset = format!("{head_doc}\na new uncommitted user note line\n");
+    fs::write(&doc, &superset).unwrap();
+
+    emit_postcommit_worktree_check(&doc);
+
+    let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        log.contains("postcommit_editor_save_flushed"),
+        "a carry-forward superset under a live editor must flush the buffer to clear drift:\n{log}"
+    );
+    assert!(
+        !log.contains("postcommit_worktree_auto_reconciled"),
+        "the carry-forward superset must NOT be auto-reconciled to HEAD:\n{log}"
+    );
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        superset,
+        "the editor flush must not clobber the carried-forward edit on disk"
+    );
+
+    let _ = fs::remove_file(crate::ipc_socket::socket_path(root));
+}
+#[test]
+fn postcommit_worktree_match_does_not_flush_editor() {
+    // When the working tree already equals HEAD there is no drift to clear, so
+    // the post-commit check must NOT send a save_document (avoid persisting a
+    // possibly-stale editor buffer over an already-correct disk).
+    use std::fs;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    init_repo(root);
+    let _listener = start_fake_listener(root);
+    wait_for_listener(root);
+
+    let head_doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: topic\n\
+            response body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+    commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+    let doc = root.join("session.md");
+    // Working tree already equals HEAD (no edit).
+
+    emit_postcommit_worktree_check(&doc);
+
+    let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        !log.contains("postcommit_editor_save_flushed"),
+        "a clean match=true working tree must not flush the editor:\n{log}"
+    );
+
+    let _ = fs::remove_file(crate::ipc_socket::socket_path(root));
 }
 #[test]
 fn postcommit_worktree_preserves_when_content_lost_but_user_work_added() {

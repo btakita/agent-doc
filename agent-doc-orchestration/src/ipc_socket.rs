@@ -400,6 +400,37 @@ pub fn send_reposition(
     send_message(project_root, &message).map(|_| true)
 }
 
+/// Ask the live editor to flush (save) its buffer for `file` to disk.
+///
+/// Used to resolve a `live_prompt_drift_after_preflight` divergence at its
+/// source: the JB editor buffer holds unsaved edits ahead of disk, so the binary
+/// reads stale disk content and the cycle would otherwise stall by adopting
+/// `content_ours` as a next-cycle carry-forward snapshot (which also leaves the
+/// IntelliJ buffer dirty, re-drifting + raising a File Cache Conflict on every
+/// later cycle). Instead the plugin runs `FileDocumentManager.saveDocument()`,
+/// flushing the buffer to disk AND clearing the editor's dirty flag, then writes
+/// the saved buffer to the ack-content sidecar keyed by `patch_id` so the binary
+/// can read exactly what was persisted and adopt it as a clean on-disk snapshot.
+pub fn send_save_document(project_root: &Path, file: &str, patch_id: &str) -> Result<bool> {
+    let message = serde_json::json!({
+        "type": "save_document",
+        "file": file,
+        "patch_id": patch_id,
+    });
+
+    match send_message(project_root, &message) {
+        Ok(Some(ack)) => {
+            eprintln!("[ipc-socket] save_document sent, ack: {}", ack);
+            Ok(true)
+        }
+        Ok(None) => {
+            eprintln!("[ipc-socket] save_document sent, no ack");
+            Ok(true)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Send committed content to the editor when the binary has just repaired a
 /// stale post-commit working tree back to HEAD.
 ///
@@ -550,6 +581,38 @@ mod tests {
         assert_eq!(ack["id"], "vcs_refresh");
 
         // Clean up — remove socket to stop listener
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
+
+    #[test]
+    fn send_save_document_sends_typed_message_with_patch_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
+        let captured_clone = captured.clone();
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                *captured_clone.lock().unwrap() = Some(v);
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        let ok = send_save_document(&root, "/tmp/plan.md", "save-pid-123").unwrap();
+        assert!(ok, "save_document should succeed on an ok ack");
+
+        let msg = captured.lock().unwrap().clone().expect("listener saw a message");
+        assert_eq!(msg["type"], "save_document");
+        assert_eq!(msg["file"], "/tmp/plan.md");
+        assert_eq!(msg["patch_id"], "save-pid-123");
+
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);
     }

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,27 @@ committed
 Compacted content:
 - Archived 3 response topic(s): Rename "Applications received" tag to "Accepted applications"; Accepted-application dialog; deploy
 - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db...
-<!-- agent:boundary:9dd9eabf -->
+
+### Re: Published deal tag + Published deals column (portal-admin/pipeline) — opus-4-8
+
+> **Queue prompt:**
+>
+> Add a Published deal tag and a Published deals column in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline
+
+
+Done — both shipped in the admin Deal Pipeline board (`lib/ui--browser--efs/portal/admin/pipeline.tsx`), committed to `equityfundingsource-dev` as `a41e097`. Frontend-only: the backend already attaches `deal_status: 'published' | 'funded' | 'closed' | null` to each loan pipeline card (`loan_pipeline_card_` in `admin/repo.ts`), so no API change was needed.
+
+**Published deal tag** — a green `Published` pill (`PipelineDealBadge`, shows only when `deal_status === 'published'`) now renders everywhere a loan card appears:
+- on the board card chip row (next to the stage + aging chips),
+- in the Table view's Stage cell,
+- in the loan detail dialog header.
+
+**Published deals column** — a read-only cross-cut lane (`published_deals_board_column_`, id `published-deals`) appended after the existing status phases. It gathers every loan card with a live published deal regardless of which TMO status lane it sits in. It's not a drop target (the id isn't a TMO loan status), it auto-collapses to a thin rail when empty like the other lanes, and it respects the active/all scope + search filters since it's built from the same filtered view data.
+
+**Verification:** `bun run check` green — 682 tests pass, 0 fail, worker build clean. Added deterministic coverage to `tests/admin-pipeline.test.ts` (asserts the column builder, the badge component, and the badge wiring).
+
+One note (not blocking): because the lane honors the Active/All scope toggle, a published deal that has advanced to Funded/Closed only appears in the lane under "All" scope. That matches how every other lane behaves; flag it if you'd rather the Published lane always show published deals regardless of scope.
+<!-- agent:boundary:58155579 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +66,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Add a Published deal tag and a Published deals column in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline
 <!-- /agent:queue -->
 
 ## Backlog

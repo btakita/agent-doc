@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -58,7 +58,7 @@ Done — both shipped in the admin Deal Pipeline board (`lib/ui--browser--efs/po
 **Verification:** `bun run check` green — 682 tests pass, 0 fail, worker build clean. Added deterministic coverage to `tests/admin-pipeline.test.ts` (asserts the column builder, the badge component, and the badge wiring).
 
 One note (not blocking): because the lane honors the Active/All scope toggle, a published deal that has advanced to Funded/Closed only appears in the lane under "All" scope. That matches how every other lane behaves; flag it if you'd rather the Published lane always show published deals regardless of scope.
-<!-- agent:boundary:58155579 -->
+<!-- agent:boundary:5db0e2f4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,6 +66,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Add an Available deal dialog in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard. Clicking on the Available deal card opens the dialog. deploy
 <!-- /agent:queue -->
 
 ## Backlog

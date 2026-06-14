@@ -238,6 +238,19 @@ class SyncLayoutAction : AnAction() {
             }
         }
 
+        /**
+         * `#recyclerestart` Q2 — decide whether a just-completed sync should re-run to
+         * apply a layout that superseded it mid-flight. Re-run only when WE held the guard
+         * (`heldGuard`) and a newer sync bumped the generation while we ran
+         * (`!generationStillCurrent`). A deferred request (guard not held) never re-runs —
+         * the in-flight holder owns the re-run — and a still-current generation means no
+         * newer sync is pending, so the re-run chain converges and cannot loop forever.
+         */
+        internal fun shouldRerunAfterSupersede(
+            heldGuard: Boolean,
+            generationStillCurrent: Boolean,
+        ): Boolean = heldGuard && !generationStillCurrent
+
         internal fun buildFocusCommand(
             agentDoc: String,
             focusedFile: String,
@@ -274,12 +287,17 @@ class SyncLayoutAction : AnAction() {
 
             Thread {
                 var syncGuard: AgentDocLib? = null
+                val lib = AgentDocLib.get()
+                // `#recyclerestart` Q2 (supersede, not warn-and-skip): bump the sync
+                // generation up front. If another sync currently holds the guard, this
+                // newer request is deferred — but the in-flight holder re-runs with THIS
+                // latest layout on completion (see the finally block) instead of dropping
+                // it, so a rapid second `Sync Tmux Layout` is never silently lost.
+                val myGen = lib?.agent_doc_sync_bump_generation() ?: 0L
                 try {
-                    val lib = AgentDocLib.get()
-                    lib?.agent_doc_sync_bump_generation()
                     if (lib != null) {
                         if (!lib.agent_doc_sync_try_lock()) {
-                            LOG.info("[sync] skipped manual sync because another editor sync is already running")
+                            LOG.info("[sync] deferred manual sync (gen=$myGen): another sync is in flight; it will re-run with this layout on completion")
                             if (notify) TerminalUtil.notifyWarning(project, SYNC_ALREADY_RUNNING_WARNING)
                             return@Thread
                         }
@@ -329,7 +347,19 @@ class SyncLayoutAction : AnAction() {
                 } catch (ex: Exception) {
                     if (notify) TerminalUtil.notifyError(project, "Failed to sync layout: ${ex.message}")
                 } finally {
+                    val heldGuard = syncGuard != null
                     syncGuard?.agent_doc_sync_unlock()
+                    // `#recyclerestart` Q2: if a newer sync arrived while we held the guard
+                    // (it bumped the generation but was deferred), re-run ONCE so the LATEST
+                    // editor layout is applied instead of dropped. Only the guard holder
+                    // re-runs (a deferred request never does), and the generation converges
+                    // when no newer sync is pending, so this cannot loop indefinitely.
+                    if (lib != null &&
+                        shouldRerunAfterSupersede(heldGuard, lib.agent_doc_sync_check_generation(myGen))
+                    ) {
+                        LOG.info("[sync] re-running after supersede (a newer sync arrived during this one)")
+                        syncLayout(project, notify = false, noAutostart = noAutostart)
+                    }
                 }
             }.start()
         }

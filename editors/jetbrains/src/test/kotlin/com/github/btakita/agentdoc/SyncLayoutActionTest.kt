@@ -50,6 +50,39 @@ class SyncLayoutActionTest {
     }
 
     @Test
+    fun `supersede re-runs only when the guard holder is superseded mid-flight`() {
+        // Held the guard AND a newer sync bumped the generation while we ran → re-run with
+        // the latest layout (supersede, not drop).
+        assertTrue(
+            SyncLayoutAction.shouldRerunAfterSupersede(
+                heldGuard = true,
+                generationStillCurrent = false,
+            ),
+        )
+        // Held the guard and no newer sync arrived → done, do not re-run (would loop).
+        assertFalse(
+            SyncLayoutAction.shouldRerunAfterSupersede(
+                heldGuard = true,
+                generationStillCurrent = true,
+            ),
+        )
+        // Deferred request (never held the guard) → never re-runs; the in-flight holder
+        // owns the supersede re-run.
+        assertFalse(
+            SyncLayoutAction.shouldRerunAfterSupersede(
+                heldGuard = false,
+                generationStillCurrent = false,
+            ),
+        )
+        assertFalse(
+            SyncLayoutAction.shouldRerunAfterSupersede(
+                heldGuard = false,
+                generationStillCurrent = true,
+            ),
+        )
+    }
+
+    @Test
     fun `focus command targets a single document without sync args`() {
         assertEquals(
             listOf("agent-doc", "focus", "tasks/one.md"),

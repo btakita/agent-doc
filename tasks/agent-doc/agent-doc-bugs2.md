@@ -305,7 +305,21 @@ Two observations triaged this cycle (no code shipped — both are CLEAN-session/
 So the mechanism is working — the impression of "not populating" is most likely the queue being visually buried under the large free-text observation blocks (the equityfundingsource dispatch logs, the monsterrodholders compaction note, the markdown-AST note) interleaved between the id-backed heads. If you saw a *specific* backlog id that never flowed into the queue, name it and I'll trace why; otherwise this is the intended `#backlog-queue-attr-populates-in-go-mode` behavior and `#cleardrainsim` already covers locking the contract under SimWorld.
 
 No new backlog id needed for (2). A real user prompt is present this cycle, so I'm not auto-looping over it.
-<!-- agent:boundary:6a6118aa -->
+
+### Re: have the plugin SAVE to resolve JB editor-buffer drift, don't stall — opus-4-8
+
+Implemented across the binary + FFI cdylib + JB plugin and committed + pushed (agent-doc `51c5f75b` → `origin/main`; `0.34.1`, plugin `0.2.164`). `#jb-editor-save-resolves-drift`.
+
+**What ships.** When a commit leaves the working tree a *carry-forward superset* (every committed line preserved PLUS uncommitted user edits), the live IntelliJ buffer stays dirty — so the same `live_prompt_drift` re-fires next cycle and a File Cache Conflict can pop. The post-commit worktree check now calls `flush_editor_buffer_to_clear_drift`, which sends a new `save_document` IPC message; the JB plugin runs `FileDocumentManager.saveDocument()` (flush buffer → disk, **clear the dirty flag**), so the drift can't recur and the cycle doesn't stall.
+
+**Why it's safe (this is the subtle part).** My first attempt saved the editor buffer *before* commit and adopted it as the snapshot — which **broke 2 shipped invariant tests**: a prompt typed during closeout must NOT be absorbed into the commit (it carries forward unanswered). So I reworked it to fire **post-commit only**: HEAD is already authoritative and untouched, the flush only persists the visible buffer. It runs **only** in the carry-forward-superset branch (provably lost no committed content) — **not** in the `#pcwc` lost-content case (already pushes HEAD back via `refresh_content`), and **not** on a clean `match=true` tree (no drift, and the buffer might be stale).
+
+**Verification.** `make check` green — **4460 passed**. New coverage: `send_save_document_sends_typed_message_with_patch_id`, `postcommit_carry_forward_superset_flushes_editor_to_clear_drift`, `postcommit_worktree_match_does_not_flush_editor`. CI run `27514119639` in progress (prior run green) — recorded pending, not blocking.
+
+**Going live (operator action needed).** I deliberately did NOT `cargo install` / `lib-install` mid-session (`#no-mid-session-install` — it would re-stale *this* live supervisor and break the very closeout). The binary/cdylib ride the supervisor self-recycle (`#supautoinstall`/`#supselfheal`, default-on) onto the pushed source. The plugin `.kt` change needs the new signed zip (`editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.164.zip`) reinstalled + an IntelliJ restart to take effect.
+
+**Note on your exact diagnostic.** The drift you've been seeing logs `content_ours_len (66466) > candidate (64894)` — the editor buffer is *smaller* (lost-content), which the existing `#pcwc` auto-reconcile already repairs + refreshes. This new flush targets the complementary *superset* case. If the lost-content refresh is being rejected live, that's a separate follow-up — say the word. VS Code parity queued as `#jbeditorsavedrift-vscode`.
+<!-- agent:boundary:5d54fe4a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -414,6 +428,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#jbeditorsavedrift-vscode] [recommended] VS Code parity for #jb-editor-save-resolves-drift: add a save_document IPC handler to the VS Code extension mirroring the JB plugin saveDocumentViaDocument (flush editor buffer to disk + clear dirty on the post-commit carry-forward flush). Shipped JB/IntelliJ only in agent-doc 0.34.1 / plugin 0.2.164. CLEAN session (editor plugin surface).
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#cleardrainsim] [clean-session] Add SimWorld/integration coverage asserting the full preflight JSON contract (not just the queue_continuation::drainable_head_count unit) emits queue_continuation_required=false + queue_drainable_head_count=0 for an active go-mode queue whose only materialized heads are [clean-session] (under a live editor-IPC listener) / [operator-verify] / inert-noise, and =true with the right count when a real drainable head remains. Locks the #cleardrainsignal contract the SKILL auto-loop now depends on. Landed: agent-doc 5c8b2891.

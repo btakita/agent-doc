@@ -91,7 +91,21 @@ Same as the Monday post: drafted, not published — gated `#kabc` for your publi
 - Or schedule: `corky schedule add --platform linkedin --time "2026-06-16T09:00" mail/drafts/linkedin/2026-06-16-lazily-architecture.md`
 
 Queue drained. Both LinkedIn posts are drafted and waiting on your review/publish.
-<!-- agent:boundary:fcd3e7fd -->
+
+### Re: Turned off go-mode on the queue — opus-4-8
+
+Acknowledged — you removed the `go` token from the queue marker, so go-mode auto-execution is off (frontmatter `queue: stop` was already set, so the queue is now idle on both switches). The queue block carries only the `#spec-test-build-install-commit-push` preset declaration and `priority`; there are no queued items to drain.
+
+Nothing is pending on the agent side. All 6 review items are operator-gated (`[/]`) and can't be agent-completed:
+
+- `#sstz` / `#kabc` — LinkedIn drafts ready, awaiting your review + publish (Mon/Tue).
+- `#h6qb` — live two-host Str0mNet validation (needs real endpoints + deployed Worker).
+- `#12b1` — v0.11.0 publish, blocked on a rotated crates.io token.
+- `#xccx` — Holons mapping, blocked on Steve Melville's 7 answers.
+- `#57by` — async-Shuttle model, NO-GO per `#shuttleeval`.
+
+Heads-up: preflight flagged the route-owned supervisor (pid 2482535) is running a **stale build** (older than the installed binary) and is the source of the recurring File Cache Conflict / IPC-drift dialogs. When convenient, restart it: `agent-doc session restart-supervisor tasks/software/lazily-rs.md --force`.
+<!-- agent:boundary:10648ff0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -99,7 +113,7 @@ Queue drained. Both LinkedIn posts are drafted and waiting on your review/publis
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,38 @@ committed
 Compacted content:
 - Archived 11 response topic(s): Use proper label names on the Declarations summary; deploy; "Drop or choose a replacement file" → "Drop file or click to select file"; 8 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:b8854a08 -->
+
+### Re: Wide Deal Pipeline kanban — UX options to cut horizontal friction — opus-4-8
+
+> **Queue prompt:**
+>
+> The Deal Pipeline kanban board is very wide...which can add friction to the admin workflow. What are some UX options to mitigate this issue? Discuss...
+
+
+The root cause is one column per TMO stage. With ~8–12 stages, the board is wider than any screen, so admins horizontal-scroll to find work and lose the at-a-glance overview that makes a kanban worth having. Options, cheapest-to-richest:
+
+**1. Collapse the many stages into a few macro-phases (recommended default).**
+Group the detailed TMO stages under 4–5 phase columns — e.g. *Intake → Underwriting → Approval → Closing → Funded* — and keep the precise stage as a chip/label on the card (and a sub-row if you want). Drag between phases still works; the exact stage shows on the card and in the detail drawer. This is the single biggest width win because column count drops by ~half or more, and it matches how an admin actually triages ("where is this deal, roughly?") before drilling in.
+
+**2. Collapsible / condensed columns.**
+Let admins collapse any stage to a thin rail showing just the name + count badge, expanding on click. Auto-collapse empty stages. Pairs well with #1 — collapse the phases you're not working today. Low effort, no data model change.
+
+**3. List/table view toggle.**
+Offer a dense, sortable table (group or sort by stage) as an alternate view. Kanban is great for visual flow; a table is better for bulk triage and handles many stages with zero horizontal sprawl. A view toggle (Board / List) lets each admin pick. This is the most reliable "never scroll sideways again" answer.
+
+**4. Saved filters / focused views.**
+"My deals", "active only", single-stage, by-broker, by-date. Most width pain is from rendering deals nobody is touching right now; a default "active" filter shrinks the working board immediately. Cheap, high payoff, composes with everything above.
+
+**5. Card density control.**
+A compact card mode (one line: borrower + amount + stage chip) narrows every column, so more fit before scroll kicks in. Quick CSS-level change.
+
+**6. Master–detail stage rail (bigger rework).**
+Replace the horizontal columns with a vertical left rail of stages + counts; clicking a stage shows its deals in the main pane. Eliminates horizontal width entirely. More build, but the most scalable if the stage list keeps growing.
+
+**Recommended path:** ship **#1 (phase grouping) + #4 (default "active" filter) + #3 (List toggle)** together — phase grouping fixes the structural width, the active filter trims the working set, and the List view is the escape hatch for power triage. #2 and #5 are low-cost polish to layer on after. This stays inside the existing #67v2 kanban work rather than a rewrite.
+
+This is a discussion, so I haven't changed code. If you want, say the word and I'll queue the chosen combination as an implementation item against #67v2.
+<!-- agent:boundary:d2dd0245 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +77,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The Deal Pipeline kanban board is very wide...which can add friction to the admin workflow. What are some UX options to mitigate this issue? Discuss...
 <!-- /agent:queue -->
 
 ## Backlog

@@ -1068,15 +1068,13 @@ pub(crate) struct UndrainableSkip {
 /// (`#goqueuestall`):
 /// - `[operator-verify]` items are ALWAYS skipped from the auto-drain queue
 ///   (they need a human); they belong on the gated review surface.
-/// - `[clean-session]` items are skipped only when a live editor-IPC listener is
-///   active (`live_ipc == true`); a clean session drains them normally.
+/// - `[clean-session]` items are kept (`#qcontdrain`): the in-session `/loop`
+///   drains them in place, so live editor-IPC state no longer gates them.
 ///
-/// Ids absent from `ctxs` (plain backlog items) are always kept. Pure + testable
-/// — the hot path supplies `live_ipc` from `ipc_socket::is_listener_active`.
+/// Ids absent from `ctxs` (plain backlog items) are always kept. Pure + testable.
 pub(crate) fn partition_drainable_backlog_ids(
     backlog_ids: &[String],
     ctxs: &std::collections::HashMap<String, crate::pending::ExecutionContext>,
-    _live_ipc: bool,
 ) -> (Vec<String>, Vec<UndrainableSkip>) {
     let mut drainable = Vec::new();
     let mut skipped = Vec::new();
@@ -1242,7 +1240,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     .map(crate::ipc_socket::is_listener_active)
                     .unwrap_or(false);
                 let (drainable, skipped) =
-                    partition_drainable_backlog_ids(&backlog_ids, &exec_ctxs, live_ipc);
+                    partition_drainable_backlog_ids(&backlog_ids, &exec_ctxs);
                 if !skipped.is_empty() {
                     let session_label = if live_ipc { "live_ipc" } else { "clean" };
                     for skip in &skipped {
@@ -1256,7 +1254,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     }
                     eprintln!(
                         "[preflight] queue: skipped {} agent-undrainable backlog head(s) from the auto-drain queue \
-                         (clean-session under live IPC / operator-verify; #goqueuestall)",
+                         (operator-verify; #qcontdrain)",
                         skipped.len()
                     );
                     backlog_ids = drainable;
@@ -4456,19 +4454,16 @@ fn partition_drainable_backlog_ids_skips_only_operator_verify() {
         "splitmodswrite".to_string(),
     ];
 
-    // Identical result with live IPC on or off: clean-session drains, only
-    // operator-verify is skipped.
-    for live_ipc in [true, false] {
-        let (drainable, skipped) = partition_drainable_backlog_ids(&ids, &ctxs, live_ipc);
-        assert_eq!(
-            drainable,
-            vec!["fcc0".to_string(), "splitmodswrite".to_string()],
-            "live_ipc={live_ipc}: clean-session + plain drain (#qcontdrain)"
-        );
-        assert_eq!(skipped.len(), 1, "live_ipc={live_ipc}");
-        assert_eq!(skipped[0].id, "qflood2");
-        assert_eq!(skipped[0].reason, "operator_verify");
-    }
+    // clean-session drains, only operator-verify is skipped (#qcontdrain).
+    let (drainable, skipped) = partition_drainable_backlog_ids(&ids, &ctxs);
+    assert_eq!(
+        drainable,
+        vec!["fcc0".to_string(), "splitmodswrite".to_string()],
+        "clean-session + plain drain (#qcontdrain)"
+    );
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(skipped[0].id, "qflood2");
+    assert_eq!(skipped[0].reason, "operator_verify");
 }
 
 #[test]

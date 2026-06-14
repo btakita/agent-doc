@@ -47,15 +47,14 @@ pub(crate) fn check_no_response_active_queue_head(
             .chain(state.pending_kept_open_ids.iter())
             .map(|id| crate::pending::normalize_pending_id(id)),
     );
-    // #goqueuestall: a queue head whose backlog id is DEFERRED (never
-    // agent-drainable in this session type — `[operator-verify]` always, or
-    // `[clean-session]` under a live editor-IPC listener) is not a "runnable" head
-    // that a no-response reap-only closeout silently dropped. Exclude it from the
-    // live set, reusing the SAME deferred set that `queue_continuation` uses so the
+    // #goqueuestall/#qcontdrain: a queue head whose backlog id is DEFERRED (never
+    // agent-drainable — `[operator-verify]` only) is not a "runnable" head that a
+    // no-response reap-only closeout silently dropped. Exclude it from the live set,
+    // reusing the SAME deferred set that `queue_continuation` uses so the
     // session-check guard and continuation logic agree. After excluding deferred
     // heads, only genuinely drainable heads can still trip this guard.
     let deferred: std::collections::HashSet<String> =
-        crate::queue_continuation::deferred_backlog_ids(file, &content)
+        crate::queue_continuation::deferred_backlog_ids(&content)
             .into_iter()
             .map(|id| crate::pending::normalize_pending_id(&id))
             .collect();

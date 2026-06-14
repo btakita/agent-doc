@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 agent_doc_pipeline:
   run_id: cycle-1781420754344
   step: write_applied
@@ -200,7 +200,37 @@ Deploy:
 - Smoke: `/` 200, `/funded-deals` 200, `/portal-admin/pipeline` 303 (Cloudflare Access login redirect — expected for the admin-gated route).
 
 CI: no `CI` workflow exists in either repo; the superproject's only workflow (`Agent Doc`) remains blocked at runner-start by the account billing/spending-limit issue, an external CI-start blocker, not a code failure.
-<!-- agent:boundary:dcb68397 -->
+
+### Re: Horizontal collapsed-lane titles — opus-4-8
+
+> **Queue prompt:**
+>
+> I find the sideways text difficult to read...particularly with the all-caps ![img_13.png](img_13.png). Please layout the column title in a way that is more horizontal while the column is collapsed. Propose options.
+
+
+You're right — the collapsed lane (`pipeline.tsx:863`) rotates the label with `writing-mode:vertical-rl;transform:rotate(180deg)` and forces `text-transform:uppercase`, so "APPLICATIONS UNDER REVIEW" reads bottom-to-top in all caps in a 76px-wide lane. The constraint driving the rotation is width: the full labels are long, and 76px can't hold them on one horizontal line. Here are four ways to make the title horizontal, ordered by how much I'd recommend them.
+
+**Option A — short label, horizontal, mixed-case (recommended).** Drop the rotation and the all-caps. Render a short label horizontally (wrapping to 2 lines), keep the full name in the existing `title` tooltip. Map: Draft Applications → "Draft", Complete Applications → "Complete", Applications Under Review → "Under Review". Cleanest and most scannable; lane stays 76px.
+```
+// replace the rotated div with:
+<div title={`${column.label} - ${column.stage_labels.join(' / ')}`}
+  style="writing-mode:horizontal-tb;font-weight:700;font-size:11px;line-height:1.2;color:#334155;text-align:center;white-space:normal;overflow-wrap:anywhere;">
+  {column.short_label ?? column.label}
+</div>
+```
+(needs a `short_label` on the column model, or a small lookup; one-time data add.)
+
+**Option B — full label, horizontal, word-per-line.** Keep every word but stack each on its own upright line, centered, mixed-case. No rotation, no new data — "Applications / Under / Review" reads top-to-bottom but each word is upright and legible. Good if you don't want to maintain short labels.
+```
+style="writing-mode:horizontal-tb;font-weight:700;font-size:11px;line-height:1.25;color:#334155;text-align:center;white-space:normal;overflow-wrap:break-word;"
+```
+
+**Option C — widen the collapsed lane to ~104px + horizontal wrap.** Bump `flex:0 0 76px` to `~104px` so the full mixed-case label wraps to 2-3 horizontal lines comfortably. Keeps full labels with zero abbreviation, costs ~28px of board width per collapsed lane.
+
+**Option D — count-forward chip, label in tooltip only.** Most compact: show only the `+`, the count badge, and a 2-letter monogram ("DA", "CA", "UR"); full label lives in the tooltip. Best if board density matters more than reading the title at a glance — but it hides the words, which is the opposite of what you asked for, so I'd skip it.
+
+My pick: **Option A** for the best readability/width tradeoff, falling back to **Option B** if you'd rather not maintain a short-label map. Both keep the lane at its current 76px. Tell me which (or mix — e.g. A's short label with C's slightly wider lane) and I'll implement it. Queued a backlog item to carry the chosen implementation. (Exchange is ~167 lines; flagging size, continuing the queue.)
+<!-- agent:boundary:2610f0dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -208,7 +238,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- I find the sideways text difficult to read...particularly with the all-caps ![img_13.png](img_13.png). Please layout the column title in a way that is more horizontal while the column is collapsed. Propose options.
 <!-- /agent:queue -->
 
 ## Backlog

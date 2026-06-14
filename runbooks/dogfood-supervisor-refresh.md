@@ -81,6 +81,43 @@ the final step can recycle this very session.
   the agent-doc backlog (the `#supselfheal` / `#jbrestale` / `#recyclerestart`
   family) so it ships to every operator, not one.
 
+## Troubleshooting
+
+### `controller launch already in progress` / `os error 11` during hot-reload
+
+Symptom — the supervisor self-recycle (a `next_queue_item` hot-reload that
+`execve`s onto the freshly-installed binary while preserving the live agent
+child) aborts to the pane with:
+
+```
+Error: controller launch already in progress: …/.agent-doc/locks/controller-launch.lock
+
+Caused by:
+    Resource temporarily unavailable (os error 11)
+```
+
+Cause — the just-`execve`'d supervisor re-ran `start` →
+`ensure_controller_running` → `connect_or_launch` → `LaunchLock::acquire`, which
+used a **non-blocking** `try_lock_exclusive` on the *shared per-project-root*
+`.agent-doc/locks/controller-launch.lock`. With several sessions open in the
+same superproject (equityfundingsource, tsift, lazily-rs, …), another launcher
+was mid-launch holding that lock, so the recycle failed immediately with
+`EWOULDBLOCK` (os error 11). Launch-lock contention is a *benign* race
+("someone else is launching right now"), not a fatal condition.
+
+Fixed — `#suprecyclelock` (agent-doc `ce7f3e7d`): `connect_or_launch` now uses
+`LaunchLock::acquire_blocking`, which polls `try_lock_exclusive` until the holder
+releases (bounded 8s `LAUNCH_LOCK_WAIT`, sized above the launch+wait window) and
+then adopts the controller the other launcher published; only a genuinely wedged
+holder still errors.
+
+Recovery on a binary that predates the fix — the refresh procedure above is
+idempotent and the response is already committed, so just re-run it: restart the
+supervisor (`agent-doc session restart-supervisor <FILE> --force`) and re-invoke
+`/agent-doc <FILE>`. Once a supervisor on `ce7f3e7d`+ is hosting the session, the
+blocking acquire waits the contender out instead of crashing the recycle. Live
+proof that the race no longer surfaces the error is operator-drive (`#1j8q`).
+
 ## See Also
 
 - `runbooks/persist-closeout.md` — response-ordering + closeout boundary.

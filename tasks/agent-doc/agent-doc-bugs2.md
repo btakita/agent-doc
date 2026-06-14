@@ -185,26 +185,40 @@ agent-doc admin queue resume tasks/agent-doc/agent-doc-bugs2.md --observed-gener
 ```
 
 then `/agent-doc tasks/agent-doc/agent-doc-bugs2.md`. (The restart-onto-fresh-binary path resumes draining on its own; the explicit `resume` is only needed if you do not restart.)
-<!-- agent:boundary:85edcb5b -->
+
+### Re: fixed the stall at the root, not with restart-supervisor — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: If you stall with `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`, you must fix the root cause of the stall.
+
+
+You're right — pausing the queue and pointing you at `restart-supervisor` was itself the stall. I root-caused it and shipped the fix (agent-doc **`5c8b2891`**, superproject **`aaae1ed74`**, both pushed; `make check` green; release built + installed + lib-install; `audit-docs` clean).
+
+**Why both redundant systems failed.** The no-op `#qchurn` cycle reached the agent because:
+
+1. **`#goqueuestall` (backlog→queue sync defer)** only skips *new* sync additions — it correctly logged `go_queue_skip_undrainable id=#qchurn` but cannot retract a `:pushpin: [#qchurn]` head that's **already materialized** in the `## Queue` block.
+2. **`#goqstall2` (idle-watch drainability filter)** is correct in code, but it only runs in the *installed* binary — the route-owned supervisor (pid 2715614) **predates it** and kept re-injecting `queue_trigger=auto` on the unfiltered head.
+
+And the gap that let it reach *me*: **neither preflight nor the Claude Code auto-loop had a machine-readable "nothing is agent-drainable" signal.** I had to re-derive drainability from the queue prose every cycle — and still stalled.
+
+**The fix (`#cleardrainsignal`):**
+- `queue_continuation::drainable_head_count()` — counts heads the agent can actually drain, reusing the *same* deferred/noise filter the idle-watch uses.
+- Preflight now emits **`queue_continuation_required`** + **`queue_drainable_head_count`**. `queue_continuation_required` is `false` whenever every remaining head is `[clean-session]`-under-live-IPC / `[operator-verify]` / inert noise — *even while `queue_active==true`*. This signal is computed by whichever binary runs preflight, so **it holds regardless of how stale the supervisor is**.
+- `SKILL.md` auto-loop now **skips when `queue_continuation_required==false`** (report deferred/noise heads in one line and stop — no pause, no punt).
+- Fixed a second runaway: the idle-watch logged its `clear-decision` line on *every* poll tick, flooding `ops.log` to **126 MB**; now deduped.
+- Unit coverage: `drainable_head_count` = 0 when all-deferred, counts only real heads otherwise.
+
+**Proof it works:** this very cycle, the new binary's preflight reports `queue_continuation_required: true, queue_drainable_head_count: 5` — correctly, because your "fix the stall" directive **is** real drainable work. On a pure `#qchurn` cycle (all heads deferred/noise) it now reports `false` and the loop stops on its own.
+
+**One activation note (not a punt):** the agent-side stall is fixed *now* — the signal is computed by the invoked binary. The live *supervisor* idle-watch filter only takes effect after the running pid 2715614 picks up the new build, via `agent-doc admin recycle --all-projects` (or a session restart). That's the last remaining staleness, and it's exactly what `#jbrestale`/`#aazp` (supervisor self-recycle) is meant to automate so no manual restart is ever needed.
+<!-- agent:boundary:c009aa63 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: Update agent-doc to fully run + install a `[clean-session]` either in a subagent or in a restarted session or in a `/clear` session.~~
-~~~done
-:pushpin: An error occurred during supervisor hot-reloading.
-```
-❯ [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve────────────────────────────────────────────────────────────────────────────────────────────────────
-  Opus 4.8 ctx:11% ~[start] harness resolved: binary=claude source=frontmatter env=default
-  ⏵⏵ bypass permissions on (shift+tab to cycle)                                           Registered session b26b9957 → pane %25
-        Error: controller launch already in progress: /home/brian/work/btakita/agent-loop/.agent-doc/locks/controller-launch.lock
-
-         Caused by:
-                       Resource temporarily unavailable (os error 11)
-```
-~~~
-- ~~:pushpin: Add to the dogfood reinstall runbook...add a backlog item with the issue. Make sure it is also added to the queue.~~
+- ~~:pushpin: If you stall with `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`, you must fix the root cause of the stall.~~
 - :pushpin: [#qchurn]
 - :pushpin: [#anw0verify]
 - :pushpin: [#jbrestale]
@@ -305,6 +319,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#cleardrainsim] [clean-session] Add SimWorld/integration coverage asserting the full preflight JSON contract (not just the queue_continuation::drainable_head_count unit) emits queue_continuation_required=false + queue_drainable_head_count=0 for an active go-mode queue whose only materialized heads are [clean-session] (under a live editor-IPC listener) / [operator-verify] / inert-noise, and =true with the right count when a real drainable head remains. Locks the #cleardrainsignal contract the SKILL auto-loop now depends on. Landed: agent-doc 5c8b2891.
 - [ ] [#dfrefresh-retire] [clean-session] Retire the dogfood-supervisor-refresh runbook (runbooks/dogfood-supervisor-refresh.md + BUNDLED_RUNBOOKS entry + SKILL.md catalog line + 4 harness mirrors) once #jbrestale (JB Run Agent Doc auto-restarts a stale route-owned supervisor / red-green switchover) AND #recyclerestart (PCP recycle restarts the harness session) both land and prove the binary self-heals a stale supervisor without the manual make+install+restart bootstrap. The runbook is an explicit stopgap for the bootstrap gap (running supervisor predates its own self-recycle fix + is the live agent parent). Acceptance: with both landed, a stale-binary session auto-promotes onto the new build at the next idle/dispatch boundary; delete the runbook + dependent references in one cycle and re-run audit-docs. CLEAN session (skill/runbook surface).
 - [ ] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.
 - [ ] [#ar27] #upgradedeps [clean-session] Upgrade agent-doc dependencies (cargo update + bump direct deps in src/agent-doc Cargo.toml where safe), rebuild + make install + lib-install, run make check, confirm CI green. CLEAN session: a dependency bump forces a rebuild/reinstall that re-stales THIS live route-owned supervisor mid-session (#no-mid-session-install / #fcc0 churn), so it cannot run from the session it would destabilize. Scope assumed = the agent-doc submodule (this doc's project); confirm target if a different repo was intended.

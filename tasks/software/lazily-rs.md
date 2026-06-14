@@ -105,7 +105,13 @@ Done — v0.11.0 release-tag drift resolved and the operator publish (#12b1) pre
 **Operator-gated remainder (#12b1).** The actual `cargo publish` + `gh release create` + crates.io token rotation stay with you — I prepped everything up to the token. Run `cargo publish` from `src/lazily-rs` (dry-run already verified), then the `gh release create` above.
 
 Queue drained.
-<!-- agent:boundary:e2290e06 -->
+
+### Re: go-mode off — opus-4-8
+
+Acknowledged — you removed `go` from the queue marker, so go-mode (auto-drain) is off. The queue is empty (preset `#spec-test-build-install-commit-push`, no items), so nothing is pending and I won't auto-loop.
+
+Two preflight notes: the route-owned host supervisor (pid 3711158) is running a stale build (File Cache Conflict / IPC-drift source) — restart with `agent-doc session restart-supervisor tasks/software/lazily-rs.md --force` when convenient. The two semantic-completion hints (#57by↔#shuttleeval, #h6qb↔#yxjw) are informational; both stay gated as operator-drive review items, not real duplicates.
+<!-- agent:boundary:9dbf9de0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -113,7 +119,7 @@ Queue drained.
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

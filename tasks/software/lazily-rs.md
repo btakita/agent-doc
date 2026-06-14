@@ -39,7 +39,16 @@ queue: start
 Compacted content:
 - Archived 12 response topic(s): session recovery (stuck cycle + uncommitted compaction); session recovery (stuck cycle + uncommitted compaction); Add a reactive Signal (eager, no intermediate unset, v1→v2); 9 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:5be84ac4 -->
+
+### Re: Backlog the Slot→Cell→Signal LinkedIn post — opus-4-8
+
+> **Queue prompt:**
+>
+> Please add a backlog for me to post the Slot->Cell->Signal linkedin post tomorrow/monday. 
+
+
+Added `#lipostslotcell` to the backlog: post the "Slot→Cell→Signal" LinkedIn post on **Mon 2026-06-15** (tomorrow). Tagged `[operator-drive]` since publishing is yours to drive — draft/publish via the `/linkedin` skill (corky) when you're ready.
+<!-- agent:boundary:acb5c01f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,13 +57,14 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Please add a backlog for me to post the Slot->Cell->Signal linkedin post tomorrow/monday. 
+- ~~Please add a backlog for me to post the Slot->Cell->Signal linkedin post tomorrow/monday.~~ 
 - Please add a backlog for me to post the Lazily architecture linkedin post tuesday. 
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#sstz] #lipostslotcell=[operator-drive] Post the "Slot→Cell→Signal" LinkedIn post on Mon 2026-06-15 (tomorrow). Draft/publish via the /linkedin skill (corky).
 <!-- /agent:backlog -->
 
 ## Review

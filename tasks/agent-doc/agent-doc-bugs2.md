@@ -37,14 +37,44 @@ queue: start
 Compacted content:
 - Archived 10 response topic(s): post-compaction recovery + go-queue is in #qchurn no-op churn; queue reorder; JB `Run Agent Doc` should auto-restart the supervisor (churn-stop dispatch block); 7 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:242f194c -->
+### Re: do [#anw0] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: auto-recycle stalled
+> ```
+> ❯ [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve────────────────────────────────────────────────────────────────────────────────────────────────────
+>   Opus 4.8 ctx:21% ~[start] harness resolved: binary=claude source=frontmatter env=default
+>   ⏵⏵ bypass permissions on (shift+tab to cycle)                                           Registered session b26b9957 → pane %25
+>         Error: controller launch already in progress: /home/brian/work/btakita/agent-loop/.agent-doc/locks/controller-launch.lock
+>
+>          Caused by:
+>                        Resource temporarily unavailable (os error 11)
+> ```
+
+
+**Session recovery first.** This doc was stuck in the no-op-closeout loop: the supervisor had run a legitimate auto-compaction (fresh archive `…-052448.md`, exchange halved 52774→25610) but left it **uncommitted**, so every cycle re-detected the drift and did nothing. Landed it via `reset --from-current --preserve-session` → `commit` (`33be92178`); doc is clean, loop broken.
+
+**#anw0 / #supkill-bg parts 1+2 — shipped.** A prior turn left 391 lines of compiling, test-bearing WIP for the blue/green drain-and-supersede restart. Verified and delivered:
+
+- `decisions.rs` — pure `supervisor_restart_action(restart_requested, reexec_intent, turn_boundary)` → `{None, AwaitDrain, ReexecInPlace, RelaunchChild}` + truth-table unit test. A pending restart **mid-turn drains** (waits for the boundary, never tears down a live turn); at the boundary a **stale binary hot-reloads in place via execve** (zero-downtime upgrade for the `generation closed`/#fcc0 case), a fresh binary takes the normal relaunch.
+- `supervisor_io.rs` / `run.rs` — IPC `Restart` stamps `restart_reexec` from live staleness and defers `kill_child`; the host loop defers its restart-kill so execve preserves the live child + pane.
+- `idle_watch.rs` — publishes `binary_stale` each tick, runs the drain-reexec with proof lines (`supervisor_restart_drain_reexec`, `supervisor_restart_reexec_failed`) + a pane-preserving relaunch fallback on execve failure.
+- `sim_world` — deterministic coverage.
+
+`make check` green (full suite, 0 failed). Committed + pushed (agent-doc `1865976e`, superproject `88d16117a`) and **installed** (fresh binary + cdylib).
+
+**Remaining → #anw0 rescoped to part 3** (tagged `[clean-session]`): turn the PCP `generation N is closed` reject into a structured *retry-against-N+1* redirect so racing dispatch self-heals (`project_controller/rpc.rs`). Not in this WIP.
+
+**Promote + verify (operator-drive).** Running controllers still serve the prior binary — promote with `agent-doc admin recycle --all-projects` (or restart sessions), then drive the #aazp/#4myd live recycle proof (needs a live editor; can't be agent-done). The rest of this queue is the #qchurn-class free-text reports already captured in the backlog (#jbrestale, #recyclerestart, #0kjc, #qchurn…) — not agent-drainable, so I'm not auto-looping.
+<!-- agent:boundary:f8c14777 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:round_pushpin: do [#anw0]~~
----
+~~~done
 :pushpin: auto-recycle stalled
 ```
 ❯ [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -55,7 +85,7 @@ Compacted content:
          Caused by:
                        Resource temporarily unavailable (os error 11)
 ```
----
+~~~
 JB `Run Agent Doc`. This should auto-repair.
 ```
 resync: pruned 10 stale session(s)
@@ -150,7 +180,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#anw0] #supkill-bg part 3 (parts 1+2 LANDED agent-doc 1865976e / superproject 88d16117a: drain-and-supersede restart with in-place execve reexec + AwaitDrain idle gate + pane-preserving reexec-fail fallback; make check green; pushed + installed). Remaining: turn the PCP generation-N-is-closed hard reject into a structured retry-against-N+1 redirect so racing dispatch self-heals (project_controller/rpc.rs authorize_operator_command/handle_operator_command). SimWorld: racing dispatch to a closed generation receives a redirect and retries against the new generation. Live recycle proof stays operator-drive (#aazp/#4myd). Plan: tasks/agent-doc/plan-supervisor-self-kill-pcp-force.md
+- [ ] [#anw0] [clean-session] #supkill-bg part 3 (parts 1+2 LANDED agent-doc 1865976e / superproject 88d16117a: drain-and-supersede restart with in-place execve reexec + AwaitDrain idle gate + pane-preserving reexec-fail fallback; make check green; pushed + installed). Remaining: turn the PCP generation-N-is-closed hard reject into a structured retry-against-N+1 redirect so racing dispatch self-heals (project_controller/rpc.rs authorize_operator_command/handle_operator_command). SimWorld: racing dispatch to a closed generation receives a redirect and retries against the new generation. Live recycle proof stays operator-drive (#aazp/#4myd). Plan: tasks/agent-doc/plan-supervisor-self-kill-pcp-force.md
 - [ ] [#qmisstrike] [clean-session] finalize strike heuristic wrongly strikes the NEXT open queue head. Operator report (tsift.md): after manually deleting struck items, agent-doc struck through the next still-open item. LIVE-REPRODUCED this session: a finalize answering the free-text `:pushpin: JB Run Agent Doc` head consumed it AND additionally struck the next open id-backed head #qchurn (response never addressed it); session-check `#queue-clear-unrun-items` caught it, had to un-strike + reset --from-current + commit. ROOT CAUSE (hypothesis): the strike cursor over-advances by one and strikes an unanswered open head; id-backed heads should only strike via --done/--pending-gate/queue-consume, never the free-text strike heuristic. FIX: strike only the head(s) this turn`s response actually answered (match by topic/text, not position); never side-strike an id-backed head; treat operator strike-deletions as terminal (no forward re-strike); proof queue_strike target=… reason=answered|consume. CLEAN session. Related #qpresetstrike/#pushpinaccum/#qchurn. Plan: tasks/agent-doc/plan-finalize-misstrike-next-head.md
 - [ ] [#jbrestale] [clean-session] JB `Run Agent Doc` should auto-restart a stale/churn-stopped supervisor instead of failing closed. Operator pressed Run Agent Doc expecting a supervisor restart; dispatch returned `failed_stage=queue_paused reason=churn-stop: ... re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain`. The churn-stop reason itself prescribes a recycle, but the dispatch path treats it as terminal. ROOT CAUSE: the supervisor self-recycle (`supervisor_binary_stale_self_recycled`, #aazp/#4myd) is gated on the idle/next-queue-item boundary, which a churn-stopped queue never reaches. FIX: in the JB Run Agent Doc dispatch handler, classify a churn-stop whose reason is a stale supervisor (`supervisor_binary_stale`/`pre-<ver>`) and branch to restart-supervisor (proof `route_dispatch_recovery action=restart_supervisor … result=restarted|reexec_failed`), lift the stale-injected pause, re-dispatch ONCE (no loop), keep operator-verify heads deferred (#goqueuestall), fail closed + keep pane alive on reexec_failed. CLEAN session (route/dispatch + recycle path). Related #recyclerestart/#aazp/#4myd/#qchurn/#fcc0. Plan: tasks/agent-doc/plan-jb-run-restart-stale-supervisor.md
 - [ ] [#0kjc] #mdastquote [clean-session] Markdown AST must treat tags inside quoted strings ("...") and code spans/blocks (backtick / triple-backtick) as CONTENT, not document tags. Operator report: agent:*/#id-looking tokens inside quotes or fenced code are being parsed as real document component markers. Same family as #lintfence (fenced agent:* markers break lint + parser). FIX: tagpath/agent-doc markdown tokenizer must mask quoted-string and code-span/code-fence regions before component/tag extraction. CLEAN session (parser path).

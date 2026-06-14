@@ -1081,23 +1081,36 @@ pub(crate) fn supervisor_stale_warning_message(status: &ControllerStatus) -> Opt
     ))
 }
 
-/// `#fccsupwarn2` — pure staleness comparison for the route-owned HOST supervisor.
+/// `#fccsupwarn2` — pure staleness comparison for the route-owned HOST supervisor,
+/// keyed on the RUNNING binary inode rather than process start time.
 ///
 /// Unlike the lazy controller, the `agent-doc start --route-owned <doc>` host that
 /// actually serves and writes a document records NO `ControllerBinaryIdentity` in its
-/// supervisor lease — only a PID and heartbeat. So the cleanest available staleness
-/// signal is the supervisor PROCESS START TIME vs the installed binary's mtime: a host
-/// process that started strictly before the currently-installed binary was written maps
-/// the pre-install (stale) inode and keeps producing File Cache Conflict / IPC-drift
-/// dialogs after a fresh `cargo install`. Pure so it is unit-testable without `/proc`.
+/// supervisor lease — only a PID and heartbeat. The earlier heuristic compared the
+/// supervisor PROCESS START TIME against the installed binary's mtime
+/// (`process_start_secs < installed_mtime_secs`). That was a permanent FALSE POSITIVE
+/// for a supervisor that hot-reloaded onto the fresh binary via in-place `execve`
+/// (`supervisor_binary_stale_self_recycled`): `execve` preserves the process start
+/// time, so a host already running the current binary still reported "started before
+/// the install" forever — driving an endless, useless `restart-supervisor` loop and
+/// misleading the agent into treating a healthy supervisor as broken.
 ///
-/// `process_start_secs` and `installed_mtime_secs` are unix-epoch seconds. Returns
-/// `true` only when the process is provably older than the installed binary
-/// (`process_start_secs < installed_mtime_secs`). Equal timestamps (clock granularity)
-/// read as NOT stale — fail-open, staleness is a recycle hint and must never block a
-/// cycle on a boundary tie.
-pub(crate) fn host_supervisor_is_stale(process_start_secs: u64, installed_mtime_secs: u64) -> bool {
-    process_start_secs < installed_mtime_secs
+/// Identity, not time, is the robust signal: a supervisor mapping the SAME on-disk
+/// inode as the installed binary runs current code (whether by its original launch or
+/// by an in-place re-exec); a supervisor mapping a different inode (the old, now
+/// unlinked binary) is stale. `running_exe_inode` is the inode reached through
+/// `/proc/<pid>/exe`; `installed_inode` is the inode of the installed binary path.
+/// Returns `true` only when BOTH are known and differ — fail-open (an unknown running
+/// inode reads NOT stale) so a read error can never spam a warning or block a cycle.
+/// Pure so it is unit-testable without `/proc`.
+pub(crate) fn host_supervisor_is_stale(
+    running_exe_inode: Option<u64>,
+    installed_inode: u64,
+) -> bool {
+    match running_exe_inode {
+        Some(running) => running != installed_inode,
+        None => false,
+    }
 }
 
 /// `#fccsupwarn2` — IO check for the route-owned HOST supervisor that serves `file`.
@@ -1107,8 +1120,9 @@ pub(crate) fn host_supervisor_is_stale(process_start_secs: u64, installed_mtime_
 /// recorded identity matched the new install → no warning) while the long-lived
 /// route-owned host supervisor was hours stale and silently kept producing the dialogs.
 /// This check resolves the host supervisor PID for `file` via the authoritative actor
-/// binding + supervisor lease, then compares its process start time against the installed
-/// binary's mtime via [`host_supervisor_is_stale`].
+/// binding + supervisor lease, then compares the inode it maps via `/proc/<pid>/exe`
+/// against the installed binary's inode via [`host_supervisor_is_stale`] — so a
+/// supervisor that re-exec'd onto the fresh binary in place reads fresh.
 ///
 /// Fully fail-open: a missing project root, no authoritative binding, no live supervisor
 /// PID, a dead PID, an unreadable `/proc/<pid>`, or any stat error yields `None` so this
@@ -1123,11 +1137,13 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
     if !process_is_alive(supervisor_pid) {
         return None;
     }
-    let age_secs = process_start_age_secs(supervisor_pid)?;
-    let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-    let process_start_secs = now_secs.saturating_sub(age_secs);
-    let installed_mtime_secs = current_binary_identity().ok()?.modified_secs;
-    if !host_supervisor_is_stale(process_start_secs, installed_mtime_secs) {
+    // `#fccsupwarn2`: compare the supervisor's RUNNING binary inode (via
+    // `/proc/<pid>/exe`) against the installed binary's inode. A supervisor that
+    // hot-reloaded onto the fresh binary in place (`execve`) maps the install inode and
+    // must read FRESH even though its process start time predates the install.
+    let installed_inode = inode_of_path(&current_binary_identity().ok()?.path)?;
+    let running_inode = running_exe_inode_for_pid(supervisor_pid);
+    if !host_supervisor_is_stale(running_inode, installed_inode) {
         return None;
     }
     Some(format!(
@@ -3951,21 +3967,27 @@ mod tests {
     }
 
     #[test]
-    fn host_supervisor_is_stale_compares_process_start_against_installed_mtime() {
-        // #fccsupwarn2 — the route-owned host supervisor records no binary identity, so
-        // staleness is process-start-time vs installed-binary mtime. A host that started
-        // before the installed binary maps the stale inode; a host that started at or
-        // after it is fresh (boundary tie reads fresh — fail-open).
-        let installed_mtime = 1_000_000u64;
+    fn host_supervisor_is_stale_compares_running_inode_against_installed_inode() {
+        // #fccsupwarn2 — staleness is identity (inode), NOT process start time. A
+        // supervisor that hot-reloaded onto the fresh binary via in-place `execve`
+        // preserves its process start time but remaps the inode, so it must read FRESH.
+        let installed_inode = 4242u64;
 
-        // Host started 10h before the installed binary was written → STALE.
-        assert!(host_supervisor_is_stale(installed_mtime - 36_000, installed_mtime));
+        // Supervisor maps a DIFFERENT inode (original launch never re-exec'd; the old,
+        // now-unlinked binary) → STALE.
+        assert!(host_supervisor_is_stale(
+            Some(installed_inode + 1),
+            installed_inode
+        ));
 
-        // Host started after the installed binary → FRESH.
-        assert!(!host_supervisor_is_stale(installed_mtime + 60, installed_mtime));
+        // Supervisor maps the SAME inode as the install (fresh launch OR in-place
+        // execve hot-reload) → FRESH. This is the case the start-time heuristic got
+        // wrong: a re-exec'd supervisor that runs current code.
+        assert!(!host_supervisor_is_stale(Some(installed_inode), installed_inode));
 
-        // Boundary tie (same second, clock granularity) → fail-open, NOT stale.
-        assert!(!host_supervisor_is_stale(installed_mtime, installed_mtime));
+        // Running inode unknown (non-Linux / unreadable `/proc/<pid>/exe`) → fail-open,
+        // NOT stale, so a read error can never spam the warning.
+        assert!(!host_supervisor_is_stale(None, installed_inode));
     }
 
     #[test]

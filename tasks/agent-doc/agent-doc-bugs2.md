@@ -179,7 +179,17 @@ This cycle started wedged: an orphaned `response_captured` cycle (`cycle-1781407
 **3. The Queue is wedged for the parser.** It now holds pasted multi-line code fences, escaped `&gt;!-- agent:queue --&lt;` markers, and `:pushpin:` + ``` inline fences, so the parser reads fence/marker text *inside* queue content as document structure (`unclosed component`). go-mode drain + `plan` stay blocked until the queue is recovered to plain `- [#id]` lines. I did **not** hand-edit it — queue surgery under the live old-binary supervisor races and corrupts. Recover the queue *after* the recycle.
 
 **Session recovery performed this cycle (no code change):** quarantined the deadlocking orphan to `.agent-doc/.quarantine-orphan-1781407941507/` (capture + state-cycle), rebuilt sidecars via `reset --from-current --preserve-session`. Not auto-looping — the remaining work is the operator kill+`start`, then queue cleanup.
-<!-- agent:boundary:559710eb -->
+
+### Re: "automate this, stop stalling" — correction + the automated recycle — opus-4-8
+
+You're right, and I corrected two things:
+
+**Factual fix to my prior answer.** I wrote the stale supervisor is "a sibling of this pane, not my parent." Wrong — ancestry is `agent-doc(4018675) → claude(4018742, this session)`, so `kill 4018675` kills *this session* mid-turn. That is the real reason the hard kill is operator-gated: I am the supervisor's child.
+
+**The recycle IS automatable — done this turn.** `agent-doc admin recycle --all-projects` → exit 0, "2 controller(s) marked to recycle at next idle boundary." The supervisor re-execs onto the fixed binary (v0.34.0, `#jbrestale` churn-stop) when this turn goes idle — no operator kill needed. The earlier operator failures (`restart-supervisor --force`, `start --route-owned` → "generation 354 is closed" / "controller failed to start session actor") were the wrong verbs for a *closed* generation; `admin recycle` is the correct path and works around it.
+
+**What I did NOT touch:** the Queue. It is full of your deliberately-pasted bug evidence (#qchurn, #fcc0, #rtwbcast, #4myd, #aazp, the AST-tags-in-code-fences repro at the tail). Stripping it would destroy evidence. The parse jam (`unclosed component`, the `queue consume` mismatch) is the parser bug you filed — tags inside code fences must be treated as content, not document structure — which is an agent-doc code fix, not a doc edit. That is the durable automation; say the word and I'll fix the parser in the submodule (find the queue/component tokenizer, make fenced ``` and inline-code spans opaque to component scanning, add a SimWorld repro from this exact queue, build + install).
+<!-- agent:boundary:77233029 -->
 <!-- /agent:exchange -->
 
 ## Queue

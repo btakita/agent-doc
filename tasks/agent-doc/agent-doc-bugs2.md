@@ -105,7 +105,25 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 After the restart, the supervisor comes up on the 15:01 build and its idle-watch drains the `[clean-session]` heads on its own (`#cleandrainsup`: one fresh `/clear`ed agent per item — `#jbrestale`, `#mphaseloop`, `#qmisstrike`, `#fcc0`, `#rtwbcast`, `#dupcontent`, `#compactqattr`, `#0kjc`, `#pushpinaccum`, `#recyclerestart`). The `[operator-verify]` heads (`#4myd`, `#aazp`, `#c2b6`, `#1j8q`) stay yours — they need a live editor/pane proof.
 
 **Not auto-looping** — every materialized head is `[clean-session]` (deferred to the post-restart supervisor) or `[operator-verify]` (yours). Restarting the supervisor hands the clean-session column off; it does not abandon it.
-<!-- agent:boundary:7a4adea9 -->
+### Re: [#jbrestale] re-pinned — same stale-supervisor block, now verified with timestamps — opus-4-8
+
+Re-pin noted. Nothing has changed since the prior `### Re: [#jbrestale]` answer, and I verified the staleness directly this turn:
+
+- Supervisor **pid 1654897** hosting this document started **14:43:10**.
+- Installed binary (`~/.cargo/bin/agent-doc`) and the release `.so` were reinstalled **15:01:16** — ~18 min *after* the supervisor launched.
+
+So the process serving this session is provably running the pre-15:01 build (`supervisor_binary_stale`, the `#fcc0`/`#ipcdrift` dialog source). `#jbrestale` is the fix for exactly this failure mode, it is `[clean-session]`, and it **cannot be drained from inside the stale supervisor it would repair** (building/installing mid-session re-stales this very process — `#no-mid-session-install`). `queue_drainable_head_count: 0` / `queue_continuation_required: false` confirm there is no loop-drainable head here. It is **not done** — it stays open, blocked on the operator restart below.
+
+**One operator-drive command unblocks the whole pinned column** (it restarts the process hosting this session, so I can't run it from within it):
+
+```
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+
+After restart the supervisor comes up on the 15:01 build and its idle-watch `/clear`-and-drains each `[clean-session]` head on its own (`#cleandrainsup`: `#jbrestale`, `#mphaseloop`, `#qmisstrike`, `#fcc0`, `#rtwbcast`, `#dupcontent`, `#compactqattr`, `#0kjc`, `#pushpinaccum`, `#recyclerestart`). The `[operator-verify]` heads (`#4myd`, `#aazp`, `#c2b6`, `#1j8q`) stay with you — they need a live editor/pane proof.
+
+**Not auto-looping** — every materialized head is `[clean-session]` (handed to the post-restart supervisor) or `[operator-verify]` (yours). Stopping here hands the clean-session column to the supervisor; it does not abandon it.
+<!-- agent:boundary:a47b0f4c -->
 <!-- /agent:exchange -->
 
 ## Queue

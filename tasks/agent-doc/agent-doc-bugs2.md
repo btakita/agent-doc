@@ -59,7 +59,28 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 ```
 
 then drain from a fresh `/agent-doc`.
-<!-- agent:boundary:ecee45eb -->
+
+### Re: #qchurn reproduced live — no-op churn cycle, still stale-supervisor blocked — opus-4-8
+
+This cycle **is `#qchurn` reproducing live.** There is no new exchange prompt and no document content change (preflight: *"no changes detected between snapshot and document"*); the only diff is go-mode re-populating the queue with `:pushpin: [#qchurn]` (a `queue`-attr backlog id), which then triggered this otherwise-empty cycle. That is precisely the failure mode `#qchurn` describes — a go-mode queue whose only remaining heads are undrainable keeps re-injecting `queue_trigger=auto` at each idle boundary, producing repeated no-op cycles with zero drainable work.
+
+**Nothing here is agent-drainable:**
+- The head `#qchurn` and the other 15 heads are all `[clean-session]` / `[operator-verify]`; preflight deferred all 16 (`#goqueuestall`).
+- The host supervisor (pid 2524189) is still **stale** (started before the installed binary). Every clean-session head edits `src/agent-doc` + needs `make install`, which would re-stale *this* live supervisor mid-cycle (`#no-mid-session-install` / `#fcc0`).
+
+So I am **not** auto-looping (it would just spin another no-op `#qchurn` cycle) and **not** editing queue state or installing against the live supervisor.
+
+To land the clean-session backlog, restart onto a fresh binary, then drain from a fresh session:
+
+```
+cd src/agent-doc && make install
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+
+then `/agent-doc tasks/agent-doc/agent-doc-bugs2.md`.
+
+This cycle is itself clean evidence for the `#qchurn` fix: a deferred clean-session head must not keep `queue_active=true` / re-dispatching when no actionable `do #id` or new user prompt remains.
+<!-- agent:boundary:2cb6baa3 -->
 <!-- /agent:exchange -->
 
 ## Queue

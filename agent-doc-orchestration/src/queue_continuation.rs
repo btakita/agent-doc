@@ -136,32 +136,75 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
     }))
 }
 
-/// The set of active backlog ids (lowercase) that are NOT agent-drainable in the
-/// current session type (`#goqueuestall`): `[operator-verify]` items always, plus
-/// `[clean-session]` items when a live editor-IPC listener is active for `file`.
-/// Used to compute queue continuation over the drainable head set only.
+/// Which drain consumer is asking for the deferred set. The two consumers treat
+/// `[clean-session]` differently (`#cleandrainsup`):
+///
+/// - [`DrainScope::Loop`] — the in-session Claude Code `/loop`, the Codex Stop-hook
+///   continuation, and preflight `queue_continuation_required`. These run IN the
+///   current (accreting) session and cannot give a `[clean-session]` head the fresh
+///   context it asks for, so they defer clean-session items under a live editor-IPC
+///   listener (and stop, letting the supervisor drive them) — the original
+///   `#goqueuestall` behavior.
+/// - [`DrainScope::Supervisor`] — the supervisor idle-watch, which force-`/clear`s
+///   and re-dispatches the head to a freshly-cleared agent. It CAN provide the clean
+///   context a `[clean-session]` item asks for, so it drains those heads, deferring
+///   only `[operator-verify]` (which genuinely needs a human).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrainScope {
+    /// In-session `/loop` / Codex Stop-hook continuation / preflight signal.
+    Loop,
+    /// Supervisor idle-watch (force-`/clear`s before a clean-session head).
+    Supervisor,
+}
+
+/// The set of active backlog ids (lowercase) that are NOT agent-drainable for the
+/// in-session [`DrainScope::Loop`] consumer (`#goqueuestall`): `[operator-verify]`
+/// items always, plus `[clean-session]` items when a live editor-IPC listener is
+/// active for `file`. Used to compute queue continuation over the drainable head
+/// set only.
 ///
 /// `pub(crate)` so `session_check`'s queue-head guards reuse the SAME deferred set
 /// (`#goqueuestall`): a deferred head must not trip the "runnable head remained /
 /// no-response reap-only closeout" guards, exactly as it is excluded here.
 pub(crate) fn deferred_backlog_ids(file: &Path, content: &str) -> std::collections::HashSet<String> {
+    deferred_backlog_ids_scoped(file, content, DrainScope::Loop)
+}
+
+/// Scoped variant of [`deferred_backlog_ids`] (`#cleandrainsup`). The supervisor
+/// idle-watch passes [`DrainScope::Supervisor`] so `[clean-session]` heads stay
+/// drainable (it force-`/clear`s before dispatch); every other caller uses
+/// [`DrainScope::Loop`].
+pub(crate) fn deferred_backlog_ids_scoped(
+    file: &Path,
+    content: &str,
+    scope: DrainScope,
+) -> std::collections::HashSet<String> {
     let live_ipc = crate::snapshot::find_project_root(file)
         .or_else(|| file.parent().map(std::path::Path::to_path_buf))
         .map(|root| crate::ipc_socket::is_listener_active(&root))
         .unwrap_or(false);
-    deferred_backlog_ids_with_ipc(content, live_ipc)
+    deferred_backlog_ids_with_ipc_scoped(content, live_ipc, scope)
 }
 
-/// Pure core of [`deferred_backlog_ids`] — testable without a live socket.
-/// `pub(crate)` so `session_check` guard tests can build the deferred set from a
-/// document string without a live editor-IPC socket (`#goqueuestall`).
-pub(crate) fn deferred_backlog_ids_with_ipc(
+/// Pure, scoped core of the deferred-set computation (`#cleandrainsup`). For
+/// [`DrainScope::Loop`] a `[clean-session]` item is deferred under a live editor-IPC
+/// listener (the in-session loop cannot self-clean); for [`DrainScope::Supervisor`]
+/// it stays drainable because the supervisor force-`/clear`s before dispatch.
+/// `[operator-verify]` is deferred in both scopes.
+pub(crate) fn deferred_backlog_ids_with_ipc_scoped(
     content: &str,
     live_ipc: bool,
+    scope: DrainScope,
 ) -> std::collections::HashSet<String> {
     let mut deferred = std::collections::HashSet::new();
     let Ok(components) = crate::component::parse(content) else {
         return deferred;
+    };
+    // The supervisor provides the fresh context a `[clean-session]` head asks for
+    // (force-`/clear` before dispatch), so it never defers clean-session.
+    let defer_clean_session = match scope {
+        DrainScope::Loop => live_ipc,
+        DrainScope::Supervisor => false,
     };
     for comp in &components {
         if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
@@ -169,12 +212,58 @@ pub(crate) fn deferred_backlog_ids_with_ipc(
         }
         let body = &content[comp.open_end..comp.close_start];
         for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
-            if ctx.operator_verify_required || (ctx.clean_session_required && live_ipc) {
+            if ctx.operator_verify_required || (ctx.clean_session_required && defer_clean_session) {
                 deferred.insert(id.to_ascii_lowercase());
             }
         }
     }
     deferred
+}
+
+/// Active backlog ids (lowercase) carrying `[clean-session]` — heads that ask for a
+/// fresh agent context. The supervisor idle-watch force-`/clear`s before dispatching
+/// such a head (`#cleandrainsup`) so it runs in a clean session even when the global
+/// `agent_doc_queue_context_reset` opt-in is off.
+pub fn clean_session_backlog_ids(content: &str) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    let Ok(components) = crate::component::parse(content) else {
+        return ids;
+    };
+    for comp in &components {
+        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
+            continue;
+        }
+        let body = &content[comp.open_end..comp.close_start];
+        for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
+            if ctx.clean_session_required {
+                ids.insert(id.to_ascii_lowercase());
+            }
+        }
+    }
+    ids
+}
+
+/// Whether the active queue `head` (an `#id` or raw prompt text) maps to a
+/// `[clean-session]` backlog item (`#cleandrainsup`). The supervisor idle-watch uses
+/// this to force a context `/clear` before dispatching the head, independent of the
+/// global `agent_doc_queue_context_reset` opt-in.
+pub fn head_requires_clean_session(file: &Path, head: &str) -> bool {
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return false;
+    };
+    head_requires_clean_session_in(&content, head)
+}
+
+/// Pure core of [`head_requires_clean_session`] — testable without a file.
+pub fn head_requires_clean_session_in(content: &str, head: &str) -> bool {
+    let ids = clean_session_backlog_ids(content);
+    if ids.is_empty() {
+        return false;
+    }
+    let id = extract_head_id(head)
+        .map(|i| i.to_ascii_lowercase())
+        .unwrap_or_else(|| head.trim().to_ascii_lowercase());
+    ids.contains(&id)
 }
 
 /// Count of active queue head prompts whose backlog id is deferred
@@ -339,14 +428,19 @@ fn open_backlog_ids_from_content(content: &str) -> Option<std::collections::Hash
 /// Like [`live_continuation_head`] but returns `Some` only when the active queue
 /// has a head the agent can actually drain in the current session — applying the
 /// same drainability + deferred filtering as [`detect`] (without the snapshot-edit
-/// comparison). A queue whose only remaining heads are inert noise lines
-/// (operator bug-report observations with no `#id`/directive/question) or deferred
-/// `[clean-session]`/`[operator-verify]` items returns `None`.
+/// comparison), but in the [`DrainScope::Supervisor`] scope (`#cleandrainsup`): a
+/// `[clean-session]` head stays drainable (the supervisor force-`/clear`s before
+/// dispatch), and only `[operator-verify]` heads and inert noise lines (operator
+/// bug-report observations with no `#id`/directive/question) are skipped. A queue
+/// whose only remaining heads are `[operator-verify]`/noise returns `None`.
 ///
 /// The supervisor idle-queue watch uses this (not the unfiltered
 /// [`live_continuation_head`]) so it does not re-inject a no-op `/agent-doc` drain
 /// trigger every idle boundary for a queue `session-check` already reports as
-/// having no continuation required (#qchurn).
+/// having no continuation required (#qchurn). It deliberately differs from the
+/// in-session `drainable_head_count` (`DrainScope::Loop`), which still defers
+/// `[clean-session]` under a live editor-IPC listener so the `/loop` stops and lets
+/// the supervisor drive those heads.
 pub fn live_drainable_continuation_head(file: &Path, content: &str) -> Option<String> {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let (fm, _) = crate::frontmatter::parse_for_file_with_context(content, file, &rc).ok()?;
@@ -366,7 +460,9 @@ pub fn live_drainable_continuation_head(file: &Path, content: &str) -> Option<St
         return None;
     }
     let open_backlog = open_backlog_ids_from_content(content);
-    let deferred_ids = deferred_backlog_ids(file, content);
+    // `#cleandrainsup`: the supervisor drains `[clean-session]` heads (it
+    // force-`/clear`s before dispatch), so it defers only `[operator-verify]`.
+    let deferred_ids = deferred_backlog_ids_scoped(file, content, DrainScope::Supervisor);
     let head = first_drainable_head(&activation.entries_after, open_backlog.as_ref(), &deferred_ids)?;
     Some(extract_head_id(&head.text).unwrap_or_else(|| head.text.trim().to_string()))
 }
@@ -1004,15 +1100,62 @@ mod tests {
                 "- [ ] [#c] plain",
             ],
         );
-        let live = deferred_backlog_ids_with_ipc(&content, true);
+        let live = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Loop);
         assert!(live.contains("a"));
         assert!(live.contains("b"));
         assert!(!live.contains("c"));
 
-        let clean = deferred_backlog_ids_with_ipc(&content, false);
+        let clean = deferred_backlog_ids_with_ipc_scoped(&content, false, DrainScope::Loop);
         assert!(!clean.contains("a"), "clean-session drains in a clean session");
         assert!(clean.contains("b"), "operator-verify always deferred");
         assert!(!clean.contains("c"));
+    }
+
+    #[test]
+    fn deferred_scoped_supervisor_drains_clean_session_under_live_ipc() {
+        // #cleandrainsup: the supervisor force-`/clear`s before a clean-session
+        // head, so it drains clean-session items even under a live editor-IPC
+        // listener — only operator-verify stays deferred. The in-session Loop scope
+        // still defers clean-session under live IPC so the /loop stops.
+        let content = doc_with_backlog(
+            &["do [#a]", "do [#b]", "do [#c]"],
+            &[
+                "- [ ] [#a] [clean-session] needs quiet",
+                "- [ ] [#b] [operator-verify] live drive",
+                "- [ ] [#c] plain",
+            ],
+        );
+
+        let loop_live = deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Loop);
+        assert!(loop_live.contains("a"), "loop defers clean-session under live IPC");
+        assert!(loop_live.contains("b"), "operator-verify always deferred");
+        assert!(!loop_live.contains("c"));
+
+        let sup_live =
+            deferred_backlog_ids_with_ipc_scoped(&content, true, DrainScope::Supervisor);
+        assert!(
+            !sup_live.contains("a"),
+            "supervisor drains clean-session even under live IPC (#cleandrainsup)"
+        );
+        assert!(sup_live.contains("b"), "operator-verify still deferred for the supervisor");
+        assert!(!sup_live.contains("c"));
+    }
+
+    #[test]
+    fn head_requires_clean_session_maps_head_id_to_tag() {
+        // #cleandrainsup: the idle-watch maps the active head (an `#id`) back to its
+        // backlog item's `[clean-session]` tag to decide whether to force a `/clear`.
+        let content = doc_with_backlog(
+            &["do [#a]", "do [#b]"],
+            &[
+                "- [ ] [#a] [clean-session] needs quiet",
+                "- [ ] [#b] plain drainable",
+            ],
+        );
+        assert!(head_requires_clean_session_in(&content, "a"));
+        assert!(head_requires_clean_session_in(&content, "do [#a]"));
+        assert!(!head_requires_clean_session_in(&content, "b"));
+        assert!(!head_requires_clean_session_in(&content, "nonexistent"));
     }
 
     #[test]

@@ -647,7 +647,25 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // conversation, so it still warrants a reset. Everything stays
                 // behind the default-off `agent_doc_queue_context_reset` opt-in,
                 // and an unknown ctx% (`pct=None`) never clears (fail safe).
-                let context_reset_reason = if clear_cooldown_active
+                // `#cleandrainsup`: a `[clean-session]` head asks for a fresh agent
+                // context. The supervisor provides it by force-`/clear`ing before
+                // dispatch, independent of the `agent_doc_queue_context_reset`
+                // opt-in (which only governs accretion-driven pre-emptive clears).
+                // This is what lets the supervisor drain clean-session heads the
+                // in-session `/loop` defers (queue_continuation_required=false).
+                let active_head_is_clean_session = active_head
+                    .as_deref()
+                    .map(|head| crate::queue_continuation::head_requires_clean_session(&path, head))
+                    .unwrap_or(false);
+                let context_reset_reason = if crate::start::decisions::clean_session_head_forces_context_reset(
+                    active_head_is_clean_session,
+                    clear_cooldown_active,
+                ) {
+                    Some(
+                        "active queue head is a [clean-session] item — clearing to give it a fresh agent context (#cleandrainsup)"
+                            .to_string(),
+                    )
+                } else if clear_cooldown_active
                     || !crate::session_accretion::queue_context_reset_opted_in(&path)
                 {
                     None

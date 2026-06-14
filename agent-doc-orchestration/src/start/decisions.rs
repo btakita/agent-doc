@@ -63,6 +63,21 @@ pub(crate) enum IdleQueueContextResetDecision {
     SkipNoResetNeeded,
 }
 
+/// `#cleandrainsup`: whether the supervisor idle-watch must force a context
+/// `/clear` before dispatching the active queue head because it is a
+/// `[clean-session]` item. A `[clean-session]` tag is an explicit per-item request
+/// for a fresh agent context, so it warrants a `/clear` independent of the global
+/// `agent_doc_queue_context_reset` opt-in (which only governs accretion-driven
+/// pre-emptive clears). It is still suppressed during a clear cooldown so it never
+/// clears into an in-flight `/clear`. Pure so the policy is unit-testable without a
+/// live pane.
+pub(crate) fn clean_session_head_forces_context_reset(
+    active_head_is_clean_session: bool,
+    clear_cooldown_active: bool,
+) -> bool {
+    active_head_is_clean_session && !clear_cooldown_active
+}
+
 pub(crate) fn idle_queue_context_reset_decision(
     prompt_visible: bool,
     turn_active: bool,
@@ -369,6 +384,17 @@ impl ReexecState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clean_session_head_forces_context_reset_policy() {
+        // #cleandrainsup: a clean-session head forces a /clear, except during a
+        // clear cooldown (never clear into an in-flight clear). A non-clean-session
+        // head never forces a clear here (the opt-in/accretion path owns that).
+        assert!(clean_session_head_forces_context_reset(true, false));
+        assert!(!clean_session_head_forces_context_reset(true, true));
+        assert!(!clean_session_head_forces_context_reset(false, false));
+        assert!(!clean_session_head_forces_context_reset(false, true));
+    }
 
     #[test]
     fn supervisor_recycle_action_policy() {

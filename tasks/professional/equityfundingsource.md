@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -58,7 +58,29 @@ Done — both shipped in the admin Deal Pipeline board (`lib/ui--browser--efs/po
 **Verification:** `bun run check` green — 682 tests pass, 0 fail, worker build clean. Added deterministic coverage to `tests/admin-pipeline.test.ts` (asserts the column builder, the badge component, and the badge wiring).
 
 One note (not blocking): because the lane honors the Active/All scope toggle, a published deal that has advanced to Funded/Closed only appears in the lane under "All" scope. That matches how every other lane behaves; flag it if you'd rather the Published lane always show published deals regardless of scope.
-<!-- agent:boundary:5db0e2f4 -->
+
+### Re: Available deal dialog on the investor dashboard — opus-4-8
+
+> **Queue prompt:**
+>
+> Add an Available deal dialog in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard. Clicking on the Available deal card opens the dialog. deploy
+
+Done — shipped, pushed, and deployed.
+
+**What changed** (`lib/ui--browser--efs/portal/investor/dashboard.tsx`): the "Available deals" preview cards on the investor dashboard used to be plain anchor links that navigated straight to `/portal-investor/deals/<id>`. They are now buttons that open an in-dashboard dialog when clicked.
+
+- **`AvailableDealDialog`** renders through the shared `PortalModal` (backdrop click + Esc close, focus-friendly), with `role="dialog" aria-modal="true"` and a `ModalCloseButton`. It shows the deal heading + location, a 2-column detail grid (Loan amount, LTV, Sold rate, Available amount), the remaining-funding line, and a **View full deal** link to the existing detail page so navigation is still one click away.
+- The card itself became a `<button>` (`aria-haspopup="dialog"`) that sets `selected_deal`; no behavior change to the data fetch or the 3-card / non-active filter.
+
+**Verification:** `bun run check` green — **683 tests pass, 0 fail**, worker build clean. Added a deterministic source-assertion test to `tests/investor-portal-e2e.test.ts` covering the button-opens-dialog wiring, the `PortalModal` import, the dialog component, and that the card no longer renders the old anchor.
+
+**Shipped:**
+- `equityfundingsource-dev` commit `5de3fa4`, pushed to `origin/main`.
+- Superproject pointer bump `ff7a60ef5`.
+- Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `488a6f7f`).
+
+Advances the #zwws investor-dashboard rework.
+<!-- agent:boundary:8637d3e4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,7 +88,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Add an Available deal dialog in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard. Clicking on the Available deal card opens the dialog. deploy
 <!-- /agent:queue -->
 
 ## Backlog

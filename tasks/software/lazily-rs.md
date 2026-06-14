@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -153,7 +153,35 @@ What I verified on this machine:
 To make posts go out: schedule them (the item then shows in `corky schedule list`), and the `corky-schedule.timer` will pick them up within 5 minutes and run `corky schedule run`. *[recommended]* After scheduling, confirm with `corky schedule list` (should show the item) and watch one timer cycle land it.
 
 (Note: this question is unrelated to the lazily-rs doc it was queued in; answering inline since it came through this session's queue. Exchange is large but an active queue is draining, so leaving it as-is.)
-<!-- agent:boundary:5d1486dc -->
+
+### Re: Did the LinkedIn post go out? — opus-4-8
+
+> **Queue prompt:**
+>
+> Did the Linked in post go out?
+
+
+**No — nothing has gone out, and nothing is queued to go out.** I verified the live state on this machine:
+
+1. **Schedule queue is empty.** `corky schedule list` → **"No scheduled items."** The `corky-schedule.timer` is healthy (firing every 5 min, last run 10:55:48 EDT, exit 0), but it has nothing to publish — same situation as the earlier `corky watch` question. A healthy publisher with an empty queue posts nothing.
+
+2. **The drafts are still just files on disk**, unpublished, in `mail/drafts/linkedin/`:
+   - `2026-06-15-slot-cell-signal.md` (#lipostslotcell / #sstz)
+   - `2026-06-16-lazily-architecture.md` (#lipostlazilyarch / #kabc)
+   - (plus two `2026-06-14-*` variants)
+
+3. **Both are operator-drive, future-dated review items.** Today is **2026-06-14**; the Slot→Cell→Signal post is slated for **Mon 2026-06-15** and the architecture post for **Tue 2026-06-16**. Per the review items (`[#sstz]`, `[#kabc]`), publishing is yours to drive — I can't auto-post them.
+
+**To make one go out**, either publish immediately:
+```
+corky linkedin post mail/drafts/linkedin/2026-06-15-slot-cell-signal.md
+```
+or queue it so the timer lands it within 5 min:
+```
+corky schedule add --platform linkedin --file mail/drafts/linkedin/2026-06-15-slot-cell-signal.md --at 2026-06-15T09:00
+```
+After scheduling, confirm with `corky schedule list` (it should then show the item).
+<!-- agent:boundary:0e632720 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -162,7 +190,6 @@ To make posts go out: schedule them (the item then shows in `corky schedule list
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Did the Linked in post go out?
 <!-- /agent:queue -->
 
 ## Backlog

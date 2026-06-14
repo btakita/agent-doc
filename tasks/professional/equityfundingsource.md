@@ -125,7 +125,7 @@ Deployed. Both queued changes from this drain are now live:
 `deploy:worker:no-migrate` (no schema change) → version `7c1f462f`, https://equityfundingsource.brian-takita.workers.dev.
 
 Remaining in the queue: `do [#c7cs]` — extend click-to-view to the admin/investor/broker/lender document **tables**. That's the next drain cycle.
-<!-- agent:boundary:3a425c58 -->
+<!-- agent:boundary:68781885 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,7 +142,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#c7cs] Extend the #doc-viewer click-to-view to the remaining download-only document surfaces (admin/documents.tsx, admin/lender_documents.tsx, admin/deal_documents.tsx, admin/document_request_detail.tsx, admin/upload_detail.tsx, investor/documents.tsx, investor/available_deals.tsx, broker portal, shared/table_actions.tsx): add a View action next to each Download button using DocumentFileLink/use_document_viewer_ from shared/ui.tsx, plus per-surface wiring tests. Intentionally kept open — drains as its own queue cycle after the borrower-facing viewer (this cycle) and deploy.
 <!-- /agent:backlog -->
 
 ## Review

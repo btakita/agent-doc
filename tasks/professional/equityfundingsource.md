@@ -166,7 +166,27 @@ Done (EFS `dcfca4e`). Phase B of the admin loan pipeline (#67v2) now records the
 **Per `#spec-test-commit-push`:** updated the PRD Phase B section (`prds/67v2-admin-loan-pipeline-kanban.md`) with the implementation block; added 5 tests to `tests/admin-pipeline.test.ts` (outbox row shape, no-loan-number skip, non-fatal failure, status-PUT wiring order, replay-gated guard). `bun run check` green (662 tests), worker build clean. Committed + pushed to `main` (submodule pointer bumped to `dcfca4e`).
 
 Not deployed — this preset is commit+push only. Remaining queue: `do [#67v2d]` (admin dashboard pipeline summary) then `#advance-review`.
-<!-- agent:boundary:b56b1ada -->
+
+### Re: do [#67v2d] — Admin dashboard pipeline summary (Phase D) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#67v2d]
+
+Done (EFS `47fb134`, submodule pointer `1d1033685`). Phase D of the admin loan pipeline (#67v2) now surfaces a **per-stage pipeline summary with next-actions on the admin dashboard**, mirroring the `/portal-admin/pipeline` board.
+
+**No drift by construction:** the board's column build in `admin_pipeline_GET_` was extracted into a shared `admin_pipeline_columns_(auth, now_s)` (`lib/admin/loan_management/index.ts`). The board GET and the dashboard summary now consume the **same** columns + counts, so they can't diverge.
+
+**What shipped:**
+- `admin_dashboard_pipeline_summary_(columns)` (`lib/admin/dashboard/index.ts`) — pure, unit-tested builder mapping each board column to a stage `{ id, label, count, action_needed, href }`, plus `total` and `action_needed_count`. `action_needed` flags the **open funnel** (Incomplete Applications + Applications / Processing / Documents / Underwriting), mirroring the Deal Pipeline action badge; terminal/parked stages (Funded / Closed / On Hold / Unassigned / Application Denied) are not.
+- `GET /api/admin/dashboard` adds a `pipeline_summary` field (built in the existing `Promise.all`; a summary failure logs and degrades to an empty stage list — never a 500).
+- **Dashboard UI** (`portal/admin/dashboard.tsx`) renders a **Loan pipeline** section under the metric grid: a per-stage count grid with action-needed stages highlighted + an "Action" badge, plus an "Open pipeline board" link. Each stage card deep-links to `/portal-admin/pipeline?tab=pipeline&column=<id>`.
+- **Pipeline board** (`portal/admin/pipeline.tsx`) reads `?column=<id>` and scrolls the targeted stage column into view with a highlighted border, so the dashboard deep-link lands on the right stage.
+
+**Per `#spec-test-commit-push`:** updated the PRD Phase D section (`prds/67v2-admin-loan-pipeline-kanban.md` → ✅ shipped) and added tests to `tests/admin-dashboard.test.ts` (pure summary builder: stage order, action flags, totals, deep-link hrefs; endpoint wiring from the shared builder; UI deep-links + board `?column=` scroll). `bun run check` green (665 tests), worker build clean. Committed + pushed to `main`.
+
+Not deployed — this preset is commit+push only. Remaining queue: `#advance-review`.
+<!-- agent:boundary:5e803abb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -175,13 +195,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - #advance-review
-- do [#67v2d]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#67v2d] Admin dashboard pipeline summary (#67v2 Phase D): per-stage counts + next-actions on the admin dashboard, mirroring /portal-admin/pipeline. EFS-local, fully actionable now (no TMO gate). Plan: src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md (Phase D). Advances review #67v2.
 <!-- /agent:backlog -->
 
 ## Review

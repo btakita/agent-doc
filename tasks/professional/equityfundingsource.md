@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 agent_doc_pipeline:
   run_id: cycle-1781420754344
   step: write_applied
@@ -230,7 +230,7 @@ style="writing-mode:horizontal-tb;font-weight:700;font-size:11px;line-height:1.2
 **Option D — count-forward chip, label in tooltip only.** Most compact: show only the `+`, the count badge, and a 2-letter monogram ("DA", "CA", "UR"); full label lives in the tooltip. Best if board density matters more than reading the title at a glance — but it hides the words, which is the opposite of what you asked for, so I'd skip it.
 
 My pick: **Option A** for the best readability/width tradeoff, falling back to **Option B** if you'd rather not maintain a short-label map. Both keep the lane at its current 76px. Tell me which (or mix — e.g. A's short label with C's slightly wider lane) and I'll implement it. Queued a backlog item to carry the chosen implementation. (Exchange is ~167 lines; flagging size, continuing the queue.)
-<!-- agent:boundary:2610f0dd -->
+<!-- agent:boundary:3367f335 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -238,6 +238,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Do Option A. deploy
 <!-- /agent:queue -->
 
 ## Backlog

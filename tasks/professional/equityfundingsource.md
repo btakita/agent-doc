@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,28 @@ committed
 Compacted content:
 - Archived 8 response topic(s): Wide Deal Pipeline kanban; Deal Pipeline horizontal width improvements; Deal Pipeline #2 + #5 polish; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:14d0ac3c -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed the EFS worker to production. The `#spec-test-commit-push` preset portions were no-ops — the `equityfundingsource-dev` submodule working tree was already clean (HEAD `7d0d691`, no unpushed commits), so there was nothing to update/commit/push.
+
+**Deploy (`bun run deploy:worker`):**
+- D1 remote migrations: none to apply (already current)
+- Worker build + upload: 1 new asset uploaded (43 already present), 908.70 KiB total / 211.05 KiB gzip
+- Live at `https://equityfundingsource.brian-takita.workers.dev` — version `ed889adb-fa2f-444d-9e89-207081a6a1aa`, hourly cron `0 * * * *` active
+- Bindings intact: DB (D1), R2 assets/documents/tmo-cache, BorrowerChatRoom + AdminEventsRoom DOs, upload rate limiter
+
+**Smoke check:** `/` → 200, `/funded-deals` → 200.
+
+This ships the latest committed admin/lender pipeline work (collapsible lanes + compact density board controls, `7d0d691`).
+
+Note: a concurrent compaction had truncated the working-tree session doc to a stale snapshot before this write; recovered via `reset --from-current --preserve-session` + `commit` (`3843a096c`) so the compaction landed before this response.
+<!-- agent:boundary:7b0fbda6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +67,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

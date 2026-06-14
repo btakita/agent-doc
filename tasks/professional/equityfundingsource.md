@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -54,7 +54,23 @@ Fixed (EFS `95ec5db`). The application detail's read-only **"Step 5 - Declaratio
 Verification: `bun run check` green (647 tests, incl. new `full-application-detail-declaration-labels.test.ts`), worker build clean.
 
 Not deployed — this prompt didn't say "deploy", and a deploy is outward-facing. The build is ready; say the word (or add "deploy") and I'll push it live via `deploy:worker:no-migrate` (no schema change).
-<!-- agent:boundary:5594ab28 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed. Both pending declaration-label fixes are now live:
+
+- `95ec5db` — Step 5 summary renders real declaration labels (not raw key letters A/B/C…).
+- `57e4475` — those labels are now the **exact questions presented to the borrower**, via a shared `shared/declarations.ts` source of truth (form + admin detail can't drift).
+
+`deploy:worker:no-migrate` (no schema change) → version `a0226791`, https://equityfundingsource.brian-takita.workers.dev.
+
+Note: my prior-cycle write-back for the `57e4475` work was lost to the stale-supervisor IPC drift (pid 2127718, pre-`5ccf1354` build), so it isn't a separate `### Re:` section here — but the code shipped and is verified (648 tests green). Restarting that supervisor (`agent-doc session restart-supervisor` or restart the session) will stop the recurring drift.
+<!-- agent:boundary:c342200d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,7 +78,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

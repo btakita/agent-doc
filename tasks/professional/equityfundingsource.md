@@ -109,7 +109,7 @@ Yes — shipped a shared in-browser document viewer (EFS `c636ea8`). Clicking an
 **Follow-up (queued `#docview-tables`):** the admin/investor/broker/lender document **tables** still use download-only buttons — those are a distinct set of table-action surfaces (`shared/table_actions.tsx` + ~7 files). Added a "View" action to each is tracked as actionable backlog so this cycle stays a coherent, tested unit.
 
 Not deployed — this preset is commit+push only; the `deploy` item next in the queue will push it live.
-<!-- agent:boundary:a8dd9e65 -->
+<!-- agent:boundary:26a55281 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -126,7 +126,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#c7cs] #docview-tables Extend the #doc-viewer click-to-view to the remaining download-only document surfaces (admin/documents.tsx, admin/lender_documents.tsx, admin/deal_documents.tsx, admin/document_request_detail.tsx, admin/upload_detail.tsx, investor/documents.tsx, investor/available_deals.tsx, broker portal, shared/table_actions.tsx): add a View action next to each Download button using DocumentFileLink/use_document_viewer_ from shared/ui.tsx. Add per-surface wiring tests.
+- [ ] [#c7cs] Extend the #doc-viewer click-to-view to the remaining download-only document surfaces (admin/documents.tsx, admin/lender_documents.tsx, admin/deal_documents.tsx, admin/document_request_detail.tsx, admin/upload_detail.tsx, investor/documents.tsx, investor/available_deals.tsx, broker portal, shared/table_actions.tsx): add a View action next to each Download button using DocumentFileLink/use_document_viewer_ from shared/ui.tsx, plus per-surface wiring tests. Intentionally kept open — drains as its own queue cycle after the borrower-facing viewer (this cycle) and deploy.
 <!-- /agent:backlog -->
 
 ## Review

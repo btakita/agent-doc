@@ -291,7 +291,21 @@ The **major-version** bumps are *not* "safe" blanket bumps — each is an API br
 **CI:** run `27512320056` (#qcontdrain `081ede2b`) is **green**; my push `d0f5475d` triggered `27512911547`, currently in-progress — recorded as pending, not blocking closeout.
 
 Exchange accretion is at `block` level — not stalling the active queue to compact without an explicit opt-in.
-<!-- agent:boundary:c09da583 -->
+
+### Re: pushpin-promotion dedup + "backlog priority queue not populating" — opus-4-8
+
+Two observations triaged this cycle (no code shipped — both are CLEAN-session/queue-formatter scope, and I'm running on the live route-owned supervisor where a mid-session reinstall would re-stale it, `#no-mid-session-install`).
+
+**1. `:pushpin: :round_pushpin:` promotion dedup → folded into `#pushpinaccum`.** Your rule ("when upgrading a `:round_pushpin:` to a `:pushpin:`, drop the `:round_pushpin:` — never carry both") is the same queue-head annotation formatter as the existing accumulation bug, so I extended `#pushpinaccum` rather than open a duplicate id. Its FIX now covers both cases under one idempotency invariant: a head carries exactly **one** leading marker — promoting `:round_pushpin:` → `:pushpin:` **replaces** (drops the round_pushpin), and re-pinning an already-`:pushpin:` head is a no-op. Note the line you typed is itself self-demonstrating (`:pushpin: :round_pushpin: If there is a :round_pushpin:...`). Stays `[clean-session]` (live write path).
+
+**2. "Document has `agent:backlog priority queue` but backlog items aren't being added to `agent:queue`."** Checked the live state this cycle — the `priority queue` backlog attribute **is** populating the queue. Evidence:
+- Preflight logged `queue: go-mode active queue — appending fresh backlog queue-attr id(s) (continuous-backlog-loop; #backlog-queue-attr-populates-in-go-mode)` and materialized `- :pushpin: do [#ar27-majors]` (the newest backlog id) into the queue this cycle.
+- Every **drainable** backlog `[ ]` id is already present as a queue head: `#mphaseloop #fcc0 #qmisstrike #aazp #rtwbcast #recyclerestart #c2b6 #pushpinaccum #0kjc #compactqattr #dupcontent #cleardrainsim #dfrefresh-retire #1j8q #ar27-majors`. The **only** backlog item absent from the queue is `#cleandrainsup-verify`, which is `[operator-verify]` and is correctly excluded from the auto-drain queue by design (`#qcontdrain`).
+
+So the mechanism is working — the impression of "not populating" is most likely the queue being visually buried under the large free-text observation blocks (the equityfundingsource dispatch logs, the monsterrodholders compaction note, the markdown-AST note) interleaved between the id-backed heads. If you saw a *specific* backlog id that never flowed into the queue, name it and I'll trace why; otherwise this is the intended `#backlog-queue-attr-populates-in-go-mode` behavior and `#cleardrainsim` already covers locking the contract under SimWorld.
+
+No new backlog id needed for (2). A real user prompt is present this cycle, so I'm not auto-looping over it.
+<!-- agent:boundary:6a6118aa -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -304,7 +318,9 @@ Exchange accretion is at `block` level — not stalling the active queue to comp
 - :pushpin: [#qmisstrike]
 - :pushpin: do [#aazp]
 - :round_pushpin: do [#rtwbcast]
-- [#cleardrainsim]
+---
+:pushpin: :round_pushpin: If there is a `:round_pushpin:` and when upgrading to a `:pushpin:`, drop the `:round_pushpin:` instead of having both. So instead of `:pushpin: :round_pushpin:` we should have `:pushpin:`.
+---
 - :pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
 - :pushpin: [#c2b6]
 - :pushpin: [#pushpinaccum]
@@ -359,17 +375,16 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ```
 ---
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
+- [#cleardrainsim]
+:round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
 ---
 - :pushpin: upgrade dependencies
 - do [#dfrefresh-retire]
 - do [#1j8q]
 - do [#ar27]
 ---
-:round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
----
-:round_pushpin: If there is a `:round_pushpin:` and when upgrading to a `:pushpin:`, drop the `:round_pushpin:` instead of having both. So instead of `:pushpin: :round_pushpin:` we should have `:pushpin:`.
----
 :round_pushpin: do [#suprehotreload]
+- :pushpin: do [#ar27-majors]
 <!-- /agent:queue -->
 ###
 <!--
@@ -409,7 +424,7 @@ What are #next-steps to fix bugs?
 - [ ] [#compactqattr] [clean-session] Compaction wipes agent:queue inline attributes (preset, priority, likely go) from the opening marker — operator observed in monsterrodholders.md: post-compaction deleted all agent:queue attributes. Too much blast radius. Compaction should only archive/truncate the EXCHANGE component and must leave every other component opening marker byte-identical. HYPOTHESIS: the post-compact CRDT refresh (compact.rs, CRDT state refreshed from post-compact content) re-serializes component opening tags from parsed structure and drops inline attrs. FIX: preserve the verbatim opening marker (all inline attributes) for every non-archived component across compact + the post-compact CRDT refresh; add coverage that compacting a doc whose agent:queue carries preset/priority/go leaves that marker unchanged. CLEAN session (compaction/CRDT path).
 - [ ] [#qmisstrike] [clean-session] finalize strike heuristic wrongly strikes the NEXT open queue head. Operator report (tsift.md): after manually deleting struck items, agent-doc struck through the next still-open item. LIVE-REPRODUCED this session: a finalize answering the free-text `:pushpin: JB Run Agent Doc` head consumed it AND additionally struck the next open id-backed head #qchurn (response never addressed it); session-check `#queue-clear-unrun-items` caught it, had to un-strike + reset --from-current + commit. ROOT CAUSE (hypothesis): the strike cursor over-advances by one and strikes an unanswered open head; id-backed heads should only strike via --done/--pending-gate/queue-consume, never the free-text strike heuristic. FIX: strike only the head(s) this turn`s response actually answered (match by topic/text, not position); never side-strike an id-backed head; treat operator strike-deletions as terminal (no forward re-strike); proof queue_strike target=… reason=answered|consume. CLEAN session. Related #qpresetstrike/#pushpinaccum/#qchurn. Plan: tasks/agent-doc/plan-finalize-misstrike-next-head.md
 - [ ] [#0kjc] #mdastquote [clean-session] Markdown AST must treat tags inside quoted strings ("...") and code spans/blocks (backtick / triple-backtick) as CONTENT, not document tags. Operator report: agent:*/#id-looking tokens inside quotes or fenced code are being parsed as real document component markers. Same family as #lintfence (fenced agent:* markers break lint + parser). FIX: tagpath/agent-doc markdown tokenizer must mask quoted-string and code-span/code-fence regions before component/tag extraction. CLEAN session (parser path).
-- [ ] [#pushpinaccum] [clean-session] Queue `:pushpin:` annotations accumulate/nest in the wrong place: a head already starting `- :pushpin:` gets another `:pushpin:` prepended -> `:pushpin: - :pushpin: ...` (operator corrected one live 2026-06-13). The queue head-grouping/annotation formatter prepends the pushpin marker without checking for an existing leading pushpin/bullet. FIX: make the queue-head annotation prefix idempotent (single :pushpin:/bullet). CLEAN session (queue formatter path).
+- [ ] [#pushpinaccum] [clean-session] Queue :pushpin: annotations accumulate/nest in the wrong place. (1) ACCUMULATION: a head already starting `- :pushpin:` gets another :pushpin: prepended -> `:pushpin: - :pushpin: ...` (operator corrected one live 2026-06-13). (2) PROMOTION DEDUP (operator 2026-06-14): when a `:round_pushpin:` head is upgraded to `:pushpin:`, the round_pushpin is kept alongside -> `:pushpin: :round_pushpin:` instead of a single `:pushpin:`. The queue head-grouping/annotation formatter prepends/promotes the pushpin marker without checking for an existing leading pushpin/round-pushpin/bullet. FIX: make the queue-head annotation prefix idempotent — a head carries exactly one leading marker; promoting `:round_pushpin:` -> `:pushpin:` REPLACES it (drop the round_pushpin), and re-pinning an already-:pushpin: head is a no-op. CLEAN session (queue formatter path).
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
 - [ ] [#aazp] [operator-verify] suprecyclestall live-verify (agent-doc aafa6510, installed+release-built): restart a stale session via session restart-supervisor FILE --force so it runs the new binary, then drive an idle/next-queue-item recycle. Confirm ops.log shows supervisor_binary_stale_self_recycled ... candidates=[...] then EITHER a clean execve hot-reload OR supervisor_reexec_failed fallback=continue_current_binary with per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Subset of the broader recyclerestart sync-block work. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#recyclerestart] [clean-session] PCP/Supervisor recycle does not restart the agent session (img_21.png); JB Sync Tmux Layout after tmux kill-pane surfaced `Sync deferred: another tmux layout sync is already running`. ROOT CAUSE (code-grounded): the warning fires when agent_doc_sync_try_lock() (ffi.rs:746, a process-wide SYNC_LOCKED AtomicBool shared cross-editor) is already held. SyncLayoutAction.kt holds that FFI lock across the ENTIRE agent-doc sync subprocess (runCommandWithTimeout, line ~299, released only in finally line 331), and that subprocess is bounded only by the 30s SYNC_PROCESS_TIMEOUT_MS and can block on in-pane/binary recovery (the timeout message literally says retry can run binary recovery). So layout GEOMETRY sync is coupled to in-pane readiness, and a second manual sync racing an in-flight one bails immediately (non-blocking compare_exchange) instead of superseding. FIX: decouple tmux geometry sync from in-pane init/recovery; hold SYNC_LOCKED only across the fast geometry reconcile, run pane readiness/recovery separately; make a newer sync generation supersede an in-flight stale one rather than warn-and-skip; prove recycle restarts/clears the harness session. CLEAN session. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md

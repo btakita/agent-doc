@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 agent_doc_pipeline:
   run_id: cycle-1781420754344
   step: write_applied
@@ -169,7 +169,38 @@ Smoke check:
 - `GET /funded-deals` → 200
 
 Verification scope: deploy only — no code, test, or build-logic change this cycle, so I did not rerun the full Bun suite (prior cycle: 674 tests + app/worker build green). Cloudflare auth confirmed via `cf:whoami` (account `1e7e194f…`, `brian.takita@gmail.com`).
-<!-- agent:boundary:e0e2f429 -->
+
+### Re: Intake missing completed + accepted applications — opus-4-8
+
+> **Queue prompt:**
+>
+> The new Deal Pipeline kanban is missing the completed application + accepted application from the intake section. deploy
+
+
+Root cause: the earlier phase-grouping refactor merged the four funnel stages (Draft / Complete / Under review / Accepted applications) into one **Intake** macro-lane, so the completed and accepted application stages lost their own columns — they survived only as per-card chips. Per your choice, I split Intake back into its underlying stages while keeping the later phases grouped.
+
+Verified against live prod D1 first: `full_applications` = 1 accepted, 19 draft, 0 submitted, 0 in_review; `loans` = 1 in `Application Received`. So there is 1 accepted-application loan (now its own **Accepted applications** lane) and 0 completed/submitted applications (the **Complete Applications** lane will show as an empty auto-collapsed rail until a borrower submits one — that is data, not a bug).
+
+Changes (`src/equityfundingsource-dev`):
+- `lib/ui--browser--efs/portal/admin/pipeline.tsx` — added a `split: true` flag on the Intake phase def; `pipeline_phase_columns_` now `flatMap`s, expanding a split phase into one lane per underlying stage (each with its own label, count, and drop target) while non-split phases stay merged. Empty stages still auto-collapse to thin rails; the read-only funnel stages (Draft/Complete/Under review) remain non-droppable, Accepted applications stays a drop target.
+- `tests/admin-pipeline.test.ts` — pinned the split-Intake wiring.
+- `prds/investor-pipeline-admin.md`, `prds/equity-funding-source-lending-portal-prd.md` — updated the board description: Intake split into stage lanes, later phases macro-grouped. (#pipeline-intake-split)
+
+Verification:
+- `bun run check` — 674 pass, 0 fail (4256 assertions) + app build + worker build green.
+- `git diff --check` clean.
+
+Commits / pushes:
+- EFS submodule: `9a11735` (`admin pipeline: split Intake into per-stage lanes`) → `btakita/equityfundingsource-dev:main`.
+- Superproject pointer: `a61d97001` (`efs: split admin pipeline Intake into per-stage lanes`) → `btakita/agent-loop:main`.
+
+Deploy:
+- `bun run deploy:worker` — no D1 migrations to apply; worker uploaded + deployed. Version `863ffa1c-9bf6-4e15-ae2b-3a85db0bda74`, hourly tmo-sync schedule preserved, all bindings intact.
+- URL: https://equityfundingsource.brian-takita.workers.dev
+- Smoke: `/` 200, `/funded-deals` 200, `/portal-admin/pipeline` 303 (Cloudflare Access login redirect — expected for the admin-gated route).
+
+CI: no `CI` workflow exists in either repo; the superproject's only workflow (`Agent Doc`) remains blocked at runner-start by the account billing/spending-limit issue, an external CI-start blocker, not a code failure.
+<!-- agent:boundary:ec5e3571 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -177,7 +208,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- The new Deal Pipeline kanban is missing the completed application + accepted application from the intake section. deploy
 <!-- /agent:queue -->
 
 ## Backlog

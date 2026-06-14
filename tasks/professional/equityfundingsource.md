@@ -108,7 +108,30 @@ Done — shipped, tested, committed, and pushed (no deploy). The lender account 
 One operator decision left open (you flagged it TBD): whether EFS must **accept** the request before deals unlock. Right now the gate clears as soon as the lender account number is set (admin completes the request in TMO). If you want an explicit EFS-accept step gating deal visibility, say so and I'll add an acceptance state — I left it out deliberately since it was TBD.
 
 Next in the queue: making the dashboard Available-deal dialog match the full Deal page.
-<!-- agent:boundary:e9b908bb -->
+
+### Re: Dashboard Available-deal dialog == full Deal page — opus-4-8
+
+> **Queue prompt:**
+>
+> The Available deal dialog on https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard should be the same as the "Full Deal" page on https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3
+
+
+> **Queue prompt (#spec-test-commit-push):**
+>
+> The Available deal dialog on the investor dashboard should be the same as the "Full Deal" page (/portal-investor/deals/<id>).
+
+Done — shipped, tested, committed, and pushed (no deploy).
+
+**What changed**
+- **Dashboard dialog** (`dashboard.tsx`) — clicking an Available-deal preview card now opens the **same content as the full Deal page** instead of a stripped summary. `AvailableDealDialog` embeds `<InvestorDealDetail deal_id={deal.id} embedded />` inside a wide `PortalModal` (`max-w-[980px]`), so the dialog shows Loan Details, Uploaded Documents, Deal Summary, Commit Funding, and Sign Deal Documents — exactly what `/portal-investor/deals/<id>` renders (it fetches the same `/api/investor/deals/:id` payload). The old bespoke summary + `DealDialogDetail` + "View full deal" link are gone.
+- **Deal detail** (`deal_detail.tsx`) — `InvestorDealDetail` gains an `embedded` prop. When embedded, the page back-link (`← Available deals`) is suppressed because the modal owns the close affordance (a corner `ModalCloseButton`). Standalone page behavior is unchanged.
+
+**Verification:** `bun run check` green — **690 tests pass, 0 fail**, worker + browser builds clean. Updated the dashboard-dialog e2e test (asserts the embedded full-deal render + wide modal, drops the old "View full deal" assertion) and added an embedded-mode test for `deal_detail`.
+
+**Shipped:** `equityfundingsource-dev` commit `16b7966`, pushed to `origin/main`; superproject pointer `a12c7b826`. EFS repo has no CI workflow, so local `bun run check` is the gate.
+
+That clears both go-mode queue items. There's still a separate `deploy` head in the queue — I did **not** deploy (the preset was commit-push, and you only said implement item 2). Say "deploy" and I'll push both changes (#lender-gate + #deal-dialog-full) to Cloudflare.
+<!-- agent:boundary:c09809d6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,7 +140,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~The Lender Account Request form should be a prerequisite to view Available deals. So it should not be on https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3. But it should be part of the workflow to request a lender account. Both https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals and https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard can gate Avalable deals until the Lender Account Request is complete. We may require EFS to accept but that decision is TBD.~~
-- The Available deal dialog on https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard should be the same as the "Full Deal" page on https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3
+- ~~The Available deal dialog on https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard should be the same as the "Full Deal" page on https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3~~
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

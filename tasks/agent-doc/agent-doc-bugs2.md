@@ -212,14 +212,39 @@ And the gap that let it reach *me*: **neither preflight nor the Claude Code auto
 **Proof it works:** this very cycle, the new binary's preflight reports `queue_continuation_required: true, queue_drainable_head_count: 5` — correctly, because your "fix the stall" directive **is** real drainable work. On a pure `#qchurn` cycle (all heads deferred/noise) it now reports `false` and the loop stops on its own.
 
 **One activation note (not a punt):** the agent-side stall is fixed *now* — the signal is computed by the invoked binary. The live *supervisor* idle-watch filter only takes effect after the running pid 2715614 picks up the new build, via `agent-doc admin recycle --all-projects` (or a session restart). That's the last remaining staleness, and it's exactly what `#jbrestale`/`#aazp` (supervisor self-recycle) is meant to automate so no manual restart is ever needed.
-<!-- agent:boundary:c009aa63 -->
+
+### Re: #qchurn signal had 3 false positives — fixed, now reports 0 drainable — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#qchurn]
+
+
+This `/agent-doc` was itself re-triggered by the still-stale supervisor re-injecting `:pushpin: [#qchurn]` (auto trigger) — which usefully exposed that the `queue_continuation_required` signal I shipped last cycle still mis-counted this doc as drainable (it reported `4`, not `0`). Three false-positive classes inflated it; all fixed (agent-doc **`7312ffbe`**, superproject **`50046ddc9`**, pushed; `make check` green; built + installed):
+
+1. **Orphan `do [#id]` heads** — `do [#suprehotreload]` has no open backlog item (not open, not in `agent:done`). Continuation only excluded *deferred* ids, not absent ones, so it disagreed with the no-response queue guard (which intersects with the open backlog). Now an `#id` head is drainable only when its id is an **open** `agent:backlog` item AND not deferred — gated on a backlog component existing, so free-form id-head queues still drain.
+2. **Fenced paste blocks** — the `JB \`Run Agent Doc\` … \`\`\`<log>\`\`\`` bug-report blocks were counted drainable because they incidentally contain "run". A head carrying a ``` fence is now noise.
+3. **The noun "document"** — "this **document** has…" / "…the **document** tags" matched the imperative verb `document` anywhere in declarative prose. Removed `document` from the directive-verb list (the rare imperative arrives as a `do [#id]`).
+
+`head_is_drainable()` is now the single predicate shared by `detect` / `live_drainable_continuation_head` (supervisor idle-watch) / `drainable_head_count` (preflight), so the drain, `session-check` continuation, and the no-stall signal all agree. **This doc's preflight now reports `queue_continuation_required: false`, `queue_drainable_head_count: 0`** — so the auto-loop correctly stops and I am not looping. Marking `#qchurn` done.
+
+**Two housekeeping notes:** (a) the live supervisor (pid 2715614) is still on the old binary — its idle-watch keeps re-injecting until it recycles onto the new build (I marked it to recycle at the next idle boundary; the preflight/skill signal is already correct, so the agent-side loop stops now regardless). (b) The `## Queue` still holds the stale fenced JB bug-report blocks and the two `document`-noun observations — they're already triaged into backlog ids (`#jbrestale`, `#0kjc`, etc.) and now classify as noise, so they no longer churn; you can clear those lines when convenient (I won't auto-delete — the live IPC supervisor races on direct queue edits).
+<!-- agent:boundary:2dc4026a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: If you stall with `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`, you must fix the root cause of the stall.~~
-- :pushpin: [#qchurn]
+- ~~:pushpin: [#qchurn]~~
+---
+:pushpin: agent-doc lazily.rs stalled
+```
+  One standing note (not blocking): preflight/session-check keep flagging that the host supervisor (pid 2482535) is
+  running a stale build and is the source of the recurring File Cache Conflict / IPC-drift dialogs. When convenient,
+  restart it with agent-doc session restart-supervisor tasks/software/lazily-rs.md --force to pick up the latest fixes.
+```
+---
 - :pushpin: [#anw0verify]
 - :pushpin: [#jbrestale]
 - :pushpin: [#mphaseloop]
@@ -335,7 +360,6 @@ What are #next-steps to fix bugs?
 - [ ] [#aazp] [operator-verify] suprecyclestall live-verify (agent-doc aafa6510, installed+release-built): restart a stale session via session restart-supervisor FILE --force so it runs the new binary, then drive an idle/next-queue-item recycle. Confirm ops.log shows supervisor_binary_stale_self_recycled ... candidates=[...] then EITHER a clean execve hot-reload OR supervisor_reexec_failed fallback=continue_current_binary with per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Subset of the broader recyclerestart sync-block work. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#4myd] [operator-verify] #suprecyclestall live-verify: with the new binary installed (cargo install + cargo build --release done, pushed agent-doc aafa6510), restart a stale session and drive an idle/next-queue-item recycle. Confirm ops.log shows `supervisor_binary_stale_self_recycled ... candidates=[...]` then EITHER a clean execve hot-reload OR `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#recyclerestart] [clean-session] PCP/Supervisor recycle does not restart the agent session (img_21.png); JB Sync Tmux Layout after tmux kill-pane surfaced `Sync deferred: another tmux layout sync is already running`. ROOT CAUSE (code-grounded): the warning fires when agent_doc_sync_try_lock() (ffi.rs:746, a process-wide SYNC_LOCKED AtomicBool shared cross-editor) is already held. SyncLayoutAction.kt holds that FFI lock across the ENTIRE agent-doc sync subprocess (runCommandWithTimeout, line ~299, released only in finally line 331), and that subprocess is bounded only by the 30s SYNC_PROCESS_TIMEOUT_MS and can block on in-pane/binary recovery (the timeout message literally says retry can run binary recovery). So layout GEOMETRY sync is coupled to in-pane readiness, and a second manual sync racing an in-flight one bails immediately (non-blocking compare_exchange) instead of superseding. FIX: decouple tmux geometry sync from in-pane init/recovery; hold SYNC_LOCKED only across the fast geometry reconcile, run pane readiness/recovery separately; make a newer sync generation supersede an in-flight stale one rather than warn-and-skip; prove recycle restarts/clears the harness session. CLEAN session. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
-- [ ] [#qchurn] [clean-session] go-mode no-op churn: after #goqueuestall tag-defer skips the id-backed [clean-session]/[operator-verify] backlog heads, untagged FREE-TEXT operator bug-report prompts in the ## Queue block still keep queue_active=true and the supervisor idle-watch re-injects queue_trigger=auto each idle boundary -> repeated no-op /agent-doc cycles (no content diff, user_intent_prompt_changes empty, zero drainable work). Halted live 2026-06-13 via admin queue pause (receipt 27, gen 338). FIX: go-mode should treat a queue whose only remaining prompts are non-id free-text reports (no actionable do #id / new user prompt) as not-drainable and stop re-dispatching, same as the undrainable-head skip. Plan: tasks/agent-doc/plan-go-queue-stall.md
 - [ ] [#fcc0] [TOP] [clean-session] Zero JB File Cache Conflict dialogs. Route all document-mutating disk writes through one shared converge_document_or_disk() behind the listener-active gate (editor_ipc primary + disk_fallback); resolve the ipcdrift/stuckhandoff2 wedge that forces fallbacks. CLEAN session required (live write path); 0-dialogs proof operator-drive live JB. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md
 - [ ] [#rtwbcast] [clean-session] rtwatch rung 4 — multi-editor CRDT broadcast. Phases rtwbcast-id (editor_id in FFI buffer-report + per-editor live_buffer_snapshot_path), then deliver/merge/verify. CLEAN session required; live two-IDE convergence verify is operator-drive. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 <!-- /agent:backlog -->

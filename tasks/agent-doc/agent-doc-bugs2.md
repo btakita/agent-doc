@@ -252,20 +252,20 @@ No code changed this turn (verification only), so no build/install or CI gate ap
 3. Read `.agent-doc/logs/ops.log` for `supervisor_binary_stale_self_recycled ... candidates=[...]`, then **either** a clean execve hot-reload **or** `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case confirm the **pane stays alive** (no hang) with the restart hint shown.
 
 **Queue:** no agent-drainable heads (`queue_drainable_head_count: 0`, `queue_continuation_required: false`) — the other materialized heads are all `[clean-session]` (supervisor idle-watch drains them) or `[operator-verify]`. Not auto-looping.
-<!-- agent:boundary:22df3471 -->
+<!-- agent:boundary:2d4644a9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~[#freshgrant]. I put this here. leave this here. You should not override my decision unless there is another dependency for this to be complete.~~
-- [#cleardrainsim]
+- ~~:round_pushpin: do [#4myd]~~
 - :pushpin: [#mphaseloop]
-- :round_pushpin: do [#4myd]
+- :round_pushpin: do [#fcc0]
 - :pushpin: [#qmisstrike]
 - :pushpin: do [#aazp]
-- :round_pushpin: do [#fcc0]
 - :round_pushpin: do [#rtwbcast]
+- [#cleardrainsim]
 - :pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
 - :pushpin: [#c2b6]
 - :pushpin: [#pushpinaccum]
@@ -325,6 +325,12 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 - do [#dfrefresh-retire]
 - do [#1j8q]
 - do [#ar27]
+---
+:round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
+---
+:round_pushpin: If there is a `:round_pushpin:` and when upgrading to a `:pushpin:`, drop the `:round_pushpin:` instead of having both. So instead of `:pushpin: :round_pushpin:` we should have `:pushpin:`.
+---
+:round_pushpin: do [#suprehotreload]
 <!-- /agent:queue -->
 ###
 <!--

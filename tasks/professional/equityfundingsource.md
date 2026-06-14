@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,15 +38,23 @@ committed
 Compacted content:
 - Archived 7 response topic(s): advance the review items; do [#tmopoll] + do [#xcvginbound]; Step 7 "Review & Sign" reverts to Step 6 on refresh; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
+- *M. Declared bankruptcy within the past 7 years?*
+- *D1. Applying for another mortgage on/before closing (not disclosed)?*
+- *A. Will you occupy the property as your primary residence?*
 
 ### Re: Use proper label names on the Declarations summary — opus-4-8
+
+> **Queue prompt:**
+>
+> Use proper label names ![img_12.png](img_12.png) Use the question presented to the user 
+
 
 Fixed (EFS `95ec5db`). The application detail's read-only **"Step 5 - Declarations"** summary was labeling each row with just the raw key letter (A, B, C, D1, D2 …) instead of the actual declaration question. It now maps each declaration through `DECLARATION_FIELDS` so the full question text shows in canonical order — e.g. *"A. Will occupy as primary residence?"*, *"D1. Applying for another mortgage?"*, *"M. Bankruptcy in past 7 years?"* — matching what the **Edit** mode already displays. Any unknown key falls back to the raw key.
 
 Verification: `bun run check` green (647 tests, incl. new `full-application-detail-declaration-labels.test.ts`), worker build clean.
 
 Not deployed — this prompt didn't say "deploy", and a deploy is outward-facing. The build is ready; say the word (or add "deploy") and I'll push it live via `deploy:worker:no-migrate` (no schema change).
-<!-- agent:boundary:0b37c674 -->
+<!-- agent:boundary:7d21fae4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -54,7 +62,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Use proper label names ![img_12.png](img_12.png) Use the question presented to the user 
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

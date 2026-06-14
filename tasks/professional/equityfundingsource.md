@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -46,7 +46,7 @@ Fixed (EFS `95ec5db`). The application detail's read-only **"Step 5 - Declaratio
 Verification: `bun run check` green (647 tests, incl. new `full-application-detail-declaration-labels.test.ts`), worker build clean.
 
 Not deployed — this prompt didn't say "deploy", and a deploy is outward-facing. The build is ready; say the word (or add "deploy") and I'll push it live via `deploy:worker:no-migrate` (no schema change).
-<!-- agent:boundary:6e5c05a7 -->
+<!-- agent:boundary:0b37c674 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -54,6 +54,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Use proper label names ![img_12.png](img_12.png) Use the question presented to the user 
 <!-- /agent:queue -->
 
 ## Backlog

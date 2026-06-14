@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -70,7 +70,7 @@ Deployed. Both pending declaration-label fixes are now live:
 `deploy:worker:no-migrate` (no schema change) → version `a0226791`, https://equityfundingsource.brian-takita.workers.dev.
 
 Note: my prior-cycle write-back for the `57e4475` work was lost to the stale-supervisor IPC drift (pid 2127718, pre-`5ccf1354` build), so it isn't a separate `### Re:` section here — but the code shipped and is verified (648 tests green). Restarting that supervisor (`agent-doc session restart-supervisor` or restart the session) will stop the recurring drift.
-<!-- agent:boundary:c342200d -->
+<!-- agent:boundary:910a6590 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,6 +78,9 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- "Drop or choose a replacement file" should be "Drop file or click to select file".
+- Can we make each uploaded file viewable by clicking on it? Can we have open a viewer of each supported file type?
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

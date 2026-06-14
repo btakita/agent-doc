@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -54,7 +54,7 @@ Fixed (EFS `95ec5db`). The application detail's read-only **"Step 5 - Declaratio
 Verification: `bun run check` green (647 tests, incl. new `full-application-detail-declaration-labels.test.ts`), worker build clean.
 
 Not deployed — this prompt didn't say "deploy", and a deploy is outward-facing. The build is ready; say the word (or add "deploy") and I'll push it live via `deploy:worker:no-migrate` (no schema change).
-<!-- agent:boundary:7d21fae4 -->
+<!-- agent:boundary:5594ab28 -->
 <!-- /agent:exchange -->
 ###
 <!--

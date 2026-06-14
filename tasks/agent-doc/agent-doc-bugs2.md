@@ -199,14 +199,23 @@ Implemented and shipped the core of your directive. This is the missing half of 
 **Not installed this turn (deliberate).** `cargo install`/`lib-install` here would re-stale *this* live route-owned supervisor mid-turn (`#no-mid-session-install`). The committed source rides in on the supervisor's own auto-install/recycle, or your next clean restart. Filed `#freshgrant` (operator-verify) for the live proof: confirm a re-dispatched agent's preflight flips to `queue_continuation_required: true` for the cleared head.
 
 **Queue:** still `queue_continuation_required: false` on the *running* (pre-`#freshgrant`) binary, so not auto-looping; remaining heads are supervisor-drained `[clean-session]` / operator-verify.
-<!-- agent:boundary:2e3d6b70 -->
+
+### Re: [#freshgrant] queue head — opus-4-8
+
+`#freshgrant` is an `[operator-verify]` item and cannot be agent-completed — its own text says so: *"Cannot be agent-done: needs a live editor + real supervisor /clear+re-dispatch."* Checked git/build state before deferring:
+
+- **Code shipped + committed.** agent-doc submodule HEAD is `86f306d3` ("queue_continuation: fresh-context grant lets a supervisor-cleared loop drain its clean-session head"); the superproject pointer bump is committed (`fa4478a55`). Submodule working tree is clean and the superproject gitlink matches — nothing left to commit/push.
+- **Install is by-design deferred** to supervisor auto-install/recycle (`#supautoinstall`, default-ON). I did **not** `cargo install` mid-session: that would (a) make the finalize client newer than the running supervisor → `live_prompt_drift`/exit-75, and (b) defeat the exact auto-install path `#freshgrant` exists to prove. Installed binary is `0.34.0`.
+
+**The only remaining step is the live proof, which is operator-gated:** with the new build picked up by the supervisor, leave a `[clean-session]` head at the active queue head under a live IDE, let the idle-watch fire `idle_queue_watch_context_reset` (`#cleandrainsup`) + `clean_session_fresh_context_grant` (`#freshgrant`), then confirm the re-dispatched agent's preflight reports `queue_continuation_required:true` for that head (drains it) instead of `false`.
+
+Not auto-looping: preflight reports `queue_drainable_head_count:0` / `queue_continuation_required:false` — every remaining head is `[operator-verify]`/`[clean-session]`, none loop-drainable. The `[clean-session]` heads are the supervisor idle-watch's to drain (force-`/clear` + re-dispatch); the `[operator-verify]` heads (`#freshgrant`, `#cleandrainsup-verify`, `#1j8q`) are yours. Gating `#freshgrant` pending the live proof.
+<!-- agent:boundary:256e4644 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: [#r18j]~~
-- ~~:pushpin: [#jbrestale]~~
 - :pushpin: [#mphaseloop]
 - :round_pushpin: do [#4myd]
 - :pushpin: [#qmisstrike]
@@ -304,7 +313,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#freshgrant] [operator-verify] #freshgrant live proof (code shipped agent-doc 86f306d3, install deferred to supervisor auto-install/recycle): with the new build installed, leave a [clean-session] head at the active queue head under a live IDE, let the supervisor idle-watch fire idle_queue_watch_context_reset (#cleandrainsup) + clean_session_fresh_context_grant (#freshgrant), then confirm the re-dispatched agent preflight reports queue_continuation_required:true for that head (drains it) instead of false. Cannot be agent-done: needs a live editor + real supervisor /clear+re-dispatch.
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#cleardrainsim] [clean-session] Add SimWorld/integration coverage asserting the full preflight JSON contract (not just the queue_continuation::drainable_head_count unit) emits queue_continuation_required=false + queue_drainable_head_count=0 for an active go-mode queue whose only materialized heads are [clean-session] (under a live editor-IPC listener) / [operator-verify] / inert-noise, and =true with the right count when a real drainable head remains. Locks the #cleardrainsignal contract the SKILL auto-loop now depends on. Landed: agent-doc 5c8b2891.
 - [ ] [#dfrefresh-retire] [clean-session] Retire the dogfood-supervisor-refresh runbook (runbooks/dogfood-supervisor-refresh.md + BUNDLED_RUNBOOKS entry + SKILL.md catalog line + 4 harness mirrors) once #jbrestale (JB Run Agent Doc auto-restarts a stale route-owned supervisor / red-green switchover) AND #recyclerestart (PCP recycle restarts the harness session) both land and prove the binary self-heals a stale supervisor without the manual make+install+restart bootstrap. The runbook is an explicit stopgap for the bootstrap gap (running supervisor predates its own self-recycle fix + is the live agent parent). Acceptance: with both landed, a stale-binary session auto-promotes onto the new build at the next idle/dispatch boundary; delete the runbook + dependent references in one cycle and re-run audit-docs. CLEAN session (skill/runbook surface).
@@ -327,6 +335,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#freshgrant] [operator-verify] #freshgrant live proof (code shipped agent-doc 86f306d3, install deferred to supervisor auto-install/recycle): with the new build installed, leave a [clean-session] head at the active queue head under a live IDE, let the supervisor idle-watch fire idle_queue_watch_context_reset (#cleandrainsup) + clean_session_fresh_context_grant (#freshgrant), then confirm the re-dispatched agent preflight reports queue_continuation_required:true for that head (drains it) instead of false. Cannot be agent-done: needs a live editor + real supervisor /clear+re-dispatch.
 - [/] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [/] [#qdedup] [clean-session] Between-queue-turn trigger enqueue must de-duplicate: successive between-turn enqueues concatenated into one garbled trigger (`/clear /agent-doc <FILE>/agent-doc <FILE>`). Operator: stop the drain once a turn completes, insert into the inactive agent between turns, enqueue UNIQUE (one /clear, one /agent-doc <FILE>) landing once in the PCP/Supervisor between-turn stage. Compose next trigger as a deduped set, gate strictly to the inter-turn boundary, proof line between_turn_enqueue deduped=N. Related #qflood2/#qchurn/#clearcontresume. CLEAN session. Plan: tasks/agent-doc/plan-between-turn-trigger-dedup.md
 - [/] [#clearexchstale] [clean-session] JB Clear Exchange clears the exchange but the content comes back (from a stale HEAD/snapshot replay); same session, a deleted+retyped prompt also revived. Same disk-vs-buffer convergence family as #fcc0: a redeliver/replay path re-applies HEAD/snapshot over the cleared buffer, and clear does not advance the durable merge base. FIX: route clear through converge_document_or_disk + advance merge base; gate redeliver on fresh editor-buffer proof (#dvre/#eprf). CLEAN session. Plan: tasks/agent-doc/plan-jb-clear-exchange-stale-head-revival.md

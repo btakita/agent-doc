@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -119,7 +119,7 @@ assert_eq!(doubled.get(&ctx), 10);
 **CI:** run `27490089664` is **queued** at push time — recording as pending per the test-bearing workflow; closing out on local `make check` evidence.
 
 **Follow-up queued:** `#lzsignalparity` [recommended] — extend `Signal` to `ThreadSafeContext` and `AsyncContext`, which still expose only lazy slots/memo.
-<!-- agent:boundary:795d04cd -->
+<!-- agent:boundary:a79e1c56 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,12 +128,15 @@ assert_eq!(doubled.get(&ctx), 10);
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- do [#3dmm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#3dmm] #lzsignalparity=[recommended] Extend the eager Signal primitive (src/signal.rs, ctx.signal) to ThreadSafeContext and AsyncContext. Single-threaded Context now has signal/get_signal/dispose_signal; ThreadSafeContext + AsyncContext still expose only lazy slots/memo. Mirror the memo-slot + puller-effect composition (or an eager-recompute flag) so shared-graph and async consumers get always-set, glitch-free v1->v2 derived values.
+- [ ] [#x7sp] Update documentation for inclusion of Signal into the architecture. Update the protocol as well.
+- [ ] [#vzk9] Create a briantakita.me blog post + linkedin summary draft explaining the lazily Slot->Cell->Signal composition. Include use cases. Add diagrams to post to linkedin.
+- [ ] [#ny9k] Create a briantakita.me blog + linkedin summary draft explaining the full lazily architecture. Include use cases. Add diagrams to post to linkedin.
 <!-- /agent:backlog -->
 
 ## Review

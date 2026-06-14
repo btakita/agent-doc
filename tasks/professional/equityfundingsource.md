@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -80,7 +80,7 @@ Fixed. The `Application Received` card heading was rendering the **entire** borr
 **Verification:** full suite green (680 pass, incl. 52 pipeline tests), `bun run build` + `build:worker` clean. No D1 migration. The EFS repo has no CI workflow configured.
 
 **Not yet live:** the preset was `#spec-test-commit-push` (no deploy), so this is on `main` (submodule `30c208c`, superproject `b4c2c4853`) but not yet on the workers.dev URL. Queued a recommended `bun run deploy:worker` backlog item to ship it.
-<!-- agent:boundary:83a7c9f7 -->
+<!-- agent:boundary:40753e18 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,6 +88,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#aww2]
 <!-- /agent:queue -->
 
 ## Backlog

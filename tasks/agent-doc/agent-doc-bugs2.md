@@ -87,20 +87,48 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 Preflight also flags `stale_install` (`target/release/agent-doc` predates `ce339055`) — if you want the *restarted* supervisor on current code, run `make install` in `src/agent-doc` first, then restart. After that a clean session can actually drain the clean-session queue.
 
 No agent-drainable work this cycle beyond filing this; not auto-looping (churn-stopped queue, live-IPC supervisor).
-<!-- agent:boundary:03c1e88b -->
+
+### Re: JB `Run Agent Doc` on a spent `#advance-review` preset head — should auto-repair, not fail closed — opus-4-8
+
+> **Operator report:** JB `Run Agent Doc`. This should auto-repair.
+> ```
+> resync: pruned 10 stale session(s)
+> [route] target tmux session: 0
+> Error: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3426
+> ```
+
+Captured as a bug refinement, not fixed live (clean-session code path; live-IPC session w/ stale supervisor).
+
+**What happened.** JB `Run Agent Doc` dispatched against `equityfundingsource.md` and failed closed: `failed_stage=queue_paused reason=advance-review preset head is spent`. The `#advance-review` preset token at the queue head had already done its work (backlog added + both features shipped), so the dispatch path *correctly* paused to avoid re-running the spent preset — but it surfaced that as a terminal error and prescribed a **manual** remedy ("clear the `- #advance-review` line") instead of applying it. That's the gap: the reason text knows the fix, the dispatch path won't do it.
+
+**Root cause — same family as two open items.** This is `#qpresetstrike` (a preset-token head `#name` is unstrikeable by any agent path — `queue consume` rejects it as id-backed, `--done`/`--pending-gate` reject it as not a backlog id, `finalize` keeps it) combined with the `#jbrestale` fail-closed-instead-of-auto-repair pattern (JB Run prescribes the recycle/clear in the reason text but treats it as terminal). A spent preset head can't be auto-struck, so the only honest move the dispatch path has left is to pause and ask you to delete the line by hand.
+
+**Captured.** Extended `#qpresetstrike` (committed `cbceebe94`) with this live repro and a second FIX clause: on a spent-preset `queue_paused`, JB Run / dispatch must **auto-strike** the spent preset head and **re-dispatch the remaining queue once** (or cleanly close if the queue is then empty), not raise a terminal error requiring manual line deletion. The underlying strike mechanism (classify a `#`-head against `prompt_presets` so it consumes like a free-text head) is the same #qpresetstrike fix; the auto-repair branch cross-links #jbrestale. Touches the route/dispatch + preset-strike path → clean session. Plan: `tasks/agent-doc/plan-preset-queue-head-unstrikeable.md`.
+
+**Immediate workaround (your call).** Since the pause is correct, the spent preset just needs clearing — on `equityfundingsource.md`, strike/delete the `- #advance-review` queue line (drop `go` if it re-triggers), then re-run. Nothing to fix in *this* doc; the bug lives in agent-doc's preset/dispatch path and is doc-agnostic.
+
+**Stale supervisor still present.** Preflight/session-check both flag this doc's host supervisor (`pid 2825163`) as pre-`ce339055` stale — still the root of the recurring File Cache Conflict / IPC-drift dialogs. When you're ready: `make install` in `src/agent-doc`, then `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`. Not restarting it mid-cycle. Not auto-looping — clean-session code path, no agent-drainable head this cycle.
+<!-- agent:boundary:fa6a20a0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
----
+~~~done
 :pushpin: JB `Run Agent Doc`. This should automatically restart the supervisor.
 ```
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain receipt_id=3420
 ```
+~~~
+JB `Run Agent Doc`. This should auto-repair.
+```
+resync: pruned 10 stale session(s)
+[route] target tmux session: 0
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3426
+```
 ---
-- [#qchurn]
+:pushpin: - [#qchurn]
 - :pushpin: [#qpresetstrike]
 - :pushpin: [#clearexchstale]
 - :pushpin: [#qdedup]
@@ -113,23 +141,23 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - ~~[#pcacheattr]~~
 - ~~[#gdbwritelock]~~
 - ~~[#pcacheregtrunc]~~
-- [#loggatefidelity]
-- [#gdbwalcheckpoint]
-- [#logfoldname]
-- [#pcachebp]
+- :pushpin: [#loggatefidelity]
+- :pushpin: [#gdbwalcheckpoint]
+- :pushpin: [#logfoldname]
+- :pushpin: [#pcachebp]
 &gt;!-- /agent:queue --&lt;
 ```
 I then manually deleted the strikethrough items...but then agent-doc struck through the next open item
 ```
 &gt;!-- agent:queue preset="#spec-test-build-install-commit-push" go --&lt;
 - ~~[#loggatefidelity]~~
-- [#gdbwalcheckpoint]
-- [#logfoldname]
-- [#pcachebp]
+- :pushpin: [#gdbwalcheckpoint]
+- :pushpin: [#logfoldname]
+- :pushpin: [#pcachebp]
 &gt;!-- /agent:queue --&lt;
 ```
 ---
-JB `Compact Exchange` on this document
+:pushpin: JB `Compact Exchange` on this document
 ```
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
 ```

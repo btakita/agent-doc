@@ -140,14 +140,22 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 ```
 
 then drain from a fresh `/agent-doc`.
-<!-- agent:boundary:b34be872 -->
+
+### Re: why isn't the supervisor refresh automated + ship the fallback runbook — opus-4-8
+
+**Why it isn't auto-running (the honest answer).** The self-heal automation IS committed and IS in the installed binary — `#supselfheal` (default-on idle-boundary self-recycle), `#anw0` blue/green drain-and-supersede restart, and the `#suprecyclelock` launch-lock fix I shipped this session. It isn't kicking in because of a **bootstrap gap**: the supervisor *currently hosting this session* (pid 2715614) started at 04:32, *before* the 04:42 install, so it's running old code that lacks the self-recycle. The automation only takes over once a supervisor on the *new* binary exists. And the running supervisor is literally my **parent process** (`agent-doc 2715614 → claude 2715665 → me`), so a session can't cleanly pull the binary out from under itself — the first refresh is inherently external. The piece that would make it fully hands-off from JB `Run Agent Doc` (`#jbrestale` auto-restart-stale-supervisor, `#recyclerestart` recycle-restarts-the-session) is still backlog, not landed.
+
+**Shipped the fallback runbook (done this turn).** New bundled, dogfooding-only runbook `runbooks/dogfood-supervisor-refresh.md` documents the post-finalize `make check` → `cargo build --release` → `cargo install` → `lib-install` → commit+push → `session restart-supervisor` bootstrap, explicitly marked as a stopgap the binary should own once the self-heal family lands. Registered in `BUNDLED_RUNBOOKS`, referenced in the SKILL.md catalog, regenerated all four harness mirrors (Claude/Codex/OpenCode/Cursor). `make check` + submodule `audit-docs` green. Committed + pushed: agent-doc **`59b40eca`**, superproject **`68f91c452`**. Queued `#dfrefresh-retire` to delete the stopgap once `#jbrestale` + `#recyclerestart` prove the binary self-heals.
+
+**Automating the bootstrap now.** Binary is built + installed + cdylib refreshed (lib-install confirms the running controllers still serve the prior build until recycled). As the final step of this turn I'm restarting this document's supervisor onto the new binary — after this closeout commits, so nothing is lost if the restart recycles the pane. Once a new-binary supervisor is in place, the idle-boundary self-recycle is live and future stale builds promote themselves.
+<!-- agent:boundary:327ab1d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: Update agent-doc to fully run + install a `[clean-session]` either in a subagent or in a restarted session or in a `/clear` session.~~
----
+~~~done
 :pushpin: An error occurred during supervisor hot-reloading.
 ```
 ❯ [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -158,7 +166,8 @@ then drain from a fresh `/agent-doc`.
          Caused by:
                        Resource temporarily unavailable (os error 11)
 ```
----
+~~~
+- :pushpin: Add to the dogfood reinstall runbook...add a backlog item with the issue. Make sure it is also added to the queue.
 - :pushpin: [#qchurn]
 - :pushpin: [#anw0verify]
 - :pushpin: [#jbrestale]
@@ -255,6 +264,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#dfrefresh-retire] [clean-session] Retire the dogfood-supervisor-refresh runbook (runbooks/dogfood-supervisor-refresh.md + BUNDLED_RUNBOOKS entry + SKILL.md catalog line + 4 harness mirrors) once #jbrestale (JB Run Agent Doc auto-restarts a stale route-owned supervisor / red-green switchover) AND #recyclerestart (PCP recycle restarts the harness session) both land and prove the binary self-heals a stale supervisor without the manual make+install+restart bootstrap. The runbook is an explicit stopgap for the bootstrap gap (running supervisor predates its own self-recycle fix + is the live agent parent). Acceptance: with both landed, a stale-binary session auto-promotes onto the new build at the next idle/dispatch boundary; delete the runbook + dependent references in one cycle and re-run audit-docs. CLEAN session (skill/runbook surface).
 - [ ] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.
 - [ ] [#ar27] #upgradedeps [clean-session] Upgrade agent-doc dependencies (cargo update + bump direct deps in src/agent-doc Cargo.toml where safe), rebuild + make install + lib-install, run make check, confirm CI green. CLEAN session: a dependency bump forces a rebuild/reinstall that re-stales THIS live route-owned supervisor mid-session (#no-mid-session-install / #fcc0 churn), so it cannot run from the session it would destabilize. Scope assumed = the agent-doc submodule (this doc's project); confirm target if a different repo was intended.
 - [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.

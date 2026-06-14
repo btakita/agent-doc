@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -146,19 +146,20 @@ Done (EFS `5f5e504`). Extended the in-browser document viewer to the remaining d
 **Per `#spec-test-commit-push`:** `document-viewer.test.ts` asserts each surface offers click-to-view; `download-security.test.ts` updated for the now-centralized HTTPS guard. `bun run check` green (657 tests), worker build clean. Committed + pushed.
 
 That drains the queue. Note: a stale route-owned supervisor (pid 861902, pre-current binary) is still throwing the recurring File-Cache-Conflict / IPC-drift dialogs this session — restart it with `agent-doc session restart-supervisor tasks/professional/equityfundingsource.md --force` (or restart the session) to clear them; it doesn't affect the shipped code.
-<!-- agent:boundary:6357bd21 -->
+<!-- agent:boundary:299b0bc8 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- #advance-review
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog queue -->
+<!-- agent:backlog priority queue -->
 <!-- /agent:backlog -->
 
 ## Review

@@ -215,7 +215,25 @@ They are not embedded in the agent-doc editor body. They were written into the c
 Why you do not see the blog post in the editor yet: the nested blog repo checkout is still at `9008263`, so the file is on the fetched remote branch but not in the currently checked-out worktree. I fetched while checking; `origin/main` for `src/briantakita.me-dev/app/briantakita.me` is now `b713281`, with `55b5bf3` as the commit that added this post. The outer `src/briantakita.me-dev` superproject pointer also was not bumped, so it is still not live/published.
 
 If your editor is rooted at `src/briantakita.me-dev`, you also will not see the LinkedIn draft because `mail/` is a sibling repo under the agent-loop root.
-<!-- agent:boundary:89aa88d5 -->
+
+### Re: why `ls` does not see the blog post
+
+That `ls` command is checking the currently checked-out nested blog worktree, and that worktree is still at `9008263`. The post exists on the fetched remote branch, not in the local checkout tree yet.
+
+Confirmed state:
+- `src/briantakita.me-dev/app/briantakita.me` local `HEAD` = `9008263`
+- `src/briantakita.me-dev/app/briantakita.me` fetched `origin/main` = `b713281`
+- `origin/main` contains `post/content/2026-06-14-lazily-slot-cell-signal-composition.md`
+- the post was added in `55b5bf3`, which is between `9008263` and `b713281`
+
+So the direct filesystem path will fail until the nested blog repo is fast-forwarded or checked out at `origin/main`. To inspect without changing the checkout, use:
+
+```sh
+git -C src/briantakita.me-dev/app/briantakita.me show origin/main:post/content/2026-06-14-lazily-slot-cell-signal-composition.md
+```
+
+The LinkedIn draft is different: it is present in the local `mail` checkout at `mail/drafts/linkedin/2026-06-14-lazily-slot-cell-signal.md`. If your editor is rooted under `src/briantakita.me-dev`, you will not see `mail/` because it is a sibling repo under the agent-loop root.
+<!-- agent:boundary:4b5375db -->
 <!-- /agent:exchange -->
 ###
 <!--

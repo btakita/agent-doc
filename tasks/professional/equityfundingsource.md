@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -186,7 +186,35 @@ Done (EFS `47fb134`, submodule pointer `1d1033685`). Phase D of the admin loan p
 **Per `#spec-test-commit-push`:** updated the PRD Phase D section (`prds/67v2-admin-loan-pipeline-kanban.md` → ✅ shipped) and added tests to `tests/admin-dashboard.test.ts` (pure summary builder: stage order, action flags, totals, deep-link hrefs; endpoint wiring from the shared builder; UI deep-links + board `?column=` scroll). `bun run check` green (665 tests), worker build clean. Committed + pushed to `main`.
 
 Not deployed — this preset is commit+push only. Remaining queue: `#advance-review`.
-<!-- agent:boundary:5e803abb -->
+
+### Re: #advance-review — opus-4-8
+
+> **Queue prompt:**
+>
+> #advance-review
+
+
+> **Queue prompt (preset `#advance-review`):**
+>
+> Go through the review items. Add actionable backlog items to complete or advance the review items.
+
+Went through all 9 `agent:review` items. The portal is substantially built out, so most review items are **parked on external/operator dependencies** (no agent-actionable step), and a few describe work that has **already shipped**. I found **one** genuinely EFS-local, ungated next step and queued it; the rest are triaged below.
+
+**Queued (actionable, EFS-local):**
+- `#vd8s-timeline` — **Per-investor activity timeline** in the in-page investor detail modal (#vtx8): sign-up, accreditation decision, lender link, commitment, wire-confirmation, and distribution dates, all from existing D1 tables. No TMO gate. Plan: `prds/investor-pipeline-admin.md` (line 92). This is the only non-gated remainder of `#vd8s` — the drag-to-confirm-wire from the Committed lane it also mentions already shipped (`#vd8s-dragwire`: `ConfirmWireModal` + multi-pending-fund disambiguation in `investor_pipeline.tsx`).
+
+**Triage of the rest (no agent-actionable step right now):**
+- `#67v2` — **near-complete**: Phases A (board), B (status writeback outbox), D (dashboard summary, just shipped), E (leads funnel) are all done. The only remaining sub-phase is **C (per-stage requirement checklist + auto-advance)**, whose requirements list is TBD pending Robert/April (PRD Q3). Operator-gated, not codeable yet.
+- `#xcvg` — message **email** round-trip is gated on a verified Resend domain (`#f4rq`) + Google Workspace SMTP (`#m6ch`/`#p40t`). The in-app half (admin owner + unread-count badges) already ships in `admin/messages.tsx`.
+- `#37ah` — broker portal backend shipped (`#37ah-backend`); only the TMO writeback sync remains, gated on `#dzmm` (`#7a4d`/`#k2xg`).
+- `#dzmm` — TMO webhooks unavailable per operator; read-side polling shipped. EFS→TMO writeback (outbox replay) is gated on the `#7a4d` write field map + `#k2xg` support answers.
+- `#zwws` — remaining investor-dashboard phases are TMO-writeback-gated (`#dzmm`/`#k2xg`/`#7a4d`) + email-gated (`#f4rq`).
+- `#next-steps` — workers.dev prod is healthy; custom-domain cutover is intentionally deferred and true Google SSO is gated on Google admin creds.
+- `#jnzs` — awaiting Judith/EFS reviewer **human approval** on funded-deal copy/lien wording before launch sign-off.
+- `#dropbox-sync-adapter` — gated on Dropbox access being provisioned.
+
+So: 1 actionable item queued (`#vd8s-timeline`); the other 8 review items are correctly parked on TMO/Resend/Google/Dropbox/human-approval gates and stay in `agent:review`. (Exchange is at ~156 lines / 8 sections — noting size; queue stays active.)
+<!-- agent:boundary:334130b5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -194,12 +222,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- #advance-review
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#vd8s-timeline] Investor Pipeline: per-investor activity timeline in the in-page investor detail modal (#vtx8) — sign-up, accreditation decision, lender link, commitment, wire-confirmation, and distribution dates from existing D1 tables. EFS-local (no TMO gate). Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md. Advances review #vd8s.
 <!-- /agent:backlog -->
 
 ## Review

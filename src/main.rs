@@ -1356,6 +1356,26 @@ enum AdminAction {
         #[arg(long)]
         json: bool,
     },
+    /// Kill the `start --route-owned` supervisor for a document: request a graceful
+    /// idle-gated self-kill, then force-kill the verified pid after a grace window
+    /// if it stays alive (`#supkill`). Refuses to kill the caller's own ancestor —
+    /// run it from a different pane (or let the project controller drive it) when the
+    /// target is the supervisor of the current session.
+    #[command(name = "kill-supervisor")]
+    KillSupervisor {
+        /// Document whose route-owned supervisor should be killed
+        document: PathBuf,
+        /// Seconds to wait for the graceful self-kill before force-killing the pid
+        /// (default: AGENT_DOC_SUPERVISOR_SELFKILL_GRACE_SECS or 10)
+        #[arg(long)]
+        grace_secs: Option<u64>,
+        /// Report the target supervisor pid without signalling anything
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
     /// Handoff a document actor to another pane after generation verification
     Handoff {
         /// Document to hand off
@@ -3044,6 +3064,82 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
                 Ok(())
+            }
+            AdminAction::KillSupervisor {
+                document,
+                grace_secs,
+                dry_run,
+                json,
+            } => {
+                #[cfg(unix)]
+                {
+                    use agent_doc_orchestration::supervisor_selfkill::{
+                        drive_supervisor_kill, selfkill_grace, SupervisorKillOutcome,
+                    };
+                    let grace = grace_secs
+                        .map(std::time::Duration::from_secs)
+                        .unwrap_or_else(selfkill_grace);
+                    let outcome = drive_supervisor_kill(&document, grace, dry_run)?;
+                    let (status, pid, message) = match outcome {
+                        SupervisorKillOutcome::NoSupervisor => (
+                            "no_supervisor",
+                            None,
+                            format!(
+                                "no running route-owned supervisor for {}",
+                                document.display()
+                            ),
+                        ),
+                        SupervisorKillOutcome::RefusedSelfAncestor(pid) => (
+                            "refused_self_ancestor",
+                            Some(pid),
+                            format!(
+                                "supervisor pid {pid} is this session's own ancestor — refused; run `agent-doc admin kill-supervisor` from a different pane, or let the project controller drive it"
+                            ),
+                        ),
+                        SupervisorKillOutcome::WouldKill(pid) => (
+                            "would_kill",
+                            Some(pid),
+                            format!("dry-run: would kill supervisor pid {pid}"),
+                        ),
+                        SupervisorKillOutcome::Graceful(pid) => (
+                            "graceful",
+                            Some(pid),
+                            format!("supervisor pid {pid} self-killed within the grace window"),
+                        ),
+                        SupervisorKillOutcome::Forced(pid) => (
+                            "forced",
+                            Some(pid),
+                            format!(
+                                "supervisor pid {pid} force-killed after the {}s grace window",
+                                grace.as_secs()
+                            ),
+                        ),
+                    };
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "status": status,
+                                "pid": pid,
+                                "document": document.display().to_string(),
+                                "grace_secs": grace.as_secs(),
+                            })
+                        );
+                    } else {
+                        println!("[admin] kill-supervisor: {message}");
+                    }
+                    // A refused self-ancestor is an operator error worth a non-zero exit
+                    // so scripts can branch; everything else (incl. no_supervisor) is Ok.
+                    if status == "refused_self_ancestor" {
+                        anyhow::bail!("{message}");
+                    }
+                    Ok(())
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = (document, grace_secs, dry_run, json);
+                    anyhow::bail!("admin kill-supervisor is only supported on Unix");
+                }
             }
             AdminAction::Queue { action } => match action {
                 AdminQueueAction::Pause {

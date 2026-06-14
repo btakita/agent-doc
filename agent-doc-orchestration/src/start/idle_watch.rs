@@ -275,6 +275,38 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // never trips it.
                 let turn_boundary = prompt_visible && !turn_active;
                 let head_pending = active_head.is_some();
+                // `#supkill-a` — graceful, idle-gated self-kill. An external driver
+                // (the PCP / `admin kill-supervisor`) records a per-document request;
+                // the supervisor honors it at a turn boundary by tearing down its
+                // harness child and exiting cleanly (no relaunch — this is a kill, not
+                // a recycle). A wedged supervisor that never reaches this point is
+                // force-killed externally instead (`#supkill-b`). Checked before the
+                // recycle decision so a kill request wins over a hot-reload.
+                if crate::supervisor_selfkill::supervisor_self_kill_action(
+                    crate::supervisor_selfkill::self_kill_requested(&path),
+                    turn_boundary,
+                ) {
+                    let child_pid = shared.child_pid.load(Ordering::Relaxed);
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "supervisor_self_killed file={} boundary=turn child_pid={} caller=self_watchdog",
+                            path.display(),
+                            child_pid,
+                        ),
+                    );
+                    eprintln!(
+                        "[agent-doc] supervisor self-kill requested; tearing down the harness child and exiting"
+                    );
+                    crate::supervisor_selfkill::clear_self_kill_request(&path);
+                    #[cfg(unix)]
+                    if child_pid > 0 {
+                        unsafe {
+                            libc::kill(child_pid as libc::pid_t, libc::SIGTERM);
+                        }
+                    }
+                    std::process::exit(0);
+                }
                 let supervisor_stale = crate::project_controller::process_binary_is_stale(
                     recycle_launch_identity.as_ref(),
                 );

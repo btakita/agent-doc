@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -80,7 +80,25 @@ Fixed. The `Application Received` card heading was rendering the **entire** borr
 **Verification:** full suite green (680 pass, incl. 52 pipeline tests), `bun run build` + `build:worker` clean. No D1 migration. The EFS repo has no CI workflow configured.
 
 **Not yet live:** the preset was `#spec-test-commit-push` (no deploy), so this is on `main` (submodule `30c208c`, superproject `b4c2c4853`) but not yet on the workers.dev URL. Queued a recommended `bun run deploy:worker` backlog item to ship it.
-<!-- agent:boundary:40753e18 -->
+
+### Re: do [#aww2] — deploy the card-heading fix — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#aww2]
+
+
+Deployed. The `#pipeline-card-address-fmt` fix is now live on the URL you linked.
+
+**Deploy (`bun run deploy:worker`):**
+- New browser bundle `/index.browser-BRFYNUZM.js` (carries the pipeline card change) uploaded; 43 assets already present.
+- Total 908.81 KiB / 211.06 KiB gzip. Worker startup 22ms.
+- Live at `https://equityfundingsource.brian-takita.workers.dev` — version `f5623d81-248d-4a1c-8944-16e6cd9dafaf`, hourly cron `0 * * * *` active. Bindings intact (D1, R2 assets/documents/tmo-cache, BorrowerChatRoom + AdminEventsRoom DOs, upload rate limiter).
+
+**Smoke check:** `/` → 200, `/funded-deals` → 200.
+
+Reload `https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline` (hard-refresh to bust the old JS bundle) — the card heading is now the short `PO Box 571 - Takita, Brian` on its own full-width row, with the `APPLICATION RECEIVED` / `Aging` chips on the row below and the full address in the footer.
+<!-- agent:boundary:c2fd6c07 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,13 +106,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#aww2]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#aww2] [recommended] Deploy the EFS worker so the #pipeline-card-address-fmt card-heading fix shows on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline (bun run deploy:worker). Committed+pushed but not yet deployed.
 <!-- /agent:backlog -->
 
 ## Review

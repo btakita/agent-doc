@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 agent_doc_pipeline:
   run_id: cycle-1781420754344
   step: write_applied
@@ -200,7 +200,7 @@ Deploy:
 - Smoke: `/` 200, `/funded-deals` 200, `/portal-admin/pipeline` 303 (Cloudflare Access login redirect — expected for the admin-gated route).
 
 CI: no `CI` workflow exists in either repo; the superproject's only workflow (`Agent Doc`) remains blocked at runner-start by the account billing/spending-limit issue, an external CI-start blocker, not a code failure.
-<!-- agent:boundary:ec5e3571 -->
+<!-- agent:boundary:dcb68397 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -208,6 +208,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- I find the sideways text difficult to read...particularly with the all-caps ![img_13.png](img_13.png). Please layout the column title in a way that is more horizontal while the column is collapsed. Propose options.
 <!-- /agent:queue -->
 
 ## Backlog

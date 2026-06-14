@@ -146,7 +146,27 @@ Done (EFS `5f5e504`). Extended the in-browser document viewer to the remaining d
 **Per `#spec-test-commit-push`:** `document-viewer.test.ts` asserts each surface offers click-to-view; `download-security.test.ts` updated for the now-centralized HTTPS guard. `bun run check` green (657 tests), worker build clean. Committed + pushed.
 
 That drains the queue. Note: a stale route-owned supervisor (pid 861902, pre-current binary) is still throwing the recurring File-Cache-Conflict / IPC-drift dialogs this session — restart it with `agent-doc session restart-supervisor tasks/professional/equityfundingsource.md --force` (or restart the session) to clear them; it doesn't affect the shipped code.
-<!-- agent:boundary:d0ed2a04 -->
+
+### Re: do [#67v2b] — Admin pipeline drag-to-change-status TMO writeback outbox — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#67v2b]
+
+Done (EFS `dcfca4e`). Phase B of the admin loan pipeline (#67v2) now records the **EFS → TMO loan-status writeback** durably, so a drag between columns is captured for TMO sync once the writeback gate clears.
+
+**What was already there:** the drag-between-columns UI and the loan-dialog status dropdown both already PUT `/api/admin/loans/:id/status` with an optimistic card move + rollback-on-error (`change_loan_status_`, `pipeline_card_move_`). That EFS-local half shipped in an earlier cycle.
+
+**What this phase adds (the gated TMO-writeback half):**
+- `tmo_loan_status_outbox_enqueue_` (`lib/tmo-api/index.ts`, re-exported via `admin/shared.ts`) inserts a `tmo_cache_outbox` row — `entity_type='loan'`, `operation='update_loan_status'`, `status='pending'`, `payload_json={ loan_number, loan_status, short_name, tmo_rec_id }` — mirroring the `add_loan_funding` outbox precedent. Returns `null` (non-fatal) when the loan has no TMO loan number or the insert fails, so the EFS-local status change always stands.
+- `admin_loans_by_id_status_PUT_` calls the enqueue right after `admin_loan_status_update_`, ahead of the legacy direct `tmo_loan_status_sync_`. The outbox is the durable gated-replay record; the direct sync stays as the pre-existing config-gated path.
+
+**Replay stays gated (#7a4d / #dzmm):** no consumer drains `update_loan_status` rows yet — they accumulate as `pending` until the TMO write field map (#7a4d) + sync direction (#dzmm/#k2xg) are confirmed. A regression test guards that no premature replay worker was added.
+
+**Per `#spec-test-commit-push`:** updated the PRD Phase B section (`prds/67v2-admin-loan-pipeline-kanban.md`) with the implementation block; added 5 tests to `tests/admin-pipeline.test.ts` (outbox row shape, no-loan-number skip, non-fatal failure, status-PUT wiring order, replay-gated guard). `bun run check` green (662 tests), worker build clean. Committed + pushed to `main` (submodule pointer bumped to `dcfca4e`).
+
+Not deployed — this preset is commit+push only. Remaining queue: `do [#67v2d]` (admin dashboard pipeline summary) then `#advance-review`.
+<!-- agent:boundary:6de402a5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -160,7 +180,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#67v2b] Admin pipeline drag-to-change-status (#67v2 Phase B): drag a loan card between columns to apply an EFS-local optimistic loan-status update + tmo_cache_outbox enqueue. Outbox REPLAY stays gated on #7a4d/#dzmm, but the EFS-local status change + enqueue ships now. Plan: src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md (Phase B). Advances review #67v2.
 - [ ] [#67v2d] Admin dashboard pipeline summary (#67v2 Phase D): per-stage counts + next-actions on the admin dashboard, mirroring /portal-admin/pipeline. EFS-local, fully actionable now (no TMO gate). Plan: src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md (Phase D). Advances review #67v2.
 <!-- /agent:backlog -->
 

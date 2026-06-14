@@ -109,7 +109,25 @@ All 7 remaining `agent:review` items are **operator-gated**, not agent-drainable
 - **API token:** username `__token__`, password `pypi-…` token — no OTP per upload.
 
 No code, build, or publish steps are agent-runnable until you supply the gated tokens/answers/live endpoints above. Nothing else to do this cycle.
-<!-- agent:boundary:9d8df0a2 -->
+
+### Re: PyPI login failing on the OTP step — opus-4-8
+
+I can't type the OTP for you, but here's how to get unstuck. PyPI's OTP field accepts **either** a 6-digit TOTP code (authenticator app) **or** an 8-character recovery code — failures almost always fall into one of these buckets:
+
+**1. TOTP clock skew (the #1 cause).** TOTP is time-based; if your phone's clock is even ~30s off, every code is rejected as "Invalid TOTP". Fix: enable automatic network time on the phone (Android: Settings -> System -> Date & time -> "Set time automatically"; iOS: Settings -> General -> Date & Time -> "Set Automatically"), then try a fresh code.
+
+**2. Stale / mistyped code.** Codes rotate every 30s. Enter it the moment it appears, with **no spaces**, and don't reuse one that already scrolled.
+
+**3. Lost authenticator -> use a recovery code.** When you enabled 2FA, PyPI showed 8 one-time recovery codes. Paste one (format 'xxxxx-xxxxx') into the same OTP field. Each works once. If you can't find them and can't get a TOTP code, you'll need PyPI account recovery (admin@pypi.org) — there's no self-serve reset.
+
+**4. Passkey/security-key path.** If you set up 2FA as a WebAuthn passkey rather than TOTP, there is no code to type — click "Use security key" / the passkey prompt instead of the OTP box.
+
+**You may not need to log in at all.** If the actual goal is publishing 'lazily-rs' (this repo has a 'pyproject.toml'), uploads don't use interactive login or OTP:
+- **API token:** username '__token__', password 'pypi-...' token — no OTP per upload.
+- **Trusted Publishing (OIDC):** your release conventions already publish PyPI via '.github/workflows/pypi.yml' on 'release: published' — that path needs no login or token at all.
+
+Tell me which method you're using (authenticator app vs passkey) and the exact error PyPI shows, and whether the goal is website access or just publishing — I'll narrow it from there.
+<!-- agent:boundary:7649f9a4 -->
 <!-- /agent:exchange -->
 ###
 <!--

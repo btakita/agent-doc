@@ -96,6 +96,26 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // the pane) on every later idle boundary. The supervisor keeps running on
             // its current binary until the operator restarts it.
             let mut reexec_recycle_disabled = false;
+            // `#supautoinstall`: dogfood auto-install rung that PRECEDES the recycle rung.
+            // When this supervisor hosts an agent-doc session editing agent-doc's OWN
+            // source and a finalize committed an edit, build+install at the idle boundary
+            // so the installed binary catches up — then the recycle block below hot-reloads
+            // onto it. Resolved ONCE: the default-OFF path does zero extra work (no source
+            // walk, no crate-root probe) — only an opted-in dogfooding session pays for it.
+            let auto_install_enabled =
+                crate::project_controller::supervisor_auto_install_enabled();
+            let install_crate_root = if auto_install_enabled {
+                crate::project_controller::dogfood_agent_doc_crate_root(&path)
+            } else {
+                None
+            };
+            let mut install_stale_since: Option<std::time::Instant> = None;
+            let mut install_detected_logged = false;
+            // `#supautoinstall` — one-shot latch: a failed build must not be re-attempted
+            // every idle boundary (it would block the watch on a hopeless multi-minute
+            // build each tick). After one failure the supervisor logs once and leaves the
+            // refresh to the operator, exactly like `reexec_recycle_disabled`.
+            let mut auto_install_disabled = false;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
@@ -318,6 +338,125 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                     }
                     std::process::exit(0);
+                }
+                // `#supautoinstall` — dogfood auto-install rung. Opt-in (default OFF) and
+                // only for a dogfooding session (`install_crate_root` resolved). When a
+                // finalize has committed a source edit (source mtime > installed binary
+                // mtime), build+install at this turn boundary so the binary catches up; the
+                // recycle block immediately below then sees the now-newer binary
+                // (`process_binary_is_stale`) and hot-reloads onto it. The build runs HERE,
+                // in the idle supervisor — never in the finalize client — which is what
+                // root-fixes the mid-session-install drift (`#no-mid-session-install`).
+                if !auto_install_disabled
+                    && let Some(crate_root) = install_crate_root.as_ref()
+                {
+                    {
+                        let source_newer = match (
+                            crate::project_controller::newest_crate_source_mtime_secs(crate_root),
+                            crate::project_controller::current_binary_identity().ok(),
+                        ) {
+                            (Some(src), Some(bin)) => {
+                                crate::project_controller::source_newer_than_installed_binary(
+                                    src,
+                                    bin.modified_secs,
+                                )
+                            }
+                            // Fail-open: any unreadable source/binary → not newer.
+                            _ => false,
+                        };
+                        let install_action = supervisor_install_action(
+                            source_newer,
+                            auto_install_enabled,
+                            turn_boundary,
+                        );
+                        // A build is heavy → always debounce (no head-pending immediate
+                        // path): a momentary idle gap mid-edit must never trip it.
+                        let (do_install, next_install_since) =
+                            crate::project_controller::recycle_debounce_decision(
+                                matches!(install_action, SupervisorInstallAction::Install),
+                                install_stale_since,
+                                std::time::Instant::now(),
+                                recycle_grace,
+                            );
+                        install_stale_since = next_install_since;
+                        if matches!(install_action, SupervisorInstallAction::Detect)
+                            && !install_detected_logged
+                        {
+                            install_detected_logged = true;
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "supervisor_source_newer_detected pane={} auto_install=opted_out hint=set_AGENT_DOC_SUPERVISOR_AUTO_INSTALL_or_run_dogfood_refresh crate_root={}",
+                                    shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                    crate_root.display(),
+                                ),
+                            );
+                            eprintln!(
+                                "[agent-doc] agent-doc source is newer than the installed binary and supervisor auto-install is opted OUT; set AGENT_DOC_SUPERVISOR_AUTO_INSTALL=1 or run the dogfood refresh to rebuild+install"
+                            );
+                        }
+                        if do_install {
+                            install_stale_since = None;
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "supervisor_auto_install_started pane={} boundary=turn crate_root={}",
+                                    shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                    crate_root.display(),
+                                ),
+                            );
+                            crate::ops_log::log_op(
+                                &path,
+                                &format!(
+                                    "supervisor_auto_install_started file={} crate_root={} caller=idle_watch",
+                                    path.display(),
+                                    crate_root.display(),
+                                ),
+                            );
+                            eprintln!(
+                                "[agent-doc] supervisor auto-install: rebuilding + installing agent-doc from {} so the next queue item runs on the freshly-committed source",
+                                crate_root.display()
+                            );
+                            match crate::project_controller::run_supervisor_auto_install(crate_root) {
+                                Ok(()) => {
+                                    log_event(
+                                        &mut session_log,
+                                        "supervisor_auto_install_succeeded next=recycle_onto_fresh_binary",
+                                    );
+                                    crate::ops_log::log_op(
+                                        &path,
+                                        &format!(
+                                            "supervisor_auto_install_succeeded file={} next=recycle_onto_fresh_binary",
+                                            path.display(),
+                                        ),
+                                    );
+                                    eprintln!(
+                                        "[agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary"
+                                    );
+                                }
+                                Err(err) => {
+                                    auto_install_disabled = true;
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "supervisor_auto_install_failed fallback=operator_refresh auto_install_disabled=true error={err}"
+                                        ),
+                                    );
+                                    crate::ops_log::log_op(
+                                        &path,
+                                        &format!(
+                                            "supervisor_auto_install_failed file={} fallback=operator_refresh error={:?}",
+                                            path.display(),
+                                            err.to_string(),
+                                        ),
+                                    );
+                                    eprintln!(
+                                        "[agent-doc] supervisor auto-install failed ({err}); leaving the rebuild to the operator (run the dogfood refresh) — not re-attempting this session"
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
                 let supervisor_stale = crate::project_controller::process_binary_is_stale(
                     recycle_launch_identity.as_ref(),

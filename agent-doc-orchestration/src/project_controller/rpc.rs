@@ -1216,6 +1216,134 @@ pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
     resolve_supervisor_auto_recycle(env.as_deref(), frontmatter, project)
 }
 
+/// `#supautoinstall` — pure: is agent-doc's OWN source newer than the installed binary?
+/// Both are unix-epoch seconds. True only when the source is STRICTLY newer (a
+/// build+install is pending). Equal timestamps (clock granularity / a just-installed
+/// binary) read as NOT newer — fail-open, source-ahead is an install hint and must never
+/// trigger a build on a boundary tie. Symmetric to [`process_binary_is_stale`] (which
+/// compares installed-binary-vs-running-process for the recycle rung).
+pub(crate) fn source_newer_than_installed_binary(
+    newest_source_secs: u64,
+    installed_binary_secs: u64,
+) -> bool {
+    newest_source_secs > installed_binary_secs
+}
+
+/// `#supautoinstall` — pure precedence for the supervisor auto-install opt-in. Env-only
+/// for this rung (heavier than recycle, so a deliberate single switch): truthy
+/// (`1`/`true`/`yes`/`on`) enables, anything else (including unset) is OFF. Pure so the
+/// resolution is unit-testable.
+pub(crate) fn resolve_supervisor_auto_install(env: Option<&str>) -> bool {
+    matches!(
+        env.map(|raw| raw.trim().to_ascii_lowercase()).as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+/// `#supautoinstall` — is supervisor auto-install enabled? Reads the env override and
+/// resolves via [`resolve_supervisor_auto_install`]. Default OFF.
+pub(crate) fn supervisor_auto_install_enabled() -> bool {
+    resolve_supervisor_auto_install(std::env::var(SUPERVISOR_AUTO_INSTALL_ENV).ok().as_deref())
+}
+
+/// `#supautoinstall` — resolve the agent-doc crate source root for a DOGFOODING session
+/// (an agent-doc session editing agent-doc's own source). Returns the crate root only when
+/// the served document's project tree actually contains the agent-doc crate — the project
+/// root itself, or a `src/agent-doc` submodule under it, whichever holds a `Cargo.toml`
+/// declaring `name = "agent-doc"`. This is what keeps the auto-install from EVER firing for
+/// an ordinary user's document. Fail-open `None` on any resolution error.
+pub(crate) fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
+    let project_root = crate::fs_util::find_project_root(file)?;
+    for candidate in [project_root.clone(), project_root.join("src/agent-doc")] {
+        let cargo = candidate.join("Cargo.toml");
+        if let Ok(content) = std::fs::read_to_string(&cargo)
+            && content.contains("name = \"agent-doc\"")
+        {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// `#supautoinstall` — newest mtime (unix secs) among the crate's build inputs: a bounded
+/// recursive walk of `.rs`/`.toml`/`.md` files under `crate_root`, skipping build/VCS/cache
+/// dirs (`target`, `.git`, `.agent-doc`, `node_modules`, `.tsift`, `build`, `dist`). Used to
+/// detect "a finalize committed a source edit but the binary has not been rebuilt yet".
+/// Fail-open `None` when nothing is readable.
+pub(crate) fn newest_crate_source_mtime_secs(crate_root: &Path) -> Option<u64> {
+    fn walk(dir: &Path, newest: &mut u64) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if matches!(
+                    name.as_ref(),
+                    "target" | ".git" | ".agent-doc" | "node_modules" | ".tsift" | "build" | "dist"
+                ) {
+                    continue;
+                }
+                walk(&entry.path(), newest);
+            } else if file_type.is_file() {
+                let path = entry.path();
+                let ext_ok = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| matches!(e, "rs" | "toml" | "md"))
+                    .unwrap_or(false);
+                if !ext_ok {
+                    continue;
+                }
+                if let Ok(secs) = entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .map_err(anyhow::Error::from)
+                    .and_then(|m| Ok(m.duration_since(UNIX_EPOCH)?.as_secs()))
+                {
+                    *newest = (*newest).max(secs);
+                }
+            }
+        }
+    }
+    let mut newest = 0u64;
+    walk(crate_root, &mut newest);
+    (newest > 0).then_some(newest)
+}
+
+/// `#supautoinstall` — run the dogfood build+install for agent-doc's own source from
+/// `crate_root`, the same three steps as `runbooks/dogfood-supervisor-refresh.md`:
+/// `cargo build --release` → `cargo install --path .` → `agent-doc lib-install`. Runs IN
+/// THE SUPERVISOR at an idle boundary (never the finalize client mid-cycle), which is what
+/// root-fixes the mid-session-install drift. After it succeeds the installed binary is
+/// newer than the running supervisor process, so the existing `process_binary_is_stale`
+/// recycle path hot-reloads onto it. Returns `Err` naming the failed step.
+pub(crate) fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
+    let steps: [(&str, &[&str]); 3] = [
+        ("cargo", &["build", "--release"]),
+        ("cargo", &["install", "--path", ".", "--quiet", "--force"]),
+        ("agent-doc", &["lib-install"]),
+    ];
+    for (program, args) in steps {
+        let status = std::process::Command::new(program)
+            .args(args)
+            .current_dir(crate_root)
+            .status()
+            .with_context(|| format!("failed to spawn `{program} {}`", args.join(" ")))?;
+        if !status.success() {
+            anyhow::bail!(
+                "auto-install step `{program} {}` failed with status {status}",
+                args.join(" ")
+            );
+        }
+    }
+    Ok(())
+}
+
 /// `#jbrestale` — seam-isolated classifier (NOT yet wired into the dispatch bail).
 ///
 /// Given a stored `queue_paused` pause `reason`, decide whether the pause was caused by a
@@ -4686,6 +4814,30 @@ mod tests {
             (false, None)
         );
     }
+    #[test]
+    fn source_newer_than_installed_binary_strict() {
+        // `#supautoinstall`: only a STRICTLY newer source triggers an install; equal
+        // timestamps (a just-installed binary / clock granularity) read as not-newer so a
+        // boundary tie never re-builds.
+        assert!(source_newer_than_installed_binary(101, 100));
+        assert!(!source_newer_than_installed_binary(100, 100));
+        assert!(!source_newer_than_installed_binary(99, 100));
+    }
+
+    #[test]
+    fn resolve_supervisor_auto_install_default_off() {
+        // `#supautoinstall`: env-only opt-in, default OFF. Truthy enables; anything else
+        // (including unset / unrecognized) stays off.
+        assert!(resolve_supervisor_auto_install(Some("1")));
+        assert!(resolve_supervisor_auto_install(Some("true")));
+        assert!(resolve_supervisor_auto_install(Some(" ON ")));
+        assert!(resolve_supervisor_auto_install(Some("yes")));
+        assert!(!resolve_supervisor_auto_install(Some("0")));
+        assert!(!resolve_supervisor_auto_install(Some("false")));
+        assert!(!resolve_supervisor_auto_install(Some("maybe")));
+        assert!(!resolve_supervisor_auto_install(None));
+    }
+
     #[test]
     fn handoff_drop_guard_aborted_handoff_sends_shutdown_and_logs() {
         // An aborted handoff (guard dropped before `complete`) must tell the

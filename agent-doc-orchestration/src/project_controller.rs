@@ -85,6 +85,17 @@ const RECYCLE_IDLE_GRACE_SECS_ENV: &str = "AGENT_DOC_RECYCLE_IDLE_GRACE_SECS";
 /// validation lands; when off the supervisor only logs `supervisor_binary_stale_detected`
 /// and the operator restarts the session to pick up the new build.
 const SUPERVISOR_AUTO_RECYCLE_ENV: &str = "AGENT_DOC_SUPERVISOR_AUTO_RECYCLE";
+/// `#supautoinstall` — opt-in flag for the DOGFOODING `start --route-owned` supervisor
+/// (an agent-doc session editing agent-doc's OWN source) to build+install that source at
+/// an idle boundary after a finalize edits it, so the installed binary catches up and the
+/// `#ctlrecycle` recycle path then hot-reloads onto it. This replaces the manual
+/// `runbooks/dogfood-supervisor-refresh.md` and root-fixes the "don't `cargo install`
+/// mid-session against a live supervisor" drift (`#no-mid-session-install`): the build
+/// runs in the supervisor at idle, never in the finalize client. Default OFF — building
+/// the binary is heavy and only applies when editing agent-doc's own source, so it stays a
+/// deliberate opt-in until live-validated. When off, a dogfood source-ahead-of-binary state
+/// only logs `supervisor_source_newer_detected`.
+const SUPERVISOR_AUTO_INSTALL_ENV: &str = "AGENT_DOC_SUPERVISOR_AUTO_INSTALL";
 
 #[derive(Clone, Debug)]
 pub struct SessionsProjectionHint {

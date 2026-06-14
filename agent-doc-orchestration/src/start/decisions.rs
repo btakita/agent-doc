@@ -281,6 +281,48 @@ pub fn supervisor_recycle_action(
     }
 }
 
+/// `#supautoinstall` — what the idle supervisor watch should do about agent-doc's OWN
+/// source being newer than the installed binary (the dogfood "a finalize just committed
+/// a source edit but nobody built+installed it" state). Pure so the policy is
+/// unit-testable. This is the install rung that PRECEDES [`supervisor_recycle_action`]:
+/// once the auto-install lands the fresh binary, `process_binary_is_stale` flips true and
+/// the existing recycle path hot-reloads onto it.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SupervisorInstallAction {
+    /// Source not newer than the installed binary, not at a turn boundary, or not a
+    /// dogfooding session — do nothing.
+    None,
+    /// Source is newer + at a turn boundary but auto-install is opted OUT (default OFF):
+    /// surface it once so the operator runs the manual dogfood refresh deliberately.
+    Detect,
+    /// Source is newer + auto-install opt-in + turn boundary: build+install at the next
+    /// idle-grace boundary. The caller always debounces this (a build is heavy, so unlike
+    /// the recycle rung there is no head-pending "immediate" fast path) — a momentary idle
+    /// gap mid-edit must never trip a multi-minute build.
+    Install,
+}
+
+/// `#supautoinstall` — pure auto-install policy for the dogfooding `start` supervisor.
+/// Mirrors [`supervisor_recycle_action`]: only acts at a `turn_boundary`
+/// (`prompt_visible && !turn_active`); when `auto_install` is opted OUT it surfaces the
+/// source-ahead state once (`Detect`) so the operator runs the manual refresh, and when
+/// opted in it requests a (caller-debounced) build+install (`Install`). Default OFF —
+/// building the binary is heavy and only applies when an agent-doc session is editing
+/// agent-doc's own source.
+pub fn supervisor_install_action(
+    source_newer: bool,
+    auto_install: bool,
+    turn_boundary: bool,
+) -> SupervisorInstallAction {
+    if !source_newer || !turn_boundary {
+        return SupervisorInstallAction::None;
+    }
+    if !auto_install {
+        return SupervisorInstallAction::Detect;
+    }
+    SupervisorInstallAction::Install
+}
+
 /// `#supkill-bg` — what an explicit operator `restart-supervisor` (IPC `Restart`)
 /// should do at the supervisor's next idle tick, framed as blue/green
 /// drain-and-supersede. Pure so the policy is unit-testable independent of the live
@@ -422,6 +464,21 @@ mod tests {
             supervisor_recycle_action(true, true, true, false),
             RecycleDebounced
         );
+    }
+
+    #[test]
+    fn supervisor_install_action_policy() {
+        use SupervisorInstallAction::*;
+        // `#supautoinstall` policy truth table. (source_newer, auto_install, turn_boundary)
+        // Source not newer than the installed binary → never act.
+        assert_eq!(supervisor_install_action(false, true, true), None);
+        assert_eq!(supervisor_install_action(false, false, true), None);
+        // Source newer but mid-turn (not at a boundary) → never act, even opted in.
+        assert_eq!(supervisor_install_action(true, true, false), None);
+        // Source newer at a turn boundary, auto-install OFF (default) → surface only.
+        assert_eq!(supervisor_install_action(true, false, true), Detect);
+        // Source newer + boundary + opt-in ON → request the (caller-debounced) install.
+        assert_eq!(supervisor_install_action(true, true, true), Install);
     }
 
     #[test]

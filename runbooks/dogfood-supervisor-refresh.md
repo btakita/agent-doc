@@ -14,6 +14,34 @@ the bootstrap step below is manual because the running supervisor predates the
 fix it would need to recycle itself, and it is the **parent process** of the
 live agent — a session cannot cleanly pull the binary out from under itself.
 
+## Automated path (opt-in, `#supautoinstall`)
+
+The build+install half of this procedure (steps 1–2 below) can run automatically
+**in the supervisor at an idle boundary** instead of by hand. Enable it for a
+dogfooding session with:
+
+```bash
+export AGENT_DOC_SUPERVISOR_AUTO_INSTALL=1   # default OFF
+```
+
+When set, after a `finalize` that committed an edit to agent-doc's own source the
+supervisor's idle-queue watch detects that the source is newer than the installed
+binary and runs `cargo build --release && cargo install --path . && agent-doc
+lib-install` at the next turn boundary (debounced, never mid-turn). That makes the
+installed binary newer than the running process, so the existing `#ctlrecycle`
+recycle path hot-reloads onto it on the same/next boundary — closing the whole
+loop without an operator step. The build runs in the **supervisor** (idle), never
+in the finalize client, so it cannot cause the mid-session-install drift the
+manual procedure warns about. ops.log proof: `supervisor_auto_install_started` →
+`supervisor_auto_install_succeeded` → `supervisor_binary_stale_self_recycled`.
+
+It is **dogfood-only** — `dogfood_agent_doc_crate_root` resolves a crate root only
+when the served document's project tree contains the agent-doc crate, so it never
+fires for an ordinary user's document. Heavy (a full build blocks the idle watch
+for its duration) and high blast-radius, hence default OFF; a failed build latches
+off for the session and falls back to the manual procedure below. When OFF, a
+source-ahead-of-binary state logs `supervisor_source_newer_detected` once.
+
 ## When to run
 
 After a normal `finalize` / `write --commit` closeout (response committed,

@@ -115,8 +115,9 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
     // stall. Walk past deferred heads; if every remaining head is deferred,
     // continuation is NOT required so the session does not perpetually re-converge
     // an undrainable queue.
+    let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = deferred_backlog_ids(file, content);
-    let head = first_drainable_head(&activation.entries_after, &deferred_ids);
+    let head = first_drainable_head(&activation.entries_after, open_backlog.as_ref(), &deferred_ids);
     let Some(head) = head else {
         return Ok(None);
     };
@@ -250,22 +251,87 @@ pub fn live_continuation_head(file: &Path, content: &str) -> Option<String> {
 /// continuation agree.
 fn first_drainable_head<'a>(
     entries_after: &'a [crate::queue::QueueEntry],
+    open_backlog_ids: Option<&std::collections::HashSet<String>>,
     deferred_ids: &std::collections::HashSet<String>,
 ) -> Option<&'a crate::queue::QueuePrompt> {
     entries_after.iter().find_map(|entry| match entry {
         crate::queue::QueueEntry::Prompt(prompt) => {
-            if !is_drainable_queue_head(&prompt.text) {
-                return None;
+            if head_is_drainable(&prompt.text, open_backlog_ids, deferred_ids) {
+                Some(prompt)
+            } else {
+                None
             }
-            let id = extract_head_id(&prompt.text);
-            let deferred = id
-                .as_deref()
-                .map(|id| deferred_ids.contains(&id.to_ascii_lowercase()))
-                .unwrap_or(false);
-            if deferred { None } else { Some(prompt) }
         }
         _ => None,
     })
+}
+
+/// Whether a single queue head is agent-drainable this session (`#cleardrainsignal`).
+///
+/// - Inert noise (a bare observation with no `#id`/directive/question, or a fenced
+///   console-output paste) is never drainable.
+/// - An `#id` head is drainable only when the id is an **open** `agent:backlog`
+///   item AND not deferred (`[operator-verify]` always / `[clean-session]` under a
+///   live editor-IPC listener). A `do [#id]` head whose id is absent from the open
+///   backlog (already `agent:done`, archived, or an orphaned ref) is a stale head
+///   the strike/reap path owns — NOT a continuation target, so it must not keep the
+///   go-mode drain alive. This makes continuation agree with the no-response queue
+///   guard, which intersects the head set with the open backlog the same way.
+/// - A free-text directive/question head (no `#id`) is drainable.
+fn head_is_drainable(
+    text: &str,
+    open_backlog_ids: Option<&std::collections::HashSet<String>>,
+    deferred_ids: &std::collections::HashSet<String>,
+) -> bool {
+    if !is_drainable_queue_head(text) {
+        return false;
+    }
+    match extract_head_id(text) {
+        Some(id) => {
+            let norm = id.to_ascii_lowercase();
+            if deferred_ids.contains(&norm) {
+                return false;
+            }
+            // Backlog-driven (go-mode) queue: an `#id` head must be an OPEN backlog
+            // item. A `do [#id]` whose id left the backlog (completed, archived, or
+            // an orphaned ref like a removed-without-archive id) is stale — the
+            // strike/reap path owns it, not the drain — so it must not keep the
+            // go-mode loop alive. When the doc has NO backlog component at all, the
+            // id-heads ARE the work themselves (free-form queue), so don't gate on
+            // membership.
+            match open_backlog_ids {
+                Some(open) => open.contains(&norm),
+                None => true,
+            }
+        }
+        None => true,
+    }
+}
+
+/// Open (`[ ]`/`[/]`, not `[x]`/done) `agent:backlog` ids from a document string,
+/// lowercased. Mirrors `session_check::done_signals::open_backlog_ids` but reads
+/// the caller's `content` so continuation and the no-response guard agree on the
+/// same drainable id set (`#cleardrainsignal`). Returns `None` when the document
+/// has no `agent:backlog` component (a free-form id-head queue is not backlog-driven,
+/// so id-head drainability is not gated on backlog membership).
+fn open_backlog_ids_from_content(content: &str) -> Option<std::collections::HashSet<String>> {
+    let components = crate::component::parse(content).ok()?;
+    let mut found_backlog = false;
+    let mut ids = std::collections::HashSet::new();
+    for comp in &components {
+        if !agent_doc_core::component::is_backlog_component(&comp.name) {
+            continue;
+        }
+        found_backlog = true;
+        let body = &content[comp.open_end..comp.close_start];
+        let (_, items, _) = crate::pending::parse_items(body);
+        for item in items {
+            if !item.is_done() && !item.id.is_empty() {
+                ids.insert(item.id.to_ascii_lowercase());
+            }
+        }
+    }
+    found_backlog.then_some(ids)
 }
 
 /// The live **drainable** continuation head of a document string.
@@ -299,8 +365,9 @@ pub fn live_drainable_continuation_head(file: &Path, content: &str) -> Option<St
     {
         return None;
     }
+    let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = deferred_backlog_ids(file, content);
-    let head = first_drainable_head(&activation.entries_after, &deferred_ids)?;
+    let head = first_drainable_head(&activation.entries_after, open_backlog.as_ref(), &deferred_ids)?;
     Some(extract_head_id(&head.text).unwrap_or_else(|| head.text.trim().to_string()))
 }
 
@@ -343,18 +410,14 @@ pub fn drainable_head_count(file: &Path, content: &str) -> usize {
     {
         return 0;
     }
+    let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = deferred_backlog_ids(file, content);
     activation
         .entries_after
         .iter()
         .filter(|entry| match entry {
             crate::queue::QueueEntry::Prompt(prompt) => {
-                if !is_drainable_queue_head(&prompt.text) {
-                    return false;
-                }
-                extract_head_id(&prompt.text)
-                    .map(|id| !deferred_ids.contains(&id.to_ascii_lowercase()))
-                    .unwrap_or(true)
+                head_is_drainable(&prompt.text, open_backlog.as_ref(), &deferred_ids)
             }
             _ => false,
         })
@@ -365,11 +428,18 @@ pub fn drainable_head_count(file: &Path, content: &str) -> usize {
 /// (`#goqstall2`). Word-matched anywhere in a normalized head — conservative in the
 /// SAFE direction: a head that looks even loosely directive stays drainable; only a
 /// bare observation with no directive and no question is demoted to inert noise.
+///
+/// `#cleardrainsignal`: deliberately EXCLUDES words that are common nouns in
+/// agent-doc's own bug reports and would false-positive a declarative observation
+/// into a drainable directive (e.g. "document" — "this document has…", "the
+/// document model" — appears in nearly every report; the rare imperative "document
+/// the API" arrives as a `do [#id]` head instead). Keep this list to verbs that
+/// read as imperatives, not nouns, in queue prose.
 const QUEUE_DIRECTIVE_VERBS: &[&str] = &[
     "do", "fix", "run", "build", "install", "commit", "push", "implement", "add",
     "update", "investigate", "create", "make", "remove", "delete", "refactor",
     "review", "explain", "drive", "resume", "continue", "check", "verify", "write",
-    "test", "debug", "diagnose", "merge", "publish", "release", "bump", "document",
+    "test", "debug", "diagnose", "merge", "publish", "release", "bump",
     "rebase", "revert", "rename", "move", "split", "extract", "wire", "land", "ship",
     "draft", "summarize", "answer", "respond", "apply", "enable", "disable", "gate",
 ];
@@ -422,6 +492,15 @@ fn normalize_queue_head_text(text: &str) -> String {
 /// continuation head set and surfaced as `queue_stale_noise_lines`, never
 /// auto-deleted (the live IPC supervisor races on direct queue edits).
 pub(crate) fn is_drainable_queue_head(text: &str) -> bool {
+    // `#cleardrainsignal`: a queue head carrying a fenced ``` code block is pasted
+    // console-output / error-report evidence the operator already triaged into
+    // backlog ids (e.g. `JB \`Run Agent Doc\` ... \`\`\`<log>\`\`\``), NOT a drain
+    // target — even though it incidentally contains a directive word like "run".
+    // Such blocks would otherwise churn no-op go-mode cycles forever. An `#id` head
+    // never carries a fence, so this only demotes free-text paste blocks.
+    if text.contains("```") {
+        return false;
+    }
     if extract_head_id(text).is_some() {
         return true;
     }
@@ -1025,6 +1104,43 @@ mod tests {
     }
 
     #[test]
+    fn drainable_head_count_excludes_orphan_id_head_when_backlog_present() {
+        // #cleardrainsignal: a `do [#id]` head whose id is absent from the open
+        // backlog (completed/archived/orphan) is stale — it must not keep the
+        // go-mode drain alive when the doc is backlog-driven.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let content = doc_with_backlog(
+            &["do [#orphan]", "do [#c]"],
+            &["- [ ] [#c] plain drainable"],
+        );
+        std::fs::write(&doc, &content).unwrap();
+        // #orphan has no backlog item → excluded; only #c counts.
+        assert_eq!(drainable_head_count(&doc, &content), 1);
+    }
+
+    #[test]
+    fn drainable_head_count_free_form_id_queue_without_backlog_still_drains() {
+        // #cleardrainsignal regression guard: when the doc has NO backlog component,
+        // id-heads are the work themselves and must stay drainable.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#x]", "do [#y]"], true, true);
+        let content = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(drainable_head_count(&doc, &content), 2);
+    }
+
+    #[test]
+    fn is_drainable_queue_head_treats_fenced_paste_as_noise() {
+        // #cleardrainsignal: a pasted bug-report/console block (fenced ```) is noise
+        // even though it incidentally contains the directive word "run".
+        let fenced = ":pushpin: JB `Run Agent Doc` should self-heal.\n```\n[route] target tmux session: 0\nError: dispatch blocked\n```";
+        assert!(!is_drainable_queue_head(fenced));
+        // A genuine inline directive (no fence) stays drainable.
+        assert!(is_drainable_queue_head("run the full test suite"));
+    }
+
+    #[test]
     fn detect_returns_head_for_active_auto_queue() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(
@@ -1132,6 +1248,15 @@ mod tests {
         ));
         assert!(!is_drainable_queue_head("- "));
         assert!(!is_drainable_queue_head(":pushpin:"));
+
+        // #cleardrainsignal: declarative observations whose only "verb" match is the
+        // noun "document" are noise, not directives (these churned bugs2.md).
+        assert!(!is_drainable_queue_head(
+            "- This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`."
+        ));
+        assert!(!is_drainable_queue_head(
+            ":pushpin: Ensure the markdown AST handles strings and code blocks. Tags within the blocks should be treated as content, not as part of the document tags."
+        ));
     }
 
     #[test]

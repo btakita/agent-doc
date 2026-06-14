@@ -500,13 +500,30 @@ pub fn infer_latest_generation(file: &Path, session_id: &str) -> Result<u64> {
             })
         })
         .unwrap_or(0);
-    let Some(path) = log_path(file, session_id)? else {
+    // The controller actor record is the authoritative committed generation: it
+    // only advances through the SQLite CAS in `store_actor_record_tx`. The
+    // session log's `session_start` / `ownership_transition` lines, by contrast,
+    // are written OPTIMISTICALLY in `start/run.rs` BEFORE the controller commits
+    // the start — so a start that loses the controller CAS still appends its
+    // intended (un-committed) generation to the log. Maxing the actor record
+    // with the log would then feed the *next* start a prior generation higher
+    // than the controller actually holds; the controller CAS expects
+    // `start_generation - 1 == committed`, so it rejects again, appends a yet
+    // higher generation to the log, and the divergence runs away — the start
+    // wedges forever with `compare-and-swap failed: expected <log>, found <db>`.
+    // When a controller actor record exists it is therefore the sole authority;
+    // the log is consulted only as a bootstrap/legacy fallback before the
+    // control plane has any record for this document.
+    if actor_generation > 0 {
         return Ok(actor_generation);
+    }
+    let Some(path) = log_path(file, session_id)? else {
+        return Ok(0);
     };
     let Some(content) = crate::fs_util::read_optional_text(&path)? else {
-        return Ok(actor_generation);
+        return Ok(0);
     };
-    Ok(actor_generation.max(infer_latest_generation_from_content(&content)))
+    Ok(infer_latest_generation_from_content(&content))
 }
 
 pub fn next_generation(file: &Path, session_id: &str) -> Result<OwnershipGeneration> {
@@ -866,6 +883,59 @@ mod tests {
         assert_eq!(record.pane_id, "%41");
         assert_eq!(record.state, ActorState::Ready);
         assert_eq!(record.harness, "codex");
+    }
+
+    #[test]
+    fn infer_latest_generation_ignores_optimistic_log_ahead_of_actor_record() {
+        // Regression for the runaway `compare-and-swap failed: expected <log>,
+        // found <db>` start wedge (#startgenlogdrift). The session log's
+        // `session_start generation=N` lines are written optimistically in
+        // `start/run.rs` BEFORE the controller commits a start, so a start that
+        // loses the controller CAS still inflates the log past the committed
+        // actor generation. The committed controller actor record must stay the
+        // sole authority — letting the log drag the inferred generation above it
+        // would feed the next start an un-committable prior generation and wedge
+        // the CAS forever.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = seed_project_file(
+            &tmp,
+            "tasks/efs.md",
+            "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n",
+        );
+
+        // Commit a controller actor at generation 1 (the last *successful* start).
+        project_binding_in(
+            tmp.path(),
+            &file.to_string_lossy(),
+            "efs",
+            "%44",
+            "@1",
+            "start",
+            "session_start",
+        )
+        .unwrap();
+        let record = load_record_in(tmp.path(), &file.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.generation, 1);
+
+        // Simulate failed starts that climbed the optimistic session log to 11
+        // without ever committing past generation 1.
+        let log = tmp.path().join(".agent-doc/logs/efs.log");
+        fs::create_dir_all(log.parent().unwrap()).unwrap();
+        fs::write(
+            &log,
+            "[1] session_start file=tasks/efs.md pane=%44 session=efs generation=1\n\
+             [2] session_start file=tasks/efs.md pane=%45 session=efs generation=11\n",
+        )
+        .unwrap();
+
+        // Inference trusts the committed actor record (1), not the inflated log
+        // (11), so the next start hands the controller a committable prior.
+        assert_eq!(infer_latest_generation(&file, "efs").unwrap(), 1);
+        let generations = next_generation(&file, "efs").unwrap();
+        assert_eq!(generations.prior_generation, 1);
+        assert_eq!(generations.new_generation, 2);
     }
 
     #[test]

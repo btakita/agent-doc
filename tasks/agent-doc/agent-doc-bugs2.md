@@ -178,20 +178,52 @@ Both queued items drained. **`#supselfheal` is now committed + pushed** (agent-d
    - **Live recycle proof is operator-drive** and folds into the existing **`#anw0verify`**: install (`cargo build --release && cargo install --path . && agent-doc lib-install`), restart this supervisor once onto a `#supselfheal` build (bootstrap caveat — a pre-`#supselfheal` supervisor cannot self-heal retroactively), then drive a turn boundary and confirm ops.log shows the self-recycle instead of repeated `supervisor_binary_stale_detected`.
 
 **2. `do [#mb98]` — DONE (resolved by #8rg3).** The request was "make mid-session install deferrable OR red/green so a newer finalize client doesn't outrun the supervisor." That is exactly what `#supselfheal` automates: the supervisor self-recycles onto the freshly-installed binary at a turn/inter-queue boundary via the blue/green `execve` that preserves the live child + pane (zero-gap), keeping client and supervisor aligned. Landing `#supselfheal` **is** the red/green-install solution. Until a `#supselfheal` supervisor is running, the interim rule stands: defer installs to post-session or restart the supervisor right after.
-<!-- agent:boundary:77aca023 -->
+
+### Re: JB `Run Agent Doc` should red/green-deploy + auto-switch the supervisor (lazily-rs stale-supervisor churn-stop) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In tsift.md, I had a queue:
+> ```
+> &gt;!-- agent:queue preset="#spec-test-build-install-commit-push" go --&lt;
+> - ~~[#pcacheattr]~~
+> - ~~[#gdbwritelock]~~
+> - ~~[#pcacheregtrunc]~~
+> - :pushpin: [#loggatefidelity]
+> - :pushpin: [#gdbwalcheckpoint]
+> - :pushpin: [#logfoldname]
+> - :pushpin: [#pcachebp]
+> &gt;!-- /agent:queue --&lt;
+> ```
+> I then manually deleted the strikethrough items...but then agent-doc struck through the next open item
+> ```
+> &gt;!-- agent:queue preset="#spec-test-build-install-commit-push" go --&lt;
+> - ~~[#loggatefidelity]~~
+> - :pushpin: [#gdbwalcheckpoint]
+> - :pushpin: [#logfoldname]
+> - :pushpin: [#pcachebp]
+> &gt;!-- /agent:queue --&lt;
+> ```
+
+
+This is a fresh live-repro of **#jbrestale**, not a new bug. The lazily-rs.md error — `failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled` — is exactly the class #jbrestale tracks: JB `Run Agent Doc` hits a stale-supervisor churn-stop and **fails closed** instead of restarting the supervisor and re-dispatching.
+
+Your added requirement — *red/green deploy the new supervisor and switch over automatically in Claude Code, Codex, OpenCode* — is the `#supselfheal` mechanism (landed `e9cf3b74`: blue/green `execve` self-recycle onto the fresh binary, zero-gap, preserves the live child + pane) wired into the **JB Run dispatch handler**. Today `#supselfheal` only fires at the idle / next-queue-item boundary, which a **churn-stopped** queue never reaches — so a manual JB Run still dead-ends on the pause. #jbrestale's fix closes that gap: classify the stale-supervisor churn-stop → branch to restart-supervisor / red-green switchover → lift the pause → re-dispatch once.
+
+I folded both facts into **#jbrestale**: (1) the 2026-06-14 lazily-rs live-repro (pid 968752, receipt 3455), and (2) the explicit cross-harness (Claude Code / Codex / OpenCode) red/green-switchover scope.
+
+Two related items this error also touches:
+- **#qpresetstrike** — the replayed `#advance-review` is a spent preset head no agent path can strike, which is why the stale supervisor keeps re-serving it.
+- **#supselfheal** (DONE, `e9cf3b74`) — the switchover primitive #jbrestale reuses.
+
+Not implementing this cycle: #jbrestale is **[clean-session]**, and the supervisor serving *this* doc (pid 1562136) is itself flagged `supervisor_binary_stale` (#fcc0) — route/recycle code work against a live stale supervisor is exactly the race that corrupts. Recommend `agent-doc admin recycle --all-projects` first, then land #jbrestale in a clean session.
+<!-- agent:boundary:420eada1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 ~~~done
-:pushpin: JB `Run Agent Doc`. This should auto-repair.
-```
-resync: pruned 10 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3426
-```
-~~~
 :pushpin: In tsift.md, I had a queue:
 ```
 &gt;!-- agent:queue preset="#spec-test-build-install-commit-push" go --&lt;
@@ -213,6 +245,13 @@ I then manually deleted the strikethrough items...but then agent-doc struck thro
 - :pushpin: [#pcachebp]
 &gt;!-- /agent:queue --&lt;
 ```
+~~~
+JB `Run Agent Doc` should red/green deploy the new supervisor and switch over to the new supervisor automatically...in Claude Code, Codex, Opencode
+```
+resync: pruned 8 stale session(s)
+[route] target tmux session: 0
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3455
+```
 ---
 :pushpin: JB `Compact Exchange` on this document
 ```
@@ -226,7 +265,8 @@ JB `Run Agent Doc` on equityfundingsource.md
 Error: project controller command `dispatch` failed: dispatch coalesced for tasks/professional/equityfundingsource.md: a dispatch for generation 66 is already in flight (#qflood); receipt_id=3310
 ```
 ---
-:pushpin: - :pushpin: :round_pushpin: do [#4myd]
+- :pushpin: :round_pushpin: do [#4myd]
+- If there is a `:round_pushpin:` and when upgrading to a `:pushpin:`, drop the `:round_pushpin:` instead of having both. So instead of `:pushpin: :round_pushpin:` we should have `:pushpin:`.
 - :pushpin: :round_pushpin: do [#fcc0]
 - :pushpin: :round_pushpin: do [#rtwbcast]
 - :pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
@@ -279,7 +319,7 @@ What are #next-steps to fix bugs?
 - [ ] [#mphaseloop] [clean-session] Multi-phase task auto-loop policy (operator directive 2026-06-14): go-mode drain must continuously advance a multi-phase task until it is DONE or legitimately blocked (clean-session / operator-verify / external outage). "Needs review" is NOT a terminal stop — when a phase needs review, move it to agent:review (gated [/]) and KEEP draining the remaining phases/queue; never halt the whole queue just because one phase needs review. Codifies SKILL #drain-no-defer + "complete over gate" into the drain/finalize loop: only done/blocked terminate the drain; a review-routed phase emits its review item and the drain continues to the next drainable head. FIX: in the go-mode drain/finalize path, on a review-routed phase do not treat review as queue-terminal — emit the review item + advance to the next drainable head; proof line drain_continue_after_review next_head=... CLEAN session (drain/queue path).
 - [ ] [#compactqattr] [clean-session] Compaction wipes agent:queue inline attributes (preset, priority, likely go) from the opening marker — operator observed in monsterrodholders.md: post-compaction deleted all agent:queue attributes. Too much blast radius. Compaction should only archive/truncate the EXCHANGE component and must leave every other component opening marker byte-identical. HYPOTHESIS: the post-compact CRDT refresh (compact.rs, CRDT state refreshed from post-compact content) re-serializes component opening tags from parsed structure and drops inline attrs. FIX: preserve the verbatim opening marker (all inline attributes) for every non-archived component across compact + the post-compact CRDT refresh; add coverage that compacting a doc whose agent:queue carries preset/priority/go leaves that marker unchanged. CLEAN session (compaction/CRDT path).
 - [ ] [#qmisstrike] [clean-session] finalize strike heuristic wrongly strikes the NEXT open queue head. Operator report (tsift.md): after manually deleting struck items, agent-doc struck through the next still-open item. LIVE-REPRODUCED this session: a finalize answering the free-text `:pushpin: JB Run Agent Doc` head consumed it AND additionally struck the next open id-backed head #qchurn (response never addressed it); session-check `#queue-clear-unrun-items` caught it, had to un-strike + reset --from-current + commit. ROOT CAUSE (hypothesis): the strike cursor over-advances by one and strikes an unanswered open head; id-backed heads should only strike via --done/--pending-gate/queue-consume, never the free-text strike heuristic. FIX: strike only the head(s) this turn`s response actually answered (match by topic/text, not position); never side-strike an id-backed head; treat operator strike-deletions as terminal (no forward re-strike); proof queue_strike target=… reason=answered|consume. CLEAN session. Related #qpresetstrike/#pushpinaccum/#qchurn. Plan: tasks/agent-doc/plan-finalize-misstrike-next-head.md
-- [ ] [#jbrestale] [clean-session] JB `Run Agent Doc` should auto-restart a stale/churn-stopped supervisor instead of failing closed. Operator pressed Run Agent Doc expecting a supervisor restart; dispatch returned `failed_stage=queue_paused reason=churn-stop: ... re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain`. The churn-stop reason itself prescribes a recycle, but the dispatch path treats it as terminal. ROOT CAUSE: the supervisor self-recycle (`supervisor_binary_stale_self_recycled`, #aazp/#4myd) is gated on the idle/next-queue-item boundary, which a churn-stopped queue never reaches. FIX: in the JB Run Agent Doc dispatch handler, classify a churn-stop whose reason is a stale supervisor (`supervisor_binary_stale`/`pre-<ver>`) and branch to restart-supervisor (proof `route_dispatch_recovery action=restart_supervisor … result=restarted|reexec_failed`), lift the stale-injected pause, re-dispatch ONCE (no loop), keep operator-verify heads deferred (#goqueuestall), fail closed + keep pane alive on reexec_failed. CLEAN session (route/dispatch + recycle path). Related #recyclerestart/#aazp/#4myd/#qchurn/#fcc0. Plan: tasks/agent-doc/plan-jb-run-restart-stale-supervisor.md
+- [ ] [#jbrestale] [clean-session] JB `Run Agent Doc` should auto-restart / red-green-deploy a stale or churn-stopped supervisor and switch over automatically instead of failing closed — across ALL harnesses (Claude Code, Codex, OpenCode). Operator pressed Run Agent Doc expecting the new supervisor to be red/green-deployed and switched over automatically. LIVE-REPRO: 2026-06-13 tsift.md churn-stop, and 2026-06-14 lazily-rs.md (failed_stage=queue_paused reason=stale route-owned supervisor pid968752 replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled, receipt 3455). The churn-stop reason itself prescribes a recycle, but the dispatch path treats it as terminal. ROOT CAUSE: the supervisor self-recycle (supervisor_binary_stale_self_recycled, #supselfheal/#aazp/#4myd) is gated on the idle/next-queue-item boundary, which a churn-stopped queue never reaches. FIX: in the JB Run Agent Doc dispatch handler (all harnesses), classify a churn-stop whose reason is a stale supervisor (supervisor_binary_stale / pre-<ver> / stale route-owned supervisor replaying an archived item) and branch to restart-supervisor / red-green execve switchover (proof route_dispatch_recovery action=restart_supervisor result=restarted|reexec_failed), lift the stale-injected pause, re-dispatch ONCE (no loop), keep operator-verify heads deferred (#goqueuestall), fail closed + keep pane alive on reexec_failed. CLEAN session (route/dispatch + recycle path). Related #recyclerestart/#supselfheal/#aazp/#4myd/#qchurn/#qpresetstrike/#fcc0. Plan: tasks/agent-doc/plan-jb-run-restart-stale-supervisor.md
 - [ ] [#0kjc] #mdastquote [clean-session] Markdown AST must treat tags inside quoted strings ("...") and code spans/blocks (backtick / triple-backtick) as CONTENT, not document tags. Operator report: agent:*/#id-looking tokens inside quotes or fenced code are being parsed as real document component markers. Same family as #lintfence (fenced agent:* markers break lint + parser). FIX: tagpath/agent-doc markdown tokenizer must mask quoted-string and code-span/code-fence regions before component/tag extraction. CLEAN session (parser path).
 - [ ] [#pushpinaccum] [clean-session] Queue `:pushpin:` annotations accumulate/nest in the wrong place: a head already starting `- :pushpin:` gets another `:pushpin:` prepended -> `:pushpin: - :pushpin: ...` (operator corrected one live 2026-06-13). The queue head-grouping/annotation formatter prepends the pushpin marker without checking for an existing leading pushpin/bullet. FIX: make the queue-head annotation prefix idempotent (single :pushpin:/bullet). CLEAN session (queue formatter path).
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.

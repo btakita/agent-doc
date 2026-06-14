@@ -108,19 +108,19 @@ Captured as a bug refinement, not fixed live (clean-session code path; live-IPC 
 **Immediate workaround (your call).** Since the pause is correct, the spent preset just needs clearing — on `equityfundingsource.md`, strike/delete the `- #advance-review` queue line (drop `go` if it re-triggers), then re-run. Nothing to fix in *this* doc; the bug lives in agent-doc's preset/dispatch path and is doc-agnostic.
 
 **Stale supervisor still present.** Preflight/session-check both flag this doc's host supervisor (`pid 2825163`) as pre-`ce339055` stale — still the root of the recurring File Cache Conflict / IPC-drift dialogs. When you're ready: `make install` in `src/agent-doc`, then `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`. Not restarting it mid-cycle. Not auto-looping — clean-session code path, no agent-drainable head this cycle.
-<!-- agent:boundary:fa6a20a0 -->
+<!-- agent:boundary:5e36bf9f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-~~~done
+---
 :pushpin: JB `Run Agent Doc`. This should automatically restart the supervisor.
 ```
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain receipt_id=3420
 ```
-~~~
+---
 JB `Run Agent Doc`. This should auto-repair.
 ```
 resync: pruned 10 stale session(s)
@@ -129,7 +129,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 ---
 :pushpin: - [#qchurn]
-- :pushpin: [#qpresetstrike]
+- ~~:pushpin: [#qpresetstrike]~~
 - :pushpin: [#clearexchstale]
 - :pushpin: [#qdedup]
 - :pushpin: :round_pushpin: do [#c2b6]

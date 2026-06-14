@@ -109,7 +109,23 @@ Yes — shipped a shared in-browser document viewer (EFS `c636ea8`). Clicking an
 **Follow-up (queued `#docview-tables`):** the admin/investor/broker/lender document **tables** still use download-only buttons — those are a distinct set of table-action surfaces (`shared/table_actions.tsx` + ~7 files). Added a "View" action to each is tracked as actionable backlog so this cycle stays a coherent, tested unit.
 
 Not deployed — this preset is commit+push only; the `deploy` item next in the queue will push it live.
-<!-- agent:boundary:26a55281 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed. Both queued changes from this drain are now live:
+
+- `a8db25e` — per-type upload zone reworded to **"Drop file or click to select file"**.
+- `c636ea8` — **in-browser document viewer** (#doc-viewer): click an uploaded file to preview it inline (images, PDF, text/CSV/JSON) on the borrower application-documents rows and the borrower Documents page.
+
+`deploy:worker:no-migrate` (no schema change) → version `7c1f462f`, https://equityfundingsource.brian-takita.workers.dev.
+
+Remaining in the queue: `do [#c7cs]` — extend click-to-view to the admin/investor/broker/lender document **tables**. That's the next drain cycle.
+<!-- agent:boundary:3a425c58 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -119,7 +135,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~"Drop or choose a replacement file" should be "Drop file or click to select file".~~
 - ~~Can we make each uploaded file viewable by clicking on it? Can we have open a viewer of each supported file type?~~
-- deploy
+- ~~deploy~~
 - do [#c7cs]
 <!-- /agent:queue -->
 

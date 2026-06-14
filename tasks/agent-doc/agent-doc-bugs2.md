@@ -140,7 +140,7 @@ After it comes up on the current binary, a clean session can actually drain the 
 **Your edits.** Fencing the resolved churn-stop block in `~~~done … ~~~` is the right manual mitigation for `#0kjc`/`#mdastquote` — it stops that pasted console output (with its `:pushpin:`/`[route]` tokens) from being re-parsed and re-injected as queue heads. Un-striking `#qpresetstrike` keeps it as an open work item; it stays a clean-session fix (preset-token heads are unstrikeable by any agent path), so I'm not touching it under the live IPC supervisor.
 
 No agent-drainable head this cycle; not auto-looping (churn-stopped, live-IPC supervisor); not doing queue/review surgery while the stale supervisor is active (it races + corrupts). Recycle first, then re-run on a clean session.
-<!-- agent:boundary:0f6c05ed -->
+<!-- agent:boundary:e856f6cf -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -164,7 +164,7 @@ JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equ
 ```
 ---
 :pushpin: - [#qchurn]
-- ~~:pushpin: [#qpresetstrike]~~
+- :pushpin: [#qpresetstrike]
 - :pushpin: [#clearexchstale]
 - :pushpin: [#qdedup]
 - :pushpin: :round_pushpin: do [#c2b6]

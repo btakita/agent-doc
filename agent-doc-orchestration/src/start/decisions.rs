@@ -218,8 +218,10 @@ pub fn drain_dispatch_dedup_skip(payload_already_pending: Option<bool>) -> bool 
 pub enum SupervisorRecycleAction {
     /// Not stale, or not at a turn boundary — do nothing.
     None,
-    /// Stale + at a turn boundary but auto-recycle is off: surface it so the
-    /// operator restarts deliberately.
+    /// Stale + at a turn boundary but auto-recycle was explicitly opted OUT
+    /// (falsey env/frontmatter/project knob): surface it so the operator restarts
+    /// deliberately. With the `#supselfheal` default-on, this only fires when an
+    /// operator turned self-recycle off.
     Detect,
     /// Stale + auto-recycle + a queue head is waiting to drain: recycle NOW so the
     /// next queue item runs on the fresh binary. The inter-queue-item boundary is the
@@ -232,10 +234,12 @@ pub enum SupervisorRecycleAction {
     RecycleDebounced,
 }
 
-/// `#ctlrecycle` R3 / `#suprecyclequeue` — pure recycle policy for the `start`
-/// supervisor. Recycling ends the operator's live agent child, so any recycle requires
-/// the opt-in flag; without it a stale supervisor at a turn boundary only surfaces
-/// (`Detect`).
+/// `#ctlrecycle` R3 / `#suprecyclequeue` / `#supselfheal` — pure recycle policy for the
+/// `start` supervisor. On unix the recycle is a blue/green `execve`-preserve-child
+/// hot-reload that keeps the live agent child + pane, so it is safe enough to default ON
+/// (the caller passes `auto_recycle` resolved from `resolve_supervisor_auto_recycle`,
+/// default-on). When an operator explicitly opts OUT (falsey env/frontmatter/project
+/// knob), a stale supervisor at a turn boundary only surfaces (`Detect`).
 ///
 /// `turn_boundary` is `prompt_visible && !turn_active` — the dispatch-ready point after
 /// a turn (or queue item) completes. `head_pending` is whether an `agent:queue` head is

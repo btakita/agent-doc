@@ -12,7 +12,13 @@ impl SimWorld {
             captured_response: None,
             pending_fault: None,
             route: RouteModel::new(),
-            recycle_clear: RecycleClearModel::default(),
+            recycle_clear: RecycleClearModel {
+                // `#supselfheal`: turn-boundary blue/green self-recycle now defaults
+                // ON in production (`resolve_supervisor_auto_recycle`), so the model's
+                // baseline matches. Opt out via `DisableSupervisorAutoRecycle`.
+                auto_recycle: true,
+                ..RecycleClearModel::default()
+            },
             sync: SyncProjection::default(),
             next_prompt: 1,
             coverage: Coverage::default(),
@@ -430,6 +436,9 @@ impl SimWorld {
             }
             SimCommand::EnableSupervisorAutoRecycle => {
                 self.recycle_clear.auto_recycle = true;
+            }
+            SimCommand::DisableSupervisorAutoRecycle => {
+                self.recycle_clear.auto_recycle = false;
             }
             SimCommand::OperatorRecycleMark => {
                 self.recycle_clear.operator_recycle_marked = true;

@@ -179,8 +179,14 @@ enum SimCommand {
     /// back to continuing on the current binary, never `process::exit` (which would
     /// orphan the child and hang the pane).
     MarkReexecWillFail,
-    /// `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` opt-in is enabled.
+    /// `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` opt-in is enabled. (`#supselfheal` made
+    /// this the default, so this is now redundant with the baseline; kept for tests
+    /// that assert the explicit opt-in path.)
     EnableSupervisorAutoRecycle,
+    /// `#supselfheal`: explicit opt OUT of turn-boundary self-recycle (a falsey
+    /// `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` / frontmatter / project knob). A stale
+    /// supervisor then only surfaces staleness (`Detect`) instead of self-recycling.
+    DisableSupervisorAutoRecycle,
     /// Operator `admin recycle --all-projects`: mark this supervisor to recycle
     /// at the next idle boundary.
     OperatorRecycleMark,
@@ -2184,29 +2190,28 @@ fn restart_supervisor_reexec_failure_falls_back_to_relaunch() {
 }
 
 #[test]
-fn non_dogfood_document_clears_and_drains_without_auto_recycle() {
-    // `#simworld`: a NON-dogfooding document — one whose project did NOT opt into
-    // `agent_doc_supervisor_auto_recycle` (the default-OFF case) — must still perform
-    // the auto-CLEAR + go-mode drain steps between queue items, even though its stale
-    // supervisor does NOT auto-recycle. This proves the recycle/clear pipeline is
-    // document-identity-agnostic: auto-recycle is opt-in (the `execve` hot-reload is
-    // high blast-radius, so `supervisor_recycle_action` returns `Detect`/surface-only
-    // by default), but the clear-cooldown resume + drain is universal. The dogfooding
-    // repo (constant `cargo install` → stale binary → opt-in recycle) is just one
-    // configuration; a real project doc with a stable binary still drains its go-mode
-    // queue across clears. Mirrors `recycle_clear_pipeline_resumes_go_mode_drain_as_a_step`
-    // with auto-recycle OFF to isolate the clear+drain steps from the recycle opt-in.
+fn opted_out_document_clears_and_drains_without_auto_recycle() {
+    // `#simworld` / `#supselfheal`: a document that explicitly OPTED OUT of
+    // `agent_doc_supervisor_auto_recycle` (falsey env/frontmatter/project knob) must
+    // still perform the auto-CLEAR + go-mode drain steps between queue items, even
+    // though its stale supervisor does NOT auto-recycle. This proves the recycle/clear
+    // pipeline is independent of the recycle decision: with self-recycle now default-ON
+    // (`#supselfheal`), an opt-OUT makes `supervisor_recycle_action` return
+    // `Detect`/surface-only, but the clear-cooldown resume + drain is universal. Mirrors
+    // `recycle_clear_pipeline_resumes_go_mode_drain_as_a_step` with auto-recycle forced
+    // OFF to isolate the clear+drain steps from the recycle path.
     let mut world = SimWorld::new(7_311);
     world.apply(SimCommand::BindRouteOwner).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
+    // Explicit opt-out (default is now ON).
+    world.apply(SimCommand::DisableSupervisorAutoRecycle).unwrap();
 
     let gen_before = world.route.durable.generation;
     let pane_before = world.route.durable.pane_id.clone();
 
-    // The supervisor binary is stale (a later `cargo install`), but this project did
-    // NOT opt into auto-recycle — the common non-dogfooding default. A go-mode head is
-    // waiting and the operator `session clear` (or the watch's deferred clear) wrote the
-    // manual clear cooldown.
+    // The supervisor binary is stale (a later `cargo install`), but this document opted
+    // OUT of auto-recycle. A go-mode head is waiting and the operator `session clear`
+    // (or the watch's deferred clear) wrote the manual clear cooldown.
     world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
     world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
     world.apply(SimCommand::SessionClear).unwrap();
@@ -2226,7 +2231,7 @@ fn non_dogfood_document_clears_and_drains_without_auto_recycle() {
         assert_eq!(world.coverage.go_drain_dispatches, 0);
         assert_eq!(
             world.coverage.supervisor_recycles, 0,
-            "a non-opted-in stale supervisor never auto-recycles"
+            "an opted-out stale supervisor never auto-recycles"
         );
     }
 
@@ -2247,20 +2252,20 @@ fn non_dogfood_document_clears_and_drains_without_auto_recycle() {
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(
         world.coverage.go_drain_dispatches, 1,
-        "the non-dogfooding doc still drains its go-mode queue after the clear settles"
+        "the opted-out doc still drains its go-mode queue after the clear settles"
     );
 
     // The whole time, the stale supervisor stayed on its current binary: no recycle, no
     // generation churn, no cold pane rebind. Staleness is surfaced (Detect), not silently
-    // hot-reloaded, for a document that did not opt in.
+    // hot-reloaded, for a document that opted out.
     assert_eq!(
         world.coverage.supervisor_recycles, 0,
-        "auto-recycle is opt-in; a non-dogfooding doc surfaces staleness instead of recycling"
+        "opted out → the doc surfaces staleness instead of recycling"
     );
     assert_eq!(world.coverage.supervisor_recycle_failures, 0);
     assert!(
         world.recycle_clear.binary_stale,
-        "the binary stays stale until an operator restart — no auto-recycle for a non-opted-in doc"
+        "the binary stays stale until an operator restart — no auto-recycle for an opted-out doc"
     );
     assert_eq!(
         world.route.durable.generation, gen_before,
@@ -2273,9 +2278,60 @@ fn non_dogfood_document_clears_and_drains_without_auto_recycle() {
 }
 
 #[test]
+fn stale_supervisor_self_recycles_at_turn_boundary_by_default() {
+    // `#supselfheal`: the headline behavior change. With NO opt-in command and NO
+    // operator `admin recycle` mark, a stale supervisor must self-retire at the next
+    // turn boundary via the blue/green `execve` hot-reload — because turn-boundary
+    // self-recycle now defaults ON (`resolve_supervisor_auto_recycle` → true). This is
+    // the hands-off self-heal for the freshly-`cargo install`ed-but-still-stale case
+    // that otherwise re-files File Cache Conflict / IPC-drift dialogs forever
+    // (`#fcc0`/`#ipcdrift`). The blue/green guarantee: the live pane is preserved (no
+    // cold rebind) and only the generation advances.
+    let mut world = SimWorld::new(7_313);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    let gen_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    // The supervisor binary goes stale (a later `cargo install`). No opt-in, no
+    // operator mark — the default-on policy must drive the recycle on its own.
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    assert!(
+        world.recycle_clear.auto_recycle,
+        "self-recycle defaults ON (`#supselfheal`) with no opt-in command"
+    );
+
+    // First idle tick at a turn boundary: stale + default-on → recycle in place. No head
+    // is waiting, so the recycle does not dispatch, but the binary is promoted.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.supervisor_recycles, 1,
+        "the default-on policy self-recycles a stale supervisor — no opt-in, no operator mark"
+    );
+    assert_eq!(
+        world.coverage.supervisor_recycle_failures, 0,
+        "the blue/green execve hot-reload succeeded"
+    );
+    assert!(
+        !world.recycle_clear.binary_stale,
+        "self-recycle promoted the freshly-installed binary"
+    );
+    assert_eq!(
+        world.route.durable.generation,
+        gen_before + 1,
+        "recycle advances the generation"
+    );
+    assert_eq!(
+        world.route.durable.pane_id, pane_before,
+        "blue/green: the live pane is preserved via execve (not a cold rebind)"
+    );
+}
+
+#[test]
 fn non_dogfood_document_auto_recycles_and_drains_from_opt_in_alone() {
     // `#simworld` / `#suprecyclecfg`: the COMPLEMENT of
-    // `non_dogfood_document_clears_and_drains_without_auto_recycle`. A non-dogfooding
+    // `opted_out_document_clears_and_drains_without_auto_recycle`. A non-dogfooding
     // document whose project (or frontmatter) DID opt into
     // `agent_doc_supervisor_auto_recycle` must perform BOTH the auto-recycle AND the
     // auto-clear + go-mode drain steps, driven purely by the opt-in — with NO operator

@@ -262,12 +262,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                 }
 
-                // R3 (#ctlrecycle) / #suprecyclequeue: recycle this supervisor onto a
-                // freshly-installed binary at a turn boundary. Recycling ends the live
-                // agent child, so the automatic path is opt-in
-                // (`AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`); otherwise we only surface
-                // staleness once so the operator can restart deliberately. A turn
-                // boundary is a dispatch-ready prompt with no turn running. When a queue
+                // R3 (#ctlrecycle) / #suprecyclequeue / #supselfheal: recycle this
+                // supervisor onto a freshly-installed binary at a turn boundary. On unix
+                // the recycle is a blue/green `execve`-preserve-child hot-reload that
+                // keeps the live agent child + pane, so it now defaults ON
+                // (`resolve_supervisor_auto_recycle`): a stale supervisor self-retires at
+                // the next turn/queue boundary instead of re-filing File Cache Conflict /
+                // IPC-drift dialogs forever. Operators opt out with a falsey
+                // `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` / frontmatter / project knob, which
+                // drops back to surfacing staleness once (`Detect`) for a deliberate
+                // restart. A turn boundary is a dispatch-ready prompt with no turn
+                // running. When a queue
                 // head is still waiting to drain, the *next* queue item is the
                 // deliberate restart point, so we recycle immediately (the re-exec'd
                 // image re-dispatches the pending head on the fresh binary); with no
@@ -420,12 +425,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     log_event(
                         &mut session_log,
                         &format!(
-                            "supervisor_binary_stale_detected pane={} hint=restart_or_set_AGENT_DOC_SUPERVISOR_AUTO_RECYCLE",
+                            "supervisor_binary_stale_detected pane={} auto_recycle=opted_out hint=restart_or_unset_AGENT_DOC_SUPERVISOR_AUTO_RECYCLE",
                             shared.inject_pane.as_deref().unwrap_or("<pty>"),
                         ),
                     );
                     eprintln!(
-                        "[agent-doc] supervisor is running a prior agent-doc binary; restart this session (or set AGENT_DOC_SUPERVISOR_AUTO_RECYCLE=1) to pick up the new build"
+                        "[agent-doc] supervisor is running a prior agent-doc binary and turn-boundary self-recycle is opted OUT; restart this session (or clear the falsey AGENT_DOC_SUPERVISOR_AUTO_RECYCLE / frontmatter / project knob) to pick up the new build"
                     );
                 }
                 let do_recycle = !reexec_recycle_disabled

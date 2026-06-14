@@ -68,21 +68,57 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 `make install` rebuilds the binary + cdylib to `e9cf3b74`+; `restart-supervisor --force` retires pid 1562136 and brings up a fresh supervisor on the new binary so client and supervisor no longer skew. Then re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` in a clean session and the `[clean-session]` heads become drainable.
 
 Not auto-looping — the queue heads are agent-undrainable under the live stale supervisor (`#goqueuestall`).
-<!-- agent:boundary:c5f4e90c -->
+
+### Re: queue cleanup + remaining heads still blocked on the stale supervisor — opus-4-8
+
+Recorded your queue cleanup — the 3 already-struck items (`agent-doc sync monsterrodholders.md`, `do [#8rg3]`, `do [#mb98]`) are removed.
+
+Still **not draining** the 4 remaining queue heads, and not auto-looping. Reason: preflight flags the supervisor serving this doc (pid 1562136) as **stale** (`supervisor_binary_stale` — started before the installed 0.34.0 binary), and every remaining head is a `[clean-session]`/`[operator-verify]` report already captured as a backlog/review id. Draining them against a stale supervisor is the exact `#dupcontent` corruption path (adopting a stale `content_ours` snapshot → duplicate component blocks on disk), so I'm holding:
+
+- "red/green deploy the new supervisor automatically" → **#jbrestale** (backlog, clean-session)
+- "efs Run Agent Doc should self-heal" → **#qpresetstrike** (review) + spent-preset auto-strike
+- "Compact Exchange bails / out-of-band typed_component_drift" → **#c2b6** (operator-verify)
+- "backlog not added to queue / `:round_pushpin:` dedup / AST tags in quotes+code" → **#4myd**, **#pushpinaccum**, **#0kjc** (+ `#fcc0`/`#rtwbcast`/`#recyclerestart`)
+- "compaction wiped agent:queue attributes (blast radius)" → **#compactqattr**
+
+Nothing new to add — all of it is already in backlog/review.
+
+**To unblock (operator-driven):** restart the supervisor so a clean session runs the current binary, then re-run:
+
+```
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+
+I'm not restarting it from inside this cycle — that would race my own finalize on the very stale supervisor that's hosting it (`#ipcdrift`). Once it's on a fresh binary in a clean session, the `[clean-session]` heads (`#jbrestale`, `#compactqattr`, `#0kjc`, `#fcc0`…) are workable.
+<!-- agent:boundary:a1339c40 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
----
+~~~done
 JB `Run Agent Doc` should red/green deploy the new supervisor and switch over to the new supervisor automatically...in Claude Code, Codex, Opencode
 ```
 resync: pruned 8 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3455
 ```
----
-- ~~agent-doc sync .../monsterrodholders.md is not opening the tmux pane for monsterrodholders.md. I previously closed the session and ran `kill-pane` to start a new supervisor version.~~
+~~~
+JB `Run Agent Doc` should self-heal and complete the dispatch. There was no `- #advance-review` line. Seems to be stuck in an old state.
+```
+[sync] recovered live pane %25 for session b26b9957 via supervisor pid 1562136
+[sync] recovered live pane %57 for session 62fe1f41 via supervisor pid 2378152
+resync: stash pane %15 is unregistered but still hosts live supervisor c94cd9fd-71b6-4588-aab5-d53d9c9887f3 — skipping kill
+[sync] recovered live pane %25 for session b26b9957 via supervisor pid 1562136
+[sync] recovered live pane %57 for session 62fe1f41 via supervisor pid 2378152
+resync: stash pane %55 is unregistered but still hosts live supervisor 3d9ff8e4-bafd-4e1f-b48d-550d3c976904 — skipping kill
+[sync] recovered live pane %25 for session b26b9957 via supervisor pid 1562136
+[sync] recovered live pane %57 for session 62fe1f41 via supervisor pid 2378152
+resync: stash pane %50 is unregistered but still hosts live supervisor tsift-v0.1 — skipping kill
+[route] target tmux session: 0
+[route] activated existing inactive agent:queue head "The new Deal Pipeline kanban is missing the completed application + accepted application from the intake section. deploy" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3460
+```
 ---
 JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
 ```
@@ -122,8 +158,6 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ---
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
 ---
-- ~~:pushpin: do [#8rg3]~~
-- ~~do [#mb98]~~
 <!-- /agent:queue -->
 ###
 <!--

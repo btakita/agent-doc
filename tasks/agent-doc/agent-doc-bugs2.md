@@ -140,7 +140,7 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 ```
 
 then drain from a fresh `/agent-doc`.
-<!-- agent:boundary:38094a1a -->
+<!-- agent:boundary:b34be872 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -159,7 +159,7 @@ then drain from a fresh `/agent-doc`.
                        Resource temporarily unavailable (os error 11)
 ```
 ---
-- ~~:pushpin: [#qchurn]~~
+- :pushpin: [#qchurn]
 - :pushpin: [#anw0verify]
 - :pushpin: [#jbrestale]
 - :pushpin: [#mphaseloop]

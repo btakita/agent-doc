@@ -146,7 +146,7 @@ Done (EFS `5f5e504`). Extended the in-browser document viewer to the remaining d
 **Per `#spec-test-commit-push`:** `document-viewer.test.ts` asserts each surface offers click-to-view; `download-security.test.ts` updated for the now-centralized HTTPS guard. `bun run check` green (657 tests), worker build clean. Committed + pushed.
 
 That drains the queue. Note: a stale route-owned supervisor (pid 861902, pre-current binary) is still throwing the recurring File-Cache-Conflict / IPC-drift dialogs this session — restart it with `agent-doc session restart-supervisor tasks/professional/equityfundingsource.md --force` (or restart the session) to clear them; it doesn't affect the shipped code.
-<!-- agent:boundary:299b0bc8 -->
+<!-- agent:boundary:d0ed2a04 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -160,6 +160,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#67v2b] Admin pipeline drag-to-change-status (#67v2 Phase B): drag a loan card between columns to apply an EFS-local optimistic loan-status update + tmo_cache_outbox enqueue. Outbox REPLAY stays gated on #7a4d/#dzmm, but the EFS-local status change + enqueue ships now. Plan: src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md (Phase B). Advances review #67v2.
+- [ ] [#67v2d] Admin dashboard pipeline summary (#67v2 Phase D): per-stage counts + next-actions on the admin dashboard, mirroring /portal-admin/pipeline. EFS-local, fully actionable now (no TMO gate). Plan: src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md (Phase D). Advances review #67v2.
 <!-- /agent:backlog -->
 
 ## Review
@@ -171,9 +173,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - [/] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [/] [#zwws] [recommended] Investor dashboard rework — remaining phases are externally gated: 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 6 new-deal email + workflow-priority dashboard (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P2b interest-button + distributions/statements cleanup (efs cd4253a), P3 simplified portfolio (8d40c66), P5 accreditation→annual Requirements (efs 1957f64). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
 - [/] [#next-steps] Remaining EFS workers.dev production state: D1 API token unblocked; migrations 0025/0026 are already applied; Cloudflare Access env vars are deployed for /login/access-callback on workers.dev using the one-time PIN IdP. Custom domain cutover remains intentionally deferred; true Google Workspace SSO remains gated on Google admin credentials.
-- [/] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
-- [/] [#dzmm] TMO webhooks assumed UNAVAILABLE per operator (2026-06-13) — TMO docs show no webhook/streaming API. Pursue the tightened-polling sync mitigation instead of push; the six-question TMO support email (#k2xg) is deferred (save for later).
-- [/] [#qakx] Investor portal document pages: replace static Documents, Statements, and Accreditation fixture data with D1/R2-backed APIs and authenticated upload/request/download flows.
+- [/] [#37ah] [recommended] Broker portal backend — D1-backed submit-deal, pipeline, commissions, documents, and notifications shipped (#37ah-backend, 2026-06-13). Remaining: TMO writeback sync, gated on #dzmm (TMO write field map #7a4d / six-question support email #k2xg).
+- [/] [#dzmm] TMO webhooks UNAVAILABLE per operator (2026-06-13). Read-side tightened polling is shipped (scheduled tmo-sync with configurable interval + due-gating + tmo_cache read mirror). Remaining gated: EFS to TMO writeback (tmo_cache_outbox replay) needs the #7a4d write field map + #k2xg support answers before it can replay.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 <!-- /agent:review -->
 

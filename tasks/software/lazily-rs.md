@@ -171,7 +171,35 @@ Done. Folded the eager **`Signal`** primitive into the public docs now that it s
 - The lazily-rs submodule pointer bump in the superproject is left to the operator's normal submodule-pointer flow (many submodules are already ahead in the worktree); the lazily-rs repo itself is committed + pushed.
 
 **Note:** preflight flagged the route-owned host supervisor (pid 968752) as running a stale pre-current build (#fcc0/#ipcdrift). If File Cache Conflict / drift dialogs appear, restart it with `agent-doc session restart-supervisor tasks/software/lazily-rs.md --force`.
-<!-- agent:boundary:d27366b2 -->
+
+### Re: do [#vzk9] — briantakita.me blog post + LinkedIn draft on Slot → Cell → Signal — opus-4-8
+
+> **Queue prompt (preset `#spec-test-build-install-commit-push`):**
+>
+> do [#vzk9] — Create a briantakita.me blog post + linkedin summary draft explaining the lazily Slot->Cell->Signal composition. Include use cases. Add diagrams to post to linkedin.
+
+Done. Wrote a focused blog post and a LinkedIn draft on the `Cell → Slot → Signal` progression, verified the post builds + renders, and committed/pushed both content repos. The one outward-facing step — the live Cloudflare deploy — is held for you (see below).
+
+**Blog post** — `app/briantakita.me/post/content/2026-06-14-lazily-slot-cell-signal-composition.md`
+- Angle: most reactive libs force the whole graph lazy *or* eager; lazily makes it a per-value choice in one graph. Walks Cell (mutable input) → Slot (lazy, compute-on-read) → Signal (eager, recompute-on-change, no unset window), then shows Signal is *composed* from `memo` + a puller `Effect` (so it inherits the memo guard, diamond glitch-freedom, batch coalescing) rather than being a second engine.
+- Use cases: lazy backend request pipeline (compute the 5 of 50 derived values a request reads), eager live-dashboard render (no flicker through unset), eager real-time/networked mirror (always a concrete value to serialize), and mixed graphs. Plus the single-thread / `ThreadSafeContext` / `AsyncContext` parity note with the two honest async caveats.
+- Diagrams: inline Unicode diagrams (the live site renders via `marked`, which has no mermaid renderer — so Unicode renders reliably; mermaid would show as raw code).
+- Reflects the **shipped** Signal + current `ctx.cell`/`ctx.computed`/`ctx.signal` API. The existing 2026-03-15 post still describes Signal as "Future" with the old `Cell::new`/`Slot::new` API; this is the accurate, current, composition-focused companion to it.
+
+**LinkedIn draft** — `mail/drafts/linkedin/2026-06-14-lazily-slot-cell-signal.md`
+- Plain-text body (no markdown/links — LinkedIn suppresses reach on outbound URLs), links moved to a first-comment block, ends on an engagement question, per the `linkedin` skill runbook.
+- "Diagrams to post to linkedin": included both a Unicode card and **mermaid source** (progression diagram + Signal-composition diagram) to render to PNG at mermaid.live and attach — LinkedIn renders neither inline, so an image is required.
+
+**Verification**
+- `bun run build` clean (exit 0, no errors); the post slug `lazily-slot-cell-signal-composition` and rendered body both appear in `dist/`. The `.md` bun loader parsed the frontmatter and derived the slug correctly.
+- `index.generate.test.ts` has **1 pre-existing failure** unrelated to this work: it asserts `2026-03-05-introducing-agent-doc.md.js`, but HEAD's committed `index.ts` already imports that post as `.md` (the generator strips `.ts` → `.md`). Stale test, not a regression here.
+
+**Committed + pushed (both deploy-free)**
+- Blog: `app/briantakita.me` submodule → `55b5bf3`, pushed to `origin/main` (rebased over a remote-ahead main; regenerated `index.ts` to resolve the conflict). The submodule has no CI, so this push does **not** publish.
+- LinkedIn draft: `mail` repo → `b53fb6d`, pushed.
+
+**Held for you — live publish is the one outward-facing action.** Pushing the **superproject** `briantakita.me-dev` to `main` triggers `.github/workflows/deploy.yml` → Cloudflare Pages, i.e. it publishes the post live and public. I left the superproject submodule-pointer bump to your normal flow (consistent with the prior docs-cycle handling), so nothing is live until you bump + push it. The LinkedIn item was explicitly a *draft*, so I treated the blog the same way for the irreversible step. To go live: in `briantakita.me-dev`, `git add app/briantakita.me && git commit` the pointer bump → push (auto-deploys). LinkedIn: review the draft, then `/linkedin post mail/drafts/linkedin/2026-06-14-lazily-slot-cell-signal.md` after attaching a rendered diagram image.
+<!-- agent:boundary:71919d4c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -185,7 +213,6 @@ Done. Folded the eager **`Signal`** primitive into the public docs now that it s
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#vzk9] Create a briantakita.me blog post + linkedin summary draft explaining the lazily Slot->Cell->Signal composition. Include use cases. Add diagrams to post to linkedin.
 - [ ] [#ny9k] Create a briantakita.me blog + linkedin summary draft explaining the full lazily architecture. Include use cases. Add diagrams to post to linkedin.
 <!-- /agent:backlog -->
 

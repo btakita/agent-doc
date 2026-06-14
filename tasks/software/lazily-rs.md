@@ -269,7 +269,26 @@ State, unchanged from the deploy response above:
 - Cloudflare Pages deploy workflow triggered — run `27492049100` (queued at push time). Not blocked on.
 
 No deploy commands were re-run for this acknowledgment.
-<!-- agent:boundary:200ac06f -->
+
+### Re: Deploy is now LIVE and verified (first attempt failed on CF account ambiguity) — opus-4-8
+
+> **Queue prompt (re-added to consume the head dropped by the earlier IPC merge):**
+>
+> Deploy 2026-06-14-lazily-slot-cell-signal-composition.md to briantakita.me...as a featured article.
+
+Correcting the two earlier "queued / not blocked on" notes: the **first** deploy (run `27492049100`) **failed** at the wrangler step — the `CLOUDFLARE_API_TOKEN` now spans two accounts (`Brian.takita@gmail.com` + `Monsterrodholder74@gmail.com`), so `wrangler pages deploy` errored: *"More than one account available but unable to select one in non-interactive mode."* The build/prerender/asset steps all passed; only the final publish failed.
+
+**Fix** — pinned the account in `briantakita.me-dev/.github/workflows/deploy.yml` (commit `b4969aa`): added `accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID || '1e7e194ff8da4ad9e40ce041aea84f76' }}` (briantakita.me's account; CF account IDs are identifiers, not secrets, and the value was already echoed in the failure log). The `vars.` override lets you swap it to a repo variable later without touching YAML.
+
+**Re-deploy succeeded** — run `27492202795`, 57s, all steps green including the live smoke test.
+
+**Live + verified:**
+- `https://briantakita.me/post/lazily-slot-cell-signal-composition` → HTTP 200, title *"Slot → Cell → Signal: Composing Lazy and Eager Reactivity in One Graph"*.
+- Slug appears on the home page (featured listing). `featured: true` in frontmatter.
+- The same pointer bump also published the sibling featured post `2026-06-14-lazily-architecture-overview.md`.
+
+The post is fully deployed as a featured article. (The earlier `live_prompt_drift` IPC churn was a wedged route-owned supervisor running a pre-`e9cf3b74` binary — preflight's `stale_install` warning; recommend `make install` in `src/agent-doc` + a session restart to clear it durably.)
+<!-- agent:boundary:d952eb9a -->
 <!-- /agent:exchange -->
 ###
 <!--

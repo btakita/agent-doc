@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -214,7 +214,7 @@ Went through all 9 `agent:review` items. The portal is substantially built out, 
 - `#dropbox-sync-adapter` — gated on Dropbox access being provisioned.
 
 So: 1 actionable item queued (`#vd8s-timeline`); the other 8 review items are correctly parked on TMO/Resend/Google/Dropbox/human-approval gates and stay in `agent:review`. (Exchange is at ~156 lines / 8 sections — noting size; queue stays active.)
-<!-- agent:boundary:334130b5 -->
+<!-- agent:boundary:e394f712 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -222,6 +222,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- In /portal-admin/pipeline, split "Incomplete applications" to "Draft Applications", "Complete Applications", "Applications under review". Rename "Applications" to "Accepted applications". deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,125 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-164802.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260613-233442.md`*
 
 Compacted content:
-- Archived 2 response topic(s): emails, TMO webhooks, funded-deals copy, disclosure; borrower notification emails
+- Archived 7 response topic(s): advance the review items; do [#tmopoll] + do [#xcvginbound]; Step 7 "Review & Sign" reverts to Step 6 on refresh; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: advance the review items — opus-4-8
-
-Went through all 10. Two genuinely unblocked items became backlog; the rest are either already shipped or waiting on something external. Triage:
-
-**Actionable now — added to backlog:**
-- **#tmopoll** (advances #dzmm, and is the keystone for the whole writeback cluster): the TMO tightened-polling sync you chose over webhooks. Phase P1 = a scheduled Worker cron mirroring TMO loan/funding/schedule reads into D1 + a sync-log. Plan: `tasks/professional/equityfundingsource/plan-tmo-polling-sync.md` (committed). This is what unblocks #vd8s, #67v2, #zwws phase 4, and #7a4d.
-- **#xcvginbound** (advances #xcvg): the inbound email→chat path — `POST /api/email/inbound` with sender/thread resolution + auth, appending into `chat_messages`. This is the code half and is **not** gated on the sending domain. The outbound borrower notification stays config-gated on #f4rq (the `#emrt` done item covers the flip).
-
-**Already shipped — only a TMO-gated remainder is left (candidates to resolve):**
-- **#qakx** — investor document pages are D1/R2-backed (shipped via #qakx-impl).
-- **#37ah** — broker portal backend is D1-backed (shipped via #37ah-backend); live TMO sync rides on #tmopoll.
-- **#vd8s** — drag-to-confirm-wire shipped; the Active-lane AddLoanFunding sync is now tracked under #tmopoll.
-- **#67v2** — Kanban shipped; auto-advance-on-requirements is now tracked under #tmopoll.
-
-**Externally gated — not agent-actionable, here's the unblock:**
-- **#jnzs** — Judith's sign-off. Per your call we sync directly rather than emailing her; this needs you to capture her approval.
-- **#zwws** — remaining phases gated on TMO writeback (#tmopoll) + the Resend domain (#f4rq); queue one phase at a time.
-- **#next-steps** — custom-domain cutover is intentionally deferred; true Workspace SSO is gated on Google admin creds (#m6ch).
-- **#dropbox-sync-adapter** — gated on Dropbox access from you/Robert.
-
-Net new actionable work: **#tmopoll** and **#xcvginbound**. Say the word (or queue one) to implement.
-
-### Re: do [#tmopoll] + do [#xcvginbound] — both shipped — opus-4-8
-
-Both done, committed, and pushed. Full EFS suite green (631 pass / 0 fail), build + worker build OK.
-
-**#tmopoll — TMO polling sync (EFS `75ff1ea`).** Important finding: the polling *engine* already existed and is wired — `tmo_sync_all_`/`tmo_sync_if_due_` read TMO loans/fundings/schedules into a D1 cache mirror, recording per-run `tmo_sync_batches` + per-field `tmo_cache_change_logs`, driven by a `scheduled()` handler on an hourly cron with admin-configurable intervals. So I did **not** rebuild it. The real gap was operator *visibility*: the run history and change log were never surfaced. I added read functions (`tmo_sync_batches_recent_R_`, `tmo_cache_change_logs_recent_R_`), a `GET /api/admin/tmo-sync` status endpoint, and a **TMO sync status panel** in admin Settings (last run time/status/counts + recent changes, refreshing after a manual sync). Tests cover the reads.
-
-**#xcvginbound — inbound email→chat (EFS `d8e6320`).** Replaced the 501 scaffold at `POST /api/email/inbound` with a real, authenticated handler. Two-factor sender auth: (1) the configured inbound provider must present a shared secret (`X-Inbound-Secret`; **fails closed when no secret is set**, so unauthenticated mail can never inject), and (2) the `from` address must resolve to an `admin` user. Authenticated replies append as an admin chat message via `borrower_chat_message_create_admin_`, claim thread ownership, and notify the borrower — same path as a portal admin reply. This is the #xcvg *code* half; outbound borrower notification stays config-gated on the verified sending domain (#f4rq).
-
-Net: #vd8s/#67v2/#zwws phase 4/#7a4d now have a live TMO data mirror + visibility behind them; the borrower message round-trip's inbound leg is built and waiting only on inbound-routing config (`MESSAGE_EMAIL_INBOUND_ENABLED` + `MESSAGE_EMAIL_INBOUND_SECRET` + provider webhook).
-
-### Re: Step 7 "Review & Sign" reverts to Step 6 on refresh — opus-4-8
-
-> **Queue prompt:**
->
-> On https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application?application_id=cda67748-3a99-49b7-95b4-cdfede0fcb7a, the Step 6 Documents is complete by me clicking "Save & Continue" and then the Step 7 is complete by me clicking "Save & Continue", which takes me to Step 7 "Review & Sign". But when I refresh, I go back to Step 6. deploy
-
-
-Fixed and deployed (EFS `ca63ddf`, worker version `1e9b13fe`).
-
-**Root cause.** The borrower full-application wizard never persisted which step you were on — on load it *reconstructed* the resume step purely from how complete each section's data was (`resume_step_from_sections_`). That heuristic can't tell the **Documents** step (index 5) from **Review & sign** (index 6): both have all field steps complete, and the Documents step has no required-field gate. So its last line returned `signature.esign_consent ? 6 : 5` — i.e. it could only land you on Review & sign *after* you e-signed. Refreshing while sitting on Review & sign (not yet signed) always recomputed to 5 = Step 6 Documents.
-
-**Fix.** Persist the furthest step you actually reached per application (`localStorage`, keyed by application id) and use it via a new pure `resolve_resume_step_` to disambiguate **only** the Documents↔Review tail. The completeness heuristic stays authoritative for the field-entry steps (0–4), so a stale stored value can never push you forward past genuinely incomplete earlier data; only forward progress is recorded.
-
-**Verification.** Added `tests/full-application-resume-step.test.ts` (8 cases: tail disambiguation, no-push-past-incomplete, clamp, heuristic fallback). Full suite green — 639 tests, 0 fail — then `build` + `build:worker` + `deploy:worker` succeeded. Note: this is a per-browser resume (localStorage); a different browser/device still falls back to the completeness heuristic.
-
-### Re: Print button on the borrower new-application page — opus-4-8
-
-> **Queue prompt:**
->
-> Please add a Print button to https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application?application_id=cda67748-3a99-49b7-95b4-cdfede0fcb7aa
-
-
-Done — committed in EFS `d7622a7`.
-
-A Print button already existed in the wizard topbar (uncommitted from a prior cycle), but it called `window.print()` directly. Because the new-application form is a step-gated wizard, only the *currently visible* step is in the DOM — so that button would have printed a single step, not the application.
-
-Fixed it to print the **full** application:
-- The button now sets a `printing` flag; an effect renders every step into the DOM, then opens the print dialog and resets the flag (on `afterprint`, with a synchronous fallback).
-- Each step gate (`{(printing || step === N) && …}`, steps 0–6) now also fires while printing.
-- Existing print CSS in `portal.ts` already hides the sidebar/nav, stepper, form-actions, and buttons, so the printout is just the application content.
-
-Verification: full suite green — **642 pass / 0 fail**; `build` + `build:worker` clean. Updated `tests/full-application-print-button.test.ts` to assert the full-application wiring (button → `set_printing(true)`, all 7 step gates render while printing).
-
-Not yet deployed — the change is committed and built but the live worker at `equityfundingsource.brian-takita.workers.dev` still runs the old bundle. Say the word and I'll run `deploy:worker`.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-Deployed. The live worker now runs the Print-button bundle (EFS `d7622a7`).
-
-- `bun run deploy:worker` — built and uploaded the worker (900 KiB / 209 KiB gzip), 1 new static asset, startup 16 ms.
-- New live version: `0236deec-39fe-4699-86d7-eb0e4d78642e` at https://equityfundingsource.brian-takita.workers.dev (hourly cron trigger intact).
-- Verified: `GET /` returns HTTP 200.
-
-No source changed this cycle — the Print-button work was already committed and built last cycle, so there was nothing new to spec/test/commit; this turn just shipped it. The full-application Print button (renders all 7 steps into the DOM, then `window.print()`) is now live on the borrower new-application page.
-
-### Re: Print button on the Review & e-sign disclosure — opus-4-8
-
-> **Queue prompt:**
->
-> Please add a Print button to the "Review & e-sign" disclosure at https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application?application_id=cda67748-3a99-49b7-95b4-cdfede0fcb7a. deploy
-
-
-Added a **Print** button to the borrower wizard's **Review & e-sign** step (the only Print control had been in the topbar). Borrowers can now print the full application straight from the disclosure step before signing.
-
-- `lib/ui--browser--efs/portal/borrower/full_application.tsx` — added a Print button to the step-6 actions row, reusing the existing render-all-steps print flag (`set_printing(true)`); it sits in the print-hidden `.form-actions` row so it stays off the printout itself.
-- `tests/full-application-print-button.test.ts` — new case asserting the Review & e-sign step exposes its own Print control ahead of the E-sign button.
-
-Verification: `bun test` green (643 pass / 0 fail), `bun run build:worker` clean, deployed to Cloudflare (version `b2afe09c`, live at https://equityfundingsource.brian-takita.workers.dev). Committed EFS submodule `a959e12`.
-
-### Re: Review & e-sign Print → upper-right, acknowledgement-only — opus-4-8
-
-> **Queue prompt:**
->
-> The "Review & E-sign" Print button should be in the upper-right corner ![img_11.png](img_11.png). The Print button should only print the "Acknowledgement and agreement" with "Electronic record & signature disclosure". deploy
-
-
-Done and deployed (EFS `69c512f`).
-
-- **Moved the Print button to the upper-right corner.** It now lives in the Review & e-sign `StepCard` header (new `header_actions` slot, right-aligned via `.form-step-head`/`.form-step-actions`), not the bottom actions row next to *E-sign application*. It's tagged `full-app-print-hide` so it stays off the printout.
-- **Scoped it to print only the acknowledgement.** A new `printing_ack` flag toggles a `full-app-print-ack` root class that hides the live wizard body (`.full-app-body`) and reveals a print-only clone containing just **"Acknowledgement and agreement"** + the **"Electronic record & signature disclosure"** (forced open). The acknowledgement+disclosure markup is now a shared `EsignAcknowledgement` component so the on-screen and printed copies can't drift.
-- The topbar Print button is unchanged — it still prints the full application via the existing `printing` flag.
-
-Verification: `bun run check` green (645 tests pass, incl. updated `full-application-print-button.test.ts`), worker build clean, deployed via `deploy:worker:no-migrate` (no schema change) → version `7d988e51`, https://equityfundingsource.brian-takita.workers.dev.
-
-Note: preflight flagged a stale local agent-doc install (predates source `5ccf1354`) — cosmetic to this EFS task; unrelated to the deploy.
-<!-- agent:boundary:a47be8e7 -->
+<!-- agent:boundary:db48b79f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -159,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- Use proper label names ![img_12.png](img_12.png)
 <!-- /agent:queue -->
 
 ## Backlog

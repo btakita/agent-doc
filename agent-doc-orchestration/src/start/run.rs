@@ -217,12 +217,19 @@ pub fn run_with_reap_policy(
 
     // Open session log
     let mut session_log = open_session_log(&canonical, &session_id);
-    let start_generation = if prior_entry
-        .as_ref()
-        .is_some_and(|entry| entry.pane != pane_id)
-    {
-        crate::session_actor::infer_latest_generation(&canonical, &session_id).unwrap_or(1)
-    } else {
+    // A `start` always mints a new ownership epoch, including when the launcher
+    // pane differs from the registry's stale pane (a pane move IS an ownership
+    // transition). The earlier no-bump `infer_latest_generation` branch for the
+    // pane-changed case was structurally incompatible with the controller's
+    // `start_session` CAS, which unconditionally expects `start_generation - 1`
+    // as the prior generation: `infer_latest_generation` returns
+    // `max(controller-actor gen, session-log gen)`, so once the controller actor
+    // catches up to the inferred latest (the healthy steady state) the no-bump
+    // value equals the live generation and the CAS fails closed
+    // (`expected N-1, found N`), surfacing as `controller failed to start
+    // session actor`. Always taking the `next_generation` (`infer + 1`) path
+    // keeps the value handed to the controller aligned with the CAS contract.
+    let start_generation = {
         let generations = crate::session_actor::next_generation(&canonical, &session_id).unwrap_or(
             crate::session_actor::OwnershipGeneration {
                 prior_generation: 0,

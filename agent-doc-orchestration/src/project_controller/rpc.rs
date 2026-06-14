@@ -4399,4 +4399,84 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn start_after_pane_move_against_up_to_date_actor_bumps_past_cas() {
+        // Regression for the live `controller failed to start session actor`
+        // wall: a session whose controller actor has already caught up to the
+        // latest generation (the healthy steady state) is re-started from a
+        // launcher pane that differs from the registry's stale pane. The start
+        // path must mint a NEW generation (`infer + 1`) so the controller's
+        // unconditional `start_generation - 1` CAS holds. Handing the
+        // un-incremented current generation — the old no-bump
+        // `infer_latest_generation` branch — fails closed with
+        // `compare-and-swap failed: expected N-1, found N`.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/efs.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let doc_id =
+            crate::session_actor::canonical_document_id_in(&bootstrap.project_root, &doc.to_string_lossy());
+
+        // Seed an up-to-date controller actor at generation 83 on the OLD pane
+        // %33 (mirrors the migrated-but-registry-lagging live state).
+        let seeded = crate::session_actor::ActorRecord {
+            document_id: doc_id.clone(),
+            session_id: "efs".to_string(),
+            generation: 83,
+            pane_id: "%33".to_string(),
+            window_id: "@9".to_string(),
+            harness: crate::session_actor::detect_document_harness_in(&bootstrap.project_root, &doc_id),
+            state: crate::session_actor::ActorState::Ready,
+            last_transition: crate::session_actor::ActorLastTransition {
+                caller: "supervisor".to_string(),
+                reason: "idle_pane_reconcile".to_string(),
+                timestamp: 1,
+                prior_generation: 82,
+                new_generation: 83,
+            },
+        };
+        store_actor_record(&bootstrap.project_root, None, &seeded).unwrap();
+
+        // The start path now unconditionally takes the `next_generation` branch:
+        // it infers 83 from the up-to-date controller actor and returns 84.
+        let generations = crate::session_actor::next_generation(&doc, "efs").unwrap();
+        assert_eq!(generations.prior_generation, 83);
+        assert_eq!(generations.new_generation, 84);
+
+        let start_at = |generation: u64| ControllerRequest {
+            command: "start_session".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("efs".to_string()),
+            pane_id: Some("%44".to_string()),
+            window_id: Some("@150".to_string()),
+            generation: Some(generation),
+            state: None,
+            caller: Some("start".to_string()),
+            reason: Some("session_start".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+
+        // Contract guard: the OLD no-bump value (the un-incremented current
+        // generation 83) is exactly what failed closed. The controller wraps the
+        // inner CAS bail in the user-visible "failed to start session actor"
+        // context, so assert against the full error chain.
+        let stale = handle_start_session(&bootstrap, None, start_at(83)).unwrap_err();
+        assert!(
+            format!("{stale:#}").contains("compare-and-swap failed"),
+            "un-bumped start must fail the CAS: {stale:#}"
+        );
+
+        // The bumped generation the fix now produces satisfies the CAS
+        // (expected prior 83 == found 83) and re-asserts ownership on pane %44.
+        let record = handle_start_session(&bootstrap, None, start_at(generations.new_generation))
+            .expect("bumped-generation start must pass the CAS");
+        assert_eq!(record.generation, 84);
+        assert_eq!(record.pane_id, "%44");
+    }
 }

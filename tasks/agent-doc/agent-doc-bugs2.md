@@ -37,6 +37,8 @@ queue: start
 Compacted content:
 - Archived 14 response topic(s): Post-compaction recovery + no agent-drainable work remains; Compaction recovery + killed a live #stuckhandoff2 wedge; hot-reload stalling + recycle doesn't restart + Sync deferred; 11 more
 - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
+- `cargo build --release --lib` + `agent-doc lib-install` → cdylib refreshed (`libagent_doc-0.34.0.so`)
+- `cargo install --path .` → `~/.cargo/bin/agent-doc` now at `ce339055` (v0.34.0)
 
 ### Re: post-compaction recovery + go-queue is in #qchurn no-op churn — opus-4-8
 
@@ -57,13 +59,23 @@ You moved `#qpresetstrike`, `#clearexchstale`, `#qdedup` to the head of the go-q
 agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 ```
 After it comes up on the current binary, a clean session can actually drain the clean-session queue (#qpresetstrike / #clearexchstale / #qdedup all have plans under `tasks/agent-doc/plan-*.md`). I'm not restarting it mid-cycle unilaterally or auto-looping — clean-session heads aren't agent-completable here, and looping would just reproduce the churn.
-<!-- agent:boundary:6be331c2 -->
+<!-- agent:boundary:863086d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+---
+:pushpin: JB `Run Agent Doc`. This should automatically restart the supervisor.
+```
+[route] target tmux session: 0
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain receipt_id=3420
+```
+---
 - [#qchurn]
+- :pushpin: [#qpresetstrike]
+- :pushpin: [#clearexchstale]
+- :pushpin: [#qdedup]
 - :pushpin: :round_pushpin: do [#c2b6]
 - :pushpin: :round_pushpin: do [#aazp]
 ---

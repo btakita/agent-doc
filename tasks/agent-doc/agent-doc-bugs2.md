@@ -328,7 +328,24 @@ The build runs **in the idle supervisor, never in the finalize client** — that
 **Did NOT** install/restart the supervisor or push the submodule — that's the operator release + live-proof step (can't be agent-done against this live supervisor without the exact drift this feature removes). Tracked as `#supautoinstall` (operator-verify). Plan: `tasks/agent-doc/plan-supervisor-auto-install-after-finalize.md`.
 
 (Session note: exchange at 276 lines / 14 sections; queue active so not stalling to compact.)
-<!-- agent:boundary:08bccf11 -->
+
+### Re: default supervisor install to true — opus-4-8
+
+Done (agent-doc submodule `56075947`, `make check` green). `#supautoinstall` now defaults **ON**.
+
+I made it mirror the `#ctlrecycle` auto-recycle resolution exactly, so the two supervisor self-heal behaviors share one control surface: `resolve_supervisor_auto_install(env, frontmatter, project)` resolves env > frontmatter > project > built-in **ON**, with a falsey opt-out at each level.
+
+**Why default-ON is safe:** the build only ever fires for a *dogfooding* session — `dogfood_agent_doc_crate_root` resolves a crate root only when the served document's project tree actually contains the agent-doc crate. An ordinary user's document never triggers a build, so ON costs them nothing.
+
+**Opt-out paths** (any one disables it):
+- `AGENT_DOC_SUPERVISOR_AUTO_INSTALL=0` (env, global)
+- `agent_doc_supervisor_auto_install: false` (per-document frontmatter)
+- `agent_doc_supervisor_auto_install = false` (`.agent-doc/config.toml`, project)
+
+Added the matching `agent_doc_supervisor_auto_install` frontmatter + project-config knobs; runbook and plan updated to default-ON; precedence unit test updated.
+
+Still operator-drive for the live proof + release (bump/push/install/restart) — tracked under `#supautoinstall`. And the existing live supervisor (pid 575771) only picks this up after it's built+installed+restarted (or, once released, it self-installs on the next dogfood edit since that's now the default).
+<!-- agent:boundary:bdbd366b -->
 <!-- /agent:exchange -->
 
 ## Queue

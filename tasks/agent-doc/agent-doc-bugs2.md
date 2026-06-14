@@ -229,7 +229,33 @@ This `/agent-doc` was itself re-triggered by the still-stale supervisor re-injec
 `head_is_drainable()` is now the single predicate shared by `detect` / `live_drainable_continuation_head` (supervisor idle-watch) / `drainable_head_count` (preflight), so the drain, `session-check` continuation, and the no-stall signal all agree. **This doc's preflight now reports `queue_continuation_required: false`, `queue_drainable_head_count: 0`** — so the auto-loop correctly stops and I am not looping. Marking `#qchurn` done.
 
 **Two housekeeping notes:** (a) the live supervisor (pid 2715614) is still on the old binary — its idle-watch keeps re-injecting until it recycles onto the new build (I marked it to recycle at the next idle boundary; the preflight/skill signal is already correct, so the agent-side loop stops now regardless). (b) The `## Queue` still holds the stale fenced JB bug-report blocks and the two `document`-noun observations — they're already triaged into backlog ids (`#jbrestale`, `#0kjc`, etc.) and now classify as noise, so they no longer churn; you can clear those lines when convenient (I won't auto-delete — the live IPC supervisor races on direct queue edits).
-<!-- agent:boundary:2dc4026a -->
+
+### Re: agent-doc lazily.rs stalled — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: agent-doc lazily.rs stalled
+> ```
+>   One standing note (not blocking): preflight/session-check keep flagging that the host supervisor (pid 2482535) is
+>   running a stale build and is the source of the recurring File Cache Conflict / IPC-drift dialogs. When convenient,
+>   restart it with agent-doc session restart-supervisor tasks/software/lazily-rs.md --force to pick up the latest fixes.
+> ```
+
+
+Logged as another live repro of the stale-supervisor stall class — not a new bug, no new id.
+
+**What happened:** the `lazily-rs.md` session's host supervisor (pid 2482535) started before the current binary, so it keeps throwing File Cache Conflict / IPC-drift dialogs and eventually churn-stalls. The note's prescribed fix — `agent-doc session restart-supervisor tasks/software/lazily-rs.md --force` — is the documented manual stopgap (runbooks/dogfood-supervisor-refresh.md).
+
+**Maps to existing backlog/review, no new id:**
+- **#jbrestale** — JB Run Agent Doc / dispatch should auto red-green-restart a stale or churn-stopped supervisor instead of failing closed. This stall is exactly that symptom; the manual restart is what #jbrestale automates away.
+- **#fcc0** — the File Cache Conflict dialogs the note cites.
+- **#recyclerestart / #aazp / #4myd** — the idle/next-queue-item self-recycle that a churn-stopped queue never reaches, which is why a manual restart is still needed today.
+- **#dfrefresh-retire** — retires the manual-restart runbook once #jbrestale + #recyclerestart prove self-heal.
+
+**I am not restarting the lazily.rs supervisor from here.** It's a different live session; touching its supervisor mid-flight races its own writes (the exact #ipcdrift multi-owner hazard). That's an operator action "when convenient," or it gets auto-handled once #jbrestale lands.
+
+**Same flag on THIS doc:** preflight warns this session's own supervisor (pid 2715614) is also stale (#fcc0). When convenient: `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`.
+<!-- agent:boundary:b925d08a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -245,7 +271,7 @@ This `/agent-doc` was itself re-triggered by the still-stale supervisor re-injec
   restart it with agent-doc session restart-supervisor tasks/software/lazily-rs.md --force to pick up the latest fixes.
 ```
 ---
-- :pushpin: [#anw0verify]
+- ~~:pushpin: [#anw0verify]~~
 - :pushpin: [#jbrestale]
 - :pushpin: [#mphaseloop]
 - :round_pushpin: do [#4myd]

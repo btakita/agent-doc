@@ -80,7 +80,35 @@ Done — shipped, pushed, and deployed.
 - Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `488a6f7f`).
 
 Advances the #zwws investor-dashboard rework.
-<!-- agent:boundary:32e0c25d -->
+
+### Re: Lender Account Request gates Available deals — opus-4-8
+
+> **Queue prompt:**
+>
+> The Lender Account Request form should be a prerequisite to view Available deals. So it should not be on https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3. But it should be part of the workflow to request a lender account. Both https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals and https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard can gate Avalable deals until the Lender Account Request is complete. We may require EFS to accept but that decision is TBD.
+
+
+> **Queue prompt (#spec-test-commit-push):**
+>
+> The Lender Account Request form should be a prerequisite to view Available deals. It should not be on the deal detail page, but part of the workflow to request a lender account. Both available-deals and dashboard can gate Available deals until the Lender Account Request is complete. EFS-accept requirement is TBD.
+
+Done — shipped, tested, committed, and pushed (no deploy). The lender account request is now a **prerequisite to viewing Available deals**.
+
+**What changed**
+- **New shared module** `lib/ui--browser--efs/portal/investor/lender_account.tsx` — the request form, pending state, and denial state moved here out of the deal detail page, plus a `LenderAccountGate` component and a `lender_account_ready_()` helper.
+- **Available deals page** (`available_deals.tsx`) — renders the `LenderAccountGate` (the full request form) **in place of** the deals list/filters until the investor has a registered lender account. Subtitle reads "Complete your Lender Account Request to view available deals."
+- **Investor dashboard** (`dashboard.tsx`) — the Available deals preview now shows a `LenderAccountPrompt` card (pending / denied / not-started messaging) linking to the Available deals page, instead of deal cards, until the account is active.
+- **Deal detail page** (`deal_detail.tsx`) — no longer embeds the request form. If somehow reached without a lender account it shows a "Lender account required" notice with a **Go to Available deals** button.
+- **Backend** (`investor_deals_GET_`) — `/api/investor/deals` now returns a top-level `lender` payload (same shape as the per-deal `investor` object) so both the list page and the dashboard gate without an extra fetch.
+
+**Verification:** `bun run check` green — **689 tests pass, 0 fail** (added `tests/lender-account-gate.test.ts`; repointed the moved-component assertion in `admin-dashboard.test.ts`), worker + browser builds clean. Spec updated in the lending-portal PRD.
+
+**Shipped:** `equityfundingsource-dev` commit `a4a6cf4`, pushed to `origin/main`; superproject pointer `4b0e4fcef`. The EFS repo has no CI workflow, so local `bun run check` is the gate.
+
+One operator decision left open (you flagged it TBD): whether EFS must **accept** the request before deals unlock. Right now the gate clears as soon as the lender account number is set (admin completes the request in TMO). If you want an explicit EFS-accept step gating deal visibility, say so and I'll add an acceptance state — I left it out deliberately since it was TBD.
+
+Next in the queue: making the dashboard Available-deal dialog match the full Deal page.
+<!-- agent:boundary:e9b908bb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,7 +116,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The Lender Account Request form should be a prerequisite to view Available deals. So it should not be on https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3. But it should be part of the workflow to request a lender account. Both https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals and https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard can gate Avalable deals until the Lender Account Request is complete. We may require EFS to accept but that decision is TBD.
+- ~~The Lender Account Request form should be a prerequisite to view Available deals. So it should not be on https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3. But it should be part of the workflow to request a lender account. Both https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals and https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard can gate Avalable deals until the Lender Account Request is complete. We may require EFS to accept but that decision is TBD.~~
 - The Available deal dialog on https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard should be the same as the "Full Deal" page on https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3
 <!-- /agent:queue -->
 

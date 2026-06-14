@@ -71,7 +71,71 @@ Two rungs, mirroring controller machinery onto the supervisor:
   fires when self-kill is suppressed (simulate the wedged/non-polling supervisor),
   (3) in-session caller never signals its own ancestor PID.
 
+## Operator refinement — blue/green (zero-downtime) restart model (#supkill-bg)
+
+Operator (2026-06-14): "treat the restart like a no-downtime server deployment —
+spawn the new version, the old version self-kills as it finishes its last job, the
+PCP routes requests to the new process, and new jobs racing to the old process fail
+with instructions to route to the new process."
+
+**This is the correct framing and it is more reliable than the kill-first model** —
+it is the direct fix for the failure that motivated this plan: `session_restart`
+was *rejected* (`generation 354 is closed receipt_id=3429`) because the current
+restart tries to mutate a closed actor generation and fails closed. Blue/green never
+needs the old supervisor to accept a kill; it spawns a new generation and lets the
+old one drain.
+
+### Why the substrate already exists
+- The PCP **is the router** and already owns the generation/authorization layer:
+  `authorize_operator_command` / `handle_operator_command`
+  (`project_controller/rpc.rs:835`/`:3160`). The `generation N is closed` error is
+  the PCP *already* rejecting work aimed at a superseded actor — that rejection IS
+  the "route to the new process" signal the operator describes, it just currently
+  reads as a hard failure instead of a redirect.
+- Generation bump + close-old is how the actor store already supersedes records;
+  blue/green is "allocate a new generation, mark the old `draining`, route new
+  dispatch to the new generation, let the old finish its in-flight turn."
+
+### How it folds into the two rungs (not a replacement)
+- Rung A (graceful self-kill, idle-gated) **becomes the drain trigger**: the old
+  supervisor self-kills *after* its last in-flight turn completes (idle proof),
+  rather than tearing down a live turn. Same idle gate, framed as "drain then exit."
+- Rung B (PCP force-kill backstop) **stays mandatory and unchanged**: blue/green
+  assumes the old supervisor *cooperates with draining*. A wedged/non-polling
+  supervisor (the M1-dead failure mode) will never drain or self-exit — the PCP
+  grace-timeout `/proc` force-kill is the only thing that reclaims it. Blue/green is
+  the healthy path; force-kill is the unhealthy-path floor.
+
+### Caveat — the supervisor owns a PTY/pane, not a network port
+A stateless HTTP blue/green flips a load balancer between two interchangeable
+listeners. The supervisor is the **parent of the live harness child**
+(`tmux → zsh → agent-doc(sup) → claude(agent)`), so "the new process serves traffic"
+means one of:
+- **(a) In-place re-exec (preferred for binary upgrade):** the existing R3 execve
+  recycle (`ReexecState`, `PtySession::adopt`, gated `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE=1`)
+  already swaps the binary in the same process slot and re-adopts the child — this is
+  the truest zero-downtime path for the stale-build case (#fcc0) and keeps the same
+  pane. Make it the default restart action when the supervisor is *healthy*.
+- **(b) New pane + reroute (true two-process blue/green):** new supervisor takes a
+  fresh pane, PCP repoints the route, old drains and exits. Heavier (pane churn,
+  brief two-pane window) but required when in-place adopt is unsafe.
+
+Recommendation: default healthy restart = in-place re-exec drain (a); keep
+PCP force-kill (Rung B) as the floor; reserve two-process reroute (b) for cases
+where adopt can't be trusted. Turn the `generation N is closed` rejection into a
+structured "superseded → retry against generation N+1" redirect so racing dispatch
+self-heals instead of erroring.
+
+### Added IDs
+- `#supkill-bg` — reframe restart as drain-and-supersede: new generation routed,
+  old generation `draining` then idle-exit (Rung A), `generation closed` becomes a
+  retryable redirect rather than a hard reject.
+
 ## Verification
 - `make check` + `make tmux-ci`; deterministic SimWorld for the wedged-supervisor
   (non-cooperating) force-kill path — model the M1-dead failure mode so this can't
   regress to "self-kill present but never fires".
+- SimWorld for blue/green: (1) healthy drain — old supervisor finishes its in-flight
+  turn then exits, new generation serves the next dispatch with no dropped turn;
+  (2) racing dispatch to the old (closed) generation receives a redirect and retries
+  against the new generation instead of failing.

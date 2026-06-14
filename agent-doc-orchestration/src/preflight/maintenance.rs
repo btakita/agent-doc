@@ -1424,14 +1424,30 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 }
             }
         }
+        // `#backlog-queue-append-stable`: a `do [#id]` queue prompt whose id is an
+        // active backlog id is backlog-sourced — the binary's `queue` attribute
+        // appends it at the tail. The priority sort holds such prompts AFTER the
+        // pre-existing unpinned manual / free-text prompts instead of floating them
+        // up by backlog rank, so the default `queue` append stays appended even
+        // under `priority` ("append, not prepend, even with non-annotated items in
+        // the queue"). Operator/agent pins are exempt (a pin is an explicit position
+        // signal — `#7r2s` already operator-pins genuinely operator-typed new lines).
+        // Keyed off the active backlog id set (durable across cycles), not a
+        // new-this-cycle diff, so a previously-synced item does not float up later.
+        let backlog_sourced: std::collections::HashSet<String> = components
+            .iter()
+            .filter(|c| matches!(c.name.as_str(), "backlog" | "pending"))
+            .flat_map(|c| crate::pending::active_item_ids(&content[c.open_end..c.close_start]))
+            .map(|id| id.to_ascii_lowercase())
+            .collect();
         // Auto-dag (#queue-auto-dag-priority): order by `after=#id` dependency
         // graph first (a blocker outranks a pin); fall back to the plain
         // pin+priority sort when there are no dependency edges.
         let deps = collect_after_deps(&components, &content);
-        let sorted = crate::queue::sort_prompts_by_dag(&entries, &rank, &deps)
+        let sorted = crate::queue::sort_prompts_by_dag(&entries, &rank, &deps, &backlog_sourced)
             .map(|s| ("auto-dag dependency order (blockers + pins)", s))
             .or_else(|| {
-                crate::queue::sort_prompts_by_priority(&entries, &rank)
+                crate::queue::sort_prompts_by_priority(&entries, &rank, &backlog_sourced)
                     .map(|s| ("backlog priority (operator pins position-locked)", s))
             });
         if let Some((how, sorted)) = sorted {

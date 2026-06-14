@@ -389,6 +389,22 @@ Semantics:
   (`queue::sort_prompts_by_priority`), covering manually edited queues.
   `priority` is recognized on backlog/icebox/queue by both the lint and
   preflight. See `specs/pending-system.md` for the per-item token grammar.
+- **Append-stable backlog scheduling (`#backlog-queue-append-stable`).** A
+  `do [#id]` queue prompt whose id is an **active backlog id** is *backlog-sourced*:
+  the `queue` attribute appends it at the tail. Under `priority`, the recompute
+  holds backlog-sourced prompts in a group **after** the pre-existing unpinned
+  prompts (manual operator lines and free-text prompts already in the queue)
+  instead of interleaving them by backlog rank — so a scheduled item **appends,
+  not prepends, even when non-annotated items are already in the queue**. Within
+  the backlog-sourced group, backlog-priority rank then document order are
+  preserved. Operator (`:pushpin:`) and agent (`:round_pushpin:`) pins are exempt
+  — a pin is an explicit position signal that outranks append-stability (a brand-new
+  operator-typed queue line is operator-pinned by `#7r2s`, so it keeps its authored
+  slot). The group is keyed off the active backlog id set, not a "new this cycle"
+  diff, so a previously-synced item stays append-stable on later cycles rather than
+  floating up once it is no longer fresh. Implemented in `sort_prompts_by_priority`
+  / `sort_prompts_by_dag` (the `backlog_sourced` group key). `queue=prepend` remains
+  the explicit opt-in for front-insertion.
 
 ### Preflight queue behavior
 

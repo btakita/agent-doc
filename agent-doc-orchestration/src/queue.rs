@@ -793,9 +793,36 @@ fn entry_priority_tier(entry: &QueueEntry) -> u8 {
     }
 }
 
+/// True when `entry` is a `do [#id]` prompt whose id is in `backlog_sourced`
+/// (the active-backlog ids the binary syncs into the queue this cycle via the
+/// `queue` attribute). Such prompts are **append-stable**
+/// (`#backlog-queue-append-stable`): the `priority` sort holds them in a tier
+/// AFTER the pre-existing unpinned movable prompts (manual operator lines and
+/// free-text prompts that were already in the queue), instead of interleaving
+/// them by backlog rank. Operator/agent pins are unaffected — a pinned backlog
+/// item is not held to the tail. The set is keyed off the *active backlog id*
+/// (not a per-cycle "new this cycle" diff) so a previously-synced item stays
+/// append-stable on later cycles instead of floating up once it is no longer
+/// "fresh".
+fn entry_is_backlog_sourced(
+    entry: &QueueEntry,
+    backlog_sourced: &std::collections::HashSet<String>,
+) -> bool {
+    if backlog_sourced.is_empty() {
+        return false;
+    }
+    // Pinned prompts are never held to the tail — an operator/agent pin is an
+    // explicit position signal that outranks append-stability.
+    if entry_priority_tier(entry) != 2 {
+        return false;
+    }
+    entry_do_id(entry).is_some_and(|id| backlog_sourced.contains(&id))
+}
+
 pub fn sort_prompts_by_priority(
     entries: &[QueueEntry],
     rank: &std::collections::HashMap<String, u8>,
+    backlog_sourced: &std::collections::HashSet<String>,
 ) -> Option<Vec<QueueEntry>> {
     let positions: Vec<usize> = entries
         .iter()
@@ -814,16 +841,25 @@ pub fn sort_prompts_by_priority(
     // unpinned tail (tier 2) are reordered, and they fill *only the slots not
     // held by an operator pin*, agent pins first then unpinned in backlog rank
     // order. A constant secondary key for agent pins keeps their document order.
-    let key = |idx: usize| -> (u8, u8) {
+    //
+    // `#backlog-queue-append-stable`: backlog-sourced unpinned prompts (ids in
+    // `backlog_sourced`) get an extra group key (`1`) so they sort AFTER the
+    // pre-existing unpinned prompts (group `0`) instead of interleaving by
+    // backlog rank. Within the backlog-sourced group, backlog-priority rank then
+    // document order are preserved. The default `queue` append therefore stays
+    // appended even under `priority` — a freshly-scheduled item never floats
+    // above a non-annotated free-text prompt that was already in the queue.
+    let key = |idx: usize| -> (u8, u8, u8) {
         let e = &prompts[idx];
         let tier = entry_priority_tier(e); // 1 (agent pin) or 2 (unpinned) here
         if tier < 2 {
-            (tier, 0)
+            (tier, 0, 0)
         } else {
+            let group = u8::from(entry_is_backlog_sourced(e, backlog_sourced));
             let r = entry_do_id(e)
                 .and_then(|id| rank.get(&id).copied())
                 .unwrap_or(u8::MAX);
-            (2, r)
+            (2, group, r)
         }
     };
     let mut movable: Vec<usize> = (0..n)
@@ -862,7 +898,8 @@ pub fn sort_prompts_by_priority(
 /// text are merged in. Ordering is Kahn's algorithm with a priority-ordered ready
 /// set: among prompts whose dependencies are already emitted, the next is chosen
 /// by the same tie-break as [`sort_prompts_by_priority`] — operator pin, then
-/// agent pin, then backlog-priority rank, then document order. Dependencies
+/// agent pin, then append-stable group (pre-existing before backlog-sourced),
+/// then backlog-priority rank, then document order. Dependencies
 /// therefore always precede their dependents, so a blocker outranks a pin (the
 /// operator's stated exception), while an edge-free queue comes out identical to
 /// the plain pin+priority sort. A dependency cycle is broken by emitting the
@@ -873,6 +910,7 @@ pub fn sort_prompts_by_dag(
     entries: &[QueueEntry],
     rank: &std::collections::HashMap<String, u8>,
     deps: &std::collections::HashMap<String, Vec<String>>,
+    backlog_sourced: &std::collections::HashSet<String>,
 ) -> Option<Vec<QueueEntry>> {
     let positions: Vec<usize> = entries
         .iter()
@@ -921,18 +959,24 @@ pub fn sort_prompts_by_dag(
     }
 
     // Movable (agent-pin/unpinned) priority key: agent pins (tier 1) before
-    // unpinned (tier 2), then backlog-priority rank, then document order.
-    let movable_key = |idx: usize| -> (u8, u8, usize) {
+    // unpinned (tier 2), then — for unpinned prompts — the append-stable group
+    // (`#backlog-queue-append-stable`: pre-existing `0` before backlog-sourced
+    // `1`), then backlog-priority rank, then document order. The dependency
+    // topological pass still always wins, so a blocker that is backlog-sourced
+    // can still precede a pre-existing dependent; append-stability only governs
+    // the tie-break among edge-free / ready prompts.
+    let movable_key = |idx: usize| -> (u8, u8, u8, usize) {
         let e = &prompts[idx];
         let tier = entry_priority_tier(e);
-        let r = if tier < 2 {
-            0
+        if tier < 2 {
+            (tier, 0, 0, idx)
         } else {
-            entry_do_id(e)
+            let group = u8::from(entry_is_backlog_sourced(e, backlog_sourced));
+            let r = entry_do_id(e)
                 .and_then(|id| rank.get(&id).copied())
-                .unwrap_or(u8::MAX)
-        };
-        (tier, r, idx)
+                .unwrap_or(u8::MAX);
+            (tier, group, r, idx)
+        }
     };
     let is_operator_pin = |idx: usize| entry_priority_tier(&prompts[idx]) == 0;
 
@@ -1606,7 +1650,7 @@ mod tests {
         rank.insert("a".to_string(), 3u8);
         rank.insert("b".to_string(), 1u8);
         rank.insert("c".to_string(), 2u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank).expect("order should change");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("order should change");
         assert_eq!(render(&sorted), "- do [#b]\n- do [#c]\n- do [#a]\n");
     }
 
@@ -1616,7 +1660,7 @@ mod tests {
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 2u8);
         rank.insert("b".to_string(), 1u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank).expect("order should change");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("order should change");
         // preset stays at index 0; prompts reorder among themselves.
         assert_eq!(render(&sorted), "preset spec\n- do [#b]\n- do [#a]\n");
     }
@@ -1627,7 +1671,75 @@ mod tests {
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 1u8);
         rank.insert("b".to_string(), 2u8);
-        assert!(sort_prompts_by_priority(&entries, &rank).is_none());
+        assert!(sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none());
+    }
+
+    #[test]
+    fn backlog_sourced_item_appends_after_pre_existing_freetext() {
+        // #backlog-queue-append-stable: a backlog-sourced `do [#a]` (id in the
+        // active backlog) stays APPENDED after a pre-existing non-annotated
+        // free-text prompt under `priority`, instead of floating above it by rank.
+        // The operator directive: "append, not prepend, even with non-annotated
+        // items in the queue."
+        let entries = parse("- review the spec draft\n- do [#a]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 1u8); // best rank — would float to top if not held
+        let backlog: std::collections::HashSet<String> = ["a".to_string()].into_iter().collect();
+        // Held to the tail → already in document order → no reorder.
+        assert!(sort_prompts_by_priority(&entries, &rank, &backlog).is_none());
+        // Contrast: without append-stability (empty set) the backlog item DOES
+        // float above the free-text prompt — the pre-fix prepend behavior.
+        let floated = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new())
+            .expect("empty set → backlog item floats up by rank");
+        assert_eq!(render(&floated), "- do [#a]\n- review the spec draft\n");
+    }
+
+    #[test]
+    fn backlog_sourced_group_preserves_rank_after_pre_existing() {
+        // The backlog-sourced group sorts after the pre-existing free-text prompt,
+        // but keeps backlog-rank order among its own members.
+        let entries = parse("- manual note\n- do [#a]\n- do [#b]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 5u8);
+        rank.insert("b".to_string(), 1u8); // better rank → before #a within the group
+        let backlog: std::collections::HashSet<String> =
+            ["a".to_string(), "b".to_string()].into_iter().collect();
+        let sorted = sort_prompts_by_priority(&entries, &rank, &backlog).expect("group reorders");
+        assert_eq!(render(&sorted), "- manual note\n- do [#b]\n- do [#a]\n");
+    }
+
+    #[test]
+    fn pinned_backlog_sourced_item_is_exempt_from_append_stable() {
+        // A pin is an explicit position signal that outranks append-stability: an
+        // operator-pinned backlog item keeps its slot and is not dragged to the
+        // tail (#7r2s pins genuinely operator-typed lines, so they are exempt).
+        let entries = parse("- __prioritized__ do [#a]\n- free text prompt\n").unwrap();
+        let rank = std::collections::HashMap::new();
+        let backlog: std::collections::HashSet<String> = ["a".to_string()].into_iter().collect();
+        // Operator pin holds slot 0; the lone free-text prompt has no peer to swap
+        // with → nothing moves (the pinned backlog item is NOT pushed past it).
+        assert!(sort_prompts_by_priority(&entries, &rank, &backlog).is_none());
+    }
+
+    #[test]
+    fn backlog_sourced_append_stable_applies_in_dag_path() {
+        // The append-stable group key also governs the auto-dag tie-break: with a
+        // real `after=` edge, a backlog-sourced dependent still sorts after the
+        // pre-existing free-text prompt among the ready set.
+        let entries = parse("- free text\n- do [#a]\n- do [#b]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 5u8);
+        rank.insert("b".to_string(), 1u8);
+        let mut deps: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        deps.insert("a".to_string(), vec!["b".to_string()]); // #a after #b
+        let backlog: std::collections::HashSet<String> =
+            ["a".to_string(), "b".to_string()].into_iter().collect();
+        let sorted =
+            sort_prompts_by_dag(&entries, &rank, &deps, &backlog).expect("dep edge reorders");
+        // #b precedes #a (edge), and the whole backlog group stays after the
+        // pre-existing free-text prompt.
+        assert_eq!(render(&sorted), "- free text\n- do [#b]\n- do [#a]\n");
     }
 
     #[test]
@@ -1639,7 +1751,7 @@ mod tests {
         rank.insert("a".to_string(), 1u8); // best rank → first among unpinned
         rank.insert("b".to_string(), 9u8); // worst rank, but pinned → frozen in middle
         rank.insert("c".to_string(), 2u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank).expect("unpinned reorder");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("unpinned reorder");
         // Pin #b holds slot 1; unpinned #a (rank1) and #c (rank2) fill slots 0,2.
         assert_eq!(
             render(&sorted),
@@ -1657,7 +1769,7 @@ mod tests {
         rank.insert("b".to_string(), 9u8);
         // #a is already in rank order at slot 0 and the pin is anchored at slot 1
         // → nothing moves.
-        assert!(sort_prompts_by_priority(&entries, &rank).is_none());
+        assert!(sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none());
     }
 
     #[test]
@@ -1670,7 +1782,7 @@ mod tests {
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 2u8);
         rank.insert("b".to_string(), 1u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank).expect("unpinned reorder");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("unpinned reorder");
         // Pins #z, #y stay at slots 1,3; unpinned #b (rank1), #a (rank2) fill 0,2.
         assert_eq!(
             render(&sorted),
@@ -1685,7 +1797,7 @@ mod tests {
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 2u8);
         rank.insert("b".to_string(), 1u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank).expect("rank reorders");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("rank reorders");
         assert_eq!(render(&sorted), "- do [#b]\n- do [#a]\n");
     }
 
@@ -1695,7 +1807,7 @@ mod tests {
         // (previously it floated to the top — that is the behavior being removed).
         let entries = parse("- do [#a]\n- __prioritized__ do [#b]\n").unwrap();
         let rank = std::collections::HashMap::new();
-        assert!(sort_prompts_by_priority(&entries, &rank).is_none());
+        assert!(sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none());
     }
 
     #[test]
@@ -1721,7 +1833,7 @@ mod tests {
         rank.insert("a".to_string(), 1u8); // best rank, but unpinned
         rank.insert("b".to_string(), 5u8);
         rank.insert("c".to_string(), 9u8); // operator-pinned → stays at slot 2
-        let sorted = sort_prompts_by_priority(&entries, &rank).expect("agent pin floats");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("agent pin floats");
         // Operator pin #c stays at the bottom (slot 2); agent pin #b floats above
         // unpinned #a in the two movable slots.
         assert_eq!(
@@ -1794,7 +1906,7 @@ mod tests {
         .unwrap();
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 1u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank).expect("tiers reorder");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("tiers reorder");
         assert_eq!(
             render(&sorted),
             "- :round_pushpin: do [#b]\n- do [#a]\n- :pushpin: do [#c]\n"
@@ -1811,7 +1923,7 @@ mod tests {
         rank.insert("a".to_string(), 9u8);
         let mut deps = std::collections::HashMap::new();
         deps.insert("b".to_string(), vec!["a".to_string()]); // b after a
-        let sorted = sort_prompts_by_dag(&entries, &rank, &deps).expect("dep reorders");
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new()).expect("dep reorders");
         assert_eq!(render(&sorted), "- do [#a]\n- do [#b]\n");
     }
 
@@ -1822,7 +1934,7 @@ mod tests {
         let rank = std::collections::HashMap::new();
         let mut deps = std::collections::HashMap::new();
         deps.insert("b".to_string(), vec!["a".to_string()]); // pinned b after a
-        let sorted = sort_prompts_by_dag(&entries, &rank, &deps).expect("blocker wins");
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new()).expect("blocker wins");
         assert_eq!(render(&sorted), "- do [#a]\n- :pushpin: do [#b]\n");
     }
 
@@ -1836,7 +1948,7 @@ mod tests {
         let rank = std::collections::HashMap::new();
         let deps = std::collections::HashMap::new();
         let sorted =
-            sort_prompts_by_dag(&entries, &rank, &deps).expect("movable edge reorders around pin");
+            sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new()).expect("movable edge reorders around pin");
         assert_eq!(
             render(&sorted),
             "- do [#x]\n- :pushpin: do [#p]\n- do [#y] after=#x\n"
@@ -1852,7 +1964,7 @@ mod tests {
         let rank = std::collections::HashMap::new();
         let deps = std::collections::HashMap::new();
         assert!(
-            sort_prompts_by_dag(&entries, &rank, &deps).is_none(),
+            sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new()).is_none(),
             "operator pin at its slot with a satisfied edge must not be reordered"
         );
     }
@@ -1862,7 +1974,7 @@ mod tests {
         let entries = parse("- do [#a]\n- do [#b]\n").unwrap();
         let rank = std::collections::HashMap::new();
         let deps = std::collections::HashMap::new();
-        assert!(sort_prompts_by_dag(&entries, &rank, &deps).is_none());
+        assert!(sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new()).is_none());
     }
 
     #[test]
@@ -1871,7 +1983,7 @@ mod tests {
         let entries = parse("- do [#b] after=#a\n- do [#a]\n").unwrap();
         let rank = std::collections::HashMap::new();
         let deps = std::collections::HashMap::new();
-        let sorted = sort_prompts_by_dag(&entries, &rank, &deps).expect("inline dep reorders");
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new()).expect("inline dep reorders");
         assert_eq!(render(&sorted), "- do [#a]\n- do [#b] after=#a\n");
     }
 
@@ -1883,7 +1995,7 @@ mod tests {
         let mut deps = std::collections::HashMap::new();
         deps.insert("a".to_string(), vec!["b".to_string()]);
         deps.insert("b".to_string(), vec!["a".to_string()]);
-        let sorted = sort_prompts_by_dag(&entries, &rank, &deps);
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new());
         // Either reordered or None (already-ordered), but never fewer prompts.
         if let Some(s) = sorted {
             assert_eq!(prompts(&s).len(), 2);
@@ -1933,7 +2045,7 @@ mod tests {
         .unwrap();
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 1u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank).expect("tiers reorder");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("tiers reorder");
         assert_eq!(
             render(&sorted),
             "- *prioritized* do [#b]\n- do [#a]\n- **prioritized** do [#c]\n"

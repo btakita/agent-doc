@@ -219,7 +219,23 @@ Yes — drain-and-supersede is more reliable than the current kill-first restart
 **On the two side-notes in your prompt:** "the supervisor is also stale" is `#fcc0` (stale-build supervisor producing the File Cache Conflict / IPC-drift dialogs you're seeing right now — pid 4018675 predates the installed binary), and "auto-recycle should be fixed" is `#suprecyclestall` (already partly addressed by `aafa6510`'s non-fatal execve fallback + candidate ladder). Both are the *motivation* for #supkill-bg: in-place re-exec drain (a) is precisely the auto-recycle fix for a stale healthy supervisor. Note this session's own supervisor is still the stale pid 4018675 — restarting it needs the blue/green path, not the kill-first `session restart-supervisor` that just got rejected.
 
 Recommendation: default healthy restart = in-place re-exec drain (a); keep PCP force-kill (Rung B) as the floor; reserve two-process reroute (b) for unsafe-adopt cases. Implementation is queued as `#supkill-bg`.
-<!-- agent:boundary:ac294183 -->
+
+### Re: `start --route-owned` / `restart-supervisor "generation 354 is closed"` — landed #anw0 part 3 + a panic fix — opus-4-8
+
+`do [#anw0]` (#supkill-bg) — the `start`/`restart` errors share one root cause and I landed the blocking half this cycle.
+
+**Root cause of both errors:**
+- `restart-supervisor … generation 354 is closed` — the PCP rejected restart at the authorize gate because the actor record was `Closed`. `session_clear`/`interrupt-clear` were allowed against a `Closed` actor; `session_restart` was not, so a restart against a dead/closed generation failed closed instead of superseding it.
+- `start --route-owned … failed to start session actor` (efs) — the CAS-against-stale-generation class already fixed by `start_after_pane_move_against_up_to_date_actor_bumps_past_cas`; it persists **live** only because the controller/supervisor serving this project is a **stale build** (preflight `supervisor_binary_stale`, pid 4018675). The restart that refreshes that stale controller is exactly what the `generation closed` reject blocked — so the two chain.
+
+**Landed this cycle:**
+1. **#anw0 part 3 — generation-closed → supersede redirect.** `handle_operator_command` (`project_controller/rpc.rs`): restart-class commands now supersede a `Closed` actor (added `session_restart` to `recovers_closed_actor`). New proof line `supervisor_restart_supersede … action=supersede_closed_actor prior_generation=N next_generation=N+1` — the structured "superseded → retry against N+1" redirect. Renamed+flipped the regression test to assert restart now accepts the closed actor.
+2. **UTF-8 panic fix** (found while recovering this very cycle): `ipc_corruption.rs:summarize_findings` called `String::truncate(80)`, which panicked (`is_char_boundary`) when a heading's `—`/`→` glyph straddled byte 80 — aborting `finalize` mid-recovery during live IPC drift. Now floors to a char boundary; added a regression test.
+
+`make check`: **4427 passed, 0 failed.** Built `--release` + `cargo install` (both binaries refreshed).
+
+**Still live-blocked:** the running PCP/supervisor are the stale build, so these fixes go live only after they restart on the new binary — and part 3 is precisely what now lets `restart-supervisor` authorize against the closed actor. Remaining #anw0 parts (Rung A idle-gated drain trigger; R3 execve as default healthy restart; full blue/green SimWorld) stay actionable. This cycle hit the session's own tracked bugs (#compactdrift guard, then the IPC-drift panic) during closeout; recovered via `git checkout HEAD` + `reset --from-current --preserve-session` + `--force-disk`. CI for the submodule still in progress on a prior commit; local suite green.
+<!-- agent:boundary:6982228f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -253,7 +269,7 @@ JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equ
 - ~~:pushpin: [#clearexchstale]~~
 - ~~:pushpin: [#qdedup]~~
 - ~~:pushpin: :round_pushpin: do [#c2b6]~~
-- :pushpin: :round_pushpin: do [#aazp]
+- ~~:pushpin: :round_pushpin: do [#aazp]~~
 ---
 :pushpin: In tsift.md, I had a queue:
 ```

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -128,7 +128,7 @@ So, for your use case:
 Bottom line: `corky watch` is *one* way (the convenient way) to drive `corky schedule`, not a hard prerequisite. If you're already running `corky watch` for inbound mail, scheduled publishing comes along with it and you need nothing else.
 
 (Note: this is a discussion answer — no code/repo changes. Also flagging: preflight warns the route-owned supervisor pid 2482535 is a stale pre-install build producing File-Cache-Conflict/IPC-drift dialogs; restart it with `agent-doc session restart-supervisor tasks/software/lazily-rs.md --force` when convenient.)
-<!-- agent:boundary:b2788d11 -->
+<!-- agent:boundary:984d0ad0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -136,7 +136,8 @@ Bottom line: `corky watch` is *one* way (the convenient way) to drive `corky sch
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- corky watch is running. Are the auto-posts scheduled and will they work?
 <!-- /agent:queue -->
 
 ## Backlog

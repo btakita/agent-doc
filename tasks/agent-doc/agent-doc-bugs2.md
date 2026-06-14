@@ -45,7 +45,19 @@ Compacted content:
 **No agent-drainable work this cycle.** Preflight skipped 12 agent-undrainable backlog heads — every id-backed `do #id` in the queue is `[clean-session]` (#qchurn, #qdedup, #clearexchstale, #qpresetstrike, #fcc0, #rtwbcast, #recyclerestart) or `[operator-verify]` (#c2b6, #aazp, #4myd). Clean-session items need a fresh session (not this live-IPC one); operator-verify items need a live editor. The free-text queue reports are already captured (#mdastquote/#0kjc, the JB Compact Exchange `typed_component_drift` error → plan-compact-typed-component-drift-false-positive.md, the efs dispatch-coalesce → #qflood2).
 
 **This very cycle reproduces #qchurn:** go-mode's only diff was auto-appending `[#qchurn]` to the queue — a no-op churn with `user_intent_prompt_changes` empty and zero drainable work. Not auto-looping; leaving queue state untouched (live IPC supervisor). Operator drive needed to advance the remaining items.
-<!-- agent:boundary:4c9f2e10 -->
+
+### Re: queue reorder — qpresetstrike/clearexchstale/qdedup to top (still clean-session) — opus-4-8
+
+You moved `#qpresetstrike`, `#clearexchstale`, `#qdedup` to the head of the go-queue and stripped their `do` markers (now plain `:pushpin: [#...]`). That's a reorder, not a new directive — and all three are tagged `[clean-session]` (lines 135–137), so go-mode correctly keeps deferring them. Pinning them to the top doesn't make them agent-drainable in this live-IPC session; they still need a fresh/clean session because the live supervisor races finalize writes. No agent-drainable head appeared this cycle (same as the prior closeout).
+
+**The actionable item this cycle is the stale supervisor.** Preflight flagged that the route-owned host supervisor (pid 2825163) serving this doc started *before* the currently-installed binary — it's running a STALE build and is the root of the recurring File Cache Conflict / IPC-drift dialogs and the no-op churn (2 no-op closeouts in 30 min, `session_accretion: warn`). That's also why the clean-session queue can't drain: the old binary keeps re-racing.
+
+**Recommended (operator-drive — restarting the live host supervisor is your call):**
+```
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+```
+After it comes up on the current binary, a clean session can actually drain the clean-session queue (#qpresetstrike / #clearexchstale / #qdedup all have plans under `tasks/agent-doc/plan-*.md`). I'm not restarting it mid-cycle unilaterally or auto-looping — clean-session heads aren't agent-completable here, and looping would just reproduce the churn.
+<!-- agent:boundary:6be331c2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -90,9 +102,6 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ```
 ---
 - :pushpin: :round_pushpin: do [#4myd]
-- :pushpin: :round_pushpin: do [#qdedup]
-- :pushpin: :round_pushpin: do [#clearexchstale]
-- :pushpin: :round_pushpin: do [#qpresetstrike]
 - :pushpin: :round_pushpin: do [#fcc0]
 - :pushpin: :round_pushpin: do [#rtwbcast]
 - [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)

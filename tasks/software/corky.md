@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Session History
@@ -171,7 +171,32 @@ Commits and push:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:409428f9 -->
+
+### Re: LinkedIn slot-cell-signal draft formatting — opus-4-8
+
+> **Queue prompt:**
+>
+> Please review /home/brian/work/btakita/agent-loop/mail/drafts/linkedin/2026-06-15-slot-cell-signal.md. Is it correctly formatted for the post and the first comment?
+
+
+Yes — `mail/drafts/linkedin/2026-06-15-slot-cell-signal.md` is correctly formatted for both the post and the first comment. It matches the `linkedin` skill conventions (`runbooks/linkedin-post.md`) and the house style of your other lazily drafts.
+
+**Post body (lines 1–19) ✓**
+- Plain text, no markdown bold — nothing renders as literal asterisks.
+- No external links in the body — the only URL is isolated to the first comment, so LinkedIn won't suppress reach.
+- Strong standalone hook line ("Most reactive libraries make you pick a side: lazy or eager.") and a closing engagement question ("What's your reactive default — lazy or eager?").
+- Line breaks separate each primitive into a scannable beat (Slot / Cell / Signal).
+
+**First comment (lines 22–26) ✓**
+- Split with the standard `---` + `FIRST COMMENT (post immediately after):` marker, same as your other drafts — `corky linkedin post` will pick up the body/comment boundary.
+- Holds the repo link (`github.com/btakita/lazily-rs`) plus the benchmark stat — links live here, not in the body.
+
+**Two optional notes (not blockers):**
+- Spaced em dashes appear on lines 3, 7, 11, 19. Your writing-voice preference is `...` over ` — `, but every lazily draft so far uses em dashes, so this is consistent house style — leaving it as-is is fine; only worth a pass if you want to align all the drafts at once.
+- The first comment claims "~8ns single-threaded on the v0.11.0 Criterion benchmarks" — consistent with your 2026-06-16 draft, so no conflict.
+
+Ready to post as-is. When you're set, `corky linkedin post mail/drafts/linkedin/2026-06-15-slot-cell-signal.md` publishes the body and adds the first comment.
+<!-- agent:boundary:8dd0a669 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -182,7 +207,6 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Please review /home/brian/work/btakita/agent-loop/mail/drafts/linkedin/2026-06-15-slot-cell-signal.md. Is it correctly formatted for the post and the first comment?
 <!-- /agent:queue -->
 
 ## Backlog

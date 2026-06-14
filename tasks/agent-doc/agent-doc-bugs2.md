@@ -167,12 +167,29 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 Once it comes up on `ce339055`, the spent `#advance-review` head strikes cleanly and the queue drains/closes instead of looping. That recycle is also the live proof for `#qpresetstrike` (and the same recycle `#aazp`/`#4myd` want — check `ops.log` for `supervisor_binary_stale_self_recycled` / `supervisor_reexec_failed fallback=continue_current_binary`).
 
 Not mutating queue/backlog state this cycle (surgery under the live stale supervisor races + corrupts), and not auto-looping — the only remaining action is the operator recycle.
-<!-- agent:boundary:376e99ef -->
+
+### Re: `restart-supervisor --force` rejected "generation 354 is closed" + the wedged session — opus-4-8
+
+This cycle started wedged: an orphaned `response_captured` cycle (`cycle-1781407941507`) deadlocked preflight, and the live supervisor held an active run. I recovered the session and re-landed the diagnosis below. Three findings:
+
+**1. The `generation 354 is closed` rejection is intentional, tested behavior — not a bug.** `handle_operator_command` only allowlists `session_clear` / `session_interrupt_clear` against a Closed actor; every other operator command (incl. `session_restart`) fails closed with `generation N is {state}`. A Closed generation is terminal — you don't *restart* it, you **start a fresh one**. `restart-supervisor`/`interrupt-clear` are for an alive-but-wedged supervisor; once the generation is Closed they are the wrong verb and the JB `start --route-owned` path that errors `controller failed to start session actor` is the same closed-generation wall. Filed `#restartclosedhint` (friendlier error pointing at the kill+`start` recovery).
+
+**2. Root cause of the churn is the stale running supervisor — verified, and the fix is already installed.** Installed binary `~/.cargo/bin/agent-doc` built `23:38:38` (v0.34.0, includes `#jbrestale` churn-stop classifier). The route-owned supervisor **pid 4018675 started `23:32:07`** — 6 minutes *before* the rebuild — so it executes pre-fix code and re-injects the spent head every idle boundary. The recycle is the operator action everything waits on, but the normal verbs are blocked (closed generation, finding #1). **Unblock: kill `4018675`, then `agent-doc start --route-owned tasks/agent-doc/agent-doc-bugs2.md` (fresh).** It is a sibling of this pane (not my parent), so killing it stops dispatch without ending this session.
+
+**3. The Queue is wedged for the parser.** It now holds pasted multi-line code fences, escaped `&gt;!-- agent:queue --&lt;` markers, and `:pushpin:` + ``` inline fences, so the parser reads fence/marker text *inside* queue content as document structure (`unclosed component`). go-mode drain + `plan` stay blocked until the queue is recovered to plain `- [#id]` lines. I did **not** hand-edit it — queue surgery under the live old-binary supervisor races and corrupts. Recover the queue *after* the recycle.
+
+**Session recovery performed this cycle (no code change):** quarantined the deadlocking orphan to `.agent-doc/.quarantine-orphan-1781407941507/` (capture + state-cycle), rebuilt sidecars via `reset --from-current --preserve-session`. Not auto-looping — the remaining work is the operator kill+`start`, then queue cleanup.
+<!-- agent:boundary:559710eb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+---
+```
+ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+Error: project controller command `operator_command` failed: operator command `session_restart` rejected for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 354 is closed receipt_id=3429
+```
 ---
 JB `Run Agent Doc`. This should auto-repair.
 ```

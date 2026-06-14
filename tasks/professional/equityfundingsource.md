@@ -214,7 +214,34 @@ Went through all 9 `agent:review` items. The portal is substantially built out, 
 - `#dropbox-sync-adapter` — gated on Dropbox access being provisioned.
 
 So: 1 actionable item queued (`#vd8s-timeline`); the other 8 review items are correctly parked on TMO/Resend/Google/Dropbox/human-approval gates and stay in `agent:review`. (Exchange is at ~156 lines / 8 sections — noting size; queue stays active.)
-<!-- agent:boundary:e394f712 -->
+
+### Re: do [#vd8s-timeline] — Per-investor activity timeline in the detail modal — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#vd8s-timeline]
+
+Done (EFS `0eb8084`, submodule pointer `549876293`). The in-page investor detail modal (#vtx8) now renders a **newest-first activity timeline** beneath the accreditation control — the investor's whole lifecycle trail, derived entirely from existing D1 tables (EFS-local, no TMO gate).
+
+**Events** (`investor_timeline_events_`, a pure builder in `repo.ts`):
+- **Signed up** — `users.created_at`.
+- **Accreditation submitted** + **verified/rejected** — `investor_accreditation_verifications` (`created_at` for the submission; `verified_at` + `status` for the decision; a still-pending submission shows no decision line).
+- **Lender setup requested** + **Lender account linked** — `lender_requests` (`created_at`, then `completed_at` once `status='done'`, with the assigned `lender_account` in the caption).
+- **Committed $X** + **Wire confirmed · $X** — `funds` (commitment on `created_at` always; the wire only for `status='active'` on `accepted_at`), each with a borrower/loan caption.
+- **Distribution** — paid `loan_payments` across every loan the investor holds a fund in, dated by `due_date`.
+
+Events sort **newest-first** with a deterministic kind tie-break; an unparseable `due_date` row is skipped rather than NaN-sorted (`date_text_to_unix_s_` parses the `YYYY-MM-DD` text to unix seconds at UTC midnight so distributions sort against the second-precision timestamps).
+
+**Endpoint:** `GET /api/admin/users/:id/investor-timeline` (`admin_users_by_id_investor_timeline_GET_`) — read-only, admin-guarded; fetches the five row sets in one `Promise.all`, maps them into the builder, returns `{ events }`. A missing user is a 404 (not an empty timeline). The distributions query joins `loan_payments → loans → investment_deals → funds` for the investor's paid payments.
+
+**UI** (`investor_pipeline.tsx`): `InvestorActivityTimeline` renders a dotted vertical trail with a per-kind lane-palette accent, the label, an optional caption (borrower/loan or lender account), and the UTC date — with loading/error/empty states.
+
+**Per `#spec-test-commit-push`:** added PRD Phase 5 (`prds/investor-pipeline-admin.md`) and 7 tests to `tests/admin-investor-pipeline.test.ts` (date parser, per-kind surface/skip rules, money + caption formatting, newest-first ordering across kinds, registered + admin-guarded endpoint built from the pure builder, and the modal wiring). `bun run check` green (673 tests), worker build clean. Committed + pushed to `main`.
+
+This is the last EFS-local remainder of review **#vd8s** — I trimmed that review item down to its only open piece: rolling the TMO `AddLoanFunding` sync **state** into the Active lane, which stays gated on the writeback gate (#dzmm/#k2xg/#7a4d).
+
+Not deployed — this preset is commit+push only. Remaining queue: the `/portal-admin/pipeline` "Incomplete applications" split + "Applications"→"Accepted applications" rename, which ends in `deploy`.
+<!-- agent:boundary:212cb23d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -228,7 +255,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#vd8s-timeline] Investor Pipeline: per-investor activity timeline in the in-page investor detail modal (#vtx8) — sign-up, accreditation decision, lender link, commitment, wire-confirmation, and distribution dates from existing D1 tables. EFS-local (no TMO gate). Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md. Advances review #vd8s.
 <!-- /agent:backlog -->
 
 ## Review
@@ -236,7 +262,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:review -->
 - [/] [#xcvg] [recommended] Borrower message email round-trip: email notification when a borrower sends a secure-portal message, inbound email reply that appends back into the D1 chat, and a borrower-facing email when an admin replies. Builds on the shipped chat_sessions/chat_messages + admin owner. Gated on a verified Resend EFS sending domain (f4rq) and Google Workspace SMTP (m6ch/p40t). (Distinct from the operator/comms emails to Judith + Robert.)
 - [/] [#jnzs] [recommended] Await Judith or EFS reviewer approval on funded-deal images, copy, and lien-position wording before invoicing or launch sign-off. The funded-deals page carries no standalone legal/disclosure text; the disclosure needing legal review is the ESIGN/UETA Electronic record and signature disclosure on the borrower full-application/document-uploads flow (full_application.tsx). Funded-deals copy was reframed as real closed deals and shipped.
-- [/] [#vd8s] [recommended] Investor Pipeline phase 2 — remaining after stalled-stage highlighting shipped (EFS 055a73c): drag-to-confirm-wire from the Committed lane (needs multi-pending-fund disambiguation) and TMO AddLoanFunding sync state in the Active lane once the writeback gate (#dzmm/#k2xg) clears. Per-investor activity timeline folds into the #vtx8 detail modal. Plan: src/equityfundingsource-dev/prds/investor-pipeline-admin.md
 - [/] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [/] [#zwws] [recommended] Investor dashboard rework — remaining phases are externally gated: 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 6 new-deal email + workflow-priority dashboard (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P2b interest-button + distributions/statements cleanup (efs cd4253a), P3 simplified portfolio (8d40c66), P5 accreditation→annual Requirements (efs 1957f64). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
 - [/] [#next-steps] Remaining EFS workers.dev production state: D1 API token unblocked; migrations 0025/0026 are already applied; Cloudflare Access env vars are deployed for /login/access-callback on workers.dev using the one-time PIN IdP. Custom domain cutover remains intentionally deferred; true Google Workspace SSO remains gated on Google admin credentials.

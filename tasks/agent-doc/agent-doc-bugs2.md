@@ -305,7 +305,30 @@ To complete it:
 4. Confirm ops.log shows `dispatch_stale_generation_redirect prior_generation=...`.
 
 Queue: no agent-drainable heads remain (`queue_drainable_head_count=0`; rest are operator-verify / clean-session). Not auto-looping.
-<!-- agent:boundary:ebdab770 -->
+
+### Re: goal — automate the install after finalize with the PCP + supervisor — opus-4-8
+
+Landed `#supautoinstall` (agent-doc submodule `7a70a4cf`, `make check` green). This automates the dogfood build+install in the supervisor so a session editing agent-doc's own source never has to run a mid-session `cargo install` (the `#no-mid-session-install` drift hazard).
+
+**The gap:** `#ctlrecycle` already recycles onto a fresh binary, but nobody ran the *install* automatically — so in a dogfood session the binary never became "stale" and the recycle never fired. The install was the missing rung.
+
+**The fix:** a new idle-boundary stage in the supervisor's idle-watch that PRECEDES the recycle rung. Symmetric to `process_binary_is_stale` (installed-newer-than-process → recycle), I added source-newer-than-installed → install:
+
+```
+source edit committed by finalize
+  └─(idle boundary, opt-in)→ cargo build --release + cargo install + lib-install
+        └─ installed binary now newer than running process
+              └─(same boundary)→ #ctlrecycle execve hot-reload → fresh binary
+```
+
+The build runs **in the idle supervisor, never in the finalize client** — that placement is what root-fixes the drift. Seams (all pure decisions + thin fail-open IO, mirroring `#ctlrecycle`): `supervisor_install_action` (decisions.rs), `source_newer_than_installed_binary` / `resolve_supervisor_auto_install` / `dogfood_agent_doc_crate_root` / `newest_crate_source_mtime_secs` / `run_supervisor_auto_install` (rpc.rs), wired into `idle_watch.rs` debounced with a fail-latch.
+
+**Safety:** default OFF (`AGENT_DOC_SUPERVISOR_AUTO_INSTALL=1` to opt in), dogfood-only (crate-root probe never matches an ordinary user's doc), idle-gated + debounced + fail-open. A failed build latches off for the session and falls back to the manual `dogfood-supervisor-refresh` runbook (now documents the auto path). 3 new unit tests; process-install/recycle isn't SimWorld-modelable.
+
+**Did NOT** install/restart the supervisor or push the submodule — that's the operator release + live-proof step (can't be agent-done against this live supervisor without the exact drift this feature removes). Tracked as `#supautoinstall` (operator-verify). Plan: `tasks/agent-doc/plan-supervisor-auto-install-after-finalize.md`.
+
+(Session note: exchange at 276 lines / 14 sections; queue active so not stalling to compact.)
+<!-- agent:boundary:75afef52 -->
 <!-- /agent:exchange -->
 
 ## Queue

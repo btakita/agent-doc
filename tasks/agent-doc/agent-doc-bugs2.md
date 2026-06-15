@@ -203,17 +203,17 @@ Commit/push: `src/agent-doc` commit `865a37ac` was pushed to `origin/main`; this
 
 Implemented agent-verifiable recycle/restart proof coverage.
 
-❯ - Added a SimWorld sync-guard model that reproduces killed-pane `Sync Tmux Layout` holding the guard, then proves stale-holder release and later completion through ops-log markers (`sync_kill_pane_path`, `sync_guard_released reason=stale_holder_superseded`, `sync_guard_released reason=sync_complete`).
-❯ - Added recyclerestart proof markers for binary promotion and session re-clear/drain (`recycle_session_reclear ...` and `supervisor_recycle_action result=binary_promoted`) and a targeted test asserting there is no permanent sync-deferred wedge.
-❯ - Made the production sync-lock decision seam public so tests can assert the real stale-bound behavior instead of duplicating it.
+- Added a SimWorld sync-guard model that reproduces killed-pane `Sync Tmux Layout` holding the guard, then proves stale-holder release and later completion through ops-log markers (`sync_kill_pane_path`, `sync_guard_released reason=stale_holder_superseded`, `sync_guard_released reason=sync_complete`).
+- Added recyclerestart proof markers for binary promotion and session re-clear/drain (`recycle_session_reclear ...` and `supervisor_recycle_action result=binary_promoted`) and a targeted test asserting there is no permanent sync-deferred wedge.
+- Made the production sync-lock decision seam public so tests can assert the real stale-bound behavior instead of duplicating it.
 
 Verification:
-❯ - `cargo test -p agent-doc recyclerestart_agent_verifies_kill_pane_sync_guard_and_reclear_proofs -- --nocapture`
-❯ - `cargo test -p agent-doc sync_lock -- --nocapture`
-❯ - `cargo test -p agent-doc recycle -- --nocapture`
-❯ - `cargo test -p agent-doc restart_supervisor -- --nocapture`
-❯ - staged-patch temp worktree: focused recyclerestart test, `sync_lock`, and `cargo check -p agent-doc`
-❯ - `make check`
+- `cargo test -p agent-doc recyclerestart_agent_verifies_kill_pane_sync_guard_and_reclear_proofs -- --nocapture`
+- `cargo test -p agent-doc sync_lock -- --nocapture`
+- `cargo test -p agent-doc recycle -- --nocapture`
+- `cargo test -p agent-doc restart_supervisor -- --nocapture`
+- staged-patch temp worktree: focused recyclerestart test, `sync_lock`, and `cargo check -p agent-doc`
+- `make check`
 
 Code commit: `src/agent-doc` `331573b1` (`test: prove recyclerestart sync guard recovery`), pushed to `origin/main`.
 
@@ -275,6 +275,12 @@ Verification:
 - staged-only verification of the same touched paths
 - `make check` (4525 passed, 238 skipped; doctests and medium SimWorld passed)
 - GitHub Actions CI run `27568580773` passed (`make check` + `make tmux-ci`)
+- GitHub Actions CI run `27569561694` passed (`make check` + `make tmux-ci`)
+- `make check` (4526 passed, 238 skipped; doctests and medium SimWorld passed)
+- `cargo check -p agent-doc`
+- `cargo test -p agent-doc --test test_cli -- --nocapture`
+- `cargo test -p agent-doc-orchestration queue_cmd -- --nocapture`
+- `cargo test -p agent-doc --test test_cli test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit -- --nocapture`
 
 Pushed: `btakita/agent-doc@66f7de43`.
 
@@ -285,24 +291,24 @@ Implemented and pushed `src/agent-doc` commit `46906792` (`test: prove monsterro
 `agent-doc queue sync` now reports active backlog ids that were not materialized because an existing queue prompt already represents the same `#id` (for example `advance [#mrhfeed-prop]`), and reports the ids it newly materialized. The regression covers the monsterrodholders-style `queue: start` + `agent:queue ... priority go` + `agent:backlog priority queue` document, preserves the existing `advance [#id]` heads, appends missing `do [#id]` heads, commits the synced document, and proves `session-check` stays clean afterward.
 
 Verification:
-- `cargo test -p agent-doc --test test_cli test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit -- --nocapture`
-- `cargo test -p agent-doc-orchestration queue_cmd -- --nocapture`
-- `cargo test -p agent-doc --test test_cli -- --nocapture`
-- `cargo check -p agent-doc`
-- `make check` (4526 passed, 238 skipped; doctests and medium SimWorld passed)
-- GitHub Actions CI run `27569561694` passed (`make check` + `make tmux-ci`)
+❯ - `cargo test -p agent-doc --test test_cli test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit -- --nocapture`
+❯ - `cargo test -p agent-doc-orchestration queue_cmd -- --nocapture`
+❯ - `cargo test -p agent-doc --test test_cli -- --nocapture`
+❯ - `cargo check -p agent-doc`
+❯ - `make check` (4526 passed, 238 skipped; doctests and medium SimWorld passed)
+❯ - GitHub Actions CI run `27569561694` passed (`make check` + `make tmux-ci`)
 
 Pushed: `btakita/agent-doc@46906792`.
-<!-- agent:boundary:497f3382 -->
+<!-- agent:boundary:96e8202c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority prest="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: JB `Run Agent Doc` sent `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` into the Codex input but did not submit. #simworld~~
 - ~~/goal Do the actual work in the queue. Stop punting on the queue work. Fix the root cause(s) of the punting. The work in the queue should be done.~~
 - ~~do [#compactdrift-agent]~~
-~~~done
+---
 :pushpin: The equityfundingsource.md compaction is duplicated and the numeric list is in reverse order:
 ```
 ### Session Summary
@@ -335,7 +341,7 @@ Compacted content:
 - **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
 - **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
 ```
-~~~
+---
 - ~~do [#cleandrainsup-agent]~~
 - ~~do [#rtwbcast-simproof]~~
 - ~~do [#recyclerestart-agent]~~
@@ -343,7 +349,7 @@ Compacted content:
 - ~~do [#suprehotreload-agent]~~
 - ~~do [#qmisstrike-regression]~~
 - ~~do [#staleheaddupcontent]~~
-- do [#mrhbacklogqueuesync]
+- ~~do [#mrhbacklogqueuesync]~~
 ---
 Please explain the cause of this churn. I don't understand why this is necessary. Just run the current task. Use the document editor buffer as the source of truth. It seems simple. Why this extra complexity?
 ```

@@ -330,7 +330,7 @@ Verification:
 - `cargo test -p agent-doc-orchestration queue_head_removal_guard -- --nocapture`
 - `cargo test -p agent-doc-orchestration free_text_queue_head_guard -- --nocapture`
 - `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
-❯ - `cargo check -p agent-doc`
+- `cargo check -p agent-doc`
 - `make check` (4528 passed, 238 skipped; doctests and medium SimWorld passed)
 - GitHub Actions CI run `27570433719` passed (`make check` + `make tmux-ci`)
 - Parent repo has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
@@ -369,6 +369,19 @@ Verification:
 Commits pushed:
 - agent-doc submodule: `c57076c8` (`fix: submit clear session composer drafts`)
 - parent repo gitlink: `dd6323551` (`agent-doc: update clear session submit fix`)
+- `cargo test -p tsift-memory -p tsift-sqlite -p tsift-tokensave -p tsift-summarize -p tsift-cli` in `src/tsift`
+- `cargo check --workspace` in `src/tsift`
+- `cargo test --lib` in `src/tagpath` (115 passed)
+- `make check` in `src/agent-doc` (4534 tests passed, 238 skipped, doctests passed, SimWorld medium budget passed)
+- `cargo test -p agent-doc-sqlite -p agent-doc-markdown-ast -p agent-doc-core -p agent-doc-orchestration`
+❯ - `cargo check -p agent-doc`
+- `agent-doc` `08286f55` (`chore: update major dependency constraints`)
+- `tsift` `cd648b5` (`chore: update rusqlite dependency`)
+- `tagpath` `a1e6a2c` (`chore: update sha2 dependency`)
+- `generic-array 0.14.7`: removed the old transitive chain by moving local `tagpath` to `sha2 0.11`; `agent-doc` no longer resolves `generic-array`.
+- `rusqlite 0.40`: aligned local `tsift-memory` plus the tsift workspace SQLite packages to avoid duplicate `libsqlite3-sys` links.
+- API migrations: updated `ureq 3` agent/body/header usage, `sha2 0.11` digest hex formatting, and `portable-pty 0.9` `MasterPty::tty_name`.
+- `agent-doc`: bumped `instruction-files`, `notify`, `portable-pty`, `pulldown-cmark`, `rusqlite`, `sha2`, `signal-hook`, `similar`, `toml`, `ureq`, `yrs`, and `zip` to the requested major lines.
 
 Post-push CI for the submodule was running as `27571278607` when checked; the previous CI run was green.
 
@@ -379,48 +392,48 @@ Added the regression guard for the Codex MCP finalize close-after-capture restar
 No production recovery patch was needed: the existing `repair` + preflight closeout path already handled this state. The change locks that behavior so the queue cannot regress into the captured-response restart stall again.
 
 Changed:
-❯ - `src/agent-doc/tests/test_cli.rs` adds `mcp_finalize_close_after_capture_recovers_on_next_preflight_once` and a small git commit-count helper.
-❯ - `src/agent-doc/VERSIONS.md` documents `#codexmcpfinalize` coverage.
+- `src/agent-doc/tests/test_cli.rs` adds `mcp_finalize_close_after_capture_recovers_on_next_preflight_once` and a small git commit-count helper.
+- `src/agent-doc/VERSIONS.md` documents `#codexmcpfinalize` coverage.
 
 Verification:
-❯ - `cargo test -p agent-doc --test test_cli mcp_finalize_close_after_capture_recovers_on_next_preflight_once -- --nocapture`
-❯ - `cargo test -p agent-doc --test test_cli mcp_finalize -- --nocapture`
+- `cargo test -p agent-doc --test test_cli mcp_finalize_close_after_capture_recovers_on_next_preflight_once -- --nocapture`
+- `cargo test -p agent-doc --test test_cli mcp_finalize -- --nocapture`
 ❯ - `cargo check -p agent-doc`
-❯ - `make check` (4534 tests passed, 238 skipped, doctests passed, medium SimWorld budget test passed)
+- `make check` (4534 tests passed, 238 skipped, doctests passed, medium SimWorld budget test passed)
 
 Commits:
-❯ - `fecc63be` in `src/agent-doc`: `test: cover MCP finalize capture recovery`
-❯ - `a7605c456` in parent: `agent-doc: cover MCP finalize capture recovery`
+- `fecc63be` in `src/agent-doc`: `test: cover MCP finalize capture recovery`
+- `a7605c456` in parent: `agent-doc: cover MCP finalize capture recovery`
 
 CI:
-❯ - Previous `src/agent-doc` CI for `c57076c8` passed.
-❯ - New `src/agent-doc` CI for `fecc63be` is running as `27571750330`.
-❯ - Parent repo has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
+- Previous `src/agent-doc` CI for `c57076c8` passed.
+- New `src/agent-doc` CI for `fecc63be` is running as `27571750330`.
+- Parent repo has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
 
 ### Re: #ar27-majors — gpt-5
 
 Updated the held-back major dependency constraints across `src/agent-doc` and the first-party crates needed to keep the graph resolvable:
 
-- `agent-doc`: bumped `instruction-files`, `notify`, `portable-pty`, `pulldown-cmark`, `rusqlite`, `sha2`, `signal-hook`, `similar`, `toml`, `ureq`, `yrs`, and `zip` to the requested major lines.
-- API migrations: updated `ureq 3` agent/body/header usage, `sha2 0.11` digest hex formatting, and `portable-pty 0.9` `MasterPty::tty_name`.
-- `rusqlite 0.40`: aligned local `tsift-memory` plus the tsift workspace SQLite packages to avoid duplicate `libsqlite3-sys` links.
-- `generic-array 0.14.7`: removed the old transitive chain by moving local `tagpath` to `sha2 0.11`; `agent-doc` no longer resolves `generic-array`.
+❯ - `agent-doc`: bumped `instruction-files`, `notify`, `portable-pty`, `pulldown-cmark`, `rusqlite`, `sha2`, `signal-hook`, `similar`, `toml`, `ureq`, `yrs`, and `zip` to the requested major lines.
+❯ - API migrations: updated `ureq 3` agent/body/header usage, `sha2 0.11` digest hex formatting, and `portable-pty 0.9` `MasterPty::tty_name`.
+❯ - `rusqlite 0.40`: aligned local `tsift-memory` plus the tsift workspace SQLite packages to avoid duplicate `libsqlite3-sys` links.
+❯ - `generic-array 0.14.7`: removed the old transitive chain by moving local `tagpath` to `sha2 0.11`; `agent-doc` no longer resolves `generic-array`.
 
 Commits pushed:
-- `tagpath` `a1e6a2c` (`chore: update sha2 dependency`)
-- `tsift` `cd648b5` (`chore: update rusqlite dependency`)
-- `agent-doc` `08286f55` (`chore: update major dependency constraints`)
+❯ - `tagpath` `a1e6a2c` (`chore: update sha2 dependency`)
+❯ - `tsift` `cd648b5` (`chore: update rusqlite dependency`)
+❯ - `agent-doc` `08286f55` (`chore: update major dependency constraints`)
 
 Verification:
-- `cargo check -p agent-doc`
-- `cargo test -p agent-doc-sqlite -p agent-doc-markdown-ast -p agent-doc-core -p agent-doc-orchestration`
-- `make check` in `src/agent-doc` (4534 tests passed, 238 skipped, doctests passed, SimWorld medium budget passed)
-- `cargo test --lib` in `src/tagpath` (115 passed)
-- `cargo check --workspace` in `src/tsift`
-- `cargo test -p tsift-memory -p tsift-sqlite -p tsift-tokensave -p tsift-summarize -p tsift-cli` in `src/tsift`
+❯ - `cargo check -p agent-doc`
+❯ - `cargo test -p agent-doc-sqlite -p agent-doc-markdown-ast -p agent-doc-core -p agent-doc-orchestration`
+❯ - `make check` in `src/agent-doc` (4534 tests passed, 238 skipped, doctests passed, SimWorld medium budget passed)
+❯ - `cargo test --lib` in `src/tagpath` (115 passed)
+❯ - `cargo check --workspace` in `src/tsift`
+❯ - `cargo test -p tsift-memory -p tsift-sqlite -p tsift-tokensave -p tsift-summarize -p tsift-cli` in `src/tsift`
 
 Note: full `cargo test` in `src/tagpath` still fails on the pre-existing live fixture lint for `tasks/software/tsift.md` line 43 (`agent:boundary` contains a UUID instead of the current hex/slug boundary form); the library tests and the `agent-doc` dependency path are clean.
-<!-- agent:boundary:68d8b526 -->
+<!-- agent:boundary:6ef884a5 -->
 <!-- /agent:exchange -->
 
 ## Queue

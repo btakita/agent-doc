@@ -154,7 +154,38 @@ Escalation: none.
 Confidence: high.
 
 Session size note: the exchange is large, but an active queue continuation is being drained, so I continued without compacting.
-<!-- agent:boundary:98cc32b0 -->
+
+### Re: Lender vestings and distributions — gpt-5
+
+Short answer: the Vestings feature is the right concept for EFS, but the page copy was not fully in line with the no-distributions/no-servicing requirement before this turn.
+
+What I found:
+- The PRD says EFS does not service loans, so the investor portal should not present Returns/Distributions/Statements as EFS-serviced features. It separately allows Vestings as an EFS-local section for legal holding entities and special instructions, with TMO writeback still gated.
+- The implementation data model is aligned: `/api/investor/vestings` only stores investor vesting rows and special instructions in EFS D1. It does not calculate, schedule, or pay distributions.
+- The UI copy had two bad implications: “EFS keeps these in sync with The Mortgage Office” overstated active TMO sync, and “Distribution, communication, or vesting preferences” implied EFS may handle distribution preferences.
+
+I fixed the copy so the page now frames Vestings as legal holding names/title preferences and avoids distribution-servicing language.
+
+Changed paths:
+- `lib/ui--browser--efs/portal/investor/vestings.tsx`
+- `tests/investor-vestings.test.ts`
+
+Commit:
+- `5c24096 fix(investor): align vestings copy with no-servicing boundary (#rpzm)` pushed to `origin/main` in `src/equityfundingsource-dev`.
+
+Verification:
+- `bun test tests/investor-vestings.test.ts` passed: 8 tests, 0 fail.
+- `make check` passed after rebasing onto latest `origin/main`: 711 tests, app build, and worker build.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Deployment:
+- Not deployed; this queue preset was commit/push, not deploy. The live workers.dev page will still show the old deployed copy until the next deployment.
+
+Escalation: none.
+Confidence: high.
+
+Preflight warning surfaced: review `#37ah` may already be resolved by archived done item `#37ah-backend`; unrelated to this vestings check.
+<!-- agent:boundary:867c6c62 -->
 <!-- /agent:exchange -->
 ###
 <!--

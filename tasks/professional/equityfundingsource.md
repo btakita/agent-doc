@@ -219,7 +219,21 @@ Escalation: none.
 
 
 I can’t execute `/clear` from inside this already-loaded model context, and I will not process `#37ah-review-dedupe` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so that queue head runs with fresh context.
-<!-- agent:boundary:c280befd -->
+
+### Re: Broker portal review dedupe — gpt-5
+
+I resolved #37ah-review-dedupe and closed #37ah out of review. The shipped #37ah-backend done item covers the broker portal backend scope called out here: D1-backed submit-deal, pipeline, commissions, documents, and notifications. The remaining TMO sync/writeback note is not broker-portal backend work; it is already tracked under #dzmm/#dzmm-writeback-replay and remains gated on the #7a4d field map plus #k2xg support answers.
+
+Changed paths: `tasks/professional/equityfundingsource.md` only.
+
+Commands: `agent_doc_preflight`; `agent_doc_plan`; `agent_doc_read` for backlog/review; prior `rg -n "37ah-backend|37ah-review-dedupe|#37ah|broker portal|broker_deals|submit-deal|commissions|broker documents|broker notifications|TMO sync" tasks/professional/equityfundingsource.done.md src/equityfundingsource-dev -S`.
+
+Verification: no app code changed, so no app tests were run. This cycle is a document repair/closeout; post-finalize session check should confirm the live queue remains on #dropbox-sync-contract.
+
+Confidence: high; the done archive, migration/repo/routes coverage, PRD, and broker portal tests all point to #37ah-backend as the completed broker backend scope, with TMO writeback intentionally split to #dzmm.
+
+Escalation: none.
+<!-- agent:boundary:e285d534 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -241,7 +255,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#37ah-review-dedupe] [recommended] Broker portal review closeout: verify the shipped #37ah-backend covers the broker portal backend scope, move any remaining TMO sync note under #dzmm-writeback-replay, then resolve #37ah from review.
 - [ ] [#dropbox-sync-contract] Dropbox sync adapter prep: design the R2_DOCUMENTS<->Dropbox sync contract, D1 sync-log schema, tombstone/idempotency rules, and mocked adapter tests so real Dropbox credentials can be wired without reworking the flow. Advances #dropbox-sync-adapter.
 <!-- /agent:backlog -->
 
@@ -259,7 +272,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - [/] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.
 - [/] [#zwws] [recommended] Investor dashboard rework — remaining phases are externally gated: 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 6 new-deal email + workflow-priority dashboard (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P2b interest-button + distributions/statements cleanup (efs cd4253a), P3 simplified portfolio (8d40c66), P5 accreditation→annual Requirements (efs 1957f64). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
 - [/] [#next-steps] Remaining EFS workers.dev production state: D1 API token unblocked; migrations 0025/0026 are already applied; Cloudflare Access env vars are deployed for /login/access-callback on workers.dev using the one-time PIN IdP. Custom domain cutover remains intentionally deferred; true Google Workspace SSO remains gated on Google admin credentials.
-- [/] [#37ah] [recommended] Broker portal backend — D1-backed submit-deal, pipeline, commissions, documents, and notifications shipped (#37ah-backend, 2026-06-13). Remaining: TMO writeback sync, gated on #dzmm (TMO write field map #7a4d / six-question support email #k2xg).
 - [/] [#dzmm] TMO webhooks UNAVAILABLE per operator (2026-06-13). Read-side tightened polling is shipped (scheduled tmo-sync with configurable interval + due-gating + tmo_cache read mirror). Remaining gated: EFS to TMO writeback (tmo_cache_outbox replay) needs the #7a4d write field map + #k2xg support answers before it can replay.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 <!-- /agent:review -->

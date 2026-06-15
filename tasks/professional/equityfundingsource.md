@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -233,7 +233,26 @@ Verification: no app code changed, so no app tests were run. This cycle is a doc
 Confidence: high; the done archive, migration/repo/routes coverage, PRD, and broker portal tests all point to #37ah-backend as the completed broker backend scope, with TMO writeback intentionally split to #dzmm.
 
 Escalation: none.
-<!-- agent:boundary:e285d534 -->
+
+### Re: Dropbox sync contract — gpt-5
+
+> **Queue prompt:**
+>
+> [#dropbox-sync-contract]
+
+
+Implemented #dropbox-sync-contract. The EFS app now has a Dropbox sync contract centered on the shared `documents` pool: R2 remains the source of truth, Dropbox paths are deterministic from the R2 key, local D1 tombstones delete only the Dropbox mirror, remote revision drift becomes an explicit conflict, and sync attempts have stable idempotency keys.
+
+Changed paths: `src/equityfundingsource-dev/app/equityfundingsource/lib/document-dropbox-sync.ts`; `src/equityfundingsource-dev/app/equityfundingsource/lib/document-storage.ts`; `src/equityfundingsource-dev/app/equityfundingsource/migrations/0066_document_dropbox_sync_contract.sql`; `src/equityfundingsource-dev/tests/dropbox-sync-contract.test.ts`; `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`; `tasks/professional/equityfundingsource.md` via this closeout.
+
+Commands: `agent_doc_preflight`; `agent_doc_plan`; `agent_doc_read`; `tsift status`; targeted source/contract searches with `tsift --envelope search`; `bun test tests/dropbox-sync-contract.test.ts tests/document-cache.test.ts`; `tsift --envelope digest-runner --kind test --path . --shell-command 'bun run check'`; `tsift test-digest ...`; `gh run list --workflow CI --limit 1`; `gh workflow list`; `git diff --check -- ...`.
+
+Verification: targeted tests passed: 10 tests, 0 failures. Full project check passed through `bun run check`: 716 tests passed, app build passed, worker build passed. The digest reported one `d1 down` log line, but the raw test output shows it is the expected non-fatal outbox-enqueue error-path test and the suite exited 0. `gh run list --workflow CI --limit 1` could not find a workflow named `CI`, and `gh workflow list` returned no workflows, so there was no CI run to inspect.
+
+Confidence: high. The contract has executable planner/mock tests plus migration and PRD assertions, and the existing R2 document cache tests still pass.
+
+Escalation: none. Existing unrelated dirty EFS/admin UI files were left untouched.
+<!-- agent:boundary:54e50a46 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -241,21 +260,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~[#dzmm-writeback-replay]~~
-- ~~[#xcvg-prod-email]~~
-- ~~[#jnzs-approval-followup]~~
-- ~~[#67v2-auto-advance]~~
-- ~~[#zwws-vestings-local]~~
-- ~~[#zwws-new-deal-email]~~
-- ~~[#efs-cutover-sso-plan]~~
-- ~~[#37ah-review-dedupe]~~
-- [#dropbox-sync-contract]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dropbox-sync-contract] Dropbox sync adapter prep: design the R2_DOCUMENTS<->Dropbox sync contract, D1 sync-log schema, tombstone/idempotency rules, and mocked adapter tests so real Dropbox credentials can be wired without reworking the flow. Advances #dropbox-sync-adapter.
 <!-- /agent:backlog -->
 
 ## Review
@@ -273,7 +282,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - [/] [#zwws] [recommended] Investor dashboard rework — remaining phases are externally gated: 4 vestings/special-instructions (TMO writeback-gated #dzmm/#k2xg/#7a4d); 6 new-deal email + workflow-priority dashboard (#f4rq). Shipped: P1 nav (30037e3), P2 dashboard-composite landing (3e06907), P2b interest-button + distributions/statements cleanup (efs cd4253a), P3 simplified portfolio (8d40c66), P5 accreditation→annual Requirements (efs 1957f64). Plan: src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md. Queue one phase at a time.
 - [/] [#next-steps] Remaining EFS workers.dev production state: D1 API token unblocked; migrations 0025/0026 are already applied; Cloudflare Access env vars are deployed for /login/access-callback on workers.dev using the one-time PIN IdP. Custom domain cutover remains intentionally deferred; true Google Workspace SSO remains gated on Google admin credentials.
 - [/] [#dzmm] TMO webhooks UNAVAILABLE per operator (2026-06-13). Read-side tightened polling is shipped (scheduled tmo-sync with configurable interval + due-gating + tmo_cache read mirror). Remaining gated: EFS to TMO writeback (tmo_cache_outbox replay) needs the #7a4d write field map + #k2xg support answers before it can replay.
-- [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
+- [/] [#dropbox-sync-adapter] Dropbox sync adapter: #dropbox-sync-contract shipped the shared documents Dropbox metadata, document_sync_logs idempotency schema, pure sync planner, and mocked adapter tests. Remaining: after Dropbox access is available, wire the real credential-backed worker to push/pull R2_DOCUMENTS with retries, backfill, tombstone replay, and per-document sync logs.
 <!-- /agent:review -->
 
 ## Completed / Reaped

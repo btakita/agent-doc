@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -60,7 +60,27 @@ Done and deployed. When a lender applies to fund a deal (`investor_fund_status =
 **Verification:** `bun run check` green — 695 tests pass (added `#pending-deals` coverage in `investor-portal-e2e.test.ts`), build + worker bundle clean. Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `61df3c82`).
 
 Commits: submodule `aba09cf`, superproject pointer bump `a0714f59d`.
-<!-- agent:boundary:ef2e1259 -->
+
+### Re: Applied deal still in Available deals — opus-4-8
+
+> **Queue prompt:**
+>
+> An applied for deal is still in Available deals ![img_15.png](img_15.png) on https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals#investor-lender-application-form
+
+
+Root cause: my first pass treated "apply for a deal" as a per-deal **funding commitment** (`investor_fund_status === 'pending'`). But the live DB shows no funds and no interests — only a **pending lender account application** (`lender_requests.status = 'pending'`). That's the action behind `#investor-lender-application-form`: the lender submitted the account application and is awaiting EFS approval. The deal in your screenshot (PO Box 571 - TD, 0% committed, empty heart) had no fund, so my fund-only filter left it in Available.
+
+**Fix** — the Pending deals section now also covers the account-application case:
+- A deal is **pending** when `lender_request_status === 'pending'` (applied, awaiting review, no registered lender account yet) **or** `investor_fund_status === 'pending'` (funding commitment awaiting acceptance).
+- While the application is pending, browseable deals leave **Available deals** and render under **Pending deals** with an **"Application under review"** badge; a committed-funding deal still shows **"Funding pending review"**.
+- Applied on both the available-deals page (`available_deals.tsx`) and the dashboard preview (`dashboard.tsx`).
+
+**Verified:** `bun run check` green — 695 tests pass (extended `#pending-deals` coverage for the lender-application gate), build + worker bundle clean.
+
+**Committed + pushed** (per `#spec-test-commit-push`): submodule `60a07f5` → origin/main, superproject pointer `bc0ec6283` → origin/main.
+
+⚠️ **Not deployed** — this preset is commit + push only. The currently-live worker (`61df3c82`) still has the fund-only logic, so the bug persists on the live site until a deploy. Say the word (or use `#…-deploy`) and I'll run `bun run deploy:worker`.
+<!-- agent:boundary:870b9aa2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,7 +88,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- An applied for deal is still in Available deals ![img_15.png](img_15.png) on https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals#investor-lender-application-form
 <!-- /agent:queue -->
 
 ## Backlog

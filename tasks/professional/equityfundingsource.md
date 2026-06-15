@@ -38,7 +38,10 @@ committed
 Compacted content:
 - Archived 3 response topic(s): Available Deals lender workflow; commit + push all dirty EFS files.; deploy
 - Prior summary/context: prior compacted content: Archived 9 response topic(s): investor pipeline resequence; lender vs deal pipeline; lender/...
-<!-- agent:boundary:e71b0aab -->
+Preflight is clean now.
+
+I rebuilt the stale agent-doc sidecars from the current EFS document with `agent-doc reset --from-current ...`, then reran preflight. It recovered and committed the document state, and now reports `no_changes: true` with no queue continuation. No repo work was needed.
+<!-- agent:boundary:ead2138c -->
 <!-- /agent:exchange -->
 ###
 <!--

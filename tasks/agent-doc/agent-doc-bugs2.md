@@ -32,16 +32,37 @@ queue: start
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260615-080022.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260615-083352.md`*
 
 Compacted content:
-❯ - Archived 1 response topic(s): JB Run Agent Doc Codex Trigger
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+- Archived 3 response topic(s): JB Run Agent Doc Drafted Reopen; JB Run Agent Doc Drafted Reopen; Codex Finalize Error
+- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
+- Confidence: high. The fix is narrow, covered by focused tests, and the full local check suite passed.
+- Escalation: none.
+- The `src/agent-doc` submodule had a broad pre-existing dirty tree; I staged and committed only the five intended files for this bug.
+- parent repo: `b19594282 agent-doc: update routed trigger submit fix`
+- `src/agent-doc`: `4345a2f9 fix: submit drafted routed triggers without stacking`
+- `gh run list --workflow CI --limit 1` -> latest `CI` on `main` completed successfully
+- `agent-doc --version` -> `agent-doc 0.34.1`
+- `cargo install --path .`
+- `make check`
+- `cargo test -p agent-doc-orchestration direct_pane_resubmit --lib`
+- `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection --lib`
+- `cargo fmt --check`
+- Updated `README.md`, `VERSIONS.md`, `specs/08a-session-actor-contract.md`, and `editors/jetbrains/SPEC.md` with the new contract.
+- Added coverage for current duplicate drafts, stale scrollback, harness scoping, and wrapped long paths.
+- The existing post-send one-shot Enter retry now shares the same helper/proof logging as the new pre-send drafted-trigger path.
+- Stale scrollback is guarded: a visible trigger with a later idle prompt below it is not treated as active draft input.
+- `agent-doc-orchestration/src/route/dispatch.rs` now checks the recent direct-pane capture before appending a routed trigger. If the exact same `agent-doc <FILE>` trigger is already visible in a Codex or Claude composer, route sends one bare `Enter` and polls acceptance instead of appending another copy.
+- Push will happen after this closeout commit exists; I will push the submodule and parent repo immediately after closeout.
+- No actionable follow-up items from this cycle.
+- No actionable follow-up items from this cycle.
 
-### Re: JB Run Agent Doc Drafted Reopen — gpt-5
+### Re: Codex MCP Permission Prompts — gpt-5
 
 > **Queue prompt:**
 >
+> Codex finalize error
 > ```
 > • Finalize’s backlog-capture guard interpreted the closeout note as a possible follow-up. I’m rerunning with an explicit
 >   no-follow-up marker; no code or doc content was written by the failed attempt.
@@ -75,90 +96,42 @@ Compacted content:
 > ```
 
 
-Implemented the route-side fix for the JetBrains `Run Agent Doc` reopen path.
+Configured the project-local Codex MCP server so `agent-doc` tools do not fall back to fresh approval prompts after reinstall.
 
 What changed:
-- `agent-doc-orchestration/src/route/dispatch.rs` now checks the recent direct-pane capture before appending a routed trigger. If the exact same `agent-doc <FILE>` trigger is already visible in a Codex or Claude composer, route sends one bare `Enter` and polls acceptance instead of appending another copy.
-- Stale scrollback is guarded: a visible trigger with a later idle prompt below it is not treated as active draft input.
-- The existing post-send one-shot Enter retry now shares the same helper/proof logging as the new pre-send drafted-trigger path.
-- Added coverage for current duplicate drafts, stale scrollback, harness scoping, and wrapped long paths.
-- Updated `README.md`, `VERSIONS.md`, `specs/08a-session-actor-contract.md`, and `editors/jetbrains/SPEC.md` with the new contract.
+- `.codex/config.toml` now sets `default_tools_approval_mode = "approve"` under `[mcp_servers.agent-doc]`.
+- The existing per-tool approvals for `agent_doc_read`, `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_session_check`, and `agent_doc_finalize` remain in place.
+
+Why this avoids the stall:
+- The current Codex manual says MCP servers are configured in user or trusted project `config.toml`, and each server supports `default_tools_approval_mode` with `auto`, `prompt`, or `approve`, plus per-tool `approval_mode` overrides.
+- The broader `approval_policy = "never"` / danger-full-access path would suppress more than MCP prompts, so the server-scoped approval default is the narrow fix for this repo.
+- If a prompt still appears after reinstall, it is probably not this project-local `mcp_servers.agent-doc` tool approval path. The next checks would be whether the prompt is coming from a plugin-provided MCP namespace (`plugins.<id>.mcp_servers...`) or from OAuth/login, which must be handled separately.
 
 Verification:
-- `cargo fmt --check`
-- `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection --lib`
-- `cargo test -p agent-doc-orchestration direct_pane_resubmit --lib`
-- `make check`
-- `cargo install --path .`
-- `agent-doc --version` -> `agent-doc 0.34.1`
-- `gh run list --workflow CI --limit 1` -> latest `CI` on `main` completed successfully
+- `codex mcp list` parsed the config and showed `agent-doc` enabled.
+- `make check` passed.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`.
+- `gh run list --limit 3` showed the only workflow (`Agent Doc`) is failing before runner startup because GitHub reports an account billing/spending-limit annotation; no failed-job logs were available.
 
-Commits created:
-- `src/agent-doc`: `4345a2f9 fix: submit drafted routed triggers without stacking`
-- parent repo: `b19594282 agent-doc: update routed trigger submit fix`
+Commit:
+- `553b22ce0 codex: approve agent-doc mcp tools`
 
-Notes:
-- The `src/agent-doc` submodule had a broad pre-existing dirty tree; I staged and committed only the five intended files for this bug.
-- Escalation: none.
-- Confidence: high. The fix is narrow, covered by focused tests, and the full local check suite passed.
-- No actionable follow-up items from this cycle.
-- Push will happen after this closeout commit exists; I will push the submodule and parent repo immediately after closeout.
-❯ - No actionable follow-up items from this cycle.
-❯ - Confidence: high. The fix is narrow, covered by focused tests, and the full local check suite passed.
-❯ - Escalation: none.
-❯ - The `src/agent-doc` submodule had a broad pre-existing dirty tree; I staged and committed only the five intended files for this bug.
-❯ - parent repo: `b19594282 agent-doc: update routed trigger submit fix`
-❯ - `src/agent-doc`: `4345a2f9 fix: submit drafted routed triggers without stacking`
-❯ - `gh run list --workflow CI --limit 1` -> latest `CI` on `main` completed successfully
-❯ - `agent-doc --version` -> `agent-doc 0.34.1`
-❯ - `cargo install --path .`
-❯ - `make check`
-❯ - `cargo test -p agent-doc-orchestration direct_pane_resubmit --lib`
-❯ - `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection --lib`
-❯ - `cargo fmt --check`
-❯ - Updated `README.md`, `VERSIONS.md`, `specs/08a-session-actor-contract.md`, and `editors/jetbrains/SPEC.md` with the new contract.
-❯ - Added coverage for current duplicate drafts, stale scrollback, harness scoping, and wrapped long paths.
-❯ - The existing post-send one-shot Enter retry now shares the same helper/proof logging as the new pre-send drafted-trigger path.
-❯ - Stale scrollback is guarded: a visible trigger with a later idle prompt below it is not treated as active draft input.
-❯ - `agent-doc-orchestration/src/route/dispatch.rs` now checks the recent direct-pane capture before appending a routed trigger. If the exact same `agent-doc <FILE>` trigger is already visible in a Codex or Claude composer, route sends one bare `Enter` and polls acceptance instead of appending another copy.
+Escalation: none.
+Confidence: medium-high; this is the documented Codex config surface for MCP tool approval, and it is scoped to the trusted project-local agent-doc server.
+Push: I will push `main` immediately after this binary-owned closeout commit exists so both the config commit and session-document commit are published.
 
-### Re: JB Run Agent Doc Drafted Reopen — gpt-5
-
-Implemented the route-side fix for the JetBrains `Run Agent Doc` reopen path.
-
-What changed:
-❯ - `agent-doc-orchestration/src/route/dispatch.rs` now checks the recent direct-pane capture before appending a routed trigger. If the exact same `agent-doc <FILE>` trigger is already visible in a Codex or Claude composer, route sends one bare `Enter` and polls acceptance instead of appending another copy.
-❯ - Stale scrollback is guarded: a visible trigger with a later idle prompt below it is not treated as active draft input.
-❯ - The existing post-send one-shot Enter retry now shares the same helper/proof logging as the new pre-send drafted-trigger path.
-❯ - Added coverage for current duplicate drafts, stale scrollback, harness scoping, and wrapped long paths.
-❯ - Updated `README.md`, `VERSIONS.md`, `specs/08a-session-actor-contract.md`, and `editors/jetbrains/SPEC.md` with the new contract.
-
-Verification:
-❯ - `cargo fmt --check`
-❯ - `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection --lib`
-❯ - `cargo test -p agent-doc-orchestration direct_pane_resubmit --lib`
-❯ - `make check`
-❯ - `cargo install --path .`
-❯ - `agent-doc --version` -> `agent-doc 0.34.1`
-❯ - `gh run list --workflow CI --limit 1` -> latest `CI` on `main` completed successfully
-
-Commits created:
-❯ - `src/agent-doc`: `4345a2f9 fix: submit drafted routed triggers without stacking`
-❯ - parent repo: `b19594282 agent-doc: update routed trigger submit fix`
-
-Notes:
-❯ - The `src/agent-doc` submodule had a broad pre-existing dirty tree; I staged and committed only the five intended files for this bug.
-❯ - Escalation: none.
-❯ - Confidence: high. The fix is narrow, covered by focused tests, and the full local check suite passed.
-- No actionable follow-up items from this cycle.
-❯ - Push will happen after this closeout commit exists; I will push the submodule and parent repo immediately after closeout.
-
-### Re: Codex Finalize Error — gpt-5
-
-Closed the repair-only cycle after the MCP transport dropped during finalize. The prior closeout response and commits were recovered into the exchange; this cycle made no code changes.
-
-No actionable follow-up items from this repair cycle.
-<!-- agent:boundary:4234e178 -->
+No actionable follow-up items from this cycle.
+- `.codex/config.toml` now sets `default_tools_approval_mode = "approve"` under `[mcp_servers.agent-doc]`.
+- The existing per-tool approvals for `agent_doc_read`, `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_session_check`, and `agent_doc_finalize` remain in place.
+- The current Codex manual says MCP servers are configured in user or trusted project `config.toml`, and each server supports `default_tools_approval_mode` with `auto`, `prompt`, or `approve`, plus per-tool `approval_mode` overrides.
+- The broader `approval_policy = "never"` / danger-full-access path would suppress more than MCP prompts, so the server-scoped approval default is the narrow fix for this repo.
+- If a prompt still appears after reinstall, it is probably not this project-local `mcp_servers.agent-doc` tool approval path. The next checks would be whether the prompt is coming from a plugin-provided MCP namespace (`plugins.<id>.mcp_servers...`) or from OAuth/login, which must be handled separately.
+- `codex mcp list` parsed the config and showed `agent-doc` enabled.
+- `make check` passed.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`.
+- `gh run list --limit 3` showed the only workflow (`Agent Doc`) is failing before runner startup because GitHub reports an account billing/spending-limit annotation; no failed-job logs were available.
+- `553b22ce0 codex: approve agent-doc mcp tools`
+<!-- agent:boundary:d763435a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -198,6 +171,7 @@ Codex finalize error
             Transport closed
 ```
 ---
+- ~~:pushpin: Codex asks for MCP permissions every reinstall. This stalls loops. How can we avoid this permission request?~~
 - JB `Run Agent Doc` on Codex sends `agent-doc tasks/monsterrodholders.md` to the Codex input, but does not submit. #simworld
 - Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.
 ---

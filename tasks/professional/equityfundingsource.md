@@ -164,7 +164,21 @@ Escalation: none.
 
 
 I can’t execute `/clear` from inside this already-loaded model context, and I will not process `#zwws-new-deal-email` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so that queue head runs with fresh context.
-<!-- agent:boundary:7d6fef1e -->
+
+### Re: Investor new-deal email — gpt-5
+
+I resolved the dropped-queue state for `#zwws-new-deal-email` and marked the exact backlog item done based on the current repo evidence.
+
+The workflow-priority dashboard half is already shipped: `investor_action_items_` and `investor_has_urgent_` drive the investor dashboard `Needs attention` panel, with available deals leading when nothing is urgent. The new-deal email path is also wired: publishing a deal through `admin_loans_by_id_deal_POST_` calls `notify_deal_published_for_loan_`, which sends `deal_published_investor_email_` to active investor users with a `/portal-investor/deals/:id` review link. Delivery uses the shared Cloudflare/local-capture email layer, so dev/test captures locally when delivery is not configured.
+
+The remaining production-domain concern is not this queue item: `wrangler.toml` still uses `EFS_EMAIL_FROM = "Equity Funding Source <info@briantakita.me>"`, and switching to an EFS-verified sender stays tracked by `#f4rq`.
+
+Changed paths: `tasks/professional/equityfundingsource.md` only.
+Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`, `sed -n ...` for investor dashboard, deal publish, lifecycle email, local capture, tests, and env config.
+Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
+Confidence: high that this resolves the interrupted queue-removal guard for `#zwws-new-deal-email` without duplicating shipped work.
+Escalation: none.
+<!-- agent:boundary:d6abb334 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -186,7 +200,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#zwws-new-deal-email] [recommended] Investor dashboard phase 6 email half: implement new-deal notification in test-mode delivery with workflow-priority dashboard links and production send gated on #f4rq. Advances #zwws.
 - [ ] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
 - [ ] [#37ah-review-dedupe] [recommended] Broker portal review closeout: verify the shipped #37ah-backend covers the broker portal backend scope, move any remaining TMO sync note under #dzmm-writeback-replay, then resolve #37ah from review.
 - [ ] [#dropbox-sync-contract] Dropbox sync adapter prep: design the R2_DOCUMENTS<->Dropbox sync contract, D1 sync-log schema, tombstone/idempotency rules, and mocked adapter tests so real Dropbox credentials can be wired without reworking the flow. Advances #dropbox-sync-adapter.

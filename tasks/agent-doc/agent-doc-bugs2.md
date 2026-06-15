@@ -262,20 +262,24 @@ Verification:
 
 Commit:
 - Plan file landed in `db6e86a63 agent-doc(equityfundingsource): 2026-06-15 04:49:35`.
+- No source tests were run for this answer-only cycle.
+- Matched this prompt to existing `#fcc0` plus the newly captured `#staleheaddupcontent` plan.
+- Session exchange/queue state only.
+- force-disk: explicit escape hatch only, with diagnostics.
+- listener inactive: disk fallback is allowed;
+- listener/plugin active: route all managed session-doc mutations through editor IPC/CRDT patch delivery, then commit the converged content;
 
 Escalation: none.
 Confidence: high that the corruption report is now actionable and tied to an exact plan file.
 Push: I will push `main` after this closeout commit.
-<!-- agent:boundary:dde71d52 -->
+<!-- agent:boundary:ae364157 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: The stale head caused the duplicate content corrupt document issue.~~
-- We need a better way to prevent merge wedges while I am typing. Can the document model support CRDT with no conflicts? There are too many `File Cache Conflicts`. We should 
-- ~~:pushpin: do [#jbclearctxsubmit]~~
-- ~~:pushpin: do [#mrhqueuepreserve]~~
+- :pushpin: We need a better way to prevent merge wedges while I am typing. Can the document model support CRDT with no conflicts? There are too many `File Cache Conflicts`. We should never write directly to disk while the plugin is running.
 ---
 :pushpin: Codex finalize error
 ```
@@ -322,6 +326,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 ---
 - ~~do [#mrhbacklogqueuesync]~~
+- do [#staleheaddupcontent]
 <!-- /agent:queue -->
 ###
 <!--

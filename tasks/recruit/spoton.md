@@ -125,15 +125,31 @@ The part I am tightening now is the move from a turn-based agent workflow into r
 So the release work is mostly about making that reliable: better merge/recovery paths, cleaner queue behavior, architecture changes around state ownership, and SimWorld coverage for the edge cases. I can work productively with it today because I know the system and there is enough redundancy, but a new user still needs a smoother first-run path.
 
 I want to respect your time, so I would rather send it once the docs, website, examples, and intro videos make the workflow clear without me walking you through my setup. When it is there, I would love for you to try it out.
-<!-- agent:boundary:bb1d54ea -->
+
+### Re: Final shorter Rafael note — gpt-5
+
+Here is a tighter version with the new details:
+
+Hi Rafael, quick update on agent-doc. I am going to hold off a bit before sending you a release link because I want your first impression to be a good one. I originally thought I was a couple of days away, but I was too optimistic about one of the architecture changes.
+
+The core workflow is useful for me, and I am dogfooding it every day: markdown docs as the interface to agents, queues/backlogs for work, edits while turns are running, and strict preflight/write/session-check paths so the work stays durable.
+
+The hard part now is moving from a turn-based agent workflow into real-time editing and queue management. That creates edge cases around editor writes, agent responses, queue state, commits, restarts, and reinstalls across Claude Code, Codex, and OpenCode. I have been working through that with the Project Control Pane/Supervisor refactor, SimWorld and SimEditor testing, and multi-editor support since I use JetBrains IDEA but many people use VS Code-based editors.
+
+I can be productive with it today because I know the system and there is enough redundancy, but a new user still needs a smoother first-run path. I want to respect your time, so I would rather send it once the docs, website, examples, and intro videos make the workflow clear without me walking you through my setup. When it is there, I would love for you to try it out.
+
+> **Queue prompt:**
+>
+> I edited the response. Stop adding the team using agent-doc. You also did not add anything about transitioning from turn based to real-time editing and queue management.
+<!-- agent:boundary:5319daee -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- I edited the response. Stop adding the team using agent-doc. You also did not add anything about transitioning from turn based to real-time editing and queue management.
+- ~~I edited the response. Stop adding the team using agent-doc. You also did not add anything about transitioning from turn based to real-time editing and queue management.~~
 - Mention my Simworld, Simeditor, and multi-editor work (since I use JB Idea but most people use VSCode-based editors), etc. testing as well
-- Also mention my mis-estimate ()
+- Also mention my mis-estimate (more than a couple of days or so). I was optimistic about the Project Control Pane refactor to fix some classes of race conditions but some other complications, such as handling restarts + reinstalls using the PCP/Supervisor across all agent harnesses (Claude Code, Codex, Opencode) has taken some time to be robust across real-time edits.
 <!-- /agent:queue -->
 
 ## Backlog

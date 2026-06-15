@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,30 @@ committed
 Compacted content:
 - Archived 5 response topic(s): do [#cgw7]; last EFS call; deploy; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:f5b006f9 -->
+
+### Re: Investor dashboard annual-requirements alert — opus-4-8
+
+> **Queue prompt:**
+>
+> Add an alert in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard about requirements activity and if the investor needs to complete the annual requirements document. deploy
+
+
+Added a requirements alert to the investor dashboard and deployed it.
+
+**What it does** — A banner now renders near the top of `/portal-investor/dashboard` (under the topbar) telling the investor the status of their annual requirements (investor questionnaire + accreditation) and whether they need to complete the annual requirements document. It fetches live status from `/api/investor/accreditation` and links to the Requirements page (`/portal-investor/accreditation`).
+
+It only shows when there is something to do, so a verified-and-current investor sees no noise:
+- **pending** → "action needed" (red) → *Complete requirements*
+- **rejected** → "resubmission needed" (red) → *Resubmit requirements*
+- **expired** → "renewal overdue" (red) → *Renew requirements*
+- **verified + renewal window open** (`renewal_opens_at <= now`) → "renewal open" (amber, with the expiry date) → *Renew requirements*
+
+**Files** — `lib/ui--browser--efs/portal/investor/dashboard.tsx` (new `RequirementsAlert` + `requirements_alert_` logic, mirrors the accreditation view shape) and a source-assertion test in `tests/investor-portal-e2e.test.ts`.
+
+**Verification** — `bun run check` green: 701 tests pass (36 in the investor-portal e2e file), worker bundle built. Committed in the EFS submodule as `fa6c587`.
+
+**Deployed** — `bun run deploy:worker` succeeded → https://equityfundingsource.brian-takita.workers.dev (version `6b27ec05-5a48-4abe-8338-67897bb35a73`). Live now.
+<!-- agent:boundary:c11aefa6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +69,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Add an alert in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard about requirements activity and if the investor needs to complete the annual requirements document. deploy
 <!-- /agent:queue -->
 
 ## Backlog

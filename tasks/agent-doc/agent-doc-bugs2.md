@@ -444,7 +444,21 @@ The Codex Stop hook now treats fresh-context queue continuation as supervisor wo
 Verification completed: `cargo fmt --check`; `cargo test -p agent-doc-orchestration codex_hook::tests -- --nocapture`; `make check`; `cargo build --release`; `cargo install --path .`.
 
 I did not clear the remaining review items because those are separate bugs and were not implemented in this cycle.
-<!-- agent:boundary:72a4beb9 -->
+
+### Re: Queue Tasks And Preset Pause Repair — gpt-5
+
+You were right to call out the punt: I did not strike queue items this cycle unless there was code behind it. I implemented the actual dispatch-side `#qpresetstrike` repair in `src/agent-doc`.
+
+The controller now revalidates durable `queue_paused` reasons shaped like `<preset> preset head is spent` before dispatch. If the preset head is gone, it clears the stale pause; if the registered preset token is still the live queue head, it consumes that head through the canonical queue consumer, clears the pause, and lets dispatch proceed. Non-spent operator pauses still fail closed.
+
+Changed paths: `agent-doc-orchestration/src/project_controller/rpc.rs`, `agent-doc-orchestration/src/project_controller.rs`, `specs/02-document-format.md`, `specs/07-orchestration-commands.md`, `VERSIONS.md`.
+
+Commits: `6d65a12e` in `src/agent-doc` and parent pointer `8349da51a`. This complements the earlier Codex PCP/supervisor handoff fix in `f5ac694c`.
+
+Verification: `cargo fmt --check`; focused controller and queue-consume tests; full `make check`; `cargo build --release`; `cargo install --path .`.
+
+Preflight still reports the route-owned supervisor as stale; I’ll check closeout/session state next.
+<!-- agent:boundary:f18d4641 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -473,7 +487,7 @@ agent-doc Codex should use the PCP/supervisor to handle tasks that cannot be don
   equityfundingsource.md so that queue head runs with fresh context.
 ```
 ---
-- :pushpin: Fix `agent:backlog queue` not adding items to the backlog.
+- ~~:pushpin: Fix `agent:backlog queue` not adding items to the backlog.~~
 - :pushpin: #advance-review. This should add items to the backlog and since backlog has the `queue` attribute, the new backlog items should go into the queue.
 - :pushpin: agent-doc is not clearing the agent context when the context threshold is reached.
 <!-- /agent:queue -->
@@ -537,7 +551,6 @@ What are #next-steps to fix bugs?
 - [/] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [/] [#qdedup] [clean-session] Between-queue-turn trigger enqueue must de-duplicate: successive between-turn enqueues concatenated into one garbled trigger (`/clear /agent-doc <FILE>/agent-doc <FILE>`). Operator: stop the drain once a turn completes, insert into the inactive agent between turns, enqueue UNIQUE (one /clear, one /agent-doc <FILE>) landing once in the PCP/Supervisor between-turn stage. Compose next trigger as a deduped set, gate strictly to the inter-turn boundary, proof line between_turn_enqueue deduped=N. Related #qflood2/#qchurn/#clearcontresume. CLEAN session. Plan: tasks/agent-doc/plan-between-turn-trigger-dedup.md
 - [/] [#clearexchstale] [clean-session] JB Clear Exchange clears the exchange but the content comes back (from a stale HEAD/snapshot replay); same session, a deleted+retyped prompt also revived. Same disk-vs-buffer convergence family as #fcc0: a redeliver/replay path re-applies HEAD/snapshot over the cleared buffer, and clear does not advance the durable merge base. FIX: route clear through converge_document_or_disk + advance merge base; gate redeliver on fresh editor-buffer proof (#dvre/#eprf). CLEAN session. Plan: tasks/agent-doc/plan-jb-clear-exchange-stale-head-revival.md
-- [/] [#qpresetstrike] [clean-session] Preset-token queue head (a #name from prompt_presets, e.g. #advance-review) is unstrikeable by any agent path AND a spent preset head fails closed instead of auto-repairing. `queue consume` rejects it as id-backed (leading #), `--done`/`--pending-gate` reject it as not a backlog id, and `finalize` keeps the head — so it wedges queue_active=true and re-serves every /agent-doc invocation. LIVE-REPRO 2026-06-13 (efs): operator pressed JB Run Agent Doc expecting auto-repair; dispatch returned 'failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the - #advance-review line' (receipt 3426). The pause itself is correct (do not re-run a spent preset) but it fails CLOSED and prescribes a MANUAL line deletion instead of auto-striking the spent head — same fail-closed-instead-of-auto-repair family as #jbrestale. FIX: (1) classify a #-head against prompt_presets AND backlog/icebox before routing; a preset head should strike like a free-text head via consume + the finalize heuristic, while do[#id] heads stay on the --done path. (2) On a spent-preset queue_paused, JB Run / dispatch must auto-strike the spent preset head and re-dispatch the remaining queue ONCE (or cleanly close if empty), not surface a terminal error requiring manual line deletion. Workaround: strike ~~#name~~ + drop go + reset --from-current --preserve-session + commit. Relates to #qchurn/#goqueuestall/#jbrestale. Plan: tasks/agent-doc/plan-preset-queue-head-unstrikeable.md
 - [/] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [/] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse baselines/<hash>.md into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = resolve_current_doc(newest-of(disk,buffer)), NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
 - [/] [#efscodexsubmit] JB Run Agent Doc in equityfundingsource.md enters but does not submit the prompt to Codex (operator must press Enter). Same class as #2v7b/#jbcodexsubmit: Codex direct-pane dispatch (route.rs send_command_unchecked) detects prompt_not_submitted (merged text+CR not treated as submit by the Codex TUI) but has no Enter re-submit fallback. FIX: Codex-scoped one-shot Enter re-submit + route_submit_resubmit proof logging + SimWorld coverage (operator-requested). CLEAN session required (touches route.rs; submodule carries dirty #fintol tree). Plan: tasks/agent-doc/plan-jb-codex-submit.md

@@ -108,7 +108,23 @@ The stalled-queue state is now logged as an agent-doc bug and the live queue is 
 - `deploy` → `Run deploy (bun run deploy:worker) to ship the changes.` (`run` is recognized).
 
 Preflight now reports `queue_drainable_head_count=2` / `queue_continuation_required=true` — the queue will drain: next the multi-file CPA/attorney upload component, then deploy.
-<!-- agent:boundary:8ffc4f8f -->
+
+### Re: Multi-file upload for the CPA / attorney letter field — opus-4-8
+
+Already implemented and committed — no code change needed this cycle.
+
+The accreditation upload form (`lib/ui--browser--efs/portal/investor/accreditation.tsx`, `CompleteRequirementsForm`) already uses our standard multi-file upload component for the **"CPA / attorney letter or supporting document"** field:
+
+- **`FileDropZone`** with `multiple` (shared `portal/shared/ui.tsx` — renders `<input ... multiple>`, `onFiles` returns every selected/dropped file).
+- State is `files: File[]`; new selections accumulate (`set_files(prev => [...prev, ...fs])`).
+- **`SelectedFileList`** renders each chosen file with per-row remove.
+- Submit loops over `files`, POSTing each to `/api/investor/accreditation/upload`.
+- Drop-zone hint: "You can attach multiple files."
+
+This shipped in commit `5a0e0c4` ("investor requirements: multi-file CPA/attorney upload via standard component (#multi-file-list)"); working tree is clean. The same form backs both the `/portal-investor/accreditation` page and the dashboard Requirements dialog (`#req-dialog`), so multi-file works in both.
+
+Remaining queue head is the deploy (`bun run deploy:worker`) to ship it live — that drains next.
+<!-- agent:boundary:b9ef9fbe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,7 +132,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Add multi-file upload to the "CPA / attorney letter or supporting document" field in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation — the dialog should allow multiple files using our standard multi-file upload component.
+- ~~:pushpin: Add multi-file upload to the "CPA / attorney letter or supporting document" field in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation — the dialog should allow multiple files using our standard multi-file upload component.~~
 - :pushpin: Run deploy (bun run deploy:worker) to ship the changes.
 <!-- /agent:queue -->
 

@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -128,6 +128,16 @@ I want to respect your time, so I would rather send it once the docs, website, e
 
 ### Re: Final shorter Rafael note — gpt-5
 
+> **Queue prompt:**
+>
+> Also mention my mis-estimate (more than a couple of days or so). I was optimistic about the Project Control Pane refactor to fix some classes of race conditions but some other complications, such as handling restarts + reinstalls using the PCP/Supervisor across all agent harnesses (Claude Code, Codex, Opencode) has taken some time to be robust across real-time edits.
+
+
+> **Queue prompt:**
+>
+> Mention my Simworld, Simeditor, and multi-editor work (since I use JB Idea but most people use VSCode-based editors), etc. testing as well
+
+
 Here is a tighter version with the new details:
 
 Hi Rafael, quick update on agent-doc. I am going to hold off a bit before sending you a release link because I want your first impression to be a good one. I originally thought I was a couple of days away, but I was too optimistic about one of the architecture changes.
@@ -141,15 +151,12 @@ I can be productive with it today because I know the system and there is enough 
 > **Queue prompt:**
 >
 > I edited the response. Stop adding the team using agent-doc. You also did not add anything about transitioning from turn based to real-time editing and queue management.
-<!-- agent:boundary:5319daee -->
+<!-- agent:boundary:782d1e74 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~I edited the response. Stop adding the team using agent-doc. You also did not add anything about transitioning from turn based to real-time editing and queue management.~~
-- Mention my Simworld, Simeditor, and multi-editor work (since I use JB Idea but most people use VSCode-based editors), etc. testing as well
-- Also mention my mis-estimate (more than a couple of days or so). I was optimistic about the Project Control Pane refactor to fix some classes of race conditions but some other complications, such as handling restarts + reinstalls using the PCP/Supervisor across all agent harnesses (Claude Code, Codex, Opencode) has taken some time to be robust across real-time edits.
 <!-- /agent:queue -->
 
 ## Backlog

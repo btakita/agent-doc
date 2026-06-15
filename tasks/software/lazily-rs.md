@@ -39,11 +39,6 @@ queue: stop
 Compacted content:
 - Archived 2 response topic(s): queue go → off (no agent work pending); Make lazily-zig compliant with lazily-spec
 - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e...
-1. Add a small `formal/lean` or `src/lazily-spec/lean` Lake package.
-2. Model only `NodeId`, node state, graph edges, `Snapshot`, `Delta`, and `DeltaOp`.
-3. Prove three or four high-leverage theorems: sequential delta application preserves epoch monotonicity; non-sequential deltas are rejected; batch output has a coalesced frontier; eager signals publish materialized values.
-4. Mirror the existing conformance fixtures as Lean examples, but do not try to generate Rust yet.
-5. If `lake build` stays fast and the model stays small, add it to CI as a spec check.
 Evaluate Lean Language. Can this be useful for lazily-rs and lazily-spec and the rest of the lazily ecosystem?
 https://lean-lang.org/
 https://www.youtube.com/watch?v=oTDcJcvrfCU
@@ -71,7 +66,7 @@ Best first spike:
 I added a recommended backlog item for that spike. Sources inspected: [Lean homepage](https://lean-lang.org/), [Lean Language Reference](https://lean-lang.org/doc/reference/latest/), Lean use cases for [Aeneas/Rust verification](https://lean-lang.org/use-cases/aeneas/), [Veil/distributed protocol verification](https://lean-lang.org/use-cases/veil/), [Cedar production verification](https://lean-lang.org/use-cases/cedar/), and the captioned video [How Agents Quietly Break Architecture](https://www.youtube.com/watch?v=oTDcJcvrfCU). Locally, I checked `src/lazily-rs/README.md`, `src/lazily-rs/SPEC.md`, and `src/lazily-spec/protocol.md`.
 
 Cycle notes: no code changed and no test suite was run; this was a prompt-response evaluation. The YouTube pass used native captions with `--no-whisper` because no local Whisper API key is configured.
-<!-- agent:boundary:d154b7c8 -->
+<!-- agent:boundary:80c12b32 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,6 +75,7 @@ Cycle notes: no code changed and no test suite was run; this was a prompt-respon
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- do [#4zvn]
 <!-- /agent:queue -->
 
 ## Backlog

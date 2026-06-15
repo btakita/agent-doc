@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,95 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-031520.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-035459.md`*
 
 Compacted content:
-- Archived 5 response topic(s): Dashboard application notice needs a button to the form; Unify the "Lender account application; Remove "Lender account application; 2 more
+- Archived 4 response topic(s): Move applied deals to a Pending deals section + deploy; Applied deal still in Available deals; deploy; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Move applied deals to a Pending deals section + deploy — opus-4-8
-
-> **Queue prompt:**
->
-> When a Lender applies for a Deal, the deal should be moved from Available deals to a new Pending deals section in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard and https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals#investor-lender-application-form. deploy
-
-
-Done and deployed. When a lender applies to fund a deal (`investor_fund_status === 'pending'`), the deal now leaves the **Available deals** pool and surfaces in its own **Pending deals** section on both surfaces.
-
-**Available deals page** (`lib/ui--browser--efs/portal/investor/available_deals.tsx`)
-- New `pending_deals` filter (`=== 'pending'`); `available_deals` now excludes both `active` and `pending`.
-- New "Pending deals" section ("Deals you have applied to fund. EFS is reviewing your funding commitment.") rendered before Active funded deals.
-- Pending cards hide the "I'm interested" heart, show a **Funding pending review** badge, and are no longer selectable as the commitment-calculator target.
-- Page subtitle now counts pending deals alongside open + active.
-
-**Dashboard** (`dashboard.tsx`)
-- `AvailableDealsPreview` splits pending out into a new `PendingDealsPreview` card (same "Funding pending review" badge, opens the full deal dialog); the Available deals preview excludes pending.
-
-**Verification:** `bun run check` green — 695 tests pass (added `#pending-deals` coverage in `investor-portal-e2e.test.ts`), build + worker bundle clean. Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `61df3c82`).
-
-Commits: submodule `aba09cf`, superproject pointer bump `a0714f59d`.
-
-### Re: Applied deal still in Available deals — opus-4-8
-
-> **Queue prompt:**
->
-> An applied for deal is still in Available deals ![img_15.png](img_15.png) on https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals#investor-lender-application-form
-
-
-Root cause: my first pass treated "apply for a deal" as a per-deal **funding commitment** (`investor_fund_status === 'pending'`). But the live DB shows no funds and no interests — only a **pending lender account application** (`lender_requests.status = 'pending'`). That's the action behind `#investor-lender-application-form`: the lender submitted the account application and is awaiting EFS approval. The deal in your screenshot (PO Box 571 - TD, 0% committed, empty heart) had no fund, so my fund-only filter left it in Available.
-
-**Fix** — the Pending deals section now also covers the account-application case:
-- A deal is **pending** when `lender_request_status === 'pending'` (applied, awaiting review, no registered lender account yet) **or** `investor_fund_status === 'pending'` (funding commitment awaiting acceptance).
-- While the application is pending, browseable deals leave **Available deals** and render under **Pending deals** with an **"Application under review"** badge; a committed-funding deal still shows **"Funding pending review"**.
-- Applied on both the available-deals page (`available_deals.tsx`) and the dashboard preview (`dashboard.tsx`).
-
-**Verified:** `bun run check` green — 695 tests pass (extended `#pending-deals` coverage for the lender-application gate), build + worker bundle clean.
-
-**Committed + pushed** (per `#spec-test-commit-push`): submodule `60a07f5` → origin/main, superproject pointer `bc0ec6283` → origin/main.
-
-⚠️ **Not deployed** — this preset is commit + push only. The currently-live worker (`61df3c82`) still has the fund-only logic, so the bug persists on the live site until a deploy. Say the word (or use `#…-deploy`) and I'll run `bun run deploy:worker`.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-Deployed. The `#pending-deals` fix (a pending lender account application moves deals from Available → Pending deals) is now live.
-
-- **Cloudflare worker:** `https://equityfundingsource.brian-takita.workers.dev`
-- **Version:** `bf71d6ee-3e2c-457e-8809-db0b3e5af3ae` (replaces `61df3c82`, which had the fund-only logic).
-
-No code changes this cycle — deploy of the already-committed-and-pushed build (submodule `60a07f5`, superproject `bc0ec6283`). Reload the available-deals page and your applied deal should now sit under **Pending deals** with an "Application under review" badge.
-
-### Re: Email notifications for investor / broker / borrower events — opus-4-8
-
-> **Queue prompt:**
->
-> Do we have email notification setup for investor, broker, and borrower events?
-
-
-Mostly yes — **borrower and investor events are wired; broker events are not.** Transport is `email_send_or_capture_` → Cloudflare Email Sending API in prod (Resend key also supported), with local capture in dev.
-
-**Borrower (transactional email):**
-- Loan status updated → borrower (`notify_loan_status_updated_`)
-- Deal published / deal closed for their loan → borrower
-- Funding committed, wire confirmed → borrower
-- New message from admin → borrower (also an in-app `notifications` row)
-- Password reset (auth)
-
-**Investor (transactional email):**
-- Deal published / deal closed → all active investors
-- Investor interest submitted → staff + confirmation leg to the investor
-- Investor documents provided → investor
-
-**Broker — gap.** The broker portal backend (#37ah-backend) ships a read endpoint `GET /api/broker/notifications` that reads the shared `notifications` table, but **nothing writes broker notification rows and there is no broker email lifecycle** — `lib/broker/routes.ts` / `repo.ts` have zero `notification_create_` or `email_send` calls. So brokers have an inbox UI with no events feeding it.
-
-**In-app DB notifications** (`notification_create_` → `notifications` table) currently only fire for borrower messages (admin + borrower). The lifecycle events above are email-only, not mirrored to the in-app inbox.
-
-Filed `[recommended]` backlog item to wire broker email + in-app notifications.
-<!-- agent:boundary:38a52718 -->
+<!-- agent:boundary:a5663c07 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#cgw7]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -115,7 +115,25 @@ Confirmed closed. The fail-closed compact guard is committed **and live in the i
 **On the stale cdylib:** the installed `libagent_doc.so` (built `00:14:46`, before the commit) does **not** carry the guard string — but that is a non-issue. The guard lives in `agent-doc-orchestration/src/compact.rs`, and `src/ffi.rs` exposes **no** compact entry point: JB `Compact Exchange` shells out to the `agent-doc` binary (`compact … --commit`), not the FFI. So the guard is reachable from the JB path via the binary that already has it; the cdylib does not gate compaction.
 
 The uncommitted `VERSIONS.md` + `src/lib_install.rs` are the pre-existing `#autorecycle-on-install` work — left untouched, separate concern (not bundled), same as the prior cycle.
-<!-- agent:boundary:fe2209d5 -->
+
+### Re: do [#dupcontent] — structural guard on content_ours adoption (shipped) — opus-4-8
+
+Done — agent-doc `e11c218b` (superproject pointer `7e6b147a8`). The corruption the item describes (a bad CRDT merge ingested verbatim as the snapshot base and written to disk) can no longer land.
+
+**Root cause (per the plan).** When `finalize` falls back to adopting the stale-supervisor / live-editor buffer (`recovery=content_ours_snapshot_next_cycle`, `snap_source=ack_content_sidecar`), agent-doc took that buffer as the snapshot base **without structural validation**. If the buffer was itself a bad prior CRDT merge — duplicate singleton component blocks plus a truncated `&lt;!-- agent:queue tasks=" --&gt;` marker — that corruption went straight to disk; the lint-gate only flagged it *after* the bad write.
+
+**Fix (plan items #1 + #3 — validate before adopting, before the disk write):**
+- `agent-doc-core` — new `component::structural_corruption_reason(doc)` returns `Some(reason)` when a buffer has a parse failure, **>1 opening marker for any singleton component** (`exchange`/`status`/`queue`/`backlog`/`review`/`icebox`/`done`, collapsing the legacy `pending` alias), or an **unterminated double-quoted attribute** on a component open marker (the `tasks="` merge-boundary split). Non-singletons like `log` may still repeat.
+- `write/ipc.rs` — **both** `content_ours` adoption guards (`...against_live_prompt_drift` and `...against_prompt_duplication`) now run that check first and **refuse a corrupt buffer**, keeping the clean candidate snapshot and logging `content_ours_adoption_refused_structural file=... reason=duplicate_singleton_component:queue=2`. The corrupt buffer never reaches disk.
+
+**Safety.** A real marker carrying a *balanced* quoted attribute (`preset="#..."`) is untouched; only odd/unterminated quotes trip the gate. The positive-control test proves a structurally-clean `content_ours` that absorbs live drift is **still adopted** — the gate doesn't break the normal recovery path.
+
+**Verification.** `make check` green — **4488 passed**, clippy clean. New coverage: 7 validator unit tests (clean / dup-queue / backlog-alias-dup / unterminated-attr / balanced-attr / repeated-`log` / parse-failure) + 2 guard tests (corrupt refused without mutating the decision; clean still adopts). FlowCore token budget updated for the new `guard_`/`reason=` tokens.
+
+**Scope landed vs. remaining.** This closes the *reported corruption* (#1 pre-adoption validation + #3 validate-before-write). Two hardening items remain and are queued as **#dupcontent2**: (#2) fail closed when the serving supervisor is already classified `supervisor_binary_stale` (don't trust its buffer at all), and (#4) de-dup singleton blocks on parse to *repair* a recoverable buffer instead of only rejecting it.
+
+**Recovery note.** This very closeout hit the bug being fixed: the live route-owned supervisor (not yet on the new binary) fed a corrupt 40853-byte `content_ours` buffer that dropped the response + churned queue heads across three commits. Recovered deterministically via `reset --from-current --preserve-session` + `finalize --force-disk` (bypassing the corrupt IPC buffer). Not installed mid-session (`#no-mid-session-install`); the guard promotes — and stops this class of churn — on the next supervisor recycle.
+<!-- agent:boundary:d499cff5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -202,7 +220,8 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 :round_pushpin: do [#suprehotreload]
 - ~~:pushpin: do [#ar27-majors]~~
 - ~~:pushpin: do [#dupcontent]~~
-- :pushpin: do [#compactqattr]
+- ~~:pushpin: do [#compactqattr]~~
+- ~~:pushpin: do [#dupcontent2]~~
 <!-- /agent:queue -->
 ###
 <!--

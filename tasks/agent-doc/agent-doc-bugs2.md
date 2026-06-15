@@ -342,6 +342,16 @@ Push: I will push `main` after this closeout commit.
 
 > **Queue prompt:**
 >
+> :pushpin: Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.
+
+
+> **Queue prompt:**
+>
+> :pushpin: When I moved `- do [#staleheaddupcontent]`, agent-doc immediately struck it. Even though no work was done.
+
+
+> **Queue prompt:**
+>
 > do [#staleheaddupcontent]
 
 
@@ -373,15 +383,15 @@ Commit:
 Escalation: none.
 Confidence: high that the observed behavior is the `#qmisstrike` regression class.
 Push: I will push `main` after this closeout commit.
-<!-- agent:boundary:43149762 -->
+<!-- agent:boundary:ba097d5c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#staleheaddupcontent]~~
-- :pushpin: When I moved `- do [#staleheaddupcontent]`, agent-doc immediately struck it. Even though no work was done.
-- :pushpin: Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.
+- ~~:pushpin: When I moved `- do [#staleheaddupcontent]`, agent-doc immediately struck it. Even though no work was done.~~
+- ~~:pushpin: Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.~~
 ---
 :pushpin: JB `Run Agent Doc`
 ```

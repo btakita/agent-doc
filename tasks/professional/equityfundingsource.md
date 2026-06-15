@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,25 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-081957.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-084628.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Lender Ready advancement
+- Archived 1 response topic(s): Advance review
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Advance review — gpt-5
-
-> **Queue prompt:**
->
-> #advance-review
-
-
-I reviewed the eight gated review items and captured actionable backlog entries for the next work slices. The additions prioritize shared blockers first: TMO writeback replay now carries the remaining #dzmm/#37ah/#67v2/#zwws sync work, while #37ah gets a separate dedupe/closeout item because the broker backend itself is already archived as shipped.
-
-I left the existing review gates in place. Most are still waiting on external approval, credentials, or field-map answers, so the new backlog items are the concrete work that can complete or advance each review item without pretending those gates have cleared.
-
-Proof: changed paths are the session document via `agent-doc finalize`; no application code changed. Commands run: `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg` checks for existing done/review references and new ID collisions, and `agent-doc finalize`. Verification is document-level only; no tests were run because this cycle only triaged review items into backlog. Escalation: none.
-<!-- agent:boundary:6eff3d3f -->
+<!-- agent:boundary:11e3c492 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -59,6 +46,15 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- [#dzmm-writeback-replay]
+- [#xcvg-prod-email]
+- [#jnzs-approval-followup]
+- [#67v2-auto-advance]
+- [#zwws-vestings-local]
+- [#zwws-new-deal-email]
+- [#efs-cutover-sso-plan]
+- [#37ah-review-dedupe]
+- [#dropbox-sync-contract]
 <!-- /agent:queue -->
 
 ## Backlog

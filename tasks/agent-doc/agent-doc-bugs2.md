@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -414,6 +414,16 @@ This addresses the deleted-head accounting without pretending the heads were com
 
 > **Queue prompt:**
 >
+> :pushpin: JB `Run Agent Doc` must also send a simple `agent-doc tasks/agent-doc/agent-doc-bugs2.md` instead of the longform prompt.
+
+
+> **Queue prompt:**
+>
+> agent-doc lazily-rs.md lost the queue content
+
+
+> **Queue prompt:**
+>
 > :pushpin: Please restore the deleted queue items as backlog items
 
 
@@ -442,17 +452,6 @@ Escalation: live verification remains operator-owned for stale supervisor / JB p
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: Please restore the deleted queue items as backlog items~~
-- agent-doc lazily-rs.md lost the queue content
-~~~done
-:pushpin: JB `Run Agent Doc` on this file.
-```
-resync: pruned 1 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3541
-```
-~~~
-- :pushpin: JB `Run Agent Doc` must also send a simple `agent-doc tasks/agent-doc/agent-doc-bugs2.md` instead of the longform prompt.
 <!-- /agent:queue -->
 ###
 <!--

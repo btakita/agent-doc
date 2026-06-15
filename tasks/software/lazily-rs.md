@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -187,7 +187,21 @@ Done. Verified both URLs return `200` (`https://lazily-hub.github.io/lazily-rs/`
 - **`2026-06-14-lazily-slot-cell-signal-composition.md`** — same `· [docs] · [spec]` addition to its `Source:` line.
 
 Committed in the nested content submodule (`app/briantakita.me` `5a404a2`) and bumped the `briantakita.me-dev` pointer (`26dbbd8`). Not pushed — say the word and I'll push both.
-<!-- agent:boundary:46bf6bde -->
+
+### Re: Deploy briantakita.me — opus-4-8
+
+> **Queue prompt:**
+>
+> Deploy briantakita.me
+
+
+Deployed. briantakita.me ships via GitHub Actions → Cloudflare Pages on push to `main` (`.github/workflows/deploy.yml`: build + prerender, S3 asset sync, `wrangler pages deploy`, then a live smoke test). The deploy checks out submodules recursively, so I pushed both repos in order:
+
+1. **`app/briantakita.me`** content submodule → `origin/main` (`ef6cbbc..5a404a2`) — the lazily-posts link edits.
+2. **`briantakita.me-dev`** superproject → `origin/main` (`d8db4a4..26dbbd8`) — the pointer bump that triggers the deploy.
+
+The superproject push kicked off the deploy workflow — run **27522894972** (`Deploy to Cloudflare Pages`), currently **queued**. It self-verifies in CI via the built-in smoke test (`/`, `/about`, `/posts`, `/robots.txt` → 200 + asset check), so I'm not blocking on `gh run watch`. Once it goes green the new lazily-hub.github.io docs/spec links will be live on the three lazily posts.
+<!-- agent:boundary:9853e8fd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -196,7 +210,6 @@ Committed in the nested content submodule (`app/briantakita.me` `5a404a2`) and b
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Deploy briantakita.me
 <!-- /agent:queue -->
 
 ## Backlog

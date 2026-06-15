@@ -59,7 +59,28 @@ Verification:
 - No GitHub workflow named `CI` exists here (`gh workflow list` returned no workflows), so there was no latest CI run to inspect.
 
 Note: pre-existing unrelated dirty EFS files remain unstaged in the submodule.
-<!-- agent:boundary:b4f4dd43 -->
+
+### Re: commit + push all dirty EFS files. — gpt-5
+
+> **Queue prompt:**
+>
+> commit + push all dirty EFS files.
+
+
+Completed.
+
+Changed paths: staged and committed the 16 dirty files in `src/equityfundingsource-dev`, covering admin event/realtime refresh wiring, Dropbox document sync contract helpers, migration `0066_document_dropbox_sync_contract.sql`, and matching tests. The EFS submodule is now clean on `main...origin/main`.
+
+Commits and push:
+- EFS submodule: `77481d7 feat(admin): add realtime refresh and dropbox sync contract`, pushed to `btakita/equityfundingsource-dev` `origin/main`.
+- Superproject pointer: `8e0453828 chore: bump equityfundingsource submodule`, pushed to `btakita/agent-loop` `origin/main`.
+
+Verification:
+- `make check` passed in `src/equityfundingsource-dev`: 729 tests, app build, and worker build.
+- `gh run list --workflow CI --limit 1` found no workflow named `CI` in both the EFS submodule and superproject, so there was no latest CI run to inspect.
+
+Escalation: none. Confidence: high. Unrelated non-EFS dirty files remain in the superproject and were not staged.
+<!-- agent:boundary:ca565036 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,7 +88,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- commit + push all dirty EFS files.
+- ~~commit + push all dirty EFS files.~~
 - deploy
 <!-- /agent:queue -->
 

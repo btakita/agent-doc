@@ -637,6 +637,19 @@ Inspection commands used:
 - `rg -n "Ctrl|C-c|C-z|send_key|send-keys|control|interrupt|suspend|SIGINT|SIGTSTP|\\^C|\\^Z" agent-doc-orchestration/src src specs VERSIONS.md`
 - `tsift --envelope search "send_key control interrupt codex" --budget normal`
 - `tsift --envelope search "Ctrl C Ctrl Z Codex" --budget normal`
+- Latest checked GitHub Actions CI for the prior pushed `agent-doc` main commit was green.
+- `git diff --check`
+- `make check` passed: clippy, 4547 tests, doctests, and medium SimWorld gate
+- `cargo test -p agent-doc ops_summary_groups_tracked_events_by_file_and_session -- --nocapture`
+- `cargo test -p agent-doc test_cli_ops_summary_groups_ops_log_events -- --nocapture`
+- `cargo check -p agent-doc`
+- `cargo test -p agent-doc-orchestration non_codex_submit_modes_keep_existing_backends -- --nocapture`
+- `cargo test -p agent-doc-orchestration idle_queue_submit_mode_uses_literal_text_enter_key_for_codex_owner_pane -- --nocapture`
+- `cargo test -p agent-doc-orchestration direct_pane_submit_mode_is_harness_specific -- --nocapture`
+- `cargo test -p agent-doc-orchestration routed_trigger_submit_diagnostic_names_codex_real_enter_key -- --nocapture`
+- `cargo test -p agent-doc-orchestration codex_submit_mode_uses_literal_text_plus_real_enter_key -- --nocapture`
+- `3fb6810f9` in the parent repo: `agent-doc: update codex route submit`
+- `55b86a61` in `src/agent-doc`: `fix: submit codex routes with enter key`
 
 ### Re: backlog queue sync check — gpt-5
 
@@ -704,19 +717,21 @@ The fix clears only document-scoped stale-supervisor churn-stop pauses when a ne
 Changed paths in `src/agent-doc`: `agent-doc-orchestration/src/project_controller/rpc.rs`, `agent-doc-orchestration/src/project_controller.rs`, and `VERSIONS.md`. Parent repo gitlink updated to `src/agent-doc` `19fbd7821fad136c3cf2a77c2211c0c9752fc375`; parent commit `2a1cddc27` records that pointer.
 
 Verification passed in the clean worktree `src/agent-doc-qchurnfix`: `cargo test -p agent-doc-orchestration session_start_clears_stale_supervisor_queue_pause_before_dispatch -- --nocapture`; `cargo test -p agent-doc-orchestration dispatch_queue_paused_stale_supervisor_emits_restart_redirect_marker -- --nocapture`; `cargo check -p agent-doc`; `make check` with clippy, 4537 tests passed, 238 skipped, doctests passed, and the medium SimWorld gate passed. Latest GitHub Actions CI for `agent-doc` is running for `19fbd782` at closeout. Escalation none. Confidence high.
-<!-- agent:boundary:cf558fd8 -->
+<!-- agent:boundary:272cc145 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~Fix the root cause of "Re: queue churn explanation — gpt-5"~~
+- :round_pushpin: Codex JB `Run Agent Doc` is still sending a `\n` to Codex instead of submitting the command. We have used several turns and 1 `/goal` but it's still not working.
+- #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
 - do [#snbc2]
 - do [#codexctrlz]
-- Codex JB `Run Agent Doc` is still sending a `\n` to Codex instead of submitting the command. We have used several turns and 1 `/goal` but it's still not working.
 - do [#opverify-submit-proof]
 - do [#opverify-editor-proof]
 - do [#opverify-recycle-proof]
+- There's too many `[operator-verify]` tags...some of the items can be agent-done...such as I performed some actions and there are log messages. Don't punt on these issues. `agent:backlog` with `queue` should add the `[operator-verify]` to the queue for process. Once procesed by agent-doc, any item that truly requires operator action should go into `agent:review`.
 <!-- /agent:queue -->
 ###
 <!--
@@ -746,6 +761,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qrefmisstrike] [clean-session] Queue auto-strike must not delete free-text follow-up prompts that merely reference a completed/gated id. Repro: EFS `- What are #next-steps to follow-up on #gq5c` was auto-pinned, auto-struck as `source=review_gated`, the queue body was cleared, and the next cycle no-oped on the compact archive summary. Fix resolved-id extraction so only directive-shaped heads like `do [#id]`, `do #id`, `advance [#id]`, or bare `[#id]` auto-strike; keep natural-language `#next-steps` / follow-up prompts live. Plan: tasks/agent-doc/plan-queue-reference-id-misstrike.md.
 - [ ] [#opverify-submit-proof] [clean-session] Operator-verify submit proof sweep: correlate ops.log for #2v7b/#jbcodexsubmit/#jbclaudesubmit across Claude and Codex panes. Require paired proof per harness: route_submit_issue issue=prompt_not_submitted followed by route_submit_resubmit action=enter_key result=accepted with queue start evidence. If both exist, close/gate-resolve #2v7b; if one side is missing, update the item with the exact missing harness and latest log timestamp.
 - [ ] [#opverify-editor-proof] [clean-session] Operator-verify editor/IPC proof sweep: correlate #qt32, #fcc0-live-verify, #c2b6, and #rtwbcast-verify against ops.log markers write_authority action=routed, plugin_watch_readonly, supervisor_host_gate hosting=in-process, queue_consume_writeback transport=editor_ipc, compact_writeback transport=editor_ipc, and disproof markers live_prompt_drift_after_preflight / crdt_merge_base_overlay_stale / File Cache Conflict. Close only items with exact zero-drift proof; otherwise update each with missing marker(s).
 - [ ] [#opverify-recycle-proof] [clean-session] Operator-verify supervisor recycle proof sweep: correlate #suprehotreload, #recyclerestart-verify, #1j8q, #aazp, #4myd, #anw0verify, and #cleandrainsup-verify against ops.log markers supervisor_binary_stale_self_recycled, supervisor_reexec_failed fallback=continue_current_binary, dispatch_stale_generation_redirect, idle_queue_watch_context_reset, and subsequent drain/dispatch proof. Close duplicates with exact proof or update each item with the missing live step.

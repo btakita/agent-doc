@@ -162,6 +162,13 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                         continuation.head_prompt
                     );
                 }
+                // #degraded-ipc-no-stall: binary-authoritative "keep draining"
+                // guidance so the loop is not stalled on a degraded transport /
+                // stale supervisor / accretion / semantic-completion warning.
+                eprintln!(
+                    "[session-check] {}",
+                    crate::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE
+                );
                 if codex_final_gate {
                     if let Some(command) =
                         crate::queue_command::slash_command_text(&continuation.head_prompt)

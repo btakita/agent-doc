@@ -36,6 +36,23 @@ pub struct QueueContinuation {
     pub reason: String,
 }
 
+/// Shared non-stall guidance surfaced wherever `queue_continuation_required ==
+/// true`. Centralizing the wording keeps preflight JSON
+/// (`queue_continuation_guidance`) and `session-check` stdout in agreement
+/// (`#degraded-ipc-no-stall`).
+///
+/// The failure this guards against: a `finalize` that reached `committed` +
+/// `session-check ok` through the **file-IPC fallback** (socket ack timeouts /
+/// a stale or wedged route-owned supervisor) is a *successful* closeout — the
+/// in-session loop does not depend on the socket, because the file-IPC patch
+/// queue + CRDT merge already carried the commit. The agent must not invent a
+/// stop reason from the degraded transport. The ONLY closeout states that stop
+/// the loop are a FAILED closeout, a `session-check` interruption, or a
+/// `lint-gate` block. Degraded / file-IPC-fallback IPC, a stale or wedged
+/// supervisor, high session-accretion, a `semantic_completion_match` warning,
+/// and a `[clean-session]` head wanting "fresh context" are NOT stop reasons.
+pub const CONTINUATION_NO_STALL_GUIDANCE: &str = "queue continuation required — keep draining. A closeout that reached committed + session-check ok is successful EVEN via the file-IPC fallback (socket degraded / ack timeouts / stale supervisor): the in-session loop does not depend on the socket, the file-IPC patch queue + CRDT merge already carried the commit. Do NOT invent a stop reason from degraded transport. Only a failed closeout, a session-check interruption, or a lint-gate block stops the loop. Degraded IPC, a stale/wedged supervisor, high session-accretion, and semantic_completion_match warnings are NOT stop reasons.";
+
 /// Detect whether `file` currently requires queue continuation.
 ///
 /// True only when: frontmatter `queue_active: true`,
@@ -1026,6 +1043,29 @@ fn now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#degraded-ipc-no-stall`: the shared no-stall guidance must name the
+    /// degraded-transport circumstance and the exhaustive stop list so neither
+    /// preflight nor session-check can drift the wording into licensing a stall.
+    #[test]
+    fn continuation_guidance_names_degraded_ipc_and_exhaustive_stop_list() {
+        let g = CONTINUATION_NO_STALL_GUIDANCE;
+        assert!(g.contains("file-IPC"), "must name the file-IPC fallback");
+        assert!(
+            g.contains("committed") && g.contains("session-check"),
+            "must state the successful-closeout proof"
+        );
+        assert!(
+            g.contains("failed closeout")
+                && g.contains("session-check interruption")
+                && g.contains("lint-gate"),
+            "must enumerate the exhaustive stop list"
+        );
+        assert!(
+            g.contains("NOT stop reasons"),
+            "must say degraded IPC / stale supervisor / accretion are NOT stop reasons"
+        );
+    }
 
     fn write_doc(dir: &Path, prompts: &[&str], queue_active: bool, has_auto: bool) -> PathBuf {
         std::fs::create_dir_all(dir.join(".agent-doc/snapshots")).unwrap();

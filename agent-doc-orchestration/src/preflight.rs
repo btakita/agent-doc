@@ -449,6 +449,16 @@ pub struct PreflightOutput {
     /// depend on the route-owned supervisor being on the latest binary.
     #[serde(default)]
     pub queue_continuation_required: bool,
+    /// `#degraded-ipc-no-stall`: explicit non-stall guidance, populated only
+    /// when `queue_continuation_required == true`. Centralized in
+    /// [`crate::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE`] so the
+    /// agent has a binary-authoritative "keep draining" signal and does not
+    /// re-derive a stop reason by hand from a degraded transport (file-IPC
+    /// fallback / stale supervisor), session-accretion, or a
+    /// `semantic_completion_match` warning. Null when continuation is not
+    /// required.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_continuation_guidance: Option<String>,
     /// Bounded session-growth / churn advisory derived from local exchange and
     /// per-document cycle/session logs.
     #[serde(default, skip_serializing_if = "Option::is_none")]

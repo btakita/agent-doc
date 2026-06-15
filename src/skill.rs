@@ -149,6 +149,8 @@ When all of these hold, first run `agent-doc drain-claim <FILE>` to claim the dr
 
 Skip the auto-loop on any failed closeout, `session-check` interruption, or `lint-gate` block — those need explicit operator attention. Skip when `preflight.queue_active == false` (queue drained or halted) **or `preflight.queue_continuation_required == false`** (no loop-drainable head — only `[operator-verify]`/noise heads remain; looping would just churn a no-op `#qchurn` cycle, so report the remaining heads in one line and stop without pausing or punting). As of `#qcontdrain`, `[clean-session]` heads are loop-drainable and therefore keep `queue_continuation_required == true` — do **not** stop the loop on them; drain them in place. High session-accretion is **not** in that skip list — it is handled by the supervisor `/clear`-and-continue path above, not by stopping.
 
+**The skip list above is exhaustive — do NOT invent stop reasons from a degraded transport (`#degraded-ipc-no-stall`).** A `finalize` that printed `IPC socket degraded` / `falling back to file-IPC` / `IPC timeout — response saved as patch` / `CRDT merge successful` and still reached `committed` with `session-check` OK is a **successful closeout**, not a failed one — the in-session loop does not depend on the socket, because the file-IPC patch queue + CRDT merge already carried the commit. When `preflight.queue_continuation_required == true`, the binary emits `preflight.queue_continuation_guidance` (and `session-check` prints the same line) restating this; treat it as authoritative and keep draining. None of the following are stop reasons: degraded / file-IPC-fallback IPC, a stale or wedged route-owned supervisor, IPC ack timeouts on the last write, high session-accretion, a `semantic_completion_match` warning, or a `[clean-session]` head wanting "fresh context." A degraded or stale supervisor is the supervisor's own self-heal / recycle concern (it resumes on its own when the short-TTL drain lease expires) — it never licenses the loop to stall. Stalling a `true` continuation because the transport degraded is itself the bug.
+
 This section is Claude-Code-specific. Codex auto-loops via its `Stop` hook in `.codex/hooks.json`; OpenCode currently has no auto-loop. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) and `tasks/agent-doc/plan-claude-code-queue-auto-loop.md`.
 "#;
 
@@ -1140,6 +1142,20 @@ mod tests {
         assert!(
             rendered.contains("\"persisted\""),
             "auto-loop section must make persisted-active queues continuation-eligible (#active-queue-persisted-no-continue)"
+        );
+        // #degraded-ipc-no-stall: the skip list must be exhaustive and degraded
+        // transport must be named as NOT a stop reason.
+        assert!(
+            rendered.contains("#degraded-ipc-no-stall"),
+            "auto-loop section must carry the degraded-IPC no-stall rule"
+        );
+        assert!(
+            rendered.contains("file-IPC") && rendered.contains("not depend on the socket"),
+            "auto-loop section must say a file-IPC-fallback closeout is still successful and the loop does not depend on the socket"
+        );
+        assert!(
+            rendered.contains("queue_continuation_guidance"),
+            "auto-loop section must point at the binary-authoritative queue_continuation_guidance field"
         );
     }
 

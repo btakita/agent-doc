@@ -1178,6 +1178,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         queue_halted: queue_state.queue_halted,
         queue_drainable_head_count: queue_state.queue_drainable_head_count,
         queue_continuation_required: queue_state.queue_continuation_required,
+        queue_continuation_guidance: queue_state.queue_continuation_required.then(|| {
+            crate::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE.to_string()
+        }),
         session_accretion,
         pipeline,
     };

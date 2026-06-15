@@ -903,7 +903,13 @@ Coverage added:
 - `queued_exchange_prompt_diff_suppression_matches_moved_prompt_targets`
 
 Verification passed: focused tests, `cargo check -p agent-doc`, and local `make check` via tsift digest runner (`tart-f709e79ba9`).
-<!-- agent:boundary:2df752cc -->
+
+### Re: Stop blocking the turn on CI. Add this instruction to agent-doc's AGENTS.md. Passively check on CI but don't block the turn. It takes too long. — gpt-5
+
+Confirmed. The passive-CI rule is in `src/agent-doc/AGENTS.md`: CI is turn evidence, not a blocking gate; use one-shot checks such as `gh run list --workflow CI --limit 1`, record queued/in-progress/success/failure, and do not run `gh run watch` unless explicitly asked.
+
+I also fixed the queue-consume recovery bug exposed by this restart: stale discarded captures and undrainable leading queue notes can no longer be used as positional proof to strike the next free-text head. The incorrectly struck SimWorld queue line was restored, and the latest CI checks were observed passively only: agent-doc `CI` and parent `Agent Doc` were both `in_progress` when checked.
+<!-- agent:boundary:2d209c7d -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,126 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-035459.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-045133.md`*
 
 Compacted content:
-- Archived 4 response topic(s): Move applied deals to a Pending deals section + deploy; Applied deal still in Available deals; deploy; 1 more
+- Archived 5 response topic(s): do [#cgw7]; last EFS call; deploy; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: do [#cgw7] — wire broker email + in-app notifications — opus-4-8
-
-> **Queue prompt:**
->
-> do [#cgw7]
-
-
-Done. Broker events now generate in-app notifications and (opt-in) email. New module `app/equityfundingsource/lib/broker/notify.ts` with three triggers, wired into `lib/broker/routes.ts`:
-
-- **Deal submitted** (`POST /api/broker/deals`) → in-app + email to all active admins.
-- **Deal status change** — both broker self-transitions (`PATCH /api/broker/deals/:id/status`) and admin promotions (`POST /api/admin/broker-deals/:id/status`) → owning broker. Status-specific copy; `docs_needed` is the "documents requested" event.
-- **Commission recorded / marked paid** (`POST /api/admin/broker-commissions`, `.../mark-paid`) → owning broker.
-
-Design notes:
-- In-app notifications (`notification_create_` → shared `notifications` table, surfaced by the existing `GET /api/broker/notifications`) **always fire**. Email is opt-in behind `BROKER_EMAIL_NOTIFICATIONS_ENABLED` (Cloudflare Email Service or local capture), mirroring the borrower-message notify pattern. `BROKER_NOTIFICATION_FROM` overrides the From (falls back to `EFS_EMAIL_FROM`). Both documented in `.env.example`.
-- Side-effects run via `notify_after_` (`ctx.waitUntil`) and swallow errors, so a notification failure never breaks the broker request.
-
-Added `lib/broker/notify.test.ts` (4 tests, all pass). Full suite green: **699 pass / 0 fail**, plus `build` + `build:worker` (typecheck) clean. Committed in the submodule (`2f3337b`) and bumped the superproject pointer (`b06386894`).
-
-One follow-up not in scope here: the broker portal needs a **deal-detail view** at `/portal-broker/deals/:id` for the status-email link to resolve — added as a backlog note if that route doesn't exist yet.
-
-### Re: last EFS call — do the "positions" make sense given EFS doesn't service loans? — opus-4-8
-
-> **Queue prompt:**
->
-> Analyze the last EFS call transcript. EFS does not handle payments. Are the positions something that makes sense to keep?
-
-
-Short answer: **yes, keep the investor "My Positions" / portfolio view — but it's a static record of what an investor funded, not a servicing view.** That's exactly the line the 2026-06-03 call drew, and the code is most of the way there.
-
-**What the call decided (2026-06-03, `docs/calls/2026-06-03 16-58-49`).** Robert/Judith explicitly cut the servicing-dependent sections from the investor portal — *"distribution and statements… we don't need that section at all. Returns… we don't need that at all… because my positions covers that and we don't do statements,"* and Brian confirms *"because we don't service."* What they kept ("My Positions") is, per Judith, a per-loan list of **property address, loan amount, interest rate, and payment** for *"each loan that they have with us."* So "positions" = the investor's holdings/history, which EFS knows because it *arranged* each loan — none of it requires servicing.
-
-**The one nuance — "payment".** EFS doesn't collect or track payments, so the "payment" shown must be the **scheduled interest-only payment** (these are interest-only loans: ≈ loan amount × rate ÷ 12), a figure computed from origination terms — **not** an actual-received / payment-status feed. Shown that way it's fine and is what Judith asked for. Shown as live cash-flow it would overstate what EFS knows.
-
-**Where the code still drifts from that.** P3 of the dashboard rework (`8d40c66`, #zwws) already dropped Avg-yield / YTD-distributions / Next-distribution from the dashboard *citing "EFS does not service loans."* But the underlying **positions API didn't get the same cleanup** — `lib/investor/portfolio/index.ts` (+ `lib/investor/shared.ts`) still compute and return:
-
-- `yield_mix` / `annual_yield` — the call said *no yield tracking*;
-- `next_payment_date` / `payment_schedule` (and `loan_payments`) — these read as a live servicing schedule EFS can't authoritatively maintain.
-
-So the *concept* is sound and worth keeping; the *API still leaks servicing-flavored fields* the call already retired on the front end.
-
-**Recommendation.** Keep "My Positions." Finish the no-servicing alignment in the API: drop `yield_mix`/`annual_yield` and `next_payment_date`/`payment_schedule` from the `investor_positions` response, keep `addr` / `amount` / `rate` / `position_type`, and relabel the per-loan `payment` as "scheduled monthly interest (est.)". Queued as **#58j3 / #posnosrv** (in backlog) rather than ripping out API surface inside an analysis turn — it's a small relabel-vs-remove call I'd rather you green-light first. Say the word and I'll do it as a `#spec-test-commit-push`.
-
-(Note: "positions" also surfaces as **lien positions** — "first, second, and other junior lien positions" — but that's loan-structure copy, unrelated to payments/servicing, and is fine as-is.)
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> :round_pushpin: deploy
-
-Deployed to production. Live at `https://equityfundingsource.brian-takita.workers.dev` — **Version `9d8f4e6c-1dfc-4546-b280-6545dc4adc41`**.
-
-**One snag, fixed before deploy.** `build:worker` first failed `pack:worker` with *"no complete CSS bundle found"* — the `dist/browser--dev` directory held a stale 21.7K CSS that had the EFS component layer but was missing the Tailwind utilities (`/*! tailwindcss`, `md:grid-cols-3`), plus a leftover 0-byte sibling. This is the racy-dist case the `pack-assets.ts` validation (commit `4969aef`) is meant to catch. Moved the stale `browser--dev`/`worker-assets` aside and clean-rebuilt — the bundle then validated clean (Tailwind layer present). No source change was needed; it was purely stale build state.
-
-**Verification before/after deploy:**
-- `bun run test` → **699 pass / 0 fail** (4460 assertions, 74 files).
-- `build` + `build:worker` clean after the rebuild.
-- Remote D1 migrations: **none to apply** (0025/0026 already live).
-- Smoke test: `/` → 200, `/funded-deals` → 200, deployed CSS bundle `index.server-…6ZMAQWOB.css` → 200, 47KB, contains the Tailwind layer (so the homepage is fully styled, not the partially-styled failure mode).
-
-**Push state:** the EFS submodule was 2 commits ahead of origin (the `#cgw7` broker-notification work: `2f3337b` + `0ebaff0`). Pushed `origin/main 60a07f5..0ebaff0`. Superproject pointer already in sync at `0ebaff0`.
-
-Next queue head is `[#58j3]` (align the investor positions API with the no-servicing model).
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-Re-deployed to production. Live at `https://equityfundingsource.brian-takita.workers.dev` — **Version `7a03635f-b136-40e4-9806-0f42244ed9cf`**.
-
-No code change since the prior deploy — the EFS submodule is clean and already at `origin/main` (`0ebaff0`, the `#cgw7` broker-notification work), so this is an idempotent re-deploy of the same tree. Nothing to commit or push.
-
-**Verification:**
-- `bun run test` → **699 pass / 0 fail** (4460 assertions, 74 files).
-- `build:worker` clean; the worker-assets bundle validated (no stale-dist snag this time — `No updated asset files to upload`).
-- Remote D1 migrations: none to apply (0025/0026 already live).
-- Smoke test: `/` → 200, `/funded-deals` → 200.
-
-Next queue head is `[#58j3]` (align the investor positions API with the no-servicing model).
-
-### Re: do [#58j3] — align investor positions API with the no-servicing model — opus-4-8
-
-> **Queue prompt:**
->
-> [#58j3]
-
-
-> **Queue prompt (preset `#spec-test-commit-push`):**
->
-> [#58j3]
-
-Done — the investor **My Positions** / portfolio surface now matches what EFS actually knows. EFS *arranges* loans and does not service them, so the API no longer implies it tracks received payments.
-
-**API (server)**
-- `investor_positions_R_` (`lib/investor/shared.ts`) drops the per-loan `payment_schedule` (which read as a live servicing feed) and instead returns `scheduled_monthly_interest` — the estimated interest-only payment from origination terms: `funded amount × sold rate ÷ 12` (via the existing, unit-tested `monthly_distribution_calc_`).
-- `GET /api/investor/positions` (`portfolio/index.ts`) drops `yield_mix` / `annual_yield` and `next_payment_date`. It still returns property, `amount_funded`/`loan_amount`/`ownership_pct`, `rate`, `position_type`, maturity inputs, and the new estimate.
-- `GET /api/investor/dashboard` drops the position `next_payment_date` too (same servicing-flavored field).
-
-**Portal (client)**
-- `my_positions.tsx`: removed the **Yield mix** card; the positions table now shows an **Est. monthly interest** column. Funded-allocation pie + position-type totals stay.
-- `dashboard.tsx` `PositionThumb`: the **"Upcoming payment"** date chip became **"Est. monthly interest"** (an amount), with copy "Estimated from origination terms. EFS arranges loans and does not service payments."
-
-**Decision worth confirming:** I compute the estimate on the investor's **funded amount** (their stake), not the full loan amount — that's the figure that's meaningful on *My* Positions, and it equals the full-loan payment for whole notes. The backlog text said "loan amount × rate / 12"; if you specifically want the full-loan payment shown on a fractional position instead, say so and I'll switch the basis (one-line change).
-
-**Spec + tests + ship**
-- `docs/formula.md`: new "Scheduled Monthly Interest (Estimate)" section + no-servicing notes on Yield Mix and Scheduled Investor Distribution.
-- Added an `investor-portal-e2e` assertion locking in the new shape (no yield mix / next-payment date; estimate present).
-- **700 pass / 0 fail**; `build` + `build:worker` clean. Committed EFS `36e06ef` and **pushed to `origin/main`** (`0ebaff0..36e06ef`); superproject pointer bumped to `dd76a0dea`.
-
-(No deploy — the preset was `#spec-test-commit-push`. Say `deploy` to push it live.)
-<!-- agent:boundary:cb48f529 -->
+<!-- agent:boundary:f5b006f9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -160,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Add an alert in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard about requirements activity and if the investor needs to complete the annual requirements document. deploy
 <!-- /agent:queue -->
 
 ## Backlog

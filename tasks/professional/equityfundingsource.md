@@ -83,7 +83,27 @@ So the *concept* is sound and worth keeping; the *API still leaks servicing-flav
 **Recommendation.** Keep "My Positions." Finish the no-servicing alignment in the API: drop `yield_mix`/`annual_yield` and `next_payment_date`/`payment_schedule` from the `investor_positions` response, keep `addr` / `amount` / `rate` / `position_type`, and relabel the per-loan `payment` as "scheduled monthly interest (est.)". Queued as **#58j3 / #posnosrv** (in backlog) rather than ripping out API surface inside an analysis turn — it's a small relabel-vs-remove call I'd rather you green-light first. Say the word and I'll do it as a `#spec-test-commit-push`.
 
 (Note: "positions" also surfaces as **lien positions** — "first, second, and other junior lien positions" — but that's loan-structure copy, unrelated to payments/servicing, and is fine as-is.)
-<!-- agent:boundary:0cdc1ce5 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: deploy
+
+Deployed to production. Live at `https://equityfundingsource.brian-takita.workers.dev` — **Version `9d8f4e6c-1dfc-4546-b280-6545dc4adc41`**.
+
+**One snag, fixed before deploy.** `build:worker` first failed `pack:worker` with *"no complete CSS bundle found"* — the `dist/browser--dev` directory held a stale 21.7K CSS that had the EFS component layer but was missing the Tailwind utilities (`/*! tailwindcss`, `md:grid-cols-3`), plus a leftover 0-byte sibling. This is the racy-dist case the `pack-assets.ts` validation (commit `4969aef`) is meant to catch. Moved the stale `browser--dev`/`worker-assets` aside and clean-rebuilt — the bundle then validated clean (Tailwind layer present). No source change was needed; it was purely stale build state.
+
+**Verification before/after deploy:**
+- `bun run test` → **699 pass / 0 fail** (4460 assertions, 74 files).
+- `build` + `build:worker` clean after the rebuild.
+- Remote D1 migrations: **none to apply** (0025/0026 already live).
+- Smoke test: `/` → 200, `/funded-deals` → 200, deployed CSS bundle `index.server-…6ZMAQWOB.css` → 200, 47KB, contains the Tailwind layer (so the homepage is fully styled, not the partially-styled failure mode).
+
+**Push state:** the EFS submodule was 2 commits ahead of origin (the `#cgw7` broker-notification work: `2f3337b` + `0ebaff0`). Pushed `origin/main 60a07f5..0ebaff0`. Superproject pointer already in sync at `0ebaff0`.
+
+Next queue head is `[#58j3]` (align the investor positions API with the no-servicing model).
+<!-- agent:boundary:cc1c2b43 -->
 <!-- /agent:exchange -->
 ###
 <!--

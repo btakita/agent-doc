@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -149,7 +149,30 @@ Built an **mdBook** site, matching the sibling-repo convention (agent-doc/corky 
 **Build + deploy** — `mdbook build` is clean (all includes resolved, no leftover `{{#include}}`). `.github/workflows/mdbook.yml` (`taiki-e/install-action@mdbook` + `actions/deploy-pages@v4`) deploys on push to `main`; enabled Pages with `build_type=workflow` via the API. The first deploy run (`27516723455`) finished **success**. `/book` added to `.gitignore`.
 
 Re the queue's `#spec-test-build-install-commit-push` preset: "spec/tests" = the spec content + build verification (mdbook build, all includes resolved, live-site 200 check); "install" is N/A for a static docs site; build + commit + push all done. Next queue item: create a GitHub Pages site for lazily-rs.
-<!-- agent:boundary:a75e4126 -->
+
+### Re: Create a GitHub Pages site for lazily-rs — opus-4-8
+
+> **Queue prompt:**
+>
+> Create a github pages site for lazily-rs
+
+**Live:** https://lazily-hub.github.io/lazily-rs/ — deployed and serving (index 200; `SPEC.html` → "Specification - lazily-rs"; `BENCHMARKS.html` 200).
+
+Built an **mdBook** site, same convention as the lazily-spec site from the previous queue item. 9 files pushed to `lazily-hub/lazily-rs` (`aff5e62`); superproject gitlink bumped (`dcf607dd6`).
+
+**Site structure** (`book.toml`, `src = "docs"`, `rust` theme, foldable nav):
+- **Overview** (index) — the crate `README.md`.
+- **Specification** — the full `SPEC.md` (104 KB normative spec).
+- **Wire Protocol** — `PROTOCOL.md`.
+- **Benchmarks** — `BENCHMARKS.md`.
+- **Release Notes — v0.11.0** — `RELEASE_NOTES_v0.11.0.md`.
+
+**No content duplication** — every chapter is a one-line `{{#include ../<DOC>.md}}`, so the repo-root markdown stays the single canonical source and the book renders it at build time. Chapter filenames intentionally mirror the root names (`docs/BENCHMARKS.md`, etc.) so the README's relative `](BENCHMARKS.md)` link rewrites cleanly to `BENCHMARKS.html` in the rendered book (verified in the build output).
+
+**Build + deploy** — `mdbook build` clean (all includes resolved, no leftover `{{#include}}`, internal links resolve). `.github/workflows/mdbook.yml` (`taiki-e/install-action@mdbook` + `actions/deploy-pages@v4`) deploys on push to `main`; enabled Pages with `build_type=workflow` via the API. Deploy run `27516826402` finished **success**. `/book` added to `.gitignore`.
+
+Re the `#spec-test-build-install-commit-push` preset: "install" is N/A for a static docs site; build + commit + push done, live-site verified. **Both GitHub Pages queue items are now complete** — the queue is drained. (Session note: exchange is large / 2 prior no-op closeouts flagged `session_accretion: warn`, but per the active-queue guidance I kept draining rather than pausing to compact.)
+<!-- agent:boundary:add74679 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -158,8 +181,6 @@ Re the queue's `#spec-test-build-install-commit-push` preset: "spec/tests" = the
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Create a github pages site for lazily-spec~~
-- Create a github pages site for lazily-rs
 <!-- /agent:queue -->
 
 ## Backlog

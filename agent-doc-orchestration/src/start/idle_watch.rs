@@ -737,6 +737,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 std::env::current_exe().ok(),
                             ),
                         );
+                        crate::ops_log::log_op(
+                            &path,
+                            &format!(
+                                "supervisor_binary_stale_self_recycled file={} pane={} boundary={} via=execve_preserve_child child_pid={} master_fd={} candidates=[{candidate_notes}]",
+                                path.display(),
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                recycle_boundary,
+                                shared.child_pid.load(Ordering::Relaxed),
+                                shared.master_fd.load(Ordering::Relaxed),
+                            ),
+                        );
                         eprintln!(
                             "[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary ({recycle_boundary}); preserving the live agent child via execve"
                         );

@@ -277,11 +277,15 @@ impl SimWorld {
                     self.coverage.record_block(&err.to_string());
                 }
             }
-            SimCommand::DispatchOperatorPrompt => {
-                if let Err(err) = self.dispatch_route_prompt_with(true) {
-                    self.coverage.record_block(&err.to_string());
+            SimCommand::DispatchOperatorPrompt => match self.dispatch_route_prompt_with(true) {
+                Ok(()) => {
+                    self.recycle_clear.jb_run_recycle_probe_pending = true;
+                    self.record_ops_proof(
+                        "suprehotreload_jb_cycle action=jb_run_agent_doc result=dispatch_accepted",
+                    );
                 }
-            }
+                Err(err) => self.coverage.record_block(&err.to_string()),
+            },
             SimCommand::ProveDispatchAccepted => {
                 if let Err(err) = self.prove_dispatch_accepted() {
                     self.coverage.record_block(&err.to_string());
@@ -791,11 +795,27 @@ impl SimWorld {
                 // binary stays stale (the operator restarts to pick up the new build).
                 self.recycle_clear.recycle_disabled = true;
                 self.coverage.supervisor_recycle_failures += 1;
+                if self.recycle_clear.jb_run_recycle_probe_pending {
+                    self.recycle_clear.jb_run_recycle_probe_pending = false;
+                    self.coverage.suprehot_jb_mapped_recycle_failures += 1;
+                    self.record_ops_proof(
+                        "suprehotreload_jb_cycle result=mapped_operator_verify targets=recyclerestart-verify,aazp,4myd reason=supervisor_reexec_failed",
+                    );
+                }
             } else {
                 self.recycle_supervisor_in_place();
                 // The in-place execve promoted the freshly-installed binary.
                 self.recycle_clear.binary_stale = false;
                 self.coverage.supervisor_recycles += 1;
+                if self.recycle_clear.jb_run_recycle_probe_pending {
+                    self.recycle_clear.jb_run_recycle_probe_pending = false;
+                    self.coverage.suprehot_jb_observed_promotions += 1;
+                    self.record_ops_proof(format!(
+                        "suprehotreload_jb_cycle result=observed_fresh_binary generation={} pane_preserved={} mapped=direct",
+                        self.route.durable.generation,
+                        self.route.durable.pane_id.is_some()
+                    ));
+                }
             }
         }
 

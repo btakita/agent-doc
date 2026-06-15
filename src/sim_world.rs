@@ -552,6 +552,11 @@ struct RecycleClearModel {
     /// policy — it DRAINS while a turn is in flight (`turn_active`) and only at the
     /// turn boundary re-execs in place (stale binary) or relaunches (fresh binary).
     restart_requested: bool,
+    /// `#suprehotreload-agent`: a JB Run Agent Doc style operator dispatch is
+    /// waiting for the next stale-binary recycle boundary to prove whether the
+    /// cycle observed the fresh binary or mapped to the existing recycle-failure
+    /// operator-verify buckets.
+    jb_run_recycle_probe_pending: bool,
 }
 
 #[derive(Debug, Default)]
@@ -662,6 +667,13 @@ struct Coverage {
     /// `#recyclerestart-agent`: proof that the following clear/drain path re-cleared
     /// or restarted the session before the next queue head.
     recycle_session_reclear_proofs: usize,
+    /// `#suprehotreload-agent`: a JB Run Agent Doc style cycle reached the
+    /// stale-binary recycle boundary and observed the fresh binary after promotion.
+    suprehot_jb_observed_promotions: usize,
+    /// `#suprehotreload-agent`: a JB Run Agent Doc style cycle hit the
+    /// stale-binary recycle failure path and mapped to the existing
+    /// #recyclerestart-verify/#aazp/#4myd operator-verify proof bucket.
+    suprehot_jb_mapped_recycle_failures: usize,
 }
 
 impl Coverage {
@@ -797,6 +809,8 @@ impl Coverage {
         self.sync_guard_completions += other.sync_guard_completions;
         self.recycle_binary_promotion_proofs += other.recycle_binary_promotion_proofs;
         self.recycle_session_reclear_proofs += other.recycle_session_reclear_proofs;
+        self.suprehot_jb_observed_promotions += other.suprehot_jb_observed_promotions;
+        self.suprehot_jb_mapped_recycle_failures += other.suprehot_jb_mapped_recycle_failures;
     }
 }
 
@@ -2321,6 +2335,87 @@ fn recyclerestart_agent_verifies_kill_pane_sync_guard_and_reclear_proofs() {
             && ops_log.contains("sync_guard_released reason=stale_holder_superseded")
             && ops_log.contains("sync_guard_released reason=sync_complete"),
         "ops log must prove killed-pane sync guard recovery:\n{ops_log}"
+    );
+}
+
+#[test]
+fn suprehotreload_agent_maps_jb_run_agent_doc_to_fresh_binary_proof() {
+    // `#suprehotreload-agent`: a JB `Run Agent Doc` cycle can be verified without
+    // live operator inspection when the stale supervisor reaches the recycle
+    // boundary: the proof records a preserved-pane promotion onto the fresh binary.
+    let mut world = SimWorld::new(6_151);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    let gen_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::DispatchOperatorPrompt).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+    assert!(world.recycle_clear.jb_run_recycle_probe_pending);
+
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+
+    assert_eq!(world.coverage.supervisor_recycles, 1);
+    assert_eq!(world.coverage.suprehot_jb_observed_promotions, 1);
+    assert_eq!(world.coverage.suprehot_jb_mapped_recycle_failures, 0);
+    assert!(!world.recycle_clear.jb_run_recycle_probe_pending);
+    assert!(!world.recycle_clear.binary_stale);
+    assert_eq!(world.route.durable.generation, gen_before + 1);
+    assert_eq!(
+        world.route.durable.pane_id, pane_before,
+        "hot reload must preserve the JB-owned live pane"
+    );
+
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log
+            .contains("suprehotreload_jb_cycle action=jb_run_agent_doc result=dispatch_accepted")
+            && ops_log.contains("suprehotreload_jb_cycle result=observed_fresh_binary")
+            && ops_log.contains("mapped=direct")
+            && ops_log.contains("supervisor_recycle_action result=binary_promoted"),
+        "ops log must prove the JB cycle observed a fresh binary:\n{ops_log}"
+    );
+}
+
+#[test]
+fn suprehotreload_agent_maps_reexec_failure_to_existing_operator_verify_buckets() {
+    // `#suprehotreload-agent`: if execve fails, the agent-verifiable result is not
+    // silent operator inspection. It maps the failed hot-reload attempt to the
+    // existing live-proof buckets that already own recycle/restart verification.
+    let mut world = SimWorld::new(6_152);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    let gen_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::MarkReexecWillFail).unwrap();
+    world.apply(SimCommand::DispatchOperatorPrompt).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+
+    assert_eq!(world.coverage.supervisor_recycle_failures, 1);
+    assert_eq!(world.coverage.suprehot_jb_observed_promotions, 0);
+    assert_eq!(world.coverage.suprehot_jb_mapped_recycle_failures, 1);
+    assert!(!world.recycle_clear.jb_run_recycle_probe_pending);
+    assert!(world.recycle_clear.recycle_disabled);
+    assert!(
+        world.recycle_clear.binary_stale,
+        "failed execve leaves the supervisor on the stale binary"
+    );
+    assert_eq!(world.route.durable.generation, gen_before);
+    assert_eq!(
+        world.route.durable.pane_id, pane_before,
+        "failed recycle keeps the session alive in the same pane"
+    );
+
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains(
+            "suprehotreload_jb_cycle result=mapped_operator_verify targets=recyclerestart-verify,aazp,4myd"
+        ) && ops_log.contains("reason=supervisor_reexec_failed"),
+        "ops log must map failed hot reload to the existing proof buckets:\n{ops_log}"
     );
 }
 

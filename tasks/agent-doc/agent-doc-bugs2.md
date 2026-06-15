@@ -303,9 +303,20 @@ Verification:
 - `cargo test -p agent-doc --test test_cli test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit -- --nocapture`
 - `cargo test -p agent-doc-orchestration queue_cmd -- --nocapture`
 - `cargo test -p agent-doc --test test_cli -- --nocapture`
-❯ - `cargo check -p agent-doc`
+- `cargo check -p agent-doc`
 - `make check` (4526 passed, 238 skipped; doctests and medium SimWorld passed)
 - GitHub Actions CI run `27569561694` passed (`make check` + `make tmux-ci`)
+- parent repo gitlink: `dd6323551` (`agent-doc: update clear session submit fix`)
+- agent-doc submodule: `c57076c8` (`fix: submit clear session composer drafts`)
+- `make check` passed: 4533 tests, 238 skipped, doctests, and medium SimWorld budget test.
+❯ - `cargo check -p agent-doc`
+- `cargo test -p agent-doc session_actor_cmd -- --nocapture`
+- `cargo test -p agent-doc clear_submit_proof -- --nocapture`
+- `cargo test -p agent-doc clear_direct_submit_retry -- --nocapture`
+- `cargo test -p agent-doc clear_command_visible -- --nocapture`
+- `VERSIONS.md` records the behavior and coverage under `#jbclearctxsubmit`.
+- The stale-scrollback guard treats a later prompt-prefix line as a newer composer, so an old visible `/clear` transcript does not trigger a stray Enter.
+- `src/session_actor_cmd.rs` now polls after direct-pane clear submission, logs `session_clear_submit_observation ... issue=prompt_not_submitted` when `/clear` or `/new` remains in the active composer, and sends exactly one bare Enter retry for Codex/Claude only.
 
 Pushed: `btakita/agent-doc@46906792`.
 
@@ -316,17 +327,17 @@ Implemented and pushed `src/agent-doc` commit `87324974` (`test: log queue remov
 The queue preservation mechanics were already present in `HEAD`; this slice tightens the required diagnostics so queue removals are auditable instead of only count-based. `session-check` now logs authorized id-backed queue head removals with the removed `#id` and proof source (`backlog_resolved_or_removed`, `cycle_lifecycle_outcome`, or `current_directive_target`), and logs removed free-text heads when committed response history proves they were answered. Missing proof still fails closed through the existing queue-head provenance guards.
 
 Coverage added:
-❯ - `queue_head_removal_guard_logs_proof_source_for_authorized_id_removals`
-❯ - `free_text_queue_head_guard_logs_response_proof_source_for_removed_head`
+- `queue_head_removal_guard_logs_proof_source_for_authorized_id_removals`
+- `free_text_queue_head_guard_logs_response_proof_source_for_removed_head`
 
 Verification:
-❯ - `cargo test -p agent-doc-orchestration proof_source -- --nocapture`
-❯ - `cargo test -p agent-doc-orchestration queue_head_removal_guard -- --nocapture`
-❯ - `cargo test -p agent-doc-orchestration free_text_queue_head_guard -- --nocapture`
-❯ - `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `cargo test -p agent-doc-orchestration proof_source -- --nocapture`
+- `cargo test -p agent-doc-orchestration queue_head_removal_guard -- --nocapture`
+- `cargo test -p agent-doc-orchestration free_text_queue_head_guard -- --nocapture`
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
 ❯ - `cargo check -p agent-doc`
-❯ - `make check` (4528 passed, 238 skipped; doctests and medium SimWorld passed)
-❯ - GitHub Actions CI run `27570433719` passed (`make check` + `make tmux-ci`)
+- `make check` (4528 passed, 238 skipped; doctests and medium SimWorld passed)
+- GitHub Actions CI run `27570433719` passed (`make check` + `make tmux-ci`)
 
 Pushed: `btakita/agent-doc@87324974`.
 
@@ -337,30 +348,30 @@ Implemented `#jbclearctxsubmit`.
 For the EFS compaction note: that churn is the already-compacted exchange summary being compacted again instead of treated as prior-summary metadata. The repeated compact payload carried the numbered lender-state list twice, in the existing reversed order. I did not edit the EFS document in this cycle; I kept this turn on the active queue head, `#jbclearctxsubmit`.
 
 What changed:
-- `src/session_actor_cmd.rs` now polls after direct-pane clear submission, logs `session_clear_submit_observation ... issue=prompt_not_submitted` when `/clear` or `/new` remains in the active composer, and sends exactly one bare Enter retry for Codex/Claude only.
-- The stale-scrollback guard treats a later prompt-prefix line as a newer composer, so an old visible `/clear` transcript does not trigger a stray Enter.
-- `VERSIONS.md` records the behavior and coverage under `#jbclearctxsubmit`.
+❯ - `src/session_actor_cmd.rs` now polls after direct-pane clear submission, logs `session_clear_submit_observation ... issue=prompt_not_submitted` when `/clear` or `/new` remains in the active composer, and sends exactly one bare Enter retry for Codex/Claude only.
+❯ - The stale-scrollback guard treats a later prompt-prefix line as a newer composer, so an old visible `/clear` transcript does not trigger a stray Enter.
+❯ - `VERSIONS.md` records the behavior and coverage under `#jbclearctxsubmit`.
 
 Verification:
-- `cargo test -p agent-doc clear_command_visible -- --nocapture`
-- `cargo test -p agent-doc clear_direct_submit_retry -- --nocapture`
-- `cargo test -p agent-doc clear_submit_proof -- --nocapture`
-- `cargo test -p agent-doc session_actor_cmd -- --nocapture`
-- `cargo check -p agent-doc`
-- `make check` passed: 4533 tests, 238 skipped, doctests, and medium SimWorld budget test.
+❯ - `cargo test -p agent-doc clear_command_visible -- --nocapture`
+❯ - `cargo test -p agent-doc clear_direct_submit_retry -- --nocapture`
+❯ - `cargo test -p agent-doc clear_submit_proof -- --nocapture`
+❯ - `cargo test -p agent-doc session_actor_cmd -- --nocapture`
+❯ - `cargo check -p agent-doc`
+❯ - `make check` passed: 4533 tests, 238 skipped, doctests, and medium SimWorld budget test.
 
 Commits pushed:
-- agent-doc submodule: `c57076c8` (`fix: submit clear session composer drafts`)
-- parent repo gitlink: `dd6323551` (`agent-doc: update clear session submit fix`)
+❯ - agent-doc submodule: `c57076c8` (`fix: submit clear session composer drafts`)
+❯ - parent repo gitlink: `dd6323551` (`agent-doc: update clear session submit fix`)
 
 Post-push CI for the submodule was running as `27571278607` when checked; the previous CI run was green.
-<!-- agent:boundary:9e143dc6 -->
+<!-- agent:boundary:49c53aa9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority prest="#spec-test-build-install-commit-push" go -->
-~~~done
+---
 :pushpin: The equityfundingsource.md compaction is duplicated and the numeric list is in reverse order:
 ```
 ### Session Summary
@@ -393,7 +404,7 @@ Compacted content:
 - **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
 - **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
 ```
-~~~
+---
 ---
 Please explain the cause of this churn. I don't understand why this is necessary. Just run the current task. Use the document editor buffer as the source of truth. It seems simple. Why this extra complexity?
 ```
@@ -484,7 +495,7 @@ Please explain the cause of this churn. I don't understand why this is necessary
     - https://www.youtube.com/shorts/hA8C9PQx0zI
 ```
 ---
-- do [#jbclearctxsubmit]
+- ~~do [#jbclearctxsubmit]~~
 - do [#codexmcpfinalize]
 - do [#ar27-majors]
 - do [#dfrefresh-retire]

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -269,7 +269,41 @@ Commit/push:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:5157a842 -->
+
+### Re: fractionalization allocations - gpt-5
+
+> **Queue prompt:**
+>
+> do [#fractionalization-allocations]
+
+
+Completed `#fractionalization-allocations`.
+
+Implemented the EFS-local fractionalization / multi-lender allocation model:
+- Added `fund_allocations` with rows linked to `funds`, `investment_deals`, `users`, and optional `investor_vestings`.
+- Added allocation helpers for totals, unallocated amount, up-to-10 lender guidance, 50%+ control warning, and gated TMO allocation mapping for #7a4d/#dzmm.
+- Seeded a default allocation when an investor submits a funding commitment, using the selected vesting/entity plus beneficiary and wire memo/account fields.
+- Added admin `GET/PUT /api/admin/funds/:id/allocations` to review/replace allocation splits, enforce the 10-allocation cap, and require allocation totals to match the commitment amount.
+- Exposed allocation summaries on admin fund responses, investor deal detail funding responses, and confirm-wire refresh responses.
+- Added investor deal-detail controls for vesting/entity, beneficiary, beneficiary account, wire memo, allocation count, and 50%+ warning.
+- Added admin deal-detail allocation summaries and an allocation editor modal for vesting/entity, amount, beneficiary, beneficiary account, wire memo, and wire status.
+- Updated PRDs, QA map, business logic, and current-progress docs.
+
+Verification:
+- Focused `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts` passed: 98 pass, 0 fail.
+- Final `bun run check` passed: 722 pass, 0 fail; app build and worker build passed.
+- GitHub Actions check: `gh workflow list` and `gh run list --limit 5` returned no workflows/runs; `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+
+Commit/push:
+- EFS submodule commit `ca476d8 feat: add investor funding allocations` pushed to `origin/main`.
+- Parent closeout stages only the EFS submodule gitlink.
+
+Local worktree note:
+- The unrelated admin/Dropbox/live-refresh edits were temporarily stashed, restored after the EFS commit, and left unstaged/untracked. Restore produced one overlap in `admin/investor_management/index.ts`; it was resolved by preserving both the restored `funding_wire_confirmed` admin event and the new allocation summary response.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:3125b295 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -277,15 +311,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#lender-terminology-audit]~~
-- ~~do [#deal-interest-workflow]~~
-- do [#fractionalization-allocations]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#fractionalization-allocations] [recommended] Fractionalization/multi-lender model: define per-deal lender allocations linked to investor vestings/entities, support multiple wires/beneficiaries, up-to-10 lender guidance, 50%+ control warning, and TMO writeback mapping once #7a4d/#dzmm unblock. Advances #zwws/#dzmm/#investor-pipeline-resequence.
 <!-- /agent:backlog -->
 
 ## Review

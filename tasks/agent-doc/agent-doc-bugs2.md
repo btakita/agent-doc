@@ -495,7 +495,106 @@ Verification passed in the dirty dev tree and again in a clean adjacent worktree
 - `cargo test -p agent-doc-orchestration component_compact_empty_message_advances_snapshot_after_exchange_clear -- --nocapture`
 - `cargo test -p agent-doc-orchestration component_compact_rejects_stale_editor_cache_when_snapshot_is_stale -- --nocapture`
 - `cargo check -p agent-doc`
-<!-- agent:boundary:3bd63c81 -->
+
+### Re: queue churn explanation — gpt-5
+
+> **Queue prompt:**
+>
+> Please explain the cause of this churn. I don't understand why this is necessary. Just run the current task. Use the document editor buffer as the source of truth. It seems simple. Why this extra complexity?
+> ```
+> • The real file has queue: start, agent:queue ... go, and agent:backlog priority queue, so it should be in go-mode and
+>   should append active backlog ids. I’m checking whether the active backlog ids are being treated as already present
+>   because of struck queue residue or duplicated done entries.
+>
+> • Explored
+>   └ Read monsterrodholders.md
+>
+> ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • The real queue uses advance [#…] heads, and the backlog source uses a bare queue token. I’m checking the component
+>   attribute parser and queue sync identity rules; those two details are not covered together by the current tests.
+>
+> • Explored
+>   └ Search parse.*attrs|attrs\.insert|Component \{|struct Component|normalize.*attr|bare in component.rs
+>     Read queue.rs
+>
+> ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • The sync primitive only de-duplicates do [#id], not advance [#id], so the real file should have appended ids if the
+>   sync ran. I’m going to reproduce that exact document shape in a focused test to expose the missing condition before
+>   changing code.
+>
+> • Explored
+>   └ Read component.rs, maintenance.rs
+>
+> ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • Before I edit, I’m checking the queue-sync CLI surface too. The acceptance says persistence through session-check, so
+>   I want to know whether the manual sync command and preflight share the same path or diverge.
+>
+> • Ran cargo run -p agent-doc -- queue sync --help
+>   └    Compiling agent-doc v0.34.1 (/home/brian/work/btakita/agent-loop/src/agent-doc)
+>         Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.46s
+>     … +8 lines (ctrl + t to view transcript)
+>     Options:
+>       -h, --help  Print help
+>
+> ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • The CLI is a one-shot wrapper, not a dry-run surface. I’m keeping live docs untouched and will add a focused
+>   regression in the orchestration tests around the exact queue: start + priority queue + non-do existing heads shape.
+>
+> • Explored
+>   └ Read queue_cmd.rs, maintenance.rs
+>
+> ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • The preflight path has the right broad pieces, but the one-shot queue sync command bypasses done/execution-context
+>   filtering and diagnostics. I’m also checking whether session-check invokes queue maintenance or only reports current
+>   state; that affects the “persists through session-check” part.
+>
+> • Explored
+>   └ Read maintenance.rs
+>     Search run_queue_maintenance\(|queue_maintenance|QueueState|session-check|session_check in session_check.rs
+>     Read queue_continuation.rs
+>
+> ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • To avoid touching the real monsterrodholders task file, I’m running the current sync command against a temporary copy
+>   of that document. That will tell us whether the current code can populate this exact shape at all.
+>
+> • Ran tmpdir=$(mktemp -d /tmp/mrh-queue-sync.XXXXXX)
+>   │ cp src/boost-client/tasks/monsterrodholders.md "$tmpdir/monsterrodholders.md"
+>   │ cargo run -p agent-doc -- queue sync "$tmpdir/monsterrodholders.md"
+>   │ … +1 lines
+>   └ cp: cannot stat 'src/boost-client/tasks/monsterrodholders.md': No such file or directory
+>         Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+>     … +4 lines (ctrl + t to view transcript)
+>         No such file or directory (os error 2)
+>     sed: can't read /tmp/mrh-queue-sync.9cgWO0/monsterrodholders.md: No such file or directory
+>
+> ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • That temp-copy command used the submodule working directory, so the relative path was wrong. I’m rerunning it from the
+>   parent repo path.
+>
+> • Ran tmpdir=$(mktemp -d /tmp/mrh-queue-sync.XXXXXX)
+>   │ cp src/boost-client/tasks/monsterrodholders.md "$tmpdir/monsterrodholders.md"
+>   │ ( cd src/agent-doc && cargo run -p agent-doc -- queue sync "$tmpdir/monsterrodholders.md" )
+>   │ … +1 lines
+>   └ &lt;!-- no-queue-removal-guard --&gt;
+>     &lt;!-- queue edited live by user during the #hydroweb-size-specs turn: added [#hydroweb-ad-url-apply] and annotated
+>     … +33 lines (ctrl + t to view transcript)
+>     OG
+>     - https://www.youtube.com/shorts/hA8C9PQx0zI
+> ```
+
+
+
+The churn was not necessary product work. It was recovery overhead from agent-doc disagreeing about which document state was authoritative after restart: the live editor buffer, the committed snapshot, the response-capture sidecars, and a stale route-owned supervisor were not all describing the same queue state. When a recovery path reads git HEAD or disk while the editor buffer has newer queue content, it can replay stale queue blocks, re-strike the wrong head, or revive archived exchange text.
+
+The durable rule is what you described: use the document/editor buffer as the current source of truth, then persist that through the binary-owned snapshot and commit boundary. The extra sidecar checks exist only to prove that recovery is not replaying stale state over that buffer. For this queue item I did not add more implementation work or create new backlog because there is no new actionable follow-up beyond the queue items already present. I normalized the session closeout so the buffer and committed snapshot match, kept `#clearexchstale` closed, and continued the queue from the existing items.
+<!-- agent:boundary:956da27b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -636,7 +735,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 ---
 /goal Using an agent doc with Codex, JB `Run Agent Doc` and JB `Clear Session Context` should submit the command sent on Codex. But a `\n` is sent instead of submit. This used to work but broke. Please identify when the regression occurred and provide a surgical & durable fix so this issue does not repeat. This regression has occurred several times in the life of agent-doc and it takes a while to fix. I want to fix this issue permanently by using a distinct primitive. #simworld
-- do [#snbc2]
+- ~~do [#snbc2]~~
 - do [#efscodexsubmit]
 - do [#stuckhandoff2]
 - do [#qt32]

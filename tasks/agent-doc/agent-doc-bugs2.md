@@ -891,11 +891,6 @@ The root cause and shipped fixes remain `28ac88d9` and `f5ac694c`: Codex now rea
 
 > **Queue prompt:**
 >
-> :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
-
-
-> **Queue prompt:**
->
 > `agent:exchange` with attribute `queue` should add items into the queue while the queue is running.
 
 
@@ -918,7 +913,7 @@ Verification passed: focused tests, `cargo check -p agent-doc`, and local `make 
 - ~~:pushpin: Why was there so much churn in the last queue turn? I was editing unrelated queue items. Those should be ignored. Use AST instead of byte-by-byte comparison. Be selective using CRDT merges into the document model and other areas that can cause churn.~~
 - ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md still sends a CR instead of submitting the command. Please consolidate all send command logic into a single function so we can make this behavior more reliable. Simplify, simplify, simplify...~~
 - ~~:pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item. Any item I place should have `:pushpin:` added since I made the decision to add it in a position.~~
-- ~~:round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.~~
+- :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
 - ~~The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex?~~
 - ~~`agent:exchange` with attribute `queue` should add items into the queue while the queue is running.~~
 - do [#snbc2]

@@ -107,10 +107,15 @@ The "Lender account application — incomplete" banner is the `LenderApplication
 The dashboard's own Available-deals **card list** still keeps its notice (that's not the dialog, so it's out of scope for this request).
 
 **Verification:** full suite green (692 pass / 0 fail), `build` + `build:worker` clean. Deployed to Cloudflare twice — once for the change, then rebuilt + redeployed from current `main` after a rebase pulled in concurrent `#deal-first-apply-cta` work on the same files, so the live worker (version `852a23bb`) matches HEAD.
-<!-- agent:boundary:ba15237d -->
 - `tests/lender-account-gate.test.ts` — updated the deal-detail assertions to expect the notice is absent while the gate stays.
 - `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — dropped `<LenderApplicationNotice …>` and its now-unused imports (`LenderApplicationNotice`, `LENDER_APPLICATION_FORM_HREF`).
-<!-- agent:boundary:acc3d04e -->
+3. **Shared store** (preact signal/context for one `InvestorLenderProfile`) — most robust, fixes every future divergence; biggest change.
+2. **Refetch on dialog close** — re-run the `/api/investor/deals` fetch when the dialog closes. Simpler but a round-trip + flash.
+1. **Lift state up** — `InvestorDealDetail` takes an optional `on_lender_change`; the dialog threads it; `AvailableDealsPreview` passes `set_lender`. The dialog's `on_change` then updates both copies. Smallest change; fixes the notice.
+- On submit, `LenderAccountGate`'s `on_change` is called with `{...lender, lender_request_status: 'pending'}` — an **optimistic** local update, no refetch.
+- `lender_account_ready_(lender)` = `Boolean(lender.lender_account)` — gates funding (stays `false` while only the *application* is pending; the account number only lands after EFS approves in TMO).
+- `LenderApplicationNotice` heading: `null` → "incomplete", `'pending'` → "awaiting EFS review", `'denied'` → "denied".
+<!-- agent:boundary:f1322a58 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,12 +123,14 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- When I filled out the Lender Application in the Available deal in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard: The UI should update. Complete application notification should transition into the waiting for approval notification. Also the Available deal that was added card state should change. Do we have a model of these sort of transitions?
+- :pushpin: When I filled out the Lender Application in the Available deal in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard: The UI should update. Complete application notification should transition into the waiting for approval notification. Also the Available deal that was added card state should change. Do we have a client side model of these sort of transitions?
+- [#9e7b]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#9e7b] Lift lender-application state across the dashboard ↔ deal-dialog boundary so submitting the application in the dashboard Available-deal dialog transitions the dashboard LenderApplicationNotice (incomplete → awaiting EFS review) without a reload. Plan: tasks/professional/efs-investor-lender-state-lift.md. [recommended]
 <!-- /agent:backlog -->
 
 ## Review

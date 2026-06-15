@@ -277,7 +277,23 @@ Verification:
 - GitHub Actions CI run `27568580773` passed (`make check` + `make tmux-ci`)
 
 Pushed: `btakita/agent-doc@66f7de43`.
-<!-- agent:boundary:37c2011c -->
+
+### Re: #mrhbacklogqueuesync
+
+Implemented and pushed `src/agent-doc` commit `46906792` (`test: prove monsterrodholders backlog queue sync`).
+
+`agent-doc queue sync` now reports active backlog ids that were not materialized because an existing queue prompt already represents the same `#id` (for example `advance [#mrhfeed-prop]`), and reports the ids it newly materialized. The regression covers the monsterrodholders-style `queue: start` + `agent:queue ... priority go` + `agent:backlog priority queue` document, preserves the existing `advance [#id]` heads, appends missing `do [#id]` heads, commits the synced document, and proves `session-check` stays clean afterward.
+
+Verification:
+- `cargo test -p agent-doc --test test_cli test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit -- --nocapture`
+- `cargo test -p agent-doc-orchestration queue_cmd -- --nocapture`
+- `cargo test -p agent-doc --test test_cli -- --nocapture`
+- `cargo check -p agent-doc`
+- `make check` (4526 passed, 238 skipped; doctests and medium SimWorld passed)
+- GitHub Actions CI run `27569561694` passed (`make check` + `make tmux-ci`)
+
+Pushed: `btakita/agent-doc@46906792`.
+<!-- agent:boundary:497f3382 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -286,7 +302,7 @@ Pushed: `btakita/agent-doc@66f7de43`.
 - ~~:pushpin: JB `Run Agent Doc` sent `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` into the Codex input but did not submit. #simworld~~
 - ~~/goal Do the actual work in the queue. Stop punting on the queue work. Fix the root cause(s) of the punting. The work in the queue should be done.~~
 - ~~do [#compactdrift-agent]~~
----
+~~~done
 :pushpin: The equityfundingsource.md compaction is duplicated and the numeric list is in reverse order:
 ```
 ### Session Summary
@@ -319,15 +335,105 @@ Compacted content:
 - **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
 - **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
 ```
----
+~~~
 - ~~do [#cleandrainsup-agent]~~
 - ~~do [#rtwbcast-simproof]~~
 - ~~do [#recyclerestart-agent]~~
 - ~~do [#lazilyqrestore-agent]~~
 - ~~do [#suprehotreload-agent]~~
 - ~~do [#qmisstrike-regression]~~
-- do [#staleheaddupcontent]
+- ~~do [#staleheaddupcontent]~~
 - do [#mrhbacklogqueuesync]
+---
+Please explain the cause of this churn. I don't understand why this is necessary. Just run the current task. Use the document editor buffer as the source of truth. It seems simple. Why this extra complexity?
+```
+• The real file has queue: start, agent:queue ... go, and agent:backlog priority queue, so it should be in go-mode and
+  should append active backlog ids. I’m checking whether the active backlog ids are being treated as already present
+  because of struck queue residue or duplicated done entries.
+
+• Explored
+  └ Read monsterrodholders.md
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• The real queue uses advance [#…] heads, and the backlog source uses a bare queue token. I’m checking the component
+  attribute parser and queue sync identity rules; those two details are not covered together by the current tests.
+
+• Explored
+  └ Search parse.*attrs|attrs\.insert|Component \{|struct Component|normalize.*attr|bare in component.rs
+    Read queue.rs
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• The sync primitive only de-duplicates do [#id], not advance [#id], so the real file should have appended ids if the
+  sync ran. I’m going to reproduce that exact document shape in a focused test to expose the missing condition before
+  changing code.
+
+• Explored
+  └ Read component.rs, maintenance.rs
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• Before I edit, I’m checking the queue-sync CLI surface too. The acceptance says persistence through session-check, so
+  I want to know whether the manual sync command and preflight share the same path or diverge.
+
+• Ran cargo run -p agent-doc -- queue sync --help
+  └    Compiling agent-doc v0.34.1 (/home/brian/work/btakita/agent-loop/src/agent-doc)
+        Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.46s
+    … +8 lines (ctrl + t to view transcript)
+    Options:
+      -h, --help  Print help
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• The CLI is a one-shot wrapper, not a dry-run surface. I’m keeping live docs untouched and will add a focused
+  regression in the orchestration tests around the exact queue: start + priority queue + non-do existing heads shape.
+
+• Explored
+  └ Read queue_cmd.rs, maintenance.rs
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• The preflight path has the right broad pieces, but the one-shot queue sync command bypasses done/execution-context
+  filtering and diagnostics. I’m also checking whether session-check invokes queue maintenance or only reports current
+  state; that affects the “persists through session-check” part.
+
+• Explored
+  └ Read maintenance.rs
+    Search run_queue_maintenance\(|queue_maintenance|QueueState|session-check|session_check in session_check.rs
+    Read queue_continuation.rs
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• To avoid touching the real monsterrodholders task file, I’m running the current sync command against a temporary copy
+  of that document. That will tell us whether the current code can populate this exact shape at all.
+
+• Ran tmpdir=$(mktemp -d /tmp/mrh-queue-sync.XXXXXX)
+  │ cp src/boost-client/tasks/monsterrodholders.md "$tmpdir/monsterrodholders.md"
+  │ cargo run -p agent-doc -- queue sync "$tmpdir/monsterrodholders.md"
+  │ … +1 lines
+  └ cp: cannot stat 'src/boost-client/tasks/monsterrodholders.md': No such file or directory
+        Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+    … +4 lines (ctrl + t to view transcript)
+        No such file or directory (os error 2)
+    sed: can't read /tmp/mrh-queue-sync.9cgWO0/monsterrodholders.md: No such file or directory
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• That temp-copy command used the submodule working directory, so the relative path was wrong. I’m rerunning it from the
+  parent repo path.
+
+• Ran tmpdir=$(mktemp -d /tmp/mrh-queue-sync.XXXXXX)
+  │ cp src/boost-client/tasks/monsterrodholders.md "$tmpdir/monsterrodholders.md"
+  │ ( cd src/agent-doc && cargo run -p agent-doc -- queue sync "$tmpdir/monsterrodholders.md" )
+  │ … +1 lines
+  └ <!-- no-queue-removal-guard -->
+    <!-- queue edited live by user during the #hydroweb-size-specs turn: added [#hydroweb-ad-url-apply] and annotated
+    … +33 lines (ctrl + t to view transcript)
+    OG
+    - https://www.youtube.com/shorts/hA8C9PQx0zI
+```
+---
 - do [#mrhqueuepreserve]
 - do [#jbclearctxsubmit]
 - do [#codexmcpfinalize]
@@ -376,7 +482,6 @@ What are #next-steps to fix bugs?
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
-- [ ] [#mrhbacklogqueuesync] [clean-session] Fix tasks/monsterrodholders.md backlog priority queue sync: document has agent:backlog priority queue but eligible backlog items are not materializing in agent:queue. Add diagnostics for skipped backlog ids, regression coverage for backlog-to-queue convergence, and persist queue sync through session-check. Plan: tasks/agent-doc/plan-monsterrodholders-backlog-priority-queue-sync.md
 - [ ] [#mrhqueuepreserve] [clean-session] Prevent active-turn queue convergence from deleting user-added queue items in tasks/monsterrodholders.md. Add regression coverage for live queue edits during a running turn, require explicit consume/strike/remove proof before queue deletion, and log the proof source for removed queue nodes. Plan: tasks/agent-doc/plan-monsterrodholders-queue-preservation.md
 - [ ] [#jbclearctxsubmit] [clean-session] Fix JB Clear Session Context submit on Codex: calling Clear Session Context for tasks/monsterrodholders.md inserted /clear into the Codex composer but did not submit it. Implement submit-proof + one-shot Enter retry for the clear-session route, with stale-scrollback guards and SimWorld/unit coverage. Plan: tasks/agent-doc/plan-jb-clear-session-context-submit.md
 - [ ] [#codexmcpfinalize] [clean-session] Fix Codex MCP finalize transport-close after response capture: agent_doc_finalize can leave session-check interrupted when the MCP transport closes after capture but before write/commit. Add regression coverage that forces the close-after-capture path and proves the next CLI/preflight/write path commits exactly once, clears cycle state, and does not require manual reset. Related observed cycle: 2026-06-15 tasks/agent-doc/agent-doc-bugs2.md.

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,18 @@ committed
 Compacted content:
 - Archived 1 response topic(s): lender bank wire instruction reveal
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:d462006b -->
+8. **Active Funding**: wire confirmed; show compliance chip such as Current, Renewal due, Expired, or Under review.
+7. **Committed / Awaiting Wire**: lender committed to a deal, wire not confirmed.
+6. **Ready to Commit**: lender account is linked and accreditation is current.
+5. **Lender Setup**: admin needs to create/link the lender account.
+4. **Accreditation Current**: EFS approved; if no lender account exists, move next to setup.
+3. **Accreditation Under Review**: submitted and awaiting EFS decision.
+2. **Accreditation Not Started**: lender still needs to submit the annual questionnaire/evidence.
+1. **Signed Up**: account exists, no annual requirements submitted.
+- **Active**: at least one fund row is active, meaning the wire was confirmed and the lender is actively invested.
+- **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
+- **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
+<!-- agent:boundary:bcdb5465 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,22 +57,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
----
-The Accrededited column should be renamed to Accredation on https://equityfundingsource.brian-takita.workers.dev/portal-admin/lender-pipeline.
-
-The Accredation column needs to be split into the different accredation steps such as Not started & review. Once EFS admins accept the accredation, the lender accredation should move to another step.
-
-What is Lender ready, Committed, Active? Does this mean the lender filled out their information...which is separate from the yearly Accredation flow.
-
-Should we have 2 pipelines or can we have a single pipeline. Perhaps renaming Active to Compliant.
-
-Please propose a resequence for the investor pipeline with #mermaid.
----
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#investor-pipeline-resequence] [recommended] Implement the approved lender pipeline resequence: correct the admin label to Accreditation/Requirements, split annual accreditation into not-started/under-review/current/needs-update/renewal states, preserve lender-account/commitment/active-funding milestones, add compliance badges for later stages, and update UI/tests.
 <!-- /agent:backlog -->
 
 ## Review

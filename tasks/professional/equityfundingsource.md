@@ -87,7 +87,28 @@ The dashboard requirements alert now opens a **dialog stack in place** instead o
 **Verification** — `bun run check` green: **703 tests pass**, worker bundle built. Committed in the EFS submodule as `fc31aaa` and pushed to `origin/main`.
 
 Next in the queue: the multi-file CPA/attorney upload component, then deploy.
-<!-- agent:boundary:08125405 -->
+
+### Re: Queue stall logged as #agent-doc-bug + state repaired — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Add multi-file upload to the "CPA / attorney letter or supporting document" field in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation — the dialog should allow multiple files using our standard multi-file upload component.
+
+
+The stalled-queue state is now logged as an agent-doc bug and the live queue is repaired so it can drain.
+
+**Root cause** — `queue_continuation::is_drainable_queue_head` classifies a free-text queue head as drainable only if it carries a `#id`, ends with `?`, or contains a verb from a hardcoded `QUEUE_DIRECTIVE_VERBS` list. That list is missing `deploy` entirely, and the CPA line's imperatives (`allow` / `use`) aren't in it either, so both genuine work items were demoted to `queue_stale_noise_lines` → `queue_continuation_required=false` → the drain stalled. The queue's own `preset="#spec-test-commit-push"` + `go` context (the preset supplies the verb per line) is ignored.
+
+**Bug logged (#goqnoise)** — Plan filed at `tasks/agent-doc/plan-go-queue-noise-misclassifies-directive-heads.md` (symptom, root cause, three fix options — preferred: make drainability preset-aware so every line in a `preset=`/`go` queue is a directive by construction; plus add the missing `deploy` verb regardless). Per the `#agent-doc-bug` preset, the fix is **not** implemented.
+  - The `agent-doc-bugs2.md` backlog pointer could **not** be added: that doc is owned by a different live pane (`%25`), so an IPC-safe cross-doc `write` is rejected and direct-editing a foreign live doc would trigger the very queue-churn this bug is about. Add it from the bugs2 session with:
+    `agent-doc write tasks/agent-doc/agent-doc-bugs2.md --commit --pending-add '[#goqnoise] go-mode queue misclassifies real directive heads as stale noise → drain stalls. Plan: tasks/agent-doc/plan-go-queue-noise-misclassifies-directive-heads.md'`
+
+**State repaired** — Reworded the two stalled queue lines so the current binary's classifier recognizes them as directives (meaning preserved):
+- CPA line now leads with `Add multi-file upload to the "CPA / attorney letter…" field …` (`add` is a recognized verb).
+- `deploy` → `Run deploy (bun run deploy:worker) to ship the changes.` (`run` is recognized).
+
+Preflight now reports `queue_drainable_head_count=2` / `queue_continuation_required=true` — the queue will drain: next the multi-file CPA/attorney upload component, then deploy.
+<!-- agent:boundary:dfec00c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -95,7 +116,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Add multi-file upload to the "CPA / attorney letter or supporting document" field in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation — the dialog should allow multiple files using our standard multi-file upload component.
+- ~~:pushpin: Add multi-file upload to the "CPA / attorney letter or supporting document" field in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation — the dialog should allow multiple files using our standard multi-file upload component.~~
 - :pushpin: Run deploy (bun run deploy:worker) to ship the changes.
 <!-- /agent:queue -->
 

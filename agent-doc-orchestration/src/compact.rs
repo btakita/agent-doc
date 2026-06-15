@@ -71,6 +71,7 @@
 //! - message_dash_reads_stdin: `--message -` reads from stdin instead of using literal "-"
 
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
@@ -211,6 +212,11 @@ pub fn run(
 
     let updated = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {} after compact", file.display()))?;
+    // `#compactdropitem`: re-verify against the document actually on disk so a
+    // concurrent stale-supervisor CRDT merge that interleaved over the written
+    // file (dropping a non-exchange item) fails closed before commit instead of
+    // staging the corrupted snapshot into HEAD.
+    assert_non_exchange_items_preserved(file, &content, &updated, "post_write")?;
     let changed = updated != content;
     if commit {
         if changed {
@@ -313,6 +319,81 @@ fn validate_compacted_exchange(file: &Path, compacted: &str) -> Result<()> {
     )
 }
 
+/// `#compactdropitem`: count tracked list items per non-exchange component.
+///
+/// Compaction must only archive/truncate the `exchange` component; every other
+/// singleton list component (`backlog`/legacy `pending`, `review`, `done`,
+/// `queue`, `icebox`) must keep all of its items. This returns a per-component
+/// item count for every non-exchange component that holds at least one tracked
+/// list item, so the compact path can assert item-count parity before/after a
+/// rewrite and fail closed if a whole item silently disappears (the worse
+/// sibling of #compactqattr, which only dropped attributes).
+fn non_exchange_list_item_counts(content: &str) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    let Ok(components) = component::parse(content) else {
+        return counts;
+    };
+    for comp in &components {
+        if comp.name == "exchange" {
+            continue;
+        }
+        let (_, items, _) = crate::pending::parse_items(comp.content(content));
+        if !items.is_empty() {
+            counts.insert(comp.name.clone(), items.len());
+        }
+    }
+    counts
+}
+
+/// `#compactdropitem`: fail closed if a compaction rewrite dropped a whole item
+/// from any non-exchange singleton list component.
+///
+/// `before` is the pre-compact document; `after` is the rebuilt/written
+/// document. Compaction legitimately rewrites `exchange` (archived/truncated)
+/// and may reconcile the generated `status` top-backlog sentence, but it must
+/// never reduce the item count of `backlog`/`review`/`done`/`queue`/`icebox`.
+/// A decrease means either a deterministic regression in the rebuild or a
+/// concurrent stale-supervisor CRDT merge interleaving over the written file —
+/// either way the corrupt document must not reach the snapshot/HEAD.
+fn assert_non_exchange_items_preserved(
+    file: &Path,
+    before: &str,
+    after: &str,
+    stage: &str,
+) -> Result<()> {
+    let before_counts = non_exchange_list_item_counts(before);
+    let after_counts = non_exchange_list_item_counts(after);
+
+    let mut dropped: Vec<String> = Vec::new();
+    for (name, before_n) in &before_counts {
+        let after_n = after_counts.get(name).copied().unwrap_or(0);
+        if after_n < *before_n {
+            dropped.push(format!("{name} {before_n}→{after_n}"));
+        }
+    }
+
+    if dropped.is_empty() {
+        return Ok(());
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "compact_dropped_non_exchange_item file={} stage={} dropped={}",
+            file.display(),
+            stage,
+            dropped.join(",")
+        ),
+    );
+    anyhow::bail!(
+        "[compact] INTERRUPTED: compaction dropped item(s) from non-exchange component(s) [{}] in {} (stage={}). Compaction must only archive/truncate the exchange; a singleton list component lost a whole tracked item (#compactdropitem — worse sibling of #compactqattr). The compact output was NOT committed. Re-run compaction; if it recurs, a concurrent stale-supervisor CRDT merge is interleaving over the written file — recycle/restart the supervisor (`agent-doc session restart-supervisor {} --force`) before retrying.",
+        dropped.join(", "),
+        file.display(),
+        stage,
+        file.display()
+    )
+}
+
 fn apply_compacted_document(
     file: &Path,
     compacted: &str,
@@ -323,6 +404,10 @@ fn apply_compacted_document(
     // Fail closed before any write if the rebuilt exchange is structurally
     // malformed (#jb-compact-malformed-response-commit).
     validate_compacted_exchange(file, compacted)?;
+
+    // Fail closed before any write if the rebuild dropped a whole item from a
+    // non-exchange singleton list component (#compactdropitem).
+    assert_non_exchange_items_preserved(file, source_content, compacted, "apply")?;
 
     // `#w42v`: when a JB editor listener is active, converge the compacted
     // content through the editor (component `op:replace`) so it does not diverge
@@ -1084,6 +1169,84 @@ mod tests {
     use super::*;
     use crate::component::is_backlog_component;
     use agent_doc_core::topic::parse_topic_sections;
+
+    const COMPACTDROPITEM_DOC: &str = concat!(
+        "---\nagent_doc_session: drop-test\nagent_doc_format: template\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: topic one\n\nResponse one.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#a1] item one\n",
+        "- [ ] [#a2] item two\n",
+        "- [ ] [#a3] item three\n",
+        "<!-- /agent:backlog -->\n\n",
+        "## Review\n\n",
+        "<!-- agent:review -->\n",
+        "- [/] [#r1] review one\n",
+        "<!-- /agent:review -->\n",
+    );
+
+    #[test]
+    fn non_exchange_list_item_counts_counts_backlog_and_review() {
+        let counts = non_exchange_list_item_counts(COMPACTDROPITEM_DOC);
+        assert_eq!(counts.get("backlog").copied(), Some(3));
+        assert_eq!(counts.get("review").copied(), Some(1));
+        // exchange is never counted (it is the only component compaction rewrites)
+        assert_eq!(counts.get("exchange"), None);
+    }
+
+    #[test]
+    fn assert_non_exchange_items_preserved_passes_when_counts_stable() {
+        // Only the exchange changed; backlog/review item counts are identical.
+        let after = COMPACTDROPITEM_DOC.replace("Response one.", "*Compacted.*");
+        assert!(super::assert_non_exchange_items_preserved(
+            Path::new("/tmp/compactdropitem.md"),
+            COMPACTDROPITEM_DOC,
+            &after,
+            "test"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn assert_non_exchange_items_preserved_fails_closed_on_dropped_backlog_item() {
+        // Simulate the live #compactdropitem regression: a concurrent CRDT merge
+        // drops one whole backlog item from the written document.
+        let after = COMPACTDROPITEM_DOC.replace("- [ ] [#a2] item two\n", "");
+        let err = super::assert_non_exchange_items_preserved(
+            Path::new("/tmp/compactdropitem.md"),
+            COMPACTDROPITEM_DOC,
+            &after,
+            "post_write",
+        )
+        .expect_err("dropping a backlog item must fail closed");
+        let msg = err.to_string();
+        assert!(msg.contains("#compactdropitem"), "message: {msg}");
+        assert!(msg.contains("backlog 3→2"), "message: {msg}");
+    }
+
+    #[test]
+    fn run_component_compact_does_not_drop_backlog_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("drop.md");
+        std::fs::write(&file, COMPACTDROPITEM_DOC).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        snapshot::save(&file, COMPACTDROPITEM_DOC).unwrap();
+
+        // Full exchange compact must leave backlog (3) and review (1) intact and
+        // must NOT trip the #compactdropitem guard.
+        run_component_compact(&file, COMPACTDROPITEM_DOC, "exchange", Some("Compacted."), false)
+            .unwrap();
+
+        let result = std::fs::read_to_string(&file).unwrap();
+        let counts = non_exchange_list_item_counts(&result);
+        assert_eq!(counts.get("backlog").copied(), Some(3));
+        assert_eq!(counts.get("review").copied(), Some(1));
+    }
 
     #[test]
     fn parse_exchanges_basic() {

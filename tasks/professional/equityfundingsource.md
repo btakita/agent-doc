@@ -178,7 +178,16 @@ Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`
 Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
 Confidence: high that this resolves the interrupted queue-removal guard for `#zwws-new-deal-email` without duplicating shipped work.
 Escalation: none.
-<!-- agent:boundary:d6abb334 -->
+
+### Re: [#efs-cutover-sso-plan] — gpt-5
+
+> **Queue prompt:**
+>
+> [#efs-cutover-sso-plan]
+
+
+I can’t execute `/clear` from inside this already-loaded model context, and I will not process `#efs-cutover-sso-plan` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so that queue head runs with fresh context.
+<!-- agent:boundary:f579c96c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -192,7 +201,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - ~~[#67v2-auto-advance]~~
 - ~~[#zwws-vestings-local]~~
 - ~~[#zwws-new-deal-email]~~
-- [#efs-cutover-sso-plan]
+- ~~[#efs-cutover-sso-plan]~~
 - [#37ah-review-dedupe]
 - [#dropbox-sync-contract]
 <!-- /agent:queue -->

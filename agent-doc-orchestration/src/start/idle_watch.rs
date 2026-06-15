@@ -8,6 +8,8 @@
 
 use super::*;
 
+const CLEAN_SESSION_CONTEXT_RESET_REASON: &str = "active queue head is a [clean-session] item - clearing to give it a fresh agent context (#cleandrainsup)";
+
 fn record_context_clear_prompt_for_hooks(
     shared: &SupervisorShared,
     path: &Path,
@@ -42,6 +44,48 @@ fn record_context_clear_prompt_for_hooks(
 fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
     let content = std::fs::read_to_string(file).ok()?;
     crate::queue_continuation::live_drainable_continuation_head(file, &content)
+}
+
+fn idle_queue_context_reset_ops_log_message(
+    file: &Path,
+    harness: &crate::harness::HarnessConfig,
+    clear_cmd: &str,
+    target: &str,
+    active_head: &str,
+    reason: &str,
+) -> String {
+    format!(
+        "idle_queue_watch_context_reset file={} harness={} cmd={:?} target={} head_bytes={} head_sha256={} reason={:?}",
+        file.display(),
+        harness.binary,
+        clear_cmd,
+        target,
+        active_head.len(),
+        crate::ops_log::content_hash(active_head),
+        reason,
+    )
+}
+
+fn log_idle_queue_context_reset_submit(
+    file: &Path,
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+    clear_cmd: &str,
+    active_head: &str,
+    reason: &str,
+) {
+    let target = shared.inject_pane.as_deref().unwrap_or("child_pty");
+    crate::ops_log::log_op(
+        file,
+        &idle_queue_context_reset_ops_log_message(
+            file,
+            harness,
+            clear_cmd,
+            target,
+            active_head,
+            reason,
+        ),
+    );
 }
 
 pub(super) fn spawn_idle_queue_watch_thread(
@@ -800,10 +844,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     active_head_is_clean_session,
                     clear_cooldown_active,
                 ) {
-                    Some(
-                        "active queue head is a [clean-session] item — clearing to give it a fresh agent context (#cleandrainsup)"
-                            .to_string(),
-                    )
+                    Some(CLEAN_SESSION_CONTEXT_RESET_REASON.to_string())
                 } else if clear_cooldown_active
                     || !crate::session_accretion::queue_context_reset_opted_in(&path)
                 {
@@ -916,6 +957,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     &path,
                                     &harness,
                                     clear_cmd,
+                                );
+                                log_idle_queue_context_reset_submit(
+                                    &path,
+                                    &shared,
+                                    &harness,
+                                    clear_cmd,
+                                    head,
+                                    context_reset_reason.as_deref().unwrap_or(""),
                                 );
                                 log_event(
                                     &mut session_log,
@@ -1120,3 +1169,101 @@ pub(super) fn spawn_idle_queue_watch_thread(
         .expect("spawn idle-queue watch thread")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_session_reset_ops_log_precedes_drain_submit() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::write(&doc, "doc\n").unwrap();
+
+        let head = "do [#cleandrainsup-agent]";
+        let harness = crate::harness::HarnessConfig::codex();
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            "codex",
+            None,
+            None,
+            Some("%25".to_string()),
+        );
+
+        assert!(crate::start::decisions::clean_session_head_forces_context_reset(true, false,));
+        assert_eq!(
+            crate::start::decisions::idle_queue_context_reset_decision(
+                true,
+                false,
+                Some(head),
+                None,
+                true,
+            ),
+            IdleQueueContextResetDecision::Reset
+        );
+
+        log_idle_queue_context_reset_submit(
+            &doc,
+            &shared,
+            &harness,
+            "/clear",
+            head,
+            CLEAN_SESSION_CONTEXT_RESET_REASON,
+        );
+
+        assert!(
+            crate::start::decisions::drain_blocked_awaiting_clear_settle(
+                true,
+                true,
+                false,
+                CLEAR_COOLDOWN_RESUME_IDLE_TICKS - 1,
+                CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+            )
+        );
+        assert!(
+            !crate::start::decisions::drain_blocked_awaiting_clear_settle(
+                true,
+                true,
+                false,
+                CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+                CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+            )
+        );
+        assert_eq!(
+            crate::start::decisions::idle_queue_drain_decision(
+                false,
+                true,
+                false,
+                false,
+                Some(head),
+                None,
+            ),
+            IdleQueueDrainDecision::Dispatch
+        );
+        log_idle_queue_drain_submit(
+            &doc,
+            &shared,
+            &harness,
+            "trigger",
+            head,
+            &format!("agent-doc {}", doc.display()),
+        );
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let reset_pos = ops_log
+            .find("idle_queue_watch_context_reset")
+            .expect("reset marker logged");
+        let drain_pos = ops_log
+            .find("idle_queue_watch_drain")
+            .expect("drain marker logged");
+        assert!(
+            reset_pos < drain_pos,
+            "clean-session reset must be observable before drain: {ops_log}"
+        );
+        assert!(ops_log.contains("reason=\"active queue head is a [clean-session] item"));
+        assert!(ops_log.contains("#cleandrainsup"));
+        assert!(ops_log.contains("head_sha256="));
+        assert!(ops_log.contains("target=%25"));
+    }
+}

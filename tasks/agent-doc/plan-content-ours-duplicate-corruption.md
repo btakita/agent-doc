@@ -1,6 +1,15 @@
 # Plan: `content_ours` snapshot adoption ingests duplicate / malformed component blocks (`#dupcontent`)
 
-**Status:** PLAN ONLY — do not implement the fix. Filed via `#agent-doc-bug` 2026-06-14.
+**Status:** PARTIALLY IMPLEMENTED 2026-06-15 (agent-doc `e11c218b`). Fix items **#1
+(structural validation before adopting any `content_ours`/`ack_content_sidecar`
+snapshot)** and **#3 (validate before the disk write, not after)** landed:
+`component::structural_corruption_reason()` + both `content_ours` adoption guards
+in `write/ipc.rs` now refuse a corrupt buffer (duplicate singleton blocks or an
+unterminated-quote attribute) and keep the clean candidate, so the corrupt buffer
+never reaches disk. Remaining: **#2** (fail closed on a `supervisor_binary_stale`
+serving supervisor — refuse its buffer regardless of structural shape) and **#4**
+(de-dup singleton blocks on parse so a recoverable single-block buffer is repaired
+rather than only rejected). Filed via `#agent-doc-bug` 2026-06-14.
 
 ## Summary
 

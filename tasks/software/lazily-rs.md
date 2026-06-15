@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -39,7 +39,7 @@ queue: stop
 Compacted content:
 - Archived 7 response topic(s): Closeout repair; Lean status; Artifact cleanup; 4 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): Evaluate Lean Language for lazily; do [#4zvn]; #4zvn
-<!-- agent:boundary:0f5d8c7b -->
+<!-- agent:boundary:0dda377f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +47,7 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->go 
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go --> 
 - release + publish
 <!-- /agent:queue -->
 

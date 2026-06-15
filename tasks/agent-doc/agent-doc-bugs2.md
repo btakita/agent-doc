@@ -109,16 +109,37 @@ The broader goal remains active because the restored queue still has additional 
 Acknowledged. I restored the queue component to the unstruck state you set, including the `/goal` bullet and `do [#compactdrift-agent]`.
 
 The compact closeout guard fix remains committed and pushed; the broader goal remains active because the queue still has additional live heads after this item.
-<!-- agent:boundary:ab3ff85f -->
+
+### Re: #cleandrainsup-agent — gpt-5
+
+Implemented `#cleandrainsup-agent` as an agent-verifiable supervisor idle-drain proof instead of leaving it as live-only operator verification.
+
+The supervisor idle-watch now emits an `idle_queue_watch_context_reset` ops-log marker when a `[clean-session]` queue head forces a pre-dispatch `/clear`. The marker records the document, harness, target, head hash, and `#cleandrainsup` reason. The existing `idle_queue_watch_drain` marker then proves the following dispatch, giving a local machine-checkable reset-then-drain sequence.
+
+Added regression coverage in `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`: `clean_session_reset_ops_log_precedes_drain_submit` writes a temp ops log, proves the clean-session reset decision, waits for the clear-settle gate to release, proves the drain decision, logs the existing drain marker, and asserts the reset marker precedes the drain marker with the expected proof fields.
+
+Verification:
+- `cargo test -p agent-doc-orchestration clean_session_reset_ops_log_precedes_drain_submit -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration clean_session_head_forces_context_reset_policy -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration idle_queue_drain -- --nocapture` passed: 13 passed.
+- `make check` passed: 4514 tests passed, 238 skipped, doctests ok, medium SimWorld gate passed.
+- `make install` passed and installed `agent-doc 0.34.1`; `libagent_doc-0.34.1.so` was refreshed and 2 controllers were marked for idle recycle.
+
+Commits:
+- `src/agent-doc`: `d24b78f5` (`test: log clean-session idle reset proof`), pushed to `origin/main`.
+- Parent repo: `9b52b0b5` (`agent-doc: update clean-session proof`).
+
+The broader goal remains active because the queue still contains additional live heads after `#cleandrainsup-agent`.
+<!-- agent:boundary:54edd74d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: JB `Run Agent Doc` sent `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` into the Codex input but did not submit. #simworld
-- /goal Do the actual work in the queue. Stop punting on the queue work. Fix the root cause(s) of the punting. The work in the queue should be done.
+- ~~:pushpin: JB `Run Agent Doc` sent `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` into the Codex input but did not submit. #simworld~~
+/goal Do the actual work in the queue. Stop punting on the queue work. Fix the root cause(s) of the punting. The work in the queue should be done.
 - do [#compactdrift-agent]
-- do [#cleandrainsup-agent]
+- ~~do [#cleandrainsup-agent]~~
 - do [#rtwbcast-simproof]
 - do [#recyclerestart-agent]
 - do [#lazilyqrestore-agent]
@@ -174,7 +195,6 @@ What are #next-steps to fix bugs?
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
-- [ ] [#cleandrainsup-agent] [clean-session] Make #cleandrainsup-verify agent-verifiable: add local supervisor/ops-log coverage for idle_queue_watch_context_reset reason=#cleandrainsup followed by draining a [clean-session] head with one fresh agent per item. Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#rtwbcast-simproof] [clean-session] Make #rtwbcast-verify agent-verifiable: add a headless two-editor/SimWorld CRDT broadcast convergence test that exercises simultaneous managed-doc edits and proves both buffers converge without clobber. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#recyclerestart-agent] [clean-session] Make #recyclerestart-verify agent-verifiable: add automated recycle/restart evidence collection for kill-pane + JB Sync Tmux Layout, including ops.log assertions for no sync-deferred wedge and restart/re-clear proof. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#lazilyqrestore-agent] [clean-session] Make #lazilyqrestore agent-verifiable: add cross-doc lost-queue recovery tooling for foreign-owned tasks/software/lazily-rs.md that reads snapshots/sidecars/doc history, reconstructs deleted queue heads, and emits explicit user-removal proof when no restore is needed.

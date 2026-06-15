@@ -201,10 +201,14 @@ pub enum DispatchOnlyReopenDelivery {
 }
 
 impl DispatchOnlyReopenDelivery {
-    pub const fn submit_mode(self) -> &'static str {
+    pub const fn submit_mode_for_harness(self, harness_binary: &str) -> &'static str {
         match self {
             DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_normalized_submit",
-            DispatchOnlyReopenDelivery::DirectPaneSubmit => "tmux_literal_cr",
+            DispatchOnlyReopenDelivery::DirectPaneSubmit => match harness_binary.as_bytes() {
+                b"codex" => "tmux_literal_text_enter_key",
+                b"opencode" => "tmux_literal_kitty_return",
+                _ => "tmux_literal_cr",
+            },
         }
     }
 
@@ -360,7 +364,7 @@ pub fn dispatch_only_sent_log_message(facts: DispatchOnlyProofOutcomeFacts<'_>) 
         facts.pane,
         facts.harness_binary,
         facts.delivery.label(),
-        facts.delivery.submit_mode(),
+        facts.delivery.submit_mode_for_harness(facts.harness_binary),
         facts.dispatch_start.dispatch_stage_label(),
         facts.dispatch_start.proof_scope_label()
     )
@@ -373,7 +377,7 @@ pub fn dispatch_only_sent_console_message(facts: DispatchOnlyProofOutcomeFacts<'
         facts.file_display,
         facts.pane,
         facts.delivery.label(),
-        facts.delivery.submit_mode(),
+        facts.delivery.submit_mode_for_harness(facts.harness_binary),
         facts.dispatch_start.dispatch_stage_label(),
         facts.dispatch_start.proof_scope_description()
     )
@@ -388,7 +392,7 @@ pub fn accepted_only_dispatch_start_log_message(
         facts.pane,
         facts.harness_binary,
         facts.delivery.label(),
-        facts.delivery.submit_mode(),
+        facts.delivery.submit_mode_for_harness(facts.harness_binary),
         facts.timeout_secs
     )
 }
@@ -402,7 +406,7 @@ pub fn accepted_only_dispatch_start_refusal_message(
         facts.file_display,
         facts.pane,
         facts.delivery.label(),
-        facts.delivery.submit_mode(),
+        facts.delivery.submit_mode_for_harness(facts.harness_binary),
         facts.timeout_secs,
         facts.harness_binary
     )
@@ -1425,6 +1429,27 @@ mod tests {
         assert_eq!(
             routed_dispatch_start_timeout_for_binary(Some("opencode"), true),
             Duration::from_secs(2)
+        );
+    }
+
+    #[test]
+    fn direct_pane_submit_mode_is_harness_specific() {
+        let delivery = DispatchOnlyReopenDelivery::DirectPaneSubmit;
+        assert_eq!(
+            delivery.submit_mode_for_harness("codex"),
+            "tmux_literal_text_enter_key"
+        );
+        assert_eq!(
+            delivery.submit_mode_for_harness("opencode"),
+            "tmux_literal_kitty_return"
+        );
+        assert_eq!(
+            delivery.submit_mode_for_harness("claude"),
+            "tmux_literal_cr"
+        );
+        assert_eq!(
+            DispatchOnlyReopenDelivery::SupervisorIpcOnce.submit_mode_for_harness("codex"),
+            "supervisor_normalized_submit"
         );
     }
 

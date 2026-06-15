@@ -352,22 +352,15 @@ pub(crate) fn send_command_once_unchecked(
         eprintln!("[route] warning: display-message failed: {}", e);
     }
 
+    let (transform, submit_key) = routed_trigger_submit_diagnostic(&harness.binary);
     crate::input_diag::log_text_submit(
         Some(Path::new(file_path)),
         "route.direct_pane_submit",
         &format!("pane:{pane}"),
         &payload,
         Some(&harness.binary),
-        if harness.binary == "opencode" {
-            "routed_trigger_kitty_return"
-        } else {
-            "routed_trigger_cr"
-        },
-        if harness.binary == "opencode" {
-            "KittyReturn"
-        } else {
-            "Enter"
-        },
+        transform,
+        submit_key,
     );
     crate::sessions::send_submitted_text_for_harness(tmux, pane, &payload, &harness.binary)?;
     if let Err(e) = tmux.select_pane(pane) {
@@ -1001,6 +994,14 @@ pub(crate) fn validate_routed_trigger_payload(
     Ok(())
 }
 
+fn routed_trigger_submit_diagnostic(harness_binary: &str) -> (&'static str, &'static str) {
+    match harness_binary {
+        "codex" => ("routed_trigger_enter_key", "Enter"),
+        "opencode" => ("routed_trigger_kitty_return", "KittyReturn"),
+        _ => ("routed_trigger_cr", "Enter"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -1105,6 +1106,21 @@ mod tests {
             CommandDispatchStatus::TimedOut,
             true
         ));
+    }
+    #[test]
+    fn routed_trigger_submit_diagnostic_names_codex_real_enter_key() {
+        assert_eq!(
+            routed_trigger_submit_diagnostic("codex"),
+            ("routed_trigger_enter_key", "Enter")
+        );
+        assert_eq!(
+            routed_trigger_submit_diagnostic("opencode"),
+            ("routed_trigger_kitty_return", "KittyReturn")
+        );
+        assert_eq!(
+            routed_trigger_submit_diagnostic("claude"),
+            ("routed_trigger_cr", "Enter")
+        );
     }
     #[test]
     fn direct_pane_existing_draft_detection_enters_only_current_codex_draft() {

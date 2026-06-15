@@ -9,7 +9,6 @@ use agent_doc_orchestration::sessions::{SessionEntry, SessionRegistry, Tmux};
 use agent_doc_orchestration::startup_miss::{SessionLogStatus, StartupMiss};
 use agent_doc_orchestration::supervisor::ipc::IpcMethod;
 
-const TMUX_DIRECT_SUBMIT_MODE: &str = "tmux_literal_cr";
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(2);
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_millis(150);
@@ -707,7 +706,7 @@ fn send_clear_to_resolved_pane(
             "session_clear_sent file={} pane={} delivery=direct_pane_submit submit_mode={} pane_source={}{}",
             ctx.canonical_file.display(),
             pane,
-            TMUX_DIRECT_SUBMIT_MODE,
+            agent_doc_orchestration::sessions::tmux_submit_mode_for_harness(&ctx.harness),
             pane_source.as_str(),
             fallback_suffix
         ),

@@ -1241,7 +1241,7 @@ mod tests {
 [101] commit_success file=/repo/tasks/a.md
 [102] route_dispatch_start_proven file=tasks/a.md pane=%1 harness=codex proof=consumed timeout_secs=10
 [103] route_dispatch_only_sent file=tasks/b.md pane=%2 harness=opencode proof=accepted proof_scope=accepted_only
-[104] route_dispatch_only_submit_unproven file=tasks/b.md pane=%2 harness=opencode delivery=direct_pane_submit submit_mode=tmux_literal_cr proof=accepted proof_scope=accepted_only timeout_secs=10
+[104] route_dispatch_only_submit_unproven file=tasks/b.md pane=%2 harness=opencode delivery=direct_pane_submit submit_mode=tmux_literal_kitty_return proof=accepted proof_scope=accepted_only timeout_secs=10
 [105] route_submit_issue file=tasks/b.md pane=%2 harness=codex phase=direct_pane_acceptance issue=prompt_not_submitted result=trigger_still_visible elapsed_ms=5010 trigger_visible=true capture_len=2048 capture_hash=abc123def456
 [106] post_commit_local_drift file=/repo/tasks/a.md kind=user_follow_up basis=head
 [107] post_commit_user_follow_up file=/repo/tasks/a.md basis=head

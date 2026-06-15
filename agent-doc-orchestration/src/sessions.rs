@@ -218,16 +218,8 @@ impl Multiplexer for Tmux {
         text: &str,
         harness: &str,
     ) -> Result<()> {
-        let submit_key = if harness == "opencode" {
-            "KittyReturn"
-        } else {
-            "Enter"
-        };
-        let transform = if harness == "opencode" {
-            "tmux_text_kitty_return"
-        } else {
-            "tmux_text_cr"
-        };
+        let submit_key = tmux_submit_key_for_harness(harness);
+        let transform = tmux_submit_transform_for_harness(harness);
         crate::input_diag::log_text_submit(
             None,
             "sessions.send_submitted_text_for_harness",
@@ -237,9 +229,79 @@ impl Multiplexer for Tmux {
             transform,
             submit_key,
         );
-        tmux_router::submit_text_for_harness(self, pane_id, text, harness)
-            .with_context(|| format!("failed to submit input to {harness} pane {pane_id}"))
+        if harness == "codex" {
+            send_literal_text_then_enter_key(self, pane_id, text)
+        } else {
+            tmux_router::submit_text_for_harness(self, pane_id, text, harness)
+        }
+        .with_context(|| format!("failed to submit input to {harness} pane {pane_id}"))
     }
+}
+
+pub const fn tmux_submit_mode_for_harness(harness: &str) -> &'static str {
+    match harness.as_bytes() {
+        b"codex" => "tmux_literal_text_enter_key",
+        b"opencode" => "tmux_literal_kitty_return",
+        _ => "tmux_literal_cr",
+    }
+}
+
+pub const fn tmux_submit_transform_for_harness(harness: &str) -> &'static str {
+    match harness.as_bytes() {
+        b"codex" => "tmux_text_enter_key",
+        b"opencode" => "tmux_text_kitty_return",
+        _ => "tmux_text_cr",
+    }
+}
+
+pub const fn tmux_submit_key_for_harness(harness: &str) -> &'static str {
+    match harness.as_bytes() {
+        b"opencode" => "KittyReturn",
+        _ => "Enter",
+    }
+}
+
+fn submitted_text_without_trailing_line_endings(text: &str) -> &str {
+    text.trim_end_matches(['\r', '\n'])
+}
+
+fn literal_text_then_enter_command_args(pane_id: &str, text: &str) -> Vec<String> {
+    let text = submitted_text_without_trailing_line_endings(text);
+    if text.is_empty() {
+        return vec![
+            "send-keys".to_string(),
+            "-t".to_string(),
+            pane_id.to_string(),
+            "Enter".to_string(),
+        ];
+    }
+    vec![
+        "send-keys".to_string(),
+        "-t".to_string(),
+        pane_id.to_string(),
+        "-l".to_string(),
+        text.to_string(),
+        ";".to_string(),
+        "send-keys".to_string(),
+        "-t".to_string(),
+        pane_id.to_string(),
+        "Enter".to_string(),
+    ]
+}
+
+fn send_literal_text_then_enter_key(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()> {
+    let status = tmux
+        .cmd()
+        .args(literal_text_then_enter_command_args(pane_id, text))
+        .status()
+        .context("failed to run tmux send-keys (literal text + Enter)")?;
+    if !status.success() {
+        anyhow::bail!(
+            "tmux send-keys literal text + Enter failed for pane {}",
+            pane_id
+        );
+    }
+    Ok(())
 }
 
 /// Return the path to the sessions registry file (relative to CWD).
@@ -1245,6 +1307,58 @@ mod tests {
         assert_eq!(pane_window_with_mux(&mux, "%active").unwrap(), "@7");
         assert!(mux_ref.pane_alive("%active"));
         assert!(mux_ref.session_alive("agent-doc"));
+    }
+
+    #[test]
+    fn codex_submit_mode_uses_literal_text_plus_real_enter_key() {
+        assert_eq!(
+            tmux_submit_mode_for_harness("codex"),
+            "tmux_literal_text_enter_key"
+        );
+        assert_eq!(
+            tmux_submit_transform_for_harness("codex"),
+            "tmux_text_enter_key"
+        );
+        assert_eq!(tmux_submit_key_for_harness("codex"), "Enter");
+        assert_eq!(
+            submitted_text_without_trailing_line_endings("agent-doc plan.md\r\n"),
+            "agent-doc plan.md"
+        );
+        assert_eq!(
+            literal_text_then_enter_command_args("%7", "agent-doc plan.md\n"),
+            vec![
+                "send-keys",
+                "-t",
+                "%7",
+                "-l",
+                "agent-doc plan.md",
+                ";",
+                "send-keys",
+                "-t",
+                "%7",
+                "Enter",
+            ]
+        );
+        assert_eq!(
+            literal_text_then_enter_command_args("%7", "\n"),
+            vec!["send-keys", "-t", "%7", "Enter"]
+        );
+    }
+
+    #[test]
+    fn non_codex_submit_modes_keep_existing_backends() {
+        assert_eq!(
+            tmux_submit_mode_for_harness("opencode"),
+            "tmux_literal_kitty_return"
+        );
+        assert_eq!(
+            tmux_submit_transform_for_harness("opencode"),
+            "tmux_text_kitty_return"
+        );
+        assert_eq!(tmux_submit_key_for_harness("opencode"), "KittyReturn");
+        assert_eq!(tmux_submit_mode_for_harness("claude"), "tmux_literal_cr");
+        assert_eq!(tmux_submit_transform_for_harness("claude"), "tmux_text_cr");
+        assert_eq!(tmux_submit_key_for_harness("claude"), "Enter");
     }
 
     #[test]

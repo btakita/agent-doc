@@ -472,11 +472,7 @@ fn idle_queue_submit_mode(
     harness: &crate::harness::HarnessConfig,
 ) -> &'static str {
     if shared.inject_pane.is_some() {
-        if harness.binary == "opencode" {
-            "tmux_literal_kitty_return"
-        } else {
-            "tmux_literal_cr"
-        }
+        crate::sessions::tmux_submit_mode_for_harness(&harness.binary)
     } else {
         "pty_cr"
     }
@@ -3458,7 +3454,7 @@ fn idle_queue_drain_defers_to_real_lease_file_then_resumes_on_expiry() {
     );
 }
 #[test]
-fn idle_queue_submit_mode_uses_literal_cr_for_codex_owner_pane() {
+fn idle_queue_submit_mode_uses_literal_text_enter_key_for_codex_owner_pane() {
     let shared = SupervisorShared::with_actor_runtime(
         "test",
         "test-instance".to_string(),
@@ -3470,7 +3466,7 @@ fn idle_queue_submit_mode_uses_literal_cr_for_codex_owner_pane() {
 
     assert_eq!(
         idle_queue_submit_mode(&shared, &crate::harness::HarnessConfig::codex()),
-        "tmux_literal_cr"
+        "tmux_literal_text_enter_key"
     );
 }
 #[test]
@@ -3941,4 +3937,3 @@ fn forwarded_ctrl_c_interrupt_exit_accepts_exit_code_130() {
     assert!(is_forwarded_ctrl_c_interrupt_exit(&status, true));
 }
 }
-

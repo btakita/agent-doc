@@ -1209,6 +1209,28 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                         continuation.head_prompt.replace('\n', " ")
                     ),
                 );
+                // #mphaseloop (multi-phase auto-loop policy): a phase routed to
+                // `agent:review` this cycle must NOT terminate the go-mode drain.
+                // When this closeout still owes a drainable continuation AND it
+                // added an open review item (a phase moved to review rather than
+                // completed or genuinely blocked), emit the proof that the drain
+                // advances to the next drainable head instead of stalling.
+                if let (Some(prior), Some(current)) = (head_doc.as_deref(), snap.as_deref())
+                    && crate::queue_continuation::review_phase_routed(prior, current)
+                {
+                    let next_head = continuation
+                        .head_id
+                        .as_deref()
+                        .unwrap_or(continuation.head_prompt.as_str());
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "drain_continue_after_review file={} next_head={} (#mphaseloop)",
+                            file.display(),
+                            next_head.replace('\n', " ")
+                        ),
+                    );
+                }
             }
             // Fire post_commit hook for cross-session coordination
             let session_id = crate::frontmatter::read_session_id(file).unwrap_or_default();

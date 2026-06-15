@@ -380,6 +380,41 @@ fn open_backlog_ids_from_content(content: &str) -> Option<std::collections::Hash
     found_backlog.then_some(ids)
 }
 
+/// Count of OPEN (`[ ]`/`[/]`, not `[x]`/done) items in the `agent:review`
+/// component of `content`. A multi-phase task's phase that needs human/external
+/// validation is routed to `agent:review` as a gated `[/]` item; counting the
+/// open review items lets a closeout detect that a phase was routed to review
+/// this cycle (`#mphaseloop`).
+fn open_review_item_count(content: &str) -> usize {
+    let Ok(components) = crate::component::parse(content) else {
+        return 0;
+    };
+    components
+        .iter()
+        .find(|comp| agent_doc_core::component::is_review_component(&comp.name))
+        .map(|comp| {
+            let body = &content[comp.open_end..comp.close_start];
+            let (_, items, _) = crate::pending::parse_items(body);
+            items.into_iter().filter(|item| !item.is_done()).count()
+        })
+        .unwrap_or(0)
+}
+
+/// Whether `current` routed at least one new phase to `agent:review` relative to
+/// `prior`: the committed document has MORE open `agent:review` items than the
+/// pre-commit HEAD (`#mphaseloop`).
+///
+/// The multi-phase auto-loop policy (operator directive 2026-06-14) requires the
+/// go-mode drain to treat "needs review" as NON-terminal — a phase moved to
+/// review must NOT halt the queue; the drain emits the review item and advances
+/// to the next drainable head. The closeout uses this to emit the
+/// `drain_continue_after_review` proof when a review-routed cycle still owes a
+/// drainable continuation, distinguishing it from a turn that completed or
+/// genuinely blocked its phase.
+pub fn review_phase_routed(prior: &str, current: &str) -> bool {
+    open_review_item_count(current) > open_review_item_count(prior)
+}
+
 /// The live **drainable** continuation head of a document string.
 ///
 /// Like [`live_continuation_head`] but returns `Some` only when the active queue
@@ -1064,6 +1099,47 @@ mod tests {
         assert!(!deferred.contains("a"), "clean-session drains in-loop (#qcontdrain)");
         assert!(deferred.contains("b"), "operator-verify always deferred");
         assert!(!deferred.contains("c"));
+    }
+
+    fn doc_with_review(review_items: &[&str]) -> String {
+        let review: String = review_items.iter().map(|r| format!("{r}\n")).collect();
+        format!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n\
+## Review\n\n<!-- agent:review -->\n{review}<!-- /agent:review -->\n\n\
+## Queue\n\n<!-- agent:queue auto -->\n- do [#next]\n<!-- /agent:queue -->\n"
+        )
+    }
+
+    #[test]
+    fn review_phase_routed_detects_added_open_review_item() {
+        // #mphaseloop: moving a phase to agent:review (a gated `[/]` item) is the
+        // signal that this cycle routed-to-review rather than completed/blocked.
+        let none = doc_with_review(&[]);
+        let one = doc_with_review(&["- [/] [#p1] phase 1 needs live verify"]);
+        assert!(
+            review_phase_routed(&none, &one),
+            "a newly-added open review item is a routed phase"
+        );
+        // No delta → not routed (idempotent re-commit must not re-fire the proof).
+        assert!(!review_phase_routed(&one, &one));
+        // Fewer open items (a review item reaped/completed) is not a routed phase.
+        assert!(!review_phase_routed(&one, &none));
+        // A `[x]` done item does not count as an open routed phase.
+        let done = doc_with_review(&["- [x] [#p1] phase 1 reviewed"]);
+        assert!(!review_phase_routed(&none, &done));
+    }
+
+    #[test]
+    fn review_phase_routed_counts_only_review_component() {
+        // A growing backlog/queue must NOT be misread as a routed review phase —
+        // only the agent:review component's open-item delta counts.
+        let prior = doc_with_review(&["- [/] [#p1] one"]);
+        let more_reviews = doc_with_review(&["- [/] [#p1] one", "- [/] [#p2] two"]);
+        assert!(review_phase_routed(&prior, &more_reviews));
+        assert_eq!(open_review_item_count(&prior), 1);
+        assert_eq!(open_review_item_count(&more_reviews), 2);
+        assert_eq!(open_review_item_count(&doc_with_review(&[])), 0);
     }
 
     #[test]

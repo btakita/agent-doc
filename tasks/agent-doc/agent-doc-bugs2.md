@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -371,19 +371,20 @@ Verification: preflight succeeded; queue/backlog read confirmed the struck `#ar2
 Confidence: high for the queue-boundary repair; no claim of dependency-migration completion.
 
 Escalation: `#ar27-majors` remains blocked on a clean implementation session/worktree, not on user input. The stale route-owned supervisor warning is still live and should be handled by restart/recycle.
-<!-- agent:boundary:129bc24f -->
+<!-- agent:boundary:a251c48c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- The items in the queue were deleted. Were they complete or is this a bug?
 <!-- /agent:queue -->
 ###
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
 ---
 `'/clear' is disabled while a task is in progress
----
+---~~~~
 A recent monsterrodholders.md session had much churn after I edited the queue while a turn was running. One churn item included deleting a queue item that I added.
 ---
 agent-doc reentrant run on equityfundingsource.md had recovery churn.

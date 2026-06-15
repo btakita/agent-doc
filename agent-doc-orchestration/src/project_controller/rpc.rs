@@ -1355,7 +1355,7 @@ pub(crate) fn newest_crate_source_mtime_secs(crate_root: &Path) -> Option<u64> {
 }
 
 /// `#supautoinstall` — run the dogfood build+install for agent-doc's own source from
-/// `crate_root`, the same three steps as `runbooks/dogfood-supervisor-refresh.md`:
+/// `crate_root`, the historical manual refresh steps:
 /// `cargo build --release` → `cargo install --path .` → `agent-doc lib-install`. Runs IN
 /// THE SUPERVISOR at an idle boundary (never the finalize client mid-cycle), which is what
 /// root-fixes the mid-session-install drift. After it succeeds the installed binary is

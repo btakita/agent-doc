@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -118,6 +118,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- When I filled out the Lender Application in the Available deal in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard: The UI should update. Complete application notification should transition into the waiting for approval notification. Also the Available deal that was added card state should change. Do we have a model of these sort of transitions?
 <!-- /agent:queue -->
 
 ## Backlog

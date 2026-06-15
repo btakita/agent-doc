@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -94,7 +94,7 @@ Deployed. The `#pending-deals` fix (a pending lender account application moves d
 - **Version:** `bf71d6ee-3e2c-457e-8809-db0b3e5af3ae` (replaces `61df3c82`, which had the fund-only logic).
 
 No code changes this cycle — deploy of the already-committed-and-pushed build (submodule `60a07f5`, superproject `bc0ec6283`). Reload the available-deals page and your applied deal should now sit under **Pending deals** with an "Application under review" badge.
-<!-- agent:boundary:33e149ad -->
+<!-- agent:boundary:77c12462 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,6 +102,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Do we have email notification setup for investor, broker, and borrower events?
 <!-- /agent:queue -->
 
 ## Backlog

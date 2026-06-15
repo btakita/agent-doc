@@ -90,7 +90,30 @@ Fixed. Compaction now **fails closed** if it would drop a whole item from any no
 **Verification:** `make check` green (exit 0). 4 new deterministic tests: counts backlog+review correctly; passes when only the exchange changes; fails closed with `backlog 3→2` on a dropped item; `run_component_compact` preserves backlog(3)+review(1) with no false positive. Submodule CI baseline green.
 
 **Not yet live:** the fix is committed + release-built but **not installed**, to avoid making the finalize client newer than the already-stale supervisor (pid 1654897) mid-cycle (`#no-mid-session-install`). I'll `cargo install --path .` + recycle the supervisor right after this closeout so the guard goes live. The pre-existing uncommitted `#autorecycle-on-install` work (`lib_install.rs` + `VERSIONS.md`) was left untouched — separate concern, not bundled.
-<!-- agent:boundary:5d26ff20 -->
+
+### Re: ~~do [#compactdropitem]~~ (struck) — verified live — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
+> ```
+> resync: pruned 8 stale session(s)
+> [route] target tmux session: 0
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3457
+> ```
+
+
+Confirmed closed. The fail-closed compact guard is committed **and live in the installed binary** — no follow-up needed.
+
+**Verification this cycle:**
+- `b571c32c` (`compact: fail closed if compaction drops a non-exchange item`) is an ancestor of the agent-doc submodule HEAD. ✓
+- Installed `~/.cargo/bin/agent-doc` is `0.34.1`, mtime `2026-06-15 00:20:58` — **after** the `b571c32c` commit (`00:17:37`); the prior cycle's promised `cargo install` landed. ✓
+- `strings ~/.cargo/bin/agent-doc | grep compact_dropped_non_exchange_item` → **present**. The guard (`assert_non_exchange_items_preserved`, `apply`/`post_write` stages) is in the live binary. ✓
+
+**On the stale cdylib:** the installed `libagent_doc.so` (built `00:14:46`, before the commit) does **not** carry the guard string — but that is a non-issue. The guard lives in `agent-doc-orchestration/src/compact.rs`, and `src/ffi.rs` exposes **no** compact entry point: JB `Compact Exchange` shells out to the `agent-doc` binary (`compact … --commit`), not the FFI. So the guard is reachable from the JB path via the binary that already has it; the cdylib does not gate compaction.
+
+The uncommitted `VERSIONS.md` + `src/lib_install.rs` are the pre-existing `#autorecycle-on-install` work — left untouched, separate concern (not bundled), same as the prior cycle.
+<!-- agent:boundary:4058bfde -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -118,7 +141,7 @@ resync: pruned 9 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3502
 ```
 ~~~
-- do [#compactdropitem]
+- ~~do [#compactdropitem]~~
 ---
 :pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
 ```
@@ -168,7 +191,7 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
 :round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
 ---
-- :pushpin: [#compactqattr]
+- ~~:pushpin: [#compactqattr]~~
 - :pushpin: [#dupcontent]
 ---
 :pushpin: - do [#dfrefresh-retire]

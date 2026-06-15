@@ -18,9 +18,6 @@ prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: start
-agent_doc_pipeline:
-  run_id: cycle-1781544545428
-  step: write_applied
 ---
 
 ## Status
@@ -138,6 +135,15 @@ Implemented the headless two-editor broadcast proof and fixed the rebroadcast ro
 - `SimEditor` now carries per-editor identity, writes per-editor live-buffer sidecars, ignores non-target patch files, applies targeted component patches, and ACK-deletes applied patch files.
 - `multi_editor_crdt_broadcast_converges_without_file_cache_conflict` now drives production `broadcast_editor_change` in both directions and proves both editor buffers converge without disk writes or conflict markers.
 - `compute_broadcast` now fast-paths stale-peer rebroadcasts when the originator already includes the peer delta, preventing a second CRDT merge from corrupting component markers.
+- `make check`
+- staged-patch temp worktree: focused recyclerestart test, `sync_lock`, and `cargo check -p agent-doc`
+- `cargo test -p agent-doc restart_supervisor -- --nocapture`
+- `cargo test -p agent-doc recycle -- --nocapture`
+- `cargo test -p agent-doc sync_lock -- --nocapture`
+- `cargo test -p agent-doc recyclerestart_agent_verifies_kill_pane_sync_guard_and_reclear_proofs -- --nocapture`
+- Made the production sync-lock decision seam public so tests can assert the real stale-bound behavior instead of duplicating it.
+- Added recyclerestart proof markers for binary promotion and session re-clear/drain (`recycle_session_reclear ...` and `supervisor_recycle_action result=binary_promoted`) and a targeted test asserting there is no permanent sync-deferred wedge.
+- Added a SimWorld sync-guard model that reproduces killed-pane `Sync Tmux Layout` holding the guard, then proves stale-holder release and later completion through ops-log markers (`sync_kill_pane_path`, `sync_guard_released reason=stale_holder_superseded`, `sync_guard_released reason=sync_complete`).
 
 Verification: `cargo test -p agent-doc-orchestration broadcast -- --nocapture`, `cargo test broadcast -- --nocapture`, `make check`, `make install`.
 ❯ <<<<<<< agent-response
@@ -197,20 +203,20 @@ Commit/push: `src/agent-doc` commit `865a37ac` was pushed to `origin/main`; this
 
 Implemented agent-verifiable recycle/restart proof coverage.
 
-- Added a SimWorld sync-guard model that reproduces killed-pane `Sync Tmux Layout` holding the guard, then proves stale-holder release and later completion through ops-log markers (`sync_kill_pane_path`, `sync_guard_released reason=stale_holder_superseded`, `sync_guard_released reason=sync_complete`).
-- Added recyclerestart proof markers for binary promotion and session re-clear/drain (`recycle_session_reclear ...` and `supervisor_recycle_action result=binary_promoted`) and a targeted test asserting there is no permanent sync-deferred wedge.
-- Made the production sync-lock decision seam public so tests can assert the real stale-bound behavior instead of duplicating it.
+❯ - Added a SimWorld sync-guard model that reproduces killed-pane `Sync Tmux Layout` holding the guard, then proves stale-holder release and later completion through ops-log markers (`sync_kill_pane_path`, `sync_guard_released reason=stale_holder_superseded`, `sync_guard_released reason=sync_complete`).
+❯ - Added recyclerestart proof markers for binary promotion and session re-clear/drain (`recycle_session_reclear ...` and `supervisor_recycle_action result=binary_promoted`) and a targeted test asserting there is no permanent sync-deferred wedge.
+❯ - Made the production sync-lock decision seam public so tests can assert the real stale-bound behavior instead of duplicating it.
 
 Verification:
-- `cargo test -p agent-doc recyclerestart_agent_verifies_kill_pane_sync_guard_and_reclear_proofs -- --nocapture`
-- `cargo test -p agent-doc sync_lock -- --nocapture`
-- `cargo test -p agent-doc recycle -- --nocapture`
-- `cargo test -p agent-doc restart_supervisor -- --nocapture`
-- staged-patch temp worktree: focused recyclerestart test, `sync_lock`, and `cargo check -p agent-doc`
-- `make check`
+❯ - `cargo test -p agent-doc recyclerestart_agent_verifies_kill_pane_sync_guard_and_reclear_proofs -- --nocapture`
+❯ - `cargo test -p agent-doc sync_lock -- --nocapture`
+❯ - `cargo test -p agent-doc recycle -- --nocapture`
+❯ - `cargo test -p agent-doc restart_supervisor -- --nocapture`
+❯ - staged-patch temp worktree: focused recyclerestart test, `sync_lock`, and `cargo check -p agent-doc`
+❯ - `make check`
 
 Code commit: `src/agent-doc` `331573b1` (`test: prove recyclerestart sync guard recovery`), pushed to `origin/main`.
-<!-- agent:boundary:517d7879 -->
+<!-- agent:boundary:9c2dba42 -->
 <!-- /agent:exchange -->
 
 ## Queue

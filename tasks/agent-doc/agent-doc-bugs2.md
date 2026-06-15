@@ -687,17 +687,36 @@ Current log sweep found partial evidence: `write_authority action=routed`, `plug
 The new backlog items split the remaining work into log-correlation tasks for submit proof, editor/IPC proof, and supervisor recycle proof. They are `[clean-session]` items so go-mode can queue and drain them with a fresh agent context.
 
 Commands used: `rg` over `agent:backlog` / `agent:review`, targeted ops-log marker search across available logs, and `agent-doc plan`. No source files changed in this cycle. Escalation none. Confidence medium: the queue additions are actionable, but final closure still depends on exact proof markers or operator reproduction.
-<!-- agent:boundary:dce497b3 -->
+
+### Re: Fix the root cause of "Re: queue churn explanation — gpt-5" — gpt-5
+
+> **Queue prompt:**
+>
+> Fix the root cause of "Re: queue churn explanation — gpt-5"
+
+
+Implemented the root fix for the restart stall case in `src/agent-doc`.
+
+The bug was that a durable controller `queue_paused` record written for stale-supervisor churn could survive a real Codex/JB session restart. The restarted session had a fresh authoritative generation, but dispatch still failed closed on the old stale-supervisor pause, so the queue stayed stalled until a manual resume/recycle.
+
+The fix clears only document-scoped stale-supervisor churn-stop pauses when a new authoritative `start_session` generation is accepted. Deliberate operator pauses still remain fail-closed. The controller now records `stale_supervisor_pause_repaired ... action=session_start ... result=cleared`, and the restarted generation can dispatch immediately.
+
+Changed paths in `src/agent-doc`: `agent-doc-orchestration/src/project_controller/rpc.rs`, `agent-doc-orchestration/src/project_controller.rs`, and `VERSIONS.md`. Parent repo gitlink updated to `src/agent-doc` `19fbd7821fad136c3cf2a77c2211c0c9752fc375`; parent commit `2a1cddc27` records that pointer.
+
+Verification passed in the clean worktree `src/agent-doc-qchurnfix`: `cargo test -p agent-doc-orchestration session_start_clears_stale_supervisor_queue_pause_before_dispatch -- --nocapture`; `cargo test -p agent-doc-orchestration dispatch_queue_paused_stale_supervisor_emits_restart_redirect_marker -- --nocapture`; `cargo check -p agent-doc`; `make check` with clippy, 4537 tests passed, 238 skipped, doctests passed, and the medium SimWorld gate passed. Latest GitHub Actions CI for `agent-doc` is running for `19fbd782` at closeout. Escalation none. Confidence high.
+<!-- agent:boundary:dad9acad -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#efsmrgmarkers]~~
-- ~~:round_pushpin: Please add actionable items into the queue to advance `[operator-verify]` tasks. Read logs to see if any of the tasks are complete or need more work.~~
-- Fix the root cause of "Re: queue churn explanation — gpt-5"
+- ~~Fix the root cause of "Re: queue churn explanation — gpt-5"~~
 - do [#snbc2]
 - do [#codexctrlz]
+- Codex JB `Run Agent Doc` is still sending a `\n` to Codex instead of submitting the command. We have used several turns and 1 `/goal` but it's still not working. 
+- do [#opverify-submit-proof]
+- do [#opverify-editor-proof]
+- do [#opverify-recycle-proof]
 <!-- /agent:queue -->
 ###
 <!--

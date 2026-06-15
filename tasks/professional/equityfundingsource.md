@@ -87,7 +87,7 @@ The dashboard requirements alert now opens a **dialog stack in place** instead o
 **Verification** — `bun run check` green: **703 tests pass**, worker bundle built. Committed in the EFS submodule as `fc31aaa` and pushed to `origin/main`.
 
 Next in the queue: the multi-file CPA/attorney upload component, then deploy.
-<!-- agent:boundary:c5f2fa9a -->
+<!-- agent:boundary:08125405 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -95,9 +95,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~On https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard, add the dialog stack for the Investor questionaire...both the Requirements and the Complete Requirements. Both the dialogs should match the https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation forms~~
-- "CPA / attorney letter or supporting document" in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation and the dialog should allow multiple files. Use our standard multi-file upload component.
-- deploy
+- :pushpin: Add multi-file upload to the "CPA / attorney letter or supporting document" field in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation — the dialog should allow multiple files using our standard multi-file upload component.
+- :pushpin: Run deploy (bun run deploy:worker) to ship the changes.
 <!-- /agent:queue -->
 
 ## Backlog

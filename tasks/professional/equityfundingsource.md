@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,31 @@ committed
 Compacted content:
 - Archived 6 response topic(s): Published deal tag + Published deals column (portal-admin/pipeline); Available deal dialog on the investor dashboard; Lender Account Request gates Available deals; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:7dfcbbec -->
+
+### Re: Dashboard application notice needs a button to the form — opus-4-8
+
+> **Queue prompt:**
+>
+> "Lender account application — incomplete" in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard should have a button to link to the form tho complete the application. deploy
+
+
+> **Queue prompt:**
+>
+> "Lender account application — incomplete" in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard should have a button to link to the form to complete the application. deploy
+
+Done — shipped, tested, committed, pushed, and deployed.
+
+**What changed:** the shared `LenderApplicationNotice` now takes an optional `complete_href`. When provided it renders a status-aware CTA button — **Complete application** (not started), **Update application** (denied), or **View application** (pending) — linking to the target. The investor **dashboard** passes `complete_href="/portal-investor/available-deals"` on both notice placements (deals present and the no-deals case), so the "Lender account application — incomplete" banner now has a button to the page where selecting a deal surfaces the application form. The notice on the Available deals page and deal detail stays button-less since the form is already on the page (`#deal-first-apply-cta`).
+
+**Verification:** `bun run check` green — **692 tests pass, 0 fail**, browser + worker builds clean. Extended `tests/lender-account-gate.test.ts` (asserts the `complete_href`/`investor-lender-application-cta` button and the dashboard wiring) and updated `docs/current_progress.md`.
+
+**Heads-up — remote had diverged:** `origin/main` had been force-updated with upstream work (#rpzm removable interest-icon toggle, admin application-status history) and my prior-cycle `9a54501` was no longer on it. I rebased my deal-first-apply + CTA commits onto the new `origin/main`, re-ran the full suite green (the interest-toggle merged cleanly into `available_deals.tsx`), and pushed — so deal-first-apply is back on `origin/main`.
+
+**Shipped:**
+- `equityfundingsource-dev` `9f16e7c` → pushed to `origin/main` (rebased).
+- Superproject pointer bump `db0d83a1a`.
+- Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `8bd4dabe`; no new D1 migrations).
+<!-- agent:boundary:cf7ac2b8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +70,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- "Lender account application — incomplete" in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard should have a button to link to the form tho complete the application. deploy
 <!-- /agent:queue -->
 
 ## Backlog

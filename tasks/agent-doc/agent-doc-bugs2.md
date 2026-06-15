@@ -288,6 +288,16 @@ Verification:
 - Focused tests: `cargo test -p agent-doc-orchestration queue_continuation::tests:: -- --nocapture` passed.
 - Full suite: `make check` passed in a clean sibling worktree with only the three `#goqnoise` files applied.
 - CI: latest `CI` run on `main` was `completed/success` (`27526061281`, 2026-06-15T05:30:10Z).
+- GitHub Actions CI run `27528207423` completed `success` for that push.
+- Pushed `agent-doc` `main` through `e7308523` (`agent-doc(#dupcontent2): harden content_ours adoption`).
+- `make install` completed, including `agent-doc lib-install`; auto-recycle reported `0` controllers marked and `0` skipped.
+- `make check` passed locally: clippy, workspace tests, doctests, medium simulation, and version sync.
+- `cargo test -p agent-doc-orchestration ipc_snapshot_dedupes_duplicate_singleton_component_from_before_content -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration guard_refuses_stale_supervisor_content_ours -- --nocapture` passed.
+- `specs/07-closeout-commands.md`, `tests/test_cli.rs`, `VERSIONS.md`: documented the invariant and updated FlowCore token budgets/version notes.
+- `agent-doc-orchestration/src/write/exchange_reconcile.rs`: added regression coverage for proven duplicate singleton repair.
+- `agent-doc-orchestration/src/write/ipc.rs`: added conservative duplicate singleton-component repair before prompt-artifact dedupe. It repairs only with before-content proof of exactly one canonical singleton block, removes only injected duplicate blocks, and logs `duplicate_singleton_component_repaired` / `ipc_snapshot_singleton_components_deduped`.
+- `agent-doc-orchestration/src/write/ipc.rs`: refuses `content_ours` adoption when the serving controller/supervisor is known stale, for both live-prompt-drift and prompt-duplication adoption paths. The refusal keeps the candidate snapshot and logs `content_ours_adoption_refused_stale_supervisor` plus `ipc_proof_insufficient invariant=supervisor_binary_stale recovery=candidate_snapshot_kept`.
 
 Caveat: I did not run `make install` from the live working tree because the submodule has unrelated concurrent dirty work; preflight correctly warns the installed binary/cdylib still predate `2ced0b4c`. Promote this fix from a clean build before expecting live supervisors to use it.
 
@@ -297,20 +307,45 @@ Already implemented and verified. This is the `#0kjc` / `#mdastquote` / `#lintfe
 `find_code_ranges()` uses pulldown-cmark offsets to mask inline code, fenced code blocks, and indented code blocks before component/tag scanning, so marker text inside backticks is treated as content. `find_quoted_ranges()` masks same-line double-quoted prose spans, including escaped quotes, so quoted marker/tag text is also treated as content. Real component markers still parse normally, including marker attributes like `preset="..."`, because the marker open precedes the quoted attribute value.
 
 Verification already recorded in this document: `cargo test -p agent-doc-core --lib component::` passed with direct coverage for fenced markers, inline markers, quoted marker prose, quoted `#id` prose, and real markers with quoted attributes. No new source changes are needed for this prompt.
-<!-- agent:boundary:eeddad9a -->
+
+### Re: queue attr preservation + backlog queue population — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: equityfundingsource.md failed to restart
+> ```
+> ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
+>
+> · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
+>
+>   ❯ /clear
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+> ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
+>   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
+>                                                                             [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
+>                                                [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc bi  ❯ /clear
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────❯ [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)            ───────────────────────────────────────────────────────────────────────────────────────────────────────────[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execvepass permissions on (shift+tab to cycle)
+>        [start] harness resolved: binary=claude source=frontmatter env=default
+>                                                                              Registered session 62fe1f41 → pane %74
+>                                                                                                                    Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
+> ```
+
+
+Already handled; no new source changes were needed for this queue head.
+
+For the `agent:queue` attribute-loss report, `#compactqattr` was already diagnosed and shipped in agent-doc `f94ca7cd`: deterministic compaction preserves queue marker inline attributes, and `assert_non_exchange_markers_preserved` now fails closed if any non-exchange opening marker, including `agent:queue preset="..." priority go`, is altered during compaction. The original monsterrodholders.md wipe was attributed to a concurrent stale-supervisor CRDT interleave, not deterministic compaction.
+
+For the `agent:backlog priority queue` population report, the current document is also proving the backlog-to-queue path is active: `#goqnoise` is done, and the active queue now contains the backlog-sourced `#dupcontent2` and `#ar27-majors` heads. That is the expected behavior for backlog items carrying the `queue` attr under an active go queue. I left both heads open because this prompt did not implement or complete them.
+
+Verification recorded here: `#compactqattr` had `make check` green with marker-preservation coverage, and `#goqnoise` had focused queue-continuation tests plus a clean-worktree `make check`.
+<!-- agent:boundary:602191ed -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-~~~done
-JB `Run Agent Doc` on this document
-```
-resync: pruned 9 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3533
-```
-~~~
+- In Codex, JB `Run Agent Doc` adds extra continuation prompt to Codex. agent-doc should be runnable with the extra instructions by using `agent-doc .../doc-file.md`
+---
 :pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
 ```
 resync: pruned 8 stale session(s)
@@ -375,15 +410,17 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
                                                                                                             Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
 ```
 ---
+~~~done
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
 :round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
+~~~
 ---
 :pushpin: - do [#dfrefresh-retire]
 :round_pushpin: do [#suprehotreload]
 - ~~do [#dfrefresh-retire]~~
 - ~~do [#c2b6]~~
 - ~~:pushpin: do [#goqnoise]~~
-- :pushpin: do [#dupcontent2]
+- ~~:pushpin: do [#dupcontent2]~~
 - :pushpin: do [#ar27-majors]
 <!-- /agent:queue -->
 ###
@@ -414,7 +451,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#dupcontent2] [clean-session] Harden content_ours adoption (follow-up from #dupcontent, e11c218b landed fix #1+#3): (#2) fail closed when the serving supervisor is classified supervisor_binary_stale (#fcc0) — refuse its IPC buffer as the snapshot base regardless of structural shape, preferring candidate/HEAD; (#4) de-dup singleton component blocks on parse so a recoverable single-block buffer is repaired to the canonical (HEAD-derived) block instead of only rejected. Plan: tasks/agent-doc/plan-content-ours-duplicate-corruption.md
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).

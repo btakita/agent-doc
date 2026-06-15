@@ -127,7 +127,29 @@ I can't type the OTP for you, but here's how to get unstuck. PyPI's OTP field ac
 - **Trusted Publishing (OIDC):** your release conventions already publish PyPI via '.github/workflows/pypi.yml' on 'release: published' — that path needs no login or token at all.
 
 Tell me which method you're using (authenticator app vs passkey) and the exact error PyPI shows, and whether the goal is website access or just publishing — I'll narrow it from there.
-<!-- agent:boundary:9b12d8ab -->
+
+### Re: Create a GitHub Pages site for lazily-spec — opus-4-8
+
+> **Queue prompt:**
+>
+> Create a github pages site for lazily-spec
+
+**Live:** https://lazily-hub.github.io/lazily-spec/ — deployed and serving (HTTP 200; `protocol.html` → "Wire Protocol - lazily-spec").
+
+Built an **mdBook** site, matching the sibling-repo convention (agent-doc/corky ship mdBook GitHub Pages sites). 8 files, all pushed to `lazily-hub/lazily-spec` (`ca97a1a`); superproject gitlink bumped (`5c3673cd7`).
+
+**Site structure** (`book.toml`, `src = "docs"`, `rust` theme, foldable nav):
+- **Introduction** — overview, protocol-layers table, wire/schema format, versioning (adapted from `README.md` with in-book links).
+- **Wire Protocol** — the full normative spec.
+- **Conformance Fixtures** — fixture schema, the 6 canonical fixtures table, add-a-binding steps, plus each fixture rendered inline.
+- **JSON Schemas** — all 5 Draft-2020-12 schemas (snapshot/delta/ffi/signaling/distributed) rendered inline.
+
+**No content duplication** — `protocol.md`, the 6 `conformance/*.json`, and the 5 `schemas/*.json` are pulled in with mdBook `{{#include ../...}}`, so the repo-root files stay the single canonical source; the book renders them at build time.
+
+**Build + deploy** — `mdbook build` is clean (all includes resolved, no leftover `{{#include}}`). `.github/workflows/mdbook.yml` (`taiki-e/install-action@mdbook` + `actions/deploy-pages@v4`) deploys on push to `main`; enabled Pages with `build_type=workflow` via the API. The first deploy run (`27516723455`) finished **success**. `/book` added to `.gitignore`.
+
+Re the queue's `#spec-test-build-install-commit-push` preset: "spec/tests" = the spec content + build verification (mdbook build, all includes resolved, live-site 200 check); "install" is N/A for a static docs site; build + commit + push all done. Next queue item: create a GitHub Pages site for lazily-rs.
+<!-- agent:boundary:a75e4126 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -136,7 +158,7 @@ Tell me which method you're using (authenticator app vs passkey) and the exact e
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Create a github pages site for lazily-spec
+- ~~Create a github pages site for lazily-spec~~
 - Create a github pages site for lazily-rs
 <!-- /agent:queue -->
 

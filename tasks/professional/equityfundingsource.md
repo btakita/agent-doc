@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,159 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-055024.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-074530.md`*
 
 Compacted content:
-- Archived 6 response topic(s): Investor dashboard annual-requirements alert; Investor dashboard requirements dialog stack; Queue stall logged as #agent-doc-bug + state repaired; 3 more
+- Archived 4 response topic(s): Annual requirements edit submission; Edit submission should show current data; Lender vestings vs distributions; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Annual requirements edit submission — gpt-5
-
-> **Queue prompt:**
->
-> The "Annual requirements" edit page + dialog "Edit submission" button should open a dialog to edit the existing submission under review. deploy
-
-
-Implemented, pushed, and deployed.
-
-Changed paths:
-- `app/equityfundingsource/lib/investor/accreditation/index.ts`
-- `app/equityfundingsource/lib/investor/documents_repo.ts`
-- `app/equityfundingsource/lib/investor/routes.ts`
-- `app/equityfundingsource/lib/investor/shared.ts`
-- `lib/ui--browser--efs/portal/investor/accreditation.tsx`
-- `lib/ui--browser--efs/portal/investor/dashboard.tsx`
-- `tests/investor-documents.test.ts`
-- `tests/investor-portal-e2e.test.ts`
-
-What changed:
-- The Annual requirements page button now opens a modal dialog instead of an inline blank form.
-- The dashboard Requirements dialog `Edit submission` button now opens the same shared edit modal.
-- The edit modal receives the existing accreditation submission, preloads verification type and notes, and keeps replacement evidence uploads on the existing upload flow.
-- Added `PATCH /api/investor/accreditation` for metadata-only edits to the latest pending submission that already has evidence, so investors can update type/notes while EFS is reviewing without uploading another file.
-
-Commit:
-- `81b06ca fix(investor): edit under-review requirements submissions (#req-review)` pushed to `origin/main` in `src/equityfundingsource-dev`.
-
-Verification:
-- `bun test tests/investor-documents.test.ts tests/investor-portal-e2e.test.ts` passed.
-- `make check` passed: 706 tests, app build, and worker build all completed with exit 0.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` reported no remote migrations to apply before and after deploy.
-- `make deploy` completed and deployed Worker version `5601f050-a8cf-4b26-8b16-d396e37ff943`.
-- Live smoke checks: `/` returned `200`; `/portal-investor` returned `303` auth redirect.
-- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Escalation: none.
-Confidence: high.
-
-### Re: Edit submission should show current data — gpt-5
-
-> **Queue prompt:**
->
-> "Edit your submission" dialog/page does not show the current submission data. It is a new submission form. Where are the uploaded documents and the filled out data? deploy
-
-
-Implemented, pushed, and deployed.
-
-You were right: the previous edit dialog still looked like a fresh upload form. The only current data it prefilled was verification type + notes, and the API did not return document metadata for the edit UI to show. There is not a larger stored questionnaire table behind this screen right now; the persisted annual-requirements data is status/dates, verification type, notes, and uploaded accreditation evidence documents. This change now surfaces that persisted data directly.
-
-Changed paths:
-- `app/equityfundingsource/lib/investor/accreditation/index.ts`
-- `lib/ui--browser--efs/portal/investor/accreditation.tsx`
-- `tests/investor-documents.test.ts`
-- `tests/investor-portal-e2e.test.ts`
-
-What changed:
-- `GET/PATCH/POST /api/investor/accreditation` now return `evidence_documents` with file name, display name, extension, size, content type, published date, secure investor download URL, and a `current` flag for the active evidence document on the latest review row.
-- The Requirements page now shows a `Current submission` panel when there is evidence: verification type, submitted notes, and uploaded document cards.
-- The `Edit your submission` dialog shows that same `Current submission` panel above the editable fields, so the investor sees the existing submission before changing type/notes or uploading replacement/additional evidence.
-- Uploaded documents are view/download links through the existing authenticated `/api/investor/documents/:id/download` route, with an `Active evidence` badge on the document tied to the latest under-review row.
-
-Commit:
-- `b0bbc3a fix(investor): show current requirements submission data (#req-review)` pushed to `origin/main` in `src/equityfundingsource-dev`.
-
-Verification:
-- `bun test tests/investor-documents.test.ts tests/investor-portal-e2e.test.ts` passed.
-- `make check` passed: 706 tests, app build, and worker build all completed with exit 0. The tsift digest still labels an expected test fixture log line (`d1 down`) as a failure, but the command exit code and Bun summary are green (`706 pass`, `0 fail`).
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` reported no remote migrations pending.
-- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Deployment:
-- `make deploy` completed successfully.
-- Worker version: `861ca702-d667-4e71-8990-e1b785323ac9`.
-- Live smoke checks: `/` returned `200`; `/portal-investor` returned `303` auth redirect.
-
-Escalation: none.
-Confidence: high.
-
-### Re: Lender vestings vs distributions — gpt-5
-
-> **Queue prompt:**
->
-> Are Lender vestings https://equityfundingsource.brian-takita.workers.dev/portal-investor/vestings in line with the project requirements of EFS not handling distributions?
-
-Yes. The current **Vestings** section is in line with the requirement that EFS not handle or present distributions.
-
-The requirement is not that EFS cannot store investor/lender title or preference data. It is that the investor portal must not present loan-servicing artifacts such as Returns, Distributions, Statements, yields, or payment servicing because EFS does not service loans. Vestings are a separate workflow: legal holding names/entities for title, plus special instructions and preferences visible to EFS.
-
-Evidence checked:
-- `src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md:7` says anything implying servicing data like yields, distributions, and statements is removed because EFS does not service loans.
-- `src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md:29`-`:31` defines Phase 4 vestings/special instructions as the EFS-local half: investors manage legal holding entities and special instructions in EFS D1; pushing vestings into TMO and modeling per-lender loan details remains gated.
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md:328` separately says the portal must not present a Returns group and lists vestings/special instructions as a remaining dashboard-rework phase.
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/vestings.tsx:129`-`:130` labels the page as legal holding names for investment positions, and `:188`-`:190` labels special instructions as communication, title, or deal-funding preferences.
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/investor/vestings_repo.ts:1`-`:3` and migration `0041_investor_vestings.sql:1`-`:4` explicitly make this EFS-local source-of-truth data and defer the TMO push.
-- `src/equityfundingsource-dev/tests/investor-vestings.test.ts:98`-`:104` asserts the vestings copy does not imply distribution servicing or active TMO sync.
-
-Caveat: the live workers.dev route is reachable but authenticated; it 303-redirected to `/login?role=investor&next=%2Fportal-investor%2Fvestings`, so I could not inspect investor-specific live data without a session. That auth behavior is expected for an investor portal. Based on the PRD, source, route behavior, and focused test, the feature is aligned.
-
-Changed paths: none.
-
-Commands run:
-- `tsift status`
-- `rg -n "vestings|distributions|distribution|special instructions|EFS not handling" ...`
-- `curl -fsSIL --max-time 10 https://equityfundingsource.brian-takita.workers.dev/portal-investor/vestings`
-- `bun test tests/investor-vestings.test.ts`
-
-Verification:
-- Live route auth-gates to investor login.
-- `bun test tests/investor-vestings.test.ts` passed: 8 pass, 0 fail.
-
-Escalation: none.
-Confidence: high.
-
-Session size note: the exchange is large, but an active queue continuation is being drained, so I continued without compacting.
-
-### Re: Lender vestings and distributions — gpt-5
-
-Short answer: the Vestings feature is the right concept for EFS, but the page copy was not fully in line with the no-distributions/no-servicing requirement before this turn.
-
-What I found:
-- The PRD says EFS does not service loans, so the investor portal should not present Returns/Distributions/Statements as EFS-serviced features. It separately allows Vestings as an EFS-local section for legal holding entities and special instructions, with TMO writeback still gated.
-- The implementation data model is aligned: `/api/investor/vestings` only stores investor vesting rows and special instructions in EFS D1. It does not calculate, schedule, or pay distributions.
-- The UI copy had two bad implications: “EFS keeps these in sync with The Mortgage Office” overstated active TMO sync, and “Distribution, communication, or vesting preferences” implied EFS may handle distribution preferences.
-
-I fixed the copy so the page now frames Vestings as legal holding names/title preferences and avoids distribution-servicing language.
-
-Changed paths:
-- `lib/ui--browser--efs/portal/investor/vestings.tsx`
-- `tests/investor-vestings.test.ts`
-
-Commit:
-- `5c24096 fix(investor): align vestings copy with no-servicing boundary (#rpzm)` pushed to `origin/main` in `src/equityfundingsource-dev`.
-
-Verification:
-- `bun test tests/investor-vestings.test.ts` passed: 8 tests, 0 fail.
-- `make check` passed after rebasing onto latest `origin/main`: 711 tests, app build, and worker build.
-- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Deployment:
-- Not deployed; this queue preset was commit/push, not deploy. The live workers.dev page will still show the old deployed copy until the next deployment.
-
-Escalation: none.
-Confidence: high.
-
-Preflight warning surfaced: review `#37ah` may already be resolved by archived done item `#37ah-backend`; unrelated to this vestings check.
-<!-- agent:boundary:867c6c62 -->
+<!-- agent:boundary:4a799fc3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -193,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- When I accredit an investor in https://equityfundingsource.brian-takita.workers.dev/portal-admin/lender-pipeline, the pipeline should be updated without a refresh. Same with any change to a record in both pipelines. deploy
 <!-- /agent:queue -->
 
 ## Backlog

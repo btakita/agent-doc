@@ -440,7 +440,25 @@ Note I updated the item's expectation to the **current** contract: the original 
 **On the equityfundingsource auto-restart you logged** — that maps onto two already-tracked items, no new bug needed:
 - The `dispatch blocked … advance-review preset head is spent … Operator can clear the '- #advance-review' line` (receipts 3502/3457) is `#qpresetstrike` (review) — a spent preset head fails **closed** with a manual-deletion prescription instead of auto-striking and re-dispatching once. Live-re-confirmed again here.
 - The auto-restart that "was stuck in the shell" until you manually restarted is `#recyclerestart` (backlog) / `#jbrestale` — PCP/supervisor recycle not cleanly restarting the harness session. Your manual-restart-then-Run-Agent-Doc workaround is the current stopgap.
-<!-- agent:boundary:c29eb9b0 -->
+### Re: [#cleandrainsup-verify] — #cleandrainsup live-proof log check — opus-4-8
+
+Log-check result: **evidence ABSENT — the runtime event has never fired in this ops.log, and the precondition isn't met.** This stays `[operator-verify]`, gated, not done.
+
+**What the log shows.** Grepped `.agent-doc/logs/ops.log` (137 MB) for the real runtime event `idle_queue_watch_context_reset harness=… reason=…` (emitted at `agent-doc-orchestration/src/start/idle_watch.rs:923`): **0 hits** — and 0 for the `_skipped` / `_failed` / `_policy_failed` variants too. The only 3 textual `idle_queue_watch_context_reset` matches are document-prose echoes inside `queue_diff_active_prompt_differs` log lines (the backlog item quoting itself), not events. So there is no `reason=#cleandrainsup` → `[clean-session]` head drain to confirm.
+
+**Why it's absent — "after the supervisor recycles onto the 1f8c9f63 build" hasn't happened.**
+- The live route-owned supervisor is pid **1654897**, started **14:43:10** (~8 h ago). Preflight flags it `supervisor_binary_stale` — it predates the currently-installed binary and has **not** recycled.
+- The installed binary (`~/.cargo/bin/agent-doc` 0.34.1, mtime 22:43; `target/release` 22:32) *does* contain 1f8c9f63 (`#cleandrainsup`, committed 13:26) but predates d5e4b83e (22:45) → `stale_install`. The **running** supervisor is older still and was never recycled onto a 1f8c9f63+ build, so the `#cleandrainsup` idle-watch path never executed in this log.
+
+**I did NOT rebuild/install to force it.** A mid-session `cargo install` / `make install` against this live supervisor re-stales the very process serving this closeout (`#no-mid-session-install`) — it's the operator's (or the supervisor self-recycle's) action.
+
+**To produce the proof (operator-driven):**
+1. Recycle the supervisor onto a fresh build: `agent-doc admin recycle --all-projects` (or restart the session; or `make install` in `src/agent-doc` then recycle).
+2. With the new build running, leave a `[clean-session]` head at the active queue head under a live IDE and let the supervisor idle-watch fire.
+3. Re-run the log check — expect `idle_queue_watch_context_reset harness=claude … reason=#cleandrainsup` followed by a `[clean-session]` head drain (one fresh agent per item).
+
+I'll re-verify the instant those lines appear.
+<!-- agent:boundary:c7eef7ca -->
 <!-- /agent:exchange -->
 
 ## Queue

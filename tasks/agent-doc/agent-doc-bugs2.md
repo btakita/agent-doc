@@ -152,13 +152,20 @@ Notes:
 ❯ - Confidence: high. The fix is narrow, covered by focused tests, and the full local check suite passed.
 - No actionable follow-up items from this cycle.
 ❯ - Push will happen after this closeout commit exists; I will push the submodule and parent repo immediately after closeout.
-<!-- agent:boundary:3d8048d7 -->
+
+### Re: Codex Finalize Error — gpt-5
+
+Closed the repair-only cycle after the MCP transport dropped during finalize. The prior closeout response and commits were recovered into the exchange; this cycle made no code changes.
+
+No actionable follow-up items from this repair cycle.
+<!-- agent:boundary:ee474a38 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 ---
+
 ```
 • Finalize’s backlog-capture guard interpreted the closeout note as a possible follow-up. I’m rerunning with an explicit
   no-follow-up marker; no code or doc content was written by the failed attempt.

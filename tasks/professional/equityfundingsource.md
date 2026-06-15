@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -77,7 +77,47 @@ Verification:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:7d4279ef -->
+
+### Re: Edit submission should show current data — gpt-5
+
+> **Queue prompt:**
+>
+> "Edit your submission" dialog/page does not show the current submission data. It is a new submission form. Where are the uploaded documents and the filled out data? deploy
+
+
+Implemented, pushed, and deployed.
+
+You were right: the previous edit dialog still looked like a fresh upload form. The only current data it prefilled was verification type + notes, and the API did not return document metadata for the edit UI to show. There is not a larger stored questionnaire table behind this screen right now; the persisted annual-requirements data is status/dates, verification type, notes, and uploaded accreditation evidence documents. This change now surfaces that persisted data directly.
+
+Changed paths:
+- `app/equityfundingsource/lib/investor/accreditation/index.ts`
+- `lib/ui--browser--efs/portal/investor/accreditation.tsx`
+- `tests/investor-documents.test.ts`
+- `tests/investor-portal-e2e.test.ts`
+
+What changed:
+- `GET/PATCH/POST /api/investor/accreditation` now return `evidence_documents` with file name, display name, extension, size, content type, published date, secure investor download URL, and a `current` flag for the active evidence document on the latest review row.
+- The Requirements page now shows a `Current submission` panel when there is evidence: verification type, submitted notes, and uploaded document cards.
+- The `Edit your submission` dialog shows that same `Current submission` panel above the editable fields, so the investor sees the existing submission before changing type/notes or uploading replacement/additional evidence.
+- Uploaded documents are view/download links through the existing authenticated `/api/investor/documents/:id/download` route, with an `Active evidence` badge on the document tied to the latest under-review row.
+
+Commit:
+- `b0bbc3a fix(investor): show current requirements submission data (#req-review)` pushed to `origin/main` in `src/equityfundingsource-dev`.
+
+Verification:
+- `bun test tests/investor-documents.test.ts tests/investor-portal-e2e.test.ts` passed.
+- `make check` passed: 706 tests, app build, and worker build all completed with exit 0. The tsift digest still labels an expected test fixture log line (`d1 down`) as a failure, but the command exit code and Bun summary are green (`706 pass`, `0 fail`).
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` reported no remote migrations pending.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Deployment:
+- `make deploy` completed successfully.
+- Worker version: `861ca702-d667-4e71-8990-e1b785323ac9`.
+- Live smoke checks: `/` returned `200`; `/portal-investor` returned `303` auth redirect.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:192e264f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,7 +125,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- "Edit your submission" dialog/page does not show the current submission data. It is a new submission form. Where are the uploaded documents and the filled out data? deploy
 <!-- /agent:queue -->
 
 ## Backlog

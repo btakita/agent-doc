@@ -1,9 +1,9 @@
 ---
 agent_doc_session: ebec48ed-d3ed-40f6-bcd0-c37938c43e8b
-agent_doc_format: template
-agent_doc_write: crdt
 agent: codex
 claude_model: opus
+agent_doc_format: template
+agent_doc_write: crdt
 codex_args: -s danger-full-access
 prompt_presets:
   '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
@@ -12,6 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: start
 ---
 
 ## Status
@@ -105,17 +106,34 @@ Here is a shorter LinkedIn version:
 
 Hi Rafael, quick update on agent-doc. I am going to hold off a bit before sending you a release link because I want your first impression to be a good one.
 
-The core workflow is already useful for me, and I am dogfooding it every day: markdown docs as the interface to agents, queues/backlogs for work, edits while turns are running, and strict preflight/write/session-check paths so the work stays durable.
+The core workflow is useful for me, and I am dogfooding it every day: markdown docs as the interface to agents, queues/backlogs for work, edits while turns are running, and strict preflight/write/session-check paths so the work stays durable.
 
 The main reason it is not released yet is onboarding. I know the system well enough to be productive, and there is enough redundancy/recovery built in for me to work through rough edges. But someone new would still need to learn too much about the document structure and recovery signals before getting value.
 
-I want to respect your time, so I would rather share it once the docs, website, examples, and intro videos make the workflow clear without me walking you through it. I still think it could be relevant to your team, especially given how much you are leaning into AI-assisted engineering, but I want it to be ready enough that you can evaluate the idea instead of reverse-engineering my setup.
-<!-- agent:boundary:369c8b08 -->
+I want to respect your time, so I would rather share it once the docs, website, examples, and intro videos make the workflow clear without me walking you through it.
+
+### Re: Revised Rafael note — gpt-5
+
+Here is the tighter version with that focus:
+
+Hi Rafael, quick update on agent-doc. I am going to hold off a bit before sending you a release link because I want your first impression to be a good one.
+
+The core workflow is useful for me, and I am dogfooding it every day: markdown docs as the interface to agents, queues/backlogs for work, edits while turns are running, and strict preflight/write/session-check paths so the work stays durable.
+
+The part I am tightening now is the move from a turn-based agent workflow into real-time editing and queue management. Once the document, editor, agent response, queue state, and commit/session-check closeout are all live at the same time, a lot of edge cases become race-condition and architecture problems rather than simple UX issues.
+
+So the release work is mostly about making that reliable: better merge/recovery paths, cleaner queue behavior, architecture changes around state ownership, and SimWorld coverage for the edge cases. I can work productively with it today because I know the system and there is enough redundancy, but a new user still needs a smoother first-run path.
+
+I want to respect your time, so I would rather send it once the docs, website, examples, and intro videos make the workflow clear without me walking you through my setup. When it is there, I would love for you to try it out.
+<!-- agent:boundary:bb1d54ea -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- I edited the response. Stop adding the team using agent-doc. You also did not add anything about transitioning from turn based to real-time editing and queue management.
+- Mention my Simworld, Simeditor, and multi-editor work (since I use JB Idea but most people use VSCode-based editors), etc. testing as well
+- Also mention my mis-estimate ()
 <!-- /agent:queue -->
 
 ## Backlog

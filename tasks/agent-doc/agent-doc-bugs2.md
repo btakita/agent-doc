@@ -133,6 +133,16 @@ No actionable follow-up items from this cycle.
 
 ### Re: Codex Finalize Transport Recovery — gpt-5
 
+> **Queue prompt:**
+>
+> agent-doc deleted all the queue items I added in monsterrodholders.md
+
+
+> **Queue prompt:**
+>
+> JB `Clear Session Context` added `/clear` to the Codex input but did not submit when called on monsterrodholders.md
+
+
 Recovered the prior Codex finalize failure through the binary-owned recovery path. The MCP call had captured the response, then the transport closed before the write/commit boundary; `agent-doc preflight` detected the captured response, found it already present in the document, cleaned the pending file, and committed the closeout as `09e735b8c`.
 
 I also added backlog item `#codexmcpfinalize` so this failure class is agent-drainable: force the close-after-capture path in coverage and make the recovery commit exactly once without requiring a manual reset.
@@ -175,15 +185,15 @@ Verification:
 Escalation: none.
 Confidence: high for the repair state; medium for the new backlog diagnosis until the forced transport-close regression is implemented.
 Push: I will push `main` immediately after this binary-owned closeout commit exists.
-<!-- agent:boundary:fdc54c2b -->
+<!-- agent:boundary:7bee43f6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: [#codexmcpfinalize]~~
-- JB `Clear Session Context` added `/clear` to the Codex input but did not submit when called on monsterrodholders.md
-- agent-doc deleted all the queue items I added in monsterrodholders.md
+- ~~JB `Clear Session Context` added `/clear` to the Codex input but did not submit when called on monsterrodholders.md~~
+- ~~agent-doc deleted all the queue items I added in monsterrodholders.md~~
 - monsterrodholders.md has `agent:backlog priority queue`...but the items are not added to `agent:queue`.
 ---
 Codex finalize error
@@ -230,6 +240,8 @@ JB `Run Agent Doc`
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3568
 ```
 ---
+- do [#jbclearctxsubmit]
+- do [#mrhqueuepreserve]
 <!-- /agent:queue -->
 ###
 <!--

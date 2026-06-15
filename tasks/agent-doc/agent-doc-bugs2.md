@@ -801,18 +801,46 @@ Added the passive-CI rule to `src/agent-doc/AGENTS.md`: CI status is evidence, n
 Code/docs commits are already on `src/agent-doc` `origin/main`: `44d25aac` (`docs: make CI checks passive`) plus the queue-reference follow-up `458e987a` (`fix: ignore prose refs in queue closeout`). Parent repo commits include `742866b98` and `b01a3a523`, with this closeout commit following them.
 
 Passive CI check only: latest `src/agent-doc` CI was `success` for `458e987a` (`fix: ignore prose refs in queue closeout`), run `27580976981`. I did not wait on CI.
-<!-- agent:boundary:9b9d7f6e -->
+
+### Re: :pushpin: Why was there so much churn in the last queue turn? I was editing unrelated queue items. Those should be ignored. Use AST instead of byte-by-byte comparison. Be selective using CRDT merges into the document model and other areas that can cause churn. — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Why was there so much churn in the last queue turn? I was editing unrelated queue items. Those should be ignored. Use AST instead of byte-by-byte comparison. Be selective using CRDT merges into the document model and other areas that can cause churn.
+
+
+The churn came from queue maintenance converging the live editor buffer with a full `agent:queue` component replacement. That path was correct for stale queue body/tag/frontmatter repair, but too broad when the operator edited unrelated queue lines at the same time: the component replacement could reassert the snapshot-shaped queue body and clobber or truncate unrelated live edits.
+
+Fixed it by making queue live-buffer convergence AST-node aware. Preflight now diffs snapshot-to-target queue items into `node_patches` and sends those alongside the legacy queue-body patch. Current JetBrains plugins apply the node patches first and skip the full queue replacement for `agent:queue`, so maintenance strikes/inserts/moves only the queue nodes it owns while preserving unrelated live queue edits. Older plugins still get the legacy full-body fallback.
+
+Commits:
+- `src/agent-doc`: `bfdcbfe4` (`fix: converge queue edits with node patches`), pushed to `origin/main`.
+- Parent repo: `282968310` (`agent-doc: update queue convergence`).
+
+Changed paths:
+- `agent-doc-orchestration/src/preflight/maintenance.rs`
+- `agent-doc-orchestration/src/ipc_socket.rs`
+- `VERSIONS.md`
+
+Verification:
+- `cargo test -p agent-doc-orchestration queue_convergence_node_patches_preserve_unrelated_live_queue_edits -- --nocapture`
+- `cargo check -p agent-doc`
+- `make check` via `tsift --envelope digest-runner`
+- `git diff --check`
+
+CI was checked passively only: latest `agent-doc` CI for `bfdcbfe4` was `in_progress` as run `27581657361`; I did not wait on it.
+<!-- agent:boundary:9756cd9c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: [#qrefmisstrike]~~
-- Why was there so much churn in the last queue turn? I was editing unrelated queue items. Those should be ignored. Use
-- :pushpin: JB `Run Agent Doc` on monsterrodholders.md still sends a CR instead of submitting the command. Please consolidate all send command logic into a single function so we can make this behavior more reliable.
+- ~~:pushpin: Why was there so much churn in the last queue turn? I was editing unrelated queue items. Those should be ignored. Use AST instead of byte-by-byte comparison. Be selective using CRDT merges into the document model and other areas that can cause churn.~~
+- :pushpin: JB `Run Agent Doc` on monsterrodholders.md still sends a CR instead of submitting the command. Please consolidate all send command logic into a single function so we can make this behavior more reliable. Simplify, simplify, simplify...
 - :pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item. Any item I place should have `:pushpin:` added since I made the decision to add it in a position.
 - :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
-- The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn.
+- The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex?
 - `agent:exchange` with attribute `queue` should add items into the queue while the queue is running.
 - do [#snbc2]
 - do [#codexctrlz]

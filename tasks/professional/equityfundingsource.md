@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -124,7 +124,23 @@ The accreditation upload form (`lib/ui--browser--efs/portal/investor/accreditati
 This shipped in commit `5a0e0c4` ("investor requirements: multi-file CPA/attorney upload via standard component (#multi-file-list)"); working tree is clean. The same form backs both the `/portal-investor/accreditation` page and the dashboard Requirements dialog (`#req-dialog`), so multi-file works in both.
 
 Remaining queue head is the deploy (`bun run deploy:worker`) to ship it live — that drains next.
-<!-- agent:boundary:b9ef9fbe -->
+
+### Re: Deploy (bun run deploy:worker) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Run deploy (bun run deploy:worker) to ship the changes.
+
+
+Deployed. The worker is live with the multi-file CPA/attorney upload.
+
+- `bun run deploy:worker` succeeded — uploaded the new browser bundle (`index.browser-PWCMEDZG.js`, the one carrying the multi-file accreditation form).
+- **Version ID:** `84b1df88-8791-4b58-8221-15bc0da255bb`
+- **URL:** https://equityfundingsource.brian-takita.workers.dev
+- All bindings (D1, R2 documents/assets/tmo-cache, durable objects, rate limiter, email env) re-bound cleanly; worker startup 21 ms.
+
+Both queue heads are now drained: multi-file upload was already in code (`#multi-file-list`, `5a0e0c4`) and is now shipped live.
+<!-- agent:boundary:06ac20af -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -132,8 +148,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Add multi-file upload to the "CPA / attorney letter or supporting document" field in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation — the dialog should allow multiple files using our standard multi-file upload component.~~
-- :pushpin: Run deploy (bun run deploy:worker) to ship the changes.
 <!-- /agent:queue -->
 
 ## Backlog

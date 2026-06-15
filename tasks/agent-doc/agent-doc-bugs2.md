@@ -258,7 +258,26 @@ Verification:
 - latest GitHub CI run was green: `27566208437`
 
 Pushed `03427e3f` to `origin/main` and staged the parent `src/agent-doc` gitlink for this closeout.
-<!-- agent:boundary:f4bc2561 -->
+
+### Re: #qmisstrike-regression
+
+Implemented and pushed `src/agent-doc` commit `66f7de43` (`fix: prevent stale queue consume misstrikes`).
+
+The queue-consume planner now refuses live id-backed heads when the consume decision has no matching explicit/current-head proof, and all consume callers that legitimately target an id-backed head now pass the pre-commit head id proof through (`finalize`, stream IPC timeout, direct `run`, and Codex Stop-hook repair/replay paths). This prevents stale free-text/head reconciliation from striking a reordered `do [#id]` head while preserving valid `### Re: do #id`, synthetic prompt diff, and Stop-hook auto-close continuations.
+
+Verification:
+- `cargo test -p agent-doc-orchestration queue_consume -- --nocapture`
+- `cargo test -p agent-doc --test finalize_integration finalize_ -- --nocapture`
+- `cargo test -p agent-doc --test run_integration run_auto_queue -- --nocapture`
+- `cargo test -p agent-doc-orchestration stop_auto -- --nocapture`
+- `cargo test -p agent-doc-orchestration stop_replays_plain_final_answer_when_auto_queue_continuation_makes_no_progress -- --nocapture`
+- `cargo check -p agent-doc`
+- staged-only verification of the same touched paths
+- `make check` (4525 passed, 238 skipped; doctests and medium SimWorld passed)
+- GitHub Actions CI run `27568580773` passed (`make check` + `make tmux-ci`)
+
+Pushed: `btakita/agent-doc@66f7de43`.
+<!-- agent:boundary:8550d310 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -306,7 +325,7 @@ Compacted content:
 - ~~do [#recyclerestart-agent]~~
 - ~~do [#lazilyqrestore-agent]~~
 - ~~do [#suprehotreload-agent]~~
-- do [#qmisstrike-regression]
+- ~~do [#qmisstrike-regression]~~
 - do [#staleheaddupcontent]
 - do [#mrhbacklogqueuesync]
 - do [#mrhqueuepreserve]
@@ -357,7 +376,6 @@ What are #next-steps to fix bugs?
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
-- [ ] [#qmisstrike-regression] [clean-session] Reopen #qmisstrike: moving/reordering do [#staleheaddupcontent] caused agent-doc to strike the id-backed head even though no work was done. Fix finalize/queue consume so id-backed heads can only be struck by explicit --done/--pending-gate/valid id consume proof, never as a side effect of stale free-text/head reconciliation. Plan: tasks/agent-doc/plan-finalize-misstrike-next-head.md
 - [ ] [#staleheaddupcontent] [clean-session] Fix stale queue head duplicate-content corruption: a stale agent:queue head can replay old exchange/queue content and corrupt the document. Add stale-head mismatch coverage, refuse stale queue snapshot replay without live-head match or consume/strike proof, and log live/snapshot/stale head identities. Plan: tasks/agent-doc/plan-stale-queue-head-duplicate-content.md
 - [ ] [#mrhbacklogqueuesync] [clean-session] Fix tasks/monsterrodholders.md backlog priority queue sync: document has agent:backlog priority queue but eligible backlog items are not materializing in agent:queue. Add diagnostics for skipped backlog ids, regression coverage for backlog-to-queue convergence, and persist queue sync through session-check. Plan: tasks/agent-doc/plan-monsterrodholders-backlog-priority-queue-sync.md
 - [ ] [#mrhqueuepreserve] [clean-session] Prevent active-turn queue convergence from deleting user-added queue items in tasks/monsterrodholders.md. Add regression coverage for live queue edits during a running turn, require explicit consume/strike/remove proof before queue deletion, and log the proof source for removed queue nodes. Plan: tasks/agent-doc/plan-monsterrodholders-queue-preservation.md

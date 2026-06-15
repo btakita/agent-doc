@@ -583,6 +583,26 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     let (Some(base), Some(ours)) = (baseline, content_ours) else {
         return false;
     };
+    // #dupcontent: never adopt a structurally-corrupt `content_ours` buffer (a
+    // bad prior CRDT merge with duplicate singleton component blocks or a
+    // split/unterminated attribute). Refuse the adoption so the clean candidate
+    // snapshot stays as the base — the corrupt buffer never reaches disk, where
+    // the lint-gate could only flag it after the fact.
+    if let Some(reason) = component::structural_corruption_reason(ours) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "content_ours_adoption_refused_structural file={} source={} patch_id={} reason={} content_ours_len={} content_ours_hash={}",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                reason,
+                ours.len(),
+                crate::ops_log::content_hash(ours),
+            ),
+        );
+        return false;
+    }
     if !ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
         base,
         &decision.snapshot_content,
@@ -748,6 +768,23 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
     let Some(ours) = content_ours else {
         return false;
     };
+    // #dupcontent: same fail-closed refusal on the prompt-duplication path — a
+    // structurally-corrupt `content_ours` buffer must never become the snapshot.
+    if let Some(reason) = component::structural_corruption_reason(ours) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "content_ours_adoption_refused_structural file={} source={} patch_id={} reason={} guard=prompt_duplication content_ours_len={} content_ours_hash={}",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                reason,
+                ours.len(),
+                crate::ops_log::content_hash(ours),
+            ),
+        );
+        return false;
+    }
     let duplicate_count = user_prompt_count_growth(ours, &decision.snapshot_content);
     if duplicate_count == 0 {
         return false;
@@ -1974,6 +2011,69 @@ mod ack_content_snapshot_tests {
         let result = read_ack_content_sidecar(&project_root, patch_id).unwrap();
         assert_eq!(result, Some("applied content from plugin".to_string()));
         assert!(!sidecar.exists(), "sidecar should be deleted after read");
+    }
+
+    // --- #dupcontent: structurally-corrupt content_ours is never adopted ---
+
+    const DC_BASELINE: &str =
+        "<!-- agent:status -->\nA\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
+    const DC_CANDIDATE: &str =
+        "<!-- agent:status -->\nB\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
+
+    #[test]
+    fn guard_refuses_structurally_corrupt_content_ours() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        // The live #dupcontent corruption: two agent:queue blocks ingested from
+        // a bad CRDT merge — must never become the snapshot base.
+        let corrupt_ours = "<!-- agent:status -->\nC\n<!-- /agent:status -->\n\
+<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n\
+<!-- agent:queue -->\n- a\n<!-- /agent:queue -->\n\
+<!-- agent:queue -->\n- b\n<!-- /agent:queue -->\n";
+        let mut decision = IpcRepairDecision::file_read(DC_CANDIDATE.to_string());
+        let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &file,
+            "test",
+            Some("p1"),
+            Some(DC_BASELINE),
+            Some(corrupt_ours),
+            &mut decision,
+        );
+        assert!(!adopted, "corrupt content_ours must be refused");
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::FileRead,
+            "decision must keep the clean candidate, not adopt the corrupt buffer"
+        );
+        assert_eq!(
+            decision.snapshot_content, DC_CANDIDATE,
+            "snapshot content must remain the clean candidate"
+        );
+    }
+
+    #[test]
+    fn guard_adopts_clean_content_ours_on_drift() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        // A structurally-clean content_ours that absorbs live drift (differs
+        // outside exchange from both baseline and candidate) must still adopt —
+        // the #dupcontent structural gate does not break the normal path.
+        let clean_ours =
+            "<!-- agent:status -->\nC\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
+        let mut decision = IpcRepairDecision::file_read(DC_CANDIDATE.to_string());
+        let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &file,
+            "test",
+            Some("p2"),
+            Some(DC_BASELINE),
+            Some(clean_ours),
+            &mut decision,
+        );
+        assert!(
+            adopted,
+            "a structurally-clean content_ours that absorbs drift must still be adopted"
+        );
+        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
     }
 
     #[test]

@@ -924,6 +924,99 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
     Ok(templates)
 }
 
+/// Singleton components that must appear at most once in a structurally valid
+/// document. Mirrors the singleton list compaction's item-count guard uses
+/// (`#compactdropitem`). Components not listed here (e.g. `log`) may repeat.
+const SINGLETON_COMPONENT_NAMES: &[&str] = &[
+    EXCHANGE_COMPONENT,
+    "status",
+    "queue",
+    BACKLOG_COMPONENT,
+    REVIEW_COMPONENT,
+    ICEBOX_COMPONENT,
+    BACKLOG_DONE_COMPONENT,
+];
+
+/// Map a component name to its canonical singleton key, collapsing the legacy
+/// backlog alias (`pending` → `backlog`). Returns `None` for names that may
+/// legitimately repeat.
+fn canonical_singleton_name(name: &str) -> Option<&'static str> {
+    if is_backlog_component(name) {
+        return Some(BACKLOG_COMPONENT);
+    }
+    SINGLETON_COMPONENT_NAMES.iter().copied().find(|&s| s == name)
+}
+
+/// True when `marker` contains an odd number of unescaped double-quotes — an
+/// unterminated quoted attribute value (e.g. `<!-- agent:queue tasks=" -->`, a
+/// CRDT merge-boundary split). Backslash escapes are honored to match
+/// [`find_quoted_ranges`] semantics.
+fn marker_has_unterminated_quote(marker: &str) -> bool {
+    let mut open = false;
+    let mut escaped = false;
+    for ch in marker.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '"' => open = !open,
+            _ => {}
+        }
+    }
+    open
+}
+
+/// Detect structural corruption that must never be adopted as a snapshot base
+/// (`#dupcontent`). Returns `Some(reason)` when the document is corrupt:
+/// - a parse failure (mismatched / unclosed markers),
+/// - more than one opening marker for a singleton component (duplicate block),
+/// - an unterminated double-quoted attribute on a component opening marker.
+///
+/// Returns `None` when the document is structurally sound. Used to fail closed
+/// before adopting a `content_ours` / `ack_content_sidecar` IPC buffer whose
+/// prior CRDT merge produced duplicate singleton blocks or a split attribute,
+/// so the corrupt buffer never reaches disk.
+pub fn structural_corruption_reason(doc: &str) -> Option<String> {
+    let components = match parse(doc) {
+        Ok(c) => c,
+        Err(e) => return Some(format!("parse_error: {e}")),
+    };
+
+    // Duplicate singleton component blocks.
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for c in &components {
+        if let Some(canonical) = canonical_singleton_name(&c.name) {
+            *counts.entry(canonical).or_insert(0) += 1;
+        }
+    }
+    let mut dupes: Vec<(&str, usize)> = counts
+        .iter()
+        .filter(|&(_, &n)| n > 1)
+        .map(|(&k, &n)| (k, n))
+        .collect();
+    if !dupes.is_empty() {
+        dupes.sort();
+        let detail = dupes
+            .iter()
+            .map(|(k, n)| format!("{k}={n}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        return Some(format!("duplicate_singleton_component:{detail}"));
+    }
+
+    // Unterminated double-quoted attribute in a component opening marker.
+    for c in &components {
+        let marker = &doc[c.open_start..c.open_end];
+        if marker_has_unterminated_quote(marker) {
+            return Some(format!("malformed_attr:{}", c.name));
+        }
+    }
+
+    None
+}
+
 /// Find the end of an HTML comment (`-->`), returning byte offset past `>`.
 pub fn find_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
     let len = bytes.len();
@@ -2238,5 +2331,76 @@ Fix applied to skip non-agent <!-- sequences.
             1,
             "prefixed synthesized patch must not duplicate the already-typed prompt:\n{result}"
         );
+    }
+
+    // --- #dupcontent: structural_corruption_reason ---
+
+    const CLEAN_DOC: &str = "<!-- agent:status -->\nok\n<!-- /agent:status -->\n\
+<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n\
+<!-- agent:queue preset=\"#spec-test-commit-push\" priority go -->\n- do [#x]\n<!-- /agent:queue -->\n\
+<!-- agent:backlog -->\n- [ ] [#y] thing\n<!-- /agent:backlog -->\n";
+
+    #[test]
+    fn structural_corruption_clean_doc_is_sound() {
+        assert_eq!(structural_corruption_reason(CLEAN_DOC), None);
+    }
+
+    #[test]
+    fn structural_corruption_flags_duplicate_singleton_queue() {
+        // The live #dupcontent corruption: two agent:queue blocks ingested from
+        // a bad content_ours CRDT merge.
+        let doc = "<!-- agent:queue -->\n- a\n<!-- /agent:queue -->\n\
+<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n\
+<!-- agent:queue preset=\"#spec-test-commit-push\" priority go -->\n- b\n<!-- /agent:queue -->\n";
+        let reason = structural_corruption_reason(doc).expect("two queue blocks must be flagged");
+        assert!(
+            reason.contains("duplicate_singleton_component") && reason.contains("queue=2"),
+            "reason was: {reason}"
+        );
+    }
+
+    #[test]
+    fn structural_corruption_flags_backlog_alias_duplicate() {
+        // Legacy `pending` alias + canonical `backlog` collapse to one singleton.
+        let doc = "<!-- agent:backlog -->\n- [ ] [#a] x\n<!-- /agent:backlog -->\n\
+<!-- agent:pending -->\n- [ ] [#b] y\n<!-- /agent:pending -->\n";
+        let reason = structural_corruption_reason(doc).expect("backlog+pending must be flagged");
+        assert!(reason.contains("backlog=2"), "reason was: {reason}");
+    }
+
+    #[test]
+    fn structural_corruption_flags_unterminated_quote_attr() {
+        // The truncated merge-boundary marker `<!-- agent:queue tasks=" -->`.
+        let doc = "<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n\
+<!-- agent:queue tasks=\" -->\n- a\n<!-- /agent:queue -->\n";
+        let reason =
+            structural_corruption_reason(doc).expect("unterminated quote attr must be flagged");
+        assert!(
+            reason.starts_with("malformed_attr:queue"),
+            "reason was: {reason}"
+        );
+    }
+
+    #[test]
+    fn structural_corruption_allows_balanced_quoted_attr() {
+        // A real queue marker carrying a balanced quoted attribute is sound.
+        let doc = "<!-- agent:queue preset=\"#a\" go -->\n- a\n<!-- /agent:queue -->\n";
+        assert_eq!(structural_corruption_reason(doc), None);
+    }
+
+    #[test]
+    fn structural_corruption_allows_repeated_non_singleton() {
+        // `log` is not a singleton; repeats must NOT be flagged.
+        let doc = "<!-- agent:log -->\na\n<!-- /agent:log -->\n\
+<!-- agent:log -->\nb\n<!-- /agent:log -->\n";
+        assert_eq!(structural_corruption_reason(doc), None);
+    }
+
+    #[test]
+    fn structural_corruption_flags_parse_failure() {
+        // Unclosed marker → parse error → corrupt.
+        let doc = "<!-- agent:queue -->\n- a\n";
+        let reason = structural_corruption_reason(doc).expect("unclosed marker must be flagged");
+        assert!(reason.starts_with("parse_error"), "reason was: {reason}");
     }
 }

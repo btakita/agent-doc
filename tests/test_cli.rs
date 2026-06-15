@@ -906,8 +906,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // not added anew.
         ("agent-doc-orchestration/src/write/queue_consume.rs", "guard_") => 1,
         ("agent-doc-orchestration/src/write/queue_consume.rs", "reason=") => 1,
-        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 6,
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 14,
+        // +4 `guard_` (#dupcontent: two `guard_adopts/refuses_*` adoption tests
+        // + two `guard_ipc_snapshot_adoption_against_live_prompt_drift` calls in
+        // those tests) and +2 `reason=` (the two `content_ours_adoption_refused_structural`
+        // ops_log lines gating corrupt-buffer adoption on both content_ours guards).
+        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 10,
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 16,
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "guard_") => 8,
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 10,
         ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 5,

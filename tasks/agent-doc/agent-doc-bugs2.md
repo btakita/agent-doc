@@ -383,7 +383,40 @@ Commit:
 Escalation: none.
 Confidence: high that the observed behavior is the `#qmisstrike` regression class.
 Push: I will push `main` after this closeout commit.
-<!-- agent:boundary:ba097d5c -->
+
+### Re: Operator Verify Enablement Gates — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc`
+> ```
+> [route] target tmux session: 0
+> [route] activated existing inactive agent:queue head "#advance-review" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3568
+> ```
+
+
+The six new operator-verify enablement items require `src/agent-doc` source changes. I gated them rather than starting those edits in this session because `src/agent-doc` still has the broad pre-existing dirty tree and session-check continues to warn about partial staging around the same route/queue/finalize surfaces.
+
+Gated:
+- `#suprehotreload-agent`
+- `#lazilyqrestore-agent`
+- `#recyclerestart-agent`
+- `#rtwbcast-simproof`
+- `#cleandrainsup-agent`
+- `#compactdrift-agent`
+
+Changed paths:
+- Session review/backlog/queue state only.
+
+Verification:
+- No source tests were run for this gate-only cycle.
+- Prior evidence in this session showed the `src/agent-doc` dirty tree spans 78 tracked files and overlaps route/queue/finalize strings.
+
+Escalation: none.
+Confidence: high that these implementation items should run in a clean source-edit cycle.
+Push: I will push `main` after this closeout commit.
+<!-- agent:boundary:a5086842 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -400,7 +433,7 @@ Push: I will push `main` after this closeout commit.
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3568
 ```
 ---
-- do [#suprehotreload-agent]
+- ~~do [#suprehotreload-agent]~~
 - do [#lazilyqrestore-agent]
 - do [#recyclerestart-agent]
 - do [#rtwbcast-simproof]
@@ -435,12 +468,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#suprehotreload-agent] [clean-session] Make #suprehotreload agent-verifiable: add supervisor hot-reload/stale-binary recycle proof logging and a SimWorld/local harness test that proves a JB Run Agent Doc cycle observes the new binary or maps the proof to #recyclerestart-verify/#aazp/#4myd without live operator inspection.
-- [ ] [#lazilyqrestore-agent] [clean-session] Make #lazilyqrestore agent-verifiable: add cross-doc lost-queue recovery tooling for foreign-owned tasks/software/lazily-rs.md that reads snapshots/sidecars/doc history, reconstructs deleted queue heads, and emits explicit user-removal proof when no restore is needed.
-- [ ] [#recyclerestart-agent] [clean-session] Make #recyclerestart-verify agent-verifiable: add automated recycle/restart evidence collection for kill-pane + JB Sync Tmux Layout, including ops.log assertions for no sync-deferred wedge and restart/re-clear proof. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
-- [ ] [#rtwbcast-simproof] [clean-session] Make #rtwbcast-verify agent-verifiable: add a headless two-editor/SimWorld CRDT broadcast convergence test that exercises simultaneous managed-doc edits and proves both buffers converge without clobber. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
-- [ ] [#cleandrainsup-agent] [clean-session] Make #cleandrainsup-verify agent-verifiable: add local supervisor/ops-log coverage for idle_queue_watch_context_reset reason=#cleandrainsup followed by draining a [clean-session] head with one fresh agent per item. Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
-- [ ] [#compactdrift-agent] [clean-session] Make #c2b6 compactdrift agent-verifiable: add an editor-IPC/fixture regression for JB Compact Exchange on a doc whose HEAD contains a finalized Re: response, proving no typed_component_drift/out-of-band historical response bail without needing live JB.
 - [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
@@ -452,6 +479,12 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#compactdrift-agent] [clean-session] Make #c2b6 compactdrift agent-verifiable: add an editor-IPC/fixture regression for JB Compact Exchange on a doc whose HEAD contains a finalized Re: response, proving no typed_component_drift/out-of-band historical response bail without needing live JB.
+- [/] [#cleandrainsup-agent] [clean-session] Make #cleandrainsup-verify agent-verifiable: add local supervisor/ops-log coverage for idle_queue_watch_context_reset reason=#cleandrainsup followed by draining a [clean-session] head with one fresh agent per item. Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
+- [/] [#rtwbcast-simproof] [clean-session] Make #rtwbcast-verify agent-verifiable: add a headless two-editor/SimWorld CRDT broadcast convergence test that exercises simultaneous managed-doc edits and proves both buffers converge without clobber. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
+- [/] [#recyclerestart-agent] [clean-session] Make #recyclerestart-verify agent-verifiable: add automated recycle/restart evidence collection for kill-pane + JB Sync Tmux Layout, including ops.log assertions for no sync-deferred wedge and restart/re-clear proof. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
+- [/] [#lazilyqrestore-agent] [clean-session] Make #lazilyqrestore agent-verifiable: add cross-doc lost-queue recovery tooling for foreign-owned tasks/software/lazily-rs.md that reads snapshots/sidecars/doc history, reconstructs deleted queue heads, and emits explicit user-removal proof when no restore is needed.
+- [/] [#suprehotreload-agent] [clean-session] Make #suprehotreload agent-verifiable: add supervisor hot-reload/stale-binary recycle proof logging and a SimWorld/local harness test that proves a JB Run Agent Doc cycle observes the new binary or maps the proof to #recyclerestart-verify/#aazp/#4myd without live operator inspection.
 - [/] [#qmisstrike-regression] [clean-session] Reopen #qmisstrike: moving/reordering do [#staleheaddupcontent] caused agent-doc to strike the id-backed head even though no work was done. Fix finalize/queue consume so id-backed heads can only be struck by explicit --done/--pending-gate/valid id consume proof, never as a side effect of stale free-text/head reconciliation. Plan: tasks/agent-doc/plan-finalize-misstrike-next-head.md
 - [/] [#staleheaddupcontent] [clean-session] Fix stale queue head duplicate-content corruption: a stale agent:queue head can replay old exchange/queue content and corrupt the document. Add stale-head mismatch coverage, refuse stale queue snapshot replay without live-head match or consume/strike proof, and log live/snapshot/stale head identities. Plan: tasks/agent-doc/plan-stale-queue-head-duplicate-content.md
 - [/] [#mrhbacklogqueuesync] [clean-session] Fix tasks/monsterrodholders.md backlog priority queue sync: document has agent:backlog priority queue but eligible backlog items are not materializing in agent:queue. Add diagnostics for skipped backlog ids, regression coverage for backlog-to-queue convergence, and persist queue sync through session-check. Plan: tasks/agent-doc/plan-monsterrodholders-backlog-priority-queue-sync.md

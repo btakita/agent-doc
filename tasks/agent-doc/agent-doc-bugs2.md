@@ -165,7 +165,104 @@ The `[sync] recovered live pane` / `resync: stash pane … skipping kill` lines 
 **What I did:** extended `tasks/agent-doc/plan-preset-queue-head-unstrikeable.md` with **Symptom 2** + **fix (5)**: on each dispatch, re-validate the spent-preset pause against the current queue — if the paused-on preset head is absent, **invalidate the pause and proceed/close**, never replay the stale receipt (with SimWorld coverage: pause on a spent preset, remove the head, next dispatch must not re-block). Committed as a plan-only edit; #qpresetstrike already points at that plan.
 
 **To unblock equityfundingsource.md right now** (operator, in that doc's session — the documented workaround): strike the head (`- ~~#advance-review~~`) and drop `go` from the `agent:queue` marker, then `agent-doc reset --from-current --preserve-session tasks/professional/equityfundingsource.md` + `commit`. If the line is genuinely already gone and the pause still replays, that confirms facet 2 — and the recovery is the same reset-from-current to rebuild the queue state from the current doc.
-<!-- agent:boundary:f5b6306b -->
+
+### Re: IPC drift root cause fixed — #stuckhandoff2 M1b self-reap — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: equityfundingsource.md failed to restart
+> ```
+> ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
+>
+> · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
+>
+>   ❯ /clear
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+> ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
+>   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
+>                                                                             [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
+>                                                [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc bi  ❯ /clear
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────❯ [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)            ───────────────────────────────────────────────────────────────────────────────────────────────────────────[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execvepass permissions on (shift+tab to cycle)
+>        [start] harness resolved: binary=claude source=frontmatter env=default
+>                                                                              Registered session 62fe1f41 → pane %74
+>                                                                                                                    Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
+> ```
+
+
+> **Queue prompt:**
+>
+> :pushpin: equityfundingsource.md failed to restart
+> ```
+> ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
+>
+> · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
+>
+>   ❯ /clear
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+> ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
+>   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
+>                                                                             [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
+>                                                [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc bi  ❯ /clear
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────❯ [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)            ───────────────────────────────────────────────────────────────────────────────────────────────────────────[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execvepass permissions on (shift+tab to cycle)
+>        [start] harness resolved: binary=claude source=frontmatter env=default
+>                                                                              Registered session 62fe1f41 → pane %74
+>                                                                                                                    Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
+> ```
+
+
+> **Queue prompt:**
+>
+> :pushpin: equityfundingsource.md failed to restart
+> ```
+> ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
+>
+> · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
+>
+>   ❯ /clear
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+> ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
+>   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
+>                                                                             [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
+>                                                [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc bi  ❯ /clear
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────❯ [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)            ───────────────────────────────────────────────────────────────────────────────────────────────────────────[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execvepass permissions on (shift+tab to cycle)
+>        [start] harness resolved: binary=claude source=frontmatter env=default
+>                                                                              Registered session 62fe1f41 → pane %74
+>                                                                                                                    Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
+> ```
+
+
+> **Queue prompt:**
+>
+> :pushpin: equityfundingsource.md failed to restart
+> ```
+> ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
+>
+> · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
+>
+>   ❯ /clear
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+> ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
+>   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
+>                                                                             [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
+>                                                [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc bi  ❯ /clear
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────❯ [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)            ───────────────────────────────────────────────────────────────────────────────────────────────────────────[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execvepass permissions on (shift+tab to cycle)
+>        [start] harness resolved: binary=claude source=frontmatter env=default
+>                                                                              Registered session 62fe1f41 → pane %74
+>                                                                                                                    Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
+> ```
+
+
+
+Operator `/goal`: "Fix the IPC drift cause… clear the invalid state, restart, and fix the root cause." Done and live.
+
+**Root cause (this was the recurring `live_prompt_drift` / `postcommit_worktree_check match=false` that corrupted this doc mid-finalize earlier today).** `promote_handoff` flips a handoff *replacement* straight to `handoff_state = Stable` and clears `handoff_started_at` the instant the client asks — `Promoted` is parsed/serialized but **never written as a production transition**. A client that dies *after* `promote_handoff` but *before* `std::fs::rename(temp_sock → public_sock)` leaves a `Stable`-in-memory controller **stranded on its `controller-handoff-*` temp socket**. M1's self-watchdog only fires on `Preparing`/`Promoted`, so it could never see these — `stale_preparing_controller_self_reaped` had **zero occurrences ever**, and only the slow gc/M5 cmdline sweep reaped them at 7–21 min, during which the orphan races `ipc.sock` and mangles the buffer (exactly the `❯`-glyph injection + duplicate-line splicing I hand-repaired this morning).
+
+**Fix (M1b, structural — agent-doc `e54bb2b7`, superproject `aff7d8fc0`, pushed + installed).** New `controller_handoff_replacement_is_stranded` keys off the launch socket, not in-memory state: a replacement launched on a temp `controller-handoff-*` socket whose path still exists past the 45s threshold proves the promote rename never completed, so it self-reaps **regardless of `handoff_state`**. Wired into the serve-loop `WouldBlock` branch (`should_suicide || is_stranded`). Hardened `controller_self_watchdog_suicide` with a generation-ownership guard so a stale stranded generation never clobbers a newer controller's shared on-disk record to `Failed`. 6 new deterministic unit tests; `make check` green (4494 passed). Net: a wedged orphan now self-clears within 45s and the next bind promotes clean — no manual `pkill`/`git checkout` recovery. Paired with the landed `#autorecycle-on-install` (lib-install auto-recycles running controllers onto the fresh binary — the "restart" half); my lib-install this cycle marked 2 controllers to recycle.
+
+**Memory cleanup (second directive).** Removed the memories that obscured this true behavior: `feedback_kill_orphan_preparing_controller_drift` (prescribed manual `kill <pid>`, justified by the now-false "M1 is dead in production") and `feedback_tagpath_queue_lint_gate_falsepos` (RESOLVED in tagpath 0.12.2). Rewrote `feedback_ipc_drift_wedged_preparing_controllers` from its contradictory CODE-COMPLETE/CORRECTION recovery-ladder into a concise statement of the real self-healing behavior (keeping only the still-true "don't kill your own host supervisor" safety fact). Fixed the dangling `[[…]]` links + MEMORY.md index. The "issue from the unobscured behavior" — M1 genuinely not firing — is the bug I just fixed.
+
+**Re: the new pushpin (`equityfundingsource.md failed to restart`, `controller failed to start session actor`).** That was captured during the recycle storm my `lib-install` auto-recycle kicked off (the pasted pane shows my `auto-recycle: 2 controller(s) marked` line bleeding in). `start_session failed: controller failed to start session actor` during a recycle is the **#recyclerestart** class (PCP recycle does not cleanly restart the harness session) — already tracked as `#recyclerestart-verify` (operator-verify), so no new backlog item. Now that the controllers are promoting onto the M1b binary, re-running JB `Run Agent Doc` on equityfundingsource.md should bind clean; if `start_session` still fails on the fresh binary, that's the #recyclerestart live-repro to capture against that item.
+<!-- agent:boundary:d33cc385 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -240,11 +337,11 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ---
 :pushpin: - do [#dfrefresh-retire]
 :round_pushpin: do [#suprehotreload]
-- do [#dupcontent2]
-- do [#recyclerestart-verify]
-- do [#rtwbcast-verify]
-- do [#ar27-majors]
-- do [#cleandrainsup-verify]
+- ~~do [#dupcontent2]~~
+- ~~do [#recyclerestart-verify]~~
+- ~~do [#rtwbcast-verify]~~
+- ~~do [#ar27-majors]~~
+- ~~do [#cleandrainsup-verify]~~
 - do [#dfrefresh-retire]
 - do [#compactqattr]
 - do [#c2b6]

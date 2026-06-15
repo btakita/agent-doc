@@ -2304,19 +2304,60 @@ fn strike_done_queue_head_prompts(
     }
 }
 
-/// Extract the `#id` from a queue prompt text like `do [#abcd]` or
-/// `do #abcd ...`. Returns the lower-cased id without `#` / brackets.
+/// Extract the `#id` from a directive-shaped queue prompt such as `do [#abcd]`,
+/// `advance [#abcd]`, or bare `[#abcd]`. Prose that merely mentions a `#id`
+/// is deliberately ignored so natural-language follow-up prompts are not
+/// auto-struck by already-done or review-gated ids.
 fn queue_prompt_done_id(text: &str) -> Option<String> {
-    let marker = text.find('#')?;
-    let tail = &text[marker + 1..];
-    let id = tail
+    let stripped = crate::queue::strip_priority_markers(text);
+    let trimmed = stripped.trim();
+    if let Some(id) = parse_bare_queue_directive_id(trimmed) {
+        return Some(id);
+    }
+    ["do", "advance"].into_iter().find_map(|verb| {
+        strip_queue_directive_verb(trimmed, verb).and_then(parse_leading_queue_directive_id)
+    })
+}
+
+fn strip_queue_directive_verb<'a>(text: &'a str, verb: &str) -> Option<&'a str> {
+    let (idx, _) = text.char_indices().find(|(_, ch)| ch.is_whitespace())?;
+    let (head, rest) = text.split_at(idx);
+    head.eq_ignore_ascii_case(verb).then_some(rest)
+}
+
+fn parse_bare_queue_directive_id(text: &str) -> Option<String> {
+    let id = text
+        .strip_prefix("[#")
+        .and_then(|rest| rest.strip_suffix(']'))
+        .or_else(|| text.strip_prefix('#'))?;
+    normalize_queue_directive_id(id)
+}
+
+fn parse_leading_queue_directive_id(text: &str) -> Option<String> {
+    let text = text.trim_start();
+    if let Some(rest) = text.strip_prefix("[#") {
+        let (id, _) = rest.split_once(']')?;
+        return normalize_queue_directive_id(id);
+    }
+    let id = text
+        .strip_prefix('#')?
         .chars()
         .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
         .collect::<String>();
+    normalize_queue_directive_id(&id)
+}
+
+fn normalize_queue_directive_id(id: &str) -> Option<String> {
     if id.is_empty() {
-        None
-    } else {
+        return None;
+    }
+    if id
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    {
         Some(id.to_ascii_lowercase())
+    } else {
+        None
     }
 }
 
@@ -3461,6 +3502,51 @@ fn strike_done_queue_head_prompts_strikes_review_gated_items() {
     }
 }
 #[test]
+fn strike_done_queue_head_prompts_ignores_prose_id_mentions() {
+    // #qrefmisstrike: the auto-strike pass may skip already-done / review-gated
+    // directive refs, but a natural-language follow-up prompt that mentions ids
+    // must stay live for the agent to answer.
+    let entries = vec![crate::queue::QueueEntry::Prompt(
+        crate::queue::QueuePrompt {
+            text: "What are #next-steps to follow-up on #gq5c?".to_string(),
+            multiline: false,
+        },
+    )];
+    let eligible_ids: std::collections::HashSet<String> =
+        ["next-steps".to_string(), "gq5c".to_string()]
+            .into_iter()
+            .collect();
+
+    assert!(
+        super::strike_done_queue_head_prompts(&entries, &eligible_ids).is_none(),
+        "prose id mentions must not be treated as resolved queue directives"
+    );
+}
+#[test]
+fn strike_done_queue_head_prompts_strikes_advance_and_bare_directives() {
+    let entries = vec![
+        crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+            text: "advance [#phase1]".to_string(),
+            multiline: false,
+        }),
+        crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+            text: ":pushpin: [#phase2]".to_string(),
+            multiline: false,
+        }),
+    ];
+    let eligible_ids: std::collections::HashSet<String> =
+        ["phase1".to_string(), "phase2".to_string()]
+            .into_iter()
+            .collect();
+
+    let (_rewritten, struck) = super::strike_done_queue_head_prompts(&entries, &eligible_ids)
+        .expect("directive-shaped heads should be struck");
+    assert_eq!(
+        struck.iter().map(|prompt| prompt.text.as_str()).collect::<Vec<_>>(),
+        vec!["advance [#phase1]", ":pushpin: [#phase2]"]
+    );
+}
+#[test]
 fn collect_agent_done_ids_extracts_from_done_component() {
     let content = "<!-- agent:done -->\n- [x] [#alpha] One thing\n- [x] [#bravo] Another\n<!-- /agent:done -->\n";
     let ids = super::collect_agent_done_ids(content);
@@ -3503,6 +3589,22 @@ fn queue_prompt_done_id_parses_canonical_bracket_form() {
     assert_eq!(
         super::queue_prompt_done_id("do #jbrsrbusyint more text"),
         Some("jbrsrbusyint".to_string())
+    );
+    assert_eq!(
+        super::queue_prompt_done_id("advance [#gq5c]"),
+        Some("gq5c".to_string())
+    );
+    assert_eq!(
+        super::queue_prompt_done_id(":pushpin: [#qrefmisstrike]"),
+        Some("qrefmisstrike".to_string())
+    );
+    assert_eq!(
+        super::queue_prompt_done_id("What are #next-steps to follow-up on #gq5c?"),
+        None
+    );
+    assert_eq!(
+        super::queue_prompt_done_id("Approve [#shoptiers]. What are #next-steps?"),
+        None
     );
     assert_eq!(super::queue_prompt_done_id("plain prompt"), None);
 }
@@ -5214,4 +5316,3 @@ fn resolve_agent_model_none_when_no_frontmatter() {
     assert_eq!(result, None);
 }
 }
-

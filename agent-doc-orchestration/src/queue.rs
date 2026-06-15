@@ -422,18 +422,58 @@ fn is_reference_directive(text: &str) -> bool {
     rest.starts_with("[#") || rest.starts_with('#')
 }
 
-/// Extract the `#id` from `do [#id]` (or `do #id`) prompt text, normalized to
-/// lowercase. Returns `None` for prompts that do not reference an id.
+/// Extract the `#id` from a directive-shaped queue prompt, normalized to
+/// lowercase. This intentionally rejects prose that merely mentions a `#id`.
 fn do_prompt_id(text: &str) -> Option<String> {
-    let marker = text.find('#')?;
-    let id: String = text[marker + 1..]
+    let stripped = strip_priority_markers(text);
+    let trimmed = stripped.trim();
+    if let Some(id) = parse_bare_directive_id(trimmed) {
+        return Some(id);
+    }
+    ["do", "advance"].into_iter().find_map(|verb| {
+        strip_directive_verb(trimmed, verb).and_then(parse_leading_directive_id)
+    })
+}
+
+fn strip_directive_verb<'a>(text: &'a str, verb: &str) -> Option<&'a str> {
+    let (idx, _) = text.char_indices().find(|(_, ch)| ch.is_whitespace())?;
+    let (head, rest) = text.split_at(idx);
+    head.eq_ignore_ascii_case(verb).then_some(rest)
+}
+
+fn parse_bare_directive_id(text: &str) -> Option<String> {
+    let inner = text
+        .strip_prefix("[#")
+        .and_then(|rest| rest.strip_suffix(']'))
+        .or_else(|| text.strip_prefix('#'))?;
+    normalize_directive_id(inner)
+}
+
+fn parse_leading_directive_id(text: &str) -> Option<String> {
+    let text = text.trim_start();
+    if let Some(rest) = text.strip_prefix("[#") {
+        let (id, _) = rest.split_once(']')?;
+        return normalize_directive_id(id);
+    }
+    let id = text
+        .strip_prefix('#')?
         .chars()
         .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-        .collect();
+        .collect::<String>();
+    normalize_directive_id(&id)
+}
+
+fn normalize_directive_id(id: &str) -> Option<String> {
     if id.is_empty() {
-        None
-    } else {
+        return None;
+    }
+    if id
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    {
         Some(id.to_ascii_lowercase())
+    } else {
+        None
     }
 }
 
@@ -1570,6 +1610,25 @@ mod tests {
     }
 
     #[test]
+    fn do_prompt_id_extracts_only_directive_shapes() {
+        assert_eq!(do_prompt_id("do [#fix1]"), Some("fix1".to_string()));
+        assert_eq!(do_prompt_id("do #fix1 more text"), Some("fix1".to_string()));
+        assert_eq!(do_prompt_id("advance [#phase1]"), Some("phase1".to_string()));
+        assert_eq!(
+            do_prompt_id(":pushpin: [#qrefmisstrike]"),
+            Some("qrefmisstrike".to_string())
+        );
+        assert_eq!(
+            do_prompt_id("What are #next-steps to follow-up on #gq5c?"),
+            None
+        );
+        assert_eq!(
+            do_prompt_id("Approve [#shoptiers]. What are #next-steps?"),
+            None
+        );
+    }
+
+    #[test]
     fn annotate_operator_priority_reorders_ignores_new_and_later_prompts() {
         let snapshot = parse("- do [#a]\n- do [#b]\n").unwrap();
         let current = parse("- do [#new]\n- do [#b]\n- do [#a]\n").unwrap();
@@ -1820,6 +1879,20 @@ mod tests {
         // #a is already in rank order at slot 0 and the pin is anchored at slot 1
         // → nothing moves.
         assert!(sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none());
+    }
+
+    #[test]
+    fn operator_pinned_bare_id_stays_in_authored_slot() {
+        // #qrefmisstrike: when the operator manually promotes a bare id head,
+        // priority sorting must not demote it behind lower-rank backlog work.
+        let entries = parse("- :pushpin: [#qrefmisstrike]\n- do [#high]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("high".to_string(), 1u8);
+        rank.insert("qrefmisstrike".to_string(), 9u8);
+        assert!(
+            sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none(),
+            "operator-pinned bare id should stay exactly where authored"
+        );
     }
 
     #[test]

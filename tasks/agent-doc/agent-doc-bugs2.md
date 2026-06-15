@@ -793,7 +793,15 @@ Verification:
 - `git diff --check`
 
 CI was checked passively only: latest `agent-doc` CI for the passive-CI docs commit was `in_progress` when checked, and I did not wait on it. The new `AGENTS.md` rule explicitly says to record queued/in-progress CI and continue from local verification evidence instead of using `gh run watch` as a closeout gate.
-<!-- agent:boundary:a0ce5d6f -->
+
+### Re: Stop blocking the turn on CI. Add this instruction to agent-doc's AGENTS.md. Passively check on CI but don't block the turn. It takes too long. — gpt-5
+
+Added the passive-CI rule to `src/agent-doc/AGENTS.md`: CI status is evidence, not a closeout gate. Agent-doc turns should use one-shot checks like `gh run list --workflow CI --limit 1` or `gh run view ... --json status,conclusion`, record queued/in-progress/success/failure, and continue from local verification evidence instead of waiting. The rule explicitly forbids `gh run watch` unless the user asks for it.
+
+Code/docs commits are already on `src/agent-doc` `origin/main`: `44d25aac` (`docs: make CI checks passive`) plus the queue-reference follow-up `458e987a` (`fix: ignore prose refs in queue closeout`). Parent repo commits include `742866b98` and `b01a3a523`, with this closeout commit following them.
+
+Passive CI check only: latest `src/agent-doc` CI was `success` for `458e987a` (`fix: ignore prose refs in queue closeout`), run `27580976981`. I did not wait on CI.
+<!-- agent:boundary:9b9d7f6e -->
 <!-- /agent:exchange -->
 
 ## Queue

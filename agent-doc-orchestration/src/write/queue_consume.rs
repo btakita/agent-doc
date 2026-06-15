@@ -623,12 +623,17 @@ pub(crate) fn head_id_names_tracked_directive_item(content: &str, head_id: &str)
         })
 }
 
-/// A queue head that is just a `do [#id]` / `do #id` directive — the `do` verb
-/// plus the id (with optional bracket sugar) and nothing else. These follow the
-/// strike-on-halt explicit-flag rule rather than heading-based consumption.
+/// A queue head that is just a `do [#id]` / `do #id` / `advance [#id]`
+/// directive — the verb plus the id (with optional bracket sugar) and nothing
+/// else. These follow the strike-on-halt explicit-flag rule rather than
+/// heading-based consumption.
 pub(crate) fn queue_head_is_bare_do_directive(queue_head: &str) -> bool {
     let norm = normalize_queue_prompt_text(queue_head);
-    let Some(rest) = norm.strip_prefix("do ") else {
+    let rest = if let Some(rest) = norm.strip_prefix("do ") {
+        rest
+    } else if let Some(rest) = norm.strip_prefix("advance ") {
+        rest
+    } else {
         return false;
     };
     matches!(
@@ -729,12 +734,14 @@ pub(crate) fn queue_consumption_allowed_for_response(
     Ok(false)
 }
 
-/// True when `topic` resolves to exactly `#<head_id>` (optionally `do `-prefixed
-/// or `[#id]` bracketed) with no trailing modifiers. Case-insensitive; `head_id`
-/// is already normalized lowercase by [`queue_prompt_done_id`].
+/// True when `topic` resolves to exactly `#<head_id>` (optionally `do ` /
+/// `advance `-prefixed or `[#id]` bracketed) with no trailing modifiers.
+/// Case-insensitive; `head_id` is already normalized lowercase by
+/// [`queue_prompt_done_id`].
 pub(crate) fn topic_resolves_to_exact_id(topic: &str, head_id: &str) -> bool {
     let norm = topic.trim().trim_start_matches('❯').trim();
     let norm = norm.strip_prefix("do ").unwrap_or(norm).trim();
+    let norm = norm.strip_prefix("advance ").unwrap_or(norm).trim();
     let inner = norm
         .strip_prefix("[#")
         .and_then(|rest| rest.strip_suffix(']'))
@@ -743,16 +750,55 @@ pub(crate) fn topic_resolves_to_exact_id(topic: &str, head_id: &str) -> bool {
 }
 
 pub(crate) fn queue_prompt_done_id(text: &str) -> Option<String> {
-    let marker = text.find('#')?;
-    let tail = &text[marker + 1..];
-    let id = tail
+    let stripped = crate::queue::strip_priority_markers(text);
+    let trimmed = stripped.trim();
+    if let Some(id) = parse_bare_queue_directive_id(trimmed) {
+        return Some(id);
+    }
+    ["do", "advance"].into_iter().find_map(|verb| {
+        strip_queue_directive_verb(trimmed, verb).and_then(parse_leading_queue_directive_id)
+    })
+}
+
+fn strip_queue_directive_verb<'a>(text: &'a str, verb: &str) -> Option<&'a str> {
+    let (idx, _) = text.char_indices().find(|(_, ch)| ch.is_whitespace())?;
+    let (head, rest) = text.split_at(idx);
+    head.eq_ignore_ascii_case(verb).then_some(rest)
+}
+
+fn parse_bare_queue_directive_id(text: &str) -> Option<String> {
+    let id = text
+        .strip_prefix("[#")
+        .and_then(|rest| rest.strip_suffix(']'))
+        .or_else(|| text.strip_prefix('#'))?;
+    normalize_queue_directive_id(id)
+}
+
+fn parse_leading_queue_directive_id(text: &str) -> Option<String> {
+    let text = text.trim_start();
+    if let Some(rest) = text.strip_prefix("[#") {
+        let (id, _) = rest.split_once(']')?;
+        return normalize_queue_directive_id(id);
+    }
+    let id = text
+        .strip_prefix('#')?
         .chars()
         .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
         .collect::<String>();
+    normalize_queue_directive_id(&id)
+}
+
+fn normalize_queue_directive_id(id: &str) -> Option<String> {
     if id.is_empty() {
-        None
-    } else {
+        return None;
+    }
+    if id
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    {
         Some(id.to_ascii_lowercase())
+    } else {
+        None
     }
 }
 
@@ -1865,6 +1911,49 @@ mod core_tests {
         assert_eq!(updated, entries);
     }
     #[test]
+    fn done_id_marking_ignores_prose_reference_prompts() {
+        let entries = crate::queue::parse(concat!(
+            "- :pushpin: [#qrefmisstrike]\n",
+            "- :pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item.\n",
+            "- do [#tail]\n",
+        ))
+        .unwrap();
+
+        let (updated, marked) =
+            mark_entries_completed_by_done_ids(&entries, &["qrefmisstrike".to_string()]);
+        assert_eq!(marked, vec![":pushpin: [#qrefmisstrike]".to_string()]);
+        assert!(matches!(
+            &updated[0],
+            crate::queue::QueueEntry::Completed(prompt)
+                if prompt.text == ":pushpin: [#qrefmisstrike]"
+        ));
+        assert!(matches!(
+            &updated[1],
+            crate::queue::QueueEntry::Prompt(prompt)
+                if prompt.text.starts_with(":pushpin: I moved [#qrefmisstrike]")
+        ));
+    }
+    #[test]
+    fn queue_prompt_done_id_extracts_only_directive_shapes() {
+        assert_eq!(queue_prompt_done_id("do [#foo]"), Some("foo".to_string()));
+        assert_eq!(
+            queue_prompt_done_id("advance [#foo]"),
+            Some("foo".to_string())
+        );
+        assert_eq!(
+            queue_prompt_done_id(":pushpin: [#qrefmisstrike]"),
+            Some("qrefmisstrike".to_string())
+        );
+        assert_eq!(
+            queue_prompt_done_id("What are #next-steps to follow-up on #gq5c?"),
+            None
+        );
+        assert_eq!(
+            queue_prompt_done_id("Approve [#shoptiers]. What are #next-steps?"),
+            None
+        );
+    }
+    #[test]
     fn free_text_queue_head_detection() {
         // #free-text-queue-head-consume: a plain question typed into the queue
         // has no #id and is not a do-directive/preset/trigger → free text.
@@ -2382,6 +2471,8 @@ Old.
         // Queue parser strips the `- ` bullet, so heads arrive as `do [#id]`.
         assert!(queue_head_is_bare_do_directive("do [#foo]"));
         assert!(queue_head_is_bare_do_directive("do #foo"));
+        assert!(queue_head_is_bare_do_directive("advance [#foo]"));
+        assert!(queue_head_is_bare_do_directive(":pushpin: advance #foo"));
         assert!(queue_head_is_bare_do_directive(":pushpin: do [#foo]"));
         assert!(queue_head_is_bare_do_directive(":round_pushpin: do #foo"));
         // A synthetic/preset prompt carrying a trailing `#preset` id is NOT a

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,226 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-084628.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-152927.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Advance review
+- Archived 16 response topic(s): EFS->TMO writeback replay; [#xcvg-prod-email]; Borrower secure-message email production pass; 13 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: EFS->TMO writeback replay — gpt-5
-
-> **Queue prompt:**
->
-> [#dzmm-writeback-replay]
-
-
-I checked `#dzmm-writeback-replay` against the current session state. This remains externally blocked: TMO webhooks are unavailable, and the EFS-to-TMO replay cannot be implemented safely until both the `#7a4d` write field map and `#k2xg` support answers are available. I moved the queue item to gated review rather than leaving it as a drainable backlog item, so the queue can continue without repeatedly attempting blocked TMO writeback work.
-
-Changed paths: `tasks/professional/equityfundingsource.md` only.
-Commands: `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
-Verification: no code changes; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
-Confidence: high that implementation is blocked until the TMO write contract is known.
-Escalation: none.
-
-### Re: [#xcvg-prod-email] — gpt-5
-
-> **Queue prompt:**
->
-> [#xcvg-prod-email]
-
-
-I can’t perform a harness `/clear` from inside this already-loaded model context. I’m going to stop here rather than draining `#xcvg-prod-email` in the stale context; re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` after `/clear` so the queue head runs cleanly.
-
-### Re: Borrower secure-message email production pass — gpt-5
-
-`#xcvg-prod-email` cannot be completed as implementation work yet because the production messaging path is still externally gated: either the EFS sending domain and Google Workspace SMTP path need to be verified (`#f4rq` / `#m6ch` / `#p40t`), or `#z3kx` needs to become the path of record through GoHighLevel. I gated the exact queue backlog item so the previously consumed queue head is no longer an open, silently dropped backlog item.
-
-For the underlying borrower-portal questions: yes, the shipped scope already has an admin owner for borrower secure-message threads, and the intended production pass is to notify admins when borrowers send messages, support inbound email replies that append to the D1 chat thread, and notify borrowers by email when an admin replies. The remaining work is production enablement and verification, not deciding whether the feature belongs in scope.
-
-Changed paths: `tasks/professional/equityfundingsource.md` only.
-Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
-Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
-Confidence: high that this resolves the interrupted queue-removal guard for `#xcvg-prod-email` while preserving the external production-email gate.
-Escalation: none.
-
-### Re: [#jnzs-approval-followup] — gpt-5
-
-> **Queue prompt:**
->
-> [#jnzs-approval-followup]
-
-
-I can’t run the harness `/clear` from inside this loaded model context, and I won’t process `#jnzs-approval-followup` here. Please clear the Codex context and re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the next queue head runs with fresh context.
-
-### Re: Funded-deals approval follow-up — gpt-5
-
-I resolved the dropped-queue state for `#jnzs-approval-followup` and prepared the approval packet content that should be sent/tracked with Judith or the EFS reviewer. I did not send an external email from this pane, so I gated the item on the reviewer decision and any requested edits.
-
-Approval packet draft:
-
-- Screenshots to attach: public `/funded-deals`, homepage `Recent transactions`, and admin `Funded Deals` editor if showing how Judith/EFS can maintain records.
-- Public funded-deals page copy: “A working record of private lending execution.” Supporting copy says these are real private real estate transactions EFS has funded and closed, organized for borrowers, brokers, and investors evaluating private real estate lending experience.
-- Funded-deals section copy: “Funded real estate loans.” Supporting copy says it is a selected record of closed private real estate loans arranged by Equity Funding Source.
-- Current seeded records include visible closed transactions in Flintridge, Pasadena, Redondo Beach, Malibu, Chula Vista, Montebello, Santa Barbara, Los Angeles, Santa Monica, Big Bear City, Oahu, South Gate, Moorpark, Santa Ana, Inglewood, El Dorado Hills, Indian Wells, and San Pedro, with amounts from `$50,000` to `$1,465,000`.
-- Lien-position language to approve: homepage loan parameters list “Lien position: 1st, 2nd, other junior” and notes “LTV varies by lien position and total encumbrance”; footer disclaimer says loans are secured by real estate in first, second, and other junior lien positions and are subject to borrower/property qualification, not a commitment to lend.
-- ESIGN/UETA disclosure excerpt for legal/reviewer visibility: borrower full-application review/sign step tells users they must have a current web browser, internet connection, PDF save/view ability, and a valid email address; they may request paper copies at no charge by contacting EFS; they may withdraw electronic-consent before or after signing, with withdrawal not affecting already signed records.
-
-Decision to track: approve as-is, request copy/image/lien-position edits, or request legal edits to the borrower ESIGN/UETA disclosure. Any requested edits should become implementation backlog items under `#jnzs`.
-
-Changed paths: `tasks/professional/equityfundingsource.md` only.
-Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`, `sed -n ...` for funded-deals/home/full-application source inspection.
-Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
-Confidence: high that this resolves the interrupted queue-removal guard for `#jnzs-approval-followup` while preserving the real external reviewer gate.
-Escalation: none.
-
-### Re: [#67v2-auto-advance] — gpt-5
-
-> **Queue prompt:**
->
-> [#67v2-auto-advance]
-
-
-I can’t execute `/clear` from inside this already-loaded model context, and I will not process `#67v2-auto-advance` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the next queue head runs in fresh context.
-
-### Re: Admin pipeline auto-advance — gpt-5
-
-I resolved the dropped-queue state for `#67v2-auto-advance` and gated the exact backlog item rather than marking it shipped.
-
-Current evidence: `#67v2a`, `#67v2-kanban`, `#67v2b`, and `#67v2d` are already archived as done: the admin Deal Pipeline exists, manual drag/status advance works, EFS-local loan-status changes enqueue `update_loan_status` rows into `tmo_cache_outbox`, and the dashboard summary mirrors the board. The remaining auto-advance layer is distinct: it needs requirement rules for each stage, evaluation against D1 plus `tmo_cache`, audited status changes, and no premature TMO replay.
-
-The safe next implementation shape is:
-
-- Define deterministic requirement predicates for `Application Received -> Processing -> Documents -> Underwriting -> Funded` from the TMO-aligned board, using D1 as local state and `tmo_cache_entities` as the read mirror.
-- Run those predicates as an explicit admin/server job, not hidden UI behavior, so each suggested/automatic move has an audit trail and can be reviewed.
-- Apply local status changes through the same `admin_loan_status_update_` / `tmo_loan_status_outbox_enqueue_` path already used by manual drag moves.
-- Keep `update_loan_status` replay gated on `#dzmm` / `#7a4d`; the existing test suite explicitly asserts no replay worker drains those rows yet.
-
-Changed paths: `tasks/professional/equityfundingsource.md` only.
-Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`, `sed -n ...` for pipeline/TMO outbox source, tests, and done-archive inspection.
-Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
-Confidence: high that this resolves the interrupted queue-removal guard for `#67v2-auto-advance` while preserving the actual remaining gated implementation work.
-Escalation: none.
-
-### Re: [#zwws-vestings-local] — gpt-5
-
-> **Queue prompt:**
->
-> [#zwws-vestings-local]
-
-
-I can’t execute the harness `/clear` from this already-loaded context, and I will not process `#zwws-vestings-local` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the next queue head runs cleanly.
-
-### Re: Investor vestings local half — gpt-5
-
-I resolved the dropped-queue state for `#zwws-vestings-local` and gated the exact backlog item on the remaining TMO writeback contract.
-
-Evidence from the current repo: the EFS-local half is already shipped under `#zwws-local-first`. The PRD marks Phase 4 as shipped for EFS-local vestings/special instructions, backed by migration `0041` tables `investor_vestings` and `investor_special_instructions`, routes `GET/POST/PATCH/DELETE /api/investor/vestings`, `PUT /api/investor/special-instructions`, and the investor portal `Vestings` section. Tests in `tests/investor-vestings.test.ts` cover the nav/route/UI wiring and explicitly guard that the copy does not imply active TMO sync.
-
-The remaining part is not safe to mark done: writing vestings into TMO and any `tmo_cache_outbox` replay path still depends on the TMO writeback field map (`#7a4d`) plus sync-direction answers (`#dzmm` / `#k2xg`). Once those arrive, the follow-up should wire the TMO-facing optimistic-write/outbox path without changing the EFS-local source-of-truth behavior.
-
-Changed paths: `tasks/professional/equityfundingsource.md` only.
-Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`, `sed -n ...` for done archive, PRD, vestings repo/routes, and tests.
-Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
-Confidence: high that this resolves the interrupted queue-removal guard for `#zwws-vestings-local` while preserving the external TMO writeback gate.
-Escalation: none.
-
-### Re: [#zwws-new-deal-email] — gpt-5
-
-> **Queue prompt:**
->
-> [#zwws-new-deal-email]
-
-
-I can’t execute `/clear` from inside this already-loaded model context, and I will not process `#zwws-new-deal-email` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so that queue head runs with fresh context.
-
-### Re: Investor new-deal email — gpt-5
-
-I resolved the dropped-queue state for `#zwws-new-deal-email` and marked the exact backlog item done based on the current repo evidence.
-
-The workflow-priority dashboard half is already shipped: `investor_action_items_` and `investor_has_urgent_` drive the investor dashboard `Needs attention` panel, with available deals leading when nothing is urgent. The new-deal email path is also wired: publishing a deal through `admin_loans_by_id_deal_POST_` calls `notify_deal_published_for_loan_`, which sends `deal_published_investor_email_` to active investor users with a `/portal-investor/deals/:id` review link. Delivery uses the shared Cloudflare/local-capture email layer, so dev/test captures locally when delivery is not configured.
-
-The remaining production-domain concern is not this queue item: `wrangler.toml` still uses `EFS_EMAIL_FROM = "Equity Funding Source <info@briantakita.me>"`, and switching to an EFS-verified sender stays tracked by `#f4rq`.
-
-Changed paths: `tasks/professional/equityfundingsource.md` only.
-Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`, `sed -n ...` for investor dashboard, deal publish, lifecycle email, local capture, tests, and env config.
-Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
-Confidence: high that this resolves the interrupted queue-removal guard for `#zwws-new-deal-email` without duplicating shipped work.
-Escalation: none.
-
-### Re: [#efs-cutover-sso-plan] — gpt-5
-
-> **Queue prompt:**
->
-> [#efs-cutover-sso-plan]
-
-
-I can’t execute `/clear` from inside this already-loaded model context, and I will not process `#efs-cutover-sso-plan` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so that queue head runs with fresh context.
-
-### Re: Workers.dev to custom-domain/SSO cutover — gpt-5
-
-I resolved the dropped-queue state for `#efs-cutover-sso-plan` and gated the exact backlog item. I wrote the cutover checklist below, but did not execute it because the remaining steps require external Cloudflare/domain control and Google Workspace admin credentials (`#m6ch`).
-
-Cutover checklist:
-
-- Preflight: verify `bun run deploy:worker` is clean, remote D1 migrations are applied, and the Worker URL serves `/`, `/funded-deals`, `/login`, `/portal-admin`, and `/login/access-callback` as expected.
-- Routing decision: point `equityfundingsource.com` and `www.equityfundingsource.com` to the Worker if portal/admin routes should live on the same hostname; otherwise keep public static routes on the current public host and route only portal/auth paths to the Worker.
-- Cloudflare custom domain: add the Worker custom domains/routes in Cloudflare for the chosen hostnames and verify TLS is active before switching traffic.
-- Access app: add both custom-domain callbacks to the Cloudflare Access self-hosted app, at minimum `equityfundingsource.com/login/access-callback` and `www.equityfundingsource.com/login/access-callback` if both hostnames serve login.
-- SSO vars: confirm `ACCESS_TEAM_DOMAIN = "equityfundingsource"` and `ACCESS_AUD` still match the Access app that protects `/login/access-callback`; redeploy after any Access app/AUD change.
-- Google Workspace SSO: after `#m6ch`, enable the Google identity provider in Cloudflare Access, restrict policy to explicit authorized admin emails first, and avoid a broad domain-wide allow rule until EFS approves it.
-- Smoke tests: check public pages, login redirects, `/login/google?role=admin`, Access callback challenge, existing email/password login fallback, and admin/borrower/broker/investor portal entry points.
-- Rollback: remove/disable Worker custom-domain routes or restore DNS to the prior host; leave workers.dev live as the fallback verification URL; if Access breaks, remove the custom-domain callback from the Access app and keep email/password login available.
-
-Current repo evidence: `wrangler.toml` already has non-secret `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`, `/login/access-callback` verifies Cloudflare Access JWTs, and the pending-config runbook covers the workers.dev Access app. The production custom domain remains outside that runbook and is explicitly still deferred.
-
-Changed paths: `tasks/professional/equityfundingsource.md` only.
-Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`, `sed -n ...` for wrangler, auth callback, deploy docs, and pending-config runbook inspection.
-Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
-Confidence: high that this resolves the interrupted queue-removal guard for `#efs-cutover-sso-plan` while preserving the real external cutover/credential gate.
-Escalation: none.
-
-### Re: [#37ah-review-dedupe] — gpt-5
-
-> **Queue prompt:**
->
-> [#37ah-review-dedupe]
-
-
-I can’t execute `/clear` from inside this already-loaded model context, and I will not process `#37ah-review-dedupe` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so that queue head runs with fresh context.
-
-### Re: Broker portal review dedupe — gpt-5
-
-I resolved #37ah-review-dedupe and closed #37ah out of review. The shipped #37ah-backend done item covers the broker portal backend scope called out here: D1-backed submit-deal, pipeline, commissions, documents, and notifications. The remaining TMO sync/writeback note is not broker-portal backend work; it is already tracked under #dzmm/#dzmm-writeback-replay and remains gated on the #7a4d field map plus #k2xg support answers.
-
-Changed paths: `tasks/professional/equityfundingsource.md` only.
-
-Commands: `agent_doc_preflight`; `agent_doc_plan`; `agent_doc_read` for backlog/review; prior `rg -n "37ah-backend|37ah-review-dedupe|#37ah|broker portal|broker_deals|submit-deal|commissions|broker documents|broker notifications|TMO sync" tasks/professional/equityfundingsource.done.md src/equityfundingsource-dev -S`.
-
-Verification: no app code changed, so no app tests were run. This cycle is a document repair/closeout; post-finalize session check should confirm the live queue remains on #dropbox-sync-contract.
-
-Confidence: high; the done archive, migration/repo/routes coverage, PRD, and broker portal tests all point to #37ah-backend as the completed broker backend scope, with TMO writeback intentionally split to #dzmm.
-
-Escalation: none.
-
-### Re: Dropbox sync contract — gpt-5
-
-> **Queue prompt:**
->
-> [#dropbox-sync-contract]
-
-
-Implemented #dropbox-sync-contract. The EFS app now has a Dropbox sync contract centered on the shared `documents` pool: R2 remains the source of truth, Dropbox paths are deterministic from the R2 key, local D1 tombstones delete only the Dropbox mirror, remote revision drift becomes an explicit conflict, and sync attempts have stable idempotency keys.
-
-Changed paths: `src/equityfundingsource-dev/app/equityfundingsource/lib/document-dropbox-sync.ts`; `src/equityfundingsource-dev/app/equityfundingsource/lib/document-storage.ts`; `src/equityfundingsource-dev/app/equityfundingsource/migrations/0066_document_dropbox_sync_contract.sql`; `src/equityfundingsource-dev/tests/dropbox-sync-contract.test.ts`; `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`; `tasks/professional/equityfundingsource.md` via this closeout.
-
-Commands: `agent_doc_preflight`; `agent_doc_plan`; `agent_doc_read`; `tsift status`; targeted source/contract searches with `tsift --envelope search`; `bun test tests/dropbox-sync-contract.test.ts tests/document-cache.test.ts`; `tsift --envelope digest-runner --kind test --path . --shell-command 'bun run check'`; `tsift test-digest ...`; `gh run list --workflow CI --limit 1`; `gh workflow list`; `git diff --check -- ...`.
-
-Verification: targeted tests passed: 10 tests, 0 failures. Full project check passed through `bun run check`: 716 tests passed, app build passed, worker build passed. The digest reported one `d1 down` log line, but the raw test output shows it is the expected non-fatal outbox-enqueue error-path test and the suite exited 0. `gh run list --workflow CI --limit 1` could not find a workflow named `CI`, and `gh workflow list` returned no workflows, so there was no CI run to inspect.
-
-Confidence: high. The contract has executable planner/mock tests plus migration and PRD assertions, and the existing R2 document cache tests still pass.
-
-Escalation: none. Existing unrelated dirty EFS/admin UI files were left untouched.
-<!-- agent:boundary:54e50a46 -->
+<!-- agent:boundary:7a7de0da -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -260,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Why can't we show the wire instructions on the lender portal? If it's ok, add the "bank" wire instruction reveal. Make it printable along with instructions that a bank would need to perform the wire transfer...since some lender want to print out the wire instructions and hand them to the bank.
 <!-- /agent:queue -->
 
 ## Backlog

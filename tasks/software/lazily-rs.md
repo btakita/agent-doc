@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -66,7 +66,7 @@ Best first spike:
 I added a recommended backlog item for that spike. Sources inspected: [Lean homepage](https://lean-lang.org/), [Lean Language Reference](https://lean-lang.org/doc/reference/latest/), Lean use cases for [Aeneas/Rust verification](https://lean-lang.org/use-cases/aeneas/), [Veil/distributed protocol verification](https://lean-lang.org/use-cases/veil/), [Cedar production verification](https://lean-lang.org/use-cases/cedar/), and the captioned video [How Agents Quietly Break Architecture](https://www.youtube.com/watch?v=oTDcJcvrfCU). Locally, I checked `src/lazily-rs/README.md`, `src/lazily-rs/SPEC.md`, and `src/lazily-spec/protocol.md`.
 
 Cycle notes: no code changed and no test suite was run; this was a prompt-response evaluation. The YouTube pass used native captions with `--no-whisper` because no local Whisper API key is configured.
-<!-- agent:boundary:80c12b32 -->
+<!-- agent:boundary:e079af6a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,7 +74,7 @@ Cycle notes: no code changed and no test suite was run; this was a prompt-respon
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - do [#4zvn]
 <!-- /agent:queue -->
 

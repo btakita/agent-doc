@@ -343,6 +343,7 @@ pub fn send_queue_convergence(
     queue_auto: bool,
     frontmatter_yaml: Option<&str>,
     queue_body: Option<&str>,
+    node_patches: Vec<serde_json::Value>,
 ) -> Result<bool> {
     let patches = queue_body
         .map(|content| {
@@ -356,6 +357,7 @@ pub fn send_queue_convergence(
         "type": "patch",
         "file": file,
         "patches": patches,
+        "node_patches": node_patches,
         "unmatched": "",
         "frontmatter": frontmatter_yaml,
         "queue_auto": queue_auto,

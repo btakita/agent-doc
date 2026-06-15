@@ -2120,6 +2120,7 @@ pub(crate) fn converge_live_buffer_queue_shape(file: &Path, content: &str, proje
         .and_then(|(fm, _)| fm.queue_active)
         .unwrap_or(false);
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let node_patches = queue_convergence_node_patches_from_snapshot(file, content);
     // #queue-active-deprecated-line-stuck: converge with the CANONICAL `queue:`
     // control, never the deprecated `queue_active:` line. Emitting the legacy form
     // here re-introduced `queue_active: true` into the live route-owned buffer on
@@ -2133,6 +2134,7 @@ pub(crate) fn converge_live_buffer_queue_shape(file: &Path, content: &str, proje
         want_auto,
         Some(&fm_yaml),
         queue_body.as_deref(),
+        node_patches,
     ) {
         Ok(_) => eprintln!(
             "[preflight] queue: converged live editor buffer (auto={want_auto}, queue_active={queue_active})"
@@ -2141,6 +2143,46 @@ pub(crate) fn converge_live_buffer_queue_shape(file: &Path, content: &str, proje
             eprintln!("[preflight] queue: live buffer convergence send failed (non-fatal): {e}")
         }
     }
+}
+
+/// Build node-keyed queue patches for live-buffer convergence.
+///
+/// The legacy queue-convergence payload still carries the full queue component
+/// body for older plugins, but current plugins apply `node_patches` first and
+/// skip the legacy component replacement for that component. That lets queue
+/// maintenance strike/insert/move only the AST items it owns while preserving
+/// unrelated live editor additions in the queue.
+pub(crate) fn queue_convergence_node_patches_from_snapshot(
+    file: &Path,
+    target_content: &str,
+) -> Vec<serde_json::Value> {
+    let Ok(Some(snapshot_content)) = snapshot::load(file) else {
+        return Vec::new();
+    };
+    queue_convergence_node_patches(&snapshot_content, target_content)
+}
+
+pub(crate) fn queue_convergence_node_patches(before: &str, after: &str) -> Vec<serde_json::Value> {
+    agent_doc_markdown_ast::events::diff_node_events(before, after)
+        .into_iter()
+        .filter(|event| event.component == "queue")
+        .map(|event| {
+            let mut obj = serde_json::Map::new();
+            obj.insert("component".to_string(), serde_json::json!(event.component));
+            obj.insert("node_key".to_string(), serde_json::json!(event.node_key));
+            obj.insert("op".to_string(), serde_json::json!(event.kind.as_str()));
+            if let Some(content) = event.after {
+                obj.insert("content".to_string(), serde_json::json!(content));
+            }
+            if let Some(before) = event.next_node_key {
+                obj.insert("before".to_string(), serde_json::json!(before));
+            }
+            if let Some(after) = event.previous_node_key {
+                obj.insert("after".to_string(), serde_json::json!(after));
+            }
+            serde_json::Value::Object(obj)
+        })
+        .collect()
 }
 
 /// Absorb an operator's edited queue head into the snapshot when the loop adopts
@@ -2231,6 +2273,80 @@ mod tests {
 use std::io::Write;
 use std::process::Command;
 use tempfile::TempDir;
+fn mutation_patches_from_json(
+    patches: Vec<serde_json::Value>,
+) -> Vec<agent_doc_markdown_ast::mutations::MutationNodePatch> {
+    patches
+        .into_iter()
+        .map(|value| {
+            let op = match value["op"].as_str().unwrap() {
+                "insert" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Insert,
+                "remove" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Remove,
+                "replace" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Replace,
+                "move" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Move,
+                "strike" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Strike,
+                "unstrike" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Unstrike,
+                other => panic!("unexpected op {other}"),
+            };
+            agent_doc_markdown_ast::mutations::MutationNodePatch {
+                component: value["component"].as_str().unwrap().to_string(),
+                node_key: value["node_key"].as_str().unwrap().to_string(),
+                op,
+                content: value
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                before: value
+                    .get("before")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                after: value
+                    .get("after")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                order: Vec::new(),
+            }
+        })
+        .collect()
+}
+#[test]
+fn queue_convergence_node_patches_preserve_unrelated_live_queue_edits() {
+    let snapshot = concat!(
+        "---\nqueue: start\n---\n\n",
+        "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue priority go -->\n",
+        "- do [#alpha]\n",
+        "- do [#beta]\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let target = concat!(
+        "---\nqueue: start\n---\n\n",
+        "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue priority go -->\n",
+        "- ~~do [#alpha]~~\n",
+        "- do [#beta]\n",
+        "- do [#gamma]\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let live = concat!(
+        "---\nqueue: start\n---\n\n",
+        "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue priority go -->\n",
+        "- do [#alpha]\n",
+        "- do [#beta]\n",
+        "- operator-added line while maintenance runs\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let patches = mutation_patches_from_json(queue_convergence_node_patches(snapshot, target));
+    let updated = agent_doc_markdown_ast::mutations::apply_node_patches(live, &patches).unwrap();
+
+    assert!(
+        updated.contains("- operator-added line while maintenance runs\n"),
+        "node-patched convergence must not replace the whole queue body:\n{updated}"
+    );
+    assert!(updated.contains("- ~~do [#alpha]~~\n"), "{updated}");
+    assert!(updated.contains("- do [#gamma]\n"), "{updated}");
+}
 #[test]
 fn run_queue_maintenance_syncs_backlog_into_empty_queue() {
     // #backlog-queue-sync-attr: a backlog carrying `queue=sync` regenerates

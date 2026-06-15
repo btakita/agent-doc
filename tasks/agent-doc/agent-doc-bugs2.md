@@ -307,20 +307,33 @@ Shipped (agent-doc `f94ca7cd`): the regression test above; `assert_non_exchange_
 
 
 Acknowledged. I won’t answer or run the queued `agent-doc` prompt from this context. I can’t invoke `/clear` as a tool here; the session needs to be reset by the harness, then `agent-doc tasks/agent-doc/agent-doc-bugs2.md` should be started in the fresh context.
-<!-- agent:boundary:f4966274 -->
+Handled as duplicate evidence for the already-open route-owned restart/recycle failure, not a new source-change task.
+
+The `equityfundingsource.md failed to restart` log is the same class already captured by `#recyclerestart-verify`: live restart/recycle promotion may still fail at `start_session` even after the install path marks controllers for recycle. The stale `advance-review` pause facet is also already tracked under `#qpresetstrike`; the stranded-controller IPC drift/root cause was handled by the M1b work already recorded in the exchange. I did not add another backlog item because it would duplicate those open items.
+
+Changed paths: session document only, via this response/queue closeout. No source, plan, or runbook edits.
+
+Commands: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read` for `queue`, `backlog`, `status`, and `exchange`.
+
+Verification: preflight succeeded and showed the restart failure as the drainable queue evidence; backlog still contains `#recyclerestart-verify` for the required live proof. Post-finalize `agent_doc_session_check` will verify the closeout boundary.
+
+Confidence: medium-high.
+
+Escalation: operator verification remains required for `#recyclerestart-verify`; if `start_session` still fails after the supervisor is confirmed on the fresh binary, attach that live repro to that item.
+<!-- agent:boundary:56ed8578 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
----
+~~~done
 JB `Run Agent Doc` on this document
 ```
 resync: pruned 9 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3533
 ```
----
+~~~
 :pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
 ```
 resync: pruned 8 stale session(s)
@@ -392,7 +405,6 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 :round_pushpin: do [#suprehotreload]
 - ~~do [#dfrefresh-retire]~~
 - ~~do [#c2b6]~~
-- do [#goqnoise]
 <!-- /agent:queue -->
 ###
 <!--

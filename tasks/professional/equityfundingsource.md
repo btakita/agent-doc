@@ -104,7 +104,16 @@ Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`
 Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
 Confidence: high that this resolves the interrupted queue-removal guard for `#jnzs-approval-followup` while preserving the real external reviewer gate.
 Escalation: none.
-<!-- agent:boundary:139f381b -->
+
+### Re: [#67v2-auto-advance] — gpt-5
+
+> **Queue prompt:**
+>
+> [#67v2-auto-advance]
+
+
+I can’t execute `/clear` from inside this already-loaded model context, and I will not process `#67v2-auto-advance` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the next queue head runs in fresh context.
+<!-- agent:boundary:7694134a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -115,7 +124,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - ~~[#dzmm-writeback-replay]~~
 - ~~[#xcvg-prod-email]~~
 - ~~[#jnzs-approval-followup]~~
-- [#67v2-auto-advance]
+- ~~[#67v2-auto-advance]~~
 - [#zwws-vestings-local]
 - [#zwws-new-deal-email]
 - [#efs-cutover-sso-plan]

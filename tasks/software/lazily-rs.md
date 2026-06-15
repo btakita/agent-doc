@@ -157,7 +157,7 @@ Commands run: `corky linkedin publish --dry-run ...`, `corky linkedin publish ..
 Verification: live publish returned the new LinkedIn URL; live comment returned the comment ID; `make check` passed. The parent repo has no workflow named `CI`; `gh workflow list` shows `Agent Doc`. The latest `Agent Doc` run on a concurrent monsterrodholders HEAD failed before runner startup: both jobs had `runner_id: 0`, empty runner names, no steps, and no logs, so I’m treating that as external CI-start failure rather than a local regression.
 
 Confidence: high. Escalation: none. Session note: the exchange is large, but the queue is active, so I kept draining instead of compacting.
-<!-- agent:boundary:b58513ec -->
+<!-- agent:boundary:936a10b4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -165,7 +165,7 @@ Confidence: high. Escalation: none. Session note: the exchange is large, but the
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

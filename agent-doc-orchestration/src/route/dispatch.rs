@@ -130,6 +130,67 @@ pub(crate) fn direct_pane_needs_enter_resubmit(
         && trigger_visible
 }
 
+/// A route reopen may already be drafted in the composer from a prior failed
+/// editor dispatch. In that case, append-free recovery is a single Enter key.
+pub(crate) fn direct_pane_can_enter_existing_draft(
+    harness_binary: &str,
+    trigger_visible: bool,
+) -> bool {
+    matches!(harness_binary, "codex" | "claude") && trigger_visible
+}
+
+pub(crate) fn direct_pane_existing_draft_visible(
+    content: &str,
+    trigger: &str,
+    harness: &HarnessConfig,
+) -> bool {
+    let recent_lines: Vec<String> = content
+        .lines()
+        .rev()
+        .take(8)
+        .map(crate::prompt::strip_ansi)
+        .collect();
+    let lines: Vec<&String> = recent_lines.iter().rev().collect();
+    for start in 0..lines.len() {
+        if !line_contains_trigger(lines[start], trigger)
+            && !wrapped_trigger_starts_at_line(&lines, start, trigger)
+        {
+            continue;
+        }
+        let later_has_idle_prompt = lines
+            .iter()
+            .skip(start + 1)
+            .any(|line| harness.is_dispatch_ready_prompt_line(line));
+        return !later_has_idle_prompt;
+    }
+    false
+}
+
+fn wrapped_trigger_starts_at_line(lines: &[&String], start: usize, trigger: &str) -> bool {
+    let compact_trigger = compact_trigger_text(trigger);
+    if compact_trigger.is_empty() {
+        return false;
+    }
+    let first = compact_trigger_text(strip_leading_prompt_prefix(lines[start]));
+    if first.is_empty() || !shares_trigger_prefix(&first, &compact_trigger) {
+        return false;
+    }
+    let mut joined = first;
+    if joined.contains(&compact_trigger) {
+        return true;
+    }
+    for next in lines.iter().skip(start + 1).take(3) {
+        joined.push_str(&compact_trigger_text(next));
+        if joined.contains(&compact_trigger) {
+            return true;
+        }
+        if joined.len() > compact_trigger.len() + 32 {
+            break;
+        }
+    }
+    false
+}
+
 /// `accepted` when the re-submit consumed the drafted trigger, `still_visible`
 /// when the bare Enter did not submit either. Kept pure for proof-line tests.
 pub(crate) fn resubmit_result_label(second_status: CommandDispatchStatus) -> &'static str {
@@ -159,14 +220,79 @@ pub(crate) fn route_submit_resubmit_proof_line(
     )
 }
 
+fn send_direct_pane_enter_resubmit(
+    tmux: &Tmux,
+    pane: &str,
+    file: &Path,
+    harness: &HarnessConfig,
+    trigger: &str,
+    phase: &str,
+) -> DirectPaneAcceptance {
+    crate::input_diag::log_text_submit(
+        Some(file),
+        "route.direct_pane_resubmit",
+        &format!("pane:{pane}"),
+        "",
+        Some(&harness.binary),
+        "routed_resubmit_enter_key",
+        "Enter",
+    );
+    if let Err(e) = crate::sessions::send_key(tmux, pane, "Enter") {
+        eprintln!(
+            "[route] warning: {} resubmit Enter failed for pane {}: {}",
+            harness.binary, pane, e
+        );
+    }
+    let second = poll_direct_pane_acceptance(tmux, pane, file, harness, trigger, phase);
+    crate::ops_log::log_op(
+        file,
+        &route_submit_resubmit_proof_line(
+            file,
+            pane,
+            &harness.binary,
+            second.status,
+            second.elapsed,
+        ),
+    );
+    second
+}
+
 pub(crate) fn send_command_unchecked(
     tmux: &Tmux,
     pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<CommandDispatchResult> {
-    let trigger = send_command_once_unchecked(tmux, pane, file_path, harness)?;
     let file = Path::new(file_path);
+    let trigger = harness.trigger_command(file_path);
+    let payload = routed_trigger_payload(&trigger);
+    validate_routed_trigger_payload(harness, &trigger, &payload)?;
+    let existing_draft_visible = match sessions::capture_pane(tmux, pane) {
+        Ok(content) => direct_pane_existing_draft_visible(&content, &trigger, harness),
+        Err(e) => {
+            eprintln!(
+                "[route] warning: failed to capture pane {} before direct submit: {}",
+                pane, e
+            );
+            false
+        }
+    };
+    if direct_pane_can_enter_existing_draft(&harness.binary, existing_draft_visible) {
+        let first = send_direct_pane_enter_resubmit(
+            tmux,
+            pane,
+            file,
+            harness,
+            &trigger,
+            "direct_pane_existing_draft_acceptance",
+        );
+        return Ok(CommandDispatchResult {
+            status: first.status,
+            elapsed: first.elapsed,
+        });
+    }
+
+    let trigger = send_command_once_unchecked(tmux, pane, file_path, harness)?;
     let first = poll_direct_pane_acceptance(
         tmux,
         pane,
@@ -184,38 +310,13 @@ pub(crate) fn send_command_unchecked(
 
     // Try exactly one re-submit so we never loop on a genuinely stuck pane.
     if direct_pane_needs_enter_resubmit(&harness.binary, first.status, first.trigger_visible) {
-        crate::input_diag::log_text_submit(
-            Some(file),
-            "route.direct_pane_resubmit",
-            &format!("pane:{pane}"),
-            "",
-            Some(&harness.binary),
-            "routed_resubmit_enter_key",
-            "Enter",
-        );
-        if let Err(e) = crate::sessions::send_key(tmux, pane, "Enter") {
-            eprintln!(
-                "[route] warning: {} resubmit Enter failed for pane {}: {}",
-                harness.binary, pane, e
-            );
-        }
-        let second = poll_direct_pane_acceptance(
+        let second = send_direct_pane_enter_resubmit(
             tmux,
             pane,
             file,
             harness,
             &trigger,
             "direct_pane_resubmit_acceptance",
-        );
-        crate::ops_log::log_op(
-            file,
-            &route_submit_resubmit_proof_line(
-                file,
-                pane,
-                &harness.binary,
-                second.status,
-                second.elapsed,
-            ),
         );
         return Ok(CommandDispatchResult {
             status: second.status,
@@ -513,7 +614,10 @@ pub(crate) fn registry_base_dir_for_dispatch(file_path: &str) -> std::path::Path
         })
 }
 
-pub(crate) fn lookup_dispatch_registration(file_path: &str, session_id: &str) -> Result<Option<String>> {
+pub(crate) fn lookup_dispatch_registration(
+    file_path: &str,
+    session_id: &str,
+) -> Result<Option<String>> {
     let base_dir = registry_base_dir_for_dispatch(file_path);
     sessions::lookup_in(&base_dir, session_id)
 }
@@ -901,150 +1005,205 @@ pub(crate) fn validate_routed_trigger_payload(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
-use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
-#[test]
-fn authoritative_actor_starting_hint_names_reroute_and_restart() {
-    let file = std::path::Path::new("/tmp/session.md");
-    let hint = authoritative_actor_dispatch_recovery_hint(
-        crate::session_actor::ActorState::Starting,
-        file,
-    );
-    assert!(
-        hint.contains("rerun `agent-doc /tmp/session.md`"),
-        "starting actor hint should tell the user how to retry: {hint}"
-    );
-    assert!(
-        hint.contains("prompt_ready=true"),
-        "starting actor hint should name the dispatch-ready wait state: {hint}"
-    );
-    assert!(
-        hint.contains("agent-doc start /tmp/session.md"),
-        "starting actor hint should name the owner restart recovery: {hint}"
-    );
-}
-#[test]
-fn direct_pane_resubmit_only_on_timeout_with_trigger_visible() {
-    // `#jbcodexsubmit` / `#jbclaudesubmit`: a direct-pane submit that times out
-    // with the trigger still drafted in the composer earns exactly one bare-Enter
-    // re-submit. The operator reported the non-submit on BOTH Codex and Claude
-    // panes — both use the merged text+CR `Enter` submit path.
-    assert!(direct_pane_needs_enter_resubmit(
-        "codex",
-        CommandDispatchStatus::TimedOut,
-        true
-    ));
-    assert!(direct_pane_needs_enter_resubmit(
-        "claude",
-        CommandDispatchStatus::TimedOut,
-        true
-    ));
-    // Trigger consumed → no re-submit even on a timeout report (a stray bare
-    // Enter into an empty composer could fire an unintended submit).
-    assert!(!direct_pane_needs_enter_resubmit(
-        "codex",
-        CommandDispatchStatus::TimedOut,
-        false
-    ));
-    assert!(!direct_pane_needs_enter_resubmit(
-        "claude",
-        CommandDispatchStatus::TimedOut,
-        false
-    ));
-    // Accepted → already submitted, never re-send.
-    assert!(!direct_pane_needs_enter_resubmit(
-        "codex",
-        CommandDispatchStatus::Accepted,
-        true
-    ));
-    assert!(!direct_pane_needs_enter_resubmit(
-        "claude",
-        CommandDispatchStatus::Accepted,
-        true
-    ));
-    // OpenCode is excluded: it submits via the Kitty Return sequence (separate
-    // key event), so the merged-CR non-submit does not apply.
-    assert!(!direct_pane_needs_enter_resubmit(
-        "opencode",
-        CommandDispatchStatus::TimedOut,
-        true
-    ));
-}
-#[test]
-fn direct_pane_resubmit_is_scoped_to_timed_out_visible_enter_harnesses() {
-    // #jbcodexsubmit / #jbclaudesubmit / #efscodexsubmit: a direct-pane submit
-    // that timed out with the trigger STILL VISIBLE (the composer left the routed
-    // prompt drafted) warrants exactly one bare-Enter re-submit. Scoped to the
-    // two harnesses that submit via the merged text+CR `Enter` path.
-    for harness in ["codex", "claude"] {
-        assert!(
-            direct_pane_needs_enter_resubmit(harness, CommandDispatchStatus::TimedOut, true),
-            "{harness} timed-out-with-visible-trigger must earn one Enter re-submit"
+    use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    #[test]
+    fn authoritative_actor_starting_hint_names_reroute_and_restart() {
+        let file = std::path::Path::new("/tmp/session.md");
+        let hint = authoritative_actor_dispatch_recovery_hint(
+            crate::session_actor::ActorState::Starting,
+            file,
         );
-        // Already accepted ⇒ the prompt submitted, nothing to re-send.
-        assert!(!direct_pane_needs_enter_resubmit(
-            harness,
-            CommandDispatchStatus::Accepted,
+        assert!(
+            hint.contains("rerun `agent-doc /tmp/session.md`"),
+            "starting actor hint should tell the user how to retry: {hint}"
+        );
+        assert!(
+            hint.contains("prompt_ready=true"),
+            "starting actor hint should name the dispatch-ready wait state: {hint}"
+        );
+        assert!(
+            hint.contains("agent-doc start /tmp/session.md"),
+            "starting actor hint should name the owner restart recovery: {hint}"
+        );
+    }
+    #[test]
+    fn direct_pane_resubmit_only_on_timeout_with_trigger_visible() {
+        // `#jbcodexsubmit` / `#jbclaudesubmit`: a direct-pane submit that times out
+        // with the trigger still drafted in the composer earns exactly one bare-Enter
+        // re-submit. The operator reported the non-submit on BOTH Codex and Claude
+        // panes — both use the merged text+CR `Enter` submit path.
+        assert!(direct_pane_needs_enter_resubmit(
+            "codex",
+            CommandDispatchStatus::TimedOut,
             true
         ));
-        // Timed out but the trigger was consumed (not visible) ⇒ not a non-submit;
-        // a bare Enter here could fire an unintended empty submit, so don't re-send.
+        assert!(direct_pane_needs_enter_resubmit(
+            "claude",
+            CommandDispatchStatus::TimedOut,
+            true
+        ));
+        // Trigger consumed → no re-submit even on a timeout report (a stray bare
+        // Enter into an empty composer could fire an unintended submit).
         assert!(!direct_pane_needs_enter_resubmit(
-            harness,
+            "codex",
             CommandDispatchStatus::TimedOut,
             false
         ));
-    }
-    // OpenCode submit behavior (Kitty Return) is never perturbed.
-    assert!(!direct_pane_needs_enter_resubmit(
-        "opencode",
-        CommandDispatchStatus::TimedOut,
-        true
-    ));
-}
-#[test]
-fn route_submit_resubmit_proof_line_is_operator_greppable_for_both_harnesses() {
-    // #jbcodexsubmit / #jbclaudesubmit: the operator's live test greps ops.log
-    // for `route_submit_resubmit ... action=enter_key result=accepted|still_visible`.
-    // Assert the exact shape the binary emits for the single bounded re-submit on
-    // BOTH harnesses that travel the merged text+CR submit path.
-    let file = std::path::Path::new("/tmp/plan.md");
-    for harness in ["codex", "claude"] {
-        // First re-submit consumed the drafted trigger ⇒ result=accepted.
-        let accepted = route_submit_resubmit_proof_line(
-            file,
-            "%42",
-            harness,
+        assert!(!direct_pane_needs_enter_resubmit(
+            "claude",
+            CommandDispatchStatus::TimedOut,
+            false
+        ));
+        // Accepted → already submitted, never re-send.
+        assert!(!direct_pane_needs_enter_resubmit(
+            "codex",
             CommandDispatchStatus::Accepted,
-            Duration::from_millis(120),
+            true
+        ));
+        assert!(!direct_pane_needs_enter_resubmit(
+            "claude",
+            CommandDispatchStatus::Accepted,
+            true
+        ));
+        // OpenCode is excluded: it submits via the Kitty Return sequence (separate
+        // key event), so the merged-CR non-submit does not apply.
+        assert!(!direct_pane_needs_enter_resubmit(
+            "opencode",
+            CommandDispatchStatus::TimedOut,
+            true
+        ));
+    }
+    #[test]
+    fn direct_pane_resubmit_is_scoped_to_timed_out_visible_enter_harnesses() {
+        // #jbcodexsubmit / #jbclaudesubmit / #efscodexsubmit: a direct-pane submit
+        // that timed out with the trigger STILL VISIBLE (the composer left the routed
+        // prompt drafted) warrants exactly one bare-Enter re-submit. Scoped to the
+        // two harnesses that submit via the merged text+CR `Enter` path.
+        for harness in ["codex", "claude"] {
+            assert!(
+                direct_pane_needs_enter_resubmit(harness, CommandDispatchStatus::TimedOut, true),
+                "{harness} timed-out-with-visible-trigger must earn one Enter re-submit"
+            );
+            // Already accepted ⇒ the prompt submitted, nothing to re-send.
+            assert!(!direct_pane_needs_enter_resubmit(
+                harness,
+                CommandDispatchStatus::Accepted,
+                true
+            ));
+            // Timed out but the trigger was consumed (not visible) ⇒ not a non-submit;
+            // a bare Enter here could fire an unintended empty submit, so don't re-send.
+            assert!(!direct_pane_needs_enter_resubmit(
+                harness,
+                CommandDispatchStatus::TimedOut,
+                false
+            ));
+        }
+        // OpenCode submit behavior (Kitty Return) is never perturbed.
+        assert!(!direct_pane_needs_enter_resubmit(
+            "opencode",
+            CommandDispatchStatus::TimedOut,
+            true
+        ));
+    }
+    #[test]
+    fn direct_pane_existing_draft_detection_enters_only_current_codex_draft() {
+        let harness = HarnessConfig::codex();
+        let trigger = "agent-doc tasks/agent-doc/agent-doc-bugs2.md";
+
+        let drafted = "\
+history line
+› agent-doc tasks/agent-doc/agent-doc-bugs2.md
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        assert!(
+            direct_pane_existing_draft_visible(drafted, trigger, &harness),
+            "visible Codex composer draft should be eligible for append-free Enter"
+        );
+
+        let accumulated = "\
+› agent-doc tasks/agent-doc/agent-doc-bugs2.md agent-doc tasks/agent-doc/agent-doc-bugs2.md
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        assert!(
+            direct_pane_existing_draft_visible(accumulated, trigger, &harness),
+            "accumulated duplicate drafts must still be treated as current input"
+        );
+
+        let stale_scrollback = "\
+› agent-doc tasks/agent-doc/agent-doc-bugs2.md
+preflight complete
+›
+";
+        assert!(
+            !direct_pane_existing_draft_visible(stale_scrollback, trigger, &harness),
+            "an idle prompt below the trigger means it is scrollback, not the active draft"
+        );
+
+        assert!(direct_pane_can_enter_existing_draft("codex", true));
+        assert!(direct_pane_can_enter_existing_draft("claude", true));
+        assert!(!direct_pane_can_enter_existing_draft("opencode", true));
+        assert!(!direct_pane_can_enter_existing_draft("codex", false));
+    }
+    #[test]
+    fn direct_pane_existing_draft_detection_handles_wrapped_codex_path() {
+        let harness = HarnessConfig::codex();
+        let trigger =
+            "agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md";
+        let content = "\
+› agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-
+doc-bugs2.md
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+
+        assert!(
+            direct_pane_existing_draft_visible(content, trigger, &harness),
+            "wrapped current drafts should be submitted with Enter rather than appended again"
+        );
+    }
+    #[test]
+    fn route_submit_resubmit_proof_line_is_operator_greppable_for_both_harnesses() {
+        // #jbcodexsubmit / #jbclaudesubmit: the operator's live test greps ops.log
+        // for `route_submit_resubmit ... action=enter_key result=accepted|still_visible`.
+        // Assert the exact shape the binary emits for the single bounded re-submit on
+        // BOTH harnesses that travel the merged text+CR submit path.
+        let file = std::path::Path::new("/tmp/plan.md");
+        for harness in ["codex", "claude"] {
+            // First re-submit consumed the drafted trigger ⇒ result=accepted.
+            let accepted = route_submit_resubmit_proof_line(
+                file,
+                "%42",
+                harness,
+                CommandDispatchStatus::Accepted,
+                Duration::from_millis(120),
+            );
+            assert_eq!(
+                accepted,
+                format!(
+                    "route_submit_resubmit file=/tmp/plan.md pane=%42 harness={harness} action=enter_key result=accepted elapsed_ms=120"
+                )
+            );
+            // The bare Enter still did not submit ⇒ result=still_visible (then we fall
+            // through to the timed-out result; never a second re-submit).
+            let still = route_submit_resubmit_proof_line(
+                file,
+                "%42",
+                harness,
+                CommandDispatchStatus::TimedOut,
+                Duration::from_millis(300),
+            );
+            assert!(
+                still.contains("action=enter_key result=still_visible"),
+                "unsubmitted re-poll must report still_visible: {still}"
+            );
+        }
+        assert_eq!(
+            resubmit_result_label(CommandDispatchStatus::Accepted),
+            "accepted"
         );
         assert_eq!(
-            accepted,
-            format!(
-                "route_submit_resubmit file=/tmp/plan.md pane=%42 harness={harness} action=enter_key result=accepted elapsed_ms=120"
-            )
-        );
-        // The bare Enter still did not submit ⇒ result=still_visible (then we fall
-        // through to the timed-out result; never a second re-submit).
-        let still = route_submit_resubmit_proof_line(
-            file,
-            "%42",
-            harness,
-            CommandDispatchStatus::TimedOut,
-            Duration::from_millis(300),
-        );
-        assert!(
-            still.contains("action=enter_key result=still_visible"),
-            "unsubmitted re-poll must report still_visible: {still}"
+            resubmit_result_label(CommandDispatchStatus::TimedOut),
+            "still_visible"
         );
     }
-    assert_eq!(
-        resubmit_result_label(CommandDispatchStatus::Accepted),
-        "accepted"
-    );
-    assert_eq!(
-        resubmit_result_label(CommandDispatchStatus::TimedOut),
-        "still_visible"
-    );
-}
 }

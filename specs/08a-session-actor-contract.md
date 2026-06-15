@@ -160,6 +160,10 @@ Later phases may refine caller values without changing the field names.
   direct-pane submit times out with the trigger still visible, route sends a
   separate `Enter` key event and re-polls the acceptance window exactly once,
   recording `route_submit_resubmit ... action=enter_key result=accepted|still_visible`.
+  If the exact same routed trigger is already visible in the composer before
+  route sends anything, route takes that same one-`Enter` path first instead of
+  appending another trigger; a later idle prompt below the trigger classifies it
+  as stale scrollback, not active draft input.
   This is scoped to the two harnesses that travel the merged text+CR submit path
   — OpenCode submits via the separate Kitty Return sequence and is unchanged —
   and never loops on a genuinely stuck pane.

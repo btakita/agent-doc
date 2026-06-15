@@ -141,7 +141,21 @@ Escalation: none.
 
 
 I can’t execute the harness `/clear` from this already-loaded context, and I will not process `#zwws-vestings-local` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the next queue head runs cleanly.
-<!-- agent:boundary:febd6a1b -->
+
+### Re: Investor vestings local half — gpt-5
+
+I resolved the dropped-queue state for `#zwws-vestings-local` and gated the exact backlog item on the remaining TMO writeback contract.
+
+Evidence from the current repo: the EFS-local half is already shipped under `#zwws-local-first`. The PRD marks Phase 4 as shipped for EFS-local vestings/special instructions, backed by migration `0041` tables `investor_vestings` and `investor_special_instructions`, routes `GET/POST/PATCH/DELETE /api/investor/vestings`, `PUT /api/investor/special-instructions`, and the investor portal `Vestings` section. Tests in `tests/investor-vestings.test.ts` cover the nav/route/UI wiring and explicitly guard that the copy does not imply active TMO sync.
+
+The remaining part is not safe to mark done: writing vestings into TMO and any `tmo_cache_outbox` replay path still depends on the TMO writeback field map (`#7a4d`) plus sync-direction answers (`#dzmm` / `#k2xg`). Once those arrive, the follow-up should wire the TMO-facing optimistic-write/outbox path without changing the EFS-local source-of-truth behavior.
+
+Changed paths: `tasks/professional/equityfundingsource.md` only.
+Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`, `sed -n ...` for done archive, PRD, vestings repo/routes, and tests.
+Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
+Confidence: high that this resolves the interrupted queue-removal guard for `#zwws-vestings-local` while preserving the external TMO writeback gate.
+Escalation: none.
+<!-- agent:boundary:e38bada7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -163,7 +177,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
 - [ ] [#zwws-new-deal-email] [recommended] Investor dashboard phase 6 email half: implement new-deal notification in test-mode delivery with workflow-priority dashboard links and production send gated on #f4rq. Advances #zwws.
 - [ ] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
 - [ ] [#37ah-review-dedupe] [recommended] Broker portal review closeout: verify the shipped #37ah-backend covers the broker portal backend scope, move any remaining TMO sync note under #dzmm-writeback-replay, then resolve #37ah from review.
@@ -173,6 +186,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Review
 
 <!-- agent:review -->
+- [/] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
 - [/] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.
 - [/] [#jnzs-approval-followup] [recommended] Send/track funded-deals approval packet: attach current screenshots/copy/lien-position language plus the full_application ESIGN/UETA disclosure excerpt, record Judith/EFS reviewer decision, and convert requested edits into implementation backlog. Advances #jnzs.
 - [/] [#xcvg-prod-email] [recommended] Borrower secure-message email production pass: after #f4rq/#m6ch/#p40t or #z3kx path-of-record is decided, enable borrower/admin outbound notifications, verify inbound reply threading, and add production env/runbook checks. Advances #xcvg.

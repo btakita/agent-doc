@@ -604,149 +604,58 @@ Verification passed in the dirty dev tree and again in a clean adjacent worktree
 The churn was not necessary product work. It was recovery overhead from agent-doc disagreeing about which document state was authoritative after restart: the live editor buffer, the committed snapshot, the response-capture sidecars, and a stale route-owned supervisor were not all describing the same queue state. When a recovery path reads git HEAD or disk while the editor buffer has newer queue content, it can replay stale queue blocks, re-strike the wrong head, or revive archived exchange text.
 
 The durable rule is what you described: use the document/editor buffer as the current source of truth, then persist that through the binary-owned snapshot and commit boundary. The extra sidecar checks exist only to prove that recovery is not replaying stale state over that buffer. For this queue item I did not add more implementation work or create new backlog because there is no new actionable follow-up beyond the queue items already present. I normalized the session closeout so the buffer and committed snapshot match, kept `#clearexchstale` closed, and continued the queue from the existing items.
-<!-- agent:boundary:0bf9aaaf -->
+
+### Re: #efscodexsubmit — gpt-5
+
+Closed `#efscodexsubmit` as already implemented in the committed `src/agent-doc` history.
+
+Committed HEAD includes the durable direct-pane submit fix: `direct_pane_needs_enter_resubmit` covers Codex timed-out submissions with the trigger still visible, sends one bare `Enter`, polls acceptance again, and records the operator-greppable `route_submit_resubmit ... action=enter_key result=accepted|still_visible` proof line. The original Codex-only fix landed in `d14dd12f` / `38ad3bc0`; the current generalized path for Codex and Claude is in `3b71cfeb`, with existing-draft resubmission hardening in `4345a2f9`. No new source changes were needed in this cycle.
+
+Verified from a clean adjacent worktree at committed `src/agent-doc` HEAD (`0ec1cdf4`):
+- `cargo test -p agent-doc-orchestration direct_pane -- --nocapture`
+- `cargo test -p agent-doc-orchestration route_submit_resubmit -- --nocapture`
+- `cargo check -p agent-doc`
+<!-- agent:boundary:a11f6144 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 ~~~done
-:pushpin: The equityfundingsource.md compaction is duplicated and the numeric list is in reverse order:
-```
-### Session Summary
-
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-170908.md`*
-
-Compacted content:
-- Archived 1 response topic(s): lender bank wire instruction reveal
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-8. **Active Funding**: wire confirmed; show compliance chip such as Current, Renewal due, Expired, or Under review.
-7. **Committed / Awaiting Wire**: lender committed to a deal, wire not confirmed.
-6. **Ready to Commit**: lender account is linked and accreditation is current.
-5. **Lender Setup**: admin needs to create/link the lender account.
-4. **Accreditation Current**: EFS approved; if no lender account exists, move next to setup.
-3. **Accreditation Under Review**: submitted and awaiting EFS decision.
-2. **Accreditation Not Started**: lender still needs to submit the annual questionnaire/evidence.
-1. **Signed Up**: account exists, no annual requirements submitted.
-- **Active**: at least one fund row is active, meaning the wire was confirmed and the lender is actively invested.
-- **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
-- **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
-8. **Active Funding**: wire confirmed; show compliance chip such as Current, Renewal due, Expired, or Under review.
-7. **Committed / Awaiting Wire**: lender committed to a deal, wire not confirmed.
-6. **Ready to Commit**: lender account is linked and accreditation is current.
-5. **Lender Setup**: admin needs to create/link the lender account.
-4. **Accreditation Current**: EFS approved; if no lender account exists, move next to setup.
-3. **Accreditation Under Review**: submitted and awaiting EFS decision.
-2. **Accreditation Not Started**: lender still needs to submit the annual questionnaire/evidence.
-1. **Signed Up**: account exists, no annual requirements submitted.
-- **Active**: at least one fund row is active, meaning the wire was confirmed and the lender is actively invested.
-- **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
-- **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
-```
-~~~
-~~~done
-Please explain the cause of this churn. I don't understand why this is necessary. Just run the current task. Use the document editor buffer as the source of truth. It seems simple. Why this extra complexity?
-```
-• The real file has queue: start, agent:queue ... go, and agent:backlog priority queue, so it should be in go-mode and
-  should append active backlog ids. I’m checking whether the active backlog ids are being treated as already present
-  because of struck queue residue or duplicated done entries.
-
-• Explored
-  └ Read monsterrodholders.md
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-• The real queue uses advance [#…] heads, and the backlog source uses a bare queue token. I’m checking the component
-  attribute parser and queue sync identity rules; those two details are not covered together by the current tests.
-
-• Explored
-  └ Search parse.*attrs|attrs\.insert|Component \{|struct Component|normalize.*attr|bare in component.rs
-    Read queue.rs
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-• The sync primitive only de-duplicates do [#id], not advance [#id], so the real file should have appended ids if the
-  sync ran. I’m going to reproduce that exact document shape in a focused test to expose the missing condition before
-  changing code.
-
-• Explored
-  └ Read component.rs, maintenance.rs
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-• Before I edit, I’m checking the queue-sync CLI surface too. The acceptance says persistence through session-check, so
-  I want to know whether the manual sync command and preflight share the same path or diverge.
-
-• Ran cargo run -p agent-doc -- queue sync --help
-  └    Compiling agent-doc v0.34.1 (/home/brian/work/btakita/agent-loop/src/agent-doc)
-        Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.46s
-    … +8 lines (ctrl + t to view transcript)
-    Options:
-      -h, --help  Print help
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-• The CLI is a one-shot wrapper, not a dry-run surface. I’m keeping live docs untouched and will add a focused
-  regression in the orchestration tests around the exact queue: start + priority queue + non-do existing heads shape.
-
-• Explored
-  └ Read queue_cmd.rs, maintenance.rs
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-• The preflight path has the right broad pieces, but the one-shot queue sync command bypasses done/execution-context
-  filtering and diagnostics. I’m also checking whether session-check invokes queue maintenance or only reports current
-  state; that affects the “persists through session-check” part.
-
-• Explored
-  └ Read maintenance.rs
-    Search run_queue_maintenance\(|queue_maintenance|QueueState|session-check|session_check in session_check.rs
-    Read queue_continuation.rs
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-• To avoid touching the real monsterrodholders task file, I’m running the current sync command against a temporary copy
-  of that document. That will tell us whether the current code can populate this exact shape at all.
-
-• Ran tmpdir=$(mktemp -d /tmp/mrh-queue-sync.XXXXXX)
-  │ cp src/boost-client/tasks/monsterrodholders.md "$tmpdir/monsterrodholders.md"
-  │ cargo run -p agent-doc -- queue sync "$tmpdir/monsterrodholders.md"
-  │ … +1 lines
-  └ cp: cannot stat 'src/boost-client/tasks/monsterrodholders.md': No such file or directory
-        Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
-    … +4 lines (ctrl + t to view transcript)
-        No such file or directory (os error 2)
-    sed: can't read /tmp/mrh-queue-sync.9cgWO0/monsterrodholders.md: No such file or directory
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-• That temp-copy command used the submodule working directory, so the relative path was wrong. I’m rerunning it from the
-  parent repo path.
-
-• Ran tmpdir=$(mktemp -d /tmp/mrh-queue-sync.XXXXXX)
-  │ cp src/boost-client/tasks/monsterrodholders.md "$tmpdir/monsterrodholders.md"
-  │ ( cd src/agent-doc && cargo run -p agent-doc -- queue sync "$tmpdir/monsterrodholders.md" )
-  │ … +1 lines
-  └ &lt;!-- no-queue-removal-guard --&gt;
-    &lt;!-- queue edited live by user during the #hydroweb-size-specs turn: added [#hydroweb-ad-url-apply] and annotated
-    … +33 lines (ctrl + t to view transcript)
-    OG
-    - https://www.youtube.com/shorts/hA8C9PQx0zI
-```
-~~~
-- ~~do [#qdedup]~~
-- ~~do [#clearexchstale]~~
----
 JB `Run Agent Doc` on lazily-rs
 ```
 resync: pruned 1 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3605
 ```
----
+~~~
 /goal Using an agent doc with Codex, JB `Run Agent Doc` and JB `Clear Session Context` should submit the command sent on Codex. But a `\n` is sent instead of submit. This used to work but broke. Please identify when the regression occurred and provide a surgical & durable fix so this issue does not repeat. This regression has occurred several times in the life of agent-doc and it takes a while to fix. I want to fix this issue permanently by using a distinct primitive. #simworld
-- ~~do [#snbc2]~~
 - do [#efscodexsubmit]
+---
+All equityfundingsource.md codex session Ctrl+C Ctrl+Z inputs are escaped ascii `^Z^Z^C^C^C^C^C^C`. #simworld
+
+```
+ agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
+[run] starting for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
+                                                                                                [diff] doc=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md snapshot=/home/brian/work/btakita/agent-loop/.agent-doc/snapshots/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.md doc_len=33777 snap_len=32718
+                                                                                                             [diff] stripped: doc_len=33403 snap_len=32344
+                                   [diff] changes detected, computing unified diff
+                                                                                  [perf] diff.compute total: 1ms
+                                                                                                                [run] diff computed (1304 bytes)
+                         [commit] detected post-commit local drift for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md — HEAD already contains the committed response; leaving later local working-tree edits uncommitted
+         [commit] staged snapshot already matches HEAD for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md — closing cycle as already committed
+                                                      [perf] commit total: 20ms
+                                                                               [diff] doc=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md snapshot=/home/brian/work/btakita/agent-loop/.agent-doc/snapshots/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.md doc_len=33777 snap_len=32718
+                                                                                            [diff] stripped: doc_len=33403 snap_len=32344
+                  [diff] changes detected, computing unified diff
+                                                                 [perf] diff.compute total: 1ms
+                                                                                               Submitting to codex...
+                                                                                                                     ^M^M^M^M^M^M^C^C^C^Zueoaueuoue^M^M^C^C^C^C^C^C[run] heartbeat phase=child_agent_wait elapsed_s=30 timeout_s=1800 cycle_id=cycle-1781557566920 cycle_phase=preflight_started cycle_age_s=30
+                                                                 ^C^C^C^C[run] heartbeat phase=child_agent_wait elapsed_s=60 timeout_s=1800 cycle_id=cycle-1781557600342 cycle_phase=preflight_started cycle_age_s=26
+                                                                                              ^Z^Z^C^C^C^C^C^C[run] heartbeat phase=child_agent_wait elapsed_s=90 timeout_s=1800 cycle_id=cycle-1781557600342 cycle_phase=preflight_started cycle_age_s=56
+            [run] heartbeat phase=child_agent_wait elapsed_s=120 timeout_s=1800 cycle_id=cycle-1781557600342 cycle_phase=preflight_started cycle_age_s=86
+```
+---
 - do [#stuckhandoff2]
 - do [#qt32]
 - do [#2v7b]
@@ -793,7 +702,6 @@ What are #next-steps to fix bugs?
 - [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse `baselines/<hash>.md` into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = `resolve_current_doc(newest-of(disk,buffer))`, NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
-- [ ] [#efscodexsubmit] JB Run Agent Doc in equityfundingsource.md enters but does not submit the prompt to Codex (operator must press Enter). Same class as #2v7b/#jbcodexsubmit: Codex direct-pane dispatch (route.rs send_command_unchecked) detects prompt_not_submitted (merged text+CR not treated as submit by the Codex TUI) but has no Enter re-submit fallback. FIX: Codex-scoped one-shot Enter re-submit + route_submit_resubmit proof logging + SimWorld coverage (operator-requested). CLEAN session required (touches route.rs; submodule carries dirty #fintol tree). Plan: tasks/agent-doc/plan-jb-codex-submit.md
 - [ ] [#stuckhandoff2] Stuck-handoff hardening: controllers wedged in --handoff-state preparing survive IDE restart + keep corrupting the worktree over ipc.sock. ROOT CAUSE: two-phase handoff (prepare_handoff->promote_handoff, project_controller.rs:3307/3318) is client-driven; if the client dies/RPC fails between the two, the controller stays Preparing forever. The existing reaper (#kqr6/#sjwm/#stuckhandoff, 45s) is bootstrap-RECORD-scoped (kills only bootstrap.pid), same-project-only, and fires on bind/gc not a timer -> orphaned + cross-project + no-new-invoke wedges survive (operator must pkill -f 'controller serve ... --handoff-state preparing'). FIX (defense-in-depth): M1 controller self-watchdog/suicide-timer on Preparing [strongest], M2 gate worktree/ipc writes on Stable [symptom-killer, overlaps #pcwc], M3 proc-scan reaper for orphans, M4 client handoff drop-guard, M5 cross-project gc sweep. M1+M2 are the durable core; land together with SimWorld coverage. CLEAN session required (submodule carries uncommitted #fintol work). Plan: tasks/agent-doc/plan-stuck-handoff-hardening.md
 - [ ] [#qt32] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#2v7b] #jbcodexsubmit / #jbclaudesubmit JB Run Agent Doc enters the routed prompt but does not submit it (operator presses Enter). CODE-COMPLETE 2026-06-13 (agent-doc 3b71cfeb, superproject 8fcdc067f): JB dispatch-only routes BOTH Claude and Codex through the same direct-pane send_command_unchecked path (merged text+CR send-keys), and TriggerStillVisible detection already covered both, but the one-shot Enter re-submit was gated codex-only. Generalized direct_pane_needs_codex_resubmit -> direct_pane_needs_enter_resubmit (codex|claude; opencode excluded; requires TimedOut+trigger_visible so no stray Enter into an empty composer); proof line route_submit_resubmit ... action=enter_key result=accepted|still_visible; 3 unit tests; make check 4369 passed 0 FAIL. Built+installed+recycled. GATE now operator-drive ONLY: run JB Run Agent Doc against a Claude pane AND a Codex pane, confirm ops.log shows route_submit_issue issue=prompt_not_submitted then route_submit_resubmit action=enter_key result=accepted with the queue starting. Plan: tasks/agent-doc/plan-jb-codex-submit.md

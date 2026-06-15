@@ -313,13 +313,37 @@ Commit:
 Escalation: none.
 Confidence: high that the corruption report is now actionable and tied to an exact plan file.
 Push: I will push `main` after this closeout commit.
-<!-- agent:boundary:ecb1e219 -->
+
+### Re: Operator Verify Backlog Enablement — gpt-5
+
+Added agent-drainable enablement items for the six current backlog `[operator-verify]` heads. The original operator-verify items stay as the live-proof records, but each now has a paired clean-session item that can add logging, SimWorld coverage, or recovery tooling so a later agent can prove or disprove the condition without relying only on manual operator inspection.
+
+Added:
+- `#suprehotreload-agent` for `#suprehotreload`.
+- `#lazilyqrestore-agent` for `#lazilyqrestore`.
+- `#recyclerestart-agent` for `#recyclerestart-verify`.
+- `#rtwbcast-simproof` for `#rtwbcast-verify`.
+- `#cleandrainsup-agent` for `#cleandrainsup-verify`.
+- `#compactdrift-agent` for `#c2b6`.
+
+Changed paths:
+- Session backlog/queue state only.
+
+Verification:
+- Reviewed the six active backlog `[operator-verify]` items in this document.
+- Added one concrete enablement item per operator-verify item.
+- No source tests were run for this backlog-only cycle.
+
+Escalation: none.
+Confidence: high that each operator-only proof now has an agent-drainable enablement path.
+Push: I will push `main` after this closeout commit.
+<!-- agent:boundary:be978aa4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
----
+~~~done
 :pushpin: Codex finalize error
 ```
 • Finalize’s backlog-capture guard interpreted the closeout note as a possible follow-up. I’m rerunning with an explicit
@@ -352,8 +376,9 @@ Push: I will push `main` after this closeout commit.
         Caused by:
             Transport closed
 ```
----
-- ~~do [#staleheaddupcontent]~~
+~~~
+- do [#staleheaddupcontent]
+- When I moved `- do [#staleheaddupcontent]`, agent-doc immediately struck it. 
 - :pushpin: Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.
 ---
 :pushpin: JB `Run Agent Doc`
@@ -392,6 +417,12 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#suprehotreload-agent] [clean-session] Make #suprehotreload agent-verifiable: add supervisor hot-reload/stale-binary recycle proof logging and a SimWorld/local harness test that proves a JB Run Agent Doc cycle observes the new binary or maps the proof to #recyclerestart-verify/#aazp/#4myd without live operator inspection.
+- [ ] [#lazilyqrestore-agent] [clean-session] Make #lazilyqrestore agent-verifiable: add cross-doc lost-queue recovery tooling for foreign-owned tasks/software/lazily-rs.md that reads snapshots/sidecars/doc history, reconstructs deleted queue heads, and emits explicit user-removal proof when no restore is needed.
+- [ ] [#recyclerestart-agent] [clean-session] Make #recyclerestart-verify agent-verifiable: add automated recycle/restart evidence collection for kill-pane + JB Sync Tmux Layout, including ops.log assertions for no sync-deferred wedge and restart/re-clear proof. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
+- [ ] [#rtwbcast-simproof] [clean-session] Make #rtwbcast-verify agent-verifiable: add a headless two-editor/SimWorld CRDT broadcast convergence test that exercises simultaneous managed-doc edits and proves both buffers converge without clobber. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
+- [ ] [#cleandrainsup-agent] [clean-session] Make #cleandrainsup-verify agent-verifiable: add local supervisor/ops-log coverage for idle_queue_watch_context_reset reason=#cleandrainsup followed by draining a [clean-session] head with one fresh agent per item. Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
+- [ ] [#compactdrift-agent] [clean-session] Make #c2b6 compactdrift agent-verifiable: add an editor-IPC/fixture regression for JB Compact Exchange on a doc whose HEAD contains a finalized Re: response, proving no typed_component_drift/out-of-band historical response bail without needing live JB.
 - [ ] [#staleheaddupcontent] [clean-session] Fix stale queue head duplicate-content corruption: a stale agent:queue head can replay old exchange/queue content and corrupt the document. Add stale-head mismatch coverage, refuse stale queue snapshot replay without live-head match or consume/strike proof, and log live/snapshot/stale head identities. Plan: tasks/agent-doc/plan-stale-queue-head-duplicate-content.md
 - [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.

@@ -379,7 +379,7 @@ So both halves of #fcc0's defining scope are done: (a) all genuine direct-disk-n
 **Not done here (correctly deferred):** the `restart-supervisor --force` OS-signal escalation (reuse `signal_pid_for_force_clear` gated on `process_binary_is_stale`) is an explicit CLEAN-session follow-up that "cannot be live-tested from the hosted session it would kill" — it stays out of this block-accreted hosted session.
 
 Also removed a contaminated `:pushpin: :round_pushpin:` queue line (the #pushpinaccum double-marker bug) that was tripping session-check; its content is already captured in backlog `#pushpinaccum`.
-<!-- agent:boundary:da77092c -->
+<!-- agent:boundary:654728b2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -393,8 +393,12 @@ Also removed a contaminated `:pushpin: :round_pushpin:` queue line (the #pushpin
 - :pushpin: do [#aazp]
 - :round_pushpin: do [#rtwbcast]
 ---
-:pushpin: :round_pushpin: If there is a `:round_pushpin:` and when upgrading to a `:pushpin:`, drop the `:round_pushpin:` instead of having both. So instead of `:pushpin: :round_pushpin:` we should have `:pushpin:`.
----
+- :pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
+- :pushpin: [#c2b6]
+- :pushpin: [#pushpinaccum]
+- :pushpin: [#0kjc]
+- :pushpin: [#compactqattr]
+- :pushpin: [#dupcontent]
 ---
 :pushpin: JB `Run Agent Doc` should self-heal and complete the dispatch. There was no `- #advance-review` line. Seems to be stuck in an old state.
 ```
@@ -431,6 +435,7 @@ JB `Run Agent Doc` on equityfundingsource.md
 Error: project controller command `dispatch` failed: dispatch coalesced for tasks/professional/equityfundingsource.md: a dispatch for generation 66 is already in flight (#qflood); receipt_id=3310
 ```
 ---
+- :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
 ---
 :pushpin: JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equityfundingsource.md`
 ```
@@ -442,6 +447,7 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ```
 ---
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
+- [#cleardrainsim]
 :round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
 ---
 - :pushpin: upgrade dependencies

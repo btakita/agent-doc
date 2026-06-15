@@ -445,24 +445,6 @@ fn complete_idle_queue_slash_command_head(
     }
 }
 
-fn codex_owner_queue_continuation_prompt(file: &str, active_head: &str) -> String {
-    let stable_prefix = "\
-Agent-doc active queue continuation.
-
-Stable instructions:
-Continue in this owner pane: answer the queue head described after the cache boundary, then persist the response using the document-specific command in the volatile payload. Do NOT run the bare agent-doc entrypoint for the same document from this pane. Do not send a final answer until the final-gate command in the volatile payload passes.";
-    let volatile_suffix = format!(
-        "Agent-doc active queue continuation for {file}.\n\n\
-         Queue head:\n{active_head}\n\n\
-         Continue in this owner pane: answer the queue head, then persist with \
-         `agent-doc finalize {file}` or `agent-doc write --commit {file}`. Do NOT run \
-         `agent-doc {file}` from this pane; that re-invokes the owner pane and hits the \
-         recursive-direct-invocation guard. Do not send a final answer until \
-         `agent-doc session-check {file} --codex-final-gate` passes."
-    );
-    crate::prompt_cache::PromptCacheBlocks::new(stable_prefix, volatile_suffix).render()
-}
-
 fn idle_queue_drain_payload(
     file: &str,
     harness: &crate::harness::HarnessConfig,
@@ -471,21 +453,15 @@ fn idle_queue_drain_payload(
     if let Some(command) = idle_queue_head_slash_command(active_head) {
         return command;
     }
-    if harness.binary == "codex" {
-        codex_owner_queue_continuation_prompt(file, active_head)
-    } else {
-        harness.trigger_command(file)
-    }
+    harness.trigger_command(file)
 }
 
 fn idle_queue_drain_payload_kind(
-    harness: &crate::harness::HarnessConfig,
+    _harness: &crate::harness::HarnessConfig,
     active_head: &str,
 ) -> &'static str {
     if idle_queue_head_slash_command(active_head).is_some() {
         "slash_command"
-    } else if harness.binary == "codex" {
-        "owner_continuation"
     } else {
         "trigger"
     }

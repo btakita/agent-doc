@@ -54,7 +54,7 @@ Prompt context must keep remote host evidence project-scoped. Globally approved 
 
 ## Prompt Cache Boundary
 
-Direct-run prompts and Codex owner-continuation prompts are assembled as:
+Direct-run prompts are assembled as:
 
 1. Stable prefix
 2. `PROMPT_CACHE_BOUNDARY`

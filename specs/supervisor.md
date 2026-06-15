@@ -465,18 +465,15 @@ distinct from the one-shot restart auto-trigger:
   `idle_queue_drain_decision`) the live idle-queue watch uses rather than
   reimplementing the policy, so the recycle + clear pipeline is simulated offline
   across its interoperating systems.
-- On `Dispatch` it injects a harness-specific payload through the same
+- On `Dispatch` it injects a harness-specific trigger through the same
   `auto_trigger_inject_command` path (capability-proof gated, actor marked
   `busy` before bytes). Claude/OpenCode receive the normal harness trigger
-  (`agent-doc <FILE>` / `/agent-doc <FILE>`), while Codex receives an
-  owner-pane continuation prompt naming the active head and instructing the
-  current pane to answer it and persist with `finalize`/`write --commit`. Codex
-  idle drains must not inject `agent-doc <FILE>` into the pane that already owns
-  the document, because that self-reinvokes the owner pane and trips the
-  recursive-direct-invocation guard instead of doing the queued work. A failed
-  inject is not recorded as dispatched, so it retries on the next idle tick.
-  Successful drains log `idle_queue_watch_drain` with
-  `payload_kind=trigger|owner_continuation` and
+  (`/agent-doc <FILE>`), while Codex receives the bare Codex-compatible trigger
+  (`agent-doc <FILE>`). The queue-continuation prompt contract belongs to the
+  installed harness instruction surface and runbooks, not to the editor/supervisor
+  payload itself. A failed inject is not recorded as dispatched, so it retries on
+  the next idle tick. Successful drains log `idle_queue_watch_drain` with
+  `payload_kind=trigger` and
   `submit_mode=tmux_literal_cr|tmux_literal_kitty_return|pty_cr`; failures log
   `idle_queue_watch_drain_failed`.
 - **Stale-busy self-heal (`#stale-busy-after-auto-inject-no-clear`).** The

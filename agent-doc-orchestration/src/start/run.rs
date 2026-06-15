@@ -1540,49 +1540,22 @@ fn start_invalid_frontmatter_returns_contextual_error() {
     );
 }
 #[test]
-fn idle_queue_drain_payload_uses_owner_continuation_for_codex() {
+fn idle_queue_drain_payload_uses_trigger_for_codex() {
     let payload = idle_queue_drain_payload(
         "tasks/monsterrodholders.md",
         &crate::harness::HarnessConfig::codex(),
         "JB Run Agent Doc on monsterrodholders.md stalled.",
     );
 
-    assert!(payload.contains("Agent-doc active queue continuation"));
-    assert!(payload.contains("JB Run Agent Doc on monsterrodholders.md stalled."));
-    assert!(payload.contains("answer the queue head"));
-    assert!(payload.contains("agent-doc finalize tasks/monsterrodholders.md"));
-    assert!(payload.contains("Do NOT run `agent-doc tasks/monsterrodholders.md`"));
-    let boundary = payload
-        .find(crate::prompt_cache::PROMPT_CACHE_BOUNDARY)
-        .expect("Codex owner-continuation prompt should expose cache boundary");
-    let (stable, volatile) = payload
-        .split_once(crate::prompt_cache::PROMPT_CACHE_BOUNDARY)
-        .expect("Codex owner-continuation prompt should split at cache boundary");
-    let file_pos = payload.find("tasks/monsterrodholders.md").unwrap();
-    let head_pos = payload
-        .find("JB Run Agent Doc on monsterrodholders.md stalled.")
-        .unwrap();
-    assert!(
-        file_pos > boundary && head_pos > boundary,
-        "volatile file path and queue head must stay after cache boundary:\n{payload}"
-    );
-    assert!(stable.contains("Stable instructions:"));
-    assert!(!stable.contains("tasks/monsterrodholders.md"));
-    assert!(!stable.contains("JB Run Agent Doc on monsterrodholders.md stalled."));
-    assert!(volatile.contains("tasks/monsterrodholders.md"));
-    assert!(volatile.contains("JB Run Agent Doc on monsterrodholders.md stalled."));
-    assert!(
-        !payload
-            .trim_start()
-            .starts_with("agent-doc tasks/monsterrodholders.md"),
-        "Codex idle queue watch must not inject the recursive trigger"
-    );
+    assert_eq!(payload, "agent-doc tasks/monsterrodholders.md");
+    assert!(!payload.contains("Agent-doc active queue continuation"));
+    assert!(!payload.contains("JB Run Agent Doc on monsterrodholders.md stalled."));
     assert_eq!(
         idle_queue_drain_payload_kind(
             &crate::harness::HarnessConfig::codex(),
             "JB Run Agent Doc on monsterrodholders.md stalled."
         ),
-        "owner_continuation"
+        "trigger"
     );
 }
 #[test]

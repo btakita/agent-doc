@@ -1004,6 +1004,111 @@ fn test_cli_help() {
 }
 
 #[test]
+fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/state/cycles")).unwrap();
+
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test-session\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue: start\n",
+        "prompt_presets:\n",
+        "  '#spec-test-commit-push': update spec + tests. commit + push\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Queue\n\n",
+        "<!-- agent:queue preset=\"#spec-test-commit-push\" priority go -->\n",
+        "- advance [#mrhfeed-prop]\n",
+        "- advance [#gvj5]\n",
+        "<!-- /agent:queue -->\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- [ ] [#2qrx] [P1] Offline click-upload backfill\n",
+        "- [ ] [#rating-emails] [P2] Enable review opt-in\n",
+        "- [ ] [#mrhfeed-prop] [P3] Existing advance head\n",
+        "- [ ] [#cf-txn-email] [P3] Transactional email migration\n",
+        "- [ ] [#884m] [P3] News sitemap cleanup\n",
+        "- [ ] [#gvj5] [P3] Existing advance head\n",
+        "- [ ] [#tk2p] [P3] Hetzner migration\n",
+        "- [ ] [#pdp-video-footage] [P3] Product video footage\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, content);
+
+    let mut sync = agent_doc_cmd();
+    sync.current_dir(root);
+    sync.args(["queue", "sync", "session.md"]);
+    let sync_output = sync.assert().success().get_output().stdout.clone();
+    let sync_stdout = String::from_utf8(sync_output).unwrap();
+    assert!(
+        sync_stdout.contains("synced 8 backlog id(s)"),
+        "sync should report all active backlog ids:\n{sync_stdout}"
+    );
+    assert!(
+        sync_stdout.contains(
+            "skipped already represented backlog id(s): #mrhfeed-prop, #gvj5 (reason: already_in_queue)"
+        ),
+        "sync should explain ids represented by existing non-do heads:\n{sync_stdout}"
+    );
+    assert!(
+        sync_stdout.contains("materialized backlog id(s): #2qrx, #rating-emails, #cf-txn-email, #884m, #tk2p, #pdp-video-footage"),
+        "sync should report newly materialized ids:\n{sync_stdout}"
+    );
+
+    let synced = fs::read_to_string(&doc).unwrap();
+    assert!(synced.contains("- advance [#mrhfeed-prop]"));
+    assert!(synced.contains("- advance [#gvj5]"));
+    assert!(synced.contains("- do [#2qrx]"));
+    assert!(synced.contains("- do [#rating-emails]"));
+    assert!(synced.contains("- do [#cf-txn-email]"));
+    assert!(synced.contains("- do [#884m]"));
+    assert!(synced.contains("- do [#tk2p]"));
+    assert!(synced.contains("- do [#pdp-video-footage]"));
+    assert_eq!(
+        synced.matches("do [#mrhfeed-prop]").count(),
+        0,
+        "existing advance head should prevent duplicate do head:\n{synced}"
+    );
+    assert_eq!(
+        synced.matches("do [#gvj5]").count(),
+        0,
+        "existing advance head should prevent duplicate do head:\n{synced}"
+    );
+
+    ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["add", "session.md"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["commit", "-m", "sync queue", "--no-verify"])
+        .status()
+        .unwrap();
+
+    let mut check = agent_doc_cmd();
+    check.current_dir(root);
+    check.args(["session-check", doc.to_str().unwrap()]);
+    let check_output = check.assert().success().get_output().stdout.clone();
+    let check_stdout = String::from_utf8(check_output).unwrap();
+    assert!(
+        check_stdout.contains("[session-check] ok"),
+        "session-check should stay clean after the synced queue is committed:\n{check_stdout}"
+    );
+}
+
+#[test]
 fn test_cli_controller_status_reports_inactive_without_launching() {
     let tmp = tempfile::TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();

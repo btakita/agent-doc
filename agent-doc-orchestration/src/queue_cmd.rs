@@ -30,6 +30,35 @@ enum HeadKind {
     IdBacked,
 }
 
+fn queue_prompt_reference_id(text: &str) -> Option<String> {
+    let marker = text.find('#')?;
+    let id: String = text[marker + 1..]
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        .collect();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_ascii_lowercase())
+    }
+}
+
+fn queue_entry_reference_id(entry: &queue::QueueEntry) -> Option<String> {
+    match entry {
+        queue::QueueEntry::Prompt(prompt) | queue::QueueEntry::Completed(prompt) => {
+            queue_prompt_reference_id(&prompt.text)
+        }
+        _ => None,
+    }
+}
+
+fn format_queue_ids(ids: &[String]) -> String {
+    ids.iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Classify the active queue head using the canonical free-text detector
 /// (`write::queue_head_is_free_text_prompt`), which resolves bare `[#id]`,
 /// `#id`, and `#preset` heads as id-backed via `topic_resolves_to_exact_id` —
@@ -186,6 +215,17 @@ pub fn sync(file: &Path) -> Result<()> {
     let body = &content[qc.open_end..qc.close_start];
     let entries = queue::parse(body)
         .with_context(|| format!("failed to parse queue body in {}", file.display()))?;
+    let existing_ids: std::collections::HashSet<String> = entries
+        .iter()
+        .filter_map(queue_entry_reference_id)
+        .collect();
+    let mut seen_existing = std::collections::HashSet::new();
+    let already_present: Vec<String> = ids
+        .iter()
+        .map(|id| id.trim().to_ascii_lowercase())
+        .filter(|id| existing_ids.contains(id))
+        .filter(|id| seen_existing.insert(id.clone()))
+        .collect();
 
     let Some(synced) = queue::sync_backlog_into_queue(&entries, &ids, effective_mode) else {
         println!(
@@ -207,6 +247,13 @@ pub fn sync(file: &Path) -> Result<()> {
         .iter()
         .filter(|e| matches!(e, queue::QueueEntry::Prompt(_)))
         .count();
+    let mut seen_new = std::collections::HashSet::new();
+    let newly_materialized: Vec<String> = synced
+        .iter()
+        .filter_map(queue_entry_reference_id)
+        .filter(|id| !existing_ids.contains(id))
+        .filter(|id| seen_new.insert(id.clone()))
+        .collect();
     println!(
         "{}: synced {} backlog id(s) → {} queue prompt(s) ({:?} mode)",
         file.display(),
@@ -214,6 +261,20 @@ pub fn sync(file: &Path) -> Result<()> {
         prompt_count,
         effective_mode
     );
+    if !already_present.is_empty() {
+        println!(
+            "{}: skipped already represented backlog id(s): {} (reason: already_in_queue)",
+            file.display(),
+            format_queue_ids(&already_present)
+        );
+    }
+    if !newly_materialized.is_empty() {
+        println!(
+            "{}: materialized backlog id(s): {}",
+            file.display(),
+            format_queue_ids(&newly_materialized)
+        );
+    }
 
     if let Err(e) = snapshot::save(file, &new_content) {
         eprintln!("[queue sync] warning: failed to update snapshot: {}", e);

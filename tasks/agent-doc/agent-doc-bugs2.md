@@ -339,7 +339,7 @@ Verification:
 - `a7605c456` in parent: `agent-doc: cover MCP finalize capture recovery`
 - `fecc63be` in `src/agent-doc`: `test: cover MCP finalize capture recovery`
 - `make check` (4534 tests passed, 238 skipped, doctests passed, medium SimWorld budget test passed)
-❯ - `cargo check -p agent-doc`
+- `cargo check -p agent-doc`
 - `cargo test -p agent-doc --test test_cli mcp_finalize -- --nocapture`
 - `cargo test -p agent-doc --test test_cli mcp_finalize_close_after_capture_recovers_on_next_preflight_once -- --nocapture`
 - `src/agent-doc/VERSIONS.md` documents `#codexmcpfinalize` coverage.
@@ -409,28 +409,39 @@ CI:
 - Previous `src/agent-doc` CI for `c57076c8` passed.
 - New `src/agent-doc` CI for `fecc63be` is running as `27571750330`.
 - Parent repo has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
+- GitHub Actions CI `27573900103` passed (`make check` + `make tmux-ci`)
+- clean-worktree `make check` from `src/agent-doc` commit `3339b4d1` (clippy, 4532 tests, doctests, medium SimWorld budget)
+- `cargo test -p agent-doc skill -- --nocapture`
+❯ - `cargo check -p agent-doc`
+- superproject `885d1e7` (`agent-doc: retire dogfood supervisor refresh runbook`)
+- `src/agent-doc` `3339b4d1` (`docs: retire dogfood supervisor refresh runbook`)
+- Fixed the prior CI-only dependency break by publishing `tsift-core 0.1.70` and `tsift-memory 0.1.70`, then resolving `tsift-memory = "0.1.70"` from crates.io instead of `../../tsift/...`.
+- Updated the remaining `#supautoinstall` comments so they refer to the historical manual refresh steps without pointing at a deleted runbook.
+- Deleted the four parent harness runbook mirrors under `.claude`, `.codex`, `.cursor`, and `.opencode`.
+- Removed the dogfood refresh catalog entry from the canonical skill text and installed harness mirrors.
+- Deleted the bundled `runbooks/dogfood-supervisor-refresh.md` and removed its `BUNDLED_RUNBOOKS` entry.
 
 ### Re: #ar27-majors — gpt-5
 
 Updated the held-back major dependency constraints across `src/agent-doc` and the first-party crates needed to keep the graph resolvable:
 
-❯ - `agent-doc`: bumped `instruction-files`, `notify`, `portable-pty`, `pulldown-cmark`, `rusqlite`, `sha2`, `signal-hook`, `similar`, `toml`, `ureq`, `yrs`, and `zip` to the requested major lines.
-❯ - API migrations: updated `ureq 3` agent/body/header usage, `sha2 0.11` digest hex formatting, and `portable-pty 0.9` `MasterPty::tty_name`.
-❯ - `rusqlite 0.40`: aligned local `tsift-memory` plus the tsift workspace SQLite packages to avoid duplicate `libsqlite3-sys` links.
-❯ - `generic-array 0.14.7`: removed the old transitive chain by moving local `tagpath` to `sha2 0.11`; `agent-doc` no longer resolves `generic-array`.
+- `agent-doc`: bumped `instruction-files`, `notify`, `portable-pty`, `pulldown-cmark`, `rusqlite`, `sha2`, `signal-hook`, `similar`, `toml`, `ureq`, `yrs`, and `zip` to the requested major lines.
+- API migrations: updated `ureq 3` agent/body/header usage, `sha2 0.11` digest hex formatting, and `portable-pty 0.9` `MasterPty::tty_name`.
+- `rusqlite 0.40`: aligned local `tsift-memory` plus the tsift workspace SQLite packages to avoid duplicate `libsqlite3-sys` links.
+- `generic-array 0.14.7`: removed the old transitive chain by moving local `tagpath` to `sha2 0.11`; `agent-doc` no longer resolves `generic-array`.
 
 Commits pushed:
-❯ - `tagpath` `a1e6a2c` (`chore: update sha2 dependency`)
-❯ - `tsift` `cd648b5` (`chore: update rusqlite dependency`)
-❯ - `agent-doc` `08286f55` (`chore: update major dependency constraints`)
+- `tagpath` `a1e6a2c` (`chore: update sha2 dependency`)
+- `tsift` `cd648b5` (`chore: update rusqlite dependency`)
+- `agent-doc` `08286f55` (`chore: update major dependency constraints`)
 
 Verification:
 ❯ - `cargo check -p agent-doc`
-❯ - `cargo test -p agent-doc-sqlite -p agent-doc-markdown-ast -p agent-doc-core -p agent-doc-orchestration`
-❯ - `make check` in `src/agent-doc` (4534 tests passed, 238 skipped, doctests passed, SimWorld medium budget passed)
-❯ - `cargo test --lib` in `src/tagpath` (115 passed)
-❯ - `cargo check --workspace` in `src/tsift`
-❯ - `cargo test -p tsift-memory -p tsift-sqlite -p tsift-tokensave -p tsift-summarize -p tsift-cli` in `src/tsift`
+- `cargo test -p agent-doc-sqlite -p agent-doc-markdown-ast -p agent-doc-core -p agent-doc-orchestration`
+- `make check` in `src/agent-doc` (4534 tests passed, 238 skipped, doctests passed, SimWorld medium budget passed)
+- `cargo test --lib` in `src/tagpath` (115 passed)
+- `cargo check --workspace` in `src/tsift`
+- `cargo test -p tsift-memory -p tsift-sqlite -p tsift-tokensave -p tsift-summarize -p tsift-cli` in `src/tsift`
 
 Note: full `cargo test` in `src/tagpath` still fails on the pre-existing live fixture lint for `tasks/software/tsift.md` line 43 (`agent:boundary` contains a UUID instead of the current hex/slug boundary form); the library tests and the `agent-doc` dependency path are clean.
 
@@ -439,28 +450,28 @@ Note: full `cargo test` in `src/tagpath` still fails on the pre-existing live fi
 Done. Retired the dogfood supervisor refresh stopgap now that the dogfood auto-install plus stale-binary recycle path owns that bootstrap.
 
 Changed:
-- Deleted the bundled `runbooks/dogfood-supervisor-refresh.md` and removed its `BUNDLED_RUNBOOKS` entry.
-- Removed the dogfood refresh catalog entry from the canonical skill text and installed harness mirrors.
-- Deleted the four parent harness runbook mirrors under `.claude`, `.codex`, `.cursor`, and `.opencode`.
-- Updated the remaining `#supautoinstall` comments so they refer to the historical manual refresh steps without pointing at a deleted runbook.
-- Fixed the prior CI-only dependency break by publishing `tsift-core 0.1.70` and `tsift-memory 0.1.70`, then resolving `tsift-memory = "0.1.70"` from crates.io instead of `../../tsift/...`.
+❯ - Deleted the bundled `runbooks/dogfood-supervisor-refresh.md` and removed its `BUNDLED_RUNBOOKS` entry.
+❯ - Removed the dogfood refresh catalog entry from the canonical skill text and installed harness mirrors.
+❯ - Deleted the four parent harness runbook mirrors under `.claude`, `.codex`, `.cursor`, and `.opencode`.
+❯ - Updated the remaining `#supautoinstall` comments so they refer to the historical manual refresh steps without pointing at a deleted runbook.
+❯ - Fixed the prior CI-only dependency break by publishing `tsift-core 0.1.70` and `tsift-memory 0.1.70`, then resolving `tsift-memory = "0.1.70"` from crates.io instead of `../../tsift/...`.
 
 Commits pushed:
-- `src/agent-doc` `3339b4d1` (`docs: retire dogfood supervisor refresh runbook`)
-- superproject `885d1e7` (`agent-doc: retire dogfood supervisor refresh runbook`)
+❯ - `src/agent-doc` `3339b4d1` (`docs: retire dogfood supervisor refresh runbook`)
+❯ - superproject `885d1e7` (`agent-doc: retire dogfood supervisor refresh runbook`)
 
 Verification:
-- `cargo check -p agent-doc`
-- `cargo test -p agent-doc skill -- --nocapture`
-- clean-worktree `make check` from `src/agent-doc` commit `3339b4d1` (clippy, 4532 tests, doctests, medium SimWorld budget)
-- GitHub Actions CI `27573900103` passed (`make check` + `make tmux-ci`)
-<!-- agent:boundary:6e505cd9 -->
+❯ - `cargo check -p agent-doc`
+❯ - `cargo test -p agent-doc skill -- --nocapture`
+❯ - clean-worktree `make check` from `src/agent-doc` commit `3339b4d1` (clippy, 4532 tests, doctests, medium SimWorld budget)
+❯ - GitHub Actions CI `27573900103` passed (`make check` + `make tmux-ci`)
+<!-- agent:boundary:95020166 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority prest="#spec-test-build-install-commit-push" go -->
-~~~done
+---
 :pushpin: The equityfundingsource.md compaction is duplicated and the numeric list is in reverse order:
 ```
 ### Session Summary
@@ -493,7 +504,7 @@ Compacted content:
 - **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
 - **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
 ```
-~~~
+---
 ---
 Please explain the cause of this churn. I don't understand why this is necessary. Just run the current task. Use the document editor buffer as the source of truth. It seems simple. Why this extra complexity?
 ```
@@ -587,7 +598,7 @@ Please explain the cause of this churn. I don't understand why this is necessary
 - ~~do [#jbclearctxsubmit]~~
 - ~~do [#codexmcpfinalize]~~
 - ~~do [#ar27-majors]~~
-- do [#dfrefresh-retire]
+- ~~do [#dfrefresh-retire]~~
 - do [#fcc0]
 - do [#qdedup]
 - do [#clearexchstale]

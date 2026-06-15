@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,35 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-080550.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-081957.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Pipeline refresh after record updates
+- Archived 1 response topic(s): Lender Ready advancement
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Lender Ready advancement — gpt-5
-
-> **Queue prompt:**
->
-> Accredited lenders in https://equityfundingsource.brian-takita.workers.dev/portal-admin/lender-pipeline do not advance to "Lender ready". How do they advance?
-
-
-Accredited lenders do not automatically advance to **Lender Ready**. In the current implementation, **Lender Ready** means `users.lender_account` is populated with a TMO lender account number. Accreditation only gets the card to **Accredited**.
-
-The intended path is:
-
-1. Investor submits the lender account application from the investor portal/deal flow.
-2. Admin opens **Lender Pipeline → Lenders** (or `/portal-admin/lenders`) and reviews the pending lender request.
-3. Admin creates the lender manually in TMO.
-4. Admin enters the TMO lender account number and clicks **Assign account & complete**.
-5. The app marks the request `done`, writes the account number to `users.lender_account`, and the next Lender Pipeline refresh moves the card to **Lender Ready**.
-
-A pending lender request only shows as `Requested`; it does not move the card to **Lender Ready**. If an accredited lender already has a TMO account number but no pending lender request, the current admin UI does not expose a direct “assign lender account” action from the user profile. That case needs either the investor request flow or a small admin shortcut if we want staff to advance existing lenders without making them submit the portal form.
-
-Evidence checked: the pipeline status resolver returns `lender_ready` only for a nonblank `lender_account`; the admin complete endpoint for lender requests writes that field; the user profile text says lender account assignment happens through the lender-account request flow. No code changed.
-
-Verification: source/PRD inspection only; no tests were run because this cycle was an explanation, not an implementation change.
-<!-- agent:boundary:3955a10c -->
+<!-- agent:boundary:2954481f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- #advance-review
 <!-- /agent:queue -->
 
 ## Backlog

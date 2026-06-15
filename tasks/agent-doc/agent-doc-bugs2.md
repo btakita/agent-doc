@@ -704,7 +704,7 @@ The fix clears only document-scoped stale-supervisor churn-stop pauses when a ne
 Changed paths in `src/agent-doc`: `agent-doc-orchestration/src/project_controller/rpc.rs`, `agent-doc-orchestration/src/project_controller.rs`, and `VERSIONS.md`. Parent repo gitlink updated to `src/agent-doc` `19fbd7821fad136c3cf2a77c2211c0c9752fc375`; parent commit `2a1cddc27` records that pointer.
 
 Verification passed in the clean worktree `src/agent-doc-qchurnfix`: `cargo test -p agent-doc-orchestration session_start_clears_stale_supervisor_queue_pause_before_dispatch -- --nocapture`; `cargo test -p agent-doc-orchestration dispatch_queue_paused_stale_supervisor_emits_restart_redirect_marker -- --nocapture`; `cargo check -p agent-doc`; `make check` with clippy, 4537 tests passed, 238 skipped, doctests passed, and the medium SimWorld gate passed. Latest GitHub Actions CI for `agent-doc` is running for `19fbd782` at closeout. Escalation none. Confidence high.
-<!-- agent:boundary:dad9acad -->
+<!-- agent:boundary:cf558fd8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -713,7 +713,7 @@ Verification passed in the clean worktree `src/agent-doc-qchurnfix`: `cargo test
 - ~~Fix the root cause of "Re: queue churn explanation — gpt-5"~~
 - do [#snbc2]
 - do [#codexctrlz]
-- Codex JB `Run Agent Doc` is still sending a `\n` to Codex instead of submitting the command. We have used several turns and 1 `/goal` but it's still not working. 
+- Codex JB `Run Agent Doc` is still sending a `\n` to Codex instead of submitting the command. We have used several turns and 1 `/goal` but it's still not working.
 - do [#opverify-submit-proof]
 - do [#opverify-editor-proof]
 - do [#opverify-recycle-proof]

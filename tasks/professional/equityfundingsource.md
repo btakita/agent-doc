@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -37,38 +37,62 @@ committed
 
 Compacted content:
 - Archived 1 response topic(s): lender bank wire instruction reveal
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-8. **Active Funding**: wire confirmed; show compliance chip such as Current, Renewal due, Expired, or Under review.
-7. **Committed / Awaiting Wire**: lender committed to a deal, wire not confirmed.
-6. **Ready to Commit**: lender account is linked and accreditation is current.
-5. **Lender Setup**: admin needs to create/link the lender account.
-4. **Accreditation Current**: EFS approved; if no lender account exists, move next to setup.
-3. **Accreditation Under Review**: submitted and awaiting EFS decision.
-2. **Accreditation Not Started**: lender still needs to submit the annual questionnaire/evidence.
-1. **Signed Up**: account exists, no annual requirements submitted.
-- **Active**: at least one fund row is active, meaning the wire was confirmed and the lender is actively invested.
-- **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...`
+
+### Re: investor pipeline resequence — gpt-5
+
+I recommend correcting the admin label to **Accreditation** rather than **Accredation**. If EFS wants the broader annual workflow language, use **Requirements** for investor-facing copy and **Accreditation** for the admin decision point.
+
+The current admin board is a single monotonic lender lifecycle: Signed Up -> Accredited -> Lender Ready -> Committed -> Active. In the source, those later stages mean:
+
 - **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
-8. **Active Funding**: wire confirmed; show compliance chip such as Current, Renewal due, Expired, or Under review.
-7. **Committed / Awaiting Wire**: lender committed to a deal, wire not confirmed.
-6. **Ready to Commit**: lender account is linked and accreditation is current.
-5. **Lender Setup**: admin needs to create/link the lender account.
-4. **Accreditation Current**: EFS approved; if no lender account exists, move next to setup.
-3. **Accreditation Under Review**: submitted and awaiting EFS decision.
-2. **Accreditation Not Started**: lender still needs to submit the annual questionnaire/evidence.
-1. **Signed Up**: account exists, no annual requirements submitted.
-- **Active**: at least one fund row is active, meaning the wire was confirmed and the lender is actively invested.
 - **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
-- **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
-<!-- agent:boundary:1db35ddf -->
+- **Active**: at least one fund row is active, meaning the wire was confirmed and the lender is actively invested.
+
+I would not make this two separate pipelines. Use one lender pipeline, but make accreditation a visible compliance dimension inside it. Two disconnected pipelines would make admins answer “is this person ready to fund?” in one place and “are they current annually?” in another. A single board should answer both, with compliance chips carried forward into the funding stages.
+
+Suggested lane sequence:
+
+1. **Signed Up**: account exists, no annual requirements submitted.
+2. **Accreditation Not Started**: lender still needs to submit the annual questionnaire/evidence.
+3. **Accreditation Under Review**: submitted and awaiting EFS decision.
+4. **Accreditation Current**: EFS approved; if no lender account exists, move next to setup.
+5. **Lender Setup**: admin needs to create/link the lender account.
+6. **Ready to Commit**: lender account is linked and accreditation is current.
+7. **Committed / Awaiting Wire**: lender committed to a deal, wire not confirmed.
+8. **Active Funding**: wire confirmed; show compliance chip such as Current, Renewal due, Expired, or Under review.
+
+I would avoid renaming the final lane to **Compliant**. Compliance can expire annually while an investment remains active, so “Compliant” is better as a status badge/filter, not the terminal funding stage. If the current **Active** label feels too broad, rename it to **Active Funding** and add the compliance badge next to it.
+
+When EFS admins approve accreditation, the card should leave **Accreditation Under Review** immediately. If the lender account is already linked, it should land in **Ready to Commit**; otherwise it should land in **Lender Setup**. Rejections should go to **Needs Update** or back to **Accreditation Not Started** with the rejection reason visible.
+
+```mermaid
+flowchart LR
+  A["Signed Up"] --> B["Accreditation Not Started"]
+  B --> C["Accreditation Under Review"]
+  C -->|"Approve"| D["Accreditation Current"]
+  C -->|"Reject"| E["Needs Update"]
+  E --> B
+  D --> F["Lender Setup"]
+  F --> G["Ready to Commit"]
+  G --> H["Committed / Awaiting Wire"]
+  H -->|"Wire confirmed"| I["Active Funding"]
+  I -. "annual renewal opens" .-> J["Renewal Due / Expired"]
+  J --> C
+  J -. "funding status stays active" .-> I
+```
+
+Implementation note: the current code treats signup self-attestation as enough for the old **Accredited** lane. For this revised flow, admin-approved annual accreditation should drive **Accreditation Current**; self-attestation should remain signup evidence, not the approval state.
+
+I left `#investor-pipeline-resequence` gated on explicit approval because this cycle was a proposal request, not an implementation request. Cycle proof: changed paths are the session document only; source inspected under `src/equityfundingsource-dev`; no tests were run because this was proposal-only; escalation none; confidence medium-high.
+<!-- agent:boundary:41bff76c -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#investor-pipeline-resequence]
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

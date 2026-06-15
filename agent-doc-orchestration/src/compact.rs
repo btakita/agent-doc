@@ -394,6 +394,84 @@ fn assert_non_exchange_items_preserved(
     )
 }
 
+/// Verbatim opening marker line (e.g. `<!-- agent:queue priority preset="#x" go -->`)
+/// for every non-exchange component, keyed by component name.
+fn non_exchange_opening_markers(content: &str) -> BTreeMap<String, String> {
+    let mut markers = BTreeMap::new();
+    let Ok(components) = component::parse(content) else {
+        return markers;
+    };
+    for comp in &components {
+        if comp.name == "exchange" {
+            continue;
+        }
+        // `open_start..open_end` is the verbatim opening marker span, including
+        // all inline attributes — captured directly from the source bytes.
+        markers.insert(
+            comp.name.clone(),
+            content[comp.open_start..comp.open_end].to_string(),
+        );
+    }
+    markers
+}
+
+/// `#compactqattr`: fail closed if a compaction rewrite altered any non-exchange
+/// component's opening marker — most importantly dropping inline attributes
+/// (`priority`, `preset="..."`, `go`) from an `agent:queue` marker. Operator
+/// observed (monsterrodholders.md) post-compaction wiping all `agent:queue`
+/// attributes ("too much blast radius").
+///
+/// The deterministic compaction rebuild (`Component::replace_content`, byte-offset
+/// based) preserves these markers verbatim — proven by
+/// `compact_preserves_queue_marker_inline_attributes`. This guard is
+/// defense-in-depth: it makes the "every non-exchange opening marker stays
+/// byte-identical" contract a hard fail-closed invariant so a future rebuild
+/// regression (or a re-render step added to the compact path) cannot silently
+/// strip attributes into the snapshot/HEAD. It is the marker-level sibling of
+/// `assert_non_exchange_items_preserved` (#compactdropitem).
+fn assert_non_exchange_markers_preserved(
+    file: &Path,
+    before: &str,
+    after: &str,
+    stage: &str,
+) -> Result<()> {
+    let before_markers = non_exchange_opening_markers(before);
+    let after_markers = non_exchange_opening_markers(after);
+
+    let mut changed: Vec<String> = Vec::new();
+    for (name, before_marker) in &before_markers {
+        // A component legitimately absent after compaction is covered by the
+        // item-count guard (#compactdropitem); only flag a surviving component
+        // whose opening marker text changed.
+        if let Some(after_marker) = after_markers.get(name)
+            && after_marker != before_marker
+        {
+            changed.push(format!("{name}: `{before_marker}` -> `{after_marker}`"));
+        }
+    }
+
+    if changed.is_empty() {
+        return Ok(());
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "compact_altered_non_exchange_marker file={} stage={} changed={}",
+            file.display(),
+            stage,
+            changed.join(" ; ")
+        ),
+    );
+    anyhow::bail!(
+        "[compact] INTERRUPTED: compaction altered the opening marker of non-exchange component(s) [{}] in {} (stage={}). Compaction must only archive/truncate the exchange and leave every other component opening marker byte-identical, including inline attributes like `priority`/`preset`/`go` (#compactqattr). The compact output was NOT committed. If this recurs from a non-wedged session it is a deterministic rebuild regression; if a stale-supervisor CRDT merge is interleaving over the written file, recycle/restart the supervisor (`agent-doc session restart-supervisor {} --force`) before retrying.",
+        changed.join(", "),
+        file.display(),
+        stage,
+        file.display()
+    )
+}
+
 fn apply_compacted_document(
     file: &Path,
     compacted: &str,
@@ -408,6 +486,11 @@ fn apply_compacted_document(
     // Fail closed before any write if the rebuild dropped a whole item from a
     // non-exchange singleton list component (#compactdropitem).
     assert_non_exchange_items_preserved(file, source_content, compacted, "apply")?;
+
+    // Fail closed before any write if the rebuild altered a non-exchange
+    // opening marker (dropped inline attributes like preset/priority/go)
+    // (#compactqattr).
+    assert_non_exchange_markers_preserved(file, source_content, compacted, "apply")?;
 
     // `#w42v`: when a JB editor listener is active, converge the compacted
     // content through the editor (component `op:replace`) so it does not diverge
@@ -2268,6 +2351,90 @@ mod tests {
         assert_eq!(status_before, status_after);
         assert!(status_after.contains("❯"));
         assert!(status_after.contains("Critical item"));
+    }
+
+    /// `#compactqattr`: compacting the exchange must leave every non-exchange
+    /// component opening marker byte-identical, including inline attributes
+    /// (`priority`, `preset="..."`, `go`) on an `agent:queue` marker. Operator
+    /// observed (monsterrodholders.md) post-compaction wiping all `agent:queue`
+    /// attributes ("too much blast radius").
+    #[test]
+    fn compact_preserves_queue_marker_inline_attributes() {
+        let doc = concat!(
+            "---\nagent_doc_session: test-qattr\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first topic\n\nResponse one.\n\n",
+            "### Re: second topic\n\nResponse two.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" go -->\n",
+            "- do [#aaa]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        // The verbatim opening marker line, captured before compaction.
+        let queue_marker =
+            "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" go -->";
+        assert!(doc.contains(queue_marker));
+
+        run_component_compact(&file, doc, "exchange", Some("Archived."), true).unwrap();
+
+        let result = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            result.contains(queue_marker),
+            "queue opening marker with inline attributes must survive compaction byte-identical; got:\n{result}"
+        );
+
+        // The post-compact CRDT refresh must also preserve the marker verbatim:
+        // a later stale-supervisor merge bootstraps from this CRDT state.
+        let crdt_path = agent_doc_dir
+            .join("crdt")
+            .join(format!("{}.yrs", snapshot::doc_hash(&file).unwrap()));
+        if let Ok(bytes) = std::fs::read(&crdt_path) {
+            let round_tripped = crate::crdt::CrdtDoc::decode_state(&bytes).unwrap().to_text();
+            assert!(
+                round_tripped.contains(queue_marker),
+                "post-compact CRDT state must round-trip the queue marker verbatim; got:\n{round_tripped}"
+            );
+        }
+    }
+
+    /// `#compactqattr`: the marker guard must fail closed when a rebuild strips
+    /// inline attributes from a non-exchange opening marker.
+    #[test]
+    fn marker_guard_fires_when_queue_attributes_dropped() {
+        let before = concat!(
+            "<!-- agent:exchange -->\nx\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue priority preset=\"#x\" go -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+        // Simulated bad rebuild: queue marker lost all inline attributes.
+        let after = concat!(
+            "<!-- agent:exchange -->\ny\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc").join("logs")).unwrap();
+
+        // Identical markers pass.
+        assert!(assert_non_exchange_markers_preserved(&file, before, before, "test").is_ok());
+        // Dropped attributes fail closed.
+        let err = assert_non_exchange_markers_preserved(&file, before, after, "test").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("#compactqattr"), "got: {msg}");
+        assert!(msg.contains("queue"), "got: {msg}");
     }
 
     #[test]

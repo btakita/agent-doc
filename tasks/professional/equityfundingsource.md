@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -83,14 +83,12 @@ Done — unified, spec + tests updated, committed, pushed, and deployed.
 - `equityfundingsource-dev` `7ad8695` → pushed to `origin/main` (rebased onto latest).
 - Superproject pointer bump `5a6d3f1fd`.
 - Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `5d08d919`; no new D1 migrations).
-<!-- agent:boundary:ccc8bdaa -->
-- Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `5d08d919`; no new D1 migrations).
 - Superproject pointer bump `5a6d3f1fd`.
 - `equityfundingsource-dev` `7ad8695` → pushed to `origin/main` (rebased onto latest).
 - **Available deals empty state** (no published deals) → previously had a button-less notice and no form at all. It now surfaces the application form inline too, so the button always has a real target.
 - **Available deals** (featured deal) and **Deal detail** → the application form (`LenderAccountGate`) is rendered inline, so the button now **scrolls to it** via a new `#investor-lender-application-form` anchor (added `scroll-margin-top` so it lands cleanly below the topbar).
 - **Dashboard** (form not on page) → button links to `/portal-investor/available-deals`, where selecting a deal surfaces the form. (Unchanged.)
-<!-- agent:boundary:543c3741 -->
+<!-- agent:boundary:ba8b2c56 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,6 +96,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Remove "Lender account application — incomplete" component from the Available deal dialog in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard and in https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3. deploy
 <!-- /agent:queue -->
 
 ## Backlog

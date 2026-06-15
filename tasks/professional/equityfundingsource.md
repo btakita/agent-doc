@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -183,7 +183,8 @@ Cycle proof: changed paths are the three new transcript markdown files in `mail`
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Please review the conversations against our current system. Use terminology such as a lender is "interested in loan" instead of applying to lend, "fractionalization" for multi-lender deals, etc. Is the current system architecture in line, additional work needed, with what we discussed in these conversations?
 <!-- /agent:queue -->
 
 ## Backlog

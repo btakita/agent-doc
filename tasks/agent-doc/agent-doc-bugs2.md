@@ -440,15 +440,29 @@ Note I updated the item's expectation to the **current** contract: the original 
 **On the equityfundingsource auto-restart you logged** — that maps onto two already-tracked items, no new bug needed:
 - The `dispatch blocked … advance-review preset head is spent … Operator can clear the '- #advance-review' line` (receipts 3502/3457) is `#qpresetstrike` (review) — a spent preset head fails **closed** with a manual-deletion prescription instead of auto-striking and re-dispatching once. Live-re-confirmed again here.
 - The auto-restart that "was stuck in the shell" until you manually restarted is `#recyclerestart` (backlog) / `#jbrestale` — PCP/supervisor recycle not cleanly restarting the harness session. Your manual-restart-then-Run-Agent-Doc workaround is the current stopgap.
-<!-- agent:boundary:f7e1d0a1 -->
+<!-- agent:boundary:c29eb9b0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: [#cleandrainsup-verify]
 - :round_pushpin: do [#rtwbcast]
 ---
-I auto-restart occurred in equityfundingsource.md. But the restart was not successful and was stuck in the shell. I manually restarted then ran JB `Run Agent Doc`.
+I auto-restart occurred in equityfundingsource.md. But the restart was not successful and was stuck in the shell.
+```
+  Opus 4.8 ctx:10% ~/work/btakit    Finished `release` profile [optimized] target(s) in 0.08s
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents                               [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)
+                         [lib-install] note: running controllers still serve the prior binary — run `agent-doc admin recycle --all-projects` (or restart sessions) to promote the new build
+                                                                    [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
+                                       [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+                                               [start] harness resolved: binary=claude source=frontmatter env=default
+                                                                                                                     Registered session 62fe1f41 → pane %74
+                                    Starting claude...
+                                                      [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+```
+
+I manually restarted then ran JB `Run Agent Doc`.
 ```
 resync: pruned 9 stale session(s)
 [route] target tmux session: 0

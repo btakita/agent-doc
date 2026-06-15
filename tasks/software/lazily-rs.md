@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -187,7 +187,7 @@ Done. Verified both URLs return `200` (`https://lazily-hub.github.io/lazily-rs/`
 - **`2026-06-14-lazily-slot-cell-signal-composition.md`** — same `· [docs] · [spec]` addition to its `Source:` line.
 
 Committed in the nested content submodule (`app/briantakita.me` `5a404a2`) and bumped the `briantakita.me-dev` pointer (`26dbbd8`). Not pushed — say the word and I'll push both.
-<!-- agent:boundary:e81194c2 -->
+<!-- agent:boundary:46bf6bde -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -196,6 +196,7 @@ Committed in the nested content submodule (`app/briantakita.me` `5a404a2`) and b
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Deploy briantakita.me
 <!-- /agent:queue -->
 
 ## Backlog

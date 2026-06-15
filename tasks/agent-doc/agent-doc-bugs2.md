@@ -854,7 +854,28 @@ Changed paths in that fix:
 Coverage already landed with the fix: `codex_submit_mode_uses_literal_text_plus_real_enter_key`, `routed_trigger_submit_diagnostic_names_codex_real_enter_key`, `direct_pane_submit_mode_is_harness_specific`, plus the updated idle-queue submit-mode regression.
 
 No additional code change was needed for this queue head; this closeout records the already-shipped fix and consumes the stale queue item.
-<!-- agent:boundary:bc155457 -->
+
+### Re: The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex? — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item. Any item I place should have `:pushpin:` added since I made the decision to add it in a position.
+
+
+The Codex path lagged Claude Code in two concrete places.
+
+First, the context percentage source was different. Claude Code already had a transcript location/parser the queue clear gate could read, but Codex reports context usage in `~/.codex/sessions/**/rollout-*.jsonl` as `token_count` events. Before `28ac88d9`, agent-doc did not read those Codex events, so the `/clear` decision saw `pct=none` and correctly failed safe instead of firing a destructive clear.
+
+Second, the fresh-context continuation behavior was wrong for Codex. When a Codex queue continuation needed a fresh context, it could return guidance that effectively punted `/clear` back to the operator. `f5ac694c` changed that path so the Codex Stop-hook records the requested queue head, logs `codex_fresh_context_handoff ... result=queued supervisor=idle_queue_watch`, and lets the supervisor own the `/clear` + redispatch sequence.
+
+Already-landed fixes:
+- `28ac88d9` (`codex: read context pct for queue clears`) parses Codex `token_count` JSONL, includes cached input in the context-window calculation, and uses `agent_doc_queue_context_reset` + `agent_doc_clear_threshold` for the same fail-safe clear decision shape.
+- `f5ac694c` (`codex: hand fresh-context queues to supervisor`) routes fresh-context Codex queue continuations to the idle supervisor instead of stopping for manual operator `/clear`.
+
+Relevant coverage already exists: `parse_codex_jsonl_context_pct_uses_latest_token_count`, `stop_codex_continuation_hands_off_when_token_count_crosses_threshold`, `stop_marker_fallback_requires_clear_after_exchange_compaction`, and `stop_tracked_state_hands_fresh_context_continuation_to_supervisor`.
+
+Important constraint: preemptive context-usage clears remain opt-in via `agent_doc_queue_context_reset`; unknown Codex token data still yields `pct=none clear=false` by design. Fresh-context queue heads and explicit clean-session cases are handled by the supervisor handoff path instead of relying on an in-pane continuation.
+<!-- agent:boundary:3d418651 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -863,7 +884,7 @@ No additional code change was needed for this queue head; this closeout records 
 - ~~:pushpin: [#qrefmisstrike]~~
 - ~~:pushpin: Why was there so much churn in the last queue turn? I was editing unrelated queue items. Those should be ignored. Use AST instead of byte-by-byte comparison. Be selective using CRDT merges into the document model and other areas that can cause churn.~~
 - ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md still sends a CR instead of submitting the command. Please consolidate all send command logic into a single function so we can make this behavior more reliable. Simplify, simplify, simplify...~~
-- :pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item. Any item I place should have `:pushpin:` added since I made the decision to add it in a position.
+- ~~:pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item. Any item I place should have `:pushpin:` added since I made the decision to add it in a position.~~
 - :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
 - The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex?
 - `agent:exchange` with attribute `queue` should add items into the queue while the queue is running.

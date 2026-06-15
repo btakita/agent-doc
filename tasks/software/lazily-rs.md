@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -113,7 +113,28 @@ Commits pushed: `src/lazily-spec` `1c33a50`, `src/lazily-rs` `372b019`, and pare
 Verification: `make test-lean-formal` passed in both submodules; `make check` passed in both submodules; `lazily-rs` full Loom coverage completed 15/15 after 540.48s. GitHub Actions: `lazily-spec` CI run `27533809965` completed successfully; `lazily-rs` CI run `27533809027` was still in progress on the last check; the parent repo has no workflow named `CI`.
 
 Changed paths: `src/lazily-spec/{Makefile,.github/workflows/ci.yml,README.md,docs/formal-model.md}`, `src/lazily-rs/{Makefile,.github/workflows/ci.yml,AGENTS.md}`, and the parent gitlinks. Confidence: high. Escalation: none.
-<!-- agent:boundary:e218076e -->
+
+### Re: LinkedIn first post — gpt-5
+
+> **Queue prompt:**
+>
+> I don't see the linkedin article for the 1st post. Please publish.
+
+
+Published the first lazily-rs LinkedIn post and added the first comment.
+
+Post: https://www.linkedin.com/feed/update/urn:li:share:7472308587487379456
+
+First comment posted with the `lazily-rs` repo link and benchmark note. Corky returned comment ID `7472308618642501632`.
+
+Changed paths: `mail/social/20260615-lazily-slot-cell-signal-linkedin.md` in the `mail` submodule, plus the parent `mail` gitlink. Commits pushed: `mail` `e73c15d chore: record lazily LinkedIn post`; parent `92d0c2387 chore: update mail social posts`. The `#sstz` review item is resolved.
+
+Commands run: `corky linkedin auth --profile btakita` to refresh the expired OAuth token, `corky linkedin publish --dry-run ...`, `corky linkedin publish ...`, `corky linkedin comment ...`, targeted git add/commit/push in `mail`, targeted parent gitlink commit/push, `make check`, and GitHub workflow checks.
+
+Verification: Corky dry-run passed before publish; live publish returned the post URL; live comment returned a comment ID; `make check` passed; parent `Agent Doc` workflow run `27557245366` was queued after push. There is no workflow named `CI` in the parent repo or `mail`, and `mail` has no workflows listed. Session note: the exchange is large, but the queue was active, so I kept draining rather than compacting.
+
+Confidence: high. Escalation: browser OAuth approval was required for the expired LinkedIn token.
+<!-- agent:boundary:e90c19eb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -122,7 +143,6 @@ Changed paths: `src/lazily-spec/{Makefile,.github/workflows/ci.yml,README.md,doc
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- I don't see the linkedin article for the 1st post. Please publish.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -135,7 +155,6 @@ Changed paths: `src/lazily-spec/{Makefile,.github/workflows/ci.yml,README.md,doc
 <!-- agent:review -->
 - [/] [#kb9b] #lzpypub011=[operator-drive] Publish lazily-py v0.11.0: build artifacts are ready in src/lazily-py/dist/ (lazily-0.11.0-{whl,tar.gz}). From src/lazily-py: tag v0.11.0 + push, gh release create v0.11.0 --generate-notes, then python -m twine upload dist/* (needs PyPI token + browser/passkey 2FA). Gated on the pre-publish live-test confirm per the testing-gate rule. Commit 28f23e4 + superproject gitlink 6339ab2e1 already pushed.
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] DRAFT READY: mail/drafts/linkedin/2026-06-16-lazily-architecture.md (Lazily architecture). Operator: review + publish Tue 2026-06-16 via `cork_y linkedin post <file>` or `corky schedule add --platform linkedin`.
-- [/] [#sstz] #lipostslotcell=[operator-drive] DRAFT READY: mail/drafts/linkedin/2026-06-15-slot-cell-signal.md (Slot->Cell->Signal). Operator: review + publish Mon 2026-06-15 via `corky linkedin post <file>` or `corky schedule add --platform linkedin`.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet networked backend through the LIVE #yxjw signaling Worker (two real hosts / NAT, not localhost). The localhost two-socket round trip (tests/str0m_net.rs) already proves the real UDP/DTLS/SCTP/timer path in-process; this remaining slice needs two live endpoints + the deployed Worker so it cannot be agent-run headless. Wire SignalingClient offer/answer/ice to Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} and confirm a Snapshot crosses between hosts.
 - [/] [#12b1] #lzpub011=[operator-drive] Finish lazily-rs v0.11.0 publish — crates.io upload + GitHub Release are BLOCKED on a revoked crates.io token (403 auth failed on both the env CARGO_REGISTRY_TOKEN and passage btak/CARGO_REGISTRY_TOKEN; both are the same expired cio-prefixed token). Operator: rotate the crates.io token (browser/passkey 2FA), store at passage btak/CARGO_REGISTRY_TOKEN, then from src/lazily-rs run: CARGO_REGISTRY_TOKEN=$(passage btak/CARGO_REGISTRY_TOKEN) cargo publish --no-verify (commit 03582f5 + tag v0.11.0 already pushed), then gh release create v0.11.0 --generate-notes.
 - [/] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.

@@ -1084,6 +1084,65 @@ pub(crate) fn display_queue_prompt_text(text: &str) -> String {
         .join("\n")
 }
 
+fn normalized_consumed_prompt_texts(texts: &[String]) -> Vec<String> {
+    texts
+        .iter()
+        .map(|t| crate::queue::strip_priority_markers(t))
+        .collect::<Vec<_>>()
+}
+
+fn prompts_have_adoptable_free_text_head_edit(
+    snapshot_consumed_texts: &[String],
+    consumed_texts: &[String],
+    response_body: Option<&str>,
+) -> bool {
+    if snapshot_consumed_texts.len() != 1 || consumed_texts.len() != 1 {
+        return false;
+    }
+    let Some(response_body) = response_body else {
+        return false;
+    };
+    let snapshot_head = crate::queue::strip_priority_markers(&snapshot_consumed_texts[0]);
+    let document_head = crate::queue::strip_priority_markers(&consumed_texts[0]);
+    if snapshot_head.is_empty()
+        || document_head.is_empty()
+        || snapshot_head == document_head
+        || queue_prompt_done_id(&snapshot_head).is_some()
+        || queue_prompt_done_id(&document_head).is_some()
+        || !response_explicitly_targets_queue_head(response_body, &document_head)
+    {
+        return false;
+    }
+    let (shorter, longer) = if snapshot_head.len() <= document_head.len() {
+        (snapshot_head.as_str(), document_head.as_str())
+    } else {
+        (document_head.as_str(), snapshot_head.as_str())
+    };
+    if shorter.chars().count() < 16 {
+        return false;
+    }
+    let Some(rest) = longer.strip_prefix(shorter) else {
+        return false;
+    };
+    rest.chars()
+        .next()
+        .is_some_and(|ch| ch.is_whitespace() || matches!(ch, '.' | ',' | ':' | ';' | '?' | '!'))
+}
+
+fn consumed_prompt_heads_match(
+    snapshot_consumed_texts: &[String],
+    consumed_texts: &[String],
+    response_body: Option<&str>,
+) -> bool {
+    normalized_consumed_prompt_texts(snapshot_consumed_texts)
+        == normalized_consumed_prompt_texts(consumed_texts)
+        || prompts_have_adoptable_free_text_head_edit(
+            snapshot_consumed_texts,
+            consumed_texts,
+            response_body,
+        )
+}
+
 /// First non-empty, trimmed line of `text`, or `None` when blank.
 pub(crate) fn first_nonempty_line(text: &str) -> Option<&str> {
     text.lines().map(str::trim).find(|l| !l.is_empty())
@@ -1520,19 +1579,24 @@ pub(crate) fn plan_queue_prompt_consumption(
             consumed_texts.len()
         );
     }
+    let response_body = crate::capture::load_active(file)
+        .ok()
+        .flatten()
+        .map(|c| c.response_body);
     // Compare head identity ignoring cosmetic pin annotations
     // (`#queue-consume-pushpin-normalization`): the snapshot can carry the
     // unpinned spelling of a head while the live document carries the `:pushpin:`
     // spelling of the same logical item. The pin is priority metadata, not
     // identity, so a raw text comparison spuriously fails the cycle. Normalize
-    // both sides through `strip_priority_markers` before the equality check.
-    let norm = |texts: &[String]| {
-        texts
-            .iter()
-            .map(|t| crate::queue::strip_priority_markers(t))
-            .collect::<Vec<_>>()
-    };
-    if norm(&snapshot_consumed_texts) != norm(&consumed_texts) {
+    // both sides through `strip_priority_markers` before the equality check. A
+    // settled live edit to a free-text head can also leave the snapshot with the
+    // pre-edit prefix; when the captured `### Re:` targets the live head, adopt
+    // the live prompt instead of failing the closeout (#queue-edit-closeout).
+    if !consumed_prompt_heads_match(
+        &snapshot_consumed_texts,
+        &consumed_texts,
+        response_body.as_deref(),
+    ) {
         anyhow::bail!(
             "queue consume: snapshot head prompts {:?} do not match document head prompts {:?}",
             snapshot_consumed_texts,
@@ -1551,13 +1615,14 @@ pub(crate) fn plan_queue_prompt_consumption(
         // #finalize-divergence-orphans-committed-head / IPC-CRDT resilience: the
         // document `content` here is the post-CRDT-merge result — the merge has
         // already reconciled the agent (snapshot) side against concurrent
-        // user/editor edits on the disk side. The same-head proof above
-        // (`snapshot_consumed_texts == consumed_texts`) already confirmed we
-        // consumed the right head; this remaining-queue difference is exactly the
-        // concurrent edit the CRDT merge resolved. Hard-bailing here re-rejected
-        // the merge the pipeline just succeeded at, leaving an orphaned unstruck
-        // head that re-serves (the divergence error hit repeatedly under live
-        // editor races). Reconcile instead: the merged document queue is
+        // user/editor edits on the disk side. The same-head proof above already
+        // confirmed we consumed the right head (or a captured response targeted
+        // the live spelling of a settled free-text head edit); this
+        // remaining-queue difference is exactly the concurrent edit the CRDT
+        // merge resolved. Hard-bailing here re-rejected the merge the pipeline
+        // just succeeded at, leaving an orphaned unstruck head that re-serves
+        // (the divergence error hit repeatedly under live editor races).
+        // Reconcile instead: the merged document queue is
         // authoritative, and the snapshot below adopts the document's `new_body`,
         // so both sides converge on the head-struck merged state. Record the
         // reconciliation for forensics rather than failing the cycle.
@@ -1606,10 +1671,10 @@ pub(crate) fn plan_queue_prompt_consumption(
     // and the snapshot, so the selective-commit boundary stays consistent) when
     // the prompt is not already present in the exchange. Fail-safe: any locator
     // miss leaves the content unchanged rather than risk corrupting the exchange.
-    let response_first_line = crate::capture::load_active(file)
-        .ok()
-        .flatten()
-        .and_then(|c| first_nonempty_line(&c.response_body).map(str::to_string));
+    let response_first_line = response_body
+        .as_deref()
+        .and_then(first_nonempty_line)
+        .map(str::to_string);
     current = embed_consumed_prompt_in_response(
         &current,
         &consumed_texts,
@@ -2192,6 +2257,77 @@ mod core_tests {
             "snapshot must adopt the reconciled document queue:\n{snap_result}"
         );
     }
+
+    #[test]
+    fn queue_consume_adopts_settled_free_text_head_edit_from_live_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let old_head =
+            "Why was there so much churn in the last queue turn? I was editing unrelated queue items. Use";
+        let edited_head = ":pushpin: Why was there so much churn in the last queue turn? I was editing unrelated queue items. Use AST instead of byte-by-byte comparison.";
+        let response = format!("### Re: {edited_head} — gpt-5\n\nFixed.\n");
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "{response}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- {edited_head}\n",
+                "- keep unrelated queue item\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response = response,
+            edited_head = edited_head,
+        );
+        let snap = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "{response}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- {old_head}\n",
+                "- keep unrelated queue item\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response = response,
+            old_head = old_head,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        snapshot::save(&doc, &snap).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&snap), Some(&content)).unwrap();
+        crate::capture::capture_response(&doc, &response).unwrap();
+
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .expect("edited free-text head should reconcile instead of bailing")
+            .expect("the answered edited head should be consumed");
+
+        assert_eq!(outcome.consumed_text, edited_head);
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains(&format!("- ~~{edited_head}~~\n")),
+            "live edited head must be struck:\n{result}"
+        );
+        assert!(
+            result.contains("- keep unrelated queue item\n"),
+            "unrelated queue item must be preserved:\n{result}"
+        );
+        let snap_result = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap_result.contains(&format!("- ~~{edited_head}~~\n")),
+            "snapshot must adopt the live edited head:\n{snap_result}"
+        );
+        assert!(
+            snap_result.contains("- keep unrelated queue item\n"),
+            "snapshot must preserve unrelated queue item:\n{snap_result}"
+        );
+        assert!(
+            !snap_result.contains(&format!("- {old_head}\n")),
+            "snapshot must not keep the stale pre-edit head:\n{snap_result}"
+        );
+    }
+
     #[test]
     fn queue_consume_uses_node_keys_to_preserve_duplicate_prompt_identity() {
         let dir = tempfile::tempdir().unwrap();

@@ -140,19 +140,40 @@ Already implemented and green — this is the `#0kjc`/`#mdastquote`/`#lintfence`
 
 - **Code blocks (triple-backtick + tilde fences) and inline code (single/double backtick)** are masked by `find_code_ranges()` (pulldown-cmark CommonMark AST via `offset_iter()`); any `<!-- agent:* -->` or `#id` token whose start byte falls inside a code range is skipped in `parse()`, `find_non_agent_html_comment_ranges()`, and the marker scanners.
 - **Quoted (double-quoted) prose strings** are masked by `find_quoted_ranges()`, added last night in `a99a882d` ("mask double-quoted prose spans in marker parser"). Same-line scope, `\"`-escape aware, fail-safe on an unterminated quote (only masks the rest of its own line, never swallows a real marker on a later line). A real marker's own `preset="..."` attribute sits to the right of its `<!--`, so real markers stay parseable.
+❯ 2. **The pause is stale-persisted (NEW).** You report there is no `- #advance-review` line in equityfundingsource.md anymore, yet `Run Agent Doc` keeps returning the *same* `queue_paused reason=advance-review preset head is spent` (receipt 3460). That means the pause decision is replayed from durable controller/queue receipt state, not re-derived from the current doc on each dispatch — so removing the line never clears it. "Stuck in an old state" is precise: the receipt outlives its target head.
+❯ 1. **Spent-preset pause fails closed (the captured bug).** When the go-queue served `#advance-review`, the response shipped the backlog/features, so the preset is *spent*. Dispatch correctly refuses to re-run it — but it fails CLOSED with `failed_stage=queue_paused ... Operator can clear the '- #advance-review' line` instead of auto-striking the spent head and re-dispatching the rest of the queue. That fail-closed-instead-of-auto-repair behavior is exactly what #qpresetstrike fixes (classify a `#`-head against `prompt_presets`, strike it like a free-text head, re-dispatch once or close cleanly).
 
 Verified live: `cargo test -p agent-doc-core --lib component::` → **95 passed, 0 failed**. Direct coverage for your exact cases: `markers_in_fenced_code_block_ignored`, `markers_in_indented_fenced_code_block_ignored`, `markers_in_inline_code_ignored`, `single_backtick_component_tag_ignored`, `double_backtick_component_tag_ignored`, `inline_code_mid_line_with_surrounding_text_ignored`, `quoted_agent_marker_in_prose_is_not_parsed`, `quoted_id_token_in_prose_is_content`, plus `real_marker_with_quoted_preset_attr_still_parses` / `mixed_backtick_and_real_tags` confirming real tags still parse. No new work needed; not filing a backlog item for already-shipped behavior.
 
 ### Re: Documented stall sequence (#qchurn flood, restart-failed, dispatch blocked) — opus-4-8
 
 The pasted logs are the recurring **stale route-owned supervisor** class, not a new bug: a pre-fix supervisor (pid 2715614 here, 1654897 earlier) keeps re-injecting `:pushpin: [#qchurn]` each idle boundary, and the queue correctly *pauses* to stop the flood (`failed_stage=queue_paused reason=#qchurn`) rather than draining no-op churn. This session's preflight confirms it: `queue_drainable_head_count: 0`, `queue_continuation_required: false` — every remaining head is clean-session / operator-verify and undrainable under the stale host. This is operator-domain recovery (restart the supervisor onto the freshly-installed binary; an already-running `agent-doc start` keeps the OLD binary until restarted) — it cannot be agent-resolved from inside the churning session. Not auto-looping this cycle.
-<!-- agent:boundary:f9660b40 -->
+
+### Re: JB Run Agent Doc stuck on a spent #advance-review pause — #qpresetstrike — opus-4-8
+
+
+Follow-up is already tracked by existing review item **#qpresetstrike**; its plan was extended this cycle (no new backlog item needed).
+
+This is a live-repro-2 of **#qpresetstrike** (already in `agent:review`), with a new facet beyond the original. Two things are happening:
+
+❯ 1. **Spent-preset pause fails closed (the captured bug).** When the go-queue served `#advance-review`, the response shipped the backlog/features, so the preset is *spent*. Dispatch correctly refuses to re-run it — but it fails CLOSED with `failed_stage=queue_paused ... Operator can clear the '- #advance-review' line` instead of auto-striking the spent head and re-dispatching the rest of the queue. That fail-closed-instead-of-auto-repair behavior is exactly what #qpresetstrike fixes (classify a `#`-head against `prompt_presets`, strike it like a free-text head, re-dispatch once or close cleanly).
+
+❯ 2. **The pause is stale-persisted (NEW).** You report there is no `- #advance-review` line in equityfundingsource.md anymore, yet `Run Agent Doc` keeps returning the *same* `queue_paused reason=advance-review preset head is spent` (receipt 3460). That means the pause decision is replayed from durable controller/queue receipt state, not re-derived from the current doc on each dispatch — so removing the line never clears it. "Stuck in an old state" is precise: the receipt outlives its target head.
+
+The `[sync] recovered live pane` / `resync: stash pane … skipping kill` lines above it are just the supervisor re-attaching live panes during resync — not the blocker; the blocker is the stale `queue_paused` receipt.
+
+**Why I'm not coding it this cycle:** #qpresetstrike is a `[clean-session]` item (touches the queue strike/reap + pause-validation path), the agent-doc submodule currently carries uncommitted work (`lib_install.rs`, `VERSIONS.md`), and this session is mid-churn with a recovered stale cycle — not a clean write surface. So I recorded the new facet durably instead of risking a half-baked route/queue edit here.
+
+**What I did:** extended `tasks/agent-doc/plan-preset-queue-head-unstrikeable.md` with **Symptom 2** + **fix (5)**: on each dispatch, re-validate the spent-preset pause against the current queue — if the paused-on preset head is absent, **invalidate the pause and proceed/close**, never replay the stale receipt (with SimWorld coverage: pause on a spent preset, remove the head, next dispatch must not re-block). Committed as a plan-only edit; #qpresetstrike already points at that plan.
+
+**To unblock equityfundingsource.md right now** (operator, in that doc's session — the documented workaround): strike the head (`- ~~#advance-review~~`) and drop `go` from the `agent:queue` marker, then `agent-doc reset --from-current --preserve-session tasks/professional/equityfundingsource.md` + `commit`. If the line is genuinely already gone and the pause still replays, that confirms facet 2 — and the recovery is the same reset-from-current to rebuild the queue state from the current doc.
+<!-- agent:boundary:77657966 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
----
+~~~done
 Previous turn stalled and restart failed
 ```
 ● The racing writer is pid 1654897 — a stale --route-owned supervisor for this doc (my memory already names 1654897 as
@@ -201,7 +222,7 @@ resync: pruned 9 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3522
 ```
----
+~~~
 :pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
 ```
 resync: pruned 8 stale session(s)

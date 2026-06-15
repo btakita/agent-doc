@@ -1404,24 +1404,23 @@ fn dedupe_snapshot_and_worktree_before_commit(
     snapshot_content: &mut Option<String>,
     file_content: &mut String,
 ) -> Result<()> {
-    let Some(snapshot) = snapshot_content.as_deref() else {
-        return Ok(());
-    };
-    let deduped_snapshot = crate::dedupe::dedupe_responses(snapshot);
-    if deduped_snapshot != snapshot {
-        eprintln!(
-            "[commit] deduped consecutive duplicate response block(s) before staging {}",
-            file.display()
-        );
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "commit_pre_stage_dedupe file={} before_commit=true",
+    if let Some(snapshot) = snapshot_content.as_deref() {
+        let deduped_snapshot = crate::dedupe::dedupe_responses(snapshot);
+        if deduped_snapshot != snapshot {
+            eprintln!(
+                "[commit] deduped consecutive duplicate response block(s) before staging {}",
                 file.display()
-            ),
-        );
-        crate::snapshot::save(file, &deduped_snapshot)?;
-        *snapshot_content = Some(deduped_snapshot);
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "commit_pre_stage_dedupe file={} before_commit=true",
+                    file.display()
+                ),
+            );
+            crate::snapshot::save(file, &deduped_snapshot)?;
+            *snapshot_content = Some(deduped_snapshot);
+        }
     }
 
     let deduped_file = crate::dedupe::dedupe_responses(file_content);
@@ -1474,6 +1473,53 @@ fn dedupe_snapshot_and_worktree_before_commit(
             ),
         );
     }
+
+    if let Some(snapshot) = snapshot_content.as_deref()
+        && let Some(repaired_snapshot) =
+            crate::template::repair_agent_response_conflict_scaffold(snapshot)?
+    {
+        crate::snapshot::save(file, &repaired_snapshot)?;
+        *snapshot_content = Some(repaired_snapshot);
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "raw_conflict_marker_scaffold_repaired file={} source=commit-snapshot before_commit=true",
+                file.display()
+            ),
+        );
+    }
+    if let Some(repaired_file) =
+        crate::template::repair_agent_response_conflict_scaffold(file_content)?
+    {
+        crate::write::atomic_write_pub(file, &repaired_file).with_context(|| {
+            format!(
+                "failed to repair raw conflict marker scaffold in {}",
+                file.display()
+            )
+        })?;
+        *file_content = repaired_file;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "raw_conflict_marker_scaffold_repaired file={} source=commit-worktree before_commit=true",
+                file.display()
+            ),
+        );
+    }
+    if let Some(snapshot) = snapshot_content.as_deref() {
+        crate::template::guard_no_raw_conflict_marker_blocks(snapshot).with_context(|| {
+            format!(
+                "raw conflict marker guard failed for snapshot before commit of {}",
+                file.display()
+            )
+        })?;
+    }
+    crate::template::guard_no_raw_conflict_marker_blocks(file_content).with_context(|| {
+        format!(
+            "raw conflict marker guard failed before commit of {}",
+            file.display()
+        )
+    })?;
 
     Ok(())
 }
@@ -3207,6 +3253,35 @@ pub(crate) use th::{add_submodule, commit_file, drift_gate_doc, drift_gate_scope
 mod tests {
     #![allow(unused_imports)]
     use super::*;
+#[test]
+fn commit_pre_stage_rejects_ambiguous_conflict_marker_block() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let doc = dir.path().join("session.md");
+    std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+    let mut snapshot_content = None;
+    let mut file_content = concat!(
+        "<!-- agent:exchange patch=append -->\n",
+        "<<<<<<< agent-response\n",
+        "assistant response\n",
+        "||||||| original\n",
+        "original text\n",
+        "=======\n",
+        "user edit\n",
+        ">>>>>>> your-edits\n",
+        "<!-- /agent:exchange -->\n"
+    )
+    .to_string();
+
+    let err =
+        dedupe_snapshot_and_worktree_before_commit(&doc, &mut snapshot_content, &mut file_content)
+            .unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("raw conflict marker guard failed before commit"),
+        "unexpected error: {err}"
+    );
+}
 #[test]
 fn scoped_drift_gate_ignores_independent_sibling_queue_insert() {
     // The motivating bug: a queue item inserted *beside* the running one is
@@ -7884,4 +7959,3 @@ fn verify_snapshot_committed_no_head() {
     );
 }
 }
-

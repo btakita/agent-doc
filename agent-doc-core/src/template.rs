@@ -340,6 +340,9 @@ pub use tail_repair::*;
 /// mixed user text remains an error so the editor can refuse the visible write.
 pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> {
     let mut normalized = crate::component::strip_backlog_patch_attr(doc);
+    if let Some(repaired) = repair_agent_response_conflict_scaffold(&normalized)? {
+        normalized = repaired;
+    }
     // #queue-completed-items-escape-below-component: scrub struck queue items
     // that drifted below `<!-- /agent:queue -->` into the parking-lot comment so
     // the visible buffer never accumulates orphaned struck-queue residue.
@@ -356,7 +359,10 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
         .context("template duplicate prompt residue guard failed")?;
 
     match guard_no_conversation_tail_outside_exchange(&normalized) {
-        Ok(()) => Ok(normalized),
+        Ok(()) => {
+            guard_no_raw_conflict_marker_blocks(&normalized)?;
+            Ok(normalized)
+        }
         Err(err)
             if err.chain().any(|cause| {
                 cause
@@ -370,6 +376,7 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
                 guard_no_conversation_tail_outside_exchange(&repaired).with_context(
                     || "template structure guard failed after duplicate-scaffold repair",
                 )?;
+                guard_no_raw_conflict_marker_blocks(&repaired)?;
                 return Ok(repaired);
             }
             if repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?.is_some() {
@@ -384,12 +391,214 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
                 guard_no_conversation_tail_outside_exchange(&repaired).with_context(
                     || "template structure guard failed after duplicate-close repair",
                 )?;
+                guard_no_raw_conflict_marker_blocks(&repaired)?;
                 return Ok(repaired);
             }
             Err(err).context("template structure guard failed")
         }
         Err(err) => Err(err).context("template structure guard failed"),
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ConflictMarkerBlock {
+    start_line: usize,
+    end_line: usize,
+    start_byte: usize,
+    end_byte: usize,
+    original_marker_index: Option<usize>,
+    separator_index: usize,
+    agent_response_scaffold: bool,
+}
+
+#[derive(Clone, Debug)]
+struct ConflictLine<'a> {
+    raw: &'a str,
+    content: &'a str,
+    start: usize,
+    end: usize,
+}
+
+fn prompt_unprefixed_line(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    trimmed
+        .strip_prefix('❯')
+        .map(|rest| rest.trim_start())
+        .unwrap_or(trimmed)
+}
+
+fn conflict_marker_kind(line: &str) -> Option<&'static str> {
+    let content = prompt_unprefixed_line(line);
+    if content.starts_with("<<<<<<<") {
+        Some("start")
+    } else if content.starts_with("|||||||") {
+        Some("original")
+    } else if content.starts_with("=======") {
+        Some("separator")
+    } else if content.starts_with(">>>>>>>") {
+        Some("end")
+    } else {
+        None
+    }
+}
+
+fn marker_has_label(line: &str, prefix: &str, label: &str) -> bool {
+    let content = prompt_unprefixed_line(line);
+    let Some(rest) = content.strip_prefix(prefix) else {
+        return false;
+    };
+    rest.trim() == label
+}
+
+fn marker_side_is_empty(lines: &[ConflictLine<'_>]) -> bool {
+    lines.iter().all(|line| {
+        let content = prompt_unprefixed_line(line.content);
+        content.trim().is_empty()
+    })
+}
+
+fn collect_conflict_lines(content: &str, base_offset: usize) -> Vec<ConflictLine<'_>> {
+    let mut lines = Vec::new();
+    let mut cursor = 0usize;
+    for raw in content.split_inclusive('\n') {
+        let start = base_offset + cursor;
+        let end = start + raw.len();
+        cursor = end - base_offset;
+        let content = raw.strip_suffix('\n').unwrap_or(raw);
+        let content = content.strip_suffix('\r').unwrap_or(content);
+        lines.push(ConflictLine {
+            raw,
+            content,
+            start,
+            end,
+        });
+    }
+    lines
+}
+
+fn find_conflict_marker_block_in_component(
+    component_content: &str,
+    base_offset: usize,
+) -> Option<ConflictMarkerBlock> {
+    let lines = collect_conflict_lines(component_content, base_offset);
+    let mut index = 0usize;
+    while index < lines.len() {
+        if conflict_marker_kind(lines[index].content) != Some("start") {
+            index += 1;
+            continue;
+        }
+
+        let mut cursor = index + 1;
+        let mut original_marker_index = None;
+        let mut separator_index = None;
+        let mut end_index = None;
+
+        while cursor < lines.len() {
+            match conflict_marker_kind(lines[cursor].content) {
+                Some("original") if original_marker_index.is_none() && separator_index.is_none() => {
+                    original_marker_index = Some(cursor);
+                }
+                Some("separator") if separator_index.is_none() => {
+                    separator_index = Some(cursor);
+                }
+                Some("end") if separator_index.is_some() => {
+                    end_index = Some(cursor);
+                    break;
+                }
+                Some("start") => break,
+                _ => {}
+            }
+            cursor += 1;
+        }
+
+        if let (Some(separator_index), Some(end_index)) = (separator_index, end_index) {
+            let original_start = original_marker_index.map(|i| i + 1).unwrap_or(separator_index);
+            let original_lines = &lines[original_start..separator_index];
+            let user_lines = &lines[separator_index + 1..end_index];
+            let agent_response_scaffold = marker_has_label(lines[index].content, "<<<<<<<", "agent-response")
+                && original_marker_index
+                    .map(|i| marker_has_label(lines[i].content, "|||||||", "original"))
+                    .unwrap_or(false)
+                && marker_has_label(lines[end_index].content, ">>>>>>>", "your-edits")
+                && marker_side_is_empty(original_lines)
+                && marker_side_is_empty(user_lines)
+                && lines[index + 1..original_marker_index.unwrap_or(separator_index)]
+                    .iter()
+                    .any(|line| !prompt_unprefixed_line(line.content).trim().is_empty());
+            return Some(ConflictMarkerBlock {
+                start_line: index + 1,
+                end_line: end_index + 1,
+                start_byte: lines[index].start,
+                end_byte: lines[end_index].end,
+                original_marker_index,
+                separator_index,
+                agent_response_scaffold,
+            });
+        }
+
+        index += 1;
+    }
+    None
+}
+
+fn managed_component_conflict_marker_block(doc: &str) -> Result<Option<ConflictMarkerBlock>> {
+    let components = match component::parse(doc) {
+        Ok(components) => components,
+        Err(_) => return Ok(None),
+    };
+    for component in components {
+        if let Some(block) =
+            find_conflict_marker_block_in_component(component.content(doc), component.open_end)
+        {
+            return Ok(Some(block));
+        }
+    }
+    Ok(None)
+}
+
+/// Remove the known abandoned diff3 scaffold where the agent-response side is
+/// intact and both the original and your-edits sides are empty.
+pub fn repair_agent_response_conflict_scaffold(doc: &str) -> Result<Option<String>> {
+    let Some(block) = managed_component_conflict_marker_block(doc)? else {
+        return Ok(None);
+    };
+    if !block.agent_response_scaffold {
+        return Ok(None);
+    }
+
+    let components =
+        component::parse(doc).context("failed to parse components for conflict marker repair")?;
+    let Some(component) = components.iter().find(|component| {
+        block.start_byte >= component.open_end && block.end_byte <= component.close_start
+    }) else {
+        return Ok(None);
+    };
+    let content = component.content(doc);
+    let lines = collect_conflict_lines(content, component.open_end);
+    let keep_start = block.start_line;
+    let keep_end = block.original_marker_index.unwrap_or(block.separator_index);
+    let kept = lines[keep_start..keep_end]
+        .iter()
+        .map(|line| line.raw)
+        .collect::<String>();
+
+    let mut repaired =
+        String::with_capacity(doc.len() - (block.end_byte - block.start_byte) + kept.len());
+    repaired.push_str(&doc[..block.start_byte]);
+    repaired.push_str(&kept);
+    repaired.push_str(&doc[block.end_byte..]);
+    Ok(Some(repaired))
+}
+
+pub fn guard_no_raw_conflict_marker_blocks(doc: &str) -> Result<()> {
+    if let Some(block) = managed_component_conflict_marker_block(doc)? {
+        anyhow::bail!(
+            "raw three-way conflict marker block remains in managed component at lines {}-{}; refusing to commit session document",
+            block.start_line,
+            block.end_line
+        );
+    }
+    Ok(())
 }
 
 /// True when a line is a displaced struck queue item — a `- ~~…~~`
@@ -1864,6 +2073,66 @@ mod tests {
     use super::*;
 use std::path::Path;
 use tempfile::TempDir;
+#[test]
+fn repairs_empty_agent_response_conflict_scaffold() {
+    let doc = concat!(
+        "---\nagent_doc_format: template\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ <<<<<<< agent-response\n",
+        "\n",
+        "### Re: EFS compact summary replay — gpt-5\n\n",
+        "Fixed the compact summary replay.\n",
+        "❯ ||||||| original\n",
+        "❯ =======\n",
+        ">>>>>>> your-edits\n",
+        "<!-- agent:boundary:6627bbc1 -->\n",
+        "<!-- /agent:exchange -->\n"
+    );
+
+    let repaired = repair_agent_response_conflict_scaffold(doc)
+        .unwrap()
+        .expect("safe abandoned scaffold should repair");
+
+    assert!(repaired.contains("### Re: EFS compact summary replay — gpt-5"));
+    assert!(repaired.contains("Fixed the compact summary replay."));
+    assert!(!repaired.contains("<<<<<<<"));
+    assert!(!repaired.contains("|||||||"));
+    assert!(!repaired.contains("======="));
+    assert!(!repaired.contains(">>>>>>>"));
+    guard_no_raw_conflict_marker_blocks(&repaired).unwrap();
+}
+#[test]
+fn rejects_ambiguous_raw_conflict_marker_block() {
+    let doc = concat!(
+        "<!-- agent:exchange patch=append -->\n",
+        "<<<<<<< agent-response\n",
+        "assistant response\n",
+        "||||||| original\n",
+        "original text\n",
+        "=======\n",
+        "user edit\n",
+        ">>>>>>> your-edits\n",
+        "<!-- /agent:exchange -->\n"
+    );
+
+    assert!(repair_agent_response_conflict_scaffold(doc).unwrap().is_none());
+    let err = guard_no_raw_conflict_marker_blocks(doc).unwrap_err();
+    assert!(
+        err.to_string().contains("raw three-way conflict marker block"),
+        "unexpected error: {err}"
+    );
+}
+#[test]
+fn allows_inline_prose_mentions_of_conflict_markers() {
+    let doc = concat!(
+        "<!-- agent:exchange patch=append -->\n",
+        "The repro mentioned `<<<<<<< agent-response` / `||||||| original` / `=======` / `>>>>>>> your-edits` inline.\n",
+        "<!-- /agent:exchange -->\n"
+    );
+
+    guard_no_raw_conflict_marker_blocks(doc).unwrap();
+    assert!(repair_agent_response_conflict_scaffold(doc).unwrap().is_none());
+}
 #[test]
 fn parse_single_patch() {
     let response = "<!-- patch:status -->\nBuild passing.\n<!-- /patch:status -->\n";
@@ -3987,4 +4256,3 @@ fn deleted_conversation_tail_cleanup_rejects_plain_note_deletion() {
     );
 }
 }
-

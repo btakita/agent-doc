@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -59,14 +59,16 @@ Verification:
 - No GitHub workflow named `CI` exists here (`gh workflow list` returned no workflows), so there was no latest CI run to inspect.
 
 Note: pre-existing unrelated dirty EFS files remain unstaged in the submodule.
-<!-- agent:boundary:c98de815 -->
+<!-- agent:boundary:b4f4dd43 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- commit + push all dirty EFS files.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

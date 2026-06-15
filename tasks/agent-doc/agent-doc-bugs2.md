@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -32,49 +32,48 @@ queue: stop
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260615-070844.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260615-080022.md`*
 
 Compacted content:
-- Archived 18 response topic(s): do [#0kjc]; do [#compactdropitem]; ~~do [#compactdropitem]~~ (struck); 15 more
+❯ - Archived 1 response topic(s): JB Run Agent Doc Codex Trigger
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-Please fix JB `Run Agent Doc` when using Codex. Please have agent-doc send `agent-doc tasks/agent-doc/agent-doc-bugs2.md` instead of the longform prompt.
-JB `Run Agent Doc` on lazily-rs.md had a long prompt
-```
-› Agent-doc active queue continuation.
-
-  Stable instructions:
-  Continue in this owner pane: answer the queue head described after the cache boundary, then persist the response
-  using the document-specific command in the volatile payload. Do NOT run the bare agent-doc entrypoint for the same
-  document from this pane. Do not send a final answer until the final-gate command in the volatile payload passes.
-
-  <agent_doc_prompt_cache_boundary cache_control="ephemeral" volatile_suffix="follows" />
-
-  Agent-doc active queue continuation for tasks/software/lazily-rs.md.
-
-  Queue head:
-  4zvn
-
-  Continue in this owner pane: answer the queue head, then persist with `agent-doc finalize tasks/software/lazily-
-  rs.md` or `agent-doc write --commit tasks/software/lazily-rs.md`. Do NOT run `agent-doc tasks/software/lazily-rs.md`
-  from this pane; that re-invokes the owner pane and hits the recursive-direct-invocation guard. Do not send a final
-  answer until `agent-doc session-check tasks/software/lazily-rs.md --codex-final-gate` passes.
-```
-
-It should simply by `agent-doc tasks/software/lazily-rs.md`. The prompt should be in a skill/runbook.
-
-### Re: JB Run Agent Doc Codex Trigger — gpt-5
-
-Fixed. Codex idle queue drains now submit the bare `agent-doc <FILE>` trigger instead of the multi-line `Agent-doc active queue continuation` prompt, so the lazily-rs case should send `agent-doc tasks/software/lazily-rs.md`.
-
-Changed paths are in `src/agent-doc`: `agent-doc-orchestration/src/start.rs`, `agent-doc-orchestration/src/start/run.rs`, `SPEC.md`, `VERSIONS.md`, and the relevant `specs/*.md` contract files. The Rust change removes the Codex-only owner-continuation payload and makes non-slash queue heads use `harness.trigger_command(file)` for every harness; slash-command heads still submit literally. The specs now state that the queue-continuation response contract belongs in installed harness instructions/runbooks, not in the editor/supervisor payload.
-
-Verification passed: `cargo test -p agent-doc-orchestration idle_queue_drain_payload`, `cargo test -p agent-doc-orchestration routed_trigger_payload`, and full `make check` (clippy, 4501 nextest tests, doctests, and the medium SimWorld seed test). Latest GitHub Actions check was also green: `gh run list --workflow CI --limit 1` reported `completed success` for CI run `27528207423`.
-
-Commits: `b47e1f2f` in `src/agent-doc`, and parent repo pointer commit `39a9fcf7f`. No escalation was used. Confidence: high. I did not install/recycle the live binary or update the JB plugin in this turn; no plugin code changed.
-
-No actionable follow-up backlog item was created for this cycle.
 
 ### Re: JB Run Agent Doc Drafted Reopen — gpt-5
+
+> **Queue prompt:**
+>
+> ```
+> • Finalize’s backlog-capture guard interpreted the closeout note as a possible follow-up. I’m rerunning with an explicit
+>   no-follow-up marker; no code or doc content was written by the failed attempt.
+>
+> • Called
+>   └ agent-doc.agent_doc_finalize({"file":"/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-
+>         bugs2.md","baseline_file":"/home/brian/work/btakita/agent-loop/.agent-doc/
+>         baselines/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.md","origin":"skill","stream":true,"r
+>         esponse":"### Re: JB Run Agent Doc Drafted Reopen — gpt-5\n\nImplemented the route-side fix for the JetBrains
+>         `Run Agent Doc` reopen path.\n\nWhat changed:\n- `agent-doc-orchestration/src/route/dispatch.rs` now checks the
+>         recent direct-pane capture before appending a routed trigger. If the exact same `agent-doc <FILE>` trigger is
+>         already visible in a Codex or Claude composer, route sends one bare `Enter` and polls acceptance instead of
+>         appending another copy.\n- Stale scrollback is guarded: a visible trigger with a later idle prompt below it is
+>         not treated as active draft input.\n- The existing post-send one-shot Enter retry now shares the same helper/
+>         proof logging as the new pre-send drafted-trigger path.\n- Added coverage for current duplicate drafts, stale
+>         scrollback, harness scoping, and wrapped long paths.\n- Updated `README.md`, `VERSIONS.md`, `specs/08a-session-
+>         actor-contract.md`, and `editors/jetbrains/SPEC.md` with the new contract.\n\nVerification:\n- `cargo fmt
+>         --check`\n- `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection --lib`\n- `cargo test -p
+>         agent-doc-orchestration direct_pane_resubmit --lib`\n- `make check`\n- `cargo install --path .`\n- `agent-doc
+>         --version` -> `agent-doc 0.34.1`\n- `gh run list --workflow CI --limit 1` -> latest `CI` on `main` completed
+>         successfully\n\nCommits created:\n- `src/agent-doc`: `4345a2f9 fix: submit drafted routed triggers without
+>         stacking`\n- parent repo: `b19594282 agent-doc: update routed trigger submit fix`\n\nNotes:\n- The `src/agent-
+>         doc` submodule had a broad pre-existing dirty tree; I staged and committed only the five intended files for this
+>         bug.\n- Escalation: none.\n- Confidence: high. The fix is narrow, covered by focused tests, and the full local
+>         check suite passed.\n- No actionable follow-up items from this cycle. \n- Push will
+>         happen after this closeout commit exists; I will push the submodule and parent repo immediately after
+>         closeout."})
+>     Error: tool call error: tool call failed for `agent-doc/agent_doc_finalize`
+>         Caused by:
+>             Transport closed
+> ```
+
 
 Implemented the route-side fix for the JetBrains `Run Agent Doc` reopen path.
 
@@ -104,12 +103,96 @@ Notes:
 - Confidence: high. The fix is narrow, covered by focused tests, and the full local check suite passed.
 - No actionable follow-up items from this cycle.
 - Push will happen after this closeout commit exists; I will push the submodule and parent repo immediately after closeout.
-<!-- agent:boundary:fe5a94a9 -->
+❯ - No actionable follow-up items from this cycle.
+❯ - Confidence: high. The fix is narrow, covered by focused tests, and the full local check suite passed.
+❯ - Escalation: none.
+❯ - The `src/agent-doc` submodule had a broad pre-existing dirty tree; I staged and committed only the five intended files for this bug.
+❯ - parent repo: `b19594282 agent-doc: update routed trigger submit fix`
+❯ - `src/agent-doc`: `4345a2f9 fix: submit drafted routed triggers without stacking`
+❯ - `gh run list --workflow CI --limit 1` -> latest `CI` on `main` completed successfully
+❯ - `agent-doc --version` -> `agent-doc 0.34.1`
+❯ - `cargo install --path .`
+❯ - `make check`
+❯ - `cargo test -p agent-doc-orchestration direct_pane_resubmit --lib`
+❯ - `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection --lib`
+❯ - `cargo fmt --check`
+❯ - Updated `README.md`, `VERSIONS.md`, `specs/08a-session-actor-contract.md`, and `editors/jetbrains/SPEC.md` with the new contract.
+❯ - Added coverage for current duplicate drafts, stale scrollback, harness scoping, and wrapped long paths.
+❯ - The existing post-send one-shot Enter retry now shares the same helper/proof logging as the new pre-send drafted-trigger path.
+❯ - Stale scrollback is guarded: a visible trigger with a later idle prompt below it is not treated as active draft input.
+❯ - `agent-doc-orchestration/src/route/dispatch.rs` now checks the recent direct-pane capture before appending a routed trigger. If the exact same `agent-doc <FILE>` trigger is already visible in a Codex or Claude composer, route sends one bare `Enter` and polls acceptance instead of appending another copy.
+
+### Re: JB Run Agent Doc Drafted Reopen — gpt-5
+
+Implemented the route-side fix for the JetBrains `Run Agent Doc` reopen path.
+
+What changed:
+❯ - `agent-doc-orchestration/src/route/dispatch.rs` now checks the recent direct-pane capture before appending a routed trigger. If the exact same `agent-doc <FILE>` trigger is already visible in a Codex or Claude composer, route sends one bare `Enter` and polls acceptance instead of appending another copy.
+❯ - Stale scrollback is guarded: a visible trigger with a later idle prompt below it is not treated as active draft input.
+❯ - The existing post-send one-shot Enter retry now shares the same helper/proof logging as the new pre-send drafted-trigger path.
+❯ - Added coverage for current duplicate drafts, stale scrollback, harness scoping, and wrapped long paths.
+❯ - Updated `README.md`, `VERSIONS.md`, `specs/08a-session-actor-contract.md`, and `editors/jetbrains/SPEC.md` with the new contract.
+
+Verification:
+❯ - `cargo fmt --check`
+❯ - `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection --lib`
+❯ - `cargo test -p agent-doc-orchestration direct_pane_resubmit --lib`
+❯ - `make check`
+❯ - `cargo install --path .`
+❯ - `agent-doc --version` -> `agent-doc 0.34.1`
+❯ - `gh run list --workflow CI --limit 1` -> latest `CI` on `main` completed successfully
+
+Commits created:
+❯ - `src/agent-doc`: `4345a2f9 fix: submit drafted routed triggers without stacking`
+❯ - parent repo: `b19594282 agent-doc: update routed trigger submit fix`
+
+Notes:
+❯ - The `src/agent-doc` submodule had a broad pre-existing dirty tree; I staged and committed only the five intended files for this bug.
+❯ - Escalation: none.
+❯ - Confidence: high. The fix is narrow, covered by focused tests, and the full local check suite passed.
+- No actionable follow-up items from this cycle.
+❯ - Push will happen after this closeout commit exists; I will push the submodule and parent repo immediately after closeout.
+<!-- agent:boundary:3d8048d7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+---
+```
+• Finalize’s backlog-capture guard interpreted the closeout note as a possible follow-up. I’m rerunning with an explicit
+  no-follow-up marker; no code or doc content was written by the failed attempt.
+
+• Called
+  └ agent-doc.agent_doc_finalize({"file":"/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-
+        bugs2.md","baseline_file":"/home/brian/work/btakita/agent-loop/.agent-doc/
+        baselines/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.md","origin":"skill","stream":true,"r
+        esponse":"### Re: JB Run Agent Doc Drafted Reopen — gpt-5\n\nImplemented the route-side fix for the JetBrains
+        `Run Agent Doc` reopen path.\n\nWhat changed:\n- `agent-doc-orchestration/src/route/dispatch.rs` now checks the
+        recent direct-pane capture before appending a routed trigger. If the exact same `agent-doc <FILE>` trigger is
+        already visible in a Codex or Claude composer, route sends one bare `Enter` and polls acceptance instead of
+        appending another copy.\n- Stale scrollback is guarded: a visible trigger with a later idle prompt below it is
+        not treated as active draft input.\n- The existing post-send one-shot Enter retry now shares the same helper/
+        proof logging as the new pre-send drafted-trigger path.\n- Added coverage for current duplicate drafts, stale
+        scrollback, harness scoping, and wrapped long paths.\n- Updated `README.md`, `VERSIONS.md`, `specs/08a-session-
+        actor-contract.md`, and `editors/jetbrains/SPEC.md` with the new contract.\n\nVerification:\n- `cargo fmt
+        --check`\n- `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection --lib`\n- `cargo test -p
+        agent-doc-orchestration direct_pane_resubmit --lib`\n- `make check`\n- `cargo install --path .`\n- `agent-doc
+        --version` -> `agent-doc 0.34.1`\n- `gh run list --workflow CI --limit 1` -> latest `CI` on `main` completed
+        successfully\n\nCommits created:\n- `src/agent-doc`: `4345a2f9 fix: submit drafted routed triggers without
+        stacking`\n- parent repo: `b19594282 agent-doc: update routed trigger submit fix`\n\nNotes:\n- The `src/agent-
+        doc` submodule had a broad pre-existing dirty tree; I staged and committed only the five intended files for this
+        bug.\n- Escalation: none.\n- Confidence: high. The fix is narrow, covered by focused tests, and the full local
+        check suite passed.\n- No actionable follow-up items from this cycle. \n- Push will
+        happen after this closeout commit exists; I will push the submodule and parent repo immediately after
+        closeout."})
+    Error: tool call error: tool call failed for `agent-doc/agent_doc_finalize`
+        Caused by:
+            Transport closed
+```
+---
+- ~~:pushpin: JB `Run Agent Doc` on this file adds `agent-doc tasks/agent-doc/agent-doc-bugs2.md` into the Codex input (multiple times accumulate every time I type), but does not submit.~~
+- Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.
 <!-- /agent:queue -->
 ###
 <!--
@@ -138,7 +221,8 @@ What are #next-steps to fix bugs?
 
 ## Backlog
 
-<!-- agent:backlog priority queue -->- [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
+<!-- agent:backlog priority queue -->
+- [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

@@ -319,7 +319,21 @@ Implemented across the binary + FFI cdylib + JB plugin and committed + pushed (a
 **Going live (operator action needed).** I deliberately did NOT `cargo install` / `lib-install` mid-session (`#no-mid-session-install` — it would re-stale *this* live supervisor and break the very closeout). The binary/cdylib ride the supervisor self-recycle (`#supautoinstall`/`#supselfheal`, default-on) onto the pushed source. The plugin `.kt` change needs the new signed zip (`editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.164.zip`) reinstalled + an IntelliJ restart to take effect.
 
 **Note on your exact diagnostic.** The drift you've been seeing logs `content_ours_len (66466) > candidate (64894)` — the editor buffer is *smaller* (lost-content), which the existing `#pcwc` auto-reconcile already repairs + refreshes. This new flush targets the complementary *superset* case. If the lost-content refresh is being rejected live, that's a separate follow-up — say the word. VS Code parity queued as `#jbeditorsavedrift-vscode`.
-<!-- agent:boundary:5d54fe4a -->
+
+### Re: do [#jbeditorsavedrift-vscode] — VS Code editor-save parity — opus-4-8
+
+Done. Shipped the VS Code half of `#jb-editor-save-resolves-drift` (the JB/IntelliJ path shipped in 0.34.1 / plugin 0.2.164; this was the explicit follow-up). This is the VS Code extension surface — separate from the core write path that hosts the live route-owned supervisor — so it was safe to build/test in-session.
+
+**The gap.** The binary's post-commit carry-forward flush (`flush_editor_buffer_to_clear_drift` in `git.rs`) only spoke the socket: it gated on `is_listener_active` and sent `save_document` over the Unix socket. VS Code doesn't run that socket listener — it watches `.agent-doc/patches/` — so a VS Code-only session never got the save request, the editor buffer stayed dirty/ahead-of-disk, and the same `live_prompt_drift` recurred every cycle (with a File Cache Conflict risk).
+
+**Fix (agent-doc `48f0bd81`, pushed).**
+- **Binary:** the flush now prefers the socket (JetBrains) and falls back to writing `.agent-doc/patches/save-document.signal` (JSON `{file, patch_id}`) when no socket listener is active or the send returns no ack — mirroring the existing `vcs-refresh.signal` channel. Proof line gains a `transport=socket|file_signal` field.
+- **VS Code extension:** `PatchWatcher` watches `save-document.signal`, flushes the matching editor buffer to disk via `TextDocument.save()` (clearing the dirty flag), and writes the saved buffer to `.agent-doc/ack-content/<patch_id>.md` — the mirror of the JB plugin's `saveDocumentViaDocument`. Pure signal-parse + sidecar-path logic lives in a new `saveSignal.ts` with unit coverage.
+
+**Verify.** `make check` green (4461 tests, 0 failed; clippy clean) — the FlowCore `git.rs` `reason=` budget needed a 9→11 audit bump for the two new file-signal logs. VS Code extension `npm test` green (83 tests, tsc clean) incl. new `saveSignal.test.ts`. Latest CI run `27514119639` is green. New coverage: `postcommit_carry_forward_superset_writes_file_signal_without_socket_listener` (Rust), `parseSaveDocumentSignal`/`ackContentSidecarPath` (TS). VS Code extension bumped `0.2.26 → 0.2.27`; VERSIONS.md Unreleased updated.
+
+**Deferred by policy:** `cargo install` / `lib-install` — installing mid-session would re-stale the live route-owned supervisor (`#no-mid-session-install`); it rides the supervisor's next idle-boundary self-recycle. Live VS Code proof (type unsaved edits, run a cycle, confirm the buffer flushes without recurring drift) is operator-drive. Marking `#jbeditorsavedrift-vscode` done.
+<!-- agent:boundary:57a9f78d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -428,7 +442,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#jbeditorsavedrift-vscode] [recommended] VS Code parity for #jb-editor-save-resolves-drift: add a save_document IPC handler to the VS Code extension mirroring the JB plugin saveDocumentViaDocument (flush editor buffer to disk + clear dirty on the post-commit carry-forward flush). Shipped JB/IntelliJ only in agent-doc 0.34.1 / plugin 0.2.164. CLEAN session (editor plugin surface).
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#cleardrainsim] [clean-session] Add SimWorld/integration coverage asserting the full preflight JSON contract (not just the queue_continuation::drainable_head_count unit) emits queue_continuation_required=false + queue_drainable_head_count=0 for an active go-mode queue whose only materialized heads are [clean-session] (under a live editor-IPC listener) / [operator-verify] / inert-noise, and =true with the right count when a real drainable head remains. Locks the #cleardrainsignal contract the SKILL auto-loop now depends on. Landed: agent-doc 5c8b2891.

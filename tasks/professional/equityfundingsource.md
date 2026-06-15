@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -62,7 +62,35 @@ Done — shipped, tested, committed, pushed, and deployed.
 - `equityfundingsource-dev` `9f16e7c` → pushed to `origin/main` (rebased).
 - Superproject pointer bump `db0d83a1a`.
 - Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `8bd4dabe`; no new D1 migrations).
-<!-- agent:boundary:82f51e70 -->
+
+### Re: Unify the "Lender account application — incomplete" notice + give every one a complete button — opus-4-8
+
+> **Queue prompt:**
+>
+> All "Lender account application — incomplete" components across all pages should be the same component...and have a button to complete the application. deploy
+
+Done — unified, spec + tests updated, committed, pushed, and deployed.
+
+**Already shared, now uniform.** The banner was already one component (`LenderApplicationNotice`) on all four placements, but only the dashboard rendered a button. It now **always** renders the status-aware CTA button (**Complete** / **Update** / **View application**) everywhere:
+
+- **Dashboard** (form not on page) → button links to `/portal-investor/available-deals`, where selecting a deal surfaces the form. (Unchanged.)
+- **Available deals** (featured deal) and **Deal detail** → the application form (`LenderAccountGate`) is rendered inline, so the button now **scrolls to it** via a new `#investor-lender-application-form` anchor (added `scroll-margin-top` so it lands cleanly below the topbar).
+- **Available deals empty state** (no published deals) → previously had a button-less notice and no form at all. It now surfaces the application form inline too, so the button always has a real target.
+
+**Verification:** `bun run check` green — **692 tests pass, 0 fail**, browser + worker builds clean. Extended `tests/lender-account-gate.test.ts` to assert the shared form anchor/href, that every notice carries `complete_href`, and that no placement renders button-less. Updated `docs/current_progress.md`.
+
+**Shipped:**
+- `equityfundingsource-dev` `7ad8695` → pushed to `origin/main` (rebased onto latest).
+- Superproject pointer bump `5a6d3f1fd`.
+- Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `5d08d919`; no new D1 migrations).
+<!-- agent:boundary:ccc8bdaa -->
+- Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `5d08d919`; no new D1 migrations).
+- Superproject pointer bump `5a6d3f1fd`.
+- `equityfundingsource-dev` `7ad8695` → pushed to `origin/main` (rebased onto latest).
+- **Available deals empty state** (no published deals) → previously had a button-less notice and no form at all. It now surfaces the application form inline too, so the button always has a real target.
+- **Available deals** (featured deal) and **Deal detail** → the application form (`LenderAccountGate`) is rendered inline, so the button now **scrolls to it** via a new `#investor-lender-application-form` anchor (added `scroll-margin-top` so it lands cleanly below the topbar).
+- **Dashboard** (form not on page) → button links to `/portal-investor/available-deals`, where selecting a deal surfaces the form. (Unchanged.)
+<!-- agent:boundary:543c3741 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,7 +98,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- All "Lender account application — incomplete" components across all pages should be the same component...and have a button to complete the application. deploy
 <!-- /agent:queue -->
 
 ## Backlog

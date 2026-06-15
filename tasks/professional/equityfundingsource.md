@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -117,7 +117,44 @@ Deployment:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:297ffef8 -->
+
+### Re: Lender vestings vs distributions — gpt-5
+
+> **Queue prompt:**
+>
+> Are Lender vestings https://equityfundingsource.brian-takita.workers.dev/portal-investor/vestings in line with the project requirements of EFS not handling distributions?
+
+Yes. The current **Vestings** section is in line with the requirement that EFS not handle or present distributions.
+
+The requirement is not that EFS cannot store investor/lender title or preference data. It is that the investor portal must not present loan-servicing artifacts such as Returns, Distributions, Statements, yields, or payment servicing because EFS does not service loans. Vestings are a separate workflow: legal holding names/entities for title, plus special instructions and preferences visible to EFS.
+
+Evidence checked:
+- `src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md:7` says anything implying servicing data like yields, distributions, and statements is removed because EFS does not service loans.
+- `src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md:29`-`:31` defines Phase 4 vestings/special instructions as the EFS-local half: investors manage legal holding entities and special instructions in EFS D1; pushing vestings into TMO and modeling per-lender loan details remains gated.
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md:328` separately says the portal must not present a Returns group and lists vestings/special instructions as a remaining dashboard-rework phase.
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/vestings.tsx:129`-`:130` labels the page as legal holding names for investment positions, and `:188`-`:190` labels special instructions as communication, title, or deal-funding preferences.
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/investor/vestings_repo.ts:1`-`:3` and migration `0041_investor_vestings.sql:1`-`:4` explicitly make this EFS-local source-of-truth data and defer the TMO push.
+- `src/equityfundingsource-dev/tests/investor-vestings.test.ts:98`-`:104` asserts the vestings copy does not imply distribution servicing or active TMO sync.
+
+Caveat: the live workers.dev route is reachable but authenticated; it 303-redirected to `/login?role=investor&next=%2Fportal-investor%2Fvestings`, so I could not inspect investor-specific live data without a session. That auth behavior is expected for an investor portal. Based on the PRD, source, route behavior, and focused test, the feature is aligned.
+
+Changed paths: none.
+
+Commands run:
+- `tsift status`
+- `rg -n "vestings|distributions|distribution|special instructions|EFS not handling" ...`
+- `curl -fsSIL --max-time 10 https://equityfundingsource.brian-takita.workers.dev/portal-investor/vestings`
+- `bun test tests/investor-vestings.test.ts`
+
+Verification:
+- Live route auth-gates to investor login.
+- `bun test tests/investor-vestings.test.ts` passed: 8 pass, 0 fail.
+
+Escalation: none.
+Confidence: high.
+
+Session size note: the exchange is large, but an active queue continuation is being drained, so I continued without compacting.
+<!-- agent:boundary:98cc32b0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,7 +162,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Are Lender vestings https://equityfundingsource.brian-takita.workers.dev/portal-investor/vestings in line with the project requirements of EFS not handling distributions?
 <!-- /agent:queue -->
 
 ## Backlog

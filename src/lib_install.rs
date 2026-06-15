@@ -120,21 +120,88 @@ pub(crate) fn run_paths(source: Option<&Path>, target_dir: Option<&Path>) -> Res
         installed.display(),
         ext,
     );
-    // R4 (#ctlrecycle): the JetBrains plugin hot-reloads this cdylib by mtime, but
-    // already-running agent-doc controllers/supervisors keep serving the PRIOR binary
-    // until they recycle. Surface the deterministic recycle so the new build actually
-    // goes live everywhere, not just in the editor cdylib.
-    eprintln!(
-        "[lib-install] note: running controllers still serve the prior binary — run `agent-doc admin recycle --all-projects` (or restart sessions) to promote the new build"
-    );
+    // #autorecycle-on-install (upgrades #ctlrecycle R4 from print-only to action):
+    // the JetBrains plugin hot-reloads this cdylib by mtime, but already-running
+    // agent-doc controllers/supervisors keep serving the PRIOR binary until they
+    // recycle. Instead of only printing the recycle hint, automatically mark every
+    // running controller to recycle at its next idle boundary so the new build goes
+    // live everywhere, not just in the editor cdylib. The recycle is idle-gated
+    // (`recycle_controllers_all_projects` sends a `recycle` RPC that fires only at a
+    // turn/inter-queue-item boundary, never mid-turn), so triggering it from
+    // `lib-install` is safe. Opt out with a falsey AGENT_DOC_RECYCLE_ON_INSTALL.
+    auto_recycle_after_install();
 
     Ok(())
+}
+
+/// `#autorecycle-on-install`: default-on resolution for auto-recycling running
+/// controllers after a `lib-install`. Falsey `AGENT_DOC_RECYCLE_ON_INSTALL`
+/// (`0`/`false`/`no`/`off`) opts out and restores the print-only hint.
+fn recycle_on_install_enabled() -> bool {
+    match std::env::var("AGENT_DOC_RECYCLE_ON_INSTALL") {
+        Ok(v) => !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off"),
+        Err(_) => true,
+    }
+}
+
+/// Mark every running controller to recycle onto the freshly-installed binary at its
+/// next idle boundary. Best-effort: a recycle failure must never fail the install, so
+/// errors are logged (never swallowed silently) and the print-only hint is surfaced as
+/// a fallback. When opted out, only the hint is printed.
+fn auto_recycle_after_install() {
+    if !recycle_on_install_enabled() {
+        eprintln!(
+            "[lib-install] note: auto-recycle opted out (AGENT_DOC_RECYCLE_ON_INSTALL falsey) — running controllers still serve the prior binary; run `agent-doc admin recycle --all-projects` (or restart sessions) to promote the new build"
+        );
+        return;
+    }
+    match agent_doc_orchestration::project_controller::recycle_controllers_all_projects() {
+        Ok((recycled, skipped)) => {
+            eprintln!(
+                "[lib-install] auto-recycle: {recycled} controller(s) marked to recycle at next idle boundary, {skipped} skipped (set AGENT_DOC_RECYCLE_ON_INSTALL=0 to disable)"
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "[lib-install] warning: auto-recycle failed ({e}) — running controllers still serve the prior binary; run `agent-doc admin recycle --all-projects` (or restart sessions) to promote the new build"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn recycle_on_install_default_on_and_opt_out_is_falsey() {
+        // #autorecycle-on-install: default-on, falsey env opts out. Serialize env
+        // mutation to avoid cross-test interference.
+        let prior = std::env::var("AGENT_DOC_RECYCLE_ON_INSTALL").ok();
+        unsafe { std::env::remove_var("AGENT_DOC_RECYCLE_ON_INSTALL") };
+        assert!(recycle_on_install_enabled(), "default must be ON");
+        for falsey in ["0", "false", "no", "off", "OFF", " False "] {
+            unsafe { std::env::set_var("AGENT_DOC_RECYCLE_ON_INSTALL", falsey) };
+            assert!(
+                !recycle_on_install_enabled(),
+                "falsey value {falsey:?} must opt out"
+            );
+        }
+        for truthy in ["1", "true", "yes", "on", "anything"] {
+            unsafe { std::env::set_var("AGENT_DOC_RECYCLE_ON_INSTALL", truthy) };
+            assert!(
+                recycle_on_install_enabled(),
+                "truthy/other value {truthy:?} stays ON"
+            );
+        }
+        unsafe {
+            match prior {
+                Some(v) => std::env::set_var("AGENT_DOC_RECYCLE_ON_INSTALL", v),
+                None => std::env::remove_var("AGENT_DOC_RECYCLE_ON_INSTALL"),
+            }
+        }
+    }
 
     #[test]
     fn versioned_name_includes_version() {

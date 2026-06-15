@@ -1939,7 +1939,15 @@ pub(crate) fn serve_with_options(
     previous_controller_pid: Option<u32>,
     handoff_state: ControllerHandoffState,
 ) -> Result<()> {
-    let sock = listen_socket.unwrap_or_else(|| socket_path(project_root));
+    let public_sock = socket_path(project_root);
+    let sock = listen_socket.unwrap_or_else(|| public_sock.clone());
+    // M1b (#stuckhandoff2 reopen): a controller launched on a non-public socket is
+    // a handoff *replacement* (`controller-handoff-*` temp socket from
+    // `handoff_stale_controller`). It becomes authoritative only when its client
+    // renames that temp socket onto the public path; until then it is a candidate
+    // for the structural stranded-replacement watchdog below. The initial
+    // controller serves directly on the public socket, so this stays `None`.
+    let handoff_temp_socket: Option<PathBuf> = (sock != public_sock).then(|| sock.clone());
     if sock.exists() {
         let _ = std::fs::remove_file(&sock);
     }
@@ -1970,6 +1978,7 @@ pub(crate) fn serve_with_options(
     let runtime = Arc::new(ControllerRuntime::new(bootstrap)?);
     let should_stop = Arc::new(AtomicBool::new(false));
     let watchdog_threshold = stale_preparing_controller_threshold();
+    let controller_launched_at = Instant::now();
     let recycle_grace = recycle_idle_grace();
     let mut recycle_stale_since: Option<Instant> = None;
     while !should_stop.load(Ordering::SeqCst) {
@@ -1993,7 +2002,19 @@ pub(crate) fn serve_with_options(
                 // in *any* project. The live in-memory bootstrap reflects the latest
                 // `prepare_handoff`/`promote_handoff` transition, so a healthy handoff
                 // (which completes well under the threshold) never trips this.
-                if controller_self_watchdog_should_suicide(&runtime, watchdog_threshold) {
+                // The in-memory predicate catches a replacement still wedged in
+                // `Preparing`. M1b additionally catches the dominant orphan shape
+                // (#stuckhandoff2 reopen): a replacement that received
+                // `promote_handoff` (flipping in-memory state to `Stable`, invisible
+                // to the predicate) but whose client died before renaming its temp
+                // socket onto the public path — detected structurally below.
+                if controller_self_watchdog_should_suicide(&runtime, watchdog_threshold)
+                    || controller_handoff_replacement_is_stranded(
+                        handoff_temp_socket.as_deref(),
+                        controller_launched_at.elapsed(),
+                        watchdog_threshold,
+                    )
+                {
                     controller_self_watchdog_suicide(&runtime, watchdog_threshold);
                     should_stop.store(true, Ordering::SeqCst);
                     break;
@@ -2051,6 +2072,32 @@ pub(crate) fn controller_self_watchdog_should_suicide(
     )
 }
 
+/// M1b (#stuckhandoff2 reopen) — structural self-watchdog for a promoted-but-stranded
+/// handoff *replacement*. The in-memory predicate above only sees `Preparing`/`Promoted`,
+/// but `promote_handoff` flips a replacement straight to `Stable` (`handoff_started_at`
+/// cleared) the instant the client asks — so a client that dies *after* `promote_handoff`
+/// but *before* `std::fs::rename(temp_sock → public_sock)` (`handoff_stale_controller`)
+/// leaves a `Stable`-in-memory controller stranded on its temp socket, invisible to the
+/// predicate. That was the dominant orphan the slow gc/M5 cmdline sweep cleaned up at
+/// 7–21 minutes while M1 logged nothing.
+///
+/// Detect it structurally, independent of in-memory `handoff_state`: a replacement was
+/// launched on a `controller-handoff-*` temp socket (`handoff_temp_socket`); a *completed*
+/// handoff removes that path via the promote rename, so a temp socket that still exists
+/// past the threshold proves the promotion never finished. The `launched_elapsed >
+/// threshold` guard spares a healthy young handoff (which completes the rename in well
+/// under a second).
+pub(crate) fn controller_handoff_replacement_is_stranded(
+    handoff_temp_socket: Option<&Path>,
+    launched_elapsed: Duration,
+    threshold: Duration,
+) -> bool {
+    let Some(temp) = handoff_temp_socket else {
+        return false;
+    };
+    launched_elapsed > threshold && temp.exists()
+}
+
 /// M1 (#stuckhandoff2) — supersede the wedged in-memory + on-disk bootstrap with
 /// `Failed` (so the next bind promotes a clean controller instead of re-adopting the
 /// stuck generation) and log the self-reap. The caller flips `should_stop`, drops the
@@ -2066,7 +2113,19 @@ pub(crate) fn controller_self_watchdog_suicide(runtime: &ControllerRuntime, thre
     if let Ok(mut state) = runtime.bootstrap.lock() {
         state.handoff_state = ControllerHandoffState::Failed;
         state.handoff_started_at = None;
-        if let Err(err) = write_bootstrap_state(&state) {
+        // The per-project bootstrap state file is shared across controller
+        // generations. Only supersede it with `Failed` while it still names THIS
+        // controller (pid + generation). A stranded replacement (the post-
+        // `promote_handoff` orphan from M1b) can be a stale generation a newer
+        // clean controller already recorded on disk — clobbering that newer record
+        // to `Failed` would churn the next bind into relaunching over a healthy
+        // controller. When we no longer own the record, just exit (the process
+        // dying is what stops the buffer race; the on-disk record stays correct).
+        let owns_record = matches!(
+            read_bootstrap(&project_root),
+            Ok(Some(on_disk)) if on_disk.pid == pid && on_disk.controller_generation == generation
+        );
+        if owns_record && let Err(err) = write_bootstrap_state(&state) {
             eprintln!(
                 "[controller] warning: self-watchdog failed to mark bootstrap failed pid={pid} generation={generation}: {err}"
             );

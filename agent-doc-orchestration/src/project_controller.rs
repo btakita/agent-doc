@@ -4662,6 +4662,109 @@ agent:queue\n\
         assert!(ops_log.contains("stale_preparing_controller_self_reaped pid="));
         assert!(ops_log.contains("caller=self_watchdog"));
     }
+    // ---- M1b (#stuckhandoff2 reopen): stranded post-promote replacement ----
+    #[test]
+    fn handoff_replacement_stranded_when_temp_socket_persists_past_threshold() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let temp = dir.path().join("controller-handoff-1234-9.sock");
+        std::fs::write(&temp, b"").unwrap();
+        // Promotion's rename never removed the temp socket and the threshold elapsed:
+        // a stranded replacement, even though its in-memory state may read `Stable`.
+        assert!(controller_handoff_replacement_is_stranded(
+            Some(temp.as_path()),
+            Duration::from_secs(600),
+            Duration::from_secs(45),
+        ));
+    }
+    #[test]
+    fn handoff_replacement_not_stranded_after_promote_rename_removes_temp_socket() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // A completed handoff renamed temp -> public, so the temp path is gone.
+        let temp = dir.path().join("controller-handoff-1234-9.sock");
+        assert!(!temp.exists());
+        assert!(
+            !controller_handoff_replacement_is_stranded(
+                Some(temp.as_path()),
+                Duration::from_secs(600),
+                Duration::from_secs(45),
+            ),
+            "a promoted+renamed replacement (temp socket gone) is authoritative, never stranded"
+        );
+    }
+    #[test]
+    fn handoff_replacement_not_stranded_within_threshold() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let temp = dir.path().join("controller-handoff-1234-9.sock");
+        std::fs::write(&temp, b"").unwrap();
+        assert!(
+            !controller_handoff_replacement_is_stranded(
+                Some(temp.as_path()),
+                Duration::from_secs(1),
+                Duration::from_secs(45),
+            ),
+            "a young in-flight handoff (temp socket still present) must not self-terminate"
+        );
+    }
+    #[test]
+    fn handoff_replacement_none_socket_is_never_stranded() {
+        // The initial controller serves on the public socket (handoff_temp_socket=None).
+        assert!(!controller_handoff_replacement_is_stranded(
+            None,
+            Duration::from_secs(600),
+            Duration::from_secs(45),
+        ));
+    }
+    #[test]
+    fn self_watchdog_suicide_marks_failed_for_stranded_stable_replacement() {
+        // The M1b structural watchdog hands a `Stable`-in-memory stranded replacement
+        // to the same suicide path; it must still mark the bootstrap Failed + log.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        write_bootstrap_state(&bootstrap).unwrap();
+        let runtime = runtime_for_bootstrap(bootstrap);
+
+        controller_self_watchdog_suicide(&runtime, Duration::from_secs(45));
+
+        let after = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(after.handoff_state, ControllerHandoffState::Failed);
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("stale_preparing_controller_self_reaped pid="));
+    }
+    #[test]
+    fn self_watchdog_suicide_preserves_superseded_generation_record() {
+        // A stranded replacement that a newer clean controller already superseded on
+        // disk must NOT clobber that newer record to Failed when it self-reaps.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut newer = preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        newer.controller_generation = 99;
+        write_bootstrap_state(&newer).unwrap();
+        // The wedged replacement is the older generation 7.
+        let stranded =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        let runtime = runtime_for_bootstrap(stranded);
+
+        controller_self_watchdog_suicide(&runtime, Duration::from_secs(45));
+
+        let after = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(
+            after.controller_generation, 99,
+            "the newer controller's record must survive the older replacement's self-reap"
+        );
+        assert_eq!(
+            after.handoff_state,
+            ControllerHandoffState::Stable,
+            "self-reap must not flip a superseding controller's record to Failed"
+        );
+        // In-memory still flips Failed so this process exits.
+        assert_eq!(
+            runtime.bootstrap_snapshot().unwrap().handoff_state,
+            ControllerHandoffState::Failed
+        );
+    }
     // ---- M3 (#stuckhandoff2): orphaned-preparing process-scan reaper ----
     #[test]
     fn process_start_age_secs_reports_for_self() {

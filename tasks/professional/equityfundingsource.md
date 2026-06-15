@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -140,7 +140,7 @@ Deployed. The worker is live with the multi-file CPA/attorney upload.
 - All bindings (D1, R2 documents/assets/tmo-cache, durable objects, rate limiter, email env) re-bound cleanly; worker startup 21 ms.
 
 Both queue heads are now drained: multi-file upload was already in code (`#multi-file-list`, `5a0e0c4`) and is now shipped live.
-<!-- agent:boundary:06ac20af -->
+<!-- agent:boundary:7cbe15dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -148,6 +148,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- In the lender Annual requirements flow, I submitted the form + documents. The stage should be locked in EFS review. This should allow editing the submission. However, "Complete questionnaire" button is still present and https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard still has the "Annual requirements — action needed" with "Complete requirements" alert. The alert should indicate the Annual requirements are under review and edits can be made. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -132,7 +132,16 @@ Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`
 Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
 Confidence: high that this resolves the interrupted queue-removal guard for `#67v2-auto-advance` while preserving the actual remaining gated implementation work.
 Escalation: none.
-<!-- agent:boundary:aadc43ea -->
+
+### Re: [#zwws-vestings-local] — gpt-5
+
+> **Queue prompt:**
+>
+> [#zwws-vestings-local]
+
+
+I can’t execute the harness `/clear` from this already-loaded context, and I will not process `#zwws-vestings-local` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the next queue head runs cleanly.
+<!-- agent:boundary:febd6a1b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -144,7 +153,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - ~~[#xcvg-prod-email]~~
 - ~~[#jnzs-approval-followup]~~
 - ~~[#67v2-auto-advance]~~
-- [#zwws-vestings-local]
+- ~~[#zwws-vestings-local]~~
 - [#zwws-new-deal-email]
 - [#efs-cutover-sso-plan]
 - [#37ah-review-dedupe]

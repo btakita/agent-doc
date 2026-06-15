@@ -34,130 +34,12 @@ queue: stop
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260615-075351.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260615-204620.md`*
 
 Compacted content:
-- Archived 3 response topic(s): Evaluate Lean Language for lazily; do [#4zvn]; #4zvn
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-
-### Re: Closeout repair — gpt-5
-
-Preflight found the session document had visible, user-authored content that was not represented in the committed agent-doc snapshot. I’m preserving that content through the strict finalize path so the queued lazily-rs prompt can run in a clean cycle.
-
-### Re: Lean status — gpt-5
-
-Status: complete and intentionally narrow. Lean is not embedded in `lazily-rs` as Rust verification or an implementation path; it lives in `src/lazily-spec/formal/lean` as a spec-layer oracle for the shared IPC Snapshot/Delta state machine. `src/lazily-rs/SPEC.md` now points to that companion model.
-
-Current coverage: the Lean 4 Lake package proves epoch sequencing, fail-closed resync on gaps/reorders/restarts, PartialEq cell-write silence, memo equality suppression, eager Signal `slot_value` materialization, and batch frontier coalescing with a single IPC epoch advance. It deliberately does not verify Rust internals, async scheduling, Str0mNet/WebRTC, JSON Schema encoders, or transport behavior; those stay in Rust tests, conformance fixtures, and live validation.
-
-Repository status checked:
-
-- `src/lazily-spec` is clean on `main...origin/main`; HEAD is `6cb978a feat: add Lean IPC formal model`.
-- `src/lazily-rs` is clean on `main...origin/main`; HEAD is `f80e4e9 docs: reference lazily Lean formal model`.
-- `lake build` from `src/lazily-spec/formal/lean` passed: `Build completed successfully (4 jobs).`
-- GitHub Actions: `lazily-spec` CI run `27533809965` completed successfully. `lazily-rs` CI run `27533809027` was still `in_progress` when checked. The parent repo has no workflow named `CI`.
-- `make check` passed in `src/lazily-rs`; the full Loom model finished with 15/15 passing after 540.48s.
-- `make check` passed in `src/lazily-spec`.
-- `make test-lean-formal` passed in `src/lazily-rs`.
-- `make test-lean-formal` passed in `src/lazily-spec`.
-- parent gitlinks: `dbd786197 chore: update lazily Lean CI submodules`
-- `src/lazily-rs`: `372b019 ci: add Lean formal model gate`
-- `src/lazily-spec`: `1c33a50 ci: add Lean formal model check`
-- `src/lazily-rs/AGENTS.md` now documents the Lean target in the local command list.
-- `src/lazily-rs/.github/workflows/ci.yml` now has a separate `Lean formal model (#lzleanformal)` job that checks out canonical `lazily-spec` and runs `leanprover/lean-action`.
-- `src/lazily-rs/Makefile` now adds `test-lean-formal` and includes it in `make check`, using the sibling `../lazily-spec/formal/lean` model.
-- `src/lazily-spec/README.md` and `src/lazily-spec/docs/formal-model.md` now point developers at `make check`.
-- `src/lazily-spec/.github/workflows/ci.yml` now runs the Lean formal model on push, pull request, and manual dispatch.
-- `src/lazily-spec/Makefile` now adds `make check` / `test-lean-formal`, which runs `lake build` in `formal/lean`.
-
-Changed paths: no `lazily-rs` or `lazily-spec` source changes in this cycle; this is a status response only. Commands run: Lean/status search, doc reads, `lake build`, git status/log checks. CI check: `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`. Confidence: high. Escalation: none.
-
-### Re: Artifact cleanup — gpt-5
-
-Cleaned the stale IPC artifacts from this session document: the Lean status answer above remains the response to the drained queue prompt, and the misplaced equityfundingsource route diagnostic was removed from the lazily-rs queue component.
-
-### Re: Lean status queue drain — gpt-5
-
-> **Queue prompt:**
->
-> What is the status of Lean in lazily-rs?
-
-
-Lean is already implemented for the lazily ecosystem as a narrow `lazily-spec` formal companion, not as embedded Rust verification inside `lazily-rs`. The active package is `src/lazily-spec/formal/lean`, and `src/lazily-rs/SPEC.md` references it as the spec-layer oracle for IPC Snapshot/Delta behavior.
-
-Current proof scope: epoch sequencing, fail-closed resync, equal cell-write silence, memo equality suppression, eager Signal `slot_value` publication, and batch frontier coalescing. Current repo state remains clean on both relevant submodules: `lazily-spec` at `6cb978a feat: add Lean IPC formal model`, `lazily-rs` at `f80e4e9 docs: reference lazily Lean formal model`. Local verification already run this cycle: `lake build` in `src/lazily-spec/formal/lean` passed.
-
-No `lazily-rs` or `lazily-spec` source changes were needed for this queue drain. CI note: the parent repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
-
-### Re: Lean test suite + CI — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: Is lean part of the test suite and CI? If not, add it.
-
-
-Lean is now part of both the local test suite and CI.
-
-Before this cycle, the Lean model was only partially gated: `lazily-spec` built it during the Pages deploy workflow, but there was no PR-style CI workflow, no local `make check` target in `lazily-spec`, and no `lazily-rs` local/CI gate for the companion model.
-
-Implemented:
-
-- `src/lazily-spec/Makefile` adds `make check` / `test-lean-formal`, running `lake build` in `formal/lean`.
-- `src/lazily-spec/.github/workflows/ci.yml` runs the Lean formal model on push, pull request, and manual dispatch.
-- `src/lazily-rs/Makefile` adds `test-lean-formal` and includes it in `make check`, using `../lazily-spec/formal/lean`.
-- `src/lazily-rs/.github/workflows/ci.yml` adds a separate `Lean formal model (#lzleanformal)` CI job that checks out canonical `lazily-spec` and runs `leanprover/lean-action`.
-- `src/lazily-spec` docs and `src/lazily-rs/AGENTS.md` now document the `make check` / Lean target path.
-
-Commits pushed: `src/lazily-spec` `1c33a50`, `src/lazily-rs` `372b019`, and parent gitlinks `dbd786197`. A newer unrelated local parent commit appeared after that push, so I did not push the parent branch again.
-
-Verification: `make test-lean-formal` passed in both submodules; `make check` passed in both submodules; `lazily-rs` full Loom coverage completed 15/15 after 540.48s. GitHub Actions: `lazily-spec` CI run `27533809965` completed successfully; `lazily-rs` CI run `27533809027` was still in progress on the last check; the parent repo has no workflow named `CI`.
-
-Changed paths: `src/lazily-spec/{Makefile,.github/workflows/ci.yml,README.md,docs/formal-model.md}`, `src/lazily-rs/{Makefile,.github/workflows/ci.yml,AGENTS.md}`, and the parent gitlinks. Confidence: high. Escalation: none.
-
-### Re: LinkedIn first post — gpt-5
-
-> **Queue prompt:**
->
-> I don't see the linkedin article for the 1st post. Please publish.
-
-
-Published the first lazily-rs LinkedIn post and added the first comment.
-
-Post: https://www.linkedin.com/feed/update/urn:li:share:7472308587487379456
-
-First comment posted with the `lazily-rs` repo link and benchmark note. Corky returned comment ID `7472308618642501632`.
-
-Changed paths: `mail/social/20260615-lazily-slot-cell-signal-linkedin.md` in the `mail` submodule, plus the parent `mail` gitlink. Commits pushed: `mail` `e73c15d chore: record lazily LinkedIn post`; parent `92d0c2387 chore: update mail social posts`. The `#sstz` review item is resolved.
-
-Commands run: `corky linkedin auth --profile btakita` to refresh the expired OAuth token, `corky linkedin publish --dry-run ...`, `corky linkedin publish ...`, `corky linkedin comment ...`, targeted git add/commit/push in `mail`, targeted parent gitlink commit/push, `make check`, and GitHub workflow checks.
-
-Verification: Corky dry-run passed before publish; live publish returned the post URL; live comment returned a comment ID; `make check` passed; parent `Agent Doc` workflow run `27557245366` was queued after push. There is no workflow named `CI` in the parent repo or `mail`, and `mail` has no workflows listed. Session note: the exchange is large, but the queue was active, so I kept draining rather than compacting.
-
-Confidence: high. Escalation: browser OAuth approval was required for the expired LinkedIn token.
-
-### Re: LinkedIn replacement post — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: The article is not complete https://www.linkedin.com/feed/update/urn:li:activity:7472308587910934528/ please fix ![img_1.png](img_1.png). I deleted the post
-
-
-The incomplete/deleted LinkedIn post has been replaced with a complete post body and a separate first comment for links.
-
-New post: https://www.linkedin.com/feed/update/urn:li:share:7472312924733198337
-
-First comment posted with the deep-dive and repository links. Corky returned comment ID `7472312958027628544`.
-
-I kept the replacement post body link-free and used the fuller Slot -> Cell -> Signal copy so LinkedIn receives the complete text in the main post. The dry-run printed the full 1,079-character body before publish.
-
-Changed paths: `mail/social/20260615-lazily-slot-cell-signal-linkedin-repost.md` in the `mail` submodule, plus the parent `mail` gitlink. Commits pushed: `mail` `5317b10 chore: record lazily LinkedIn repost`; parent `241912145 chore: update mail lazily LinkedIn repost`. A concurrent agent-doc commit later advanced parent HEAD, and HEAD still records `mail` at `5317b10`.
-
-Commands run: `corky linkedin publish --dry-run ...`, `corky linkedin publish ...`, `corky linkedin comment ...`, targeted git add/commit/push in `mail`, targeted parent gitlink add/commit/push, `make check`, `gh run list --workflow CI --limit 1`, `gh workflow list`, and `gh run view` / `gh api` for the available `Agent Doc` workflow.
-
-Verification: live publish returned the new LinkedIn URL; live comment returned the comment ID; `make check` passed. The parent repo has no workflow named `CI`; `gh workflow list` shows `Agent Doc`. The latest `Agent Doc` run on a concurrent monsterrodholders HEAD failed before runner startup: both jobs had `runner_id: 0`, empty runner names, no steps, and no logs, so I’m treating that as external CI-start failure rather than a local regression.
-
-Confidence: high. Escalation: none. Session note: the exchange is large, but the queue is active, so I kept draining instead of compacting.
-<!-- agent:boundary:936a10b4 -->
+- Archived 7 response topic(s): Closeout repair; Lean status; Artifact cleanup; 4 more
+- Prior summary/context: prior compacted content: Archived 3 response topic(s): Evaluate Lean Language for lazily; do [#4zvn]; #4zvn
+<!-- agent:boundary:0f5d8c7b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -165,7 +47,8 @@ Confidence: high. Escalation: none. Session note: the exchange is large, but the
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->go 
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

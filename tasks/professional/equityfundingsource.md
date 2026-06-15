@@ -43,6 +43,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> Analyze the last EFS call transcript. EFS does not handle payments. Are the positions something that makes sense to keep?
+
+
+> **Queue prompt:**
+>
 > do [#cgw7]
 
 
@@ -55,11 +60,13 @@ Done. Broker events now generate in-app notifications and (opt-in) email. New mo
 Design notes:
 - In-app notifications (`notification_create_` → shared `notifications` table, surfaced by the existing `GET /api/broker/notifications`) **always fire**. Email is opt-in behind `BROKER_EMAIL_NOTIFICATIONS_ENABLED` (Cloudflare Email Service or local capture), mirroring the borrower-message notify pattern. `BROKER_NOTIFICATION_FROM` overrides the From (falls back to `EFS_EMAIL_FROM`). Both documented in `.env.example`.
 - Side-effects run via `notify_after_` (`ctx.waitUntil`) and swallow errors, so a notification failure never breaks the broker request.
+- `next_payment_date` / `payment_schedule` (and `loan_payments`) — these read as a live servicing schedule EFS can't authoritatively maintain.
+- `yield_mix` / `annual_yield` — the call said *no yield tracking*;
 
 Added `lib/broker/notify.test.ts` (4 tests, all pass). Full suite green: **699 pass / 0 fail**, plus `build` + `build:worker` (typecheck) clean. Committed in the submodule (`2f3337b`) and bumped the superproject pointer (`b06386894`).
 
 One follow-up not in scope here: the broker portal needs a **deal-detail view** at `/portal-broker/deals/:id` for the status-email link to resolve — added as a backlog note if that route doesn't exist yet.
-<!-- agent:boundary:5e84666c -->
+<!-- agent:boundary:e506fe9f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,12 +74,14 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Analyze the last EFS call transcript. EFS does not handle payments. Are the positions something that makes sense to keep?
+- [#58j3]
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#58j3] #posnosrv [recommended] Align investor "My Positions"/portfolio API with the no-servicing model: drop yield_mix/annual_yield and next_payment_date/payment_schedule from the investor_positions response (lib/investor/portfolio/index.ts + shared.ts still compute them even though the 2026-06-03 call + #zwws P3 8d40c66 already removed them from the dashboard); keep addr/amount/rate/position_type and relabel the per-loan "payment" as the scheduled interest-only payment (est., loan amount x rate / 12) so the portal never implies EFS tracks received payments.
 <!-- /agent:backlog -->
 
 ## Review

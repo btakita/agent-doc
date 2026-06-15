@@ -212,6 +212,10 @@ enum SimCommand {
     /// `#qflood2`: set whether the routed trigger is already pending in the
     /// modeled composer (the live pane-capture dedup signal).
     SetTriggerAlreadyPending(bool),
+    /// `#qdedup`: queue a supervisor/PCP fresh-context handoff request. Targeted
+    /// tests repeat this while the pane is busy to prove the inter-turn stage
+    /// delivers one de-duplicated `/clear` + `agent-doc <FILE>` set.
+    QueueBetweenTurnFreshContextHandoff,
     /// `#supkill-bg`: an explicit operator `restart-supervisor` (IPC `Restart`). The
     /// next idle tick drives the `supervisor_restart_action` drain-and-supersede
     /// policy: drain the in-flight turn, then in-place `execve` reexec (stale) or
@@ -547,6 +551,9 @@ struct RecycleClearModel {
     /// `#qflood2`: the routed trigger is already pending/visible in the modeled
     /// composer, so a re-send would stack a duplicate (`recent_lines_contain_trigger`).
     trigger_already_pending: bool,
+    /// `#qdedup`: raw between-turn command requests buffered while a turn is
+    /// active. The idle boundary composes these as a set.
+    between_turn_enqueue: Vec<String>,
     /// `#supkill-bg`: an explicit `restart-supervisor` (IPC `Restart`) is pending. The
     /// idle tick drives the production `supervisor_restart_action` drain-and-supersede
     /// policy — it DRAINS while a turn is in flight (`turn_active`) and only at the
@@ -667,6 +674,15 @@ struct Coverage {
     /// `#recyclerestart-agent`: proof that the following clear/drain path re-cleared
     /// or restarted the session before the next queue head.
     recycle_session_reclear_proofs: usize,
+    /// `#qdedup`: a buffered between-turn command set was delivered at an idle
+    /// boundary.
+    between_turn_enqueue_deliveries: usize,
+    /// `#qdedup`: duplicate raw between-turn command requests suppressed while
+    /// composing the delivered set.
+    between_turn_enqueue_deduped: usize,
+    /// `#qdedup`: pending between-turn commands were held because the pane was
+    /// not yet at an idle boundary.
+    between_turn_enqueue_busy_skips: usize,
     /// `#suprehotreload-agent`: a JB Run Agent Doc style cycle reached the
     /// stale-binary recycle boundary and observed the fresh binary after promotion.
     suprehot_jb_observed_promotions: usize,
@@ -809,6 +825,9 @@ impl Coverage {
         self.sync_guard_completions += other.sync_guard_completions;
         self.recycle_binary_promotion_proofs += other.recycle_binary_promotion_proofs;
         self.recycle_session_reclear_proofs += other.recycle_session_reclear_proofs;
+        self.between_turn_enqueue_deliveries += other.between_turn_enqueue_deliveries;
+        self.between_turn_enqueue_deduped += other.between_turn_enqueue_deduped;
+        self.between_turn_enqueue_busy_skips += other.between_turn_enqueue_busy_skips;
         self.suprehot_jb_observed_promotions += other.suprehot_jb_observed_promotions;
         self.suprehot_jb_mapped_recycle_failures += other.suprehot_jb_mapped_recycle_failures;
     }
@@ -2789,6 +2808,42 @@ fn qflood2_drain_dedups_trigger_already_pending_in_composer() {
     // The head was marked last_dispatched by the dedup path, so the normal drain
     // dedup (`SkipAlreadyDispatched`) now owns it — no duplicate, no hot loop.
     assert_eq!(world.coverage.drain_dedup_skips, 1);
+}
+
+#[test]
+fn qdedup_between_turn_enqueue_waits_for_idle_and_dedupes_command_set() {
+    // `#qdedup`: repeated supervisor/PCP between-turn handoff requests should be
+    // buffered while a turn is active, then composed as a set at the idle boundary:
+    // exactly one `/clear`, exactly one `agent-doc <FILE>`, in that order.
+    let mut world = SimWorld::new(4_244);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorBusy).unwrap();
+    world
+        .apply(SimCommand::QueueBetweenTurnFreshContextHandoff)
+        .unwrap();
+    world
+        .apply(SimCommand::QueueBetweenTurnFreshContextHandoff)
+        .unwrap();
+
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.between_turn_enqueue_deliveries, 0,
+        "active turns must hold the buffered handoff"
+    );
+    assert_eq!(world.coverage.between_turn_enqueue_busy_skips, 1);
+
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(world.coverage.between_turn_enqueue_deliveries, 1);
+    assert_eq!(
+        world.coverage.between_turn_enqueue_deduped, 2,
+        "two repeated handoffs contain four raw commands but deliver only two"
+    );
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("between_turn_enqueue deduped=2 kept=/clear,/agent-doc result=delivered"),
+        "ops log must prove the deduped between-turn delivery:\n{ops_log}"
+    );
 }
 
 #[test]

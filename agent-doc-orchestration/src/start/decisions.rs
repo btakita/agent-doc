@@ -227,6 +227,78 @@ pub fn drain_dispatch_dedup_skip(payload_already_pending: Option<bool>) -> bool 
     matches!(payload_already_pending, Some(true))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BetweenTurnCommandKind {
+    Clear,
+    AgentDoc,
+}
+
+impl BetweenTurnCommandKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Clear => "/clear",
+            Self::AgentDoc => "/agent-doc",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BetweenTurnEnqueuePlan {
+    pub kept: Vec<BetweenTurnCommandKind>,
+    pub deduped: usize,
+}
+
+impl BetweenTurnEnqueuePlan {
+    pub fn kept_labels(&self) -> String {
+        self.kept
+            .iter()
+            .map(|kind| kind.label())
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+}
+
+fn command_occurrences(text: &str, command: &str) -> usize {
+    let command = command.trim();
+    if command.is_empty() {
+        return 0;
+    }
+    text.match_indices(command).count()
+}
+
+/// `#qdedup`: compose supervisor/PCP between-turn enqueues as a set, not an
+/// append-only string. Repeated requests may arrive while the current turn is
+/// still active; when the pane reaches the idle boundary, only one clear command
+/// and one agent-doc trigger should remain, in that order. Counting raw
+/// occurrences also recognizes the historical malformed line
+/// `/clear /agent-doc <FILE>/agent-doc <FILE>` so the duplicate can be measured
+/// and suppressed instead of appended again.
+pub fn between_turn_enqueue_plan<'a>(
+    requested: impl IntoIterator<Item = &'a str>,
+    clear_command: &str,
+    trigger_command: &str,
+) -> BetweenTurnEnqueuePlan {
+    let mut clear_count = 0usize;
+    let mut trigger_count = 0usize;
+    for item in requested {
+        clear_count += command_occurrences(item, clear_command);
+        trigger_count += command_occurrences(item, trigger_command);
+    }
+    let mut kept = Vec::with_capacity(2);
+    if clear_count > 0 {
+        kept.push(BetweenTurnCommandKind::Clear);
+    }
+    if trigger_count > 0 {
+        kept.push(BetweenTurnCommandKind::AgentDoc);
+    }
+    BetweenTurnEnqueuePlan {
+        kept,
+        deduped: clear_count
+            .saturating_add(trigger_count)
+            .saturating_sub(clear_count.min(1).saturating_add(trigger_count.min(1))),
+    }
+}
+
 /// `#ctlrecycle` R3 — what the idle supervisor watch should do about a binary that
 /// no longer matches the installed agent-doc. Pure so the policy is unit-testable.
 #[derive(Debug, PartialEq, Eq)]
@@ -737,6 +809,50 @@ mod tests {
         assert!(!drain_dispatch_dedup_skip(Some(false)));
         // Unreadable pane capture → never suppress a legitimate dispatch.
         assert!(!drain_dispatch_dedup_skip(None));
+    }
+
+    #[test]
+    fn between_turn_enqueue_plan_keeps_one_clear_and_one_trigger() {
+        let plan = between_turn_enqueue_plan(
+            [
+                "/clear",
+                "agent-doc tasks/agent-doc/agent-doc-bugs2.md",
+                "/clear",
+                "agent-doc tasks/agent-doc/agent-doc-bugs2.md",
+            ],
+            "/clear",
+            "agent-doc tasks/agent-doc/agent-doc-bugs2.md",
+        );
+
+        assert_eq!(
+            plan.kept,
+            vec![
+                BetweenTurnCommandKind::Clear,
+                BetweenTurnCommandKind::AgentDoc
+            ]
+        );
+        assert_eq!(plan.kept_labels(), "/clear,/agent-doc");
+        assert_eq!(plan.deduped, 2);
+    }
+
+    #[test]
+    fn between_turn_enqueue_plan_counts_concatenated_trigger_duplicate() {
+        let plan = between_turn_enqueue_plan(
+            [
+                "/clear /agent-doc tasks/agent-doc/agent-doc-bugs2.md/agent-doc tasks/agent-doc/agent-doc-bugs2.md",
+            ],
+            "/clear",
+            "/agent-doc tasks/agent-doc/agent-doc-bugs2.md",
+        );
+
+        assert_eq!(
+            plan.kept,
+            vec![
+                BetweenTurnCommandKind::Clear,
+                BetweenTurnCommandKind::AgentDoc
+            ]
+        );
+        assert_eq!(plan.deduped, 1);
     }
 
     #[test]

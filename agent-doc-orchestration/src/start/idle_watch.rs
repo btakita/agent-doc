@@ -88,6 +88,22 @@ fn log_idle_queue_context_reset_submit(
     );
 }
 
+fn log_between_turn_enqueue_delivery(file: &Path, clear_cmd: &str, drain_payload: &str) {
+    let plan = crate::start::decisions::between_turn_enqueue_plan(
+        [clear_cmd, drain_payload],
+        clear_cmd,
+        drain_payload,
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "between_turn_enqueue deduped={} kept={} result=delivered",
+            plan.deduped,
+            plan.kept_labels()
+        ),
+    );
+}
+
 fn idle_queue_pending_payload_needs_enter_resubmit(
     harness_binary: &str,
     payload_already_pending: Option<bool>,
@@ -1245,6 +1261,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                         match auto_trigger_submit_queue_command(&shared, &stop, &drain_payload) {
                             AutoTriggerOutcome::Sent => {
+                                if last_context_reset_head.as_deref() == Some(head.as_str())
+                                    && !crate::queue_command::is_context_clear_command(
+                                        &drain_payload,
+                                    )
+                                {
+                                    log_between_turn_enqueue_delivery(
+                                        &path,
+                                        harness.context_clear_command(),
+                                        &drain_payload,
+                                    );
+                                }
                                 log_idle_queue_drain_submit(
                                     &path,
                                     &shared,
@@ -1457,6 +1484,7 @@ mod tests {
             head,
             &format!("agent-doc {}", doc.display()),
         );
+        log_between_turn_enqueue_delivery(&doc, "/clear", &format!("agent-doc {}", doc.display()));
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         let reset_pos = ops_log
@@ -1473,5 +1501,9 @@ mod tests {
         assert!(ops_log.contains("#cleandrainsup"));
         assert!(ops_log.contains("head_sha256="));
         assert!(ops_log.contains("target=%25"));
+        assert!(
+            ops_log
+                .contains("between_turn_enqueue deduped=0 kept=/clear,/agent-doc result=delivered")
+        );
     }
 }

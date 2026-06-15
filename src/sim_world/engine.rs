@@ -473,6 +473,9 @@ impl SimWorld {
             SimCommand::SetTriggerAlreadyPending(pending) => {
                 self.set_trigger_already_pending(pending);
             }
+            SimCommand::QueueBetweenTurnFreshContextHandoff => {
+                self.queue_between_turn_fresh_context_handoff();
+            }
             SimCommand::RequestSupervisorRestart => {
                 self.recycle_clear.restart_requested = true;
             }
@@ -503,6 +506,49 @@ impl SimWorld {
 
     fn record_ops_proof(&mut self, marker: impl Into<String>) {
         self.ops_log.push(marker.into());
+    }
+
+    fn queue_between_turn_fresh_context_handoff(&mut self) {
+        self.recycle_clear
+            .between_turn_enqueue
+            .push("/clear".to_string());
+        self.recycle_clear
+            .between_turn_enqueue
+            .push("agent-doc sim.md".to_string());
+    }
+
+    fn maybe_deliver_between_turn_enqueue(
+        &mut self,
+        prompt_visible: bool,
+        turn_active: bool,
+    ) -> bool {
+        if self.recycle_clear.between_turn_enqueue.is_empty() {
+            return false;
+        }
+        if !prompt_visible || turn_active {
+            self.coverage.between_turn_enqueue_busy_skips += 1;
+            return true;
+        }
+        let requested = self
+            .recycle_clear
+            .between_turn_enqueue
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let plan = agent_doc_orchestration::start::decisions::between_turn_enqueue_plan(
+            requested,
+            "/clear",
+            "agent-doc sim.md",
+        );
+        self.coverage.between_turn_enqueue_deliveries += 1;
+        self.coverage.between_turn_enqueue_deduped += plan.deduped;
+        self.record_ops_proof(format!(
+            "between_turn_enqueue deduped={} kept={} result=delivered",
+            plan.deduped,
+            plan.kept_labels()
+        ));
+        self.recycle_clear.between_turn_enqueue.clear();
+        true
     }
 
     pub(crate) fn start_blocking_sync_after_kill_pane(&mut self) {
@@ -828,6 +874,9 @@ impl SimWorld {
             self.route.durable.lifecycle,
             SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
         );
+        if self.maybe_deliver_between_turn_enqueue(prompt_visible_now, turn_active_now) {
+            return Ok(());
+        }
         // `#qflood2` (a): advance the post-`/clear` settle debounce for the
         // watch's OWN clears (mirrors idle_watch.rs's `clear_settle_idle_ticks`).
         if self.recycle_clear.awaiting_clear_settle && prompt_visible_now && !turn_active_now {

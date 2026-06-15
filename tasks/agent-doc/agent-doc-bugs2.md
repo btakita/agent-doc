@@ -146,8 +146,7 @@ Verified live: `cargo test -p agent-doc-core --lib component::` → **95 passed,
 ### Re: Documented stall sequence (#qchurn flood, restart-failed, dispatch blocked) — opus-4-8
 
 The pasted logs are the recurring **stale route-owned supervisor** class, not a new bug: a pre-fix supervisor (pid 2715614 here, 1654897 earlier) keeps re-injecting `:pushpin: [#qchurn]` each idle boundary, and the queue correctly *pauses* to stop the flood (`failed_stage=queue_paused reason=#qchurn`) rather than draining no-op churn. This session's preflight confirms it: `queue_drainable_head_count: 0`, `queue_continuation_required: false` — every remaining head is clean-session / operator-verify and undrainable under the stale host. This is operator-domain recovery (restart the supervisor onto the freshly-installed binary; an already-running `agent-doc start` keeps the OLD binary until restarted) — it cannot be agent-resolved from inside the churning session. Not auto-looping this cycle.
-
-<!-- agent:boundary:370f55e0 -->
+<!-- agent:boundary:f9660b40 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -253,6 +252,14 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ---
 :pushpin: - do [#dfrefresh-retire]
 :round_pushpin: do [#suprehotreload]
+- do [#dupcontent2]
+- do [#recyclerestart-verify]
+- do [#rtwbcast-verify]
+- do [#ar27-majors]
+- do [#cleandrainsup-verify]
+- do [#dfrefresh-retire]
+- do [#compactqattr]
+- do [#c2b6]
 <!-- /agent:queue -->
 ###
 <!--

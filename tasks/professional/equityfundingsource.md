@@ -137,7 +137,9 @@ On the dashboard the deal dialog renders `InvestorDealDetail` (embedded). When y
 3. **Shared store** (preact signal/context for one `InvestorLenderProfile`) — most robust, fixes every future divergence; biggest change.
 
 I recommend **Option 1** for the immediate notice transition (Option 3 later if more cross-component lender-derived state appears). I did **not** implement it this turn since the prompt was a "do we have…?" question and the card-state piece needs a UX decision — queued as actionable backlog item `#9e7b` with a plan at `tasks/professional/efs-investor-lender-state-lift.md`. Say `do #9e7b` and I'll wire Option 1, update tests, and ship it.
-<!-- agent:boundary:5c758e3c -->
+
+<!-- no-queue-removal-guard -->
+<!-- agent:boundary:47f56b61 -->
 <!-- /agent:exchange -->
 ###
 <!--

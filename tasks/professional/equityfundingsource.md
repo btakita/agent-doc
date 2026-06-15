@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -140,7 +140,34 @@ Deployed. The worker is live with the multi-file CPA/attorney upload.
 - All bindings (D1, R2 documents/assets/tmo-cache, durable objects, rate limiter, email env) re-bound cleanly; worker startup 21 ms.
 
 Both queue heads are now drained: multi-file upload was already in code (`#multi-file-list`, `5a0e0c4`) and is now shipped live.
-<!-- agent:boundary:7cbe15dd -->
+
+### Re: Annual requirements — show "under review" + allow editing after submit — opus-4-8
+
+> **Queue prompt:**
+>
+> In the lender Annual requirements flow, I submitted the form + documents. The stage should be locked in EFS review. This should allow editing the submission. However, "Complete questionnaire" button is still present and https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard still has the "Annual requirements — action needed" with "Complete requirements" alert. The alert should indicate the Annual requirements are under review and edits can be made. deploy
+
+
+> **Queue prompt:**
+>
+> In the lender Annual requirements flow, I submitted the form + documents. The stage should be locked in EFS review. This should allow editing the submission. However, "Complete questionnaire" button is still present and the dashboard still shows the "Annual requirements — action needed" / "Complete requirements" alert. The alert should indicate the Annual requirements are under review and edits can be made. deploy
+
+Fixed. A submitted-but-not-yet-reviewed questionnaire now reads as **under review** everywhere, and editing the submission stays available. Shipped + deployed.
+
+**Root cause** — After you submit the form + documents, the backend keeps `status='pending'` and sets `has_evidence=true`; only an EFS admin flips it to `verified`/`rejected` (`documents_repo.ts:investor_accreditation_view_`). The requirements tracker already understood this ("Awaiting EFS reviewer approval"), but the **dashboard alert** and the **button labels** treated *all* `pending` as "not started" — so you saw "Annual requirements — action needed" / "Complete requirements" / "Complete questionnaire" even though it was already in review.
+
+**What changed** (the under-review state is now `status==='pending' && has_evidence`):
+- **Dashboard alert** (`dashboard.tsx`) — new branch *ahead of* the action-needed branch: heading **"Annual requirements — under review"**, reminder (amber) tone, copy "…under review by EFS. You can still edit your submission while it is being reviewed." The alert CTA reads **"Edit submission"**.
+- **Button labels** — the dialog's questionnaire button and the Requirements page button now read **"Edit submission"** while under review (still "Update questionnaire" once verified, "Complete questionnaire" before first submit). Editing the submission was always wired; the label just implied it wasn't done.
+- **Status pill** — the Questionnaire-status row now shows **"Under review"** instead of "Pending" once evidence is submitted.
+- Logic is centralized in three exported helpers in `accreditation.tsx` (`accreditation_under_review_`, `accreditation_display_status_`, `questionnaire_action_label_`) so the dashboard dialog and the Requirements page stay in lockstep.
+
+**Files** — `lib/ui--browser--efs/portal/investor/accreditation.tsx`, `lib/ui--browser--efs/portal/investor/dashboard.tsx`, `tests/investor-portal-e2e.test.ts` (new `#req-review` source-assertion test).
+
+**Verification** — `bun run check` green: **705 tests pass**, worker bundle built. Committed `b02dab6`, pushed to `origin/main`.
+
+**Deployed** — `bun run deploy:worker` succeeded → https://equityfundingsource.brian-takita.workers.dev (version `23323d36-36eb-4d12-8f3b-44314586107e`). Live now — reload the investor dashboard; with your submission in place the banner should read "Annual requirements — under review" with an **Edit submission** button.
+<!-- agent:boundary:5d7b29ee -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -148,7 +175,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In the lender Annual requirements flow, I submitted the form + documents. The stage should be locked in EFS review. This should allow editing the submission. However, "Complete questionnaire" button is still present and https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard still has the "Annual requirements — action needed" with "Complete requirements" alert. The alert should indicate the Annual requirements are under review and edits can be made. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -10,3 +10,19 @@ args = [
     "/home/brian/work/btakita/agent-loop",
 ]
 command = "agent-doc"
+default_tools_approval_mode = "approve"
+
+[mcp_servers.agent-doc.tools.agent_doc_read]
+approval_mode = "approve"
+
+[mcp_servers.agent-doc.tools.agent_doc_preflight]
+approval_mode = "approve"
+
+[mcp_servers.agent-doc.tools.agent_doc_plan]
+approval_mode = "approve"
+
+[mcp_servers.agent-doc.tools.agent_doc_session_check]
+approval_mode = "approve"
+
+[mcp_servers.agent-doc.tools.agent_doc_finalize]
+approval_mode = "approve"

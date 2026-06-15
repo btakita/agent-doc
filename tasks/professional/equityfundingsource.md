@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -61,7 +61,7 @@ It only shows when there is something to do, so a verified-and-current investor 
 **Verification** — `bun run check` green: 701 tests pass (36 in the investor-portal e2e file), worker bundle built. Committed in the EFS submodule as `fa6c587`.
 
 **Deployed** — `bun run deploy:worker` succeeded → https://equityfundingsource.brian-takita.workers.dev (version `6b27ec05-5a48-4abe-8338-67897bb35a73`). Live now.
-<!-- agent:boundary:c11aefa6 -->
+<!-- agent:boundary:4a736e2f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,6 +69,9 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- On https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard, add the dialog stack for the Investor questionaire...both the Requirements and the Complete Requirements. Both the dialogs should match the https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation forms
+- "CPA / attorney letter or supporting document" in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation and the dialog should allow multiple files. Use our standard multi-file upload component.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

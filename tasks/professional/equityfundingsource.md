@@ -38,7 +38,49 @@ committed
 Compacted content:
 - Archived 2 response topic(s): compact archive summary / no-op closeout; #gq5c follow-up next steps
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): Available Deals lender workflow; commit + push all dirty EFS f...
-<!-- agent:boundary:58887a1b -->
+
+### Re: #investor-pipeline-resequence and borrower portal messages — gpt-5
+
+Implemented `#investor-pipeline-resequence` in `src/equityfundingsource-dev`.
+
+What changed:
+- Lender Pipeline is now account eligibility: Signed Up, Requirements Review, Requirements Current, Renewal Due, Expired / Hold, Lender Ready.
+- Pending/active funding no longer moves a lender card. Pending commitments remain context on the lender card; wire/funded state belongs to Deal Pipeline / Funding Commits.
+- Deal Pipeline labels now read Available, Ready to Commit, Committed / Awaiting Wire, Wire Confirmed / Funded, Closed.
+- Deal Pipeline cards now include lender compliance chips for ready, renewal due, and hold counts, aggregated from interested/committed lenders.
+- Admin UI copy, source tests, poll-refresh expectations, and PRDs were updated to match the resequenced model.
+
+Borrower portal messaging answer:
+- Yes, there is an admin side for borrower portal messages. The admin Messages UI can list borrower threads and reply.
+- Email notifications for borrower/admin chat are already wired behind `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED`; production config enables outbound notifications with the currently verified Cloudflare sender.
+- Borrowers can receive email when an admin replies, through the same notification path.
+- Email reply back into chat is implemented as `/api/email/inbound`, but it remains disabled in production until inbound provider routing, `MESSAGE_EMAIL_INBOUND_ENABLED`, and `MESSAGE_EMAIL_INBOUND_SECRET` are configured. It also requires the inbound sender to resolve to an authorized admin.
+
+Verification:
+- `bun test tests/admin-investor-pipeline.test.ts tests/admin-pipeline.test.ts` passed: 112 tests, 705 assertions.
+- `make check` passed: 729 tests, app build, worker build.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` and `gh run list --limit 1` returned no workflows/runs for this submodule repository.
+
+Changed paths:
+- `app/equityfundingsource/lib/admin/repo.ts`
+- `app/equityfundingsource/lib/admin/shared.ts`
+- `app/equityfundingsource/lib/admin/loan_management/index.ts`
+- `app/equityfundingsource/lib/admin/investor_management/index.ts`
+- `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `tests/admin-investor-pipeline.test.ts`
+- `tests/admin-pipeline.test.ts`
+- `tests/admin-poll-refresh.test.ts`
+- `prds/investor-pipeline-admin.md`
+- `prds/equity-funding-source-lending-portal-prd.md`
+
+Commit/push proof:
+- EFS submodule: `1dc930b feat(admin): resequence lender pipeline`, pushed to `btakita/equityfundingsource-dev` `main`.
+- Parent repo pointer: `ebf25ff9a chore: bump equityfundingsource-dev`, pushed to `btakita/agent-loop` `main`.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:bcca8091 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -56,7 +98,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Review
 
 <!-- agent:review -->
-- [x] [#investor-pipeline-resequence] [operator-verify] [recommended] Await explicit approval of the revised lender/deal pipeline split, then implement: correct the admin label to Accreditation/Requirements; keep the lender pipeline focused on signup, first-time/annual requirements, under-review/current/renewal-due/expired states, and lender-account eligibility/linking; move per-deal Ready to Commit, Committed/Awaiting Wire, and Wire Confirmed/Funded states into the Deal Pipeline; show lender compliance badges/holds on deal cards; update UI/tests.
 - [/] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
 - [/] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
 - [/] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.

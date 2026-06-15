@@ -555,7 +555,17 @@ Per your division of labor ("I test, file bugs, you check the logs"): the report
 **This very cycle reproduced it live:** my first finalize drift-raced against the stale supervisor (`live_prompt_drift_after_preflight`, `content_ours_len=98226`) and a concurrent compaction folded the response into the summary — the precise self-race the reports describe.
 
 **No agent-doable code work is safe here** (fixes are `[clean-session]`/`[operator-verify]`; stale supervisor races every write; accretion at `block`). **Operator action to clear it** (can't be agent-done — would kill this session's own parent supervisor): `agent-doc admin recycle --all-projects` (or restart the session), then `pkill -f 'controller serve .* --handoff-state preparing'` for pid 1195078. After recycle onto the 23:12 build, `Run Agent Doc` self-heals and `#recyclerestart-verify` / `#aazp` / `#4myd` prove from ops.log (`supervisor_binary_stale_self_recycled`).
-<!-- agent:boundary:e8c733b8 -->
+
+### Re: [#cleandrainsup-verify] — third re-check, marker still absent — opus-4-8
+
+Re-ran the acceptance grep on the live ops.log. **Still no genuine emission** — stays `[operator-verify]`, gated, not done (it's an operator-driven live proof; I cannot complete it).
+
+**Don't be fooled by the raw counts.** A naive `grep -c` now returns `supervisor_binary_stale_self_recycled` → 17 and `reason=#cleandrainsup` → 3, but every one of those hits is inside a `queue_diff_active_prompt_differs file=…agent-doc-bugs2.md prompt_changes=[…]` line — i.e. this document's own backlog/queue prose echoed into queue-diff log entries, not a supervisor event. Filtering out `queue_diff` lines leaves **0** genuine `idle_queue_watch_context_reset … reason=#cleandrainsup` events and **0** genuine `supervisor_binary_stale_self_recycled` events. Same result as the last two checks.
+
+**Why it can't have fired:** the live route-owned supervisor serving this session is still pid **1654897** (started 14:43, ~9 h ago), flagged `supervisor_binary_stale` — it predates the `1f8c9f63` (`#cleandrainsup`) build and has not recycled. The idle-watch reset/drain path that emits the marker isn't in that running binary.
+
+**Unchanged operator path to the proof:** recycle the supervisor onto a fresh build (`agent-doc admin recycle --all-projects`, or restart the session), leave a `[clean-session]` head at the active queue head under a live IDE, let idle-watch fire, then re-grep — expect `idle_queue_watch_context_reset harness=claude … reason=#cleandrainsup` followed by a one-fresh-agent-per-item `[clean-session]` drain. I will not mid-cycle recycle the host serving this finalize (`#no-mid-session-install`). I'll re-verify the instant those lines appear in the log.
+<!-- agent:boundary:8361f12c -->
 <!-- /agent:exchange -->
 
 ## Queue

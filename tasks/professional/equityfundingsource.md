@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,29 @@ committed
 Compacted content:
 - Archived 5 response topic(s): Dashboard application notice needs a button to the form; Unify the "Lender account application; Remove "Lender account application; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:9dd33a43 -->
+
+### Re: Move applied deals to a Pending deals section + deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> When a Lender applies for a Deal, the deal should be moved from Available deals to a new Pending deals section in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard and https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals#investor-lender-application-form. deploy
+
+
+Done and deployed. When a lender applies to fund a deal (`investor_fund_status === 'pending'`), the deal now leaves the **Available deals** pool and surfaces in its own **Pending deals** section on both surfaces.
+
+**Available deals page** (`lib/ui--browser--efs/portal/investor/available_deals.tsx`)
+- New `pending_deals` filter (`=== 'pending'`); `available_deals` now excludes both `active` and `pending`.
+- New "Pending deals" section ("Deals you have applied to fund. EFS is reviewing your funding commitment.") rendered before Active funded deals.
+- Pending cards hide the "I'm interested" heart, show a **Funding pending review** badge, and are no longer selectable as the commitment-calculator target.
+- Page subtitle now counts pending deals alongside open + active.
+
+**Dashboard** (`dashboard.tsx`)
+- `AvailableDealsPreview` splits pending out into a new `PendingDealsPreview` card (same "Funding pending review" badge, opens the full deal dialog); the Available deals preview excludes pending.
+
+**Verification:** `bun run check` green — 695 tests pass (added `#pending-deals` coverage in `investor-portal-e2e.test.ts`), build + worker bundle clean. Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `61df3c82`).
+
+Commits: submodule `aba09cf`, superproject pointer bump `a0714f59d`.
+<!-- agent:boundary:8d47754a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +68,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- When a Lender applies for a Deal, the deal should be moved from Available deals to a new Pending deals section in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard and https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals#investor-lender-application-form. deploy
 <!-- /agent:queue -->
 
 ## Backlog

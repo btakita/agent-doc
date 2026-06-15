@@ -677,16 +677,27 @@ Changed paths in `src/agent-doc`: `agent-doc-core/src/template.rs`, `agent-doc-o
 Verification passed from the clean worktree `src/agent-doc-efsmrgmarkers`: `cargo test -p agent-doc-core conflict -- --nocapture`; `cargo test -p agent-doc-orchestration conflict -- --nocapture`; `cargo test -p agent-doc normalize_template_structure_ffi -- --nocapture`; `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`; `make check` with 4542 tests passed, 238 skipped, doctests passed, and the medium SimWorld gate passed.
 
 Commits: `src/agent-doc` `278e9bec` (`fix: guard session docs against raw merge markers`) pushed to `origin/main`; parent gitlink update `a3eb99721` committed. Escalation none. Confidence high.
-<!-- agent:boundary:1fc18842 -->
+
+### Re: operator-verify queue actions — gpt-5
+
+I added concrete queueable follow-ups for the remaining `[operator-verify]` work instead of leaving the broad live gates as the only action.
+
+Current log sweep found partial evidence: `write_authority action=routed`, `plugin_watch_readonly`, `queue_consume_writeback transport=editor_ipc`, `idle_queue_watch_context_reset`, and `supervisor_binary_stale_self_recycled` all appear in recent logs. I also found disproof or incomplete-proof signals, including `live_prompt_drift_after_preflight`, `content_ours_adoption_refused_stale_supervisor`, and `crdt_merge_base_overlay_stale`. I did not close any operator-verify item from this sweep because the existing items require exact live proof per gate, not just related marker presence.
+
+The new backlog items split the remaining work into log-correlation tasks for submit proof, editor/IPC proof, and supervisor recycle proof. They are `[clean-session]` items so go-mode can queue and drain them with a fresh agent context.
+
+Commands used: `rg` over `agent:backlog` / `agent:review`, targeted ops-log marker search across available logs, and `agent-doc plan`. No source files changed in this cycle. Escalation none. Confidence medium: the queue additions are actionable, but final closure still depends on exact proof markers or operator reproduction.
+<!-- agent:boundary:dce497b3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#efsmrgmarkers]~~
+- ~~:round_pushpin: Please add actionable items into the queue to advance `[operator-verify]` tasks. Read logs to see if any of the tasks are complete or need more work.~~
+- Fix the root cause of "Re: queue churn explanation — gpt-5"
 - do [#snbc2]
 - do [#codexctrlz]
-- Please add actionable items into the queue to advance `[operator-verify]` tasks. Read logs to see if any of the tasks are complete or need more work.
 <!-- /agent:queue -->
 ###
 <!--
@@ -716,6 +727,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#opverify-submit-proof] [clean-session] Operator-verify submit proof sweep: correlate ops.log for #2v7b/#jbcodexsubmit/#jbclaudesubmit across Claude and Codex panes. Require paired proof per harness: route_submit_issue issue=prompt_not_submitted followed by route_submit_resubmit action=enter_key result=accepted with queue start evidence. If both exist, close/gate-resolve #2v7b; if one side is missing, update the item with the exact missing harness and latest log timestamp.
+- [ ] [#opverify-editor-proof] [clean-session] Operator-verify editor/IPC proof sweep: correlate #qt32, #fcc0-live-verify, #c2b6, and #rtwbcast-verify against ops.log markers write_authority action=routed, plugin_watch_readonly, supervisor_host_gate hosting=in-process, queue_consume_writeback transport=editor_ipc, compact_writeback transport=editor_ipc, and disproof markers live_prompt_drift_after_preflight / crdt_merge_base_overlay_stale / File Cache Conflict. Close only items with exact zero-drift proof; otherwise update each with missing marker(s).
+- [ ] [#opverify-recycle-proof] [clean-session] Operator-verify supervisor recycle proof sweep: correlate #suprehotreload, #recyclerestart-verify, #1j8q, #aazp, #4myd, #anw0verify, and #cleandrainsup-verify against ops.log markers supervisor_binary_stale_self_recycled, supervisor_reexec_failed fallback=continue_current_binary, dispatch_stale_generation_redirect, idle_queue_watch_context_reset, and subsequent drain/dispatch proof. Close duplicates with exact proof or update each item with the missing live step.
 - [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md

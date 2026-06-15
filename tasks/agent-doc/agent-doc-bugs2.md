@@ -232,6 +232,42 @@ Push: I will push `main` after this closeout commit.
 
 > **Queue prompt:**
 >
+> :pushpin: Codex finalize error
+> ```
+> • Finalize’s backlog-capture guard interpreted the closeout note as a possible follow-up. I’m rerunning with an explicit
+>   no-follow-up marker; no code or doc content was written by the failed attempt.
+>
+> • Called
+>   └ agent-doc.agent_doc_finalize({"file":"/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-
+>         bugs2.md","baseline_file":"/home/brian/work/btakita/agent-loop/.agent-doc/
+>         baselines/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.md","origin":"skill","stream":true,"r
+>         esponse":"### Re: JB Run Agent Doc Drafted Reopen — gpt-5\n\nImplemented the route-side fix for the JetBrains
+>         `Run Agent Doc` reopen path.\n\nWhat changed:\n- `agent-doc-orchestration/src/route/dispatch.rs` now checks the
+>         recent direct-pane capture before appending a routed trigger. If the exact same `agent-doc <FILE>` trigger is
+>         already visible in a Codex or Claude composer, route sends one bare `Enter` and polls acceptance instead of
+>         appending another copy.\n- Stale scrollback is guarded: a visible trigger with a later idle prompt below it is
+>         not treated as active draft input.\n- The existing post-send one-shot Enter retry now shares the same helper/
+>         proof logging as the new pre-send drafted-trigger path.\n- Added coverage for current duplicate drafts, stale
+>         scrollback, harness scoping, and wrapped long paths.\n- Updated `README.md`, `VERSIONS.md`, `specs/08a-session-
+>         actor-contract.md`, and `editors/jetbrains/SPEC.md` with the new contract.\n\nVerification:\n- `cargo fmt
+>         --check`\n- `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection --lib`\n- `cargo test -p
+>         agent-doc-orchestration direct_pane_resubmit --lib`\n- `make check`\n- `cargo install --path .`\n- `agent-doc
+>         --version` -> `agent-doc 0.34.1`\n- `gh run list --workflow CI --limit 1` -> latest `CI` on `main` completed
+>         successfully\n\nCommits created:\n- `src/agent-doc`: `4345a2f9 fix: submit drafted routed triggers without
+>         stacking`\n- parent repo: `b19594282 agent-doc: update routed trigger submit fix`\n\nNotes:\n- The `src/agent-
+>         doc` submodule had a broad pre-existing dirty tree; I staged and committed only the five intended files for this
+>         bug.\n- Escalation: none.\n- Confidence: high. The fix is narrow, covered by focused tests, and the full local
+>         check suite passed.\n- No actionable follow-up items from this cycle. \n- Push will
+>         happen after this closeout commit exists; I will push the submodule and parent repo immediately after
+>         closeout."})
+>     Error: tool call error: tool call failed for `agent-doc/agent_doc_finalize`
+>         Caused by:
+>             Transport closed
+> ```
+
+
+> **Queue prompt:**
+>
 > :pushpin: We need a better way to prevent merge wedges while I am typing. Can the document model support CRDT with no conflicts? There are too many `File Cache Conflicts`. We should never write directly to disk while the plugin is running.
 
 
@@ -277,15 +313,13 @@ Commit:
 Escalation: none.
 Confidence: high that the corruption report is now actionable and tied to an exact plan file.
 Push: I will push `main` after this closeout commit.
-<!-- agent:boundary:218ca0db -->
+<!-- agent:boundary:7c235bbe -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: The stale head caused the duplicate content corrupt document issue.~~
-- ~~:pushpin: We need a better way to prevent merge wedges while I am typing. Can the document model support CRDT with no conflicts? There are too many `File Cache Conflicts`. We should never write directly to disk while the plugin is running.~~
----
+~~~done
 :pushpin: Codex finalize error
 ```
 • Finalize’s backlog-capture guard interpreted the closeout note as a possible follow-up. I’m rerunning with an explicit
@@ -318,7 +352,8 @@ Push: I will push `main` after this closeout commit.
         Caused by:
             Transport closed
 ```
----
+~~~
+- do [#staleheaddupcontent]
 - :pushpin: Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.
 ---
 :pushpin: JB `Run Agent Doc`
@@ -328,7 +363,6 @@ Push: I will push `main` after this closeout commit.
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3568
 ```
 ---
-- do [#staleheaddupcontent]
 <!-- /agent:queue -->
 ###
 <!--

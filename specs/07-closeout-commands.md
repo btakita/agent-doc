@@ -26,6 +26,7 @@ or prove capabilities, but it may not change the closeout semantics.
 
 - Commits the saved snapshot, not arbitrary working-tree drift.
 - Narrow self-heal is allowed only for agent-owned drift that preserves the redacted component structure, or for exchange-only already-committed historical response growth proven by `HEAD`.
+- `agent-doc compact <FILE> --component exchange --commit` may archive finalized `### Re:` response history that is already present in `HEAD`; when non-exchange components are preserved, that exchange-only archival is not `typed_component_drift` and must commit successfully, including after the compacted exchange converges through editor IPC.
 - Plain user prompts must remain uncommitted.
 - If `snapshot == HEAD` but the working tree still differs, `commit` must classify that state as later local drift rather than a missed patchback.
 - If `snapshot == HEAD` while an active response capture still exists, `commit` must prove that the captured response body is present in the staged snapshot/`HEAD` before closing the cycle as already committed. A prompt-only `HEAD`-current snapshot with a missing captured response must fail closed and leave the cycle at `response_captured` for `agent-doc write --commit <FILE>` replay instead of logging `commit_already_current`.

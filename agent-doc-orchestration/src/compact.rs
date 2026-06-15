@@ -1246,7 +1246,6 @@ fn is_leap_year(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1284,13 +1283,15 @@ mod tests {
     fn assert_non_exchange_items_preserved_passes_when_counts_stable() {
         // Only the exchange changed; backlog/review item counts are identical.
         let after = COMPACTDROPITEM_DOC.replace("Response one.", "*Compacted.*");
-        assert!(super::assert_non_exchange_items_preserved(
-            Path::new("/tmp/compactdropitem.md"),
-            COMPACTDROPITEM_DOC,
-            &after,
-            "test"
-        )
-        .is_ok());
+        assert!(
+            super::assert_non_exchange_items_preserved(
+                Path::new("/tmp/compactdropitem.md"),
+                COMPACTDROPITEM_DOC,
+                &after,
+                "test"
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -1322,8 +1323,14 @@ mod tests {
 
         // Full exchange compact must leave backlog (3) and review (1) intact and
         // must NOT trip the #compactdropitem guard.
-        run_component_compact(&file, COMPACTDROPITEM_DOC, "exchange", Some("Compacted."), false)
-            .unwrap();
+        run_component_compact(
+            &file,
+            COMPACTDROPITEM_DOC,
+            "exchange",
+            Some("Compacted."),
+            false,
+        )
+        .unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
         let counts = non_exchange_list_item_counts(&result);
@@ -2402,7 +2409,9 @@ mod tests {
             .join("crdt")
             .join(format!("{}.yrs", snapshot::doc_hash(&file).unwrap()));
         if let Ok(bytes) = std::fs::read(&crdt_path) {
-            let round_tripped = crate::crdt::CrdtDoc::decode_state(&bytes).unwrap().to_text();
+            let round_tripped = crate::crdt::CrdtDoc::decode_state(&bytes)
+                .unwrap()
+                .to_text();
             assert!(
                 round_tripped.contains(queue_marker),
                 "post-compact CRDT state must round-trip the queue marker verbatim; got:\n{round_tripped}"
@@ -2574,6 +2583,92 @@ mod tests {
     }
 
     #[test]
+    fn compact_with_commit_converges_committed_response_head_without_historical_drift_guard() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/ack-content")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+
+        git(root, &["init", "-q"]);
+        git(root, &["config", "user.email", "test@example.com"]);
+        git(root, &["config", "user.name", "Test"]);
+
+        let file = root.join("session.md");
+        let doc = concat!(
+            "---\nagent_doc_session: test-compactdrift\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "rtwbcast landed.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Earlier work.\n\n",
+            "do #rtwbcast. spec-test-build-install-commit-push\n",
+            "### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8\n\n",
+            "Implemented the broadcast rung.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#follow] keep an eye on convergence\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        fs::write(&file, doc).unwrap();
+        snapshot::save(&file, doc).unwrap();
+        git(root, &["add", "session.md"]);
+        git(root, &["commit", "-q", "-m", "finalized response head"]);
+
+        let _listener = start_component_patch_ack_listener(root);
+        crate::test_support::wait_for_live_prompt_drift_listener(root);
+
+        run(
+            &file,
+            None,
+            Some("exchange"),
+            Some("Compacted summary."),
+            Some("skip"),
+            true,
+        )
+        .expect("compact --commit must not reject a clean exchange-only historical response");
+
+        let committed = crate::git::show_head(&file).unwrap().unwrap();
+        assert!(
+            committed.contains("Compacted summary."),
+            "HEAD should hold the compacted exchange:\n{committed}"
+        );
+        assert!(
+            !committed.contains("### Re: do [#rtwbcast]"),
+            "the historical finalized response must be archived out of HEAD:\n{committed}"
+        );
+        assert!(
+            committed.contains("- [ ] [#follow] keep an eye on convergence"),
+            "compact must preserve non-exchange components:\n{committed}"
+        );
+        assert_eq!(
+            snapshot::load(&file).unwrap().unwrap(),
+            committed,
+            "post-compact snapshot must match the committed document"
+        );
+
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("compact_writeback") && ops_log.contains("transport=editor_ipc"),
+            "fixture should prove the Compact Exchange editor-IPC path:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("commit_blocked_committed_historical_patchback")
+                && !ops_log.contains("typed_component_drift")
+                && !ops_log.contains("refusing to auto-adopt committed historical response"),
+            "clean exchange-only compact must not trip the historical response drift guard:\n{ops_log}"
+        );
+    }
+
+    #[test]
     fn malformed_compact_summary_detects_prompt_prefixed_summary() {
         // #jb-compact-malformed-response-commit: the live repro shape.
         let doc = concat!(
@@ -2687,6 +2782,49 @@ mod tests {
             .output()
             .unwrap();
         assert!(out.status.success(), "git {:?} failed", args);
+    }
+
+    fn start_component_patch_ack_listener(root: &Path) -> std::thread::JoinHandle<()> {
+        let root = root.to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            let root_clone = root.clone();
+            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = payload
+                    .get("patch_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown");
+                let mut content = payload.get("baseline")?.as_str()?.to_string();
+                if let Some(frontmatter) = payload.get("frontmatter").and_then(|v| v.as_str()) {
+                    content = replace_frontmatter(&content, frontmatter)?;
+                }
+                for patch in payload.get("patches")?.as_array()? {
+                    let name = patch.get("component")?.as_str()?;
+                    let replacement = patch.get("content")?.as_str()?;
+                    let components = component::parse(&content).ok()?;
+                    let target = components.iter().find(|component| component.name == name)?;
+                    content = target.replace_content(&content, replacement);
+                }
+
+                if let Some(file_path) = payload.get("file").and_then(|value| value.as_str()) {
+                    let _ = std::fs::write(file_path, &content);
+                }
+                let ack_dir = root_clone.join(".agent-doc/ack-content");
+                let _ = std::fs::create_dir_all(&ack_dir);
+                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
+                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            });
+        })
+    }
+
+    fn replace_frontmatter(content: &str, frontmatter: &str) -> Option<String> {
+        let rest = content.strip_prefix("---\n")?;
+        let end = rest.find("\n---")?;
+        Some(format!(
+            "---\n{frontmatter}\n---{}",
+            &rest[end + "\n---".len()..]
+        ))
     }
 
     #[test]

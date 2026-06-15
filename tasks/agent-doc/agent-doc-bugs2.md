@@ -732,7 +732,19 @@ Verification:
 - `make check` passed: clippy, 4547 tests, doctests, and medium SimWorld gate
 - `git diff --check`
 - Latest checked GitHub Actions CI for the prior pushed `agent-doc` main commit was green.
-<!-- agent:boundary:703bfe81 -->
+
+### Re: :round_pushpin: There's too many `[operator-verify]` tags...some of the items can be agent-done...such as I performed some actions and there are log messages. Don't punt on these issues. `agent:backlog` with `queue` should add the `[operator-verify]` to the queue for process. Once procesed by agent-doc, any item that truly requires operator action should go into `agent:review`. — gpt-5
+
+Cleared the only current `agent:review` item, `#2v7b`, by moving its actionable replacement into the queueable backlog path instead of leaving it as a gated review entry. I updated `#opverify-submit-proof` to explicitly replace `#2v7b / #jbcodexsubmit / #jbclaudesubmit`, name the current submit-path fix (`agent-doc` `55b86a61`), and define the proof/disproof markers the agent should check from logs.
+
+No JetBrains plugin update is required for the submit-path fix I just landed; it is a Rust `agent-doc` CLI/orchestration change. To test it live, install/recycle the current `agent-doc` binary/cdylib so JB routes call the new code, then let the queueable `#opverify-submit-proof` item inspect the logs.
+
+Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only.
+
+Commands used: `agent-doc plan`, targeted `rg`/`sed` inspection of `agent:queue`, `agent:backlog`, and `agent:review`, and `agent-doc finalize` with `--review-remove 2v7b` plus `--pending-edit opverify-submit-proof=...`.
+
+Verification: this closeout should leave `agent:review` empty and keep the replacement work in `agent:backlog priority queue`. Escalation none. Confidence high.
+<!-- agent:boundary:b0589865 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -740,9 +752,10 @@ Verification:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~Fix the root cause of "Re: queue churn explanation — gpt-5"~~
 - ~~:round_pushpin: Codex JB `Run Agent Doc` is still sending a `\n` to Codex instead of submitting the command. We have used several turns and 1 `/goal` but it's still not working.~~
-- [#qrefmisstrike]
-- :round_pushpin: There's too many `[operator-verify]` tags...some of the items can be agent-done...such as I performed some actions and there are log messages. Don't punt on these issues. `agent:backlog` with `queue` should add the `[operator-verify]` to the queue for process. Once procesed by agent-doc, any item that truly requires operator action should go into `agent:review`.
-- #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
+- :pushpin: [#qrefmisstrike]
+- :pushpin: [#qrefmisstrike]
+- ~~:round_pushpin: There's too many `[operator-verify]` tags...some of the items can be agent-done...such as I performed some actions and there are log messages. Don't punt on these issues. `agent:backlog` with `queue` should add the `[operator-verify]` to the queue for process. Once procesed by agent-doc, any item that truly requires operator action should go into `agent:review`.~~
+- :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
 - do [#snbc2]
 - do [#codexctrlz]
 - do [#opverify-submit-proof]
@@ -778,7 +791,7 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#qrefmisstrike] [clean-session] Queue auto-strike must not delete free-text follow-up prompts that merely reference a completed/gated id. Repro: EFS `- What are #next-steps to follow-up on #gq5c` was auto-pinned, auto-struck as `source=review_gated`, the queue body was cleared, and the next cycle no-oped on the compact archive summary. Fix resolved-id extraction so only directive-shaped heads like `do [#id]`, `do #id`, `advance [#id]`, or bare `[#id]` auto-strike; keep natural-language `#next-steps` / follow-up prompts live. Plan: tasks/agent-doc/plan-queue-reference-id-misstrike.md.
-- [ ] [#opverify-submit-proof] [clean-session] Operator-verify submit proof sweep: correlate ops.log for #2v7b/#jbcodexsubmit/#jbclaudesubmit across Claude and Codex panes. Require paired proof per harness: route_submit_issue issue=prompt_not_submitted followed by route_submit_resubmit action=enter_key result=accepted with queue start evidence. If both exist, close/gate-resolve #2v7b; if one side is missing, update the item with the exact missing harness and latest log timestamp.
+- [ ] [#opverify-submit-proof] [clean-session] Replacement for cleared review #2v7b / #jbcodexsubmit / #jbclaudesubmit. After installing and recycling agent-doc 55b86a61 (no JetBrains plugin update required for this Rust CLI/cdylib submit-path fix), correlate ops.log for JB Run Agent Doc submit proof across Claude and Codex panes. Required proof per harness: route_direct/direct-pane submit diagnostics show the intended backend (Codex submit_mode=tmux_literal_text_enter_key / routed_trigger_enter_key; OpenCode remains Kitty Return; Claude remains CR), followed by route_dispatch_start_proven or route_dispatch_only_sent proof_scope=dispatch_start. If a harness still needs a manual Enter or only has accepted-only/no-proof output, update this item with the exact missing harness, pane, and latest log timestamp instead of moving it back to review.
 - [ ] [#opverify-editor-proof] [clean-session] Operator-verify editor/IPC proof sweep: correlate #qt32, #fcc0-live-verify, #c2b6, and #rtwbcast-verify against ops.log markers write_authority action=routed, plugin_watch_readonly, supervisor_host_gate hosting=in-process, queue_consume_writeback transport=editor_ipc, compact_writeback transport=editor_ipc, and disproof markers live_prompt_drift_after_preflight / crdt_merge_base_overlay_stale / File Cache Conflict. Close only items with exact zero-drift proof; otherwise update each with missing marker(s).
 - [ ] [#opverify-recycle-proof] [clean-session] Operator-verify supervisor recycle proof sweep: correlate #suprehotreload, #recyclerestart-verify, #1j8q, #aazp, #4myd, #anw0verify, and #cleandrainsup-verify against ops.log markers supervisor_binary_stale_self_recycled, supervisor_reexec_failed fallback=continue_current_binary, dispatch_stale_generation_redirect, idle_queue_watch_context_reset, and subsequent drain/dispatch proof. Close duplicates with exact proof or update each item with the missing live step.
 - [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
@@ -801,7 +814,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#2v7b] [operator-verify] #jbcodexsubmit / #jbclaudesubmit JB Run Agent Doc enters the routed prompt but does not submit it (operator presses Enter). CODE-COMPLETE 2026-06-13 (agent-doc 3b71cfeb, superproject 8fcdc067f): JB dispatch-only routes BOTH Claude and Codex through the same direct-pane send_command_unchecked path (merged text+CR send-keys), and TriggerStillVisible detection already covered both, but the one-shot Enter re-submit was gated codex-only. Generalized direct_pane_needs_codex_resubmit -> direct_pane_needs_enter_resubmit (codex|claude; opencode excluded; requires TimedOut+trigger_visible so no stray Enter into an empty composer); proof line route_submit_resubmit ... action=enter_key result=accepted|still_visible; 3 unit tests; make check 4369 passed 0 FAIL. Built+installed+recycled. GATE now operator-drive ONLY: run JB Run Agent Doc against a Claude pane AND a Codex pane, confirm ops.log shows route_submit_issue issue=prompt_not_submitted then route_submit_resubmit action=enter_key result=accepted with the queue starting. Plan: tasks/agent-doc/plan-jb-codex-submit.md
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

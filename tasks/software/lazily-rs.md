@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -134,7 +134,7 @@ Commands run: `corky linkedin auth --profile btakita` to refresh the expired OAu
 Verification: Corky dry-run passed before publish; live publish returned the post URL; live comment returned a comment ID; `make check` passed; parent `Agent Doc` workflow run `27557245366` was queued after push. There is no workflow named `CI` in the parent repo or `mail`, and `mail` has no workflows listed. Session note: the exchange is large, but the queue was active, so I kept draining rather than compacting.
 
 Confidence: high. Escalation: browser OAuth approval was required for the expired LinkedIn token.
-<!-- agent:boundary:e90c19eb -->
+<!-- agent:boundary:64f6db7b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -143,6 +143,7 @@ Confidence: high. Escalation: browser OAuth approval was required for the expire
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- The article is not complete https://www.linkedin.com/feed/update/urn:li:activity:7472308587910934528/ please fix
 <!-- /agent:queue -->
 
 ## Backlog

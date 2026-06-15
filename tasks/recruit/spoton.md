@@ -22,8 +22,29 @@ prompt_presets:
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+❯ Please add contacts for:
+❯ - rafael-onso https://www.linkedin.com/in/rafaalonso/
+❯ - michael-kai https://www.linkedin.com/in/mikekai/
 
-<!-- agent:boundary:1a0a1956 -->
+❯ Transcribe + diarize my call with them [2026-06-11 12-31-50-compressed.mp4](../../../../../Videos/2026-06-11%2012-31-50-compressed.mp4)
+
+### Re: contacts + call transcript — gpt-5
+
+Added the requested contacts and created a versioned transcript artifact:
+
+- [SpotOn call transcript - 2026-06-11](spoton-2026-06-11-call-transcript.md)
+- Contacts included: Rafael Alonso (`https://www.linkedin.com/in/rafaalonso/`) and Mike Kai (`https://www.linkedin.com/in/mikekai/`)
+
+The transcript file includes the contact table, speaker map, call summary, and the full timestamped diarized transcript. I used the local recording at `../../../../../Videos/2026-06-11 12-31-50-compressed.mp4`, extracted meeting frames with the `watch` workflow, read the visible Zoom labels, transcribed locally with Whisper `turbo`, then clustered speaker embeddings into Rafael / Brian / Mike. No external audio transcription API was used because the watch setup has no Whisper API key configured.
+
+Verification:
+
+- `make check` passed.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+- `gh workflow list` shows only `Agent Doc`; the latest `Agent Doc` run was queued when checked.
+
+Confidence: medium-high for transcript text, medium for diarization. The diarization is automated and timestamped for review; short back-and-forth turns can still be merged into one speaker line near speaker changes.
+<!-- agent:boundary:0f61ef99 -->
 <!-- /agent:exchange -->
 
 ## Queue

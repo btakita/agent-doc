@@ -185,7 +185,43 @@ Verification:
 Escalation: none.
 Confidence: high for the repair state; medium for the new backlog diagnosis until the forced transport-close regression is implemented.
 Push: I will push `main` immediately after this binary-owned closeout commit exists.
-<!-- agent:boundary:7bee43f6 -->
+
+### Re: Monsterrodholders Backlog Queue Sync — gpt-5
+
+> **Queue prompt:**
+>
+> monsterrodholders.md has `agent:backlog priority queue`...but the items are not added to `agent:queue`.
+
+
+Captured the `monsterrodholders.md` backlog-to-queue sync failure as a plan-backed backlog item.
+
+Added:
+- `#mrhbacklogqueuesync` for the case where `agent:backlog priority queue` is present but eligible backlog items do not materialize in `agent:queue`. Plan: `tasks/agent-doc/plan-monsterrodholders-backlog-priority-queue-sync.md`.
+
+Changed paths:
+- `tasks/agent-doc/plan-monsterrodholders-backlog-priority-queue-sync.md`
+- Session backlog/queue state in this document.
+
+Commands:
+- `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md`
+- `apply_patch` added the plan file.
+- `git add tasks/agent-doc/plan-monsterrodholders-backlog-priority-queue-sync.md`
+- `git diff --cached --name-only`
+- `git diff --cached --stat`
+- `git commit -m "agent-doc: plan monsterrodholders queue sync"`
+
+Verification:
+- Plan file records reproduction, diagnostics, implementation, and acceptance criteria.
+- Verified only the new plan file was staged for the manual repo commit.
+- No source tests were run for this planning-only cycle; the plan defines the required focused regression and `make check` gate for implementation.
+
+Commit:
+- `4abfb95f7 agent-doc: plan monsterrodholders queue sync`
+
+Escalation: none.
+Confidence: high that the report is now actionable and tied to an exact plan file.
+Push: I will push `main` after this closeout commit.
+<!-- agent:boundary:53e6c5a1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -194,7 +230,7 @@ Push: I will push `main` immediately after this binary-owned closeout commit exi
 - ~~:pushpin: [#codexmcpfinalize]~~
 - ~~JB `Clear Session Context` added `/clear` to the Codex input but did not submit when called on monsterrodholders.md~~
 - ~~agent-doc deleted all the queue items I added in monsterrodholders.md~~
-- monsterrodholders.md has `agent:backlog priority queue`...but the items are not added to `agent:queue`.
+- ~~monsterrodholders.md has `agent:backlog priority queue`...but the items are not added to `agent:queue`.~~
 ---
 Codex finalize error
 ```
@@ -271,6 +307,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#mrhbacklogqueuesync] [clean-session] Fix tasks/monsterrodholders.md backlog priority queue sync: document has agent:backlog priority queue but eligible backlog items are not materializing in agent:queue. Add diagnostics for skipped backlog ids, regression coverage for backlog-to-queue convergence, and persist queue sync through session-check. Plan: tasks/agent-doc/plan-monsterrodholders-backlog-priority-queue-sync.md
 - [ ] [#jbclearctxsubmit] [clean-session] Fix JB Clear Session Context submit on Codex: calling Clear Session Context for tasks/monsterrodholders.md inserted /clear into the Codex composer but did not submit it. Implement submit-proof + one-shot Enter retry for the clear-session route, with stale-scrollback guards and SimWorld/unit coverage. Plan: tasks/agent-doc/plan-jb-clear-session-context-submit.md
 - [ ] [#mrhqueuepreserve] [clean-session] Prevent active-turn queue convergence from deleting user-added queue items in tasks/monsterrodholders.md. Add regression coverage for live queue edits during a running turn, require explicit consume/strike/remove proof before queue deletion, and log the proof source for removed queue nodes. Plan: tasks/agent-doc/plan-monsterrodholders-queue-preservation.md
 - [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.

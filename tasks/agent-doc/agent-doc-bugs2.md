@@ -663,17 +663,30 @@ I could not close `#2v7b` as complete from agent-side evidence. The required pro
 
 
 I updated `#2v7b` to `[operator-verify]` so the auto-drain skips it; it remains open for live validation. Commands checked: `agent-doc plan`, `agent-doc preflight --probe`, and ops-log search for `route_submit_issue` / `route_submit_resubmit` markers.
-<!-- agent:boundary:c356f845 -->
+Implemented `#efsmrgmarkers`.
+
+> **Queue prompt:**
+>
+> do [#efsmrgmarkers]
+
+
+The fix adds a shared template-level raw three-way conflict marker invariant. The known EFS abandoned scaffold shape is repaired only when the `agent-response` side is intact and the `original` / `your-edits` sides are empty; any remaining structural `<<<<<<<` / `|||||||` / `=======` / `>>>>>>>` block inside managed components fails closed before commit. The guard now runs in editor-visible template normalization, response-bearing write normalization, and commit pre-stage snapshot/worktree adoption, so repair/fallback and postcommit reconciliation cannot commit raw merge markers.
+
+Changed paths in `src/agent-doc`: `agent-doc-core/src/template.rs`, `agent-doc-orchestration/src/write.rs`, `agent-doc-orchestration/src/git.rs`, and `tests/test_cli.rs`.
+
+Verification passed from the clean worktree `src/agent-doc-efsmrgmarkers`: `cargo test -p agent-doc-core conflict -- --nocapture`; `cargo test -p agent-doc-orchestration conflict -- --nocapture`; `cargo test -p agent-doc normalize_template_structure_ffi -- --nocapture`; `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`; `make check` with 4542 tests passed, 238 skipped, doctests passed, and the medium SimWorld gate passed.
+
+Commits: `src/agent-doc` `278e9bec` (`fix: guard session docs against raw merge markers`) pushed to `origin/main`; parent gitlink update `a3eb99721` committed. Escalation none. Confidence high.
+<!-- agent:boundary:1fc18842 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#qt32]~~
-- ~~do [#2v7b]~~
-- do [#efsmrgmarkers]
+- ~~do [#efsmrgmarkers]~~
 - do [#snbc2]
 - do [#codexctrlz]
+- Please add actionable items into the queue to advance `[operator-verify]` tasks. Read logs to see if any of the tasks are complete or need more work.
 <!-- /agent:queue -->
 ###
 <!--
@@ -703,7 +716,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#efsmrgmarkers] [clean-session] Prevent raw three-way merge markers from surviving in session docs after finalize/write/repair fallback. Repro: `tasks/professional/equityfundingsource.md` had `<<<<<<< agent-response` / `||||||| original` / `=======` / `>>>>>>> your-edits` around the conversation/system architecture response; preflight repaired and committed it as `0eb0b2032`. Add fail-closed/repair guard plus SimWorld/regression coverage for CRDT/file-IPC fallback and postcommit reconciliation. Plan: `tasks/agent-doc/plan-session-doc-merge-leftover-guard.md`
 - [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md

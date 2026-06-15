@@ -18,6 +18,9 @@ prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: start
+agent_doc_pipeline:
+  run_id: cycle-1781544545428
+  step: write_applied
 ---
 
 ## Status
@@ -137,7 +140,23 @@ Implemented the headless two-editor broadcast proof and fixed the rebroadcast ro
 - `compute_broadcast` now fast-paths stale-peer rebroadcasts when the originator already includes the peer delta, preventing a second CRDT merge from corrupting component markers.
 
 Verification: `cargo test -p agent-doc-orchestration broadcast -- --nocapture`, `cargo test broadcast -- --nocapture`, `make check`, `make install`.
-<!-- agent:boundary:7d3d50d1 -->
+❯ <<<<<<< agent-response
+
+### Re: EFS compact summary replay — gpt-5
+
+Fixed the exchange compact digest so recompacting a document that already starts with `### Session Summary` no longer recursively embeds the previous `Prior summary/context` payload. Prior compact summaries now carry forward only compact metadata, and detailed ordered-list response lines stay in the archive instead of being replayed into the live summary.
+
+I also fixed the Codex/Claude restart queue stall from the opening prompt. When the idle watcher sees the drain trigger or `/clear` already drafted in the owned pane, it now submits one bare `Enter` for that live queue head instead of treating the queue as handled. OpenCode keeps the existing dedup-only path.
+
+Changed: `agent-doc-orchestration/src/compact.rs`, `agent-doc-orchestration/src/start/idle_watch.rs`, `specs/07-closeout-commands.md`, `VERSIONS.md`.
+
+Verification: `cargo test -p agent-doc-orchestration exchange_compact_default_summary_does_not_replay_prior_compact_lists -- --nocapture`, `cargo test -p agent-doc-orchestration exchange_compact_default_summary_includes_archived_content_digest -- --nocapture`, `cargo test -p agent-doc-orchestration compact -- --nocapture`, restart-drain focused tests (`pending_payload_enter_resubmit_is_scoped_and_one_shot`, `clean_session_reset_ops_log_precedes_drain_submit`, `idle_queue`), `cargo check -p agent-doc-orchestration`, `make check`, `make install`, and latest `CI` on `main` green (`27562089979`).
+
+Commit/push: `src/agent-doc` commit `865a37ac` was pushed to `origin/main`; this closeout records the parent `src/agent-doc` gitlink to that commit. Existing unrelated dirty worktree changes were left untouched.
+❯ ||||||| original
+❯ =======
+>>>>>>> your-edits
+<!-- agent:boundary:6627bbc1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -145,9 +164,43 @@ Verification: `cargo test -p agent-doc-orchestration broadcast -- --nocapture`, 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: JB `Run Agent Doc` sent `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` into the Codex input but did not submit. #simworld~~
 - ~~/goal Do the actual work in the queue. Stop punting on the queue work. Fix the root cause(s) of the punting. The work in the queue should be done.~~
-- do [#compactdrift-agent]
-- do [#cleandrainsup-agent]
-- do [#rtwbcast-simproof]
+- ~~do [#compactdrift-agent]~~
+---
+:pushpin: The equityfundingsource.md compaction is duplicated and the numeric list is in reverse order:
+```
+### Session Summary
+
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-170908.md`*
+
+Compacted content:
+- Archived 1 response topic(s): lender bank wire instruction reveal
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
+8. **Active Funding**: wire confirmed; show compliance chip such as Current, Renewal due, Expired, or Under review.
+7. **Committed / Awaiting Wire**: lender committed to a deal, wire not confirmed.
+6. **Ready to Commit**: lender account is linked and accreditation is current.
+5. **Lender Setup**: admin needs to create/link the lender account.
+4. **Accreditation Current**: EFS approved; if no lender account exists, move next to setup.
+3. **Accreditation Under Review**: submitted and awaiting EFS decision.
+2. **Accreditation Not Started**: lender still needs to submit the annual questionnaire/evidence.
+1. **Signed Up**: account exists, no annual requirements submitted.
+- **Active**: at least one fund row is active, meaning the wire was confirmed and the lender is actively invested.
+- **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
+- **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
+8. **Active Funding**: wire confirmed; show compliance chip such as Current, Renewal due, Expired, or Under review.
+7. **Committed / Awaiting Wire**: lender committed to a deal, wire not confirmed.
+6. **Ready to Commit**: lender account is linked and accreditation is current.
+5. **Lender Setup**: admin needs to create/link the lender account.
+4. **Accreditation Current**: EFS approved; if no lender account exists, move next to setup.
+3. **Accreditation Under Review**: submitted and awaiting EFS decision.
+2. **Accreditation Not Started**: lender still needs to submit the annual questionnaire/evidence.
+1. **Signed Up**: account exists, no annual requirements submitted.
+- **Active**: at least one fund row is active, meaning the wire was confirmed and the lender is actively invested.
+- **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
+- **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
+```
+---
+- ~~do [#cleandrainsup-agent]~~
+- ~~do [#rtwbcast-simproof]~~
 - do [#recyclerestart-agent]
 - do [#lazilyqrestore-agent]
 - do [#suprehotreload-agent]

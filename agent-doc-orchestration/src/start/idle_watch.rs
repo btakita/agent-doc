@@ -88,6 +88,81 @@ fn log_idle_queue_context_reset_submit(
     );
 }
 
+fn idle_queue_pending_payload_needs_enter_resubmit(
+    harness_binary: &str,
+    payload_already_pending: Option<bool>,
+    already_resubmitted: bool,
+) -> bool {
+    matches!(harness_binary, "codex" | "claude")
+        && drain_dispatch_dedup_skip(payload_already_pending)
+        && !already_resubmitted
+}
+
+fn idle_queue_resubmit_pending_payload(
+    file: &Path,
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+    payload_kind: &str,
+    active_head: &str,
+    payload: &str,
+) -> AutoTriggerOutcome {
+    let Some(pane) = shared
+        .inject_pane
+        .clone()
+        .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))
+    else {
+        return AutoTriggerOutcome::SendFailed;
+    };
+    crate::input_diag::log_text_submit(
+        Some(file),
+        "supervisor.idle_queue_resubmit",
+        &format!("pane:{pane}"),
+        "",
+        Some(&harness.binary),
+        "idle_queue_pending_payload_enter",
+        "Enter",
+    );
+    let tmux = crate::sessions::Tmux::default_server();
+    match crate::sessions::send_key(&tmux, &pane, "Enter") {
+        Ok(()) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "idle_queue_watch_resubmit file={} harness={} action=enter_key result=sent target={} payload_kind={} head_bytes={} head_sha256={} payload_bytes={}",
+                    file.display(),
+                    harness.binary,
+                    pane,
+                    payload_kind,
+                    active_head.len(),
+                    crate::ops_log::content_hash(active_head),
+                    payload.len()
+                ),
+            );
+            AutoTriggerOutcome::Sent
+        }
+        Err(err) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "idle_queue_watch_resubmit file={} harness={} action=enter_key result=send_failed target={} payload_kind={} head_bytes={} head_sha256={} error={:?}",
+                    file.display(),
+                    harness.binary,
+                    pane,
+                    payload_kind,
+                    active_head.len(),
+                    crate::ops_log::content_hash(active_head),
+                    err.to_string()
+                ),
+            );
+            eprintln!(
+                "[agent-doc] idle-queue watch: {} pending payload Enter re-submit failed for pane {}: {err:#}",
+                harness.binary, pane
+            );
+            AutoTriggerOutcome::SendFailed
+        }
+    }
+}
+
 pub(super) fn spawn_idle_queue_watch_thread(
     shared: Arc<SupervisorShared>,
     stop: Arc<AtomicBool>,
@@ -102,6 +177,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut last_dispatched: Option<String> = None;
             let mut last_context_clear_at: Option<u64> = None;
             let mut last_context_reset_head: Option<String> = None;
+            let mut last_pending_enter_resubmitted: Option<String> = None;
             let mut clear_cooldown_logged = false;
             // `#cleardecisionflood`: the `[s760] clear-decision …` diagnostic is
             // recomputed on every idle poll while `agent_doc_queue_context_reset`
@@ -774,6 +850,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 }
                                 last_dispatched = None;
                                 last_context_clear_at = Some(current_epoch_secs());
+                                awaiting_clear_settle = true;
+                                clear_settle_idle_ticks = 0;
                                 if let Some(head) = active_head.clone() {
                                     last_context_reset_head = Some(head);
                                 }
@@ -911,11 +989,56 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         let head = active_head.as_deref().unwrap_or("<unknown>");
                         let clear_cmd = harness.context_clear_command();
                         // `#qflood2`: never stack a second `/clear` when one is
-                        // already pending in the composer. Mark the head reset so
-                        // the next tick proceeds without re-firing.
-                        if drain_dispatch_dedup_skip(supervisor_pane_payload_already_pending(
-                            &shared, clear_cmd,
-                        )) {
+                        // already pending in the composer. For Codex/Claude, a
+                        // proven pending draft can be the merged-CR non-submit
+                        // shape; press Enter once instead of declaring the
+                        // queue handled.
+                        let clear_already_pending =
+                            supervisor_pane_payload_already_pending(&shared, clear_cmd);
+                        let resubmit_key = format!("context_reset:{head}");
+                        if idle_queue_pending_payload_needs_enter_resubmit(
+                            &harness.binary,
+                            clear_already_pending,
+                            last_pending_enter_resubmitted.as_deref()
+                                == Some(resubmit_key.as_str()),
+                        ) {
+                            match idle_queue_resubmit_pending_payload(
+                                &path,
+                                &shared,
+                                &harness,
+                                "context_clear",
+                                head,
+                                clear_cmd,
+                            ) {
+                                AutoTriggerOutcome::Sent => {
+                                    last_pending_enter_resubmitted = Some(resubmit_key);
+                                    last_context_reset_head = active_head.clone();
+                                    awaiting_clear_settle = true;
+                                    clear_settle_idle_ticks = 0;
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "idle_queue_watch_context_reset_resubmit harness={} reason=clear_already_pending head={:?}",
+                                            harness.binary, head
+                                        ),
+                                    );
+                                    continue;
+                                }
+                                AutoTriggerOutcome::Cancelled => return,
+                                outcome => {
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "idle_queue_watch_context_reset_resubmit_failed harness={} outcome={}",
+                                            harness.binary,
+                                            outcome.as_str()
+                                        ),
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+                        if drain_dispatch_dedup_skip(clear_already_pending) {
                             last_context_reset_head = active_head.clone();
                             awaiting_clear_settle = true;
                             clear_settle_idle_ticks = 0;
@@ -1043,12 +1166,53 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         let payload_kind = idle_queue_drain_payload_kind(&harness, &head);
                         let slash_command = idle_queue_head_slash_command(&head);
                         // `#qflood2`: never stack a trigger already pending in the
-                        // composer. Record the head so a proven-pending trigger
-                        // does not hot-loop the watch, but do not re-send it.
-                        if drain_dispatch_dedup_skip(supervisor_pane_payload_already_pending(
-                            &shared,
-                            &drain_payload,
-                        )) {
+                        // composer. For Codex/Claude, a proven-pending draft may
+                        // simply be waiting for the bare Enter that the merged
+                        // text+CR path failed to deliver, so submit it once.
+                        let payload_already_pending =
+                            supervisor_pane_payload_already_pending(&shared, &drain_payload);
+                        let resubmit_key = format!("drain:{head}");
+                        if idle_queue_pending_payload_needs_enter_resubmit(
+                            &harness.binary,
+                            payload_already_pending,
+                            last_pending_enter_resubmitted.as_deref()
+                                == Some(resubmit_key.as_str()),
+                        ) {
+                            match idle_queue_resubmit_pending_payload(
+                                &path,
+                                &shared,
+                                &harness,
+                                payload_kind,
+                                &head,
+                                &drain_payload,
+                            ) {
+                                AutoTriggerOutcome::Sent => {
+                                    last_pending_enter_resubmitted = Some(resubmit_key);
+                                    last_dispatched = Some(head.clone());
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "idle_queue_watch_drain_resubmit harness={} reason=trigger_already_pending payload_kind={}",
+                                            harness.binary, payload_kind
+                                        ),
+                                    );
+                                    continue;
+                                }
+                                AutoTriggerOutcome::Cancelled => return,
+                                outcome => {
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "idle_queue_watch_drain_resubmit_failed harness={} outcome={}",
+                                            harness.binary,
+                                            outcome.as_str()
+                                        ),
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+                        if drain_dispatch_dedup_skip(payload_already_pending) {
                             last_dispatched = Some(head.clone());
                             log_event(
                                 &mut session_log,
@@ -1143,6 +1307,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // Head drained (or never present): clear dedup so a later
                         // re-enqueue of the same prompt text fires again.
                         last_dispatched = None;
+                        last_pending_enter_resubmitted = None;
                     }
                     IdleQueueDrainDecision::SkipSelfDrivingLoopOwner => {
                         // The Claude Code `/loop` owns the drain — proof the
@@ -1172,6 +1337,38 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_payload_enter_resubmit_is_scoped_and_one_shot() {
+        assert!(idle_queue_pending_payload_needs_enter_resubmit(
+            "codex",
+            Some(true),
+            false
+        ));
+        assert!(idle_queue_pending_payload_needs_enter_resubmit(
+            "claude",
+            Some(true),
+            false
+        ));
+        assert!(!idle_queue_pending_payload_needs_enter_resubmit(
+            "opencode",
+            Some(true),
+            false
+        ));
+        assert!(!idle_queue_pending_payload_needs_enter_resubmit(
+            "codex",
+            Some(false),
+            false
+        ));
+        assert!(!idle_queue_pending_payload_needs_enter_resubmit(
+            "codex", None, false
+        ));
+        assert!(!idle_queue_pending_payload_needs_enter_resubmit(
+            "codex",
+            Some(true),
+            true
+        ));
+    }
 
     #[test]
     fn clean_session_reset_ops_log_precedes_drain_submit() {

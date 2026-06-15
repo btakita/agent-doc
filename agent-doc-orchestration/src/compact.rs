@@ -849,12 +849,8 @@ fn summarize_compacted_exchange(exchange: &str) -> Vec<String> {
         summary.push(item);
     }
 
-    let preamble = parsed.preamble.trim();
-    if !preamble.is_empty() {
-        summary.push(format!(
-            "Prior summary/context: {}",
-            truncate_with_ellipsis(&collapse_whitespace(preamble), COMPACT_SUMMARY_TEXT_LIMIT)
-        ));
+    if let Some(preamble) = summarize_prior_preamble_context(&parsed.preamble) {
+        summary.push(format!("Prior summary/context: {preamble}"));
     }
 
     let trailing = parsed.trailing.trim();
@@ -892,6 +888,101 @@ fn summarize_freeform_component(body: &str) -> Vec<String> {
     } else {
         vec![excerpt]
     }
+}
+
+fn summarize_prior_preamble_context(preamble: &str) -> Option<String> {
+    let preamble = preamble.trim();
+    if preamble.is_empty() {
+        return None;
+    }
+    let is_session_summary = preamble
+        .lines()
+        .any(|line| line.trim() == "### Session Summary");
+    if is_session_summary && let Some(summary) = summarize_prior_compact_summary(preamble) {
+        return Some(summary);
+    }
+
+    let mut selected = Vec::new();
+    for line in preamble.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed == "### Session Summary"
+            || trimmed == "Compacted content:"
+            || trimmed.starts_with("*Compacted. Content archived to `")
+            || trimmed.starts_with("- Prior summary/context:")
+            || trimmed.starts_with("- Trailing prompt/context:")
+            || is_markdown_ordered_item(trimmed)
+            || (is_session_summary && trimmed.starts_with("- "))
+        {
+            continue;
+        }
+        let item = trimmed.trim_start_matches("- ").trim().to_string();
+        if !selected.iter().any(|seen| seen == &item) {
+            selected.push(item);
+        }
+        if selected.len() >= COMPACT_SUMMARY_ITEM_LIMIT {
+            break;
+        }
+    }
+
+    let excerpt = if selected.is_empty() {
+        if is_session_summary {
+            return None;
+        }
+        collapse_whitespace(preamble)
+    } else {
+        collapse_whitespace(&selected.join(" "))
+    };
+    let excerpt = truncate_with_ellipsis(&excerpt, COMPACT_SUMMARY_TEXT_LIMIT);
+    (!excerpt.is_empty()).then_some(excerpt)
+}
+
+fn summarize_prior_compact_summary(preamble: &str) -> Option<String> {
+    let mut in_compacted_content = false;
+    let mut items = Vec::new();
+
+    for line in preamble.lines() {
+        let trimmed = line.trim();
+        if trimmed == "Compacted content:" {
+            in_compacted_content = true;
+            continue;
+        }
+        if !in_compacted_content || trimmed.is_empty() {
+            continue;
+        }
+        let Some(item) = trimmed.strip_prefix("- ").map(str::trim) else {
+            continue;
+        };
+        if item.starts_with("Prior summary/context:")
+            || item.starts_with("Trailing prompt/context:")
+        {
+            break;
+        }
+        if !items.iter().any(|seen| seen == item) {
+            items.push(item.to_string());
+        }
+        if items.len() >= COMPACT_SUMMARY_ITEM_LIMIT {
+            break;
+        }
+    }
+
+    if items.is_empty() {
+        return None;
+    }
+    Some(truncate_with_ellipsis(
+        &format!("prior compacted content: {}", items.join("; ")),
+        COMPACT_SUMMARY_TEXT_LIMIT,
+    ))
+}
+
+fn is_markdown_ordered_item(line: &str) -> bool {
+    let mut chars = line.chars().peekable();
+    let mut saw_digit = false;
+    while matches!(chars.peek(), Some(ch) if ch.is_ascii_digit()) {
+        saw_digit = true;
+        chars.next();
+    }
+    saw_digit && chars.next() == Some('.') && matches!(chars.next(), Some(ch) if ch.is_whitespace())
 }
 
 fn collapse_whitespace(text: &str) -> String {
@@ -2206,6 +2297,87 @@ mod tests {
         assert!(!exchange.contains("Queue:"));
         assert!(!exchange.contains("Icebox:"));
         assert!(!exchange.contains("### Re: topic one"));
+    }
+
+    #[test]
+    fn exchange_compact_default_summary_does_not_replay_prior_compact_lists() {
+        let doc = concat!(
+            "---\nagent_doc_session: test-summary\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "*Compacted. Content archived to `.agent-doc/archives/previous.md`*\n\n",
+            "Compacted content:\n",
+            "- Archived 1 response topic(s): lender bank wire instruction reveal\n",
+            "- Prior summary/context: ### Session Summary *Compacted. Content archived to `.agent-doc/archives/older.md`*\n",
+            "8. **Active Funding**: wire confirmed.\n",
+            "7. **Committed / Awaiting Wire**: lender committed.\n",
+            "6. **Ready to Commit**: lender account is linked.\n",
+            "5. **Lender Setup**: admin needs setup.\n",
+            "4. **Accreditation Current**: EFS approved.\n",
+            "3. **Accreditation Under Review**: submitted.\n",
+            "2. **Accreditation Not Started**: lender still needs to submit.\n",
+            "1. **Signed Up**: account exists.\n",
+            "- **Active**: at least one fund row is active.\n",
+            "- **Committed**: the lender has a pending commitment.\n",
+            "- **Lender Ready**: a lender account is linked.\n",
+            "8. **Active Funding**: wire confirmed.\n",
+            "7. **Committed / Awaiting Wire**: lender committed.\n",
+            "6. **Ready to Commit**: lender account is linked.\n",
+            "5. **Lender Setup**: admin needs setup.\n",
+            "4. **Accreditation Current**: EFS approved.\n",
+            "3. **Accreditation Under Review**: submitted.\n",
+            "2. **Accreditation Not Started**: lender still needs to submit.\n",
+            "1. **Signed Up**: account exists.\n\n",
+            "### Re: investor pipeline resequence — gpt-5\n\n",
+            "Suggested lane sequence:\n\n",
+            "1. **Signed Up**: account exists.\n",
+            "2. **Accreditation Not Started**: lender still needs to submit.\n",
+            "3. **Accreditation Under Review**: submitted.\n",
+            "4. **Accreditation Current**: EFS approved.\n",
+            "5. **Lender Setup**: admin needs setup.\n",
+            "6. **Ready to Commit**: lender account is linked.\n",
+            "7. **Committed / Awaiting Wire**: lender committed.\n",
+            "8. **Active Funding**: wire confirmed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        run_component_compact(&file, doc, "exchange", None, false).unwrap();
+
+        let result = std::fs::read_to_string(&file).unwrap();
+        let exchange = component::parse(&result)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "exchange")
+            .unwrap()
+            .content(&result)
+            .to_string();
+
+        assert!(exchange.contains("Archived 1 response topic(s): investor pipeline resequence"));
+        assert!(exchange.contains(
+            "Prior summary/context: prior compacted content: Archived 1 response topic(s): lender bank wire instruction reveal"
+        ));
+        assert!(
+            !exchange.contains("Prior summary/context: ### Session Summary"),
+            "prior compact summaries must not be recursively embedded:\n{exchange}"
+        );
+        assert!(
+            !exchange.contains("8. **Active Funding**"),
+            "ordered-list response details must stay in the archive, not the compact digest:\n{exchange}"
+        );
+        assert!(
+            !exchange.contains("- **Lender Ready**"),
+            "duplicated prior-context bullets must stay out of the compact digest:\n{exchange}"
+        );
     }
 
     #[test]

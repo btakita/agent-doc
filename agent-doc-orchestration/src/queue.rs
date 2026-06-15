@@ -611,6 +611,21 @@ pub fn strip_priority_markers(text: &str) -> String {
     t.trim().to_string()
 }
 
+/// Apply the canonical operator pin to a head **idempotently** (`#pushpinaccum`).
+///
+/// A queue head carries exactly **one** leading priority marker. This strips any
+/// existing leading operator/agent pin marker(s) (`:pushpin:` / `:round_pushpin:`
+/// in any spelling) plus surrounding whitespace, then prefixes a single
+/// `:pushpin:`. Two accumulation bugs are closed:
+/// - **Promotion dedup:** promoting a `:round_pushpin:` (agent) head to a
+///   `:pushpin:` (operator) head REPLACES the marker instead of stacking it, so
+///   the result is `:pushpin: do [#x]`, never `:pushpin: :round_pushpin: do [#x]`.
+/// - **Re-pin no-op:** re-pinning an already-`:pushpin:` head yields the same
+///   text (idempotent), never `:pushpin: :pushpin: do [#x]`.
+fn apply_operator_pin(text: &str) -> String {
+    format!("{} {}", PRIORITIZED_MARKER, strip_priority_markers(text))
+}
+
 /// Prefix auto-promoted queue prompts with the canonical agent-priority marker.
 ///
 /// Sorting by backlog priority / auto-DAG is binary-owned priority, not an
@@ -707,7 +722,10 @@ pub fn annotate_operator_priority_reorders(
         if let Some(slot) = original_slot {
             used[slot] = true;
             if slot > prompt_slot && !is_prioritized(&prompt.text) {
-                prompt.text = format!("{} {}", PRIORITIZED_MARKER, prompt.text.trim_start());
+                // Idempotent promotion: drop any existing agent pin so an operator
+                // reorder of a `:round_pushpin:` head yields a single `:pushpin:`,
+                // not `:pushpin: :round_pushpin:` (`#pushpinaccum`).
+                prompt.text = apply_operator_pin(&prompt.text);
                 changed = true;
             }
         }
@@ -766,7 +784,7 @@ pub fn annotate_manual_queue_additions(
         if is_prioritized(&prompt.text) || is_agent_prioritized(&prompt.text) {
             continue; // operator/agent already pinned it
         }
-        prompt.text = format!("{} {}", PRIORITIZED_MARKER, prompt.text.trim_start());
+        prompt.text = apply_operator_pin(&prompt.text);
         changed = true;
     }
     changed.then_some(out)
@@ -1507,15 +1525,47 @@ mod tests {
 
     #[test]
     fn annotate_operator_priority_reorders_upgrades_agent_pin() {
+        // #pushpinaccum: promoting a `:round_pushpin:` (agent) head to an operator
+        // pin REPLACES the marker — the result carries a single `:pushpin:`, never
+        // the accumulated `:pushpin: :round_pushpin:`.
         let snapshot = parse("- do [#a]\n- :round_pushpin: do [#b]\n").unwrap();
         let current = parse("- :round_pushpin: do [#b]\n- do [#a]\n").unwrap();
 
         let marked = annotate_operator_priority_reorders(&snapshot, &current)
             .expect("operator move should add operator pin");
 
+        assert_eq!(render(&marked), "- :pushpin: do [#b]\n- do [#a]\n");
+    }
+
+    #[test]
+    fn annotate_operator_priority_reorders_repin_is_idempotent() {
+        // #pushpinaccum: an already-`:pushpin:` head that the operator moves earlier
+        // is left as-is (the existing-operator-pin guard) — it never stacks a second
+        // `:pushpin:`. Move an unpinned neighbor so the function returns Some.
+        let snapshot = parse("- :pushpin: do [#b]\n- do [#a]\n- do [#c]\n").unwrap();
+        let current = parse("- :pushpin: do [#b]\n- do [#c]\n- do [#a]\n").unwrap();
+
+        let marked = annotate_operator_priority_reorders(&snapshot, &current)
+            .expect("the moved unpinned neighbor pins");
+
         assert_eq!(
             render(&marked),
-            "- :pushpin: :round_pushpin: do [#b]\n- do [#a]\n"
+            "- :pushpin: do [#b]\n- :pushpin: do [#c]\n- do [#a]\n"
+        );
+    }
+
+    #[test]
+    fn apply_operator_pin_is_idempotent_and_dedupes() {
+        // #pushpinaccum: one leading marker, always.
+        assert_eq!(apply_operator_pin("do [#x]"), ":pushpin: do [#x]");
+        assert_eq!(apply_operator_pin(":pushpin: do [#x]"), ":pushpin: do [#x]");
+        assert_eq!(
+            apply_operator_pin(":round_pushpin: do [#x]"),
+            ":pushpin: do [#x]"
+        );
+        assert_eq!(
+            apply_operator_pin(":pushpin: :round_pushpin: do [#x]"),
+            ":pushpin: do [#x]"
         );
     }
 

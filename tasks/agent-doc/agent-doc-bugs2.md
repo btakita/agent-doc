@@ -73,7 +73,38 @@ Verification passed: `cargo test -p agent-doc-orchestration idle_queue_drain_pay
 Commits: `b47e1f2f` in `src/agent-doc`, and parent repo pointer commit `39a9fcf7f`. No escalation was used. Confidence: high. I did not install/recycle the live binary or update the JB plugin in this turn; no plugin code changed.
 
 No actionable follow-up backlog item was created for this cycle.
-<!-- agent:boundary:b6746f34 -->
+
+### Re: JB Run Agent Doc Drafted Reopen — gpt-5
+
+Implemented the route-side fix for the JetBrains `Run Agent Doc` reopen path.
+
+What changed:
+- `agent-doc-orchestration/src/route/dispatch.rs` now checks the recent direct-pane capture before appending a routed trigger. If the exact same `agent-doc <FILE>` trigger is already visible in a Codex or Claude composer, route sends one bare `Enter` and polls acceptance instead of appending another copy.
+- Stale scrollback is guarded: a visible trigger with a later idle prompt below it is not treated as active draft input.
+- The existing post-send one-shot Enter retry now shares the same helper/proof logging as the new pre-send drafted-trigger path.
+- Added coverage for current duplicate drafts, stale scrollback, harness scoping, and wrapped long paths.
+- Updated `README.md`, `VERSIONS.md`, `specs/08a-session-actor-contract.md`, and `editors/jetbrains/SPEC.md` with the new contract.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection --lib`
+- `cargo test -p agent-doc-orchestration direct_pane_resubmit --lib`
+- `make check`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.34.1`
+- `gh run list --workflow CI --limit 1` -> latest `CI` on `main` completed successfully
+
+Commits created:
+- `src/agent-doc`: `4345a2f9 fix: submit drafted routed triggers without stacking`
+- parent repo: `b19594282 agent-doc: update routed trigger submit fix`
+
+Notes:
+- The `src/agent-doc` submodule had a broad pre-existing dirty tree; I staged and committed only the five intended files for this bug.
+- Escalation: none.
+- Confidence: high. The fix is narrow, covered by focused tests, and the full local check suite passed.
+- No actionable follow-up items from this cycle.
+- Push will happen after this closeout commit exists; I will push the submodule and parent repo immediately after closeout.
+<!-- agent:boundary:fe5a94a9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -107,8 +138,7 @@ What are #next-steps to fix bugs?
 
 ## Backlog
 
-<!-- agent:backlog priority queue --> 
-- [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
+<!-- agent:backlog priority queue -->- [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

@@ -103,7 +103,25 @@ Deployed to production. Live at `https://equityfundingsource.brian-takita.worker
 **Push state:** the EFS submodule was 2 commits ahead of origin (the `#cgw7` broker-notification work: `2f3337b` + `0ebaff0`). Pushed `origin/main 60a07f5..0ebaff0`. Superproject pointer already in sync at `0ebaff0`.
 
 Next queue head is `[#58j3]` (align the investor positions API with the no-servicing model).
-<!-- agent:boundary:cc1c2b43 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Re-deployed to production. Live at `https://equityfundingsource.brian-takita.workers.dev` — **Version `7a03635f-b136-40e4-9806-0f42244ed9cf`**.
+
+No code change since the prior deploy — the EFS submodule is clean and already at `origin/main` (`0ebaff0`, the `#cgw7` broker-notification work), so this is an idempotent re-deploy of the same tree. Nothing to commit or push.
+
+**Verification:**
+- `bun run test` → **699 pass / 0 fail** (4460 assertions, 74 files).
+- `build:worker` clean; the worker-assets bundle validated (no stale-dist snag this time — `No updated asset files to upload`).
+- Remote D1 migrations: none to apply (0025/0026 already live).
+- Smoke test: `/` → 200, `/funded-deals` → 200.
+
+Next queue head is `[#58j3]` (align the investor positions API with the no-servicing model).
+<!-- agent:boundary:a670b473 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,7 +130,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - [#58j3]
-- :round_pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -133,35 +133,75 @@ Done — agent-doc `e11c218b` (superproject pointer `7e6b147a8`). The corruption
 **Scope landed vs. remaining.** This closes the *reported corruption* (#1 pre-adoption validation + #3 validate-before-write). Two hardening items remain and are queued as **#dupcontent2**: (#2) fail closed when the serving supervisor is already classified `supervisor_binary_stale` (don't trust its buffer at all), and (#4) de-dup singleton blocks on parse to *repair* a recoverable buffer instead of only rejecting it.
 
 **Recovery note.** This very closeout hit the bug being fixed: the live route-owned supervisor (not yet on the new binary) fed a corrupt 40853-byte `content_ours` buffer that dropped the response + churned queue heads across three commits. Recovered deterministically via `reset --from-current --preserve-session` + `finalize --force-disk` (bypassing the corrupt IPC buffer). Not installed mid-session (`#no-mid-session-install`); the guard promotes — and stops this class of churn — on the next supervisor recycle.
-<!-- agent:boundary:d499cff5 -->
+
+### Re: Markdown AST must treat tags inside strings + code blocks as content — opus-4-8
+
+Already implemented and green — this is the `#0kjc`/`#mdastquote`/`#lintfence` family, fully covered in `agent-doc-core/src/component.rs`:
+
+- **Code blocks (triple-backtick + tilde fences) and inline code (single/double backtick)** are masked by `find_code_ranges()` (pulldown-cmark CommonMark AST via `offset_iter()`); any `<!-- agent:* -->` or `#id` token whose start byte falls inside a code range is skipped in `parse()`, `find_non_agent_html_comment_ranges()`, and the marker scanners.
+- **Quoted (double-quoted) prose strings** are masked by `find_quoted_ranges()`, added last night in `a99a882d` ("mask double-quoted prose spans in marker parser"). Same-line scope, `\"`-escape aware, fail-safe on an unterminated quote (only masks the rest of its own line, never swallows a real marker on a later line). A real marker's own `preset="..."` attribute sits to the right of its `<!--`, so real markers stay parseable.
+
+Verified live: `cargo test -p agent-doc-core --lib component::` → **95 passed, 0 failed**. Direct coverage for your exact cases: `markers_in_fenced_code_block_ignored`, `markers_in_indented_fenced_code_block_ignored`, `markers_in_inline_code_ignored`, `single_backtick_component_tag_ignored`, `double_backtick_component_tag_ignored`, `inline_code_mid_line_with_surrounding_text_ignored`, `quoted_agent_marker_in_prose_is_not_parsed`, `quoted_id_token_in_prose_is_content`, plus `real_marker_with_quoted_preset_attr_still_parses` / `mixed_backtick_and_real_tags` confirming real tags still parse. No new work needed; not filing a backlog item for already-shipped behavior.
+
+### Re: Documented stall sequence (#qchurn flood, restart-failed, dispatch blocked) — opus-4-8
+
+The pasted logs are the recurring **stale route-owned supervisor** class, not a new bug: a pre-fix supervisor (pid 2715614 here, 1654897 earlier) keeps re-injecting `:pushpin: [#qchurn]` each idle boundary, and the queue correctly *pauses* to stop the flood (`failed_stage=queue_paused reason=#qchurn`) rather than draining no-op churn. This session's preflight confirms it: `queue_drainable_head_count: 0`, `queue_continuation_required: false` — every remaining head is clean-session / operator-verify and undrainable under the stale host. This is operator-domain recovery (restart the supervisor onto the freshly-installed binary; an already-running `agent-doc start` keeps the OLD binary until restarted) — it cannot be agent-resolved from inside the churning session. Not auto-looping this cycle.
+
+<!-- agent:boundary:370f55e0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-~~~done
-I auto-restart occurred in equityfundingsource.md. But the restart was not successful and was stuck in the shell.
+---
+Previous turn stalled and restart failed
 ```
-  Opus 4.8 ctx:10% ~/work/btakit    Finished `release` profile [optimized] target(s) in 0.08s
-  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents                               [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)
-                         [lib-install] note: running controllers still serve the prior binary — run `agent-doc admin recycle --all-projects` (or restart sessions) to promote the new build
-                                                                    [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
-                                       [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-                                               [start] harness resolved: binary=claude source=frontmatter env=default
-                                                                                                                     Registered session 62fe1f41 → pane %74
-                                    Starting claude...
-                                                      [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+● The racing writer is pid 1654897 — a stale --route-owned supervisor for this doc (my memory already names 1654897 as
+  the stale supervisor causing this exact drift). The socket listener is IntelliJ (pid 3724007). pid 314892 hosts
+  sift.md, not mine. Let me confirm 1654897 is a stale orphan and not my session host before acting:
+
+● Bash(cd /home/brian/work/btakita/agent-loop
+      echo "=== process tree of stale supervisor 1654897 (does it host a claude child?) ==="…)
+  ⎿  Error: Exit code 1
+     === process tree of stale supervisor 1654897 (does it host a claude child?) ===
+     agent-doc(1654897)-+-agent-doc(93343)
+                        |-agent-doc(327552)
+                        |-agent-doc(327773)
+                        |-agent-doc(410429)
+                        |-agent-doc(411670)
+                        |-agent-doc(582302)
+                        |-agent-doc(939525)
+                        |-agent-doc(940276)
+     … +5 lines (ctrl+o to expand)
+
+● Confirmed: pid 1654897's only children are defunct agent-doc workers — no claude child, so it does not host my session
+  (my shell 2336685 descends from 3732506, not 1654897). It's a stale orphan route-owned supervisor racing my writes
+  with a corrupt in-memory CRDT. Per the documented recovery ladder, killing this single orphan clears the drift:
+
+● Bash(cd /home/brian/work/btakita/agent-loop
+      echo "=== confirm 3732506 (my parent) is not 1654897-related ==="…)
+  ⎿  Waiting…
+
+✽ Razzmatazzing… (20m 40s · ↓ 77.0k tokens)
+  ⎿  Tip: Hit shift+tab to cycle between default mode, auto-accept edit mode, and plan mode
+
+
+  ❯ /clear
+  ❯ /agent-doc tasks/agent-doc/agent-doc-bugs2.md
+  ❯ /clear
+  ❯ /agent-doc tasks/agent-doc/agent-doc-bugs2.md
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ [1]    1654897 terminated  /home/brian/.cargo/bin/agent-doc start --route-owned
+──────────────────────────────────────────────────────────────────────────────────%
+~/work/btakita/agent-loop main ⇡29 *5 !36 ?13                                                                                                ✘ TERM 9h 59m 0s  agent-loop 00:42:11
 ```
 
-I manually restarted then ran JB `Run Agent Doc`.
+I manually started the session. JB `Run Agent Doc` error
 ```
 resync: pruned 9 stale session(s)
 [route] target tmux session: 0
-[route] activated existing inactive agent:queue head "All \"Lender account application — incomplete\" components across all pages should be the same component...and have a button to complete the application. deploy" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3502
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3522
 ```
-~~~
-- ~~do [#compactdropitem]~~
 ---
 :pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
 ```
@@ -186,7 +226,7 @@ resync: stash pane %50 is unregistered but still hosts live supervisor tsift-v0.
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3460
 ```
 ---
-:pushpin: :round_pushpin: - :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
+- :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
 ---
 :pushpin: JB `Compact Exchange` on this document
 ```
@@ -211,17 +251,8 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
 :round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
 ---
-- ~~:pushpin: [#compactqattr]~~
-- ~~:pushpin: [#dupcontent]~~
----
 :pushpin: - do [#dfrefresh-retire]
-- ~~do [#1j8q]~~
----
 :round_pushpin: do [#suprehotreload]
-- ~~:pushpin: do [#ar27-majors]~~
-- ~~:pushpin: do [#dupcontent]~~
-- ~~:pushpin: do [#compactqattr]~~
-- ~~:pushpin: do [#dupcontent2]~~
 <!-- /agent:queue -->
 ###
 <!--

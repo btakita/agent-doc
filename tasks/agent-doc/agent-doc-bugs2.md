@@ -158,14 +158,14 @@ Notes:
 Closed the repair-only cycle after the MCP transport dropped during finalize. The prior closeout response and commits were recovered into the exchange; this cycle made no code changes.
 
 No actionable follow-up items from this repair cycle.
-<!-- agent:boundary:ee474a38 -->
+<!-- agent:boundary:4234e178 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 ---
-
+Codex finalize error
 ```
 • Finalize’s backlog-capture guard interpreted the closeout note as a possible follow-up. I’m rerunning with an explicit
   no-follow-up marker; no code or doc content was written by the failed attempt.
@@ -198,8 +198,16 @@ No actionable follow-up items from this repair cycle.
             Transport closed
 ```
 ---
-- ~~:pushpin: JB `Run Agent Doc` on this file adds `agent-doc tasks/agent-doc/agent-doc-bugs2.md` into the Codex input (multiple times accumulate every time I type), but does not submit.~~
+- JB `Run Agent Doc` on Codex sends `agent-doc tasks/monsterrodholders.md` to the Codex input, but does not submit. #simworld
 - Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.
+---
+JB `Run Agent Doc`
+```
+[route] target tmux session: 0
+[route] activated existing inactive agent:queue head "#advance-review" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3568
+```
+---
 <!-- /agent:queue -->
 ###
 <!--

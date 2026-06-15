@@ -458,14 +458,30 @@ Log-check result: **evidence ABSENT — the runtime event has never fired in thi
 3. Re-run the log check — expect `idle_queue_watch_context_reset harness=claude … reason=#cleandrainsup` followed by a `[clean-session]` head drain (one fresh agent per item).
 
 I'll re-verify the instant those lines appear.
-<!-- agent:boundary:c7eef7ca -->
+
+### Re: do [#rtwbcast] — multi-editor CRDT broadcast (already code-complete) — opus-4-8
+
+This queue head points at work that has **already landed** — verified in source, not just claimed:
+
+- All three implementation rungs are committed in agent-doc `cddad87b` (2026-06-12, "add per-editor realtime broadcast"):
+  - `#rtwbcast-id` — `editor_id` in the FFI buffer-report + per-editor live-buffer sidecars (`ffi.rs`, `realtime_model.rs`, `debounce.rs`).
+  - `#rtwbcast-deliver` — per-editor targeted patch delivery.
+  - `#rtwbcast-merge` — production N-buffer `compute_broadcast_plan` / `broadcast_editor_change` CRDT planner (`realtime_model.rs`), with SimWorld coverage (`sim_world.rs`).
+- The plan records `make check` + VS Code `npm test` + gradlew plugin test + CI green at landing (agent-doc 0.34.0, JB plugin 0.2.162, VS Code 0.2.26).
+
+So the agent-doable scope is **done** — marking `#rtwbcast` done. I did not rebuild/install (the landed build is already installed; mid-session install would re-stale this live supervisor anyway, `#no-mid-session-install`).
+
+The single remaining rung is `#rtwbcast-verify` — the **operator-only** two-live-IDE convergence proof (edit the same doc in JB + VS Code, confirm both buffers receive the broadcast patch and converge with no clobber). That cannot be agent-done; captured as an `[operator-verify]` backlog item pointing at `tasks/agent-doc/plan-realtime-editor-watcher.md`.
+
+(Exchange is large — 429 lines / 24 sections — but an `agent:queue` is active, so not stalling to compact.)
+<!-- agent:boundary:7913c405 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - :pushpin: [#cleandrainsup-verify]
-- :round_pushpin: do [#rtwbcast]
+- ~~:round_pushpin: do [#rtwbcast]~~
 ---
 I auto-restart occurred in equityfundingsource.md. But the restart was not successful and was stuck in the shell.
 ```
@@ -584,6 +600,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#dfrefresh-retire] [clean-session] Retire the dogfood-supervisor-refresh runbook (runbooks/dogfood-supervisor-refresh.md + BUNDLED_RUNBOOKS entry + SKILL.md catalog line + 4 harness mirrors) once #jbrestale (JB Run Agent Doc auto-restarts a stale route-owned supervisor / red-green switchover) AND #recyclerestart (PCP recycle restarts the harness session) both land and prove the binary self-heals a stale supervisor without the manual make+install+restart bootstrap. The runbook is an explicit stopgap for the bootstrap gap (running supervisor predates its own self-recycle fix + is the live agent parent). Acceptance: with both landed, a stale-binary session auto-promotes onto the new build at the next idle/dispatch boundary; delete the runbook + dependent references in one cycle and re-run audit-docs. CLEAN session (skill/runbook surface).
@@ -594,7 +611,6 @@ What are #next-steps to fix bugs?
 - [ ] [#pushpinaccum] [clean-session] Queue :pushpin: annotations accumulate/nest in the wrong place. (1) ACCUMULATION: a head already starting `- :pushpin:` gets another :pushpin: prepended -> `:pushpin: - :pushpin: ...` (operator corrected one live 2026-06-13). (2) PROMOTION DEDUP (operator 2026-06-14): when a `:round_pushpin:` head is upgraded to `:pushpin:`, the round_pushpin is kept alongside -> `:pushpin: :round_pushpin:` instead of a single `:pushpin:`. The queue head-grouping/annotation formatter prepends/promotes the pushpin marker without checking for an existing leading pushpin/round-pushpin/bullet. FIX: make the queue-head annotation prefix idempotent — a head carries exactly one leading marker; promoting `:round_pushpin:` -> `:pushpin:` REPLACES it (drop the round_pushpin), and re-pinning an already-:pushpin: head is a no-op. CLEAN session (queue formatter path).
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
 - [ ] [#recyclerestart] [clean-session] PCP/Supervisor recycle does not restart the agent session (img_21.png); JB Sync Tmux Layout after tmux kill-pane surfaced `Sync deferred: another tmux layout sync is already running`. ROOT CAUSE (code-grounded): the warning fires when agent_doc_sync_try_lock() (ffi.rs:746, a process-wide SYNC_LOCKED AtomicBool shared cross-editor) is already held. SyncLayoutAction.kt holds that FFI lock across the ENTIRE agent-doc sync subprocess (runCommandWithTimeout, line ~299, released only in finally line 331), and that subprocess is bounded only by the 30s SYNC_PROCESS_TIMEOUT_MS and can block on in-pane/binary recovery (the timeout message literally says retry can run binary recovery). So layout GEOMETRY sync is coupled to in-pane readiness, and a second manual sync racing an in-flight one bails immediately (non-blocking compare_exchange) instead of superseding. FIX: decouple tmux geometry sync from in-pane init/recovery; hold SYNC_LOCKED only across the fast geometry reconcile, run pane readiness/recovery separately; make a newer sync generation supersede an in-flight stale one rather than warn-and-skip; prove recycle restarts/clears the harness session. CLEAN session. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
-- [ ] [#rtwbcast] [clean-session] rtwatch rung 4 — multi-editor CRDT broadcast. Phases rtwbcast-id (editor_id in FFI buffer-report + per-editor live_buffer_snapshot_path), then deliver/merge/verify. CLEAN session required; live two-IDE convergence verify is operator-drive. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 <!-- /agent:backlog -->
 
 ## Review

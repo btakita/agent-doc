@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -49,7 +49,18 @@ Compacted content:
 - **Active**: at least one fund row is active, meaning the wire was confirmed and the lender is actively invested.
 - **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
 - **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
-<!-- agent:boundary:bcdb5465 -->
+8. **Active Funding**: wire confirmed; show compliance chip such as Current, Renewal due, Expired, or Under review.
+7. **Committed / Awaiting Wire**: lender committed to a deal, wire not confirmed.
+6. **Ready to Commit**: lender account is linked and accreditation is current.
+5. **Lender Setup**: admin needs to create/link the lender account.
+4. **Accreditation Current**: EFS approved; if no lender account exists, move next to setup.
+3. **Accreditation Under Review**: submitted and awaiting EFS decision.
+2. **Accreditation Not Started**: lender still needs to submit the annual questionnaire/evidence.
+1. **Signed Up**: account exists, no annual requirements submitted.
+- **Active**: at least one fund row is active, meaning the wire was confirmed and the lender is actively invested.
+- **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
+- **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
+<!-- agent:boundary:1db35ddf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -57,17 +68,18 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#investor-pipeline-resequence]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#investor-pipeline-resequence] [recommended] Implement the approved lender pipeline resequence: correct the admin label to Accreditation/Requirements, split annual accreditation into not-started/under-review/current/needs-update/renewal states, preserve lender-account/commitment/active-funding milestones, add compliance badges for later stages, and update UI/tests.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#investor-pipeline-resequence] [operator-verify] [recommended] Await explicit approval of the proposed lender pipeline resequence, then implement: correct the admin label to Accreditation/Requirements, split annual accreditation into not-started/under-review/current/needs-update/renewal states, preserve lender-account/commitment/active-funding milestones, add compliance badges for later stages, and update UI/tests.
 - [/] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
 - [/] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
 - [/] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.

@@ -214,6 +214,7 @@ pub(crate) fn check_queue_head_removal_guard(
         .collect();
 
     let mut lost: Vec<String> = Vec::new();
+    let mut removal_proofs: Vec<(String, &'static str)> = Vec::new();
     for id in recorded_ids {
         let norm = crate::pending::normalize_pending_id(&id);
         if norm.is_empty() {
@@ -223,14 +224,38 @@ pub(crate) fn check_queue_head_removal_guard(
             continue; // head preserved in the committed queue
         }
         if !open_backlog.contains(&norm) {
+            if !removal_proofs.iter().any(|(existing, _)| existing == &norm) {
+                removal_proofs.push((norm, "backlog_resolved_or_removed"));
+            }
             continue; // backlog item resolved / removed → deletion proven
         }
-        if resolved.contains(&norm) || directive_targets.contains(&norm) {
-            continue; // explicit lifecycle proof or sibling-owned target
+        if resolved.contains(&norm) {
+            if !removal_proofs.iter().any(|(existing, _)| existing == &norm) {
+                removal_proofs.push((norm, "cycle_lifecycle_outcome"));
+            }
+            continue; // explicit lifecycle proof
+        }
+        if directive_targets.contains(&norm) {
+            if !removal_proofs.iter().any(|(existing, _)| existing == &norm) {
+                removal_proofs.push((norm, "current_directive_target"));
+            }
+            continue; // sibling-owned target
         }
         if !lost.iter().any(|existing| existing == &norm) {
             lost.push(norm);
         }
+    }
+
+    for (id, proof_source) in &removal_proofs {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_head_removal_guard_proof file={} removed=#{} proof_source={}",
+                file.display(),
+                id,
+                proof_source
+            ),
+        );
     }
 
     if lost.is_empty() {
@@ -245,7 +270,7 @@ pub(crate) fn check_queue_head_removal_guard(
     crate::ops_log::log_op(
         file,
         &format!(
-            "queue_head_removal_guard_fired file={} lost={}",
+            "queue_head_removal_guard_fired file={} lost={} proof_source=missing",
             file.display(),
             lost.join(",")
         ),
@@ -309,6 +334,7 @@ pub(crate) fn check_free_text_queue_head_provenance(
         .map(|c| c.content(&content).to_string())
         .unwrap_or_default();
     let mut unresolved: Vec<String> = Vec::new();
+    let mut response_proven_removed: Vec<String> = Vec::new();
     for head in &state.active_free_text_queue_heads {
         let normalized = head.trim().to_ascii_lowercase();
         if normalized.is_empty() {
@@ -321,9 +347,25 @@ pub(crate) fn check_free_text_queue_head_provenance(
             continue;
         }
         if response_head_plausibly_answers(&content, head) {
+            response_proven_removed.push(head.clone());
             continue;
         }
         unresolved.push(head.clone());
+    }
+    if !response_proven_removed.is_empty() {
+        let heads_text = response_proven_removed
+            .iter()
+            .map(|h| format!("{:?}", h))
+            .collect::<Vec<_>>()
+            .join("; ");
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "free_text_queue_head_provenance_proof file={} removed={} proof_source=committed_response",
+                file.display(),
+                heads_text
+            ),
+        );
     }
     if unresolved.is_empty() {
         return Ok(GuardResult::None);
@@ -522,4 +564,125 @@ pub(crate) fn open_review_ids(file: &Path) -> Result<std::collections::HashSet<S
         .map(|item| crate::pending::normalize_pending_id(&item.id))
         .filter(|id| !id.is_empty())
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, path::PathBuf};
+
+    fn make_doc(root: &Path, content: &str) -> PathBuf {
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("doc.md");
+        fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        doc
+    }
+
+    fn mark_cycle_committed(doc: &Path, preflight: &str, committed: &str) {
+        crate::cycle_state::start_preflight(doc, Some(preflight), Some(preflight)).unwrap();
+        fs::write(doc, committed).unwrap();
+        crate::snapshot::save(doc, committed).unwrap();
+        crate::cycle_state::mark_committed(doc, "commit_success", Some(committed), Some(committed))
+            .unwrap();
+    }
+
+    fn run_context(doc: &Path, content: &str) -> crate::graph::RunContext {
+        let rc = crate::graph::RunContext::new(doc.to_path_buf());
+        rc.set_doc_content(content.to_string());
+        rc
+    }
+
+    fn ops_log(root: &Path) -> String {
+        fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default()
+    }
+
+    #[test]
+    fn queue_head_removal_guard_logs_proof_source_for_authorized_id_removals() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let preflight = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#done] done this cycle\n",
+            "- [ ] [#keep] still queued\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#done]\n",
+            "- do [#resolved]\n",
+            "- do [#keep]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: do #done\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#done] done this cycle\n",
+            "- [ ] [#keep] still queued\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#keep]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = make_doc(tmp.path(), preflight);
+        mark_cycle_committed(&doc, preflight, committed);
+        crate::cycle_state::record_pending_done_ids(&doc, &["done".to_string()]).unwrap();
+
+        let rc = run_context(&doc, committed);
+        assert!(
+            matches!(
+                check_queue_head_removal_guard(&doc, &rc).unwrap(),
+                GuardResult::None
+            ),
+            "authorized queue-head removals should not interrupt"
+        );
+        let log = ops_log(tmp.path());
+        assert!(
+            log.contains("removed=#done proof_source=cycle_lifecycle_outcome"),
+            "done removal proof should name the id and source:\n{log}"
+        );
+        assert!(
+            log.contains("removed=#resolved proof_source=backlog_resolved_or_removed"),
+            "resolved backlog removal proof should name the id and source:\n{log}"
+        );
+    }
+
+    #[test]
+    fn free_text_queue_head_guard_logs_response_proof_source_for_removed_head() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let preflight = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- Please explain the churn\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: Please explain the churn\n\n",
+            "The churn comes from stale queue convergence.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = make_doc(tmp.path(), preflight);
+        mark_cycle_committed(&doc, preflight, committed);
+
+        let rc = run_context(&doc, committed);
+        assert!(
+            matches!(
+                check_free_text_queue_head_provenance(&doc, &rc).unwrap(),
+                GuardResult::None
+            ),
+            "answered free-text queue head should not interrupt"
+        );
+        let log = ops_log(tmp.path());
+        assert!(
+            log.contains("free_text_queue_head_provenance_proof")
+                && log.contains("Please explain the churn")
+                && log.contains("proof_source=committed_response"),
+            "free-text removal proof should name the head and source:\n{log}"
+        );
+    }
 }

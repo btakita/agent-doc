@@ -840,8 +840,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // guards; only production `guard_` tokens are budgeted here now.
         ("agent-doc-orchestration/src/session_check.rs", "guard_") => 65,
         ("agent-doc-orchestration/src/session_check/closeout_guards.rs", "guard_") => 4,
+        // +3 (#mrhqueuepreserve): the audited
+        // `queue_head_removal_guard_proof` diagnostic plus two regression test
+        // names proving removed id-backed/free-text queue heads log their proof
+        // source instead of disappearing silently.
         ("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs", "guard_") => {
-            6
+            9
         }
         ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 8,
         ("agent-doc-orchestration/src/session_check/queue_head_guards.rs", "guard_") => 2,

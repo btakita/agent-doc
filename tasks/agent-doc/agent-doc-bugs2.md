@@ -156,7 +156,61 @@ Commit/push: `src/agent-doc` commit `865a37ac` was pushed to `origin/main`; this
 ❯ ||||||| original
 ❯ =======
 >>>>>>> your-edits
-<!-- agent:boundary:6627bbc1 -->
+
+### Re: #recyclerestart-agent proof — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: The equityfundingsource.md compaction is duplicated and the numeric list is in reverse order:
+> ```
+> ### Session Summary
+>
+> *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-170908.md`*
+>
+> Compacted content:
+> - Archived 1 response topic(s): lender bank wire instruction reveal
+> - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
+> 8. **Active Funding**: wire confirmed; show compliance chip such as Current, Renewal due, Expired, or Under review.
+> 7. **Committed / Awaiting Wire**: lender committed to a deal, wire not confirmed.
+> 6. **Ready to Commit**: lender account is linked and accreditation is current.
+> 5. **Lender Setup**: admin needs to create/link the lender account.
+> 4. **Accreditation Current**: EFS approved; if no lender account exists, move next to setup.
+> 3. **Accreditation Under Review**: submitted and awaiting EFS decision.
+> 2. **Accreditation Not Started**: lender still needs to submit the annual questionnaire/evidence.
+> 1. **Signed Up**: account exists, no annual requirements submitted.
+> - **Active**: at least one fund row is active, meaning the wire was confirmed and the lender is actively invested.
+> - **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
+> - **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
+> 8. **Active Funding**: wire confirmed; show compliance chip such as Current, Renewal due, Expired, or Under review.
+> 7. **Committed / Awaiting Wire**: lender committed to a deal, wire not confirmed.
+> 6. **Ready to Commit**: lender account is linked and accreditation is current.
+> 5. **Lender Setup**: admin needs to create/link the lender account.
+> 4. **Accreditation Current**: EFS approved; if no lender account exists, move next to setup.
+> 3. **Accreditation Under Review**: submitted and awaiting EFS decision.
+> 2. **Accreditation Not Started**: lender still needs to submit the annual questionnaire/evidence.
+> 1. **Signed Up**: account exists, no annual requirements submitted.
+> - **Active**: at least one fund row is active, meaning the wire was confirmed and the lender is actively invested.
+> - **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
+> - **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
+> ```
+
+
+Implemented agent-verifiable recycle/restart proof coverage.
+
+- Added a SimWorld sync-guard model that reproduces killed-pane `Sync Tmux Layout` holding the guard, then proves stale-holder release and later completion through ops-log markers (`sync_kill_pane_path`, `sync_guard_released reason=stale_holder_superseded`, `sync_guard_released reason=sync_complete`).
+- Added recyclerestart proof markers for binary promotion and session re-clear/drain (`recycle_session_reclear ...` and `supervisor_recycle_action result=binary_promoted`) and a targeted test asserting there is no permanent sync-deferred wedge.
+- Made the production sync-lock decision seam public so tests can assert the real stale-bound behavior instead of duplicating it.
+
+Verification:
+- `cargo test -p agent-doc recyclerestart_agent_verifies_kill_pane_sync_guard_and_reclear_proofs -- --nocapture`
+- `cargo test -p agent-doc sync_lock -- --nocapture`
+- `cargo test -p agent-doc recycle -- --nocapture`
+- `cargo test -p agent-doc restart_supervisor -- --nocapture`
+- staged-patch temp worktree: focused recyclerestart test, `sync_lock`, and `cargo check -p agent-doc`
+- `make check`
+
+Code commit: `src/agent-doc` `331573b1` (`test: prove recyclerestart sync guard recovery`), pushed to `origin/main`.
+<!-- agent:boundary:517d7879 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -201,7 +255,7 @@ Compacted content:
 ---
 - ~~do [#cleandrainsup-agent]~~
 - ~~do [#rtwbcast-simproof]~~
-- do [#recyclerestart-agent]
+- ~~do [#recyclerestart-agent]~~
 - do [#lazilyqrestore-agent]
 - do [#suprehotreload-agent]
 - do [#qmisstrike-regression]
@@ -255,7 +309,6 @@ What are #next-steps to fix bugs?
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
-- [ ] [#recyclerestart-agent] [clean-session] Make #recyclerestart-verify agent-verifiable: add automated recycle/restart evidence collection for kill-pane + JB Sync Tmux Layout, including ops.log assertions for no sync-deferred wedge and restart/re-clear proof. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#lazilyqrestore-agent] [clean-session] Make #lazilyqrestore agent-verifiable: add cross-doc lost-queue recovery tooling for foreign-owned tasks/software/lazily-rs.md that reads snapshots/sidecars/doc history, reconstructs deleted queue heads, and emits explicit user-removal proof when no restore is needed.
 - [ ] [#suprehotreload-agent] [clean-session] Make #suprehotreload agent-verifiable: add supervisor hot-reload/stale-binary recycle proof logging and a SimWorld/local harness test that proves a JB Run Agent Doc cycle observes the new binary or maps the proof to #recyclerestart-verify/#aazp/#4myd without live operator inspection.
 - [ ] [#qmisstrike-regression] [clean-session] Reopen #qmisstrike: moving/reordering do [#staleheaddupcontent] caused agent-doc to strike the id-backed head even though no work was done. Fix finalize/queue consume so id-backed heads can only be struck by explicit --done/--pending-gate/valid id consume proof, never as a side effect of stale free-text/head reconciliation. Plan: tasks/agent-doc/plan-finalize-misstrike-next-head.md

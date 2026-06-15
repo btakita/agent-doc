@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -61,7 +61,20 @@ Changed paths: no `lazily-rs` or `lazily-spec` source changes in this cycle; thi
 ### Re: Artifact cleanup — gpt-5
 
 Cleaned the stale IPC artifacts from this session document: the Lean status answer above remains the response to the drained queue prompt, and the misplaced equityfundingsource route diagnostic was removed from the lazily-rs queue component.
-<!-- agent:boundary:d602cdbe -->
+
+### Re: Lean status queue drain — gpt-5
+
+> **Queue prompt:**
+>
+> What is the status of Lean in lazily-rs?
+
+
+Lean is already implemented for the lazily ecosystem as a narrow `lazily-spec` formal companion, not as embedded Rust verification inside `lazily-rs`. The active package is `src/lazily-spec/formal/lean`, and `src/lazily-rs/SPEC.md` references it as the spec-layer oracle for IPC Snapshot/Delta behavior.
+
+Current proof scope: epoch sequencing, fail-closed resync, equal cell-write silence, memo equality suppression, eager Signal `slot_value` publication, and batch frontier coalescing. Current repo state remains clean on both relevant submodules: `lazily-spec` at `6cb978a feat: add Lean IPC formal model`, `lazily-rs` at `f80e4e9 docs: reference lazily Lean formal model`. Local verification already run this cycle: `lake build` in `src/lazily-spec/formal/lean` passed.
+
+No `lazily-rs` or `lazily-spec` source changes were needed for this queue drain. CI note: the parent repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+<!-- agent:boundary:6252fd35 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,7 +83,6 @@ Cleaned the stale IPC artifacts from this session document: the Lean status answ
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- What is the status of Lean in lazily-rs?
 <!-- /agent:queue -->
 
 ## Backlog

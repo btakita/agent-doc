@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -211,7 +211,7 @@ I added three follow-up backlog items: `#lender-terminology-audit`, `#deal-inter
 Preflight note: agent-doc also flagged likely already-resolved review items (`#dropbox-sync-adapter`, `#dzmm-writeback-replay`, `#zwws-vestings-local`); I did not mutate those in this review cycle. Session-size note: preflight warned the exchange is large, but the queue was active, so I kept draining.
 
 Cycle proof: changed paths are the session document only via finalize/backlog mutation; source inspected included the three June 15 Robert Waldman transcripts, `docs/business-logic.md`, `prds/rpzm-investor-dashboard-rework.md`, `prds/investor-pipeline-admin.md`, the investor deal marketplace/detail UI, admin deal detail, migrations, and investor portal tests. Commands included `agent-doc preflight/plan/read`, `tsift status/search`, and targeted `rg`/`sed`. No tests were run because this was a review/document response with no source changes. Escalation none. Confidence high.
-<!-- agent:boundary:d072414d -->
+<!-- agent:boundary:5c85699d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -219,6 +219,9 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#lender-terminology-audit]
+- do [#deal-interest-workflow]
+- do [#fractionalization-allocations]
 <!-- /agent:queue -->
 
 ## Backlog

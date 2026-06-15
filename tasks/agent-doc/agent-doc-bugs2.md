@@ -530,7 +530,19 @@ This closes the recurring `supervisor_binary_stale` / `#fcc0` / `#no-mid-session
 **Live promotion is operator-gated** (needs a live editor + an actual install): run `agent-doc lib-install` from a `#autorecycle-on-install` build and confirm ops.log shows the auto-recycle line and running supervisors pick up the new binary at their next idle boundary. The currently-running supervisor is the pre-fix binary, so it won't self-promote retroactively.
 
 Queue note: active go-mode drain, exchange at 484 lines / 28 sections — continuing to drain.
-<!-- agent:boundary:b09ac53c -->
+
+### Re: [#cleandrainsup-verify] — re-checked; acceptance marker still absent (new pct=none detail) — opus-4-8
+
+Re-ran the ops.log acceptance grep on the full 138.8 MB log. The specific marker you asked for is **still absent**, but I found the *reason* it never fires:
+
+- `idle_queue_watch_context_reset … reason=#cleandrainsup` → **0** genuine emissions. Every `reason=#cleandrainsup` hit is backlog/prompt text echoed inside `queue_diff_active_prompt_differs` lines, not a supervisor event.
+- `supervisor_binary_stale_self_recycled` → **0**.
+- The paired `clean_session_fresh_context_grant` (`#freshgrant`) **did** fire 3× for the clean-session head `mphaseloop` (`1781467943`/`1781468982`/`1781471529`) — so the *grant* half of the flow works; only the `#cleandrainsup` reset+drain half is missing.
+
+**Root cause in the log (new):** the supervisor's `clear-decision` loop is overwhelmingly `optIn=true threshold=15 pct=none clear=false` — **264,969** occurrences vs the handful of `clear=true` bursts that only happen when `pct` is actually readable. When `pct=none` the host can't introspect the agent's context-window percentage, so it never crosses the threshold and never force-clears, so the `#cleandrainsup` reset+drain never triggers. (There are also recent same-label `pct=29.6 clear=true` decisions interleaved with `pct=none clear=false` at ~now, i.e. two evaluators disagreeing for `s760` — the documented multi-owner clear-decision contention.)
+
+**Status:** agent-doable log check done; the live proof stays `[operator-verify]` and open per your placement (not marking done, not moving to review). The running route-owned host for this session is the pre-fix binary (the gen-400 actor predates the `1f8c9f63`/`pct`-aware build), so it cannot produce the marker. The proof completes only when the supervisor is recycled onto the new build (auto-recycle / `admin recycle --all-projects` / restart) **and** then drains a live `[clean-session]` head — at which point ops.log will show `idle_queue_watch_context_reset reason=#cleandrainsup` followed by a one-fresh-agent-per-item drain. I did not force a mid-cycle recycle: recycling the host that's serving this finalize is the exact IPC-drift hazard this session has been hitting (see the `ipcfullprompt_corruption_suspected` deletions today).
+<!-- agent:boundary:71336e68 -->
 <!-- /agent:exchange -->
 
 ## Queue

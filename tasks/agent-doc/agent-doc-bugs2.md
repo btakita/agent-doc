@@ -71,7 +71,7 @@ Done — agent-doc `a99a882d` (superproject pointer `fcf6d21ec`), pushed to `ori
 **Safety.** A real `agent:queue` marker carrying a quoted attribute value is NOT masked — the comment-open precedes the quotes, so the marker start is never inside a quoted span; attribute parsing is untouched (dedicated regression test). Coverage: quoted-marker/quoted-`#id`/fenced-marker(regression)/real-marker-with-quoted-attr tests + a `find_quoted_ranges` same-line/fail-safe unit. `make check` green — **4476 passed, 0 failed**, clippy clean. Not installed mid-session (`#no-mid-session-install`); promotes on next supervisor recycle.
 
 **⚠️ New bug observed live this cycle — compaction dropped a backlog item.** A concurrent compaction mid-finalize archived the exchange to `.agent-doc/archives/…-035227.md` (queue `preset`/`go` attrs preserved — no `#compactqattr` regression there) but **silently dropped the entire `[#0kjc]` backlog item** (pre-compact HEAD `f8a340c44` had 9 backlog items; post-compact `e4d597474` has 8, only `#0kjc` missing). Compaction must only archive the EXCHANGE and leave every other component byte-identical — dropping a backlog **item** is a worse blast-radius variant of `#compactqattr`. Filing as `#compactdropitem`. Because the item was dropped, I could not `--done` it; the completion is durable in git (`a99a882d`) and recorded here. A `--pending-add` to restore it was raced/no-op'd by the stale route-owned supervisor (pid 1654897), so I'm not fighting it further this cycle.
-<!-- agent:boundary:138ed9aa -->
+<!-- agent:boundary:503387ce -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -151,7 +151,7 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 - ~~:pushpin: upgrade dependencies~~
 ---
 - ~~:pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)~~
-- :pushpin: [#c2b6]
+- ~~:pushpin: [#c2b6]~~
 - ~~:pushpin: [#pushpinaccum]~~
 - ~~:pushpin: [#0kjc]~~
 - :pushpin: [#compactqattr]
@@ -195,6 +195,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#compactdropitem] [clean-session] Compaction silently DROPS a whole backlog item (not just attributes). LIVE 2026-06-15 (agent-doc-bugs2.md): a concurrent compaction mid-finalize archived the exchange correctly (queue preset/go attrs preserved, so NOT #compactqattr) but pre-compact HEAD f8a340c44 had 9 agent:backlog items and post-compact HEAD e4d597474 had 8 — the [#0kjc] item vanished with no agent:done archive entry. Compaction must only archive/truncate the EXCHANGE and leave every other singleton component (backlog/review/queue/done) byte-identical. ROOT CAUSE (hypothesis): the post-compact CRDT refresh (compact.rs CRDT state refreshed from post-compact content) re-serializes/re-parses non-exchange components and can drop a list item when a concurrent stale-supervisor CRDT merge interleaves. FIX: snapshot every non-exchange component verbatim across compact + post-compact CRDT refresh and assert item-count parity (backlog/review/done) before/after; fail closed if any non-exchange component loses content. Same blast-radius family as #compactqattr, worse (full-item loss). CLEAN session (compaction/CRDT path).
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).

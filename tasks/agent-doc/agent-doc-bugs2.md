@@ -416,7 +416,13 @@ Verification:
 Escalation: none.
 Confidence: high that these implementation items should run in a clean source-edit cycle.
 Push: I will push `main` after this closeout commit.
-<!-- agent:boundary:a5086842 -->
+
+### Re: Codex PCP/Supervisor Handoff — gpt-5
+
+Captured this as `#codexpcphandoff`. The failure is not that Codex cannot type `/clear`; it is that agent-doc should not leave a fresh-context continuation as operator work when PCP/supervisor can own the boundary.
+
+I added `tasks/agent-doc/plan-codex-pcp-supervisor-fresh-context-handoff.md` with acceptance around Stop-hook fresh-context handoff, between-turn dedupe, preserved Codex launch contract, and proof logging. I put the item in gated review rather than editing `src/agent-doc` here because that tree is already dirty with overlapping route/queue/supervisor work.
+<!-- agent:boundary:2ded2dbb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -425,20 +431,36 @@ Push: I will push `main` after this closeout commit.
 - ~~do [#staleheaddupcontent]~~
 - ~~:pushpin: When I moved `- do [#staleheaddupcontent]`, agent-doc immediately struck it. Even though no work was done.~~
 - ~~:pushpin: Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.~~
----
+~~~done
 :pushpin: JB `Run Agent Doc`
 ```
 [route] target tmux session: 0
 [route] activated existing inactive agent:queue head "#advance-review" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3568
 ```
+~~~
+agent-doc Codex should use the PCP/supervisor to handle tasks that cannot be done in an agent-doc turn
+```
+• Stop hook (blocked)
+  feedback: agent-doc Stop hook kept an active `agent:queue auto` moving for /home/brian/work/btakita/agent-loop/tasks/
+  professional/equityfundingsource.md. The next queue prompt is "[#zwws-new-deal-email]". Do NOT answer the next queue
+  prompt in this already-loaded Codex context. Fresh context is required because exchange was compacted after the last
+  tracked context clear; compaction shrinks the document but not the already-loaded conversation. Run `/clear` before
+  continuing, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+  from the fresh context so the next queue head runs after the reset. Do not send the final answer yet.
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+• I can’t execute /clear from inside this already-loaded model context, and I will not process #zwws-new-deal-email
+  here. Clear the Codex context first, then re-invoke agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/
+  equityfundingsource.md so that queue head runs with fresh context.
+```
 ---
+- If agent-doc Codex task requires a clean session, use PCP/Supervisor to coordinate a clean session to run the task. 
 - ~~do [#suprehotreload-agent]~~
-- do [#lazilyqrestore-agent]
-- do [#recyclerestart-agent]
-- do [#rtwbcast-simproof]
-- do [#cleandrainsup-agent]
-- do [#compactdrift-agent]
+- ~~do [#lazilyqrestore-agent]~~
+- ~~do [#recyclerestart-agent]~~
+- ~~do [#rtwbcast-simproof]~~
+- ~~do [#cleandrainsup-agent]~~
+- ~~do [#compactdrift-agent]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -479,6 +501,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#codexpcphandoff] [clean-session] Codex Stop-hook/fresh-context blocks must hand off to PCP/supervisor instead of punting to the operator: when a Codex turn cannot execute /clear or must not process the next queue head after compaction/context-clear, enqueue one deduped supervisor fresh-context continuation that preserves launch permissions and logs proof. Plan: tasks/agent-doc/plan-codex-pcp-supervisor-fresh-context-handoff.md
 - [/] [#compactdrift-agent] [clean-session] Make #c2b6 compactdrift agent-verifiable: add an editor-IPC/fixture regression for JB Compact Exchange on a doc whose HEAD contains a finalized Re: response, proving no typed_component_drift/out-of-band historical response bail without needing live JB.
 - [/] [#cleandrainsup-agent] [clean-session] Make #cleandrainsup-verify agent-verifiable: add local supervisor/ops-log coverage for idle_queue_watch_context_reset reason=#cleandrainsup followed by draining a [clean-session] head with one fresh agent per item. Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [/] [#rtwbcast-simproof] [clean-session] Make #rtwbcast-verify agent-verifiable: add a headless two-editor/SimWorld CRDT broadcast convergence test that exercises simultaneous managed-doc edits and proves both buffers converge without clobber. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

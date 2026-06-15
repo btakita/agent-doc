@@ -379,7 +379,24 @@ So both halves of #fcc0's defining scope are done: (a) all genuine direct-disk-n
 **Not done here (correctly deferred):** the `restart-supervisor --force` OS-signal escalation (reuse `signal_pid_for_force_clear` gated on `process_binary_is_stale`) is an explicit CLEAN-session follow-up that "cannot be live-tested from the hosted session it would kill" — it stays out of this block-accreted hosted session.
 
 Also removed a contaminated `:pushpin: :round_pushpin:` queue line (the #pushpinaccum double-marker bug) that was tripping session-check; its content is already captured in backlog `#pushpinaccum`.
-<!-- agent:boundary:654728b2 -->
+
+### Re: do [#qmisstrike] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#qmisstrike]
+
+
+Fixed and committed (agent-doc `6c85ed42`).
+
+**Root cause.** The mis-strike was not an "over-advance by one" cursor — it was a *mis-classification* in the repair strike guard. `repair::first_queue_head_is_free_text` gated `strike_recovered_free_text_queue_head` (which calls `consume_queue_prompt_force_disk`, and that strikes the leading head **by position**). The guard used a brittle prefix test: `!(t.starts_with("do [#") || t.starts_with("do #"))`. That only recognizes the `do `-prefixed spelling, so a head spelled `[#qchurn]` or `:pushpin: [#qchurn]` / `:round_pushpin: [#qchurn]` (no `do `) was classified as **free text** and struck by position. After a free-text head was consumed (or the operator deleted already-struck items), the next open id-backed head became position-0 and got wrongly struck — exactly the tsift.md report and the live `#qchurn` repro.
+
+**Fix.** Delegate the guard to the authoritative `write::queue_head_is_free_text_prompt`, which already resolves every id-backed spelling (`#id`, `[#id]`, `do [#id]`, pinned, preset) correctly via `topic_resolves_to_exact_id`. The repair strike path now agrees with the finalize path: an id-backed head is struck **only** via `--done` / `--pending-gate` / `queue consume`, never by the positional free-text heuristic. This satisfies fix points 1–3 of the plan (strike only answered heads; never side-strike an id-backed head; manual-deletion stability — deleting struck items can no longer re-anchor the strike onto a new leading id head). Point 4's symptom guard (`#queue-clear-unrun-items`) already existed; the fix makes finalize stop producing the symptom.
+
+**Tests + verification.** Added `repair::first_queue_head_free_text_check_excludes_id_backed_head` (all id-backed spellings classify as not-free-text; a genuine no-`#id` head still strikes; inactive queue strikes nothing) and extended `write::queue_consume::free_text_queue_head_detection` with the bare/pinned `[#id]` spellings. `make check` green — 4464 passed, 238 skipped, clippy clean (FlowCore token-budget gate included). Plan: `tasks/agent-doc/plan-finalize-misstrike-next-head.md`.
+
+Note: this is a `[clean-session]` binary fix — the live build/install + supervisor recycle (so a running session uses the new strike guard) is handled by the default-on `#supselfheal`/`#supautoinstall` path at the next idle boundary.
+<!-- agent:boundary:2673ea34 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -389,16 +406,16 @@ Also removed a contaminated `:pushpin: :round_pushpin:` queue line (the #pushpin
 - ~~:round_pushpin: do [#4myd]~~
 - ~~:pushpin: [#mphaseloop]~~
 - ~~:round_pushpin: do [#fcc0]~~
-- :pushpin: [#qmisstrike]
+- ~~:pushpin: [#qmisstrike]~~
 - :pushpin: do [#aazp]
 - :round_pushpin: do [#rtwbcast]
 ---
-- :pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
-- :pushpin: [#c2b6]
-- :pushpin: [#pushpinaccum]
-- :pushpin: [#0kjc]
-- :pushpin: [#compactqattr]
-- :pushpin: [#dupcontent]
+:pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
+```
+resync: pruned 8 stale session(s)
+[route] target tmux session: 0
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3457
+```
 ---
 :pushpin: JB `Run Agent Doc` should self-heal and complete the dispatch. There was no `- #advance-review` line. Seems to be stuck in an old state.
 ```
@@ -416,12 +433,7 @@ resync: stash pane %50 is unregistered but still hosts live supervisor tsift-v0.
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3460
 ```
 ---
-JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
-```
-resync: pruned 8 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3457
-```
+:pushpin: :round_pushpin: - :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
 ---
 :pushpin: JB `Compact Exchange` on this document
 ```
@@ -434,9 +446,7 @@ JB `Run Agent Doc` on equityfundingsource.md
 [route] activated existing inactive agent:queue head "Please create sample borrower documents and sample investor documents that I can upload for testing. Place in the equityfundingsource-dev/tmp directory. Ensure tmp is in .gitignore." for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
 Error: project controller command `dispatch` failed: dispatch coalesced for tasks/professional/equityfundingsource.md: a dispatch for generation 66 is already in flight (#qflood); receipt_id=3310
 ```
----
-- :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
----
+- ~~:round_pushpin: do [#ar27]~~
 :pushpin: JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equityfundingsource.md`
 ```
 ~/work/btakita/agent-loop main ⇡20 *5 !41 ?11                                                     agent-loop 23:02:05
@@ -451,12 +461,23 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 :round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
 ---
 - :pushpin: upgrade dependencies
+---
+- :pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
+- :pushpin: [#c2b6]
+- :pushpin: [#pushpinaccum]
+- :pushpin: [#0kjc]
+- :pushpin: [#compactqattr]
+- :pushpin: [#dupcontent]
+---
 - do [#dfrefresh-retire]
 - do [#1j8q]
-- do [#ar27]
 ---
 :round_pushpin: do [#suprehotreload]
 - :pushpin: do [#ar27-majors]
+- :pushpin: do [#dupcontent]
+- :pushpin: do [#compactqattr]
+- :pushpin: do [#0kjc]
+- :pushpin: do [#pushpinaccum]
 <!-- /agent:queue -->
 ###
 <!--
@@ -493,7 +514,6 @@ What are #next-steps to fix bugs?
 - [ ] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.
 - [ ] [#dupcontent] [clean-session] Duplicate-content / malformed-attribute document corruption when finalize adopts a stale-supervisor `content_ours` snapshot. LIVE 2026-06-14 (monsterrodholders.md, stale route-owned supervisor pid1328300 started 02:15:48 < binary mtime 02:28:10, session-check `#fcc0`): `finalize --stream` hit `mid-turn cycle rotation ... #adoc-compact-during-turn-response-loss` then `live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar content_ours_len=40827 > candidate 39216` then `snapshot from content_ours`. The adopted buffer was CORRUPT and written to disk: 273 lines vs 181 in clean HEAD, TWO `agent:queue` blocks (held one at ~88 PLUS a stale re-armed `preset="#spec-test-commit-push" priority go` block at ~181) and a truncated marker `<!-- agent:queue tasks=" -->`. The lint-gate caught `empty-attr-value` only AFTER the corrupt content already landed on disk (interrupt, no commit; HEAD stayed clean). Repair: `git checkout HEAD -- <file>` + `reset --from-current --preserve-session`. ROOT CAUSE (hypothesis): `content_ours`/`ack_content_sidecar` buffer is adopted verbatim as the snapshot base without structural validation, so a bad prior CRDT merge (duplicate singleton component blocks + attribute split across a merge boundary) is taken as truth and written before the lint-gate runs; the known-stale supervisor is still trusted as an IPC content source. FIX: (1) structurally validate before adopting any content_ours snapshot — reject/repair >1 open marker for a singleton component (exchange/status/queue/backlog/review/icebox/done) or a malformed/unterminated attribute, falling back to candidate/HEAD; (2) fail closed when the serving supervisor is already classified `supervisor_binary_stale` (#fcc0) — do not ingest its buffer; (3) run the structural/lint check on the candidate BEFORE the disk write, not after; (4) de-dup singleton blocks on parse instead of concatenating. CLEAN session (snapshot-adoption / converge write path). Related #fcc0/#compactqattr/#adoc-compact-during-turn-response-loss. Plan: tasks/agent-doc/plan-content-ours-duplicate-corruption.md
 - [ ] [#compactqattr] [clean-session] Compaction wipes agent:queue inline attributes (preset, priority, likely go) from the opening marker — operator observed in monsterrodholders.md: post-compaction deleted all agent:queue attributes. Too much blast radius. Compaction should only archive/truncate the EXCHANGE component and must leave every other component opening marker byte-identical. HYPOTHESIS: the post-compact CRDT refresh (compact.rs, CRDT state refreshed from post-compact content) re-serializes component opening tags from parsed structure and drops inline attrs. FIX: preserve the verbatim opening marker (all inline attributes) for every non-archived component across compact + the post-compact CRDT refresh; add coverage that compacting a doc whose agent:queue carries preset/priority/go leaves that marker unchanged. CLEAN session (compaction/CRDT path).
-- [ ] [#qmisstrike] [clean-session] finalize strike heuristic wrongly strikes the NEXT open queue head. Operator report (tsift.md): after manually deleting struck items, agent-doc struck through the next still-open item. LIVE-REPRODUCED this session: a finalize answering the free-text `:pushpin: JB Run Agent Doc` head consumed it AND additionally struck the next open id-backed head #qchurn (response never addressed it); session-check `#queue-clear-unrun-items` caught it, had to un-strike + reset --from-current + commit. ROOT CAUSE (hypothesis): the strike cursor over-advances by one and strikes an unanswered open head; id-backed heads should only strike via --done/--pending-gate/queue-consume, never the free-text strike heuristic. FIX: strike only the head(s) this turn`s response actually answered (match by topic/text, not position); never side-strike an id-backed head; treat operator strike-deletions as terminal (no forward re-strike); proof queue_strike target=… reason=answered|consume. CLEAN session. Related #qpresetstrike/#pushpinaccum/#qchurn. Plan: tasks/agent-doc/plan-finalize-misstrike-next-head.md
 - [ ] [#0kjc] #mdastquote [clean-session] Markdown AST must treat tags inside quoted strings ("...") and code spans/blocks (backtick / triple-backtick) as CONTENT, not document tags. Operator report: agent:*/#id-looking tokens inside quotes or fenced code are being parsed as real document component markers. Same family as #lintfence (fenced agent:* markers break lint + parser). FIX: tagpath/agent-doc markdown tokenizer must mask quoted-string and code-span/code-fence regions before component/tag extraction. CLEAN session (parser path).
 - [ ] [#pushpinaccum] [clean-session] Queue :pushpin: annotations accumulate/nest in the wrong place. (1) ACCUMULATION: a head already starting `- :pushpin:` gets another :pushpin: prepended -> `:pushpin: - :pushpin: ...` (operator corrected one live 2026-06-13). (2) PROMOTION DEDUP (operator 2026-06-14): when a `:round_pushpin:` head is upgraded to `:pushpin:`, the round_pushpin is kept alongside -> `:pushpin: :round_pushpin:` instead of a single `:pushpin:`. The queue head-grouping/annotation formatter prepends/promotes the pushpin marker without checking for an existing leading pushpin/round-pushpin/bullet. FIX: make the queue-head annotation prefix idempotent — a head carries exactly one leading marker; promoting `:round_pushpin:` -> `:pushpin:` REPLACES it (drop the round_pushpin), and re-pinning an already-:pushpin: head is a no-op. CLEAN session (queue formatter path).
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.

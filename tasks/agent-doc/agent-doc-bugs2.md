@@ -542,7 +542,20 @@ Re-ran the ops.log acceptance grep on the full 138.8 MB log. The specific marker
 **Root cause in the log (new):** the supervisor's `clear-decision` loop is overwhelmingly `optIn=true threshold=15 pct=none clear=false` — **264,969** occurrences vs the handful of `clear=true` bursts that only happen when `pct` is actually readable. When `pct=none` the host can't introspect the agent's context-window percentage, so it never crosses the threshold and never force-clears, so the `#cleandrainsup` reset+drain never triggers. (There are also recent same-label `pct=29.6 clear=true` decisions interleaved with `pct=none clear=false` at ~now, i.e. two evaluators disagreeing for `s760` — the documented multi-owner clear-decision contention.)
 
 **Status:** agent-doable log check done; the live proof stays `[operator-verify]` and open per your placement (not marking done, not moving to review). The running route-owned host for this session is the pre-fix binary (the gen-400 actor predates the `1f8c9f63`/`pct`-aware build), so it cannot produce the marker. The proof completes only when the supervisor is recycled onto the new build (auto-recycle / `admin recycle --all-projects` / restart) **and** then drains a live `[clean-session]` head — at which point ops.log will show `idle_queue_watch_context_reset reason=#cleandrainsup` followed by a one-fresh-agent-per-item drain. I did not force a mid-cycle recycle: recycling the host that's serving this finalize is the exact IPC-drift hazard this session has been hitting (see the `ipcfullprompt_corruption_suspected` deletions today).
-<!-- agent:boundary:71336e68 -->
+
+### Re: JB `Run Agent Doc` won't self-heal / "stuck in old state" — log check — opus-4-8
+
+Per your division of labor ("I test, file bugs, you check the logs"): the reports are **not** a regression in the current binary — they are the stale-supervisor + wedged-controller condition. Proof:
+
+- **This doc's supervisor (pid 1654897) started 14:43:10; the installed binary was rebuilt at 23:12** — it serves an **~8.5-hour-stale build** predating every self-recycle / preset-strike / auto-restart fix. That is why `Run Agent Doc` does not self-heal and reports "stuck in an old state": the running supervisor *is* the pre-fix binary (`supervisor_binary_stale` / `#fcc0`). Captured as **#recyclerestart-verify / #aazp / #4myd** (`[operator-verify]`).
+- **pid 1195078 is a `controller serve … --handoff-state preparing` orphan wedged 23+ min** — the `#stuckhandoff2` wedge. The current binary's reaper IS alive (`orphaned_preparing_controller_reaped*` fires repeatedly in ops.log, 45s threshold) but triggers on gc/connect/bind, not a timer, so this orphan survives between triggers — live evidence FOR `#stuckhandoff2` **M1** (self-watchdog suicide-timer). Already captured.
+- The efs `advance-review preset head is spent … Operator can clear the - #advance-review line` cluster is **#qpresetstrike** (spent preset fails closed instead of auto-striking); the `#qchurn` "zero drainable work … pausing to stop the flood" line is the same stale-host symptom.
+- You already added + closed **#autorecycle-on-install** (recycle `--all-projects` on install) — the durable fix for this exact "supervisor stays stale after a rebuild" pain.
+
+**This very cycle reproduced it live:** my first finalize drift-raced against the stale supervisor (`live_prompt_drift_after_preflight`, `content_ours_len=98226`) and a concurrent compaction folded the response into the summary — the precise self-race the reports describe.
+
+**No agent-doable code work is safe here** (fixes are `[clean-session]`/`[operator-verify]`; stale supervisor races every write; accretion at `block`). **Operator action to clear it** (can't be agent-done — would kill this session's own parent supervisor): `agent-doc admin recycle --all-projects` (or restart the session), then `pkill -f 'controller serve .* --handoff-state preparing'` for pid 1195078. After recycle onto the 23:12 build, `Run Agent Doc` self-heals and `#recyclerestart-verify` / `#aazp` / `#4myd` prove from ops.log (`supervisor_binary_stale_self_recycled`).
+<!-- agent:boundary:e8c733b8 -->
 <!-- /agent:exchange -->
 
 ## Queue

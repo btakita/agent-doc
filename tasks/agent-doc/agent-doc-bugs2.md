@@ -313,13 +313,13 @@ Commit:
 Escalation: none.
 Confidence: high that the corruption report is now actionable and tied to an exact plan file.
 Push: I will push `main` after this closeout commit.
-<!-- agent:boundary:7c235bbe -->
+<!-- agent:boundary:ecb1e219 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-~~~done
+---
 :pushpin: Codex finalize error
 ```
 • Finalize’s backlog-capture guard interpreted the closeout note as a possible follow-up. I’m rerunning with an explicit
@@ -352,8 +352,8 @@ Push: I will push `main` after this closeout commit.
         Caused by:
             Transport closed
 ```
-~~~
-- do [#staleheaddupcontent]
+---
+- ~~do [#staleheaddupcontent]~~
 - :pushpin: Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.
 ---
 :pushpin: JB `Run Agent Doc`

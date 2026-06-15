@@ -236,7 +236,29 @@ Verification:
 - latest CI: `gh run list --workflow CI --limit 1` green (`27565526111`)
 
 Code commit: `src/agent-doc` `e1c834fc` (`feat: audit lost queue heads`), pushed to `origin/main`.
-<!-- agent:boundary:1f1c5398 -->
+Implemented `#suprehotreload-agent`.
+
+Submodule commit `03427e3f` (`test: prove supervisor hot reload mapping`) adds the requested agent-verifiable hot-reload proof path:
+
+- live stale-binary recycle success now writes `supervisor_binary_stale_self_recycled ... via=execve_preserve_child` to `ops.log` before `execve`
+- SimWorld arms a one-shot JB `Run Agent Doc` probe on accepted operator dispatch
+- successful recycle records `suprehotreload_jb_cycle result=observed_fresh_binary ... mapped=direct`
+- failed `execve` records `suprehotreload_jb_cycle result=mapped_operator_verify targets=recyclerestart-verify,aazp,4myd`
+- added the two `suprehotreload_agent_*` SimWorld tests and a `VERSIONS.md` entry
+
+Verification:
+
+- `cargo fmt`
+- `cargo test -p agent-doc suprehotreload_agent -- --nocapture`
+- `cargo test -p agent-doc recyclerestart_agent_verifies_kill_pane_sync_guard_and_reclear_proofs -- --nocapture`
+- `cargo check -p agent-doc`
+- staged-only sibling worktree: `cargo test -p agent-doc suprehotreload_agent -- --nocapture`
+- staged-only sibling worktree: `cargo check -p agent-doc`
+- `make check` passed: 4524 nextest tests, doctests, and medium SimWorld corpus
+- latest GitHub CI run was green: `27566208437`
+
+Pushed `03427e3f` to `origin/main` and staged the parent `src/agent-doc` gitlink for this closeout.
+<!-- agent:boundary:f4bc2561 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -283,7 +305,7 @@ Compacted content:
 - ~~do [#rtwbcast-simproof]~~
 - ~~do [#recyclerestart-agent]~~
 - ~~do [#lazilyqrestore-agent]~~
-- do [#suprehotreload-agent]
+- ~~do [#suprehotreload-agent]~~
 - do [#qmisstrike-regression]
 - do [#staleheaddupcontent]
 - do [#mrhbacklogqueuesync]
@@ -335,7 +357,6 @@ What are #next-steps to fix bugs?
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
-- [ ] [#suprehotreload-agent] [clean-session] Make #suprehotreload agent-verifiable: add supervisor hot-reload/stale-binary recycle proof logging and a SimWorld/local harness test that proves a JB Run Agent Doc cycle observes the new binary or maps the proof to #recyclerestart-verify/#aazp/#4myd without live operator inspection.
 - [ ] [#qmisstrike-regression] [clean-session] Reopen #qmisstrike: moving/reordering do [#staleheaddupcontent] caused agent-doc to strike the id-backed head even though no work was done. Fix finalize/queue consume so id-backed heads can only be struck by explicit --done/--pending-gate/valid id consume proof, never as a side effect of stale free-text/head reconciliation. Plan: tasks/agent-doc/plan-finalize-misstrike-next-head.md
 - [ ] [#staleheaddupcontent] [clean-session] Fix stale queue head duplicate-content corruption: a stale agent:queue head can replay old exchange/queue content and corrupt the document. Add stale-head mismatch coverage, refuse stale queue snapshot replay without live-head match or consume/strike proof, and log live/snapshot/stale head identities. Plan: tasks/agent-doc/plan-stale-queue-head-duplicate-content.md
 - [ ] [#mrhbacklogqueuesync] [clean-session] Fix tasks/monsterrodholders.md backlog priority queue sync: document has agent:backlog priority queue but eligible backlog items are not materializing in agent:queue. Add diagnostics for skipped backlog ids, regression coverage for backlog-to-queue convergence, and persist queue sync through session-check. Plan: tasks/agent-doc/plan-monsterrodholders-backlog-priority-queue-sync.md

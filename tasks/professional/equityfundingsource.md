@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -110,6 +110,11 @@ The dashboard's own Available-deals **card list** still keeps its notice (that's
 
 ### Re: Client-side model for the lender-application UI transitions — opus-4-8
 
+> **Queue prompt:**
+>
+> :pushpin: When I filled out the Lender Application in the Available deal in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard: The UI should update. Complete application notification should transition into the waiting for approval notification. Also the Available deal that was added card state should change. Do we have a client side model of these sort of transitions?
+
+
 Short answer: **partly.** There is a real client-side model of these transitions, but it is **per-component, not shared** — and on the **dashboard** (where you hit this) the dialog's copy of the state never reaches the dashboard's notice or cards, so they don't update until a full reload.
 
 **What the model is.** The state object is `InvestorLenderProfile` (`lender_account.tsx`), and the transition is driven entirely by its `lender_request_status: 'pending' | 'done' | 'denied' | null` field plus `lender_account` (the TMO account number). Pure functions derive the UI from it:
@@ -139,7 +144,7 @@ On the dashboard the deal dialog renders `InvestorDealDetail` (embedded). When y
 I recommend **Option 1** for the immediate notice transition (Option 3 later if more cross-component lender-derived state appears). I did **not** implement it this turn since the prompt was a "do we have…?" question and the card-state piece needs a UX decision — queued as actionable backlog item `#9e7b` with a plan at `tasks/professional/efs-investor-lender-state-lift.md`. Say `do #9e7b` and I'll wire Option 1, update tests, and ship it.
 
 <!-- no-queue-removal-guard -->
-<!-- agent:boundary:47f56b61 -->
+<!-- agent:boundary:149603a1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -147,7 +152,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: When I filled out the Lender Application in the Available deal in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard: The UI should update. Complete application notification should transition into the waiting for approval notification. Also the Available deal that was added card state should change. Do we have a client side model of these sort of transitions?
 <!-- /agent:queue -->
 
 ## Backlog

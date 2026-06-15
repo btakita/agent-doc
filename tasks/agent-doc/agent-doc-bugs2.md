@@ -886,7 +886,29 @@ Important constraint: preemptive context-usage clears remain opt-in via `agent_d
 Correction: the previous response body answered this PCP/Codex queue head, but the old positional consumer echoed and struck the skipped qref prompt. I fixed that product bug in `src/agent-doc` commit `721114ad` (`fix: target queue closeout prompt by heading`) and parent commit `21681d62d`.
 
 The root cause and shipped fixes remain `28ac88d9` and `f5ac694c`: Codex now reads `token_count` events from `~/.codex/sessions/**/rollout-*.jsonl` for context-percent clear decisions, and fresh-context Codex continuations hand off to `idle_queue_watch` instead of punting `/clear` back to the operator. This closeout consumes the actual PCP/Codex queue item.
-<!-- agent:boundary:a08bfdc0 -->
+
+### Re: `agent:exchange` with attribute `queue` should add items into the queue while the queue is running. — gpt-5
+
+> **Queue prompt:**
+>
+> :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
+
+
+> **Queue prompt:**
+>
+> `agent:exchange` with attribute `queue` should add items into the queue while the queue is running.
+
+
+Implemented in `src/agent-doc` commit `5faba172` (`fix: queue exchange prompts during active loops`), with parent repo commit `b84d75064` advancing the submodule pointer.
+
+Behavior now matches the requested queue intake semantics: `&lt;!-- agent:exchange queue --&gt;` is treated as a prompt intake surface. During preflight, newly added exchange prompt blocks are moved into `agent:queue` using the same `queue` modes (`append` by default, plus `prepend` and `sync`), removed from the exchange tail so they do not remain as unanswered direct prompts, and mirrored into the snapshot. Preflight also suppresses those moved prompt targets from the current diff, so the running queue keeps its current head and the new prompt waits its turn in `agent:queue`.
+
+Coverage added:
+- `run_queue_maintenance_moves_exchange_queue_prompts_into_active_queue`
+- `queued_exchange_prompt_diff_suppression_matches_moved_prompt_targets`
+
+Verification passed: focused tests, `cargo check -p agent-doc`, and local `make check` via tsift digest runner (`tart-f709e79ba9`).
+<!-- agent:boundary:2df752cc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -896,9 +918,9 @@ The root cause and shipped fixes remain `28ac88d9` and `f5ac694c`: Codex now rea
 - ~~:pushpin: Why was there so much churn in the last queue turn? I was editing unrelated queue items. Those should be ignored. Use AST instead of byte-by-byte comparison. Be selective using CRDT merges into the document model and other areas that can cause churn.~~
 - ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md still sends a CR instead of submitting the command. Please consolidate all send command logic into a single function so we can make this behavior more reliable. Simplify, simplify, simplify...~~
 - ~~:pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item. Any item I place should have `:pushpin:` added since I made the decision to add it in a position.~~
-- :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
+- ~~:round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.~~
 - ~~The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex?~~
-- `agent:exchange` with attribute `queue` should add items into the queue while the queue is running.
+- ~~`agent:exchange` with attribute `queue` should add items into the queue while the queue is running.~~
 - do [#snbc2]
 - do [#codexctrlz]
 - do [#opverify-submit-proof]

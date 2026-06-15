@@ -151,12 +151,16 @@ I can be productive with it today because I know the system and there is enough 
 > **Queue prompt:**
 >
 > I edited the response. Stop adding the team using agent-doc. You also did not add anything about transitioning from turn based to real-time editing and queue management.
-<!-- agent:boundary:782d1e74 -->
+
+### Re: Queue drained — gpt-5
+
+The revised note above covers the remaining queue items: SimWorld/SimEditor and multi-editor work, plus the estimate slip around the Project Control Pane/Supervisor refactor.
+<!-- agent:boundary:60c3aff1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

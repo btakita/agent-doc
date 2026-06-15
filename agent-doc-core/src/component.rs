@@ -690,6 +690,66 @@ pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
     ranges
 }
 
+/// Find byte ranges of same-line double-quoted spans (`"..."`) — `#0kjc`/`#mdastquote`.
+///
+/// A `<!-- agent:* -->` marker (or other tag-looking token) embedded inside a
+/// double-quoted prose span — for example a queue/backlog item that quotes a
+/// marker by name like `"<!-- agent:queue -->"` — is content, not a real
+/// document tag, and must not be parsed as one (same family as the code-span /
+/// code-fence masking in [`find_code_ranges`], and as `#lintfence`).
+///
+/// Quotes are scoped to a single line, so an unterminated quote only masks the
+/// rest of its own line (fail-safe: it can never swallow a real marker on a
+/// later line). The opening `"` is included in the returned span. A real
+/// marker's own attribute value (for example `preset="..."`) sits to the right
+/// of the marker's `<!--`, so the marker's start byte is never inside one of
+/// these spans and stays parseable. Mirrors the `\"`-escape handling of
+/// `crate::gate_verify`'s `strip_quoted_spans` (`#gng8`).
+pub fn find_quoted_ranges(doc: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut offset = 0usize;
+    for raw_line in doc.split_inclusive('\n') {
+        let line_start = offset;
+        offset += raw_line.len();
+        let bytes = raw_line.as_bytes();
+        let line_content_len = raw_line.trim_end_matches(['\n', '\r']).len();
+        let mut i = 0usize;
+        while i < bytes.len() {
+            if bytes[i] != b'"' {
+                i += 1;
+                continue;
+            }
+            let span_start = line_start + i;
+            let mut j = i + 1;
+            let mut closed = false;
+            while j < bytes.len() {
+                match bytes[j] {
+                    b'\\' => {
+                        j += 2;
+                        continue;
+                    }
+                    b'"' => {
+                        closed = true;
+                        break;
+                    }
+                    b'\n' | b'\r' => break,
+                    _ => j += 1,
+                }
+            }
+            if closed {
+                ranges.push((span_start, line_start + j + 1));
+                i = j + 1;
+            } else {
+                // Unterminated quote: mask to end of line (fail-safe), then stop
+                // scanning this line.
+                ranges.push((span_start, line_start + line_content_len));
+                break;
+            }
+        }
+    }
+    ranges
+}
+
 /// Find byte ranges for ordinary HTML comments, skipping code spans/blocks and
 /// preserving `agent:` markers for the component parser.
 ///
@@ -700,9 +760,11 @@ pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
 /// stripped by repair.
 pub fn find_non_agent_html_comment_ranges(doc: &str) -> Vec<(usize, usize)> {
     let code_ranges = find_code_ranges(doc);
+    let quoted_ranges = find_quoted_ranges(doc);
     let in_code = |pos: usize| {
         code_ranges
             .iter()
+            .chain(quoted_ranges.iter())
             .any(|&(start, end)| pos >= start && pos < end)
     };
 
@@ -746,6 +808,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
     let bytes = doc.as_bytes();
     let len = bytes.len();
     let code_ranges = find_code_ranges(doc);
+    let quoted_ranges = find_quoted_ranges(doc);
     let mut templates: Vec<Component> = Vec::new();
     // Stack of (name, attrs, open_start, open_end)
     let mut stack: Vec<(String, HashMap<String, String>, usize, usize)> = Vec::new();
@@ -758,9 +821,11 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
             continue;
         }
 
-        // Skip markers inside code regions
+        // Skip markers inside code regions or double-quoted prose spans
+        // (a quoted `"<!-- agent:* -->"` is content, not a real marker — `#0kjc`).
         if code_ranges
             .iter()
+            .chain(quoted_ranges.iter())
             .any(|&(start, end)| pos >= start && pos < end)
         {
             pos += 4;
@@ -1316,6 +1381,88 @@ new content here\n\
         assert_eq!(components.len(), 1);
         assert_eq!(components[0].name, "exchange");
         assert!(components[0].content(doc).contains("new content here"));
+    }
+
+    #[test]
+    fn quoted_agent_marker_in_prose_is_not_parsed() {
+        // #0kjc: a marker quoted by name in prose is content, not a real marker.
+        // Without quote-masking the dangling `<!-- agent:queue -->` inside the
+        // quotes would open an unmatched component and error the whole parse.
+        let doc = "\
+<!-- agent:exchange -->\n\
+Operator note: \"<!-- agent:queue -->\" attributes were dropped on compaction.\n\
+new content here\n\
+<!-- /agent:exchange -->\n";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "exchange");
+        assert!(components[0].content(doc).contains("new content here"));
+        assert!(components[0].content(doc).contains("attributes were dropped"));
+    }
+
+    #[test]
+    fn quoted_id_token_in_prose_is_content() {
+        // #0kjc: a `#id`-looking token in a quoted span is prose, never a tag.
+        let doc = "\
+<!-- agent:exchange -->\n\
+The operator asked to clear \"#advance-review\" but no such line exists.\n\
+<!-- /agent:exchange -->\n";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert!(components[0].content(doc).contains("#advance-review"));
+    }
+
+    #[test]
+    fn fenced_agent_marker_in_prose_is_not_parsed() {
+        // Regression guard: code-fence masking (pre-#0kjc) must keep working — a
+        // marker inside a fenced block stays content.
+        let doc = "\
+<!-- agent:exchange -->\n\
+```\n\
+<!-- agent:queue -->\n\
+```\n\
+new content here\n\
+<!-- /agent:exchange -->\n";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "exchange");
+        assert!(components[0].content(doc).contains("new content here"));
+    }
+
+    #[test]
+    fn real_marker_with_quoted_preset_attr_still_parses() {
+        // #0kjc safety: a real marker carrying a double-quoted attribute value
+        // must NOT be masked — its `<!--` precedes the quotes, so its start byte
+        // is never inside a quoted span.
+        let doc = "\
+<!-- agent:queue preset=\"#spec-test-build-install-commit-push\" priority go -->\n\
+- :pushpin: do [#thing]\n\
+<!-- /agent:queue -->\n";
+        let components = parse(doc).unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "queue");
+        // The marker is NOT masked (proving the safety property); the attr
+        // parser stores the raw quoted value, same as before this change.
+        assert!(
+            components[0]
+                .attrs
+                .get("preset")
+                .is_some_and(|v| v.contains("#spec-test-build-install-commit-push")),
+            "preset attr should survive quote-masking, got {:?}",
+            components[0].attrs.get("preset")
+        );
+    }
+
+    #[test]
+    fn find_quoted_ranges_is_same_line_and_fail_safe() {
+        // Balanced same-line span is masked; a span never crosses a newline.
+        let doc = "a \"bc\" d\n\"ef\n";
+        let ranges = find_quoted_ranges(doc);
+        // First line: `"bc"` (bytes 2..6). Second line: unterminated `"ef`
+        // masks to end-of-line only (not into the next line).
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(&doc[ranges[0].0..ranges[0].1], "\"bc\"");
+        assert_eq!(&doc[ranges[1].0..ranges[1].1], "\"ef");
     }
 
     // --- Inline attribute tests ---

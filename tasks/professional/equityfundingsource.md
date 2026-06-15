@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,28 @@ committed
 Compacted content:
 - Archived 4 response topic(s): Move applied deals to a Pending deals section + deploy; Applied deal still in Available deals; deploy; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:a5663c07 -->
+
+### Re: do [#cgw7] — wire broker email + in-app notifications — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#cgw7]
+
+
+Done. Broker events now generate in-app notifications and (opt-in) email. New module `app/equityfundingsource/lib/broker/notify.ts` with three triggers, wired into `lib/broker/routes.ts`:
+
+- **Deal submitted** (`POST /api/broker/deals`) → in-app + email to all active admins.
+- **Deal status change** — both broker self-transitions (`PATCH /api/broker/deals/:id/status`) and admin promotions (`POST /api/admin/broker-deals/:id/status`) → owning broker. Status-specific copy; `docs_needed` is the "documents requested" event.
+- **Commission recorded / marked paid** (`POST /api/admin/broker-commissions`, `.../mark-paid`) → owning broker.
+
+Design notes:
+- In-app notifications (`notification_create_` → shared `notifications` table, surfaced by the existing `GET /api/broker/notifications`) **always fire**. Email is opt-in behind `BROKER_EMAIL_NOTIFICATIONS_ENABLED` (Cloudflare Email Service or local capture), mirroring the borrower-message notify pattern. `BROKER_NOTIFICATION_FROM` overrides the From (falls back to `EFS_EMAIL_FROM`). Both documented in `.env.example`.
+- Side-effects run via `notify_after_` (`ctx.waitUntil`) and swallow errors, so a notification failure never breaks the broker request.
+
+Added `lib/broker/notify.test.ts` (4 tests, all pass). Full suite green: **699 pass / 0 fail**, plus `build` + `build:worker` (typecheck) clean. Committed in the submodule (`2f3337b`) and bumped the superproject pointer (`b06386894`).
+
+One follow-up not in scope here: the broker portal needs a **deal-detail view** at `/portal-broker/deals/:id` for the status-email link to resolve — added as a backlog note if that route doesn't exist yet.
+<!-- agent:boundary:9dbecfb4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,13 +67,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#cgw7]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#cgw7] [recommended] Wire broker email + in-app notifications — broker portal exposes GET /api/broker/notifications (reads shared notifications table) but no broker events write notification rows or send broker emails; add broker lifecycle (deal submitted/status change/commission paid/document request) to email/lifecycle.ts + notification_create_ for broker user_id.
 <!-- /agent:backlog -->
 
 ## Review

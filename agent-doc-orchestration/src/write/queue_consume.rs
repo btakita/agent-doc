@@ -665,24 +665,7 @@ pub(crate) fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
     // still free text and completes on being answered. The old `queue_prompt_done_id(..).is_some()`
     // test matched any `#id` mention and wrongly left such heads un-strikable,
     // hanging the auto-queue (they have no single id to `--done`).
-    let normalized_head = normalize_queue_prompt_text(&queue_head);
-    if let Some(id) = queue_prompt_done_id(&normalized_head)
-        && topic_resolves_to_exact_id(&normalized_head, &id)
-    {
-        // #qpresetstrike: a head that resolves to exactly a registered
-        // `prompt_presets` token (and is not also a tracked backlog/review id) has
-        // no `--done` reap path — it is a synthetic prompt completed by being
-        // answered, so treat it as free text (strikeable by `queue consume` and the
-        // free-text finalize heuristic) rather than wedging it as id-backed.
-        if head_id_is_registered_preset(content, &id) {
-            return Ok(true);
-        }
-        return Ok(false);
-    }
-    if crate::diff::detect_queue_trigger(&normalized_head) {
-        return Ok(false);
-    }
-    Ok(true)
+    Ok(queue_prompt_is_free_text_for_consume(content, &queue_head))
 }
 
 /// Resolve whether this cycle's committed response should consume (strike) the
@@ -819,6 +802,97 @@ pub(crate) fn first_n_queue_prompt_texts(entries: &[crate::queue::QueueEntry], c
         })
         .take(count)
         .collect()
+}
+
+pub(crate) fn queue_prompt_is_free_text_for_consume(content: &str, queue_prompt: &str) -> bool {
+    let normalized_head = normalize_queue_prompt_text(queue_prompt);
+    if let Some(id) = queue_prompt_done_id(&normalized_head)
+        && topic_resolves_to_exact_id(&normalized_head, &id)
+    {
+        return head_id_is_registered_preset(content, &id);
+    }
+    !crate::diff::detect_queue_trigger(&normalized_head)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct QueueTargetedPrompt {
+    ordinal: usize,
+    text: String,
+    free_text: bool,
+}
+
+pub(crate) fn response_targeted_queue_prompt(
+    content: &str,
+    entries: &[crate::queue::QueueEntry],
+    response_body: Option<&str>,
+) -> Option<QueueTargetedPrompt> {
+    let response_body = response_body?.trim();
+    if response_body.is_empty() {
+        return None;
+    }
+
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            crate::queue::QueueEntry::Prompt(prompt) => Some(prompt),
+            _ => None,
+        })
+        .enumerate()
+        .find_map(|(ordinal, prompt)| {
+            response_explicitly_targets_queue_head(response_body, &prompt.text).then(|| {
+                QueueTargetedPrompt {
+                    ordinal,
+                    text: prompt.text.clone(),
+                    free_text: queue_prompt_is_free_text_for_consume(content, &prompt.text),
+                }
+            })
+        })
+}
+
+pub(crate) fn mark_queue_prompt_ordinal_completed(
+    entries: &[crate::queue::QueueEntry],
+    target_ordinal: usize,
+) -> (Vec<crate::queue::QueueEntry>, Vec<String>) {
+    let mut result = Vec::with_capacity(entries.len());
+    let mut prompt_ordinal = 0usize;
+    let mut marked_texts = Vec::new();
+    for entry in entries {
+        if let crate::queue::QueueEntry::Prompt(prompt) = entry {
+            if prompt_ordinal == target_ordinal {
+                result.push(crate::queue::QueueEntry::Completed(prompt.clone()));
+                marked_texts.push(prompt.text.clone());
+                prompt_ordinal += 1;
+                continue;
+            }
+            prompt_ordinal += 1;
+        }
+        result.push(entry.clone());
+    }
+    (result, marked_texts)
+}
+
+pub(crate) fn mark_queue_prompt_matching_text_completed(
+    entries: &[crate::queue::QueueEntry],
+    consumed_text: &str,
+    response_body: Option<&str>,
+) -> (Vec<crate::queue::QueueEntry>, Vec<String>) {
+    let mut result = Vec::with_capacity(entries.len());
+    let mut marked_texts = Vec::new();
+    for entry in entries {
+        if marked_texts.is_empty()
+            && let crate::queue::QueueEntry::Prompt(prompt) = entry
+        {
+            let candidate = vec![prompt.text.clone()];
+            let consumed = vec![consumed_text.to_string()];
+            if consumed_prompt_heads_match(&candidate, &consumed, response_body) {
+                result.push(crate::queue::QueueEntry::Completed(prompt.clone()));
+                marked_texts.push(prompt.text.clone());
+                continue;
+            }
+        }
+        result.push(entry.clone());
+    }
+    (result, marked_texts)
 }
 
 pub(crate) fn queue_consume_count_for_done_ids(
@@ -1010,6 +1084,46 @@ pub(crate) fn queue_prompt_node_keys_for_count(content: &str, count: usize) -> R
             let hash = crate::ops_log::content_hash(text);
             let short_hash = &hash[..hash.len().min(12)];
             format!("queue:entry:{index}:{short_hash}")
+        })
+        .collect::<Vec<_>>();
+
+    Ok(QueuePromptNodeKeys {
+        keys,
+        ast_backed: false,
+    })
+}
+
+pub(crate) fn queue_prompt_node_keys_for_ordinals(
+    content: &str,
+    ordinals: &[usize],
+    consumed_texts: &[String],
+) -> Result<QueuePromptNodeKeys> {
+    let wanted = ordinals
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(content, "queue") {
+        let keys = nodes
+            .into_iter()
+            .filter(|node| !node.item.struck)
+            .enumerate()
+            .filter_map(|(ordinal, node)| wanted.contains(&ordinal).then_some(node.node_key))
+            .collect::<Vec<_>>();
+        if keys.len() == ordinals.len() {
+            return Ok(QueuePromptNodeKeys {
+                keys,
+                ast_backed: true,
+            });
+        }
+    }
+
+    let keys = consumed_texts
+        .iter()
+        .zip(ordinals.iter())
+        .map(|(text, ordinal)| {
+            let hash = crate::ops_log::content_hash(text);
+            let short_hash = &hash[..hash.len().min(12)];
+            format!("queue:entry:{ordinal}:{short_hash}")
         })
         .collect::<Vec<_>>();
 
@@ -1492,25 +1606,70 @@ pub(crate) fn plan_queue_prompt_consumption(
         }
     }
 
+    let response_body = crate::capture::load_active(file)
+        .ok()
+        .flatten()
+        .map(|c| c.response_body);
+    let targeted_prompt = (leading_done_consume_count == 0)
+        .then(|| response_targeted_queue_prompt(content, &entries, response_body.as_deref()))
+        .flatten();
+    if let Some(targeted_prompt) = targeted_prompt.as_ref()
+        && !targeted_prompt.free_text
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_consume_refused_id_backed_target_without_explicit_signal file={} ordinal={} head={:?}",
+                file.display(),
+                targeted_prompt.ordinal,
+                targeted_prompt.text
+            ),
+        );
+        return Ok(None);
+    }
+
     let consume_count = leading_done_consume_count.max(1);
-    let consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
+    let (completed_entries, consumed_texts, consumed_node_keys) =
+        if let Some(targeted_prompt) = targeted_prompt.as_ref() {
+            let (completed_entries, consumed_texts) =
+                mark_queue_prompt_ordinal_completed(&entries, targeted_prompt.ordinal);
+            if consumed_texts.is_empty() {
+                anyhow::bail!(
+                    "queue consume: targeted queue prompt ordinal {} was not found",
+                    targeted_prompt.ordinal
+                );
+            }
+            let consumed_node_keys =
+                queue_prompt_node_keys_for_ordinals(content, &[targeted_prompt.ordinal], &consumed_texts)?;
+            (completed_entries, consumed_texts, consumed_node_keys)
+        } else {
+            let consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
+            let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "queue consume: queue_active is true but document queue has no prompt to consume"
+                )
+            })?;
+            if leading_done_consume_count == 0 && !queue_head_is_free_text_prompt(content)? {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "queue_consume_refused_id_backed_head_without_explicit_signal file={} head={:?}",
+                        file.display(),
+                        consumed_text
+                    ),
+                );
+                return Ok(None);
+            }
+            let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
+            let completed_entries =
+                crate::queue::mark_first_n_prompts_completed(&entries, consume_count);
+            (completed_entries, consumed_texts, consumed_node_keys)
+        };
     let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
         anyhow::anyhow!(
             "queue consume: queue_active is true but document queue has no prompt to consume"
         )
     })?;
-    if leading_done_consume_count == 0 && !queue_head_is_free_text_prompt(content)? {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "queue_consume_refused_id_backed_head_without_explicit_signal file={} head={:?}",
-                file.display(),
-                consumed_text
-            ),
-        );
-        return Ok(None);
-    }
-    let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
     let node_ops = consumed_node_keys
         .keys
         .iter()
@@ -1519,7 +1678,6 @@ pub(crate) fn plan_queue_prompt_consumption(
         .collect::<Vec<_>>();
 
     let has_auto = crate::queue::has_auto_attr(&comp.attrs);
-    let completed_entries = crate::queue::mark_first_n_prompts_completed(&entries, consume_count);
     let remaining = crate::queue::prompts(&completed_entries).len();
     let drained = remaining == 0;
     let new_entries = if drained {
@@ -1553,7 +1711,7 @@ pub(crate) fn plan_queue_prompt_consumption(
     }
 
     // Update snapshot in sync. Required closeouts must be able to prove the
-    // same head prompt was removed from both the file and the snapshot.
+    // same answered prompt was removed from both the file and the snapshot.
     let snap = snapshot::load(file)?.ok_or_else(|| {
         anyhow::anyhow!("queue consume: queue_active is true but snapshot is missing")
     })?;
@@ -1570,8 +1728,33 @@ pub(crate) fn plan_queue_prompt_consumption(
     let snap_entries =
         crate::queue::parse(snap_body).context("queue consume: failed to parse snapshot queue")?;
     let snap_has_auto = crate::queue::has_auto_attr(&snap_queue.attrs);
-    let snapshot_consumed_texts = first_n_queue_prompt_texts(&snap_entries, consume_count);
-    let snapshot_node_keys = queue_prompt_node_keys_for_count(&snap, consume_count)?;
+    let (snap_completed_entries, snapshot_consumed_texts, snapshot_node_keys) =
+        if targeted_prompt.is_some() {
+            let (snap_completed_entries, snapshot_consumed_texts) =
+                mark_queue_prompt_matching_text_completed(
+                    &snap_entries,
+                    &consumed_text,
+                    response_body.as_deref(),
+                );
+            (
+                snap_completed_entries,
+                snapshot_consumed_texts,
+                QueuePromptNodeKeys {
+                    keys: Vec::new(),
+                    ast_backed: false,
+                },
+            )
+        } else {
+            let snapshot_consumed_texts = first_n_queue_prompt_texts(&snap_entries, consume_count);
+            let snapshot_node_keys = queue_prompt_node_keys_for_count(&snap, consume_count)?;
+            let snap_completed_entries =
+                crate::queue::mark_first_n_prompts_completed(&snap_entries, consume_count);
+            (
+                snap_completed_entries,
+                snapshot_consumed_texts,
+                snapshot_node_keys,
+            )
+        };
     if snapshot_consumed_texts.len() != consumed_texts.len() {
         anyhow::bail!(
             "queue consume: snapshot has {} prompt(s) available but document consumed {}",
@@ -1579,10 +1762,6 @@ pub(crate) fn plan_queue_prompt_consumption(
             consumed_texts.len()
         );
     }
-    let response_body = crate::capture::load_active(file)
-        .ok()
-        .flatten()
-        .map(|c| c.response_body);
     // Compare head identity ignoring cosmetic pin annotations
     // (`#queue-consume-pushpin-normalization`): the snapshot can carry the
     // unpinned spelling of a head while the live document carries the `:pushpin:`
@@ -1603,8 +1782,6 @@ pub(crate) fn plan_queue_prompt_consumption(
             consumed_texts
         );
     }
-    let snap_completed_entries =
-        crate::queue::mark_first_n_prompts_completed(&snap_entries, consume_count);
     let snap_remaining = crate::queue::prompts(&snap_completed_entries).len();
     let snap_new_entries = if snap_remaining == 0 {
         Vec::new()
@@ -2325,6 +2502,68 @@ mod core_tests {
         assert!(
             !snap_result.contains(&format!("- {old_head}\n")),
             "snapshot must not keep the stale pre-edit head:\n{snap_result}"
+        );
+    }
+
+    #[test]
+    fn queue_consume_targets_response_heading_instead_of_first_live_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let skipped = ":pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item. Any item I place should have :pushpin: added.";
+        let target = "The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex?";
+        let tail = "`agent:exchange` with attribute `queue` should add items into the queue while the queue is running.";
+        let response = format!("### Re: {target} — gpt-5\n\nFixed.\n");
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "{response}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- {skipped}\n",
+                "- {target}\n",
+                "- {tail}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response = response,
+            skipped = skipped,
+            target = target,
+            tail = tail,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        snapshot::save(&doc, &content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        crate::capture::capture_response(&doc, &response).unwrap();
+
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .expect("targeted non-head free-text prompt should consume")
+            .expect("the response-targeted queue prompt should be consumed");
+
+        assert_eq!(outcome.consumed_text, target);
+        assert_eq!(outcome.remaining, 2);
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains(&format!("- {skipped}\n")),
+            "the skipped prompt must remain live:\n{result}"
+        );
+        assert!(
+            !result.contains(&format!("- ~~{skipped}~~\n")),
+            "the skipped prompt must not be struck:\n{result}"
+        );
+        assert!(
+            result.contains(&format!("- ~~{target}~~\n")),
+            "the response-targeted prompt must be struck:\n{result}"
+        );
+        assert!(
+            result.contains(&format!("- {tail}\n")),
+            "tail prompt must remain live:\n{result}"
+        );
+        let snap_result = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap_result.contains(&format!("- {skipped}\n"))
+                && snap_result.contains(&format!("- ~~{target}~~\n"))
+                && snap_result.contains(&format!("- {tail}\n")),
+            "snapshot must mirror targeted queue consumption:\n{snap_result}"
         );
     }
 

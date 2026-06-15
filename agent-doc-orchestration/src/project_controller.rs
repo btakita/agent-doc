@@ -4146,6 +4146,179 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn session_start_clears_stale_supervisor_queue_pause_before_dispatch() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/jbrestale-restart.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-jbr-restart\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(
+            &doc,
+            "session-jbr-restart",
+            "%52",
+            "@1",
+            1,
+        )
+        .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-jbr-restart",
+            "%52",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let pause_reason =
+            "churn-stop: re-injected by stale supervisor pid1368698; needs operator recycle";
+        let pause = ControllerRequest {
+            command: "queue_control".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(1),
+            state: Some("pause".to_string()),
+            caller: Some("admin".to_string()),
+            reason: Some(pause_reason.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("pause".to_string()),
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&pause).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<ControllerAdminReceipt> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+
+        let blocked_dispatch = ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-jbr-restart".to_string()),
+            pane_id: Some("%52".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some("pre-restart stale pause".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&blocked_dispatch).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(!envelope.ok);
+        assert!(
+            envelope
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("failed_stage=queue_paused"),
+            "stale pause must block before the restart: {response}"
+        );
+
+        let restart = ControllerRequest {
+            command: "start_session".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-jbr-restart".to_string()),
+            pane_id: Some("%53".to_string()),
+            window_id: Some("@2".to_string()),
+            generation: Some(2),
+            state: None,
+            caller: Some("start".to_string()),
+            reason: Some("session_start".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&restart).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok, "restart should be accepted: {response}");
+        assert_eq!(envelope.data.unwrap().generation, 2);
+
+        let conn = open_state_db(dir.path()).unwrap();
+        let document_id =
+            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let effective = state_store::load_effective_queue_control_from_db(
+            &conn,
+            &document_id,
+            &dir.path().to_string_lossy(),
+        )
+        .unwrap();
+        assert!(
+            effective.is_none(),
+            "stale-supervisor pause must be cleared by the accepted restart"
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("stale_supervisor_pause_repaired"));
+        assert!(ops_log.contains("action=session_start"));
+        assert!(ops_log.contains("stale_pid=1368698"));
+
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-jbr-restart",
+            "%53",
+            Some(2),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready_after_restart",
+        )
+        .unwrap();
+        let dispatch_after_restart = ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-jbr-restart".to_string()),
+            pane_id: Some("%53".to_string()),
+            window_id: None,
+            generation: Some(2),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some("post-restart stale pause repaired".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&dispatch_after_restart).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok, "restart-cleared queue must dispatch: {response}");
+    }
+
     #[test]
     fn controller_admin_handoff_and_reap_require_observed_generation() {
         let dir = tempfile::TempDir::new().unwrap();

@@ -1485,6 +1485,49 @@ fn resume_spent_preset_pause(
     Ok(())
 }
 
+fn clear_stale_supervisor_pause_after_session_start(
+    project_root: &Path,
+    file: &Path,
+    document_id: &str,
+    generation: u64,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    let project_scope = project_root.to_string_lossy();
+    let Some(control) =
+        state_store::load_effective_queue_control_from_db(&conn, document_id, &project_scope)?
+    else {
+        return Ok(false);
+    };
+    if control.scope_kind != "document" || control.state != "paused" {
+        return Ok(false);
+    }
+    let Some(reason) = control.reason.as_deref() else {
+        return Ok(false);
+    };
+    if !pause_reason_is_stale_supervisor_churn_stop(reason) {
+        return Ok(false);
+    }
+    let stale_pid = stale_supervisor_pid_from_pause_reason(reason).unwrap_or(0);
+    let repair_reason = format!(
+        "stale_supervisor_pause_repaired file={} action=session_start generation={} stale_pid={} result=cleared",
+        file.display(),
+        generation,
+        stale_pid
+    );
+    state_store::upsert_queue_control_in_db(
+        &conn,
+        &state_store::QueueControlInsert {
+            scope_kind: "document",
+            scope_id: document_id,
+            state: "resumed",
+            reason: Some(&repair_reason),
+            operation_receipt_id: None,
+        },
+    )?;
+    crate::ops_log::log_op(file, &repair_reason);
+    Ok(true)
+}
+
 fn repair_spent_preset_pause_before_dispatch(
     project_root: &Path,
     file: &Path,
@@ -2598,6 +2641,22 @@ pub(crate) fn handle_start_session(
     })?;
     refresh_runtime_after_actor_write(runtime)?;
     let _ = project_sessions_projection_for_actor(&bootstrap.project_root, &record.document_id);
+    if let Err(err) = clear_stale_supervisor_pause_after_session_start(
+        &bootstrap.project_root,
+        &file,
+        &record.document_id,
+        record.generation,
+    ) {
+        crate::ops_log::log_op(
+            &file,
+            &format!(
+                "stale_supervisor_pause_repair_failed file={} action=session_start generation={} error={}",
+                file.display(),
+                record.generation,
+                err.to_string().replace(char::is_whitespace, "_")
+            ),
+        );
+    }
     crate::ops_log::log_op(
         &file,
         &format!(

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -39,7 +39,37 @@ queue: start
 Compacted content:
 - Archived 7 response topic(s): Closeout repair; Lean status; Artifact cleanup; 4 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): Evaluate Lean Language for lazily; do [#4zvn]; #4zvn
-<!-- agent:boundary:5aed189e -->
+
+### Re: release + publish — gpt-5
+
+> **Queue prompt:**
+>
+> release + publish
+
+
+Completed the lazily-rs v0.11.0 release and publish.
+
+Changed paths:
+- `src/lazily-rs/RELEASE_NOTES_v0.11.0.md` refreshed to match the current v0.11.0 payload, including eager Signal support and the Lean CI gate.
+- `src/lazily-rs` superproject gitlink advanced to the release-notes commit.
+
+Release actions:
+- Pushed lazily-rs `main` at `45da443c26273abd2aeffcc39cd4a6ee6d1c49a2`.
+- Moved the unpublished pushed tag `v0.11.0` from `2fb8e80` to `45da443` so the tag matches the published crate payload.
+- Published `lazily v0.11.0` to crates.io. `cargo search lazily --limit 1` now reports `lazily = "0.11.0"`.
+- Created GitHub Release: https://github.com/lazily-hub/lazily-rs/releases/tag/v0.11.0
+- Pushed the superproject pointer commit `8ab88a5c5` on `agent-loop/main`.
+
+Verification:
+- `make check` passed locally through `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`.
+- `cargo publish --dry-run --no-verify` passed after the release-note commit: 72 files, 1.1 MiB package, 232.8 KiB compressed.
+- Latest lazily-rs GitHub Actions CI for `45da443` was still `in_progress` at closeout; the previous `main` CI was green before the release-note-only commit.
+- Root `agent-loop` has no workflow named `CI`.
+
+Escalation/confidence:
+- Used the stored `passage btak/CARGO_REGISTRY_TOKEN`; the token is valid now and publish succeeded.
+- Confidence is high: package dry-run, full local check, crates.io search, pushed tag, and GitHub release all line up. Remaining external watch item is the in-progress lazily-rs CI run for the release-note commit.
+<!-- agent:boundary:b2033e51 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,9 +77,7 @@ Compacted content:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go --> 
-- release + publish
-<!-- /agent:queue -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go --><!-- /agent:queue -->
 
 ## Backlog
 

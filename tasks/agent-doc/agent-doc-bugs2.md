@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -444,23 +444,20 @@ The Codex Stop hook now treats fresh-context queue continuation as supervisor wo
 Verification completed: `cargo fmt --check`; `cargo test -p agent-doc-orchestration codex_hook::tests -- --nocapture`; `make check`; `cargo build --release`; `cargo install --path .`.
 
 I did not clear the remaining review items because those are separate bugs and were not implemented in this cycle.
-<!-- agent:boundary:a3316236 -->
+<!-- agent:boundary:72a4beb9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#staleheaddupcontent]~~
-- ~~:pushpin: When I moved `- do [#staleheaddupcontent]`, agent-doc immediately struck it. Even though no work was done.~~
-- ~~:pushpin: Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.~~
-~~~done
+---
 :pushpin: JB `Run Agent Doc`
 ```
 [route] target tmux session: 0
 [route] activated existing inactive agent:queue head "#advance-review" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3568
 ```
-~~~
+---
 agent-doc Codex should use the PCP/supervisor to handle tasks that cannot be done in an agent-doc turn
 ```
 • Stop hook (blocked)
@@ -476,12 +473,9 @@ agent-doc Codex should use the PCP/supervisor to handle tasks that cannot be don
   equityfundingsource.md so that queue head runs with fresh context.
 ```
 ---
-- ~~do [#suprehotreload-agent]~~
-- ~~do [#lazilyqrestore-agent]~~
-- ~~do [#recyclerestart-agent]~~
-- ~~do [#rtwbcast-simproof]~~
-- ~~do [#cleandrainsup-agent]~~
-- ~~do [#compactdrift-agent]~~
+- :pushpin: Fix `agent:backlog queue` not adding items to the backlog.
+- :pushpin: #advance-review. This should add items to the backlog and since backlog has the `queue` attribute, the new backlog items should go into the queue.
+- :pushpin: agent-doc is not clearing the agent context when the context threshold is reached.
 <!-- /agent:queue -->
 ###
 <!--

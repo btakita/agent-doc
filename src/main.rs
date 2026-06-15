@@ -70,6 +70,7 @@ mod plan;
 mod plugin;
 mod project_config;
 mod queue_dispatch;
+mod queue_recovery;
 mod read;
 mod rename;
 mod reset;
@@ -1761,6 +1762,18 @@ enum PendingAction {
 
 #[derive(Subcommand)]
 enum QueueAction {
+    /// Reconstruct historical queue heads from snapshots, sidecars, and git history
+    #[command(name = "recover-lost")]
+    RecoverLost {
+        /// Path to the session document
+        file: PathBuf,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+        /// Maximum git versions to scan for historical queue heads
+        #[arg(long, default_value_t = 50)]
+        max_git_versions: usize,
+    },
     /// One-shot sync from backlog items with `queue` attribute into agent:queue
     Sync {
         /// Path to the session document
@@ -3363,6 +3376,11 @@ fn main() -> anyhow::Result<()> {
             }
         },
         Commands::Queue { action } => match action {
+            QueueAction::RecoverLost {
+                file,
+                json,
+                max_git_versions,
+            } => queue_recovery::run(&file, json, max_git_versions),
             QueueAction::Sync { file } => agent_doc_orchestration::queue_cmd::sync(&file),
             QueueAction::Consume { file, count } => {
                 agent_doc_orchestration::queue_cmd::consume(&file, count)

@@ -33,42 +33,19 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-215724.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-225127.md`*
 
 Compacted content:
-- Archived 3 response topic(s): Available Deals lender workflow; commit + push all dirty EFS files.; deploy
-- Prior summary/context: prior compacted content: Archived 9 response topic(s): investor pipeline resequence; lender vs deal pipeline; lender/...
-Preflight is clean now.
-
-I rebuilt the stale agent-doc sidecars from the current EFS document with `agent-doc reset --from-current ...`, then reran preflight. It recovered and committed the document state, and now reports `no_changes: true` with no queue continuation. No repo work was needed.
-
-### Re: compact archive summary / no-op closeout — gpt-5
-
-No repo work was required for this cycle.
-
-The visible prompt-only tail was the compact archive summary line, `Archived 3 response topic(s): Available Deals lender workflow; commit + push all dirty EFS files.; deploy`, not a new EFS implementation request. The earlier queued work was already completed: EFS commit/push, superproject pointer push, Worker deploy, remote migrations, and smoke checks.
-
-I rebuilt the stale agent-doc sidecars from the current document, reran preflight, and confirmed `no_changes: true` with no queue continuation. Changed paths: none. Verification: `agent-doc preflight` only. Escalation: none. Confidence: high.
-
-### Re: #gq5c follow-up next steps — gpt-5
-
-`#gq5c` should stay closed as the shipped provenance item for the Available Deals rename and the initial lender workflow framing.
-
-The next follow-up is to advance the existing review item `#investor-pipeline-resequence`, because it owns the remaining product decision: keep lender-account eligibility/requirements separate from per-deal status, and move the interested-lender processing/underwriting loop into the Deal Pipeline. That should be approved before more implementation.
-
-Once approved, the implementation should be split into a focused per-interested-lender sub-pipeline: package sent, lender document request, borrower upload/response, lender review/underwriting, verbal commitment, selected/backup/declined, then wire/funding state. Admin and lender should both be able to initiate document requests; borrower uploads should thread back to the deal; relevant parties should get in-app notifications immediately, with production email depending on the existing `#xcvg`/sending-domain gates.
-
-I would not add a new duplicate backlog item for this cycle. Use `#gq5c` as history, `#investor-pipeline-resequence` as the approval gate, and `#xcvg` for the borrower/admin email round-trip piece.
-
-Changed paths: session document only. Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg #gq5c`, and this `agent-doc finalize`. Verification: prompt-only closeout; no app tests needed. Escalation: none. Confidence: high.
-<!-- agent:boundary:6b2f00fa -->
+- Archived 2 response topic(s): compact archive summary / no-op closeout; #gq5c follow-up next steps
+- Prior summary/context: prior compacted content: Archived 3 response topic(s): Available Deals lender workflow; commit + push all dirty EFS f...
+<!-- agent:boundary:58887a1b -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
@@ -79,7 +56,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Review
 
 <!-- agent:review -->
-- [/] [#investor-pipeline-resequence] [operator-verify] [recommended] Await explicit approval of the revised lender/deal pipeline split, then implement: correct the admin label to Accreditation/Requirements; keep the lender pipeline focused on signup, first-time/annual requirements, under-review/current/renewal-due/expired states, and lender-account eligibility/linking; move per-deal Ready to Commit, Committed/Awaiting Wire, and Wire Confirmed/Funded states into the Deal Pipeline; show lender compliance badges/holds on deal cards; update UI/tests.
+- [x] [#investor-pipeline-resequence] [operator-verify] [recommended] Await explicit approval of the revised lender/deal pipeline split, then implement: correct the admin label to Accreditation/Requirements; keep the lender pipeline focused on signup, first-time/annual requirements, under-review/current/renewal-due/expired states, and lender-account eligibility/linking; move per-deal Ready to Commit, Committed/Awaiting Wire, and Wire Confirmed/Funded states into the Deal Pipeline; show lender compliance badges/holds on deal cards; update UI/tests.
 - [/] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
 - [/] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
 - [/] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.

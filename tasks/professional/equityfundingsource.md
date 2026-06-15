@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -60,7 +60,7 @@ Done and deployed. When a lender applies to fund a deal (`investor_fund_status =
 **Verification:** `bun run check` green — 695 tests pass (added `#pending-deals` coverage in `investor-portal-e2e.test.ts`), build + worker bundle clean. Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `61df3c82`).
 
 Commits: submodule `aba09cf`, superproject pointer bump `a0714f59d`.
-<!-- agent:boundary:8d47754a -->
+<!-- agent:boundary:ef2e1259 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,6 +68,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- An applied for deal is still in Available deals ![img_15.png](img_15.png) on https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals#investor-lender-application-form
 <!-- /agent:queue -->
 
 ## Backlog

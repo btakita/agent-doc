@@ -277,7 +277,7 @@ Verification:
 - GitHub Actions CI run `27568580773` passed (`make check` + `make tmux-ci`)
 
 Pushed: `btakita/agent-doc@66f7de43`.
-<!-- agent:boundary:8550d310 -->
+<!-- agent:boundary:37c2011c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -376,7 +376,6 @@ What are #next-steps to fix bugs?
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
-- [ ] [#staleheaddupcontent] [clean-session] Fix stale queue head duplicate-content corruption: a stale agent:queue head can replay old exchange/queue content and corrupt the document. Add stale-head mismatch coverage, refuse stale queue snapshot replay without live-head match or consume/strike proof, and log live/snapshot/stale head identities. Plan: tasks/agent-doc/plan-stale-queue-head-duplicate-content.md
 - [ ] [#mrhbacklogqueuesync] [clean-session] Fix tasks/monsterrodholders.md backlog priority queue sync: document has agent:backlog priority queue but eligible backlog items are not materializing in agent:queue. Add diagnostics for skipped backlog ids, regression coverage for backlog-to-queue convergence, and persist queue sync through session-check. Plan: tasks/agent-doc/plan-monsterrodholders-backlog-priority-queue-sync.md
 - [ ] [#mrhqueuepreserve] [clean-session] Prevent active-turn queue convergence from deleting user-added queue items in tasks/monsterrodholders.md. Add regression coverage for live queue edits during a running turn, require explicit consume/strike/remove proof before queue deletion, and log the proof source for removed queue nodes. Plan: tasks/agent-doc/plan-monsterrodholders-queue-preservation.md
 - [ ] [#jbclearctxsubmit] [clean-session] Fix JB Clear Session Context submit on Codex: calling Clear Session Context for tasks/monsterrodholders.md inserted /clear into the Codex composer but did not submit it. Implement submit-proof + one-shot Enter retry for the clear-session route, with stale-scrollback guards and SimWorld/unit coverage. Plan: tasks/agent-doc/plan-jb-clear-session-context-submit.md

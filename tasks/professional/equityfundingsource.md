@@ -113,7 +113,26 @@ Escalation: none.
 
 
 I can’t execute `/clear` from inside this already-loaded model context, and I will not process `#67v2-auto-advance` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the next queue head runs in fresh context.
-<!-- agent:boundary:7694134a -->
+
+### Re: Admin pipeline auto-advance — gpt-5
+
+I resolved the dropped-queue state for `#67v2-auto-advance` and gated the exact backlog item rather than marking it shipped.
+
+Current evidence: `#67v2a`, `#67v2-kanban`, `#67v2b`, and `#67v2d` are already archived as done: the admin Deal Pipeline exists, manual drag/status advance works, EFS-local loan-status changes enqueue `update_loan_status` rows into `tmo_cache_outbox`, and the dashboard summary mirrors the board. The remaining auto-advance layer is distinct: it needs requirement rules for each stage, evaluation against D1 plus `tmo_cache`, audited status changes, and no premature TMO replay.
+
+The safe next implementation shape is:
+
+- Define deterministic requirement predicates for `Application Received -> Processing -> Documents -> Underwriting -> Funded` from the TMO-aligned board, using D1 as local state and `tmo_cache_entities` as the read mirror.
+- Run those predicates as an explicit admin/server job, not hidden UI behavior, so each suggested/automatic move has an audit trail and can be reviewed.
+- Apply local status changes through the same `admin_loan_status_update_` / `tmo_loan_status_outbox_enqueue_` path already used by manual drag moves.
+- Keep `update_loan_status` replay gated on `#dzmm` / `#7a4d`; the existing test suite explicitly asserts no replay worker drains those rows yet.
+
+Changed paths: `tasks/professional/equityfundingsource.md` only.
+Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`, `sed -n ...` for pipeline/TMO outbox source, tests, and done-archive inspection.
+Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
+Confidence: high that this resolves the interrupted queue-removal guard for `#67v2-auto-advance` while preserving the actual remaining gated implementation work.
+Escalation: none.
+<!-- agent:boundary:aadc43ea -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,7 +154,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.
 - [ ] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
 - [ ] [#zwws-new-deal-email] [recommended] Investor dashboard phase 6 email half: implement new-deal notification in test-mode delivery with workflow-priority dashboard links and production send gated on #f4rq. Advances #zwws.
 - [ ] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
@@ -146,6 +164,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Review
 
 <!-- agent:review -->
+- [/] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.
 - [/] [#jnzs-approval-followup] [recommended] Send/track funded-deals approval packet: attach current screenshots/copy/lien-position language plus the full_application ESIGN/UETA disclosure excerpt, record Judith/EFS reviewer decision, and convert requested edits into implementation backlog. Advances #jnzs.
 - [/] [#xcvg-prod-email] [recommended] Borrower secure-message email production pass: after #f4rq/#m6ch/#p40t or #z3kx path-of-record is decided, enable borrower/admin outbound notifications, verify inbound reply threading, and add production env/runbook checks. Advances #xcvg.
 - [/] [#dzmm-writeback-replay] EFS->TMO writeback replay: once #7a4d field map and #k2xg support answers arrive, replay tmo_cache_outbox with idempotency keys, conflict logging, retry/dead-letter state, and tests across broker/admin/investor writebacks. Advances #dzmm/#37ah/#67v2/#zwws.

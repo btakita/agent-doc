@@ -43,7 +43,21 @@ Compacted content:
 ### Re: Closeout repair — gpt-5
 
 Preflight found the session document had visible, user-authored content that was not represented in the committed agent-doc snapshot. I’m preserving that content through the strict finalize path so the queued lazily-rs prompt can run in a clean cycle.
-<!-- agent:boundary:89a1cb5a -->
+
+### Re: Lean status — gpt-5
+
+Status: complete and intentionally narrow. Lean is not embedded in `lazily-rs` as Rust verification or an implementation path; it lives in `src/lazily-spec/formal/lean` as a spec-layer oracle for the shared IPC Snapshot/Delta state machine. `src/lazily-rs/SPEC.md` now points to that companion model.
+
+Current coverage: the Lean 4 Lake package proves epoch sequencing, fail-closed resync on gaps/reorders/restarts, PartialEq cell-write silence, memo equality suppression, eager Signal `slot_value` materialization, and batch frontier coalescing with a single IPC epoch advance. It deliberately does not verify Rust internals, async scheduling, Str0mNet/WebRTC, JSON Schema encoders, or transport behavior; those stay in Rust tests, conformance fixtures, and live validation.
+
+Repository status checked:
+
+- `src/lazily-spec` is clean on `main...origin/main`; HEAD is `6cb978a feat: add Lean IPC formal model`.
+- `src/lazily-rs` is clean on `main...origin/main`; HEAD is `f80e4e9 docs: reference lazily Lean formal model`.
+- `lake build` from `src/lazily-spec/formal/lean` passed: `Build completed successfully (4 jobs).`
+
+Changed paths: no `lazily-rs` or `lazily-spec` source changes in this cycle; this is a status response only. Commands run: Lean/status search, doc reads, `lake build`, git status/log checks. CI check: `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`. Confidence: high. Escalation: none.
+<!-- agent:boundary:0a38c79f -->
 <!-- /agent:exchange -->
 ###
 <!--

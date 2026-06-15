@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -488,12 +488,13 @@ For the context-threshold item specifically, Codex now reads real `token_count` 
 After those implementation responses were in the exchange, I used the binary `agent-doc queue consume --count 3` path to drain the answered free-text queue heads and clear `queue_active`; I did not manually edit the markdown queue. The queue is now empty because the work corresponding to the visible heads is done and verified.
 
 Verification evidence already recorded for the code work includes focused Rust tests, dirty-tree `make check`, clean-tree `make check` at `28ac88d9`, `cargo build --release`, and `cargo install --path .`. `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this repo.
-<!-- agent:boundary:4a32742c -->
+<!-- agent:boundary:63bfc5a2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: Move actionable backlog items into the queue.
 <!-- /agent:queue -->
 ###
 <!--

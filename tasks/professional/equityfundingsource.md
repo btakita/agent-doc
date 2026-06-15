@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,156 +33,20 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260614-190908.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-022613.md`*
 
 Compacted content:
-- Archived 3 response topic(s): Rename "Applications received" tag to "Accepted applications"; Accepted-application dialog; deploy
-- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db...
-
-### Re: Published deal tag + Published deals column (portal-admin/pipeline) — opus-4-8
-
-> **Queue prompt:**
->
-> Add a Published deal tag and a Published deals column in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline
-
-
-Done — both shipped in the admin Deal Pipeline board (`lib/ui--browser--efs/portal/admin/pipeline.tsx`), committed to `equityfundingsource-dev` as `a41e097`. Frontend-only: the backend already attaches `deal_status: 'published' | 'funded' | 'closed' | null` to each loan pipeline card (`loan_pipeline_card_` in `admin/repo.ts`), so no API change was needed.
-
-**Published deal tag** — a green `Published` pill (`PipelineDealBadge`, shows only when `deal_status === 'published'`) now renders everywhere a loan card appears:
-- on the board card chip row (next to the stage + aging chips),
-- in the Table view's Stage cell,
-- in the loan detail dialog header.
-
-**Published deals column** — a read-only cross-cut lane (`published_deals_board_column_`, id `published-deals`) appended after the existing status phases. It gathers every loan card with a live published deal regardless of which TMO status lane it sits in. It's not a drop target (the id isn't a TMO loan status), it auto-collapses to a thin rail when empty like the other lanes, and it respects the active/all scope + search filters since it's built from the same filtered view data.
-
-**Verification:** `bun run check` green — 682 tests pass, 0 fail, worker build clean. Added deterministic coverage to `tests/admin-pipeline.test.ts` (asserts the column builder, the badge component, and the badge wiring).
-
-One note (not blocking): because the lane honors the Active/All scope toggle, a published deal that has advanced to Funded/Closed only appears in the lane under "All" scope. That matches how every other lane behaves; flag it if you'd rather the Published lane always show published deals regardless of scope.
-
-### Re: Available deal dialog on the investor dashboard — opus-4-8
-
-> **Queue prompt:**
->
-> Add an Available deal dialog in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard. Clicking on the Available deal card opens the dialog. deploy
-
-Done — shipped, pushed, and deployed.
-
-**What changed** (`lib/ui--browser--efs/portal/investor/dashboard.tsx`): the "Available deals" preview cards on the investor dashboard used to be plain anchor links that navigated straight to `/portal-investor/deals/<id>`. They are now buttons that open an in-dashboard dialog when clicked.
-
-- **`AvailableDealDialog`** renders through the shared `PortalModal` (backdrop click + Esc close, focus-friendly), with `role="dialog" aria-modal="true"` and a `ModalCloseButton`. It shows the deal heading + location, a 2-column detail grid (Loan amount, LTV, Sold rate, Available amount), the remaining-funding line, and a **View full deal** link to the existing detail page so navigation is still one click away.
-- The card itself became a `<button>` (`aria-haspopup="dialog"`) that sets `selected_deal`; no behavior change to the data fetch or the 3-card / non-active filter.
-
-**Verification:** `bun run check` green — **683 tests pass, 0 fail**, worker build clean. Added a deterministic source-assertion test to `tests/investor-portal-e2e.test.ts` covering the button-opens-dialog wiring, the `PortalModal` import, the dialog component, and that the card no longer renders the old anchor.
-
-**Shipped:**
-- `equityfundingsource-dev` commit `5de3fa4`, pushed to `origin/main`.
-- Superproject pointer bump `ff7a60ef5`.
-- Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `488a6f7f`).
-
-Advances the #zwws investor-dashboard rework.
-
-### Re: Lender Account Request gates Available deals — opus-4-8
-
-> **Queue prompt:**
->
-> The Lender Account Request form should be a prerequisite to view Available deals. So it should not be on https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3. But it should be part of the workflow to request a lender account. Both https://equityfundingsource.brian-takita.workers.dev/portal-investor/available-deals and https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard can gate Avalable deals until the Lender Account Request is complete. We may require EFS to accept but that decision is TBD.
-
-
-> **Queue prompt (#spec-test-commit-push):**
->
-> The Lender Account Request form should be a prerequisite to view Available deals. It should not be on the deal detail page, but part of the workflow to request a lender account. Both available-deals and dashboard can gate Available deals until the Lender Account Request is complete. EFS-accept requirement is TBD.
-
-Done — shipped, tested, committed, and pushed (no deploy). The lender account request is now a **prerequisite to viewing Available deals**.
-
-**What changed**
-- **New shared module** `lib/ui--browser--efs/portal/investor/lender_account.tsx` — the request form, pending state, and denial state moved here out of the deal detail page, plus a `LenderAccountGate` component and a `lender_account_ready_()` helper.
-- **Available deals page** (`available_deals.tsx`) — renders the `LenderAccountGate` (the full request form) **in place of** the deals list/filters until the investor has a registered lender account. Subtitle reads "Complete your Lender Account Request to view available deals."
-- **Investor dashboard** (`dashboard.tsx`) — the Available deals preview now shows a `LenderAccountPrompt` card (pending / denied / not-started messaging) linking to the Available deals page, instead of deal cards, until the account is active.
-- **Deal detail page** (`deal_detail.tsx`) — no longer embeds the request form. If somehow reached without a lender account it shows a "Lender account required" notice with a **Go to Available deals** button.
-- **Backend** (`investor_deals_GET_`) — `/api/investor/deals` now returns a top-level `lender` payload (same shape as the per-deal `investor` object) so both the list page and the dashboard gate without an extra fetch.
-
-**Verification:** `bun run check` green — **689 tests pass, 0 fail** (added `tests/lender-account-gate.test.ts`; repointed the moved-component assertion in `admin-dashboard.test.ts`), worker + browser builds clean. Spec updated in the lending-portal PRD.
-
-**Shipped:** `equityfundingsource-dev` commit `a4a6cf4`, pushed to `origin/main`; superproject pointer `4b0e4fcef`. The EFS repo has no CI workflow, so local `bun run check` is the gate.
-
-One operator decision left open (you flagged it TBD): whether EFS must **accept** the request before deals unlock. Right now the gate clears as soon as the lender account number is set (admin completes the request in TMO). If you want an explicit EFS-accept step gating deal visibility, say so and I'll add an acceptance state — I left it out deliberately since it was TBD.
-
-Next in the queue: making the dashboard Available-deal dialog match the full Deal page.
-
-### Re: Dashboard Available-deal dialog == full Deal page — opus-4-8
-
-> **Queue prompt:**
->
-> The Available deal dialog on https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard should be the same as the "Full Deal" page on https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3
-
-
-> **Queue prompt (#spec-test-commit-push):**
->
-> The Available deal dialog on the investor dashboard should be the same as the "Full Deal" page (/portal-investor/deals/<id>).
-
-Done — shipped, tested, committed, and pushed (no deploy).
-
-**What changed**
-- **Dashboard dialog** (`dashboard.tsx`) — clicking an Available-deal preview card now opens the **same content as the full Deal page** instead of a stripped summary. `AvailableDealDialog` embeds `<InvestorDealDetail deal_id={deal.id} embedded />` inside a wide `PortalModal` (`max-w-[980px]`), so the dialog shows Loan Details, Uploaded Documents, Deal Summary, Commit Funding, and Sign Deal Documents — exactly what `/portal-investor/deals/<id>` renders (it fetches the same `/api/investor/deals/:id` payload). The old bespoke summary + `DealDialogDetail` + "View full deal" link are gone.
-- **Deal detail** (`deal_detail.tsx`) — `InvestorDealDetail` gains an `embedded` prop. When embedded, the page back-link (`← Available deals`) is suppressed because the modal owns the close affordance (a corner `ModalCloseButton`). Standalone page behavior is unchanged.
-
-**Verification:** `bun run check` green — **690 tests pass, 0 fail**, worker + browser builds clean. Updated the dashboard-dialog e2e test (asserts the embedded full-deal render + wide modal, drops the old "View full deal" assertion) and added an embedded-mode test for `deal_detail`.
-
-**Shipped:** `equityfundingsource-dev` commit `16b7966`, pushed to `origin/main`; superproject pointer `a12c7b826`. EFS repo has no CI workflow, so local `bun run check` is the gate.
-
-That clears both go-mode queue items. There's still a separate `deploy` head in the queue — I did **not** deploy (the preset was commit-push, and you only said implement item 2). Say "deploy" and I'll push both changes (#lender-gate + #deal-dialog-full) to Cloudflare.
-
-### Re: Deploy — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-Done — deployed to Cloudflare.
-
-`bun run deploy:worker` (build → remote D1 migrate → `cf-deploy.ts`). My changes added no migrations, so the remote D1 migrate step was a no-op; the worker bundle + the one new browser asset uploaded and deployed clean.
-
-- **Version:** `0ba1e95c-f4db-46c7-9c19-a33ffedc51f9`
-- **Live:** https://equityfundingsource.brian-takita.workers.dev
-- **Smoke check:** home `HTTP 200`, `/api/investor/deals` `HTTP 401` (auth-gated, expected).
-
-This ships both go-mode features to production:
-- **#lender-gate** — Lender Account Request now gates Available deals (Available deals page renders the request form; dashboard shows a prompt) until the investor has a registered lender account.
-- **#deal-dialog-full** — the dashboard Available-deal dialog now opens the full Deal page content (loan details, documents, deal summary, commit funding, sign documents) instead of a stripped summary.
-
-Queue fully drained. To eyeball the live behavior you'd want a logged-in investor session — without a lender account you'll see the gate on `/portal-investor/available-deals` and the prompt on the dashboard; with one, the dashboard Available-deal card opens the full deal modal.
-
-### Re: Browse deals first, apply on selection — opus-4-8
-
-> **Queue prompt (#spec-test-commit-push):**
->
-> Let's show the deals even if the funder has not completed their application or their application has not been approved. If they select an Available Deal they are interested in, there should be a 2nd part of the submission for them to fill out their application. Please keep the notice that their application is not complete or is awaiting review the EFS staff. deploy
-
-Done — shipped, tested, committed, pushed, and deployed. This relaxes the #lender-gate so deals are **browsable without** a completed/approved lender application; the application becomes a **second step** surfaced once the investor picks a deal, and a persistent notice keeps explaining the incomplete / awaiting-review state.
-
-**What changed** (frontend-only — `/api/investor/deals` already returns both the deals and the lender payload, so no backend change was needed):
-
-- **`lender_account.tsx`** — added `LenderApplicationNotice` (the persistent banner) + `lender_application_status_message_()` covering the not-started / pending / denied states. Re-framed `LenderAccountGate` as "Complete your lender account application" (the second part), now described as the funding prerequisite rather than a view prerequisite.
-- **Available deals page** (`available_deals.tsx`) — removed the early-return that hid the whole list behind the gate. Deals always render; an amber notice sits above them while the application is incomplete. On the **featured (selected) deal**, the right column shows the lender application form in place of the commitment calculator until the lender account is active.
-- **Investor dashboard** (`dashboard.tsx`) — the Available-deals preview no longer swaps deal cards for a prompt; it shows the cards plus the application notice. (Removed the now-dead `LenderAccountPrompt`.) Clicking a card opens the deal dialog, which hosts the application form.
-- **Deal detail** (`deal_detail.tsx`) — the Deal Summary now always shows; when there's no lender account the dead-end "Go to Available deals" card is replaced by the inline notice + application form (`on_change` updates the live profile). This is what powers the dashboard dialog's second step.
-
-A registered lender account is still the prerequisite to **commit funding** — only the *viewing* gate was removed.
-
-**Verification:** `bun run check` green — **691 tests pass, 0 fail**, browser + worker builds clean. Rewrote `tests/lender-account-gate.test.ts` to assert the new deal-first flow (deals shown, notice present, gate surfaced on selection, old prompt gone) and added a `lender_application_status_message_` unit test. Updated `docs/current_progress.md`. (equityfundingsource-dev has no GitHub Actions CI workflow, so local check is the verification of record.)
-
-**Shipped:**
-- `equityfundingsource-dev` commit `9a54501`, pushed to `origin/main`.
-- Superproject pointer bump `a7cba3ee3`.
-- Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `16d23ecb`).
-<!-- agent:boundary:c544a389 -->
+- Archived 6 response topic(s): Published deal tag + Published deals column (portal-admin/pipeline); Available deal dialog on the investor dashboard; Lender Account Request gates Available deals; 3 more
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
+<!-- agent:boundary:7dfcbbec -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- "Lender account application — incomplete" in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard should have a button to link to the form tho complete the application. deploy
 <!-- /agent:queue -->
 
 ## Backlog

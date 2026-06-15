@@ -1482,6 +1482,128 @@ fn test_preflight_active_auto_queue_head_is_not_user_intent() {
     );
 }
 
+/// `#cleardrainsim`: pin the FULL preflight JSON drainability contract — not just
+/// the `queue_continuation::drainable_head_count` unit — that the SKILL.md
+/// auto-loop (`queue_continuation_required`) and the supervisor idle-watch both
+/// depend on. A go-mode active queue whose only materialized heads are
+/// `[operator-verify]` + inert-noise must emit `queue_continuation_required:false`
+/// + `queue_drainable_head_count:0` (the `#qchurn` no-op-loop guard) WITHOUT the
+/// non-stall guidance, so the auto-loop stops instead of churning. `[clean-session]`
+/// heads stay drainable in place (`#qcontdrain`).
+fn preflight_json(root: &Path, doc: &Path) -> serde_json::Value {
+    let mut preflight = agent_doc_cmd();
+    preflight.current_dir(root);
+    preflight.args(["preflight", doc.to_str().unwrap()]);
+    let output = preflight.output().unwrap();
+    assert!(
+        output.status.success(),
+        "preflight failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("preflight stdout must be JSON")
+}
+
+#[test]
+fn test_preflight_drainability_contract_zero_when_only_deferred_and_noise() {
+    // Active go-mode queue whose ONLY heads are an `[operator-verify]` id-head and
+    // an inert bare-observation noise line. Neither is agent-drainable, so the
+    // authoritative no-loop signal must be `queue_continuation_required:false` +
+    // `queue_drainable_head_count:0`, and the don't-stall guidance must be ABSENT.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let content = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n\
+        ## Exchange\n\n\
+        <!-- agent:exchange patch=append -->\n\
+        ### Re: prior — gpt-5\n\nDone.\n\
+        <!-- agent:boundary:head-boundary -->\n\
+        <!-- /agent:exchange -->\n\n\
+        ## Backlog\n\n\
+        <!-- agent:backlog -->\n\
+        - [ ] [#ov1] [operator-verify] live drive needs a human editor\n\
+        <!-- /agent:backlog -->\n\n\
+        ## Queue\n\n\
+        <!-- agent:queue go -->\n\
+        - do [#ov1]\n\
+        - lender application screenshot attached for the intake section\n\
+        <!-- /agent:queue -->\n";
+    fs::write(&doc, content).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, content);
+
+    let parsed = preflight_json(root, &doc);
+    assert_eq!(
+        parsed["queue_active"],
+        serde_json::Value::Bool(true),
+        "queue should still be active: {parsed}"
+    );
+    assert_eq!(
+        parsed["queue_drainable_head_count"], 0,
+        "operator-verify + noise heads are not agent-drainable: {parsed}"
+    );
+    assert_eq!(
+        parsed["queue_continuation_required"],
+        serde_json::Value::Bool(false),
+        "no drainable head → auto-loop must stop, not churn (#qchurn): {parsed}"
+    );
+    assert!(
+        parsed["queue_continuation_guidance"].is_null(),
+        "non-stall guidance must be absent when continuation is not required: {parsed}"
+    );
+}
+
+#[test]
+fn test_preflight_drainability_contract_true_with_real_drainable_head() {
+    // Same active go-mode queue but now with a `[clean-session]` id-head (drains in
+    // place, #qcontdrain) and a free-text directive head ("fix ...") alongside the
+    // deferred `[operator-verify]` head and the inert noise line. The drainable
+    // count must be EXACTLY 2 (clean-session + directive), continuation required,
+    // and the shared non-stall guidance present.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let content = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n\
+        ## Exchange\n\n\
+        <!-- agent:exchange patch=append -->\n\
+        ### Re: prior — gpt-5\n\nDone.\n\
+        <!-- agent:boundary:head-boundary -->\n\
+        <!-- /agent:exchange -->\n\n\
+        ## Backlog\n\n\
+        <!-- agent:backlog -->\n\
+        - [ ] [#cs1] [clean-session] tighten the parser\n\
+        - [ ] [#ov1] [operator-verify] live drive needs a human editor\n\
+        <!-- /agent:backlog -->\n\n\
+        ## Queue\n\n\
+        <!-- agent:queue go -->\n\
+        - do [#cs1]\n\
+        - do [#ov1]\n\
+        - fix the parser bug in the tokenizer\n\
+        - lender application screenshot attached for the intake section\n\
+        <!-- /agent:queue -->\n";
+    fs::write(&doc, content).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, content);
+
+    let parsed = preflight_json(root, &doc);
+    assert_eq!(
+        parsed["queue_drainable_head_count"], 2,
+        "clean-session id-head + free-text directive are drainable; operator-verify + noise are not: {parsed}"
+    );
+    assert_eq!(
+        parsed["queue_continuation_required"],
+        serde_json::Value::Bool(true),
+        "a real drainable head remains → keep draining: {parsed}"
+    );
+    let guidance = parsed["queue_continuation_guidance"]
+        .as_str()
+        .expect("non-stall guidance must be present when continuation is required");
+    assert!(
+        guidance.contains("file-IPC") && guidance.contains("NOT stop reasons"),
+        "guidance must carry the degraded-IPC no-stall contract: {guidance}"
+    );
+}
+
 #[test]
 fn test_preflight_exchange_slash_command_is_command_only() {
     let tmp = tempfile::TempDir::new().unwrap();

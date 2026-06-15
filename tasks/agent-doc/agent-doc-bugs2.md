@@ -168,15 +168,6 @@ The `[sync] recovered live pane` / `resync: stash pane … skipping kill` lines 
 
 ### Re: IPC drift root cause fixed — #stuckhandoff2 M1b self-reap — opus-4-8
 
-> **Queue prompt:**
->
-> :pushpin: equityfundingsource.md failed to restart
-> ```
-> ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
->
-> · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
->
->   ❯ /clear
 > ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 > ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
 >   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
@@ -263,11 +254,6 @@ Done — agent-doc `2ced0b4c` (`queue: keep preset go heads drainable`).
 >
 > :pushpin: equityfundingsource.md failed to restart
 > ```
-> ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
->
-> · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
->
->   ❯ /clear
 > ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 > ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
 >   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
@@ -338,13 +324,36 @@ For the `agent:queue` attribute-loss report, `#compactqattr` was already diagnos
 For the `agent:backlog priority queue` population report, the current document is also proving the backlog-to-queue path is active: `#goqnoise` is done, and the active queue now contains the backlog-sourced `#dupcontent2` and `#ar27-majors` heads. That is the expected behavior for backlog items carrying the `queue` attr under an active go queue. I left both heads open because this prompt did not implement or complete them.
 
 Verification recorded here: `#compactqattr` had `make check` green with marker-preservation coverage, and `#goqnoise` had focused queue-continuation tests plus a clean-worktree `make check`.
-<!-- agent:boundary:602191ed -->
+
+### Re: do [#dupcontent2] — gpt-5
+
+> **Queue prompt:**
+>
+> In Codex, JB `Run Agent Doc` adds extra continuation prompt to Codex. agent-doc should be runnable with the extra instructions by using `agent-doc .../doc-file.md`
+
+
+Confirmed this queue head is already complete; no source work was needed or safe to duplicate in this dirty submodule state.
+
+`#dupcontent2` is archived in `tasks/agent-doc-bugs2.done.md` as done, and the current exchange records the shipped/pushed implementation at agent-doc `e7308523` (`agent-doc(#dupcontent2): harden content_ours adoption`). Preflight also recognized the reactivated queue head as already resolved and auto-struck it from the queue (`source=done`).
+
+I left the unrelated dirty `src/agent-doc` working tree untouched. The stale-supervisor warning is still live; it is not a stop reason for this closeout, but it should still be handled by restarting/recycling the route-owned supervisor onto the installed binary.
+
+Changed paths: session document only, via queue convergence and this response.
+
+Commands: `agent-doc --version`; `tsift status`; `tsift status --fix`; `agent_doc_preflight`; `agent_doc_plan`; `agent_doc_read`; `rg -n "#dupcontent2|dupcontent2" ...`; `git status --short`; `git -C src/agent-doc status --short`.
+
+Verification: `agent-doc` is `0.34.1`; preflight succeeded and identified the queue head as done; `rg` found the archived done entry for `#dupcontent2` plus the exchange proof for `e7308523`; no test suite was run because this turn made no code changes.
+
+Confidence: high.
+
+Escalation: none. Remaining live-supervisor promotion/restart proof stays with the existing operator-verify items.
+<!-- agent:boundary:a867b4e9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- In Codex, JB `Run Agent Doc` adds extra continuation prompt to Codex. agent-doc should be runnable with the extra instructions by using `agent-doc .../doc-file.md`
+- ~~In Codex, JB `Run Agent Doc` adds extra continuation prompt to Codex. agent-doc should be runnable with the extra instructions by using `agent-doc .../doc-file.md`~~
 ---
 :pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
 ```
@@ -356,10 +365,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 :pushpin: equityfundingsource.md failed to restart
 ```
 ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
-
 · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
-
-
   ❯ /clear
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
@@ -409,12 +415,10 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
                                                                       Registered session 62fe1f41 → pane %33
                                                                                                             Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
 ```
----
 ~~~done
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
 :round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
 ~~~
----
 :pushpin: - do [#dfrefresh-retire]
 :round_pushpin: do [#suprehotreload]
 - ~~do [#dfrefresh-retire]~~

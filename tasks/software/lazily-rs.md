@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -113,7 +113,7 @@ Commits pushed: `src/lazily-spec` `1c33a50`, `src/lazily-rs` `372b019`, and pare
 Verification: `make test-lean-formal` passed in both submodules; `make check` passed in both submodules; `lazily-rs` full Loom coverage completed 15/15 after 540.48s. GitHub Actions: `lazily-spec` CI run `27533809965` completed successfully; `lazily-rs` CI run `27533809027` was still in progress on the last check; the parent repo has no workflow named `CI`.
 
 Changed paths: `src/lazily-spec/{Makefile,.github/workflows/ci.yml,README.md,docs/formal-model.md}`, `src/lazily-rs/{Makefile,.github/workflows/ci.yml,AGENTS.md}`, and the parent gitlinks. Confidence: high. Escalation: none.
-<!-- agent:boundary:7661391d -->
+<!-- agent:boundary:e218076e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -122,6 +122,7 @@ Changed paths: `src/lazily-spec/{Makefile,.github/workflows/ci.yml,README.md,doc
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- I don't see the linkedin article for the 1st post. Please publish.
 <!-- /agent:queue -->
 
 ## Backlog

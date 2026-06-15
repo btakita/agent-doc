@@ -61,7 +61,33 @@ It only shows when there is something to do, so a verified-and-current investor 
 **Verification** — `bun run check` green: 701 tests pass (36 in the investor-portal e2e file), worker bundle built. Committed in the EFS submodule as `fa6c587`.
 
 **Deployed** — `bun run deploy:worker` succeeded → https://equityfundingsource.brian-takita.workers.dev (version `6b27ec05-5a48-4abe-8338-67897bb35a73`). Live now.
-<!-- agent:boundary:4a736e2f -->
+
+### Re: Investor dashboard requirements dialog stack — opus-4-8
+
+> **Queue prompt:**
+>
+> On https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard, add the dialog stack for the Investor questionaire...both the Requirements and the Complete Requirements. Both the dialogs should match the https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation forms
+
+
+> **Queue prompt:**
+>
+> On `/portal-investor/dashboard`, add the dialog stack for the Investor questionnaire — both the Requirements and the Complete Requirements. Both dialogs should match the `/portal-investor/accreditation` forms.
+
+The dashboard requirements alert now opens a **dialog stack in place** instead of navigating to the Requirements page, and both dialogs reuse the exact components the accreditation page renders, so they match it verbatim.
+
+**What it does**
+- The alert CTA (`Complete / Resubmit / Renew requirements`) is now a button that opens the **Requirements dialog** — the questionnaire status + requirements tracker read view (`RequirementsStatusView`).
+- Inside it, **Complete / Update questionnaire** opens the **Complete Requirements dialog** stacked on top (`z-[1001]`) — the upload form (`CompleteRequirementsForm`: verification type, CPA/attorney document drop zone, notes, submit-for-review).
+- On submit, the inner dialog closes, both the dialog and the dashboard alert reload live status (a verified-and-current investor sees the alert disappear).
+
+**How it matches the accreditation page** — I extracted `CompleteRequirementsForm` and `RequirementsStatusView` (plus the `accreditation_view_T` type) out of `accreditation.tsx` and now both the `/portal-investor/accreditation` page and the dashboard dialogs render the same components — no duplicated markup, guaranteed parity. The form still posts to `/api/investor/accreditation/upload`.
+
+**Files** — `lib/ui--browser--efs/portal/investor/accreditation.tsx` (extract + export the two components), `lib/ui--browser--efs/portal/investor/dashboard.tsx` (alert CTA → `RequirementsDialog` + `CompleteRequirementsDialog` stack), and `tests/investor-portal-e2e.test.ts` (two new source-assertion tests).
+
+**Verification** — `bun run check` green: **703 tests pass**, worker bundle built. Committed in the EFS submodule as `fc31aaa` and pushed to `origin/main`.
+
+Next in the queue: the multi-file CPA/attorney upload component, then deploy.
+<!-- agent:boundary:c5f2fa9a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,7 +95,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- On https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard, add the dialog stack for the Investor questionaire...both the Requirements and the Complete Requirements. Both the dialogs should match the https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation forms
+- ~~On https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard, add the dialog stack for the Investor questionaire...both the Requirements and the Complete Requirements. Both the dialogs should match the https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation forms~~
 - "CPA / attorney letter or supporting document" in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation and the dialog should allow multiple files. Use our standard multi-file upload component.
 - deploy
 <!-- /agent:queue -->

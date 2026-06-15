@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,35 @@ committed
 Compacted content:
 - Archived 16 response topic(s): EFS->TMO writeback replay; [#xcvg-prod-email]; Borrower secure-message email production pass; 13 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:7a7de0da -->
+
+### Re: lender bank wire instruction reveal — gpt-5
+
+> **Queue prompt:**
+>
+> Why can't we show the wire instructions on the lender portal? If it's ok, add the "bank" wire instruction reveal. Make it printable along with instructions that a bank would need to perform the wire transfer...since some lender want to print out the wire instructions and hand them to the bank.
+
+
+We can show wiring instructions in the lender portal as long as they are not emailed in plaintext and are not rendered by default. I implemented that path as an explicit reveal for authenticated investors/lenders who already have a funding commitment on the deal.
+
+Changed paths in `src/equityfundingsource-dev`:
+- `app/equityfundingsource/lib/investor/deal_marketplace/index.ts`, `routes.ts`, `shared.ts`, and `wire_link/routes.ts`: added `POST /api/investor/deals/:id/wire-instructions/reveal`, gated to investor auth, registered lender account, and an existing deal funding commitment. The endpoint reads live `wire_*` platform settings and returns the mandatory wire-fraud phone-verification reminder plus bank handoff instructions.
+- `lib/ui--browser--efs/portal/investor/deal_detail.tsx`: after a commitment is submitted or pending/active, the Commit Funding card now shows a hidden bank wire panel. Reveal loads the live instructions, and Print opens a dedicated bank-ready sheet with loan number, committed amount, lender/account reference, beneficiary bank/routing/account fields, memo/reference, special instructions, and handoff steps.
+- `prds/equity-funding-source-lending-portal-prd.md`, `docs/qa-investor-portal.md`, `bin/qa-investor-portal.ts`, `tests/investor-portal-e2e.test.ts`, and `tests/seed/investor-portal-fixtures.ts`: updated spec, QA coverage, smoke behavior, and route/UI drift guards.
+
+Verification:
+- `bun test tests/investor-portal-e2e.test.ts tests/wire-instruction-links.test.ts` passed: 60 tests.
+- `make check` passed before rebase: 717 tests plus app build and worker build.
+- Rebased on current `origin/main`, resolved the unrelated local autostash conflict in `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx` by keeping the pre-existing realtime refresh logic and the remote lender-facing wording.
+- `make check` passed after rebase: 718 tests plus app build and worker build.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows.
+
+Commit and push:
+- Pushed `src/equityfundingsource-dev` `main`: `3da43ec feat(investor): add printable wire instruction reveal (#wir3)`.
+
+Notes:
+- No privilege escalation was used.
+- The submodule had unrelated dirty files before this turn; I left them unstaged. Git also retained `stash@{0}: autostash` as a backup from the rebase because it involved those unrelated local changes.
+<!-- agent:boundary:e3507ffa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +74,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Why can't we show the wire instructions on the lender portal? If it's ok, add the "bank" wire instruction reveal. Make it printable along with instructions that a bank would need to perform the wire transfer...since some lender want to print out the wire instructions and hand them to the bank.
 <!-- /agent:queue -->
 
 ## Backlog

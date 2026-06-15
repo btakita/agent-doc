@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -293,12 +293,34 @@ Proven empirically by `compact_preserves_queue_marker_inline_attributes`: compac
 So the monsterrodholders.md attribute-wipe was a concurrent **stale-supervisor CRDT interleave** over the written file (the class `#compactdropitem` names; root-fixed by `#recyclerestart`), not a compaction-code regression.
 
 Shipped (agent-doc `f94ca7cd`): the regression test above; `assert_non_exchange_markers_preserved` wired into `apply_compacted_document` (fails closed if a rebuild alters any non-exchange opening marker — marker-level sibling of `assert_non_exchange_items_preserved`); `marker_guard_fires_when_queue_attributes_dropped`. `make check`: 4496 passed, 0 failed. Live promotion deferred per `#no-mid-session-install`; live JB re-verify tracked as `#c2b6`.
-<!-- agent:boundary:8b5c43a1 -->
+
+### Re: do [#goqnoise] — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` on this document
+> ```
+> resync: pruned 9 stale session(s)
+> [route] target tmux session: 0
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3533
+> ```
+
+
+Acknowledged. I won’t answer or run the queued `agent-doc` prompt from this context. I can’t invoke `/clear` as a tool here; the session needs to be reset by the harness, then `agent-doc tasks/agent-doc/agent-doc-bugs2.md` should be started in the fresh context.
+<!-- agent:boundary:f4966274 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+---
+JB `Run Agent Doc` on this document
+```
+resync: pruned 9 stale session(s)
+[route] target tmux session: 0
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3533
+```
+---
 :pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
 ```
 resync: pruned 8 stale session(s)
@@ -368,14 +390,8 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ---
 :pushpin: - do [#dfrefresh-retire]
 :round_pushpin: do [#suprehotreload]
-- ~~do [#dupcontent2]~~
-- ~~do [#recyclerestart-verify]~~
-- ~~do [#rtwbcast-verify]~~
-- ~~do [#ar27-majors]~~
-- ~~do [#cleandrainsup-verify]~~
-- do [#dfrefresh-retire]
-- ~~do [#compactqattr]~~
-- do [#c2b6]
+- ~~do [#dfrefresh-retire]~~
+- ~~do [#c2b6]~~
 - do [#goqnoise]
 <!-- /agent:queue -->
 ###

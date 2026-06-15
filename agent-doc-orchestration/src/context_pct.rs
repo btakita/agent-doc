@@ -10,9 +10,11 @@
 //! This module owns two phases:
 //! - **`#s760a`** — the harness-aware transcript locator + token reader. For
 //!   Claude Code, locate `~/.claude/projects/<project-hash>/<session-id>.jsonl`
-//!   and read the latest entry's cumulative `usage`. Codex/OpenCode transcript
-//!   stores are not yet confirmed, so they return `None` (unsupported, skip)
-//!   rather than guess.
+//!   and read the latest entry's cumulative `usage`. For Codex, locate the
+//!   newest `~/.codex/sessions/**/rollout-*.jsonl` for the current project and
+//!   read the latest `token_count` event's `last_token_usage` plus
+//!   `model_context_window`. OpenCode transcript stores are not yet confirmed,
+//!   so they return `None` (unsupported, skip) rather than guess.
 //! - **`#s760b`** — the model → context-window table and the ctx% compute
 //!   (`pct = used / window * 100`, clamped).
 //!
@@ -38,6 +40,7 @@
 //! - `context_pct_computes_and_clamps`
 //! - `context_pct_unknown_model_is_none`
 //! - `read_used_tokens_unsupported_harness_is_none`
+//! - `parse_codex_jsonl_context_pct_uses_latest_token_count`
 //! - `transcript_context_pct_end_to_end`
 
 use std::path::{Path, PathBuf};
@@ -145,9 +148,11 @@ pub fn parse_claude_jsonl_used_tokens(content: &str) -> Option<UsedTokens> {
 }
 
 /// Read cumulative token usage from a transcript file for the given harness
-/// (`#s760a`). Claude → parse JSONL; Codex/OpenCode → `None` (unsupported until
-/// their transcript stores are confirmed live, so the caller fails safe and
-/// never clears). A missing/unreadable file is `None`.
+/// (`#s760a`). Claude -> parse JSONL; OpenCode -> `None` (unsupported until its
+/// transcript store is confirmed live, so the caller fails safe and never
+/// clears). Codex usage needs the event-provided context window, so callers use
+/// [`parse_codex_jsonl_context_pct`] through [`transcript_context_pct`] instead
+/// of this raw token helper. A missing/unreadable file is `None`.
 pub fn read_used_tokens(harness: Harness, transcript: &Path) -> Option<UsedTokens> {
     match harness {
         Harness::Claude => {
@@ -156,7 +161,7 @@ pub fn read_used_tokens(harness: Harness, transcript: &Path) -> Option<UsedToken
         }
         Harness::Codex | Harness::OpenCode => {
             eprintln!(
-                "[s760] transcript token reading unsupported for {harness:?}; ctx% None (never clears)"
+                "[s760] raw transcript token reading unsupported for {harness:?}; ctx% None (never clears)"
             );
             None
         }
@@ -199,8 +204,86 @@ pub fn context_pct(used: u64, model: &str) -> Option<f64> {
 /// (never clear) on any failure: unreadable/empty transcript, unsupported
 /// harness, or unknown model.
 pub fn transcript_context_pct(harness: Harness, transcript: &Path, model: &str) -> Option<f64> {
-    let used = read_used_tokens(harness, transcript)?;
-    context_pct(used.total(), model)
+    match harness {
+        Harness::Claude => {
+            let used = read_used_tokens(harness, transcript)?;
+            context_pct(used.total(), model)
+        }
+        Harness::Codex => {
+            let content = std::fs::read_to_string(transcript).ok()?;
+            parse_codex_jsonl_context_pct(&content)
+        }
+        Harness::OpenCode => {
+            eprintln!(
+                "[s760] transcript context reading unsupported for {harness:?}; ctx% None (never clears)"
+            );
+            None
+        }
+    }
+}
+
+fn json_u64_at(value: &serde_json::Value, path: &[&str]) -> u64 {
+    let mut cursor = value;
+    for key in path {
+        let Some(next) = cursor.get(*key) else {
+            return 0;
+        };
+        cursor = next;
+    }
+    cursor.as_u64().unwrap_or(0)
+}
+
+fn context_pct_for_window(used: u64, window: u64) -> Option<f64> {
+    if window == 0 {
+        return None;
+    }
+    Some(((used as f64) / (window as f64) * 100.0).clamp(0.0, 100.0))
+}
+
+/// Parse Codex TUI session JSONL and compute live context usage from the latest
+/// `token_count` event. Codex reports the current turn's prompt/context usage in
+/// `last_token_usage` and the exact `model_context_window` for that model. The
+/// CLI displays cached input separately (`input=N (+ M cached)`), and cached
+/// input still occupies the model context window, so it is included here.
+pub fn parse_codex_jsonl_context_pct(content: &str) -> Option<f64> {
+    let mut latest: Option<(u64, u64)> = None;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let value: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if value
+            .get("payload")
+            .and_then(|p| p.get("type"))
+            .and_then(serde_json::Value::as_str)
+            != Some("token_count")
+        {
+            continue;
+        }
+        let window = json_u64_at(&value, &["payload", "info", "model_context_window"]);
+        let input = json_u64_at(
+            &value,
+            &["payload", "info", "last_token_usage", "input_tokens"],
+        );
+        let cached = json_u64_at(
+            &value,
+            &["payload", "info", "last_token_usage", "cached_input_tokens"],
+        );
+        let output = json_u64_at(
+            &value,
+            &["payload", "info", "last_token_usage", "output_tokens"],
+        );
+        let used = input.saturating_add(cached).saturating_add(output);
+        if window > 0 && used > 0 {
+            latest = Some((used, window));
+        }
+    }
+    let (used, window) = latest?;
+    context_pct_for_window(used, window)
 }
 
 /// Outcome of the `#s760c` dispatch-time pre-emptive `/clear` gate. `clear` is
@@ -263,6 +346,84 @@ pub fn latest_claude_transcript(projects_subdir: &Path) -> Option<PathBuf> {
         };
         if newest.as_ref().is_none_or(|(best, _)| modified > *best) {
             newest = Some((modified, path));
+        }
+    }
+    newest.map(|(_, path)| path)
+}
+
+fn codex_session_meta_cwd(path: &Path) -> Option<PathBuf> {
+    let file = std::fs::File::open(path).ok()?;
+    let reader = std::io::BufReader::new(file);
+    use std::io::BufRead;
+    for line in reader.lines().map_while(Result::ok).take(20) {
+        let value: serde_json::Value = match serde_json::from_str(line.trim()) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if value.get("type").and_then(serde_json::Value::as_str) != Some("session_meta") {
+            continue;
+        }
+        let cwd = value
+            .get("payload")
+            .and_then(|p| p.get("cwd"))
+            .and_then(serde_json::Value::as_str)?;
+        return Some(PathBuf::from(cwd));
+    }
+    None
+}
+
+fn path_matches_project_dir(path: &Path, project_dir: &Path) -> bool {
+    if path == project_dir {
+        return true;
+    }
+    match (path.canonicalize(), project_dir.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Locate the newest Codex TUI session transcript for the current project.
+/// Codex stores sessions under `~/.codex/sessions/<year>/<month>/<day>/`; the
+/// first `session_meta` record carries `payload.cwd`, which is the stable
+/// project match key.
+pub fn latest_codex_transcript(home: &Path, project_dir: &Path) -> Option<PathBuf> {
+    let root = home.join(".codex").join("sessions");
+    let mut stack = vec![root];
+    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if metadata.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !file_name.starts_with("rollout-") {
+                continue;
+            }
+            let Ok(modified) = metadata.modified() else {
+                continue;
+            };
+            if newest.as_ref().is_some_and(|(best, _)| modified <= *best) {
+                continue;
+            }
+            let Some(cwd) = codex_session_meta_cwd(&path) else {
+                continue;
+            };
+            if path_matches_project_dir(&cwd, project_dir) {
+                newest = Some((modified, path));
+            }
         }
     }
     newest.map(|(_, path)| path)
@@ -390,6 +551,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_codex_jsonl_context_pct_uses_latest_token_count() {
+        let content = r#"{"type":"session_meta","payload":{"cwd":"/tmp/project"}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10000,"cached_input_tokens":5000,"output_tokens":1000},"model_context_window":100000}}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20000,"cached_input_tokens":10000,"output_tokens":5000},"model_context_window":100000}}}
+"#;
+        let pct = parse_codex_jsonl_context_pct(content).expect("codex pct");
+        assert_eq!(pct, 35.0);
+    }
+
+    #[test]
+    fn parse_codex_jsonl_context_pct_clamps_and_ignores_missing_window() {
+        let content = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1,"cached_input_tokens":1,"output_tokens":1}}}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":90000,"cached_input_tokens":20000,"output_tokens":1000},"model_context_window":100000}}}
+"#;
+        let pct = parse_codex_jsonl_context_pct(content).expect("codex pct");
+        assert_eq!(pct, 100.0);
+    }
+
+    #[test]
     fn transcript_context_pct_end_to_end() {
         let mut tmp = NamedTempFile::new().unwrap();
         tmp.write_all(FIXTURE.as_bytes()).unwrap();
@@ -405,8 +585,19 @@ mod tests {
             .unwrap();
         let pct = transcript_context_pct(Harness::Claude, small.path(), "sonnet").unwrap();
         assert_eq!(pct, 30.0); // 60000 / 200000 * 100
-        // Unsupported harness → None.
-        assert!(transcript_context_pct(Harness::Codex, tmp.path(), "opus").is_none());
+        let mut codex = NamedTempFile::new().unwrap();
+        codex
+            .write_all(
+                br#"{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20000,"cached_input_tokens":10000,"output_tokens":0},"model_context_window":100000}}}
+"#,
+            )
+            .unwrap();
+        assert_eq!(
+            transcript_context_pct(Harness::Codex, codex.path(), "gpt-5"),
+            Some(30.0)
+        );
+        // Unsupported harness -> None.
+        assert!(transcript_context_pct(Harness::OpenCode, tmp.path(), "opus").is_none());
     }
 
     #[test]
@@ -497,5 +688,69 @@ mod tests {
     #[test]
     fn latest_claude_transcript_missing_dir_is_none() {
         assert!(latest_claude_transcript(Path::new("/no/such/projects/dir")).is_none());
+    }
+
+    #[test]
+    fn latest_codex_transcript_picks_newest_matching_project() {
+        let home = tempfile::tempdir().unwrap();
+        let day = home
+            .path()
+            .join(".codex")
+            .join("sessions")
+            .join("2026")
+            .join("06")
+            .join("15");
+        std::fs::create_dir_all(&day).unwrap();
+        let project = home.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let older = day.join("rollout-old.jsonl");
+        let newer = day.join("rollout-new.jsonl");
+        let other = day.join("rollout-other.jsonl");
+        let non_rollout = day.join("notes.jsonl");
+
+        std::fs::write(
+            &older,
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"cwd\":\"{}\"}}}}\n",
+                project.display()
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &newer,
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"cwd\":\"{}\"}}}}\n",
+                project.display()
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &other,
+            "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/tmp/other\"}}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &non_rollout,
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"cwd\":\"{}\"}}}}\n",
+                project.display()
+            ),
+        )
+        .unwrap();
+
+        let old_time = std::time::SystemTime::now() + std::time::Duration::from_secs(10);
+        let new_time = std::time::SystemTime::now() + std::time::Duration::from_secs(20);
+        let other_time = std::time::SystemTime::now() + std::time::Duration::from_secs(30);
+        let non_rollout_time = std::time::SystemTime::now() + std::time::Duration::from_secs(40);
+        filetime::set_file_mtime(&older, filetime::FileTime::from_system_time(old_time)).unwrap();
+        filetime::set_file_mtime(&newer, filetime::FileTime::from_system_time(new_time)).unwrap();
+        filetime::set_file_mtime(&other, filetime::FileTime::from_system_time(other_time)).unwrap();
+        filetime::set_file_mtime(
+            &non_rollout,
+            filetime::FileTime::from_system_time(non_rollout_time),
+        )
+        .unwrap();
+
+        assert_eq!(latest_codex_transcript(home.path(), &project), Some(newer));
     }
 }

@@ -373,18 +373,30 @@ fn is_context_clear_prompt(prompt: &str) -> bool {
 /// observable marker — so an operator driving a queue drain could never confirm
 /// or deny that a queue-turn boundary actually requested a reset. This helper
 /// restores parity: when the project is opted into `agent_doc_queue_context_reset`,
-/// it logs the canonical `[s760] clear-decision` line (Codex transcript token
-/// reading is unsupported — `read_used_tokens` → None for Codex — so the ctx%
-/// gate is always `pct=none clear=false` and never drives the clear by itself)
-/// plus a `[clearcodex] codex-continuation` companion line carrying the
-/// accretion/compaction reason that actually instructs the `/clear`. Returns the
-/// effective reason unchanged so the caller still wires it into the continuation
+/// it logs the canonical `[s760] clear-decision` line from the Codex session
+/// JSONL `token_count` event when available, plus a `[clearcodex]
+/// codex-continuation` companion line carrying the effective reset reason.
+/// Returns the effective reason so the caller wires it into the continuation
 /// instruction.
+fn codex_live_context_pct(file: &Path) -> Option<f64> {
+    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
+    let project_dir = project_roots_for(file)
+        .into_iter()
+        .next()
+        .or_else(|| std::env::current_dir().ok())?;
+    let transcript = crate::context_pct::latest_codex_transcript(Path::new(&home), &project_dir)?;
+    crate::context_pct::transcript_context_pct(
+        crate::context_pct::Harness::Codex,
+        &transcript,
+        "codex",
+    )
+}
+
 fn codex_continuation_clear_reason(
     file: &Path,
     last_context_clear_at: Option<u64>,
 ) -> Option<String> {
-    let reason = match crate::session_accretion::queue_context_reset_reason_if_opted_in(
+    let mut reason = match crate::session_accretion::queue_context_reset_reason_if_opted_in(
         file,
         last_context_clear_at,
     ) {
@@ -399,10 +411,15 @@ fn codex_continuation_clear_reason(
     };
     if crate::session_accretion::queue_context_reset_opted_in(file) {
         let threshold = crate::session_accretion::clear_threshold_for_doc(file);
-        // Codex transcript token reading is unsupported, so ctx% is unknown and
-        // the s760 gate never clears on its own; the accretion/compaction
-        // `reason` is the live signal that instructs the `/clear`.
-        let decision = crate::context_pct::clear_decision(true, None, threshold);
+        let pct = codex_live_context_pct(file);
+        let decision = crate::context_pct::clear_decision(true, pct, threshold);
+        if reason.is_none() && decision.clear {
+            reason = Some(format!(
+                "transcript context {:.1}% >= clear threshold {}% (#clearcodex)",
+                pct.unwrap_or_default(),
+                threshold
+            ));
+        }
         crate::ops_log::log_op(file, &decision.diagnostic);
         crate::ops_log::log_op(
             file,
@@ -1527,6 +1544,29 @@ mod tests {
     use super::*;
     use std::fs;
     use std::process::Command as ProcessCommand;
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &Path) -> Self {
+            let old = std::env::var_os(key);
+            unsafe { std::env::set_var(key, value) };
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = self.old.as_ref() {
+                unsafe { std::env::set_var(self.key, value) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
+        }
+    }
 
     fn setup_project() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -2972,7 +3012,7 @@ agent-doc {}\n",
         );
         assert!(
             ops_log.contains("pct=none clear=false"),
-            "codex ctx% is unsupported, so the s760 gate must report pct=none clear=false:\n{ops_log}"
+            "without a readable Codex token_count transcript, the s760 gate must fail safe:\n{ops_log}"
         );
         assert!(
             ops_log.contains("[clearcodex] codex-continuation optIn=true"),
@@ -2981,6 +3021,61 @@ agent-doc {}\n",
         assert!(
             ops_log.contains("clear_instructed=true"),
             "compaction-after-clear should instruct a /clear:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn stop_codex_continuation_hands_off_when_token_count_crosses_threshold() {
+        let dir = setup_project();
+        fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "agent_doc_queue_context_reset = true\nagent_doc_clear_threshold = 15\n",
+        )
+        .unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home_guard = EnvGuard::set("HOME", home.path());
+        let sessions = home
+            .path()
+            .join(".codex")
+            .join("sessions")
+            .join("2026")
+            .join("06")
+            .join("15");
+        fs::create_dir_all(&sessions).unwrap();
+        fs::write(
+            sessions.join("rollout-current.jsonl"),
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"cwd\":\"{}\"}}}}\n{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"last_token_usage\":{{\"input_tokens\":20000,\"cached_input_tokens\":20000,\"output_tokens\":0}},\"model_context_window\":100000}}}}}}\n",
+                dir.path().display()
+            ),
+        )
+        .unwrap();
+
+        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
+        init_git_repo(dir.path(), &doc);
+        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+
+        let response = apply_stop(&StopInput {
+            session_id: "untracked-session".to_string(),
+            turn_id: "turn-x".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Final answer.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .expect("ops.log should exist after threshold clear");
+        assert!(
+            ops_log.contains("[s760] clear-decision optIn=true threshold=15 pct=40.0 clear=true"),
+            "threshold clear decision should use Codex token_count:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains("transcript context 40.0% >= clear threshold 15%")
+                && ops_log.contains("codex_fresh_context_handoff")
+                && ops_log.contains("result=queued"),
+            "threshold crossing should become a supervisor handoff reason:\n{ops_log}"
         );
     }
 

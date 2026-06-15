@@ -157,9 +157,9 @@ pub const DEFAULT_CLEAR_THRESHOLD: u8 = 50;
 /// Resolution order mirrors [`queue_context_reset_opted_in`]: a per-document
 /// frontmatter `agent_doc_clear_threshold` takes precedence, then the project
 /// config `.agent-doc/config.toml`, then [`DEFAULT_CLEAR_THRESHOLD`]. The value
-/// is clamped to `0..=100`. The binary owns this threshold so every editor shares
-/// it; the context-percentage comparison and the actual pre-emptive clear remain
-/// the editor's responsibility.
+/// is clamped to `0..=100`. The binary owns this threshold so every editor and
+/// harness shares the same gate; supported transcript readers compare live
+/// context usage against it and fail safe when no reliable percentage is known.
 pub fn clear_threshold_for_doc(file: &Path) -> u8 {
     if let Ok(content) = std::fs::read_to_string(file)
         && let Ok((fm, _)) = crate::frontmatter::parse(&content)

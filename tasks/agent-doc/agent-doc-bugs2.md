@@ -458,7 +458,24 @@ Commits: `6d65a12e` in `src/agent-doc` and parent pointer `8349da51a`. This comp
 Verification: `cargo fmt --check`; focused controller and queue-consume tests; full `make check`; `cargo build --release`; `cargo install --path .`.
 
 Preflight still reports the route-owned supervisor as stale; I’ll check closeout/session state next.
-<!-- agent:boundary:f18d4641 -->
+
+### Re: Codex context threshold clears — gpt-5
+
+Implemented the queue context-threshold fix. Codex Stop-hook continuations now read real context usage from the newest matching `~/.codex/sessions/**/rollout-*.jsonl` for the document project, parse the latest `token_count` event, include cached input tokens in the ctx% calculation, and compare that number to `agent_doc_clear_threshold` when `agent_doc_queue_context_reset` is enabled. If the numeric pct crosses the threshold, the hook logs the canonical `[s760] ... pct=N clear=true` proof, records a `transcript context ... >= clear threshold ... (#clearcodex)` reason, and hands the next queue head to the supervisor via `codex_fresh_context_handoff` instead of continuing inside the already-loaded pane. Missing or unreadable Codex token counts still fail safe with `pct=none clear=false`.
+
+Code landed in submodule commit `28ac88d9` and parent gitlink commit `2574caa99`. I also updated the specs/changelog so Codex is no longer documented as permanently unsupported for this gate.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p agent-doc-orchestration context_pct -- --nocapture`
+- `cargo test -p agent-doc-orchestration codex_hook::tests::stop_codex_continuation_hands_off_when_token_count_crosses_threshold -- --nocapture`
+- `cargo test -p agent-doc-orchestration codex_hook::tests::stop_codex_continuation_logs_structured_clear_proof_when_opted_in -- --nocapture`
+- `make check` in the dirty source checkout
+- clean detached worktree at `28ac88d9`: `make check`, `cargo build --release`, `cargo install --path .`
+
+The installed `agent-doc` binary is now built from the clean `28ac88d9` tree. `gh run list --workflow CI --limit 1` could not find a workflow named `CI`, so there was no GitHub CI run to inspect.
+
+<!-- agent:boundary:b957461b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -488,7 +505,7 @@ agent-doc Codex should use the PCP/supervisor to handle tasks that cannot be don
 ```
 ---
 - ~~:pushpin: Fix `agent:backlog queue` not adding items to the backlog.~~
-- :pushpin: #advance-review. This should add items to the backlog and since backlog has the `queue` attribute, the new backlog items should go into the queue.
+- ~~:pushpin: #advance-review. This should add items to the backlog and since backlog has the `queue` attribute, the new backlog items should go into the queue.~~
 - :pushpin: agent-doc is not clearing the agent context when the context threshold is reached.
 <!-- /agent:queue -->
 ###

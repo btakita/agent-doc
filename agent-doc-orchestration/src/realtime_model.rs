@@ -317,6 +317,12 @@ pub fn compute_broadcast(
     originator: &str,
     peer: &str,
 ) -> anyhow::Result<BroadcastMerge> {
+    if text_delta_included(base, peer, originator) {
+        return Ok(BroadcastMerge {
+            merged: originator.to_string(),
+            originator_echo_suppressed: true,
+        });
+    }
     let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
     let (merged, _state) = crate::merge::merge_contents_crdt(Some(&base_state), originator, peer)?;
     let originator_echo_suppressed = merged == originator;
@@ -324,6 +330,39 @@ pub fn compute_broadcast(
         merged,
         originator_echo_suppressed,
     })
+}
+
+fn text_delta_included(base: &str, changed: &str, candidate: &str) -> bool {
+    if changed == base || changed == candidate {
+        return true;
+    }
+    let base_counts = line_counts(base);
+    let changed_counts = line_counts(changed);
+    let candidate_counts = line_counts(candidate);
+    let mut saw_delta = false;
+    for line in base_counts.keys().chain(changed_counts.keys()) {
+        let base_count = *base_counts.get(line).unwrap_or(&0);
+        let changed_count = *changed_counts.get(line).unwrap_or(&0);
+        let candidate_count = *candidate_counts.get(line).unwrap_or(&0);
+        if changed_count != base_count {
+            saw_delta = true;
+        }
+        if changed_count > base_count && candidate_count < changed_count {
+            return false;
+        }
+        if changed_count < base_count && candidate_count > changed_count {
+            return false;
+        }
+    }
+    saw_delta
+}
+
+fn line_counts(text: &str) -> std::collections::BTreeMap<&str, usize> {
+    let mut counts = std::collections::BTreeMap::new();
+    for line in text.split_inclusive('\n') {
+        *counts.entry(line).or_insert(0) += 1;
+    }
+    counts
 }
 
 /// Production-shaped N-buffer broadcast planner.
@@ -578,6 +617,39 @@ mod tests {
             result.originator_echo_suppressed,
             "an unchanged peer must suppress the redundant echo back to the originator"
         );
+    }
+
+    #[test]
+    fn compute_broadcast_rebroadcast_preserves_component_boundaries() {
+        let base = concat!(
+            "# Doc\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#base] existing\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let editor_a = base.replace(
+            "- [ ] [#base] existing\n",
+            "- [ ] [#base] existing\n- [ ] [#edit-A] queued in editor A\n",
+        );
+        let editor_b = base.replace(
+            "- [ ] [#base] existing\n",
+            "- [ ] [#base] existing\n- [ ] [#edit-B] queued in editor B\n",
+        );
+
+        let merged = compute_broadcast(base, &editor_a, &editor_b)
+            .unwrap()
+            .merged;
+        assert!(merged.contains("#edit-A"));
+        assert!(merged.contains("#edit-B"));
+        crate::component::parse(&merged).unwrap();
+
+        let rebroadcast = compute_broadcast(base, &merged, &editor_a).unwrap();
+        assert_eq!(
+            rebroadcast.merged, merged,
+            "rebroadcasting an already-converged buffer to a stale peer must not re-merge component markers"
+        );
+        assert!(rebroadcast.originator_echo_suppressed);
+        crate::component::parse(&rebroadcast.merged).unwrap();
     }
 
     #[test]

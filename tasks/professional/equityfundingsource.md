@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -77,7 +77,7 @@ Verification:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:d6c50c7c -->
+<!-- agent:boundary:7d4279ef -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,6 +85,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- "Edit your submission" dialog/page does not show the current submission data. It is a new submission form. Where are the uploaded documents and the filled out data? deploy
 <!-- /agent:queue -->
 
 ## Backlog

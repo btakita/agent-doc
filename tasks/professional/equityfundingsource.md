@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,50 @@ committed
 Compacted content:
 - Archived 4 response topic(s): Annual requirements edit submission; Edit submission should show current data; Lender vestings vs distributions; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:4a799fc3 -->
+
+### Re: Pipeline refresh after record updates — gpt-5
+
+> **Queue prompt:**
+>
+> When I accredit an investor in https://equityfundingsource.brian-takita.workers.dev/portal-admin/lender-pipeline, the pipeline should be updated without a refresh. Same with any change to a record in both pipelines. deploy
+
+
+Implemented and deployed the no-refresh pipeline update fix.
+
+What changed:
+- Lender Pipeline now refreshes from admin realtime events/poll fallback, preserves the open detail modal with freshly fetched card data, and refreshes after stacked investor-profile save/delete.
+- Deal Pipeline now refreshes parent board data after embedded lead/full-application edits, and refreshes the open selected card from the latest pipeline payload.
+- Admin mutation endpoints now emit best-effort admin events for user changes, application-lead changes/invites, loan status changes, investor accreditation decisions, and funding wire confirmations.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/{investor_pipeline,pipeline,user_management,application_leads,application_lead_detail,full_applications}.tsx`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/{user_management,application_leads,loan_management,investor_management}/index.ts`
+- `src/equityfundingsource-dev/tests/{admin-investor-pipeline,admin-pipeline,admin-poll-refresh,admin-realtime-events,admin-application-lead-detail,admin-subject-property-edit,application-status-ui}.test.ts`
+
+Verification:
+- `bun test tests/admin-investor-pipeline.test.ts tests/admin-pipeline.test.ts tests/admin-poll-refresh.test.ts tests/admin-realtime-events.test.ts` — passed, 113 tests.
+- `make check` — passed, 712 tests + app build + worker build.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI`; `gh workflow list` returned no workflows for this repo.
+
+Deploy proof:
+- Reviewed pending migration `0065_application_feedback_read.sql`; it is additive (`ADD COLUMN` + index).
+- `make deploy` completed successfully, applied remote D1 migration `0065_application_feedback_read.sql`, and deployed Worker Version ID `cf0f91d3-5c94-436f-b652-517df7ee0847`.
+- Post-deploy remote migrations: `No migrations to apply`.
+- Smoke checks: `/` returned `200`; `/portal-admin/lender-pipeline` and `/portal-admin/pipeline` returned `303` Cloudflare Access redirects, as expected for protected admin routes.
+
+Escalation: none.
+Confidence: high.
+
+I did not create a git commit because the project-local instructions say not to commit unless explicitly asked. The app changes remain in the working tree and are already deployed.
+
+Suggested commit message:
+
+```txt
+fix(admin): refresh pipeline boards after record changes (#67v2)
+
+Refresh the lender and deal pipeline boards after embedded profile, lead, application, accreditation, loan-status, and wire-confirmation changes. Add admin realtime events for the mutation endpoints and cover the no-refresh behavior with focused admin pipeline tests.
+```
+<!-- agent:boundary:c67cbcca -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +89,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- When I accredit an investor in https://equityfundingsource.brian-takita.workers.dev/portal-admin/lender-pipeline, the pipeline should be updated without a refresh. Same with any change to a record in both pipelines. deploy
 <!-- /agent:queue -->
 
 ## Backlog

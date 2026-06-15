@@ -500,6 +500,16 @@ Verification passed in the dirty dev tree and again in a clean adjacent worktree
 
 > **Queue prompt:**
 >
+> JB `Run Agent Doc` on lazily-rs
+> ```
+> resync: pruned 1 stale session(s)
+> [route] target tmux session: 0
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3605
+> ```
+
+
+> **Queue prompt:**
+>
 > Please explain the cause of this churn. I don't understand why this is necessary. Just run the current task. Use the document editor buffer as the source of truth. It seems simple. Why this extra complexity?
 > ```
 > • The real file has queue: start, agent:queue ... go, and agent:backlog priority queue, so it should be in go-mode and
@@ -594,7 +604,7 @@ Verification passed in the dirty dev tree and again in a clean adjacent worktree
 The churn was not necessary product work. It was recovery overhead from agent-doc disagreeing about which document state was authoritative after restart: the live editor buffer, the committed snapshot, the response-capture sidecars, and a stale route-owned supervisor were not all describing the same queue state. When a recovery path reads git HEAD or disk while the editor buffer has newer queue content, it can replay stale queue blocks, re-strike the wrong head, or revive archived exchange text.
 
 The durable rule is what you described: use the document/editor buffer as the current source of truth, then persist that through the binary-owned snapshot and commit boundary. The extra sidecar checks exist only to prove that recovery is not replaying stale state over that buffer. For this queue item I did not add more implementation work or create new backlog because there is no new actionable follow-up beyond the queue items already present. I normalized the session closeout so the buffer and committed snapshot match, kept `#clearexchstale` closed, and continued the queue from the existing items.
-<!-- agent:boundary:956da27b -->
+<!-- agent:boundary:0bf9aaaf -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -634,7 +644,7 @@ Compacted content:
 - **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
 ```
 ~~~
----
+~~~done
 Please explain the cause of this churn. I don't understand why this is necessary. Just run the current task. Use the document editor buffer as the source of truth. It seems simple. Why this extra complexity?
 ```
 • The real file has queue: start, agent:queue ... go, and agent:backlog priority queue, so it should be in go-mode and
@@ -723,7 +733,7 @@ Please explain the cause of this churn. I don't understand why this is necessary
     OG
     - https://www.youtube.com/shorts/hA8C9PQx0zI
 ```
----
+~~~
 - ~~do [#qdedup]~~
 - ~~do [#clearexchstale]~~
 ---
@@ -782,7 +792,7 @@ What are #next-steps to fix bugs?
 - [ ] [#4myd] [operator-verify] #suprecyclestall live-verify: with the new binary installed (cargo install + cargo build --release done, pushed agent-doc aafa6510), restart a stale session and drive an idle/next-queue-item recycle. Confirm ops.log shows `supervisor_binary_stale_self_recycled ... candidates=[...]` then EITHER a clean execve hot-reload OR `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
-- [ ] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse baselines/<hash>.md into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = resolve_current_doc(newest-of(disk,buffer)), NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
+- [ ] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse `baselines/<hash>.md` into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = `resolve_current_doc(newest-of(disk,buffer))`, NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
 - [ ] [#efscodexsubmit] JB Run Agent Doc in equityfundingsource.md enters but does not submit the prompt to Codex (operator must press Enter). Same class as #2v7b/#jbcodexsubmit: Codex direct-pane dispatch (route.rs send_command_unchecked) detects prompt_not_submitted (merged text+CR not treated as submit by the Codex TUI) but has no Enter re-submit fallback. FIX: Codex-scoped one-shot Enter re-submit + route_submit_resubmit proof logging + SimWorld coverage (operator-requested). CLEAN session required (touches route.rs; submodule carries dirty #fintol tree). Plan: tasks/agent-doc/plan-jb-codex-submit.md
 - [ ] [#stuckhandoff2] Stuck-handoff hardening: controllers wedged in --handoff-state preparing survive IDE restart + keep corrupting the worktree over ipc.sock. ROOT CAUSE: two-phase handoff (prepare_handoff->promote_handoff, project_controller.rs:3307/3318) is client-driven; if the client dies/RPC fails between the two, the controller stays Preparing forever. The existing reaper (#kqr6/#sjwm/#stuckhandoff, 45s) is bootstrap-RECORD-scoped (kills only bootstrap.pid), same-project-only, and fires on bind/gc not a timer -> orphaned + cross-project + no-new-invoke wedges survive (operator must pkill -f 'controller serve ... --handoff-state preparing'). FIX (defense-in-depth): M1 controller self-watchdog/suicide-timer on Preparing [strongest], M2 gate worktree/ipc writes on Stable [symptom-killer, overlaps #pcwc], M3 proc-scan reaper for orphans, M4 client handoff drop-guard, M5 cross-project gc sweep. M1+M2 are the durable core; land together with SimWorld coverage. CLEAN session required (submodule carries uncommitted #fintol work). Plan: tasks/agent-doc/plan-stuck-handoff-hardening.md
 - [ ] [#qt32] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]

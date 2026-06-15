@@ -144,7 +144,20 @@ On the dashboard the deal dialog renders `InvestorDealDetail` (embedded). When y
 I recommend **Option 1** for the immediate notice transition (Option 3 later if more cross-component lender-derived state appears). I did **not** implement it this turn since the prompt was a "do we have…?" question and the card-state piece needs a UX decision — queued as actionable backlog item `#9e7b` with a plan at `tasks/professional/efs-investor-lender-state-lift.md`. Say `do #9e7b` and I'll wire Option 1, update tests, and ship it.
 
 <!-- no-queue-removal-guard -->
-<!-- agent:boundary:149603a1 -->
+
+### Re: do #9e7b — lift lender-application state across the dashboard ↔ deal-dialog boundary — opus-4-8
+
+Done. Implemented **Option 1 (lift state up)** from `tasks/professional/efs-investor-lender-state-lift.md`.
+
+**What changed (EFS submodule `70195ec`, superproject pointer `af640fcdb`):**
+
+- `deal_detail.tsx::InvestorDealDetail` now accepts an optional `on_lender_change?: (next: InvestorLenderProfile) => void`. The inline `LenderAccountGate`'s `on_change` calls both `set_investor(next)` (its own copy) **and** `on_lender_change?.(next)` (the lift), so a parent holding its own lender copy reacts immediately.
+- `dashboard.tsx`: `AvailableDealsPreview` passes its own `set_lender` → `AvailableDealDialog` (new `on_lender_change` prop) → `InvestorDealDetail`. Submitting the application in the in-dashboard Available-deal dialog now flips `AvailableDealsPreview`'s `lender` to `pending`, so the dashboard's outer `LenderApplicationNotice` transitions **incomplete → "awaiting EFS review" without a page reload**.
+
+Cards still don't change — as the plan notes, there is no per-deal card-level lender state; the notice is the thing that transitions (account-global `lender_request_status`).
+
+**Tests:** updated the source-assertion tests in `lender-account-gate.test.ts` and `investor-portal-e2e.test.ts` to match the new wiring, plus added two new assertions covering the lifted callback threading. Full suite green: **694 pass / 0 fail**; `bun run build` and `bun run build:worker` both clean.
+<!-- agent:boundary:6d46acfc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -157,7 +170,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#9e7b] Lift lender-application state across the dashboard ↔ deal-dialog boundary so submitting the application in the dashboard Available-deal dialog transitions the dashboard LenderApplicationNotice (incomplete → awaiting EFS review) without a reload. Plan: tasks/professional/efs-investor-lender-state-lift.md. [recommended]
 <!-- /agent:backlog -->
 
 ## Review

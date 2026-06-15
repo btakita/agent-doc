@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -59,7 +59,7 @@ Design notes:
 Added `lib/broker/notify.test.ts` (4 tests, all pass). Full suite green: **699 pass / 0 fail**, plus `build` + `build:worker` (typecheck) clean. Committed in the submodule (`2f3337b`) and bumped the superproject pointer (`b06386894`).
 
 One follow-up not in scope here: the broker portal needs a **deal-detail view** at `/portal-broker/deals/:id` for the status-email link to resolve — added as a backlog note if that route doesn't exist yet.
-<!-- agent:boundary:9dbecfb4 -->
+<!-- agent:boundary:5e84666c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,6 +67,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Analyze the last EFS call transcript. EFS does not handle payments. Are the positions something that makes sense to keep?
 <!-- /agent:queue -->
 
 ## Backlog

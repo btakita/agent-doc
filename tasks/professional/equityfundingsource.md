@@ -38,7 +38,7 @@ committed
 Compacted content:
 - Archived 9 response topic(s): investor pipeline resequence; lender vs deal pipeline; lender/deal pipeline mermaid; 6 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): lender bank wire instruction reveal
-<!-- agent:boundary:aa7e8b9b -->
+<!-- agent:boundary:b90ead4d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,6 +52,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#gq5c] :pushpin: Rename the "Accepted Applications" column in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline & state name to "Available Deals". We still want the lender to see "Available Deals" even when the deal is processing or in underwriting...as discussed in the conversations with robert-waldman. Can we have a sub-pipeline for each interested lender? This sub-pipeline includes processing + underwriting (sending deal package, lender requesting additional documets, lender verbally committing to the deal, underwriting). processing + underwriting is an iterative feedback look where the lender sees the documents, requests more documents, underwrites the deal which may include additional requests for documents. The processing + underwriting sub-pipeline should include workflows for these requests. Such as by notifying the borrower of the document request and providing a way for the borrower to upload the documents. The admin or lender can initiate requests for more documents. All relevant parties should be notified with each step.
 <!-- /agent:backlog -->
 
 ## Review

@@ -754,9 +754,11 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         );
     }
 
-    let snapshot_matches_current_file = snapshot_content
-        .as_deref()
-        .is_some_and(|snapshot| snapshot == file_content);
+    let snapshot_matches_current_file = snapshot_content.as_deref().is_some_and(|snapshot| {
+        snapshot == file_content
+            || normalize_transient_agent_doc_markers(snapshot)
+                == normalize_transient_agent_doc_markers(&file_content)
+    });
 
     if !repaired_committed_historical
         && !snapshot_matches_current_file
@@ -6967,6 +6969,96 @@ fn commit_allows_clean_exchange_only_compaction() {
     assert!(
         !head_doc.contains("### Re: do [#rtwbcast]"),
         "the archived response must not remain in HEAD after compaction:\n{head_doc}"
+    );
+}
+#[test]
+fn commit_allows_clean_exchange_only_compaction_with_head_marker_worktree() {
+    use std::fs;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+    Command::new("git")
+        .current_dir(root)
+        .args(["init"])
+        .output()
+        .unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["config", "user.email", "test@example.com"])
+        .output()
+        .unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["config", "user.name", "Test"])
+        .output()
+        .unwrap();
+
+    let doc = root.join("session.md");
+    let pre_compact = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Status\n\n",
+        "<!-- agent:status patch=replace -->\n",
+        "stable status.\n",
+        "<!-- /agent:status -->\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: older - gpt-5\n\n",
+        "Earlier work.\n\n",
+        "do #compactdrift. spec-test-build-install-commit-push\n",
+        "### Re: #compactdrift-agent - gpt-5\n\n",
+        "Implemented.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Queue\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#compactdrift-agent]\n",
+        "- do [#next]\n",
+        "<!-- /agent:queue -->\n",
+    );
+    fs::write(&doc, pre_compact).unwrap();
+    crate::snapshot::save(&doc, pre_compact).unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["add", "session.md"])
+        .output()
+        .unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["commit", "-m", "finalized compactdrift", "--no-verify"])
+        .output()
+        .unwrap();
+
+    let post_compact_snapshot = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Status\n\n",
+        "<!-- agent:status patch=replace -->\n",
+        "stable status.\n",
+        "<!-- /agent:status -->\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Session Summary\n\n",
+        "Archived compactdrift responses.\n\n",
+        "### Re: #compactdrift-agent - gpt-5\n\n",
+        "Verified compact drift.\n",
+        "<!-- agent:boundary:test -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Queue\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#next]\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let post_compact_worktree = post_compact_snapshot.replace(
+        "### Re: #compactdrift-agent - gpt-5",
+        "### Re: #compactdrift-agent - gpt-5 (HEAD)",
+    );
+    fs::write(&doc, &post_compact_worktree).unwrap();
+    crate::snapshot::save(&doc, post_compact_snapshot).unwrap();
+
+    let result = commit(&doc);
+    assert!(
+        result.is_ok(),
+        "transient (HEAD) marker drift must not trip the committed-historical guard: {:?}",
+        result.err().map(|e| e.to_string())
     );
 }
 // #compactdrift — the recovery shape: compact archived the exchange and refreshed

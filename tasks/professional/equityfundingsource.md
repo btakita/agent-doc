@@ -108,7 +108,7 @@ The stalled-queue state is now logged as an agent-doc bug and the live queue is 
 - `deploy` → `Run deploy (bun run deploy:worker) to ship the changes.` (`run` is recognized).
 
 Preflight now reports `queue_drainable_head_count=2` / `queue_continuation_required=true` — the queue will drain: next the multi-file CPA/attorney upload component, then deploy.
-<!-- agent:boundary:dfec00c8 -->
+<!-- agent:boundary:8ffc4f8f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,7 +116,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Add multi-file upload to the "CPA / attorney letter or supporting document" field in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation — the dialog should allow multiple files using our standard multi-file upload component.~~
+- :pushpin: Add multi-file upload to the "CPA / attorney letter or supporting document" field in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation — the dialog should allow multiple files using our standard multi-file upload component.
 - :pushpin: Run deploy (bun run deploy:worker) to ship the changes.
 <!-- /agent:queue -->
 

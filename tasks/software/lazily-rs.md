@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -62,6 +62,15 @@ Best first spike:
 3. Prove three or four high-leverage theorems: sequential delta application preserves epoch monotonicity; non-sequential deltas are rejected; batch output has a coalesced frontier; eager signals publish materialized values.
 4. Mirror the existing conformance fixtures as Lean examples, but do not try to generate Rust yet.
 5. If `lake build` stays fast and the model stays small, add it to CI as a spec check.
+- In `src/lazily-spec`, `gh run list --workflow CI --limit 1` also found no `CI` workflow; the latest available `Deploy mdBook site to Pages` run succeeded on 2026-06-15T00:16:50Z.
+- Root `gh run list --workflow CI --limit 1` could not run because the root repo has no workflow named `CI`; the only root workflow, `Agent Doc`, has an older failing main run from 2026-06-15T05:30:17Z with logs unavailable.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed after the final patch (`tart-6e2e45e0ab`, exit 0).
+- `git -C src/lazily-spec diff --check` passed.
+- `~/.elan/bin/lake build` from `src/lazily-spec/formal/lean` passed with Lean 4.30.0.
+- `src/lazily-spec/.github/workflows/mdbook.yml`: adds `leanprover/lean-action@v1` with `lake-package-directory: formal/lean` so Pages builds run `lake build` for the model.
+- `src/lazily-spec/docs/formal-model.md`, `docs/SUMMARY.md`, `README.md`, `protocol.md`: documents the formal model and links it from the mdBook/spec docs.
+- `src/lazily-spec/formal/lean/{LazilyFormal.lean,lakefile.lean,lean-toolchain,lake-manifest.json,.gitignore,README.md}`: Lake package scaffold pinned to Lean 4.30.0 with local verification instructions.
+- `src/lazily-spec/formal/lean/LazilyFormal/IPC.lean`: models nodes, snapshots, deltas, apply decisions, cell/memo/signal/batch transitions, and proves epoch sequencing, fail-closed resync, equality suppression, eager Signal `slot_value` materialization, and no-duplicate batch frontier invariants.
 
 I added a recommended backlog item for that spike. Sources inspected: [Lean homepage](https://lean-lang.org/), [Lean Language Reference](https://lean-lang.org/doc/reference/latest/), Lean use cases for [Aeneas/Rust verification](https://lean-lang.org/use-cases/aeneas/), [Veil/distributed protocol verification](https://lean-lang.org/use-cases/veil/), [Cedar production verification](https://lean-lang.org/use-cases/cedar/), and the captioned video [How Agents Quietly Break Architecture](https://www.youtube.com/watch?v=oTDcJcvrfCU). Locally, I checked `src/lazily-rs/README.md`, `src/lazily-rs/SPEC.md`, and `src/lazily-spec/protocol.md`.
 
@@ -75,7 +84,7 @@ Cycle notes: no code changed and no test suite was run; this was a prompt-respon
 
 
 I won’t process `do [#4zvn]` in this loaded context. I can’t issue the harness `/clear` command from inside the assistant turn, so the next step is to run `/clear`, then re-invoke `agent-doc tasks/software/lazily-rs.md` in the fresh context.
-<!-- agent:boundary:a468edd9 -->
+<!-- agent:boundary:466a7007 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,12 +93,12 @@ I won’t process `do [#4zvn]` in this loaded context. I can’t issue the harne
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- do [#4zvn]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#4zvn] #lzleanmodel=[recommended] Spike Lean 4 as a formal spec companion for lazily-spec/lazily-rs: create a small Lake package that models IPC Snapshot/Delta state transitions and proves epoch sequencing, gap fail-closed resync, batch coalescing, PartialEq/memo suppression, and Signal slot_value/no-bare-invalidate invariants; only wire `lake build` into CI if the first spike stays small and maintainable.
 <!-- /agent:backlog -->
 
 ## Review

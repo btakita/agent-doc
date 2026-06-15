@@ -487,7 +487,23 @@ The stall you captured (img_23) is the **stale live binary**, not an un-fixed bu
 **Why you still see it:** the live route-owned supervisor is pid 1654897 (started 14:43, ~8 h ago), flagged `supervisor_binary_stale` — it runs a build that **predates** `fa6a230a`/`0b31e90c`. The fix is committed but **not promoted** onto that process, so the stall recurs. I did not `make install`/recycle mid-session: that re-stales the very supervisor serving this closeout (`#no-mid-session-install`).
 
 So the agent-doable scope is **done** — marking `#recyclerestart` done. What remains is operator-drive and can't be agent-completed: **promote the new build** (`agent-doc admin recycle --all-projects`, or restart the session), then live-verify that (a) kill-pane + JB `Sync Tmux Layout` no longer reports `Sync deferred`, and (b) a real idle/next-queue recycle restarts/re-clears the agent session. Captured as `[#recyclerestart-verify]` (operator-verify) → `tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md`.
-<!-- agent:boundary:a8e35780 -->
+
+### Re: do [#pushpinaccum] — idempotent queue-head pin (shipped) — opus-4-8
+
+Implemented and pushed (agent-doc `c5ce1e7d` → `origin/main`).
+
+**Root cause.** `annotate_operator_priority_reorders` (queue.rs) prepended `:pushpin:` to any head it moved earlier that was not *operator*-pinned. A `:round_pushpin:` (agent) pin doesn't count as operator-pinned, so promoting one stacked the markers → `:pushpin: :round_pushpin: …`. (The existing test literally asserted that buggy output.)
+
+**Fix.** New `apply_operator_pin(text)` strips any existing leading pin marker(s) — operator or agent, any spelling — then prefixes exactly one `:pushpin:`. Wired into both `annotate_operator_priority_reorders` and `annotate_manual_queue_additions`, so:
+- promoting `:round_pushpin:` → `:pushpin:` **replaces** the marker (no accumulation);
+- re-pinning an already-`:pushpin:` head is a **no-op** (idempotent).
+
+A head now carries exactly one leading marker — both cases you flagged (promotion-dedup and re-pin accumulation) are closed under one invariant.
+
+**Verification.** Rewrote the test that codified the old `:pushpin: :round_pushpin:` to expect `:pushpin:`, added `annotate_operator_priority_reorders_repin_is_idempotent` and `apply_operator_pin_is_idempotent_and_dedupes`. `make check` green (full suite, 0 failures). CI run `27521449581` in progress on the push (prior run green) — recorded pending, not blocking.
+
+**Going live.** Source is pushed; I did not `make install` mid-session (`#no-mid-session-install` — re-stales this live supervisor). The fix promotes onto the running supervisor at its next self-recycle / restart, same as the other clean-session landings this batch.
+<!-- agent:boundary:c82e9a6e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -570,7 +586,7 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ---
 - ~~:pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)~~
 - :pushpin: [#c2b6]
-- :pushpin: [#pushpinaccum]
+- ~~:pushpin: [#pushpinaccum]~~
 - :pushpin: [#0kjc]
 - :pushpin: [#compactqattr]
 - :pushpin: [#dupcontent]
@@ -583,7 +599,7 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 - :pushpin: do [#dupcontent]
 - :pushpin: do [#compactqattr]
 - :pushpin: do [#0kjc]
-- :pushpin: do [#pushpinaccum]
+- ~~:pushpin: do [#pushpinaccum]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -622,7 +638,6 @@ What are #next-steps to fix bugs?
 - [ ] [#dupcontent] [clean-session] Duplicate-content / malformed-attribute document corruption when finalize adopts a stale-supervisor `content_ours` snapshot. LIVE 2026-06-14 (monsterrodholders.md, stale route-owned supervisor pid1328300 started 02:15:48 < binary mtime 02:28:10, session-check `#fcc0`): `finalize --stream` hit `mid-turn cycle rotation ... #adoc-compact-during-turn-response-loss` then `live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar content_ours_len=40827 > candidate 39216` then `snapshot from content_ours`. The adopted buffer was CORRUPT and written to disk: 273 lines vs 181 in clean HEAD, TWO `agent:queue` blocks (held one at ~88 PLUS a stale re-armed `preset="#spec-test-commit-push" priority go` block at ~181) and a truncated marker `<!-- agent:queue tasks=" -->`. The lint-gate caught `empty-attr-value` only AFTER the corrupt content already landed on disk (interrupt, no commit; HEAD stayed clean). Repair: `git checkout HEAD -- <file>` + `reset --from-current --preserve-session`. ROOT CAUSE (hypothesis): `content_ours`/`ack_content_sidecar` buffer is adopted verbatim as the snapshot base without structural validation, so a bad prior CRDT merge (duplicate singleton component blocks + attribute split across a merge boundary) is taken as truth and written before the lint-gate runs; the known-stale supervisor is still trusted as an IPC content source. FIX: (1) structurally validate before adopting any content_ours snapshot — reject/repair >1 open marker for a singleton component (exchange/status/queue/backlog/review/icebox/done) or a malformed/unterminated attribute, falling back to candidate/HEAD; (2) fail closed when the serving supervisor is already classified `supervisor_binary_stale` (#fcc0) — do not ingest its buffer; (3) run the structural/lint check on the candidate BEFORE the disk write, not after; (4) de-dup singleton blocks on parse instead of concatenating. CLEAN session (snapshot-adoption / converge write path). Related #fcc0/#compactqattr/#adoc-compact-during-turn-response-loss. Plan: tasks/agent-doc/plan-content-ours-duplicate-corruption.md
 - [ ] [#compactqattr] [clean-session] Compaction wipes agent:queue inline attributes (preset, priority, likely go) from the opening marker — operator observed in monsterrodholders.md: post-compaction deleted all agent:queue attributes. Too much blast radius. Compaction should only archive/truncate the EXCHANGE component and must leave every other component opening marker byte-identical. HYPOTHESIS: the post-compact CRDT refresh (compact.rs, CRDT state refreshed from post-compact content) re-serializes component opening tags from parsed structure and drops inline attrs. FIX: preserve the verbatim opening marker (all inline attributes) for every non-archived component across compact + the post-compact CRDT refresh; add coverage that compacting a doc whose agent:queue carries preset/priority/go leaves that marker unchanged. CLEAN session (compaction/CRDT path).
 - [ ] [#0kjc] #mdastquote [clean-session] Markdown AST must treat tags inside quoted strings ("...") and code spans/blocks (backtick / triple-backtick) as CONTENT, not document tags. Operator report: agent:*/#id-looking tokens inside quotes or fenced code are being parsed as real document component markers. Same family as #lintfence (fenced agent:* markers break lint + parser). FIX: tagpath/agent-doc markdown tokenizer must mask quoted-string and code-span/code-fence regions before component/tag extraction. CLEAN session (parser path).
-- [ ] [#pushpinaccum] [clean-session] Queue :pushpin: annotations accumulate/nest in the wrong place. (1) ACCUMULATION: a head already starting `- :pushpin:` gets another :pushpin: prepended -> `:pushpin: - :pushpin: ...` (operator corrected one live 2026-06-13). (2) PROMOTION DEDUP (operator 2026-06-14): when a `:round_pushpin:` head is upgraded to `:pushpin:`, the round_pushpin is kept alongside -> `:pushpin: :round_pushpin:` instead of a single `:pushpin:`. The queue head-grouping/annotation formatter prepends/promotes the pushpin marker without checking for an existing leading pushpin/round-pushpin/bullet. FIX: make the queue-head annotation prefix idempotent — a head carries exactly one leading marker; promoting `:round_pushpin:` -> `:pushpin:` REPLACES it (drop the round_pushpin), and re-pinning an already-:pushpin: head is a no-op. CLEAN session (queue formatter path).
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
 <!-- /agent:backlog -->
 

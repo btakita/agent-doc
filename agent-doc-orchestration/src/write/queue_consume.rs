@@ -1811,6 +1811,29 @@ mod core_tests {
             !queue_head_is_free_text_prompt(pinned_do).unwrap(),
             "a pinned do[#id] head is still id-backed, not free text"
         );
+        // #qmisstrike: a bare `[#id]` head (no `do ` prefix) and a pin-prefixed
+        // `:pushpin: [#id]` head are still id-backed. The repair free-text strike
+        // guard delegates here, so these MUST classify as not-free-text or the
+        // repair wrongly strikes the next open id-backed head by position.
+        for head in [
+            "- [#foo]\n",
+            "- :pushpin: [#foo]\n",
+            "- :round_pushpin: [#foo]\n",
+        ] {
+            let bracketed = format!(
+                concat!(
+                    "---\nqueue_active: true\n---\n\n",
+                    "<!-- agent:queue auto -->\n",
+                    "{}",
+                    "<!-- /agent:queue -->\n",
+                ),
+                head
+            );
+            assert!(
+                !queue_head_is_free_text_prompt(&bracketed).unwrap(),
+                "a bare/pinned [#id] head {head:?} is id-backed, not free text"
+            );
+        }
         // A #-token head that is NOT a registered preset (no `prompt_presets`
         // frontmatter) carries an #id with no backlog row, so it stays id-backed
         // (cannot be silently struck without an explicit signal).

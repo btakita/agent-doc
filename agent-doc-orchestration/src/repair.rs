@@ -1774,24 +1774,20 @@ fn strike_recovered_free_text_queue_head(file: &Path) {
 }
 
 /// True when the first prompt in the document's `agent:queue` is a free-text
-/// head (not a `do [#id]` / `do #id` directive).
+/// head — i.e. NOT an id-backed directive (`#id`, `[#id]`, `do [#id]`, with or
+/// without a leading `:pushpin:` / `:round_pushpin:` / bullet pin marker).
+///
+/// `#qmisstrike`: the free-text strike repair may consume (strike) a head only
+/// when it is genuinely free text. An id-backed head is struck solely via the
+/// `--done` / `--pending-gate` / `queue consume` reap paths, never by this
+/// positional free-text heuristic. Delegate to the authoritative classifier
+/// (`queue_head_is_free_text_prompt`) so this guard agrees with the finalize
+/// path. The previous brittle `do [#` / `do #` prefix check mis-classified a
+/// pin-prefixed (`:pushpin: [#id]`) or bare-`[#id]` head as free text, so after
+/// the operator deleted struck items (or a free-text head was consumed) the
+/// repair wrongly struck the next open id-backed head by position.
 fn first_queue_head_is_free_text(content: &str) -> bool {
-    let Ok(components) = crate::component::parse(content) else {
-        return false;
-    };
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
-        return false;
-    };
-    let Ok(entries) = crate::queue::parse(queue.content(content)) else {
-        return false;
-    };
-    match crate::queue::prompts(&entries).first() {
-        Some(prompt) => {
-            let t = prompt.text.trim().to_ascii_lowercase();
-            !(t.starts_with("do [#") || t.starts_with("do #"))
-        }
-        None => false,
-    }
+    crate::write::queue_head_is_free_text_prompt(content).unwrap_or(false)
 }
 
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
@@ -2016,6 +2012,57 @@ mod tests {
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "# Doc\n\n## User\n\nHello\n").unwrap();
         assert_eq!(run(&doc).unwrap(), RepairOutcome::Noop);
+    }
+
+    #[test]
+    fn first_queue_head_free_text_check_excludes_id_backed_head() {
+        // #qmisstrike: the free-text strike repair must classify every id-backed
+        // head spelling as NOT free text so it never strikes the next open
+        // id-backed head by position. The previous `do [#`/`do #` prefix check
+        // missed the bare `[#id]` and pin-prefixed `:pushpin: [#id]` spellings,
+        // which the operator's queues use after manual edits / pin promotion.
+        let id_backed_heads = [
+            "- do [#qchurn]\n",
+            "- [#qchurn]\n",
+            "- :pushpin: [#qchurn]\n",
+            "- :round_pushpin: [#qchurn]\n",
+            "- :pushpin: do [#qchurn]\n",
+            "- #qchurn\n",
+        ];
+        for head in id_backed_heads {
+            let doc = format!(
+                concat!(
+                    "---\nqueue_active: true\n---\n\n",
+                    "<!-- agent:queue auto -->\n",
+                    "{}",
+                    "- do [#tail]\n",
+                    "<!-- /agent:queue -->\n",
+                ),
+                head
+            );
+            assert!(
+                !first_queue_head_is_free_text(&doc),
+                "id-backed head {head:?} must not be classified as free text (would be wrongly struck)"
+            );
+        }
+
+        // A genuine free-text head is still recognized so the repair can strike
+        // the head this turn actually answered.
+        let free_text = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Is the parser masking fenced regions correctly?\n",
+            "- do [#tail]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            first_queue_head_is_free_text(free_text),
+            "a no-#id queue head is free text and strikeable by being answered"
+        );
+
+        // Inactive queue → nothing to strike.
+        let inactive = free_text.replace("queue_active: true", "queue_active: false");
+        assert!(!first_queue_head_is_free_text(&inactive));
     }
 
     #[test]

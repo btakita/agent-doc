@@ -34,6 +34,34 @@ then `reset --from-current --preserve-session` + `commit`. Editing the queue
 directly races the live IPC writeback (`file modified since read`), so it must be
 done in one shot and reconciled through reset, not a bare write.
 
+## Symptom 2 — spent-preset pause is stale-persisted, survives line removal (2026-06-15, equityfundingsource.md, receipt 3460)
+
+Operator pressed JB `Run Agent Doc` expecting self-heal; dispatch returned the
+**same** spent-preset pause as the 2026-06-13 repro — even though there is **no
+`- #advance-review` line in the doc anymore**:
+
+```
+Error: project controller command `dispatch` failed: dispatch blocked for
+tasks/professional/equityfundingsource.md: failed_stage=queue_paused
+reason=advance-review preset head is spent (backlog added + both features
+shipped); pausing so the go-queue does not re-trigger advance-review.
+Operator can clear the '- #advance-review' line. receipt_id=3460
+```
+
+Operator: *"There was no `- #advance-review` line. Seems to be stuck in an old
+state."* So the `queue_paused` decision is **replayed from durable controller /
+queue receipt state**, not re-derived from the current doc on each dispatch. Once
+the operator removes (or never re-adds) the preset line, the pause should clear —
+instead it keeps re-surfacing on every `Run Agent Doc`, wedging the doc closed.
+
+This is a second, distinct fix point from the classifier work above: even after
+fix (1)–(4) let an agent strike a *present* preset head, a pause keyed to an
+*absent* preset head must not survive. Add fix (5): on each dispatch, re-validate
+the spent-preset pause against the current queue — if the paused-on preset head
+is no longer present, **invalidate the pause and proceed/close**, never replay the
+stale receipt. SimWorld: pause on a spent preset head, remove the head from the
+doc, next dispatch must NOT re-block on `queue_paused`.
+
 ## Root-cause hypothesis
 
 The queue strike/reap router classifies a head as **id-backed vs free-text** by the

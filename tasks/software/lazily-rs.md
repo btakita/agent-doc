@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -88,7 +88,32 @@ Lean is already implemented for the lazily ecosystem as a narrow `lazily-spec` f
 Current proof scope: epoch sequencing, fail-closed resync, equal cell-write silence, memo equality suppression, eager Signal `slot_value` publication, and batch frontier coalescing. Current repo state remains clean on both relevant submodules: `lazily-spec` at `6cb978a feat: add Lean IPC formal model`, `lazily-rs` at `f80e4e9 docs: reference lazily Lean formal model`. Local verification already run this cycle: `lake build` in `src/lazily-spec/formal/lean` passed.
 
 No `lazily-rs` or `lazily-spec` source changes were needed for this queue drain. CI note: the parent repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
-<!-- agent:boundary:c3b8cce1 -->
+
+### Re: Lean test suite + CI — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Is lean part of the test suite and CI? If not, add it.
+
+
+Lean is now part of both the local test suite and CI.
+
+Before this cycle, the Lean model was only partially gated: `lazily-spec` built it during the Pages deploy workflow, but there was no PR-style CI workflow, no local `make check` target in `lazily-spec`, and no `lazily-rs` local/CI gate for the companion model.
+
+Implemented:
+
+- `src/lazily-spec/Makefile` adds `make check` / `test-lean-formal`, running `lake build` in `formal/lean`.
+- `src/lazily-spec/.github/workflows/ci.yml` runs the Lean formal model on push, pull request, and manual dispatch.
+- `src/lazily-rs/Makefile` adds `test-lean-formal` and includes it in `make check`, using `../lazily-spec/formal/lean`.
+- `src/lazily-rs/.github/workflows/ci.yml` adds a separate `Lean formal model (#lzleanformal)` CI job that checks out canonical `lazily-spec` and runs `leanprover/lean-action`.
+- `src/lazily-spec` docs and `src/lazily-rs/AGENTS.md` now document the `make check` / Lean target path.
+
+Commits pushed: `src/lazily-spec` `1c33a50`, `src/lazily-rs` `372b019`, and parent gitlinks `dbd786197`. A newer unrelated local parent commit appeared after that push, so I did not push the parent branch again.
+
+Verification: `make test-lean-formal` passed in both submodules; `make check` passed in both submodules; `lazily-rs` full Loom coverage completed 15/15 after 540.48s. GitHub Actions: `lazily-spec` CI run `27533809965` completed successfully; `lazily-rs` CI run `27533809027` was still in progress on the last check; the parent repo has no workflow named `CI`.
+
+Changed paths: `src/lazily-spec/{Makefile,.github/workflows/ci.yml,README.md,docs/formal-model.md}`, `src/lazily-rs/{Makefile,.github/workflows/ci.yml,AGENTS.md}`, and the parent gitlinks. Confidence: high. Escalation: none.
+<!-- agent:boundary:7661391d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,7 +122,6 @@ No `lazily-rs` or `lazily-spec` source changes were needed for this queue drain.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: Is lean part of the test suite and CI? If not, add it.
 <!-- /agent:queue -->
 
 ## Backlog

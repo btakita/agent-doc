@@ -297,7 +297,7 @@ Already implemented and verified. This is the `#0kjc` / `#mdastquote` / `#lintfe
 `find_code_ranges()` uses pulldown-cmark offsets to mask inline code, fenced code blocks, and indented code blocks before component/tag scanning, so marker text inside backticks is treated as content. `find_quoted_ranges()` masks same-line double-quoted prose spans, including escaped quotes, so quoted marker/tag text is also treated as content. Real component markers still parse normally, including marker attributes like `preset="..."`, because the marker open precedes the quoted attribute value.
 
 Verification already recorded in this document: `cargo test -p agent-doc-core --lib component::` passed with direct coverage for fenced markers, inline markers, quoted marker prose, quoted `#id` prose, and real markers with quoted attributes. No new source changes are needed for this prompt.
-<!-- agent:boundary:7171ab69 -->
+<!-- agent:boundary:16e1ee19 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -353,7 +353,9 @@ resync: stash pane %50 is unregistered but still hosts live supervisor tsift-v0.
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3460
 ```
 ---
-~~:pushpin: - :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.~~
+~~~done
+:pushpin: - :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
+~~~
 ---
 :pushpin: JB `Compact Exchange` on this document
 ```

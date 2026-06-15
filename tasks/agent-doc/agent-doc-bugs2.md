@@ -396,7 +396,31 @@ CI:
 ❯ - Previous `src/agent-doc` CI for `c57076c8` passed.
 ❯ - New `src/agent-doc` CI for `fecc63be` is running as `27571750330`.
 ❯ - Parent repo has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
-<!-- agent:boundary:efe7e147 -->
+
+### Re: #ar27-majors — gpt-5
+
+Updated the held-back major dependency constraints across `src/agent-doc` and the first-party crates needed to keep the graph resolvable:
+
+- `agent-doc`: bumped `instruction-files`, `notify`, `portable-pty`, `pulldown-cmark`, `rusqlite`, `sha2`, `signal-hook`, `similar`, `toml`, `ureq`, `yrs`, and `zip` to the requested major lines.
+- API migrations: updated `ureq 3` agent/body/header usage, `sha2 0.11` digest hex formatting, and `portable-pty 0.9` `MasterPty::tty_name`.
+- `rusqlite 0.40`: aligned local `tsift-memory` plus the tsift workspace SQLite packages to avoid duplicate `libsqlite3-sys` links.
+- `generic-array 0.14.7`: removed the old transitive chain by moving local `tagpath` to `sha2 0.11`; `agent-doc` no longer resolves `generic-array`.
+
+Commits pushed:
+- `tagpath` `a1e6a2c` (`chore: update sha2 dependency`)
+- `tsift` `cd648b5` (`chore: update rusqlite dependency`)
+- `agent-doc` `08286f55` (`chore: update major dependency constraints`)
+
+Verification:
+- `cargo check -p agent-doc`
+- `cargo test -p agent-doc-sqlite -p agent-doc-markdown-ast -p agent-doc-core -p agent-doc-orchestration`
+- `make check` in `src/agent-doc` (4534 tests passed, 238 skipped, doctests passed, SimWorld medium budget passed)
+- `cargo test --lib` in `src/tagpath` (115 passed)
+- `cargo check --workspace` in `src/tsift`
+- `cargo test -p tsift-memory -p tsift-sqlite -p tsift-tokensave -p tsift-summarize -p tsift-cli` in `src/tsift`
+
+Note: full `cargo test` in `src/tagpath` still fails on the pre-existing live fixture lint for `tasks/software/tsift.md` line 43 (`agent:boundary` contains a UUID instead of the current hex/slug boundary form); the library tests and the `agent-doc` dependency path are clean.
+<!-- agent:boundary:68d8b526 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -528,7 +552,7 @@ Please explain the cause of this churn. I don't understand why this is necessary
 ---
 - ~~do [#jbclearctxsubmit]~~
 - ~~do [#codexmcpfinalize]~~
-- do [#ar27-majors]
+- ~~do [#ar27-majors]~~
 - do [#dfrefresh-retire]
 - do [#fcc0]
 - do [#qdedup]
@@ -574,7 +598,6 @@ What are #next-steps to fix bugs?
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
-- [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).
 - [ ] [#dfrefresh-retire] [clean-session] Retire the dogfood-supervisor-refresh runbook (runbooks/dogfood-supervisor-refresh.md + BUNDLED_RUNBOOKS entry + SKILL.md catalog line + 4 harness mirrors) once #jbrestale (JB Run Agent Doc auto-restarts a stale route-owned supervisor / red-green switchover) AND #recyclerestart (PCP recycle restarts the harness session) both land and prove the binary self-heals a stale supervisor without the manual make+install+restart bootstrap. The runbook is an explicit stopgap for the bootstrap gap (running supervisor predates its own self-recycle fix + is the live agent parent). Acceptance: with both landed, a stale-binary session auto-promotes onto the new build at the next idle/dispatch boundary; delete the runbook + dependent references in one cycle and re-run audit-docs. CLEAN session (skill/runbook surface).
 - [ ] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.
 - [ ] [#aazp] [operator-verify] suprecyclestall live-verify (agent-doc aafa6510, installed+release-built): restart a stale session via session restart-supervisor FILE --force so it runs the new binary, then drive an idle/next-queue-item recycle. Confirm ops.log shows supervisor_binary_stale_self_recycled ... candidates=[...] then EITHER a clean execve hot-reload OR supervisor_reexec_failed fallback=continue_current_binary with per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Subset of the broader recyclerestart sync-block work. Cannot be agent-done: needs a live editor + real recycle.

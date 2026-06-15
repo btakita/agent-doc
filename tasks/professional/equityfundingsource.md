@@ -187,7 +187,30 @@ Escalation: none.
 
 
 I can’t execute `/clear` from inside this already-loaded model context, and I will not process `#efs-cutover-sso-plan` here. Clear the Codex context first, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so that queue head runs with fresh context.
-<!-- agent:boundary:f579c96c -->
+
+### Re: Workers.dev to custom-domain/SSO cutover — gpt-5
+
+I resolved the dropped-queue state for `#efs-cutover-sso-plan` and gated the exact backlog item. I wrote the cutover checklist below, but did not execute it because the remaining steps require external Cloudflare/domain control and Google Workspace admin credentials (`#m6ch`).
+
+Cutover checklist:
+
+- Preflight: verify `bun run deploy:worker` is clean, remote D1 migrations are applied, and the Worker URL serves `/`, `/funded-deals`, `/login`, `/portal-admin`, and `/login/access-callback` as expected.
+- Routing decision: point `equityfundingsource.com` and `www.equityfundingsource.com` to the Worker if portal/admin routes should live on the same hostname; otherwise keep public static routes on the current public host and route only portal/auth paths to the Worker.
+- Cloudflare custom domain: add the Worker custom domains/routes in Cloudflare for the chosen hostnames and verify TLS is active before switching traffic.
+- Access app: add both custom-domain callbacks to the Cloudflare Access self-hosted app, at minimum `equityfundingsource.com/login/access-callback` and `www.equityfundingsource.com/login/access-callback` if both hostnames serve login.
+- SSO vars: confirm `ACCESS_TEAM_DOMAIN = "equityfundingsource"` and `ACCESS_AUD` still match the Access app that protects `/login/access-callback`; redeploy after any Access app/AUD change.
+- Google Workspace SSO: after `#m6ch`, enable the Google identity provider in Cloudflare Access, restrict policy to explicit authorized admin emails first, and avoid a broad domain-wide allow rule until EFS approves it.
+- Smoke tests: check public pages, login redirects, `/login/google?role=admin`, Access callback challenge, existing email/password login fallback, and admin/borrower/broker/investor portal entry points.
+- Rollback: remove/disable Worker custom-domain routes or restore DNS to the prior host; leave workers.dev live as the fallback verification URL; if Access breaks, remove the custom-domain callback from the Access app and keep email/password login available.
+
+Current repo evidence: `wrangler.toml` already has non-secret `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`, `/login/access-callback` verifies Cloudflare Access JWTs, and the pending-config runbook covers the workers.dev Access app. The production custom domain remains outside that runbook and is explicitly still deferred.
+
+Changed paths: `tasks/professional/equityfundingsource.md` only.
+Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`, `sed -n ...` for wrangler, auth callback, deploy docs, and pending-config runbook inspection.
+Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
+Confidence: high that this resolves the interrupted queue-removal guard for `#efs-cutover-sso-plan` while preserving the real external cutover/credential gate.
+Escalation: none.
+<!-- agent:boundary:e188c1e7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -209,7 +232,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
 - [ ] [#37ah-review-dedupe] [recommended] Broker portal review closeout: verify the shipped #37ah-backend covers the broker portal backend scope, move any remaining TMO sync note under #dzmm-writeback-replay, then resolve #37ah from review.
 - [ ] [#dropbox-sync-contract] Dropbox sync adapter prep: design the R2_DOCUMENTS<->Dropbox sync contract, D1 sync-log schema, tombstone/idempotency rules, and mocked adapter tests so real Dropbox credentials can be wired without reworking the flow. Advances #dropbox-sync-adapter.
 <!-- /agent:backlog -->
@@ -217,6 +239,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Review
 
 <!-- agent:review -->
+- [/] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
 - [/] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
 - [/] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.
 - [/] [#jnzs-approval-followup] [recommended] Send/track funded-deals approval packet: attach current screenshots/copy/lien-position language plus the full_application ESIGN/UETA disclosure excerpt, record Judith/EFS reviewer decision, and convert requested edits into implementation backlog. Advances #jnzs.

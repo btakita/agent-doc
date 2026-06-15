@@ -38,7 +38,42 @@ Compacted content:
 - Archived 18 response topic(s): do [#0kjc]; do [#compactdropitem]; ~~do [#compactdropitem]~~ (struck); 15 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 Please fix JB `Run Agent Doc` when using Codex. Please have agent-doc send `agent-doc tasks/agent-doc/agent-doc-bugs2.md` instead of the longform prompt.
-<!-- agent:boundary:cab5785a -->
+JB `Run Agent Doc` on lazily-rs.md had a long prompt
+```
+› Agent-doc active queue continuation.
+
+  Stable instructions:
+  Continue in this owner pane: answer the queue head described after the cache boundary, then persist the response
+  using the document-specific command in the volatile payload. Do NOT run the bare agent-doc entrypoint for the same
+  document from this pane. Do not send a final answer until the final-gate command in the volatile payload passes.
+
+  <agent_doc_prompt_cache_boundary cache_control="ephemeral" volatile_suffix="follows" />
+
+  Agent-doc active queue continuation for tasks/software/lazily-rs.md.
+
+  Queue head:
+  4zvn
+
+  Continue in this owner pane: answer the queue head, then persist with `agent-doc finalize tasks/software/lazily-
+  rs.md` or `agent-doc write --commit tasks/software/lazily-rs.md`. Do NOT run `agent-doc tasks/software/lazily-rs.md`
+  from this pane; that re-invokes the owner pane and hits the recursive-direct-invocation guard. Do not send a final
+  answer until `agent-doc session-check tasks/software/lazily-rs.md --codex-final-gate` passes.
+```
+
+It should simply by `agent-doc tasks/software/lazily-rs.md`. The prompt should be in a skill/runbook.
+
+### Re: JB Run Agent Doc Codex Trigger — gpt-5
+
+Fixed. Codex idle queue drains now submit the bare `agent-doc <FILE>` trigger instead of the multi-line `Agent-doc active queue continuation` prompt, so the lazily-rs case should send `agent-doc tasks/software/lazily-rs.md`.
+
+Changed paths are in `src/agent-doc`: `agent-doc-orchestration/src/start.rs`, `agent-doc-orchestration/src/start/run.rs`, `SPEC.md`, `VERSIONS.md`, and the relevant `specs/*.md` contract files. The Rust change removes the Codex-only owner-continuation payload and makes non-slash queue heads use `harness.trigger_command(file)` for every harness; slash-command heads still submit literally. The specs now state that the queue-continuation response contract belongs in installed harness instructions/runbooks, not in the editor/supervisor payload.
+
+Verification passed: `cargo test -p agent-doc-orchestration idle_queue_drain_payload`, `cargo test -p agent-doc-orchestration routed_trigger_payload`, and full `make check` (clippy, 4501 nextest tests, doctests, and the medium SimWorld seed test). Latest GitHub Actions check was also green: `gh run list --workflow CI --limit 1` reported `completed success` for CI run `27528207423`.
+
+Commits: `b47e1f2f` in `src/agent-doc`, and parent repo pointer commit `39a9fcf7f`. No escalation was used. Confidence: high. I did not install/recycle the live binary or update the JB plugin in this turn; no plugin code changed.
+
+No actionable follow-up backlog item was created for this cycle.
+<!-- agent:boundary:b6746f34 -->
 <!-- /agent:exchange -->
 
 ## Queue

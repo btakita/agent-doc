@@ -79,7 +79,7 @@ pub fn socket_path(project_root: &Path, session_uuid: &str) -> PathBuf {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(project_root.as_os_str().as_encoded_bytes());
-    let hash = format!("{:x}", hasher.finalize());
+    let hash = hex::encode(hasher.finalize());
     let short_hash = &hash[..12];
     let short_uuid = &session_uuid[..session_uuid.len().min(8)];
 

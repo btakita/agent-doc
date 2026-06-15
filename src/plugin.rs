@@ -35,21 +35,25 @@ use std::path::PathBuf;
 const GITHUB_REPO: &str = "btakita/agent-doc";
 
 fn build_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_read(std::time::Duration::from_secs(30))
-        .timeout_write(std::time::Duration::from_secs(10))
+    ureq::Agent::config_builder()
+        .timeout_recv_body(Some(std::time::Duration::from_secs(30)))
+        .timeout_send_body(Some(std::time::Duration::from_secs(10)))
         .build()
+        .into()
 }
 
 fn fetch_latest_release() -> Result<Value> {
     let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
     let resp = build_agent()
         .get(&url)
-        .set("Accept", "application/vnd.github+json")
-        .set("User-Agent", "agent-doc")
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "agent-doc")
         .call()
         .context("Failed to fetch latest release from GitHub")?;
-    let body: Value = resp.into_json().context("Failed to parse release JSON")?;
+    let body: Value = resp
+        .into_body()
+        .read_json()
+        .context("Failed to parse release JSON")?;
     Ok(body)
 }
 
@@ -57,11 +61,14 @@ fn fetch_releases() -> Result<Vec<Value>> {
     let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases");
     let resp = build_agent()
         .get(&url)
-        .set("Accept", "application/vnd.github+json")
-        .set("User-Agent", "agent-doc")
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "agent-doc")
         .call()
         .context("Failed to fetch releases from GitHub")?;
-    let body: Vec<Value> = resp.into_json().context("Failed to parse releases JSON")?;
+    let body: Vec<Value> = resp
+        .into_body()
+        .read_json()
+        .context("Failed to parse releases JSON")?;
     Ok(body)
 }
 
@@ -126,14 +133,15 @@ fn fetch_release_for_asset(prefix: &str, ext: &str) -> Result<Value> {
 
 fn download_to_temp(url: &str) -> Result<tempfile::NamedTempFile> {
     eprintln!("Downloading {url}");
-    let resp = build_agent()
+    let mut resp = build_agent()
         .get(url)
-        .set("User-Agent", "agent-doc")
+        .header("User-Agent", "agent-doc")
         .call()
         .context("Download failed")?;
     let mut tmp = tempfile::NamedTempFile::new().context("Failed to create temp file")?;
     let mut bytes = Vec::new();
-    resp.into_reader()
+    resp.body_mut()
+        .as_reader()
         .read_to_end(&mut bytes)
         .context("Failed to read response")?;
     tmp.write_all(&bytes).context("Failed to write temp file")?;

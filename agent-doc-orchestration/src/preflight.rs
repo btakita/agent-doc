@@ -2654,7 +2654,7 @@ fn links_cache_dir(file: &Path) -> Option<std::path::PathBuf> {
 /// Compute a cache filename for a URL.
 fn url_cache_path(cache_dir: &Path, url: &str) -> std::path::PathBuf {
     use sha2::{Digest, Sha256};
-    let hash = format!("{:x}", Sha256::digest(url.as_bytes()));
+    let hash = hex::encode(Sha256::digest(url.as_bytes()));
     cache_dir.join(format!("{}.txt", hash))
 }
 
@@ -2678,15 +2678,21 @@ fn check_url_link(url: &str, cache_dir: &Path) -> RelatedDocChange {
     let cached = std::fs::read_to_string(&cache_path).ok();
 
     // Fetch with a reasonable timeout
-    let agent = ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(10))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(10)))
+        .build()
+        .into();
     let response = agent.get(url).call();
 
     match response {
-        Ok(resp) => {
-            let content_type = resp.header("content-type").unwrap_or("").to_string();
-            let body = match resp.into_string() {
+        Ok(mut resp) => {
+            let content_type = resp
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let body = match resp.body_mut().read_to_string() {
                 Ok(b) => b,
                 Err(e) => {
                     return RelatedDocChange {

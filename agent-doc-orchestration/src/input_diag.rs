@@ -34,7 +34,7 @@ fn sanitize_field(value: &str) -> String {
 fn bytes_hash(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 fn emit(file: Option<&Path>, message: String) {

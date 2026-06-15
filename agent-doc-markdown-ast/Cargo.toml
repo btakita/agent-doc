@@ -9,4 +9,4 @@ repository = "https://github.com/btakita/agent-doc"
 [dependencies]
 tree-sitter = "0.26"
 tree-sitter-md = "0.5"
-yrs = "0.21"
+yrs = "0.27"

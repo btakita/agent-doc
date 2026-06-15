@@ -229,10 +229,11 @@ fn resolve_endpoint(provider: &Provider) -> String {
 }
 
 fn build_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_read(std::time::Duration::from_secs(60))
-        .timeout_write(std::time::Duration::from_secs(10))
+    ureq::Agent::config_builder()
+        .timeout_recv_body(Some(std::time::Duration::from_secs(60)))
+        .timeout_send_body(Some(std::time::Duration::from_secs(10)))
         .build()
+        .into()
 }
 
 fn call_openai(
@@ -258,13 +259,14 @@ fn call_openai(
 
     let resp = agent
         .post(endpoint)
-        .set("Authorization", &format!("Bearer {}", api_key))
-        .set("Content-Type", "application/json")
+        .header("Authorization", &format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
         .send_json(&body)
         .context("OpenAI vision API request failed")?;
 
     let v: Value = resp
-        .into_json()
+        .into_body()
+        .read_json()
         .context("failed to parse OpenAI response")?;
     v["choices"][0]["message"]["content"]
         .as_str()
@@ -295,14 +297,15 @@ fn call_anthropic(
 
     let resp = agent
         .post(endpoint)
-        .set("x-api-key", api_key)
-        .set("anthropic-version", "2023-06-01")
-        .set("Content-Type", "application/json")
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("Content-Type", "application/json")
         .send_json(&body)
         .context("Anthropic vision API request failed")?;
 
     let v: Value = resp
-        .into_json()
+        .into_body()
+        .read_json()
         .context("failed to parse Anthropic response")?;
     v["content"][0]["text"]
         .as_str()

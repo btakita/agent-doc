@@ -480,6 +480,10 @@ impl AdoptedMaster {
 
 #[cfg(unix)]
 impl MasterPty for AdoptedMaster {
+    fn tty_name(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+
     fn resize(&self, size: PtySize) -> Result<()> {
         let ws = libc::winsize {
             ws_row: size.rows,

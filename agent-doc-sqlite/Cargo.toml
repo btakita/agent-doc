@@ -13,7 +13,7 @@ name = "agent_doc_sqlite"
 [dependencies]
 agent-doc-core = { path = "../agent-doc-core" }
 anyhow = "1"
-rusqlite = { version = "0.34", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

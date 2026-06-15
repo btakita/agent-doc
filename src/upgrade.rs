@@ -113,18 +113,24 @@ fn try_github_release_upgrade(version: &str) -> bool {
     let tmp_archive = exe_dir.join(format!(".{CRATE_NAME}-upgrade.tar.gz"));
     let tmp_binary = exe_dir.join(format!(".{CRATE_NAME}-upgrade"));
 
-    let agent = ureq::AgentBuilder::new()
-        .timeout_read(std::time::Duration::from_secs(30))
-        .timeout_write(std::time::Duration::from_secs(10))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_recv_body(Some(std::time::Duration::from_secs(30)))
+        .timeout_send_body(Some(std::time::Duration::from_secs(10)))
+        .build()
+        .into();
 
-    let resp = match agent.get(&url).call() {
+    let mut resp = match agent.get(&url).call() {
         Ok(r) => r,
         Err(_) => return false,
     };
 
     let mut archive_bytes = Vec::new();
-    if resp.into_reader().read_to_end(&mut archive_bytes).is_err() {
+    if resp
+        .body_mut()
+        .as_reader()
+        .read_to_end(&mut archive_bytes)
+        .is_err()
+    {
         return false;
     }
 
@@ -285,12 +291,12 @@ fn write_cache(version: &str) -> Option<()> {
 
 fn fetch_latest_version(crate_name: &str) -> Option<String> {
     let url = format!("https://crates.io/api/v1/crates/{}", crate_name);
-    let agent = ureq::AgentBuilder::new()
-        .timeout_read(std::time::Duration::from_secs(5))
-        .timeout_write(std::time::Duration::from_secs(5))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(5)))
+        .build()
+        .into();
     let resp = agent.get(&url).call().ok()?;
-    let body: Value = resp.into_json().ok()?;
+    let body: Value = resp.into_body().read_json().ok()?;
     let max_version = body.pointer("/crate/max_version")?.as_str()?.to_string();
     Some(max_version)
 }

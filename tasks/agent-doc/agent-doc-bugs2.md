@@ -398,14 +398,61 @@ Verification: document-state audit only. I verified the deleted queue heads agai
 Confidence: high for the listed id accounting; medium for `#suprehotreload` because it has no exact durable id record to inspect.
 
 Escalation: none. Remaining live proof/restart work stays with the existing operator-verify items and the stale-supervisor warning.
-<!-- agent:boundary:e1e64576 -->
+
+### Re: restore deleted queue heads as backlog items — gpt-5
+
+I restored the two unaccounted queue-loss prompts as backlog replacements rather than treating them as complete.
+
+Added backlog replacements:
+
+- `#suprehotreload` for the deleted `:round_pushpin: do [#suprehotreload]` shorthand. I marked it `operator-verify` because the nearest existing work is live supervisor hot-reload / stale-binary recycle proof (`#recyclerestart-verify`, `#aazp`, `#4myd`), and the correct closeout is either live proof or an explicit duplicate mapping.
+- `#lazilyqrestore` for `agent-doc lazily-rs.md lost the queue content`. I did not edit `tasks/software/lazily-rs.md` from this pane because preflight reports it foreign-owned by another pane. The restored item points the owner session at the recovery evidence sources and the existing queue-loss invariants.
+
+This addresses the deleted-head accounting without pretending the heads were completed.
+
+### Re: JB Run Agent Doc simple trigger — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Please restore the deleted queue items as backlog items
+
+
+The source contract already says JetBrains `Run Agent Doc` sends the simple trigger path, not the Codex owner-continuation longform prompt.
+
+Evidence checked this cycle:
+
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt` builds `agent-doc route --dispatch-only --plain-trigger --debounce 0 --wait-for-ready 60 <relativePath>`.
+- `src/agent-doc/editors/jetbrains/SPEC.md` says `Run Agent Doc` dispatches with `--plain-trigger` and sends the plain `agent-doc <FILE>` reopen into the live session.
+- `src/agent-doc/VERSIONS.md` records the shipped change: JetBrains Run Agent Doc forces the plain reopen prompt.
+
+The longform “Agent-doc active queue continuation” prompt is from the Codex Stop-hook / idle-queue continuation path, not the JetBrains plugin route path. That longform prompt exists specifically to avoid recursively running bare `agent-doc <FILE>` from the owner pane while a Codex turn is already active. So I did not make source edits here. If a live JetBrains install is still sending longform text, that points to a stale plugin/binary install or the Stop-hook continuation path being mistaken for a JB route submission.
+
+Changed paths: session document only, via this response and two backlog replacements.
+
+Commands: `agent_doc_preflight`; `agent_doc_plan`; `agent_doc_read` for queue/backlog/review; `rg` over route/Run Agent Doc/continuation surfaces; targeted `sed` reads of `TerminalUtil.kt`, JetBrains `SPEC.md`, `start/run.rs`, and `VERSIONS.md`; `git status --short`.
+
+Verification: source inspection only. No source files changed, so no source test suite was run. Finalize/session-check will verify the document closeout boundary.
+
+Confidence: high that JetBrains source already uses the simple trigger; medium that `#suprehotreload` is the exact intended restoration, because the deleted shorthand had no durable backlog/review/done record.
+
+Escalation: live verification remains operator-owned for stale supervisor / JB plugin behavior.
+<!-- agent:boundary:12fed3e4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~The items in the queue were deleted. Were they complete or is this a bug?~~
+- ~~:pushpin: Please restore the deleted queue items as backlog items~~
 - agent-doc lazily-rs.md lost the queue content
+~~~done
+:pushpin: JB `Run Agent Doc` on this file.
+```
+resync: pruned 1 stale session(s)
+[route] target tmux session: 0
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3541
+```
+~~~
+- :pushpin: JB `Run Agent Doc` must also send a simple `agent-doc tasks/agent-doc/agent-doc-bugs2.md` instead of the longform prompt.
 <!-- /agent:queue -->
 ###
 <!--
@@ -435,6 +482,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
+- [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md

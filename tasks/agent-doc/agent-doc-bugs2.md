@@ -503,7 +503,17 @@ A head now carries exactly one leading marker — both cases you flagged (promot
 **Verification.** Rewrote the test that codified the old `:pushpin: :round_pushpin:` to expect `:pushpin:`, added `annotate_operator_priority_reorders_repin_is_idempotent` and `apply_operator_pin_is_idempotent_and_dedupes`. `make check` green (full suite, 0 failures). CI run `27521449581` in progress on the push (prior run green) — recorded pending, not blocking.
 
 **Going live.** Source is pushed; I did not `make install` mid-session (`#no-mid-session-install` — re-stales this live supervisor). The fix promotes onto the running supervisor at its next self-recycle / restart, same as the other clean-session landings this batch.
-<!-- agent:boundary:c82e9a6e -->
+
+### Re: auto-recycle --all-projects on new install — opus-4-8
+
+Caught and preserved. Your queue edit (*"admin recycle --all-projects should automatically occur when a new install occurs … it should be safe"*) was typed while my previous `finalize` was mid-merge, and the IPC `content_ours` convergence dropped it — a **live recurrence of `#queue-user-edit-overwrite`**, the exact drift class this doc tracks. `session-check` INTERRUPTED on it, which is how I recovered your exact wording.
+
+Preserved as backlog **`#autorecycle-on-install`** (the actionable home for a feature request). It's a good one and squarely targets the pain we hit all session: `lib-install`/install only **prints** "run `agent-doc admin recycle --all-projects` to promote the new build" — it doesn't do it — so the running supervisor stays `supervisor_binary_stale` (the source of every `#fcc0`/`#pcwc` churn this session). Auto-recycling at the post-install idle boundary closes that gap.
+
+**Stopping the auto-loop here** — a `session-check` interruption is an explicit stop condition, and a real user prompt mid-loop takes precedence. I'm not implementing the feature this turn: it touches the install/supervisor path and deserves a clean focused session (ironically, *this* session runs on the stale supervisor it would fix). It's queued as backlog for that.
+
+This drain run closed: `#rtwbcast` (done — code already landed `cddad87b`, operator verify captured), `#recyclerestart` (done — Q1/Q2 committed `0b31e90c`/`fa6a230a`, verify captured), `#pushpinaccum` (done — idempotent pin **shipped** `c5ce1e7d`, `make check` green). `#cleandrainsup-verify` log-check: evidence absent (supervisor never recycled onto the 1f8c9f63 build). The remaining drainable heads are clean-session code fixes (`#dupcontent`/`#compactqattr`/`#0kjc`/`#ar27-majors`) best done from a fresh session once the supervisor is promoted.
+<!-- agent:boundary:52d8242e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -629,6 +639,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#autorecycle-on-install] When a new agent-doc install / lib-install occurs, automatically run agent-doc admin recycle --all-projects so running supervisors promote onto the fresh binary instead of staying stale — operator: it is scheduled at an opportune/idle time so it should be safe. Closes the gap where lib-install only PRINTS the recycle hint (running controllers still serve the prior binary). Directly targets the recurring supervisor_binary_stale / #fcc0 / #no-mid-session-install pain hit all session. Related #supautoinstall/#supselfheal. CLEAN session (install/supervisor path).
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).

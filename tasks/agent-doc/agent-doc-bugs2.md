@@ -56,7 +56,6 @@ Compacted content:
 - `agent-doc-orchestration/src/route/dispatch.rs` now checks the recent direct-pane capture before appending a routed trigger. If the exact same `agent-doc <FILE>` trigger is already visible in a Codex or Claude composer, route sends one bare `Enter` and polls acceptance instead of appending another copy.
 - Push will happen after this closeout commit exists; I will push the submodule and parent repo immediately after closeout.
 - No actionable follow-up items from this cycle.
-- No actionable follow-up items from this cycle.
 
 ### Re: Codex MCP Permission Prompts — gpt-5
 
@@ -131,7 +130,31 @@ No actionable follow-up items from this cycle.
 - `gh run list --workflow CI --limit 1` could not find a workflow named `CI`.
 - `gh run list --limit 3` showed the only workflow (`Agent Doc`) is failing before runner startup because GitHub reports an account billing/spending-limit annotation; no failed-job logs were available.
 - `553b22ce0 codex: approve agent-doc mcp tools`
-<!-- agent:boundary:d763435a -->
+
+### Re: Codex Finalize Transport Recovery — gpt-5
+
+Recovered the prior Codex finalize failure through the binary-owned recovery path. The MCP call had captured the response, then the transport closed before the write/commit boundary; `agent-doc preflight` detected the captured response, found it already present in the document, cleaned the pending file, and committed the closeout as `09e735b8c`.
+
+I also added backlog item `#codexmcpfinalize` so this failure class is agent-drainable: force the close-after-capture path in coverage and make the recovery commit exactly once without requiring a manual reset.
+
+Changed paths:
+- No code changes in this repair cycle.
+- Session/backlog mutation: added `#codexmcpfinalize`.
+
+Commands:
+- `agent-doc reset --from-current tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc plan tasks/agent-doc/agent-doc-bugs2.md`
+
+Verification:
+- Preflight recovered the captured response and created session-document commit `09e735b8c`.
+- The remaining closeout is this write/commit cycle plus session-check.
+- Prior local verification for the config change in the immediately preceding cycle: `codex mcp list` and `make check` passed; GitHub Actions is externally blocked by billing/spending-limit before runner startup.
+
+Escalation: none.
+Confidence: high for the repair state; medium for the new backlog diagnosis until the forced transport-close regression is implemented.
+Push: I will push `main` immediately after this binary-owned closeout commit exists.
+<!-- agent:boundary:69d60ff8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -172,7 +195,7 @@ Codex finalize error
 ```
 ---
 - ~~:pushpin: Codex asks for MCP permissions every reinstall. This stalls loops. How can we avoid this permission request?~~
-- JB `Run Agent Doc` on Codex sends `agent-doc tasks/monsterrodholders.md` to the Codex input, but does not submit. #simworld
+- ~~JB `Run Agent Doc` on Codex sends `agent-doc tasks/monsterrodholders.md` to the Codex input, but does not submit. #simworld~~
 - Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.
 ---
 JB `Run Agent Doc`
@@ -211,6 +234,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#codexmcpfinalize] [clean-session] Fix Codex MCP finalize transport-close after response capture: agent_doc_finalize can leave session-check interrupted when the MCP transport closes after capture but before write/commit. Add regression coverage that forces the close-after-capture path and proves the next CLI/preflight/write path commits exactly once, clears cycle state, and does not require manual reset. Related observed cycle: 2026-06-15 tasks/agent-doc/agent-doc-bugs2.md.
 - [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md

@@ -371,13 +371,41 @@ Verification: preflight succeeded; queue/backlog read confirmed the struck `#ar2
 Confidence: high for the queue-boundary repair; no claim of dependency-migration completion.
 
 Escalation: `#ar27-majors` remains blocked on a clean implementation session/worktree, not on user input. The stale route-owned supervisor warning is still live and should be handled by restart/recycle.
-<!-- agent:boundary:a251c48c -->
+
+### Re: queue deletion audit — gpt-5
+
+> **Queue prompt:**
+>
+> The items in the queue were deleted. Were they complete or is this a bug?
+
+
+Short answer: not “all complete.” Most of the deleted queue material is accounted for, but the clear was too broad to call a clean all-done drain.
+
+I checked the queue-clearing transition (`e86e4f34a..a41b01b29`). These heads are complete/already archived: `#0kjc`, `#compactqattr`, `#goqnoise`, and `#dupcontent2`. These are not complete, but are still represented in the document: `#dfrefresh-retire` and `#ar27-majors` are gated in `agent:review`; `#c2b6` and `#recyclerestart-verify` remain open operator-verify backlog work. The equityfundingsource paste blocks are evidence for existing `#qpresetstrike` / `#recyclerestart-verify`, not separate completed work.
+
+The concerning line is `:round_pushpin: do [#suprehotreload]`: I do not find an exact matching backlog, review, or done entry for that id. If that line was intended as concrete work, treat its deletion as queue-head loss, not completion. The failure class is already documented by `#queue-clear-unrun-items`, `#manual-queue-head-loss`, and `#queue-user-edit-overwrite`: queue cleanup should require a per-line proof reason (`consumed`, `done`, `gated`, explicit user removal, or stale generated residue) before removing a head.
+
+So the current document does not appear to have lost any known backlog-backed work, but the queue clear did include at least one unproven/untracked shorthand head. That is bug-shaped behavior, even though the main actionable items are still present as done, backlog, or review state.
+
+Warnings: preflight still reports the route-owned supervisor pid `3168807` is stale relative to the installed `agent-doc` binary. It is not a stop reason for this closeout, but it is still the right next operator recovery: restart/recycle that supervisor onto the current binary. Preflight also emitted semantic-completion candidates for several review/backlog items; I did not mutate those here.
+
+Changed paths: session document only, through this response/queue closeout.
+
+Commands: `agent-doc --version`; `tsift status`; `agent_doc_preflight`; `agent_doc_plan`; `agent_doc_read` for `queue`, `backlog`, `status`, `exchange`, and `review`; `agent_doc_session_check`; `git log`; focused `git diff` comparisons; `rg` over the session/done/plan files; `git status --short`; targeted `sed` reads of queue-loss plans.
+
+Verification: document-state audit only. I verified the deleted queue heads against current backlog/review and `tasks/agent-doc-bugs2.done.md`; no source files were changed, so no source test suite was run.
+
+Confidence: high for the listed id accounting; medium for `#suprehotreload` because it has no exact durable id record to inspect.
+
+Escalation: none. Remaining live proof/restart work stays with the existing operator-verify items and the stale-supervisor warning.
+<!-- agent:boundary:e1e64576 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- The items in the queue were deleted. Were they complete or is this a bug?
+- ~~The items in the queue were deleted. Were they complete or is this a bug?~~
+- agent-doc lazily-rs.md lost the queue content
 <!-- /agent:queue -->
 ###
 <!--

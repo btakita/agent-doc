@@ -68,6 +68,24 @@ fn read_cycle_phase(root: &Path, doc: &Path) -> Option<String> {
     json["phase"].as_str().map(str::to_string)
 }
 
+fn git_commit_count(root: &Path) -> usize {
+    let output = ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["rev-list", "--count", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git rev-list failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap()
+}
+
 fn extract_preflight_baseline(output: &str) -> String {
     output
         .lines()
@@ -478,6 +496,72 @@ fn mcp_finalize_uses_strict_write_commit_path() {
     assert!(
         String::from_utf8_lossy(&head_blob.stdout).contains("### Re: MCP finalize - gpt-5"),
         "HEAD blob should contain the MCP finalize response"
+    );
+}
+
+#[test]
+fn mcp_finalize_close_after_capture_recovers_on_next_preflight_once() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let content = template_doc(
+        "Session",
+        "❯ Please reply\n<!-- agent:boundary:1234abcd -->\n",
+        "",
+        "",
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, &content);
+    agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(&content), Some(&content))
+        .unwrap();
+
+    let response =
+        "<!-- patch:exchange -->\n### Re: MCP finalize - gpt-5\nbody\n<!-- /patch:exchange -->\n";
+    agent_doc_orchestration::repair::save_pending(&doc, response).unwrap();
+    assert_eq!(
+        read_cycle_phase(root, &doc).as_deref(),
+        Some("response_captured")
+    );
+
+    let before = git_commit_count(root);
+    let mut preflight = agent_doc_cmd();
+    preflight.current_dir(root);
+    preflight.args(["preflight", doc.to_str().unwrap()]);
+    preflight.assert().success();
+    let after = git_commit_count(root);
+    assert_eq!(
+        after,
+        before + 1,
+        "recovery preflight should create exactly one closeout commit"
+    );
+
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    let head_doc = String::from_utf8_lossy(&head_blob.stdout);
+    assert_eq!(
+        head_doc.matches("### Re: MCP finalize - gpt-5").count(),
+        1,
+        "recovery should commit the captured response exactly once:\n{head_doc}"
+    );
+    assert!(
+        !agent_doc_orchestration::snapshot::pending_path_for(&doc)
+            .unwrap()
+            .exists(),
+        "pending response should be cleared after recovery"
+    );
+
+    let mut check = agent_doc_cmd();
+    check.current_dir(root);
+    check.args(["session-check", doc.to_str().unwrap()]);
+    let check_output = check.assert().success().get_output().stdout.clone();
+    let check_stdout = String::from_utf8(check_output).unwrap();
+    assert!(
+        check_stdout.contains("[session-check] ok"),
+        "session-check should be clean after close-after-capture recovery:\n{check_stdout}"
     );
 }
 

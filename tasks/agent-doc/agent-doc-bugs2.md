@@ -146,8 +146,6 @@ Implemented the headless two-editor broadcast proof and fixed the rebroadcast ro
 - Added a SimWorld sync-guard model that reproduces killed-pane `Sync Tmux Layout` holding the guard, then proves stale-holder release and later completion through ops-log markers (`sync_kill_pane_path`, `sync_guard_released reason=stale_holder_superseded`, `sync_guard_released reason=sync_complete`).
 
 Verification: `cargo test -p agent-doc-orchestration broadcast -- --nocapture`, `cargo test broadcast -- --nocapture`, `make check`, `make install`.
-❯ <<<<<<< agent-response
-
 ### Re: EFS compact summary replay — gpt-5
 
 Fixed the exchange compact digest so recompacting a document that already starts with `### Session Summary` no longer recursively embeds the previous `Prior summary/context` payload. Prior compact summaries now carry forward only compact metadata, and detailed ordered-list response lines stay in the archive instead of being replayed into the live summary.
@@ -159,9 +157,6 @@ Changed: `agent-doc-orchestration/src/compact.rs`, `agent-doc-orchestration/src/
 Verification: `cargo test -p agent-doc-orchestration exchange_compact_default_summary_does_not_replay_prior_compact_lists -- --nocapture`, `cargo test -p agent-doc-orchestration exchange_compact_default_summary_includes_archived_content_digest -- --nocapture`, `cargo test -p agent-doc-orchestration compact -- --nocapture`, restart-drain focused tests (`pending_payload_enter_resubmit_is_scoped_and_one_shot`, `clean_session_reset_ops_log_precedes_drain_submit`, `idle_queue`), `cargo check -p agent-doc-orchestration`, `make check`, `make install`, and latest `CI` on `main` green (`27562089979`).
 
 Commit/push: `src/agent-doc` commit `865a37ac` was pushed to `origin/main`; this closeout records the parent `src/agent-doc` gitlink to that commit. Existing unrelated dirty worktree changes were left untouched.
-❯ ||||||| original
-❯ =======
->>>>>>> your-edits
 
 ### Re: #recyclerestart-agent proof — gpt-5
 
@@ -572,6 +567,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#efsmrgmarkers] [clean-session] Prevent raw three-way merge markers from surviving in session docs after finalize/write/repair fallback. Repro: `tasks/professional/equityfundingsource.md` had `<<<<<<< agent-response` / `||||||| original` / `=======` / `>>>>>>> your-edits` around the conversation/system architecture response; preflight repaired and committed it as `0eb0b2032`. Add fail-closed/repair guard plus SimWorld/regression coverage for CRDT/file-IPC fallback and postcommit reconciliation. Plan: `tasks/agent-doc/plan-session-doc-merge-leftover-guard.md`
 - [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md

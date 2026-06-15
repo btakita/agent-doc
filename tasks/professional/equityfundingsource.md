@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -94,7 +94,34 @@ Deployed. The `#pending-deals` fix (a pending lender account application moves d
 - **Version:** `bf71d6ee-3e2c-457e-8809-db0b3e5af3ae` (replaces `61df3c82`, which had the fund-only logic).
 
 No code changes this cycle — deploy of the already-committed-and-pushed build (submodule `60a07f5`, superproject `bc0ec6283`). Reload the available-deals page and your applied deal should now sit under **Pending deals** with an "Application under review" badge.
-<!-- agent:boundary:77c12462 -->
+
+### Re: Email notifications for investor / broker / borrower events — opus-4-8
+
+> **Queue prompt:**
+>
+> Do we have email notification setup for investor, broker, and borrower events?
+
+
+Mostly yes — **borrower and investor events are wired; broker events are not.** Transport is `email_send_or_capture_` → Cloudflare Email Sending API in prod (Resend key also supported), with local capture in dev.
+
+**Borrower (transactional email):**
+- Loan status updated → borrower (`notify_loan_status_updated_`)
+- Deal published / deal closed for their loan → borrower
+- Funding committed, wire confirmed → borrower
+- New message from admin → borrower (also an in-app `notifications` row)
+- Password reset (auth)
+
+**Investor (transactional email):**
+- Deal published / deal closed → all active investors
+- Investor interest submitted → staff + confirmation leg to the investor
+- Investor documents provided → investor
+
+**Broker — gap.** The broker portal backend (#37ah-backend) ships a read endpoint `GET /api/broker/notifications` that reads the shared `notifications` table, but **nothing writes broker notification rows and there is no broker email lifecycle** — `lib/broker/routes.ts` / `repo.ts` have zero `notification_create_` or `email_send` calls. So brokers have an inbox UI with no events feeding it.
+
+**In-app DB notifications** (`notification_create_` → `notifications` table) currently only fire for borrower messages (admin + borrower). The lifecycle events above are email-only, not mirrored to the in-app inbox.
+
+Filed `[recommended]` backlog item to wire broker email + in-app notifications.
+<!-- agent:boundary:38a52718 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,12 +129,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Do we have email notification setup for investor, broker, and borrower events?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#cgw7] [recommended] Wire broker email + in-app notifications — broker portal exposes GET /api/broker/notifications (reads shared notifications table) but no broker events write notification rows or send broker emails; add broker lifecycle (deal submitted/status change/commission paid/document request) to email/lifecycle.ts + notification_create_ for broker user_id.
 <!-- /agent:backlog -->
 
 ## Review

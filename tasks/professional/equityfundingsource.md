@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -62,7 +62,7 @@ Done — shipped, tested, committed, pushed, and deployed.
 - `equityfundingsource-dev` `9f16e7c` → pushed to `origin/main` (rebased).
 - Superproject pointer bump `db0d83a1a`.
 - Deployed to Cloudflare: `https://equityfundingsource.brian-takita.workers.dev` (Version `8bd4dabe`; no new D1 migrations).
-<!-- agent:boundary:cf7ac2b8 -->
+<!-- agent:boundary:82f51e70 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,6 +70,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- All "Lender account application — incomplete" components across all pages should be the same component...and have a button to complete the application. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -691,7 +691,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // post-commit editor flush logs whether it asked the live plugin to save its
         // (carry-forward-superset) buffer to clear the dirty flag, or skipped/failed —
         // routed through `flush_editor_buffer_to_clear_drift`.
-        ("agent-doc-orchestration/src/git.rs", "reason=") => 9,
+        // +2 (file-signal `reason=clear_carry_forward_drift`, `reason={e}`):
+        // #jbeditorsavedrift-vscode adds a file-based `save-document.signal` fallback
+        // in the same `flush_editor_buffer_to_clear_drift` flow for editors that watch
+        // `.agent-doc/patches/` (VS Code) instead of the socket (JetBrains).
+        ("agent-doc-orchestration/src/git.rs", "reason=") => 11,
         ("src/orchestrate.rs", "guard_") => 0,
         ("src/orchestrate/dag.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it

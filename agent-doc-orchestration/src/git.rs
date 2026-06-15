@@ -2558,32 +2558,67 @@ fn flush_editor_buffer_to_clear_drift(file: &Path) {
         }
     };
     let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
-    if !crate::ipc_socket::is_listener_active(&project_root) {
-        return;
-    }
+    let path_str = canonical.to_string_lossy();
     let save_patch_id = uuid::Uuid::new_v4().to_string();
-    match crate::ipc_socket::send_save_document(
-        &project_root,
-        &canonical.to_string_lossy(),
-        &save_patch_id,
-    ) {
-        Ok(_) => crate::ops_log::log_op(
-            file,
-            &format!(
-                "postcommit_editor_save_flushed file={} save_patch_id={} reason=clear_carry_forward_drift",
-                file.display(),
-                save_patch_id,
+
+    // Prefer socket IPC (the JetBrains plugin runs an in-process listener).
+    if crate::ipc_socket::is_listener_active(&project_root) {
+        match crate::ipc_socket::send_save_document(&project_root, &path_str, &save_patch_id) {
+            Ok(true) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "postcommit_editor_save_flushed file={} save_patch_id={} transport=socket reason=clear_carry_forward_drift",
+                        file.display(),
+                        save_patch_id,
+                    ),
+                );
+                return;
+            }
+            Ok(false) => { /* no ack — fall through to the file-signal fallback */ }
+            Err(e) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "postcommit_editor_save_skipped file={} save_patch_id={} transport=socket reason={}",
+                        file.display(),
+                        save_patch_id,
+                        e,
+                    ),
+                );
+                // Fall through: a socket send error still gets the file fallback so
+                // a VS Code-only session (no socket listener) can pick it up.
+            }
+        }
+    }
+
+    // File-based fallback for editors that watch `.agent-doc/patches/` instead of
+    // the socket (VS Code PatchWatcher), mirroring the `vcs-refresh.signal`
+    // channel. The signal carries the file + patch_id so the editor can flush the
+    // matching buffer and write the ack-content sidecar keyed by patch_id.
+    let signal = project_root.join(".agent-doc/patches/save-document.signal");
+    if signal.parent().is_some_and(|p| p.exists()) {
+        let payload =
+            serde_json::json!({ "file": path_str, "patch_id": save_patch_id }).to_string();
+        match std::fs::write(&signal, payload) {
+            Ok(_) => crate::ops_log::log_op(
+                file,
+                &format!(
+                    "postcommit_editor_save_flushed file={} save_patch_id={} transport=file_signal reason=clear_carry_forward_drift",
+                    file.display(),
+                    save_patch_id,
+                ),
             ),
-        ),
-        Err(e) => crate::ops_log::log_op(
-            file,
-            &format!(
-                "postcommit_editor_save_skipped file={} save_patch_id={} reason={}",
-                file.display(),
-                save_patch_id,
-                e,
+            Err(e) => crate::ops_log::log_op(
+                file,
+                &format!(
+                    "postcommit_editor_save_skipped file={} save_patch_id={} transport=file_signal reason={}",
+                    file.display(),
+                    save_patch_id,
+                    e,
+                ),
             ),
-        ),
+        }
     }
 }
 
@@ -5663,6 +5698,62 @@ fn postcommit_carry_forward_superset_flushes_editor_to_clear_drift() {
     );
 
     let _ = fs::remove_file(crate::ipc_socket::socket_path(root));
+}
+#[test]
+fn postcommit_carry_forward_superset_writes_file_signal_without_socket_listener() {
+    // #jbeditorsavedrift-vscode: VS Code watches `.agent-doc/patches/` instead of
+    // the socket, so when NO socket listener is active the carry-forward flush
+    // must fall back to writing a `save-document.signal` file carrying the doc
+    // path + patch_id, mirroring the `vcs-refresh.signal` channel.
+    use std::fs;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+    init_repo(root);
+    // Deliberately no start_fake_listener — emulates a VS Code-only session.
+
+    let head_doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: topic\n\
+            response body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+    commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+    let doc = root.join("session.md");
+
+    let superset = format!("{head_doc}\na new uncommitted user note line\n");
+    fs::write(&doc, &superset).unwrap();
+
+    emit_postcommit_worktree_check(&doc);
+
+    let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        log.contains("postcommit_editor_save_flushed") && log.contains("transport=file_signal"),
+        "a VS Code-only carry-forward superset must flush via the file signal:\n{log}"
+    );
+
+    let signal = root.join(".agent-doc/patches/save-document.signal");
+    assert!(
+        signal.exists(),
+        "the save-document.signal file must be written for file-watching editors"
+    );
+    let payload: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&signal).unwrap()).unwrap();
+    assert_eq!(
+        payload["file"].as_str().unwrap(),
+        doc.canonicalize().unwrap().to_string_lossy(),
+        "the signal must carry the canonical document path"
+    );
+    assert!(
+        payload["patch_id"].as_str().is_some_and(|id| !id.is_empty()),
+        "the signal must carry a non-empty patch_id"
+    );
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        superset,
+        "the file-signal fallback must not clobber the carried-forward edit on disk"
+    );
 }
 #[test]
 fn postcommit_worktree_match_does_not_flush_editor() {

@@ -8,6 +8,7 @@ import * as native from './native';
 import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
 import { appendPatchAlreadyPresent, isPureRepositionSignal } from './patchPlan';
 import { parseCrossSessionReject, CrossSessionReject } from './crossSession';
+import { parseSaveDocumentSignal, ackContentSidecarPath } from './saveSignal';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
     buildBusySessionRestartBlockedMessage,
@@ -1423,6 +1424,7 @@ interface IpcPatch {
 class PatchWatcher implements vscode.Disposable {
     private watcher: vscode.FileSystemWatcher | undefined;
     private signalWatcher: vscode.FileSystemWatcher | undefined;
+    private saveSignalWatcher: vscode.FileSystemWatcher | undefined;
     private typingListener: vscode.Disposable | undefined;
     private patchesDir: string | undefined;
     private outputChannel: vscode.OutputChannel;
@@ -1462,6 +1464,16 @@ class PatchWatcher implements vscode.Disposable {
         this.signalWatcher.onDidCreate(() => this.onVcsRefreshSignal(patchesDir));
         this.signalWatcher.onDidChange(() => this.onVcsRefreshSignal(patchesDir));
 
+        // Watch for save-document signal (#jbeditorsavedrift-vscode): the binary
+        // detected the editor buffer is ahead of disk (carry-forward drift) and
+        // asks us to flush it. VS Code parity for the JB plugin's socket
+        // `save_document` handler — delivered as a file signal because the
+        // extension watches `.agent-doc/patches/` instead of the socket.
+        const saveSignalPattern = new vscode.RelativePattern(patchesDir, 'save-document.signal');
+        this.saveSignalWatcher = vscode.workspace.createFileSystemWatcher(saveSignalPattern, false, false, true);
+        this.saveSignalWatcher.onDidCreate(() => this.onSaveDocumentSignal(patchesDir));
+        this.saveSignalWatcher.onDidChange(() => this.onSaveDocumentSignal(patchesDir));
+
         // Track typing events for debounce (TS fallback + FFI)
         this.typingListener = vscode.workspace.onDidChangeTextDocument((e) => {
             if (e.document.languageId === 'markdown' && e.contentChanges.length > 0) {
@@ -1486,6 +1498,7 @@ class PatchWatcher implements vscode.Disposable {
 
         // Process any existing patch files and signals on startup
         this.processVcsRefreshSignal(patchesDir);
+        void this.processSaveDocumentSignal(patchesDir);
         this.processPendingPatches(patchesDir);
     }
 
@@ -1524,6 +1537,102 @@ class PatchWatcher implements vscode.Disposable {
             }
         } catch {
             // signal file may have been consumed by another process
+        }
+    }
+
+    private onSaveDocumentSignal(patchesDir: string): void {
+        void this.processSaveDocumentSignal(patchesDir);
+    }
+
+    /**
+     * Handle a `save-document.signal` file written by the binary
+     * (#jbeditorsavedrift-vscode). The binary detected the editor buffer is ahead
+     * of disk (a post-commit carry-forward superset that re-triggers
+     * `live_prompt_drift`), so flush the matching editor buffer to disk and clear
+     * its dirty flag, then hand the saved content back via the ack-content sidecar
+     * (keyed by patch_id) so the binary can adopt it as a clean snapshot.
+     *
+     * VS Code parity for the JB plugin's socket `save_document` handler
+     * (`saveDocumentViaDocument`): same behavior, file-signal transport.
+     */
+    private async processSaveDocumentSignal(patchesDir: string): Promise<void> {
+        const signalFile = path.join(patchesDir, 'save-document.signal');
+        let raw: string;
+        try {
+            raw = fs.readFileSync(signalFile, 'utf8');
+        } catch {
+            // Signal absent or already consumed by another watcher pass.
+            return;
+        }
+        // Consume the signal immediately so a re-fire does not re-process it.
+        try {
+            fs.unlinkSync(signalFile);
+        } catch {
+            // Already consumed by a concurrent process.
+        }
+
+        const signal = parseSaveDocumentSignal(raw);
+        if (!signal) {
+            this.outputChannel.appendLine('save_document: malformed or empty signal payload, ignoring');
+            return;
+        }
+        await this.saveDocumentToDisk(signal.file, signal.patchId, patchesDir);
+    }
+
+    /**
+     * Flush the live editor buffer for [filePath] to disk and clear its dirty
+     * flag, resolving a `live_prompt_drift` where the editor holds unsaved edits
+     * ahead of disk. Writes the saved buffer to the ack-content sidecar (keyed by
+     * [patchId]) so the binary reads exactly what was persisted. Mirrors the JB
+     * plugin's `saveDocumentViaDocument`.
+     */
+    private async saveDocumentToDisk(
+        filePath: string,
+        patchId: string | undefined,
+        patchesDir: string,
+    ): Promise<boolean> {
+        const target = vscode.workspace.textDocuments.find(
+            (d) => d.uri.fsPath === filePath,
+        );
+        if (!target) {
+            this.outputChannel.appendLine(`save_document: no open document for ${filePath}`);
+            return false;
+        }
+        if (target.isDirty) {
+            const saved = await target.save();
+            if (!saved) {
+                this.outputChannel.appendLine(`save_document: save() failed for ${filePath}`);
+                return false;
+            }
+        }
+        // Buffer is now on disk (or was already clean); hand it back to the binary.
+        const content = target.getText();
+        this.outputChannel.appendLine(
+            `save_document: flushed ${content.length} chars to disk for ${filePath}`,
+        );
+        this.writeAckContent(patchId, content, patchesDir);
+        return true;
+    }
+
+    /**
+     * Write the saved document content to the ack-content sidecar
+     * (`.agent-doc/ack-content/<patch_id>.md`) so the binary adopts exactly what
+     * was persisted instead of re-reading/polling disk. No-op without a patch_id.
+     */
+    private writeAckContent(
+        patchId: string | undefined,
+        content: string,
+        patchesDir: string,
+    ): void {
+        if (!patchId) {
+            return;
+        }
+        const sidecar = ackContentSidecarPath(patchesDir, patchId);
+        try {
+            fs.mkdirSync(path.dirname(sidecar), { recursive: true });
+            fs.writeFileSync(sidecar, content);
+        } catch (e) {
+            this.outputChannel.appendLine(`save_document: ack-content write failed: ${e}`);
         }
     }
 
@@ -2129,6 +2238,7 @@ class PatchWatcher implements vscode.Disposable {
     dispose(): void {
         this.watcher?.dispose();
         this.signalWatcher?.dispose();
+        this.saveSignalWatcher?.dispose();
         this.typingListener?.dispose();
         this.outputChannel.dispose();
     }

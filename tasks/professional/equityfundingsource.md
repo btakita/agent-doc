@@ -49,14 +49,26 @@ No repo work was required for this cycle.
 The visible prompt-only tail was the compact archive summary line, `Archived 3 response topic(s): Available Deals lender workflow; commit + push all dirty EFS files.; deploy`, not a new EFS implementation request. The earlier queued work was already completed: EFS commit/push, superproject pointer push, Worker deploy, remote migrations, and smoke checks.
 
 I rebuilt the stale agent-doc sidecars from the current document, reran preflight, and confirmed `no_changes: true` with no queue continuation. Changed paths: none. Verification: `agent-doc preflight` only. Escalation: none. Confidence: high.
-<!-- agent:boundary:4602bfde -->
+
+### Re: #gq5c follow-up next steps — gpt-5
+
+`#gq5c` should stay closed as the shipped provenance item for the Available Deals rename and the initial lender workflow framing.
+
+The next follow-up is to advance the existing review item `#investor-pipeline-resequence`, because it owns the remaining product decision: keep lender-account eligibility/requirements separate from per-deal status, and move the interested-lender processing/underwriting loop into the Deal Pipeline. That should be approved before more implementation.
+
+Once approved, the implementation should be split into a focused per-interested-lender sub-pipeline: package sent, lender document request, borrower upload/response, lender review/underwriting, verbal commitment, selected/backup/declined, then wire/funding state. Admin and lender should both be able to initiate document requests; borrower uploads should thread back to the deal; relevant parties should get in-app notifications immediately, with production email depending on the existing `#xcvg`/sending-domain gates.
+
+I would not add a new duplicate backlog item for this cycle. Use `#gq5c` as history, `#investor-pipeline-resequence` as the approval gate, and `#xcvg` for the borrower/admin email round-trip piece.
+
+Changed paths: session document only. Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg #gq5c`, and this `agent-doc finalize`. Verification: prompt-only closeout; no app tests needed. Escalation: none. Confidence: high.
+<!-- agent:boundary:5e781491 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -49,7 +49,7 @@ No repo work was required for this cycle.
 The visible prompt-only tail was the compact archive summary line, `Archived 3 response topic(s): Available Deals lender workflow; commit + push all dirty EFS files.; deploy`, not a new EFS implementation request. The earlier queued work was already completed: EFS commit/push, superproject pointer push, Worker deploy, remote migrations, and smoke checks.
 
 I rebuilt the stale agent-doc sidecars from the current document, reran preflight, and confirmed `no_changes: true` with no queue continuation. Changed paths: none. Verification: `agent-doc preflight` only. Escalation: none. Confidence: high.
-<!-- agent:boundary:52b7c1a6 -->
+<!-- agent:boundary:4602bfde -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -57,7 +57,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- What are #next-steps to follow-up on #gq5c
 <!-- /agent:queue -->
 
 ## Backlog

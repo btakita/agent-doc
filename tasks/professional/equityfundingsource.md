@@ -107,7 +107,48 @@ Existing active deals should not move backward in the Deal Pipeline just because
 So the earlier recommendation changes: keep the lender board focused on accreditation/requirements and eligibility, and let the Deal Pipeline carry the per-deal funding progression.
 
 I updated the pending `#investor-pipeline-resequence` review item to reflect that split. Cycle proof: changed paths are the session document only; no source files changed; no tests were run because this was a proposal/queue response; escalation none; confidence high.
-<!-- agent:boundary:e90608e4 -->
+
+### Re: lender/deal pipeline mermaid — gpt-5
+
+Here is the split as a Mermaid diagram. The lender pipeline owns eligibility and requirements; each deal participation owns its own commitment/funding state.
+
+```mermaid
+flowchart LR
+  subgraph LENDER["Lender Pipeline: eligibility and account readiness"]
+    LS["Signed Up"] --> LREQ["Requirements Not Started"]
+    LREQ --> LREV["Requirements Under Review"]
+    LREV -->|"Approve"| LCUR["Requirements Current / Eligible"]
+    LREV -->|"Needs changes"| LUPD["Needs Update"]
+    LUPD --> LREQ
+    LCUR --> LSET["Lender Account Setup / Link TMO"]
+    LSET --> LREADY["Eligible Lender Ready"]
+    LREADY -->|"annual window opens"| LREN["Annual Renewal Due"]
+    LREN --> LRREV["Renewal Under Review"]
+    LRREV -->|"Approve"| LREADY
+    LREN -->|"lapses"| LEXP["Expired / Hold New Commitments"]
+    LRREV -->|"Reject or incomplete"| LEXP
+    LEXP --> LREQ
+  end
+
+  subgraph DEAL["Deal Pipeline: per-deal lender participation"]
+    DOPEN["Deal Open"] --> DREADY["Ready to Commit"]
+    DREADY --> DCOMMIT["Committed / Awaiting Wire"]
+    DCOMMIT -->|"wire confirmed"| DFUNDED["Wire Confirmed / Funded"]
+    DFUNDED --> DACTIVE["Active Deal Participation"]
+    DCOMMIT -->|"cancel / fail"| DVOID["Commitment Canceled"]
+  end
+
+  LREADY -. "can enter deal" .-> DREADY
+  LREN -. "show renewal warning chip" .-> DREADY
+  LEXP -. "block new commitments" .-> DREADY
+  LREN -. "do not rewind existing deal state" .-> DACTIVE
+  LEXP -. "compliance hold badge; preserve history" .-> DACTIVE
+```
+
+The key rule: **Annual Renewal Due** moves the lender into a renewal/requirements branch on the lender pipeline. It should warn or block future commitments depending on due vs. expired, but it should not move an already funded deal backward from `Wire Confirmed / Funded` or `Active Deal Participation`.
+
+Cycle proof: changed paths are the session document only; no source files changed; no tests were run because this was a diagram/proposal response; escalation none; confidence high.
+<!-- agent:boundary:0934caad -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -115,11 +156,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
----
-There is a separate Deal Pipeline that the lender participates with. "Ready to Commit", "Committed", "Wire confirmed" states seem to belong in the Deal Pipeline because they are per-deal.
-
-Would "Annual Renewal" due state move the lender back to the accredation step of the lender pipeline?
----
 <!-- /agent:queue -->
 
 ## Backlog

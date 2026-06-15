@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -34,83 +34,16 @@ queue: stop
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260615-065534.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260615-075351.md`*
 
 Compacted content:
-- Archived 2 response topic(s): queue go → off (no agent work pending); Make lazily-zig compliant with lazily-spec
-- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e...
-Evaluate Lean Language. Can this be useful for lazily-rs and lazily-spec and the rest of the lazily ecosystem?
-https://lean-lang.org/
-https://www.youtube.com/watch?v=oTDcJcvrfCU
+- Archived 3 response topic(s): Evaluate Lean Language for lazily; do [#4zvn]; #4zvn
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
 
-### Re: Evaluate Lean Language for lazily — gpt-5
+### Re: Closeout repair — gpt-5
 
-Short answer: yes, Lean looks useful for the lazily ecosystem, but the right first use is a compact formal model of the stable semantic core, not a rewrite target and not whole-crate Rust verification.
-
-The strongest fit is `lazily-spec`. The current spec already has language-agnostic Snapshot/Delta schemas, conformance fixtures, capability negotiation, epoch rules, and cross-language bindings. Lean can turn the invariants that currently live in prose and tests into a compiled contract: `Delta.base_epoch == last_epoch`, `Delta.epoch == base_epoch + 1`, gaps fail closed into resync, outermost batch flush advances epoch once, equal `Cell` writes emit no downstream ops, memo-equal recompute suppresses propagation, and eager `Signal` changes lower to concrete `slot_value` rather than a bare `invalidate`.
-
-For `lazily-rs`, I would use Lean as an external semantic model before trying extraction or deep source verification. The Rust crate has closures, dynamic dependency discovery, type erasure, `RefCell`/mutex internals, async stale-completion behavior, Loom tests, and transport surfaces. Those are awkward to verify wholesale. A smaller Lean model can still be valuable: define the abstract graph state and transition rules, prove the invariants above, then use the model to generate or review conformance traces that `lazily-rs`, `lazily-py`, `lazily-zig`, and `@lazily/signaling` all consume.
-
-The video’s useful point is directly relevant: tests can catch a mismatch, but an agent can make the mismatch disappear while weakening the architecture. The speaker’s Lean example separates two concepts that local code had blurred, then uses the formal model as the source of truth for whether the implementation fix preserved the intended distinction. That maps well to lazily’s own high-risk distinctions: lazy versus eager, dirty versus unset, invalidation versus concrete value publication, slot-local recomputation versus cross-language state sync, and sender-side value mirrors versus future distributed compute replication.
-
-I would not use Lean to replace JSON Schema, conformance fixtures, property tests, Loom/Shuttle-style concurrency checks, or live Str0mNet/WebRTC validation. Lean should sit one layer above those as a precise semantic oracle. The JSON wire format remains normative for compatibility; Lean proves the state-machine laws the wire messages are supposed to preserve.
-
-Best first spike:
-
-1. Add a small `formal/lean` or `src/lazily-spec/lean` Lake package.
-2. Model only `NodeId`, node state, graph edges, `Snapshot`, `Delta`, and `DeltaOp`.
-3. Prove three or four high-leverage theorems: sequential delta application preserves epoch monotonicity; non-sequential deltas are rejected; batch output has a coalesced frontier; eager signals publish materialized values.
-4. Mirror the existing conformance fixtures as Lean examples, but do not try to generate Rust yet.
-5. If `lake build` stays fast and the model stays small, add it to CI as a spec check.
-- In `src/lazily-spec`, `gh run list --workflow CI --limit 1` also found no `CI` workflow; the latest available `Deploy mdBook site to Pages` run succeeded on 2026-06-15T00:16:50Z.
-- Root `gh run list --workflow CI --limit 1` could not run because the root repo has no workflow named `CI`; the only root workflow, `Agent Doc`, has an older failing main run from 2026-06-15T05:30:17Z with logs unavailable.
-- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed after the final patch (`tart-6e2e45e0ab`, exit 0).
-- `git -C src/lazily-spec diff --check` passed.
-- `~/.elan/bin/lake build` from `src/lazily-spec/formal/lean` passed with Lean 4.30.0.
-- `src/lazily-spec/.github/workflows/mdbook.yml`: adds `leanprover/lean-action@v1` with `lake-package-directory: formal/lean` so Pages builds run `lake build` for the model.
-- `src/lazily-spec/docs/formal-model.md`, `docs/SUMMARY.md`, `README.md`, `protocol.md`: documents the formal model and links it from the mdBook/spec docs.
-- `src/lazily-spec/formal/lean/{LazilyFormal.lean,lakefile.lean,lean-toolchain,lake-manifest.json,.gitignore,README.md}`: Lake package scaffold pinned to Lean 4.30.0 with local verification instructions.
-- `src/lazily-spec/formal/lean/LazilyFormal/IPC.lean`: models nodes, snapshots, deltas, apply decisions, cell/memo/signal/batch transitions, and proves epoch sequencing, fail-closed resync, equality suppression, eager Signal `slot_value` materialization, and no-duplicate batch frontier invariants.
-
-I added a recommended backlog item for that spike. Sources inspected: [Lean homepage](https://lean-lang.org/), [Lean Language Reference](https://lean-lang.org/doc/reference/latest/), Lean use cases for [Aeneas/Rust verification](https://lean-lang.org/use-cases/aeneas/), [Veil/distributed protocol verification](https://lean-lang.org/use-cases/veil/), [Cedar production verification](https://lean-lang.org/use-cases/cedar/), and the captioned video [How Agents Quietly Break Architecture](https://www.youtube.com/watch?v=oTDcJcvrfCU). Locally, I checked `src/lazily-rs/README.md`, `src/lazily-rs/SPEC.md`, and `src/lazily-spec/protocol.md`.
-
-Cycle notes: no code changed and no test suite was run; this was a prompt-response evaluation. The YouTube pass used native captions with `--no-whisper` because no local Whisper API key is configured.
-
-### Re: do [#4zvn] — gpt-5
-
-> **Queue prompt:**
->
-> do [#4zvn]
-
-
-I won’t process `do [#4zvn]` in this loaded context. I can’t issue the harness `/clear` command from inside the assistant turn, so the next step is to run `/clear`, then re-invoke `agent-doc tasks/software/lazily-rs.md` in the fresh context.
-
-### Re: #4zvn — gpt-5
-
-Implemented the Lean spike as a small spec companion, then committed and pushed it through the lazily repos and the parent gitlinks.
-
-Changed paths:
-- `src/lazily-spec/formal/lean/`: new Lake package pinned to Lean 4.30.0, with `LazilyFormal.IPC` modeling Snapshot/Delta state and proving epoch sequencing, fail-closed resync, PartialEq cell silence, memo suppression, eager Signal `slot_value` publication/no bare `invalidate`, and batch frontier/epoch invariants.
-- `src/lazily-spec/docs/formal-model.md`, `docs/SUMMARY.md`, `README.md`, and `protocol.md`: documented the formal model and verification command.
-- `src/lazily-spec/.github/workflows/mdbook.yml`: added a Pages workflow step that runs `leanprover/lean-action@v1` against `formal/lean` before mdBook deploy; I checked the action inputs against the upstream lean-action documentation: https://github.com/leanprover/lean-action
-- `src/lazily-rs/SPEC.md`: added the Rust-spec pointer to the shared Lean model.
-- Parent gitlinks: updated `src/lazily-spec` and `src/lazily-rs` in `btakita/agent-loop`.
-
-Commits pushed:
-- `lazily-spec` `6cb978a` — `feat: add Lean IPC formal model`
-- `lazily-rs` `f80e4e9` — `docs: reference lazily Lean formal model`
-- `agent-loop` `ed56c80b0` — `chore: update lazily formal model refs`
-
-Verification:
-- `cd src/lazily-spec/formal/lean && lake build` passed.
-- `cd src/lazily-spec && mdbook build` passed.
-- `cd src/lazily-rs && mdbook build` passed.
-- `cd src/lazily-rs && make check` passed, including fmt, clippy, all feature tests, Loom (`thread_safe_loom` finished in 550.05s), WebRTC/WebSocket checks, IPC conformance, and benchmark check.
-- `git diff --check` passed in both touched submodules.
-- Latest pushed `lazily-rs` CI and `lazily-spec` Pages workflow were still `in_progress` when checked after push; root `agent-loop` has no workflow named `CI`.
-
-Confidence: high. The Lean package is intentionally narrow and now builds both locally and in the spec deployment workflow. Escalation: none; local Lean 4.30.0 was installed with elan for verification.
-<!-- agent:boundary:68653ffc -->
+Preflight found the session document had visible, user-authored content that was not represented in the committed agent-doc snapshot. I’m preserving that content through the strict finalize path so the queued lazily-rs prompt can run in a clean cycle.
+<!-- agent:boundary:89a1cb5a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -119,6 +52,7 @@ Confidence: high. The Lean package is intentionally narrow and now builds both l
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- What is the status of Lean in lazily-rs?
 <!-- /agent:queue -->
 
 ## Backlog

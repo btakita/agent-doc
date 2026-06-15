@@ -83,7 +83,28 @@ Escalation: none.
 
 
 I can’t run the harness `/clear` from inside this loaded model context, and I won’t process `#jnzs-approval-followup` here. Please clear the Codex context and re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the next queue head runs with fresh context.
-<!-- agent:boundary:a917e203 -->
+
+### Re: Funded-deals approval follow-up — gpt-5
+
+I resolved the dropped-queue state for `#jnzs-approval-followup` and prepared the approval packet content that should be sent/tracked with Judith or the EFS reviewer. I did not send an external email from this pane, so I gated the item on the reviewer decision and any requested edits.
+
+Approval packet draft:
+
+- Screenshots to attach: public `/funded-deals`, homepage `Recent transactions`, and admin `Funded Deals` editor if showing how Judith/EFS can maintain records.
+- Public funded-deals page copy: “A working record of private lending execution.” Supporting copy says these are real private real estate transactions EFS has funded and closed, organized for borrowers, brokers, and investors evaluating private real estate lending experience.
+- Funded-deals section copy: “Funded real estate loans.” Supporting copy says it is a selected record of closed private real estate loans arranged by Equity Funding Source.
+- Current seeded records include visible closed transactions in Flintridge, Pasadena, Redondo Beach, Malibu, Chula Vista, Montebello, Santa Barbara, Los Angeles, Santa Monica, Big Bear City, Oahu, South Gate, Moorpark, Santa Ana, Inglewood, El Dorado Hills, Indian Wells, and San Pedro, with amounts from `$50,000` to `$1,465,000`.
+- Lien-position language to approve: homepage loan parameters list “Lien position: 1st, 2nd, other junior” and notes “LTV varies by lien position and total encumbrance”; footer disclaimer says loans are secured by real estate in first, second, and other junior lien positions and are subject to borrower/property qualification, not a commitment to lend.
+- ESIGN/UETA disclosure excerpt for legal/reviewer visibility: borrower full-application review/sign step tells users they must have a current web browser, internet connection, PDF save/view ability, and a valid email address; they may request paper copies at no charge by contacting EFS; they may withdraw electronic-consent before or after signing, with withdrawal not affecting already signed records.
+
+Decision to track: approve as-is, request copy/image/lien-position edits, or request legal edits to the borrower ESIGN/UETA disclosure. Any requested edits should become implementation backlog items under `#jnzs`.
+
+Changed paths: `tasks/professional/equityfundingsource.md` only.
+Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg -n ...`, `sed -n ...` for funded-deals/home/full-application source inspection.
+Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
+Confidence: high that this resolves the interrupted queue-removal guard for `#jnzs-approval-followup` while preserving the real external reviewer gate.
+Escalation: none.
+<!-- agent:boundary:139f381b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -105,7 +126,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jnzs-approval-followup] [recommended] Send/track funded-deals approval packet: attach current screenshots/copy/lien-position language plus the full_application ESIGN/UETA disclosure excerpt, record Judith/EFS reviewer decision, and convert requested edits into implementation backlog. Advances #jnzs.
 - [ ] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.
 - [ ] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
 - [ ] [#zwws-new-deal-email] [recommended] Investor dashboard phase 6 email half: implement new-deal notification in test-mode delivery with workflow-priority dashboard links and production send gated on #f4rq. Advances #zwws.
@@ -117,6 +137,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Review
 
 <!-- agent:review -->
+- [/] [#jnzs-approval-followup] [recommended] Send/track funded-deals approval packet: attach current screenshots/copy/lien-position language plus the full_application ESIGN/UETA disclosure excerpt, record Judith/EFS reviewer decision, and convert requested edits into implementation backlog. Advances #jnzs.
 - [/] [#xcvg-prod-email] [recommended] Borrower secure-message email production pass: after #f4rq/#m6ch/#p40t or #z3kx path-of-record is decided, enable borrower/admin outbound notifications, verify inbound reply threading, and add production env/runbook checks. Advances #xcvg.
 - [/] [#dzmm-writeback-replay] EFS->TMO writeback replay: once #7a4d field map and #k2xg support answers arrive, replay tmo_cache_outbox with idempotency keys, conflict logging, retry/dead-letter state, and tests across broker/admin/investor writebacks. Advances #dzmm/#37ah/#67v2/#zwws.
 - [/] [#xcvg] [recommended] Borrower message email round-trip: email notification when a borrower sends a secure-portal message, inbound email reply that appends back into the D1 chat, and a borrower-facing email when an admin replies. Builds on the shipped chat_sessions/chat_messages + admin owner. Gated on a verified Resend EFS sending domain (f4rq) and Google Workspace SMTP (m6ch/p40t). (Distinct from the operator/comms emails to Judith + Robert.)

@@ -85,7 +85,29 @@ flowchart LR
 Implementation note: the current code treats signup self-attestation as enough for the old **Accredited** lane. For this revised flow, admin-approved annual accreditation should drive **Accreditation Current**; self-attestation should remain signup evidence, not the approval state.
 
 I left `#investor-pipeline-resequence` gated on explicit approval because this cycle was a proposal request, not an implementation request. Cycle proof: changed paths are the session document only; source inspected under `src/equityfundingsource-dev`; no tests were run because this was proposal-only; escalation none; confidence medium-high.
-<!-- agent:boundary:41bff76c -->
+
+### Re: lender vs deal pipeline — gpt-5
+
+You are right: **Ready to Commit**, **Committed**, and **Wire Confirmed** should be deal-pipeline states, not lender-pipeline lanes, because they describe a lender's participation in a specific deal.
+
+Revised split:
+
+- **Lender pipeline** answers: is this lender eligible and administratively ready? It should cover signup, annual requirements/accreditation, review, current/expired status, and whether the lender account is linked.
+- **Deal Pipeline** answers: where is this lender's commitment for this deal? It should own Ready to Commit, Committed/Awaiting Wire, Wire Confirmed/Funded, and any per-deal exceptions.
+
+For **Annual Renewal Due**, I would move the lender back into the accreditation/requirements area of the lender pipeline, but not all the way back to first-time onboarding. Treat it as a renewal branch:
+
+1. **Requirements Current / Eligible**
+2. **Annual Renewal Due**
+3. **Renewal Under Review**
+4. **Requirements Current / Eligible** after approval, or **Expired / Ineligible for New Commitments** if the renewal lapses
+
+Existing active deals should not move backward in the Deal Pipeline just because the annual renewal opens. Instead, deal cards should show a lender compliance chip or hold state. A due-soon/due renewal can warn admins; an expired renewal should probably block new commitments until approved, while preserving historical and currently active deal state.
+
+So the earlier recommendation changes: keep the lender board focused on accreditation/requirements and eligibility, and let the Deal Pipeline carry the per-deal funding progression.
+
+I updated the pending `#investor-pipeline-resequence` review item to reflect that split. Cycle proof: changed paths are the session document only; no source files changed; no tests were run because this was a proposal/queue response; escalation none; confidence high.
+<!-- agent:boundary:e90608e4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,6 +115,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
+---
+There is a separate Deal Pipeline that the lender participates with. "Ready to Commit", "Committed", "Wire confirmed" states seem to belong in the Deal Pipeline because they are per-deal.
+
+Would "Annual Renewal" due state move the lender back to the accredation step of the lender pipeline?
+---
 <!-- /agent:queue -->
 
 ## Backlog
@@ -103,7 +130,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Review
 
 <!-- agent:review -->
-- [/] [#investor-pipeline-resequence] [operator-verify] [recommended] Await explicit approval of the proposed lender pipeline resequence, then implement: correct the admin label to Accreditation/Requirements, split annual accreditation into not-started/under-review/current/needs-update/renewal states, preserve lender-account/commitment/active-funding milestones, add compliance badges for later stages, and update UI/tests.
+- [/] [#investor-pipeline-resequence] [operator-verify] [recommended] Await explicit approval of the revised lender/deal pipeline split, then implement: correct the admin label to Accreditation/Requirements; keep the lender pipeline focused on signup, first-time/annual requirements, under-review/current/renewal-due/expired states, and lender-account eligibility/linking; move per-deal Ready to Commit, Committed/Awaiting Wire, and Wire Confirmed/Funded states into the Deal Pipeline; show lender compliance badges/holds on deal cards; update UI/tests.
 - [/] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
 - [/] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
 - [/] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.

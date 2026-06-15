@@ -428,7 +428,13 @@ I added `tasks/agent-doc/plan-codex-pcp-supervisor-fresh-context-handoff.md` wit
 No new implementation work in this recovery pass. The live buffer edits struck the clean-session directive line after `#codexpcphandoff` was captured, and the durable item remains in gated review with its plan file committed.
 
 Changed paths: session document only. Verification: recovery preflight ran and identified this as buffer convergence on the already-captured PCP/supervisor handoff requirement.
-<!-- agent:boundary:e82d4691 -->
+
+### Re: Continue Recovery — gpt-5
+
+Continued the interrupted closeout. `agent-doc preflight` recovered the `response_captured` cycle and committed the buffer-convergence response, so the session is back on the binary-owned write path.
+
+The PCP/supervisor handoff requirement remains captured as gated review item `#codexpcphandoff` with plan `tasks/agent-doc/plan-codex-pcp-supervisor-fresh-context-handoff.md`. No source edits were made in this follow-up cycle.
+<!-- agent:boundary:a48a807d -->
 <!-- /agent:exchange -->
 
 ## Queue

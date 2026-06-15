@@ -859,6 +859,11 @@ No additional code change was needed for this queue head; this closeout records 
 
 > **Queue prompt:**
 >
+> The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex?
+
+
+> **Queue prompt:**
+>
 > :pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item. Any item I place should have `:pushpin:` added since I made the decision to add it in a position.
 
 
@@ -875,7 +880,13 @@ Already-landed fixes:
 Relevant coverage already exists: `parse_codex_jsonl_context_pct_uses_latest_token_count`, `stop_codex_continuation_hands_off_when_token_count_crosses_threshold`, `stop_marker_fallback_requires_clear_after_exchange_compaction`, and `stop_tracked_state_hands_fresh_context_continuation_to_supervisor`.
 
 Important constraint: preemptive context-usage clears remain opt-in via `agent_doc_queue_context_reset`; unknown Codex token data still yields `pct=none clear=false` by design. Fresh-context queue heads and explicit clean-session cases are handled by the supervisor handoff path instead of relying on an in-pane continuation.
-<!-- agent:boundary:3d418651 -->
+
+### Re: The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex? — gpt-5
+
+Correction: the previous response body answered this PCP/Codex queue head, but the old positional consumer echoed and struck the skipped qref prompt. I fixed that product bug in `src/agent-doc` commit `721114ad` (`fix: target queue closeout prompt by heading`) and parent commit `21681d62d`.
+
+The root cause and shipped fixes remain `28ac88d9` and `f5ac694c`: Codex now reads `token_count` events from `~/.codex/sessions/**/rollout-*.jsonl` for context-percent clear decisions, and fresh-context Codex continuations hand off to `idle_queue_watch` instead of punting `/clear` back to the operator. This closeout consumes the actual PCP/Codex queue item.
+<!-- agent:boundary:a08bfdc0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -886,7 +897,7 @@ Important constraint: preemptive context-usage clears remain opt-in via `agent_d
 - ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md still sends a CR instead of submitting the command. Please consolidate all send command logic into a single function so we can make this behavior more reliable. Simplify, simplify, simplify...~~
 - ~~:pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item. Any item I place should have `:pushpin:` added since I made the decision to add it in a position.~~
 - :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
-- The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex?
+- ~~The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex?~~
 - `agent:exchange` with attribute `queue` should add items into the queue while the queue is running.
 - do [#snbc2]
 - do [#codexctrlz]

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,20 @@ committed
 Compacted content:
 - Archived 1 response topic(s): Lender Ready advancement
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:2954481f -->
+
+### Re: Advance review — gpt-5
+
+> **Queue prompt:**
+>
+> #advance-review
+
+
+I reviewed the eight gated review items and captured actionable backlog entries for the next work slices. The additions prioritize shared blockers first: TMO writeback replay now carries the remaining #dzmm/#37ah/#67v2/#zwws sync work, while #37ah gets a separate dedupe/closeout item because the broker backend itself is already archived as shipped.
+
+I left the existing review gates in place. Most are still waiting on external approval, credentials, or field-map answers, so the new backlog items are the concrete work that can complete or advance each review item without pretending those gates have cleared.
+
+Proof: changed paths are the session document via `agent-doc finalize`; no application code changed. Commands run: `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg` checks for existing done/review references and new ID collisions, and `agent-doc finalize`. Verification is document-level only; no tests were run because this cycle only triaged review items into backlog. Escalation: none.
+<!-- agent:boundary:6eff3d3f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,12 +59,20 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- #advance-review
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#dzmm-writeback-replay] EFS->TMO writeback replay: once #7a4d field map and #k2xg support answers arrive, replay tmo_cache_outbox with idempotency keys, conflict logging, retry/dead-letter state, and tests across broker/admin/investor writebacks. Advances #dzmm/#37ah/#67v2/#zwws.
+- [ ] [#xcvg-prod-email] [recommended] Borrower secure-message email production pass: after #f4rq/#m6ch/#p40t or #z3kx path-of-record is decided, enable borrower/admin outbound notifications, verify inbound reply threading, and add production env/runbook checks. Advances #xcvg.
+- [ ] [#jnzs-approval-followup] [recommended] Send/track funded-deals approval packet: attach current screenshots/copy/lien-position language plus the full_application ESIGN/UETA disclosure excerpt, record Judith/EFS reviewer decision, and convert requested edits into implementation backlog. Advances #jnzs.
+- [ ] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.
+- [ ] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
+- [ ] [#zwws-new-deal-email] [recommended] Investor dashboard phase 6 email half: implement new-deal notification in test-mode delivery with workflow-priority dashboard links and production send gated on #f4rq. Advances #zwws.
+- [ ] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
+- [ ] [#37ah-review-dedupe] [recommended] Broker portal review closeout: verify the shipped #37ah-backend covers the broker portal backend scope, move any remaining TMO sync note under #dzmm-writeback-replay, then resolve #37ah from review.
+- [ ] [#dropbox-sync-contract] Dropbox sync adapter prep: design the R2_DOCUMENTS<->Dropbox sync contract, D1 sync-log schema, tombstone/idempotency rules, and mocked adapter tests so real Dropbox credentials can be wired without reworking the flow. Advances #dropbox-sync-adapter.
 <!-- /agent:backlog -->
 
 ## Review

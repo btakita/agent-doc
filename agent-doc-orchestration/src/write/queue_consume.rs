@@ -76,6 +76,32 @@ pub fn consume_queue_prompt_force_disk(file: &Path) -> Result<Option<QueueConsum
     consume_queue_prompts_with_outcome(file, &[], true)
 }
 
+fn capture_state_allows_queue_response(capture: &crate::capture::CaptureRecord) -> bool {
+    matches!(
+        capture.state,
+        crate::capture::CaptureState::Captured
+            | crate::capture::CaptureState::WriteApplied
+            | crate::capture::CaptureState::Replayed
+    )
+}
+
+fn capture_response_body_for_queue_consumption(
+    capture: &crate::capture::CaptureRecord,
+) -> Option<String> {
+    capture_state_allows_queue_response(capture)
+        .then(|| capture.response_body.clone())
+        .filter(|body| !body.trim().is_empty())
+}
+
+pub(crate) fn active_response_body_for_queue_consumption(
+    file: &Path,
+) -> Result<Option<String>> {
+    let Some(capture) = crate::capture::load_active(file)? else {
+        return Ok(None);
+    };
+    Ok(capture_response_body_for_queue_consumption(&capture))
+}
+
 pub(crate) fn consume_queue_prompts_with_outcome(
     file: &Path,
     done_ids: &[String],
@@ -1576,10 +1602,8 @@ pub(crate) fn plan_queue_prompt_consumption(
                 new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
             }
 
-            let response_first_line = crate::capture::load_active(file)
-                .ok()
-                .flatten()
-                .and_then(|c| first_nonempty_line(&c.response_body).map(str::to_string));
+            let response_first_line = active_response_body_for_queue_consumption(file)?
+                .and_then(|body| first_nonempty_line(&body).map(str::to_string));
             current = embed_consumed_prompt_in_response(
                 &current,
                 &consumed_texts,
@@ -1606,13 +1630,29 @@ pub(crate) fn plan_queue_prompt_consumption(
         }
     }
 
-    let response_body = crate::capture::load_active(file)
-        .ok()
-        .flatten()
-        .map(|c| c.response_body);
+    let active_capture = crate::capture::load_active(file)?;
+    let ignored_inactive_response_capture = active_capture.as_ref().is_some_and(|capture| {
+        !capture_state_allows_queue_response(capture) && !capture.response_body.trim().is_empty()
+    });
+    let response_body = active_capture
+        .as_ref()
+        .and_then(capture_response_body_for_queue_consumption);
     let targeted_prompt = (leading_done_consume_count == 0)
         .then(|| response_targeted_queue_prompt(content, &entries, response_body.as_deref()))
         .flatten();
+    if targeted_prompt.is_none()
+        && leading_done_consume_count == 0
+        && ignored_inactive_response_capture
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_consume_refused_inactive_capture_positional_fallback file={}",
+                file.display()
+            ),
+        );
+        return Ok(None);
+    }
     if let Some(targeted_prompt) = targeted_prompt.as_ref()
         && !targeted_prompt.free_text
     {
@@ -2564,6 +2604,53 @@ mod core_tests {
                 && snap_result.contains(&format!("- ~~{target}~~\n"))
                 && snap_result.contains(&format!("- {tail}\n")),
             "snapshot must mirror targeted queue consumption:\n{snap_result}"
+        );
+    }
+
+    #[test]
+    fn queue_consume_ignores_discarded_capture_instead_of_striking_head_by_position() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let head = ":round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.";
+        let stale_target = "`agent:exchange` with attribute `queue` should add items into the queue while the queue is running.";
+        let stale_response = format!("### Re: {stale_target} — gpt-5\n\nFixed.\n");
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "{stale_response}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- {head}\n",
+                "- ~~{stale_target}~~\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            stale_response = stale_response,
+            head = head,
+            stale_target = stale_target,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        snapshot::save(&doc, &content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        crate::capture::capture_response(&doc, &stale_response).unwrap();
+        crate::capture::mark_discarded(&doc).unwrap();
+
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .expect("discarded capture should be ignored without consuming");
+
+        assert!(outcome.is_none());
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains(&format!("- {head}\n")),
+            "live head must remain queued:\n{result}"
+        );
+        assert!(
+            !result.contains(&format!("- ~~{head}~~\n")),
+            "discarded stale response must not strike the live head:\n{result}"
+        );
+        assert!(
+            result.contains(&format!("- ~~{stale_target}~~\n")),
+            "previously consumed target should stay consumed:\n{result}"
         );
     }
 

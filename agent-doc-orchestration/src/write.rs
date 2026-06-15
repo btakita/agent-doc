@@ -2036,9 +2036,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // stream IPC-timeout `exit(75)` path, uses an identical decision
     // (#queue-consume-on-stream-ipc-timeout).
     if write_result.is_ok() {
-        let response_body = crate::capture::load_active(file)?
-            .map(|capture| capture.response_body)
-            .unwrap_or_default();
+        let response_body = active_response_body_for_queue_consumption(file)?.unwrap_or_default();
         let queue_consumption_allowed = queue_consumption_allowed_for_response(
             file,
             baseline.as_deref(),

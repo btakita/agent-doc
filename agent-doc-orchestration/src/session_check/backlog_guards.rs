@@ -4,7 +4,15 @@ use super::*;
 pub(crate) fn check_shadow_backlog_guard(_file: &Path, rc: &crate::graph::RunContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): cached document content.
     let content = rc.doc_content();
-    let report = crate::pending::detect_shadow_open_items(&content)?;
+    let report = match crate::pending::detect_shadow_open_items(&content) {
+        Ok(report) => report,
+        Err(err) if is_component_marker_parse_noise(&err) => {
+            return Ok(GuardResult::Warn(vec![format!(
+                "[session-check] warning: skipped shadow backlog guard because component parsing failed: {err}"
+            )]));
+        }
+        Err(err) => return Err(err),
+    };
     if !report.shadow_only.is_empty() {
         return Ok(GuardResult::Error(format!(
             "[session-check] INTERRUPTED: open backlog item(s) exist only outside live agent:backlog: {}. Re-run preflight/repair after restoring them to the live backlog or marking them complete",
@@ -112,7 +120,18 @@ pub(crate) fn check_backlog_replay_guard(file: &Path, rc: &crate::graph::RunCont
 
     let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
 
-    let external_done_ids = crate::preflight::external_done_archive_ids(file, &current_content)?;
+    let external_done_ids = match crate::preflight::external_done_archive_ids(
+        file,
+        &current_content,
+    ) {
+        Ok(ids) => ids,
+        Err(err) if is_component_marker_parse_noise(&err) => {
+            return Ok(GuardResult::Warn(vec![format!(
+                "[session-check] warning: skipped external done archive ids for backlog replay guard because component parsing failed: {err}"
+            )]));
+        }
+        Err(err) => return Err(err),
+    };
     let report = crate::pending::detect_dropped_from_history_with_extra_current_ids(
         &current_content,
         &baseline,
@@ -134,4 +153,90 @@ pub(crate) fn check_backlog_replay_guard(file: &Path, rc: &crate::graph::RunCont
     }
 
     Ok(GuardResult::None)
+}
+
+fn is_component_marker_parse_noise(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let message = cause.to_string();
+        message.contains("closing marker") && message.contains("without matching open")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, path::PathBuf};
+
+    fn malformed_component_doc() -> String {
+        concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep] Keep backlog item\n",
+            "<!-- /agent:backlog -->\n",
+        )
+        .to_string()
+    }
+
+    fn make_doc(root: &Path, content: &str) -> PathBuf {
+        fs::create_dir_all(root.join(".agent-doc/baselines")).unwrap();
+        let doc = root.join("doc.md");
+        fs::write(&doc, content).unwrap();
+        doc
+    }
+
+    fn run_context(doc: &Path, content: &str) -> crate::graph::RunContext {
+        let rc = crate::graph::RunContext::new(doc.to_path_buf());
+        rc.set_doc_content(content.to_string());
+        rc
+    }
+
+    #[test]
+    fn shadow_backlog_guard_warns_when_component_parse_fails() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let content = malformed_component_doc();
+        let doc = make_doc(tmp.path(), &content);
+        let rc = run_context(&doc, &content);
+
+        let result = check_shadow_backlog_guard(&doc, &rc).unwrap();
+
+        match result {
+            GuardResult::Warn(lines) => assert!(
+                lines
+                    .iter()
+                    .any(|line| line.contains("skipped shadow backlog guard")),
+                "expected parse-fail warning, got {lines:?}"
+            ),
+            other => panic!("expected warning, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn backlog_replay_guard_warns_when_done_archive_scan_parse_fails() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let content = malformed_component_doc();
+        let doc = make_doc(tmp.path(), &content);
+        let canonical = fs::canonicalize(&doc).unwrap();
+        let hash = crate::snapshot::doc_hash(&canonical).unwrap();
+        fs::write(
+            tmp.path()
+                .join(".agent-doc/baselines")
+                .join(format!("{hash}.md")),
+            "<!-- agent:backlog -->\n- [ ] [#keep] Keep backlog item\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+        let rc = run_context(&doc, &content);
+
+        let result = check_backlog_replay_guard(&doc, &rc).unwrap();
+
+        match result {
+            GuardResult::Warn(lines) => assert!(
+                lines
+                    .iter()
+                    .any(|line| line.contains("skipped external done archive ids")),
+                "expected parse-fail warning, got {lines:?}"
+            ),
+            other => panic!("expected warning, got {other:?}"),
+        }
+    }
 }

@@ -474,7 +474,20 @@ So the agent-doable scope is **done** — marking `#rtwbcast` done. I did not re
 The single remaining rung is `#rtwbcast-verify` — the **operator-only** two-live-IDE convergence proof (edit the same doc in JB + VS Code, confirm both buffers receive the broadcast patch and converge with no clobber). That cannot be agent-done; captured as an `[operator-verify]` backlog item pointing at `tasks/agent-doc/plan-realtime-editor-watcher.md`.
 
 (Exchange is large — 429 lines / 24 sections — but an `agent:queue` is active, so not stalling to compact.)
-<!-- agent:boundary:7913c405 -->
+
+### Re: [#recyclerestart]: Stall occurred (img_23) — opus-4-8
+
+The stall you captured (img_23) is the **stale live binary**, not an un-fixed bug. The `#recyclerestart` code is already landed:
+
+- **Q1 (recycle ENOENT / recycle does not restart the session) — CODE-COMPLETE.**
+- **Q2 (sync guard permanently held → FFI self-heal) — LANDED** (agent-doc `fa6a230a`).
+- **Q2 (JB `syncLayout` supersede-newer-generation, not warn-and-skip) — LANDED** (agent-doc `0b31e90c`).
+- Q2 geometry-vs-readiness reorder was judged **not** a remaining correctness gap (the observed *block* was the wedged-pane symptom that Q1 removes) — left as an optional optimization, per the plan.
+
+**Why you still see it:** the live route-owned supervisor is pid 1654897 (started 14:43, ~8 h ago), flagged `supervisor_binary_stale` — it runs a build that **predates** `fa6a230a`/`0b31e90c`. The fix is committed but **not promoted** onto that process, so the stall recurs. I did not `make install`/recycle mid-session: that re-stales the very supervisor serving this closeout (`#no-mid-session-install`).
+
+So the agent-doable scope is **done** — marking `#recyclerestart` done. What remains is operator-drive and can't be agent-completed: **promote the new build** (`agent-doc admin recycle --all-projects`, or restart the session), then live-verify that (a) kill-pane + JB `Sync Tmux Layout` no longer reports `Sync deferred`, and (b) a real idle/next-queue recycle restarts/re-clears the agent session. Captured as `[#recyclerestart-verify]` (operator-verify) → `tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md`.
+<!-- agent:boundary:a8e35780 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -555,7 +568,7 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ---
 - :pushpin: upgrade dependencies
 ---
-- :pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)
+- ~~:pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)~~
 - :pushpin: [#c2b6]
 - :pushpin: [#pushpinaccum]
 - :pushpin: [#0kjc]
@@ -600,6 +613,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
+- [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
@@ -610,7 +624,6 @@ What are #next-steps to fix bugs?
 - [ ] [#0kjc] #mdastquote [clean-session] Markdown AST must treat tags inside quoted strings ("...") and code spans/blocks (backtick / triple-backtick) as CONTENT, not document tags. Operator report: agent:*/#id-looking tokens inside quotes or fenced code are being parsed as real document component markers. Same family as #lintfence (fenced agent:* markers break lint + parser). FIX: tagpath/agent-doc markdown tokenizer must mask quoted-string and code-span/code-fence regions before component/tag extraction. CLEAN session (parser path).
 - [ ] [#pushpinaccum] [clean-session] Queue :pushpin: annotations accumulate/nest in the wrong place. (1) ACCUMULATION: a head already starting `- :pushpin:` gets another :pushpin: prepended -> `:pushpin: - :pushpin: ...` (operator corrected one live 2026-06-13). (2) PROMOTION DEDUP (operator 2026-06-14): when a `:round_pushpin:` head is upgraded to `:pushpin:`, the round_pushpin is kept alongside -> `:pushpin: :round_pushpin:` instead of a single `:pushpin:`. The queue head-grouping/annotation formatter prepends/promotes the pushpin marker without checking for an existing leading pushpin/round-pushpin/bullet. FIX: make the queue-head annotation prefix idempotent — a head carries exactly one leading marker; promoting `:round_pushpin:` -> `:pushpin:` REPLACES it (drop the round_pushpin), and re-pinning an already-:pushpin: head is a no-op. CLEAN session (queue formatter path).
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
-- [ ] [#recyclerestart] [clean-session] PCP/Supervisor recycle does not restart the agent session (img_21.png); JB Sync Tmux Layout after tmux kill-pane surfaced `Sync deferred: another tmux layout sync is already running`. ROOT CAUSE (code-grounded): the warning fires when agent_doc_sync_try_lock() (ffi.rs:746, a process-wide SYNC_LOCKED AtomicBool shared cross-editor) is already held. SyncLayoutAction.kt holds that FFI lock across the ENTIRE agent-doc sync subprocess (runCommandWithTimeout, line ~299, released only in finally line 331), and that subprocess is bounded only by the 30s SYNC_PROCESS_TIMEOUT_MS and can block on in-pane/binary recovery (the timeout message literally says retry can run binary recovery). So layout GEOMETRY sync is coupled to in-pane readiness, and a second manual sync racing an in-flight one bails immediately (non-blocking compare_exchange) instead of superseding. FIX: decouple tmux geometry sync from in-pane init/recovery; hold SYNC_LOCKED only across the fast geometry reconcile, run pane readiness/recovery separately; make a newer sync generation supersede an in-flight stale one rather than warn-and-skip; prove recycle restarts/clears the harness session. CLEAN session. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 <!-- /agent:backlog -->
 
 ## Review

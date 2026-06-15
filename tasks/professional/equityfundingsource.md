@@ -62,7 +62,19 @@ Escalation: none.
 
 
 I can’t perform a harness `/clear` from inside this already-loaded model context. I’m going to stop here rather than draining `#xcvg-prod-email` in the stale context; re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` after `/clear` so the queue head runs cleanly.
-<!-- agent:boundary:2e5ef687 -->
+
+### Re: Borrower secure-message email production pass — gpt-5
+
+`#xcvg-prod-email` cannot be completed as implementation work yet because the production messaging path is still externally gated: either the EFS sending domain and Google Workspace SMTP path need to be verified (`#f4rq` / `#m6ch` / `#p40t`), or `#z3kx` needs to become the path of record through GoHighLevel. I gated the exact queue backlog item so the previously consumed queue head is no longer an open, silently dropped backlog item.
+
+For the underlying borrower-portal questions: yes, the shipped scope already has an admin owner for borrower secure-message threads, and the intended production pass is to notify admins when borrowers send messages, support inbound email replies that append to the D1 chat thread, and notify borrowers by email when an admin replies. The remaining work is production enablement and verification, not deciding whether the feature belongs in scope.
+
+Changed paths: `tasks/professional/equityfundingsource.md` only.
+Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
+Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
+Confidence: high that this resolves the interrupted queue-removal guard for `#xcvg-prod-email` while preserving the external production-email gate.
+Escalation: none.
+<!-- agent:boundary:fa890024 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,7 +96,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#xcvg-prod-email] [recommended] Borrower secure-message email production pass: after #f4rq/#m6ch/#p40t or #z3kx path-of-record is decided, enable borrower/admin outbound notifications, verify inbound reply threading, and add production env/runbook checks. Advances #xcvg.
 - [ ] [#jnzs-approval-followup] [recommended] Send/track funded-deals approval packet: attach current screenshots/copy/lien-position language plus the full_application ESIGN/UETA disclosure excerpt, record Judith/EFS reviewer decision, and convert requested edits into implementation backlog. Advances #jnzs.
 - [ ] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.
 - [ ] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
@@ -97,6 +108,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Review
 
 <!-- agent:review -->
+- [/] [#xcvg-prod-email] [recommended] Borrower secure-message email production pass: after #f4rq/#m6ch/#p40t or #z3kx path-of-record is decided, enable borrower/admin outbound notifications, verify inbound reply threading, and add production env/runbook checks. Advances #xcvg.
 - [/] [#dzmm-writeback-replay] EFS->TMO writeback replay: once #7a4d field map and #k2xg support answers arrive, replay tmo_cache_outbox with idempotency keys, conflict logging, retry/dead-letter state, and tests across broker/admin/investor writebacks. Advances #dzmm/#37ah/#67v2/#zwws.
 - [/] [#xcvg] [recommended] Borrower message email round-trip: email notification when a borrower sends a secure-portal message, inbound email reply that appends back into the D1 chat, and a borrower-facing email when an admin replies. Builds on the shipped chat_sessions/chat_messages + admin owner. Gated on a verified Resend EFS sending domain (f4rq) and Google Workspace SMTP (m6ch/p40t). (Distinct from the operator/comms emails to Judith + Robert.)
 - [/] [#jnzs] [recommended] Await Judith or EFS reviewer approval on funded-deal images, copy, and lien-position wording before invoicing or launch sign-off. The funded-deals page carries no standalone legal/disclosure text; the disclosure needing legal review is the ESIGN/UETA Electronic record and signature disclosure on the borrower full-application/document-uploads flow (full_application.tsx). Funded-deals copy was reframed as real closed deals and shipped.

@@ -134,7 +134,13 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
     // undrainable queue.
     let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = deferred_backlog_ids(content);
-    let head = first_drainable_head(&activation.entries_after, open_backlog.as_ref(), &deferred_ids);
+    let preset_supplies_directive = queue_component.attrs.contains_key("preset");
+    let head = first_drainable_head(
+        &activation.entries_after,
+        open_backlog.as_ref(),
+        &deferred_ids,
+        preset_supplies_directive,
+    );
     let Some(head) = head else {
         return Ok(None);
     };
@@ -316,10 +322,16 @@ fn first_drainable_head<'a>(
     entries_after: &'a [crate::queue::QueueEntry],
     open_backlog_ids: Option<&std::collections::HashSet<String>>,
     deferred_ids: &std::collections::HashSet<String>,
+    preset_supplies_directive: bool,
 ) -> Option<&'a crate::queue::QueuePrompt> {
     entries_after.iter().find_map(|entry| match entry {
         crate::queue::QueueEntry::Prompt(prompt) => {
-            if head_is_drainable(&prompt.text, open_backlog_ids, deferred_ids) {
+            if head_is_drainable(
+                &prompt.text,
+                open_backlog_ids,
+                deferred_ids,
+                preset_supplies_directive,
+            ) {
                 Some(prompt)
             } else {
                 None
@@ -340,13 +352,22 @@ fn first_drainable_head<'a>(
 ///   the strike/reap path owns — NOT a continuation target, so it must not keep the
 ///   go-mode drain alive. This makes continuation agree with the no-response queue
 ///   guard, which intersects the head set with the open backlog the same way.
-/// - A free-text directive/question head (no `#id`) is drainable.
+/// - A free-text directive/question head (no `#id`) is drainable. In a queue with
+///   a marker-level `preset=...`, every non-empty, non-fenced free-text head is
+///   also drainable because the preset supplies the verb and the line is the
+///   object.
 fn head_is_drainable(
     text: &str,
     open_backlog_ids: Option<&std::collections::HashSet<String>>,
     deferred_ids: &std::collections::HashSet<String>,
+    preset_supplies_directive: bool,
 ) -> bool {
-    if !is_drainable_queue_head(text) {
+    let drainable = if preset_supplies_directive {
+        is_drainable_queue_head_with_context(text, true)
+    } else {
+        is_drainable_queue_head(text)
+    };
+    if !drainable {
         return false;
     }
     match extract_head_id(text) {
@@ -473,7 +494,13 @@ pub fn live_drainable_continuation_head(file: &Path, content: &str) -> Option<St
     // is made separately (`head_requires_clean_session`) and does not change the
     // drainable set.
     let deferred_ids = deferred_backlog_ids(content);
-    let head = first_drainable_head(&activation.entries_after, open_backlog.as_ref(), &deferred_ids)?;
+    let preset_supplies_directive = queue_component.attrs.contains_key("preset");
+    let head = first_drainable_head(
+        &activation.entries_after,
+        open_backlog.as_ref(),
+        &deferred_ids,
+        preset_supplies_directive,
+    )?;
     Some(extract_head_id(&head.text).unwrap_or_else(|| head.text.trim().to_string()))
 }
 
@@ -518,13 +545,17 @@ pub fn drainable_head_count(file: &Path, content: &str) -> usize {
     }
     let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = deferred_backlog_ids(content);
+    let preset_supplies_directive = queue_component.attrs.contains_key("preset");
     activation
         .entries_after
         .iter()
         .filter(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => {
-                head_is_drainable(&prompt.text, open_backlog.as_ref(), &deferred_ids)
-            }
+            crate::queue::QueueEntry::Prompt(prompt) => head_is_drainable(
+                &prompt.text,
+                open_backlog.as_ref(),
+                &deferred_ids,
+                preset_supplies_directive,
+            ),
             _ => false,
         })
         .count()
@@ -542,12 +573,55 @@ pub fn drainable_head_count(file: &Path, content: &str) -> usize {
 /// the API" arrives as a `do [#id]` head instead). Keep this list to verbs that
 /// read as imperatives, not nouns, in queue prose.
 const QUEUE_DIRECTIVE_VERBS: &[&str] = &[
-    "do", "fix", "run", "build", "install", "commit", "push", "implement", "add",
-    "update", "investigate", "create", "make", "remove", "delete", "refactor",
-    "review", "explain", "drive", "resume", "continue", "check", "verify", "write",
-    "test", "debug", "diagnose", "merge", "publish", "release", "bump",
-    "rebase", "revert", "rename", "move", "split", "extract", "wire", "land", "ship",
-    "draft", "summarize", "answer", "respond", "apply", "enable", "disable", "gate",
+    "do",
+    "fix",
+    "run",
+    "build",
+    "install",
+    "commit",
+    "push",
+    "implement",
+    "add",
+    "update",
+    "investigate",
+    "create",
+    "make",
+    "remove",
+    "delete",
+    "refactor",
+    "review",
+    "explain",
+    "drive",
+    "resume",
+    "continue",
+    "check",
+    "verify",
+    "write",
+    "test",
+    "debug",
+    "diagnose",
+    "merge",
+    "publish",
+    "release",
+    "bump",
+    "rebase",
+    "revert",
+    "rename",
+    "move",
+    "split",
+    "extract",
+    "wire",
+    "land",
+    "ship",
+    "draft",
+    "summarize",
+    "answer",
+    "respond",
+    "apply",
+    "enable",
+    "disable",
+    "gate",
+    "deploy",
 ];
 
 /// Strip a queue head's leading list bullet, emoji-shortcode tokens
@@ -593,11 +667,16 @@ fn normalize_queue_head_text(text: &str) -> String {
 ///
 /// A head is drainable iff it carries a `#id` / `[#id]` (the
 /// `[clean-session]`/`[operator-verify]` defer is applied separately by id), ends
-/// with a question mark, or contains a recognized imperative directive verb.
+/// with a question mark, contains a recognized imperative directive verb, or lives
+/// in a preset-bearing queue where the preset supplies the directive verb.
 /// Everything else (a bare observation) is inert **noise**: excluded from the
 /// continuation head set and surfaced as `queue_stale_noise_lines`, never
 /// auto-deleted (the live IPC supervisor races on direct queue edits).
 pub(crate) fn is_drainable_queue_head(text: &str) -> bool {
+    is_drainable_queue_head_with_context(text, false)
+}
+
+fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directive: bool) -> bool {
     // `#cleardrainsignal`: a queue head carrying a fenced ``` code block is pasted
     // console-output / error-report evidence the operator already triaged into
     // backlog ids (e.g. `JB \`Run Agent Doc\` ... \`\`\`<log>\`\`\``), NOT a drain
@@ -620,6 +699,9 @@ pub(crate) fn is_drainable_queue_head(text: &str) -> bool {
         return true;
     }
     if normalized.trim_end().ends_with('?') {
+        return true;
+    }
+    if preset_supplies_directive {
         return true;
     }
     let lowered = normalized.to_ascii_lowercase();
@@ -647,10 +729,13 @@ pub fn queue_stale_noise_lines(file: &Path) -> usize {
     let Ok(entries) = crate::queue::parse(body) else {
         return 0;
     };
+    let preset_supplies_directive = queue_component.attrs.contains_key("preset");
     entries
         .iter()
         .filter(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => !is_drainable_queue_head(&prompt.text),
+            crate::queue::QueueEntry::Prompt(prompt) => {
+                !is_drainable_queue_head_with_context(&prompt.text, preset_supplies_directive)
+            }
             _ => false,
         })
         .count()
@@ -1068,14 +1153,32 @@ mod tests {
     }
 
     fn write_doc(dir: &Path, prompts: &[&str], queue_active: bool, has_auto: bool) -> PathBuf {
+        let queue_attrs = if has_auto { " auto" } else { "" };
+        write_doc_with_queue_attrs(dir, prompts, queue_active, queue_attrs)
+    }
+
+    fn write_doc_with_queue_attrs(
+        dir: &Path,
+        prompts: &[&str],
+        queue_active: bool,
+        queue_attrs: &str,
+    ) -> PathBuf {
+        let queue: String = prompts.iter().map(|p| format!("- {p}\n")).collect();
+        write_doc_with_queue_body(dir, &queue, queue_active, queue_attrs)
+    }
+
+    fn write_doc_with_queue_body(
+        dir: &Path,
+        queue_body: &str,
+        queue_active: bool,
+        queue_attrs: &str,
+    ) -> PathBuf {
         std::fs::create_dir_all(dir.join(".agent-doc/snapshots")).unwrap();
         let doc = dir.join("task.md");
-        let queue: String = prompts.iter().map(|p| format!("- {p}\n")).collect();
-        let auto = if has_auto { " auto" } else { "" };
         let content = format!(
             "---\nsession: sid\nagent_doc_format: template\nqueue_active: {queue_active}\n---\n\n\
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue{auto} -->\n{queue}<!-- /agent:queue -->\n"
+## Queue\n\n<!-- agent:queue{queue_attrs} -->\n{queue_body}<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, &content).unwrap();
         crate::snapshot::save(&doc, &content).unwrap();
@@ -1136,7 +1239,10 @@ mod tests {
             ],
         );
         let deferred = deferred_backlog_ids(&content);
-        assert!(!deferred.contains("a"), "clean-session drains in-loop (#qcontdrain)");
+        assert!(
+            !deferred.contains("a"),
+            "clean-session drains in-loop (#qcontdrain)"
+        );
         assert!(deferred.contains("b"), "operator-verify always deferred");
         assert!(!deferred.contains("c"));
     }
@@ -1196,7 +1302,10 @@ mod tests {
         );
         let deferred = deferred_backlog_ids(&content);
         assert!(!deferred.contains("a"), "clean-session drains in-loop");
-        assert!(!deferred.contains("e"), "every clean-session head drains in-loop");
+        assert!(
+            !deferred.contains("e"),
+            "every clean-session head drains in-loop"
+        );
         assert!(
             deferred.contains("b"),
             "operator-verify is never drainable by any agent scope"
@@ -1346,6 +1455,50 @@ mod tests {
     }
 
     #[test]
+    fn preset_queue_treats_prompt_lines_as_drainable_directives() {
+        // #goqnoise: with a queue-level preset, the preset supplies the verb for
+        // each non-empty prompt line; the line itself is the object to act on.
+        let dir = tempfile::tempdir().unwrap();
+        let cpa_line = "\"CPA / attorney letter or supporting document\" in https://example.test/accreditation and the dialog should allow multiple files. Use our standard multi-file upload component.";
+        let doc = write_doc_with_queue_attrs(
+            dir.path(),
+            &[cpa_line, "deploy"],
+            true,
+            " auto preset=\"#spec-test-commit-push\" go",
+        );
+        let content = std::fs::read_to_string(&doc).unwrap();
+
+        let continuation = detect(&doc).unwrap().expect("preset queue should drain");
+        assert_eq!(continuation.head_prompt, cpa_line);
+        assert_eq!(
+            live_drainable_continuation_head(&doc, &content).as_deref(),
+            Some(cpa_line)
+        );
+        assert_eq!(drainable_head_count(&doc, &content), 2);
+        assert_eq!(queue_stale_noise_lines(&doc), 0);
+    }
+
+    #[test]
+    fn preset_queue_still_treats_fenced_paste_as_noise() {
+        // #goqnoise: preset context must not re-admit pasted console evidence.
+        let dir = tempfile::tempdir().unwrap();
+        let fenced = ":pushpin: JB `Run Agent Doc` should self-heal.\n```\n[route] target tmux session: 0\nError: dispatch blocked\n```";
+        let queue_body = format!("~~~prompt\n{fenced}\n~~~\n");
+        let doc = write_doc_with_queue_body(
+            dir.path(),
+            &queue_body,
+            true,
+            " auto preset=\"#spec-test-commit-push\" go",
+        );
+        let content = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(detect(&doc).unwrap().is_none());
+        assert!(live_drainable_continuation_head(&doc, &content).is_none());
+        assert_eq!(drainable_head_count(&doc, &content), 0);
+        assert_eq!(queue_stale_noise_lines(&doc), 1);
+    }
+
+    #[test]
     fn detect_returns_head_for_active_auto_queue() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(
@@ -1443,6 +1596,7 @@ mod tests {
         // Harness slash commands are drainable command heads, not prose noise.
         assert!(is_drainable_queue_head("- /model sonnet"));
         assert!(is_drainable_queue_head(":pushpin: /clear"));
+        assert!(is_drainable_queue_head("deploy"));
 
         // Bare bug-report observations with no directive and no question → noise.
         assert!(!is_drainable_queue_head(
@@ -1479,7 +1633,10 @@ mod tests {
             true,
         );
         let continuation = detect(&doc).unwrap().expect("a drainable head remains");
-        assert_eq!(continuation.head_prompt, "Fix the submit bug and add coverage");
+        assert_eq!(
+            continuation.head_prompt,
+            "Fix the submit bug and add coverage"
+        );
         assert_eq!(queue_stale_noise_lines(&doc), 1);
     }
 

@@ -33,80 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-210933.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-215724.md`*
 
 Compacted content:
-- Archived 9 response topic(s): investor pipeline resequence; lender vs deal pipeline; lender/deal pipeline mermaid; 6 more
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): lender bank wire instruction reveal
-
-### Re: Available Deals lender workflow — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: Rename the "Accepted Applications" column in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline & state name to "Available Deals". We still want the lender to see "Available Deals" even when the deal is processing or in underwriting...as discussed in the conversations with robert-waldman. Can we have a sub-pipeline for each interested lender? This sub-pipeline includes processing + underwriting (sending deal package, lender requesting additional documets, lender verbally committing to the deal, underwriting). processing + underwriting is an iterative feedback look where the lender sees the documents, requests more documents, underwrites the deal which may include additional requests for documents. The processing + underwriting sub-pipeline should include workflows for these requests. Such as by notifying the borrower of the document request and providing a way for the borrower to upload the documents. The admin or lender can initiate requests for more documents. All relevant parties should be notified with each step.
-
-
-Implemented #gq5c.
-
-Changed the admin Deal Pipeline display state from “Accepted applications” to “Available Deals” while keeping the raw TMO status `Application Received`. Lenders now keep deals in Available Deals unless they have an actual pending/active funding commitment, so processing/underwriting no longer hides the opportunity.
-
-Added the interested-lender processing/underwriting workflow: admin and lender request endpoints create borrower document requests, issue secure upload tokens, notify the borrower by email, mark requests provided when the upload token is used, refresh admin views, and show the request controls inside the Lender Pipeline deal follow-up card. Updated PRDs and tests.
-
-Verification:
-- `make check` passed (729 tests, app build, worker build).
-- Focused pipeline/investor tests passed before the full suite.
-- Pushed EFS submodule commit `c872c63` to `origin/main`.
-- No GitHub workflow named `CI` exists here (`gh workflow list` returned no workflows), so there was no latest CI run to inspect.
-
-Note: pre-existing unrelated dirty EFS files remain unstaged in the submodule.
-
-### Re: commit + push all dirty EFS files. — gpt-5
-
-> **Queue prompt:**
->
-> commit + push all dirty EFS files.
-
-
-Completed.
-
-Changed paths: staged and committed the 16 dirty files in `src/equityfundingsource-dev`, covering admin event/realtime refresh wiring, Dropbox document sync contract helpers, migration `0066_document_dropbox_sync_contract.sql`, and matching tests. The EFS submodule is now clean on `main...origin/main`.
-
-Commits and push:
-- EFS submodule: `77481d7 feat(admin): add realtime refresh and dropbox sync contract`, pushed to `btakita/equityfundingsource-dev` `origin/main`.
-- Superproject pointer: `8e0453828 chore: bump equityfundingsource submodule`, pushed to `btakita/agent-loop` `origin/main`.
-
-Verification:
-- `make check` passed in `src/equityfundingsource-dev`: 729 tests, app build, and worker build.
-- `gh run list --workflow CI --limit 1` found no workflow named `CI` in both the EFS submodule and superproject, so there was no latest CI run to inspect.
-
-Escalation: none. Confidence: high. Unrelated non-EFS dirty files remain in the superproject and were not staged.
-
-### Re: deploy — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-
-Deployed the pushed EFS Worker state.
-
-Commands:
-- `bun run deploy:worker` from `src/equityfundingsource-dev`.
-- Confirmed Wrangler's remote D1 migration prompt for 4 pending migrations: `0066_document_dropbox_sync_contract.sql`, `0066_investor_deal_interest_workflow.sql`, `0067_investor_fund_allocations.sql`, and `0068_deal_interest_document_requests.sql`.
-- `bun run cf:d1:migrations:list:remote` after deploy.
-- Smoke checks with `curl` against `/`, `/funded-deals`, and `/portal-admin/pipeline`.
-
-Result:
-- Worker deployed at `https://equityfundingsource.brian-takita.workers.dev`.
-- Current Version ID: `434a72ba-681c-4698-8490-ebcdbbeec8ab`.
-- Remote D1 now reports `No migrations to apply!`.
-- Smoke checks: `/` returned 200, `/funded-deals` returned 200, `/portal-admin/pipeline` returned 303 to `/login?role=admin&next=%2Fportal-admin%2Fpipeline` as expected for unauthenticated access.
-
-Changed paths: none in this deploy cycle; the EFS repo remained clean on `main...origin/main`. Escalation: none. Confidence: high.
-Preflight found no new changes to respond to in `tasks/professional/equityfundingsource.md`, so I stopped per the agent-doc workflow.
-
-It did auto-commit a previously written response and cleared the already-drained queue, setting `queue: stop`. The only notable warning is that the exchange is large; compaction is available with `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md --commit` if you want it.
-<!-- agent:boundary:e961161d -->
+- Archived 3 response topic(s): Available Deals lender workflow; commit + push all dirty EFS files.; deploy
+- Prior summary/context: prior compacted content: Archived 9 response topic(s): investor pipeline resequence; lender vs deal pipeline; lender/...
+<!-- agent:boundary:e71b0aab -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -241,7 +241,35 @@ Verification:
 Committed and pushed EFS submodule commit `6d0bc97` (`fix: align investor deal terminology`) to `origin/main`; staged only the parent gitlink update for this session closeout. Existing unrelated admin/Dropbox dirty work in the EFS submodule was left untouched.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:af65faba -->
+
+### Re: deal-interest workflow - gpt-5
+
+> **Queue prompt:**
+>
+> do [#deal-interest-workflow]
+
+
+Completed `#deal-interest-workflow`.
+
+Implemented an admin-owned investor deal-interest workflow in the EFS submodule:
+- Added persisted workflow fields for package sent, call scheduled/completed, selected lender state, pre-doc conditions/instructions, verbal commitment amount/recorded time, notes, updater, and timeline indexing.
+- Added admin API support for `PATCH /api/admin/deal-interests/:id/workflow`, deal interest workflow summaries on investor pipeline cards, deal interest detail workflow fields, and timeline events for package sent/calls/selection/verbal commitment.
+- Added admin UI controls in the investor pipeline modal for package sent, calls, selected lender, verbal commitment, pre-doc instructions/conditions, and workflow notes.
+- Reframed lender-side deal document signing as a non-binding package acknowledgement in investor UI, admin copy, validation, docs, and tests.
+
+Verification:
+- Focused `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts` passed: 94 pass, 0 fail.
+- Full dirty-tree `bun run check` passed: 723 pass, 0 fail.
+- Staged-only `bun run check` passed after temporarily stashing unrelated local edits: 718 pass, 0 fail; app build and worker build passed.
+- GitHub Actions check: `gh workflow list` and `gh run list --limit 5` returned no workflows/runs; `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+
+Commit/push:
+- EFS submodule commit `a9f5050 feat: add investor interest workflow queue` pushed to `origin/main`.
+- Parent closeout stages only the EFS submodule gitlink; unrelated admin/Dropbox/live-refresh edits were restored and left unstaged/untracked.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:5157a842 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -250,14 +278,13 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lender-terminology-audit]~~
-- do [#deal-interest-workflow]
+- ~~do [#deal-interest-workflow]~~
 - do [#fractionalization-allocations]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#deal-interest-workflow] [recommended] Deal-interest workflow pass: make investor interest create an admin work queue for package sent, call scheduled/completed, selected lender(s), pre-doc conditions/instructions, and admin-recorded verbal funding commitment; remove or reframe lender-side "Sign Deal Documents" as a non-binding acknowledgement if retained. Advances #investor-pipeline-resequence/#67v2/#rpzm.
 - [ ] [#fractionalization-allocations] [recommended] Fractionalization/multi-lender model: define per-deal lender allocations linked to investor vestings/entities, support multiple wires/beneficiaries, up-to-10 lender guidance, 50%+ control warning, and TMO writeback mapping once #7a4d/#dzmm unblock. Advances #zwws/#dzmm/#investor-pipeline-resequence.
 <!-- /agent:backlog -->
 

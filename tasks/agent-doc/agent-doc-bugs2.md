@@ -109,13 +109,13 @@ The broader goal remains active because the restored queue still has additional 
 Acknowledged. I restored the queue component to the unstruck state you set, including the `/goal` bullet and `do [#compactdrift-agent]`.
 
 The compact closeout guard fix remains committed and pushed; the broader goal remains active because the queue still has additional live heads after this item.
-<!-- agent:boundary:606137de -->
+<!-- agent:boundary:ab3ff85f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: JB `Run Agent Doc` sent `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` into the Codex input but did not submit. #simworld~~
+- :pushpin: JB `Run Agent Doc` sent `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` into the Codex input but did not submit. #simworld
 - /goal Do the actual work in the queue. Stop punting on the queue work. Fix the root cause(s) of the punting. The work in the queue should be done.
 - do [#compactdrift-agent]
 - do [#cleandrainsup-agent]

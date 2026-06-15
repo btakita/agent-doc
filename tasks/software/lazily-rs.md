@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -84,7 +84,7 @@ Cycle notes: no code changed and no test suite was run; this was a prompt-respon
 
 
 I won’t process `do [#4zvn]` in this loaded context. I can’t issue the harness `/clear` command from inside the assistant turn, so the next step is to run `/clear`, then re-invoke `agent-doc tasks/software/lazily-rs.md` in the fresh context.
-<!-- agent:boundary:466a7007 -->
+<!-- agent:boundary:a7e3d7ea -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,7 +93,6 @@ I won’t process `do [#4zvn]` in this loaded context. I can’t issue the harne
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#4zvn]
 <!-- /agent:queue -->
 
 ## Backlog

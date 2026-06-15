@@ -620,41 +620,32 @@ Verified from a clean adjacent worktree at committed `src/agent-doc` HEAD (`0ec1
 - `cargo test -p agent-doc-orchestration direct_pane -- --nocapture`
 - `cargo test -p agent-doc-orchestration route_submit_resubmit -- --nocapture`
 - `cargo check -p agent-doc`
-<!-- agent:boundary:22d9cb79 -->
+
+### Re: Codex control-key transcript — gpt-5
+
+> **Queue prompt:**
+>
+> All equityfundingsource.md codex session Ctrl+C Ctrl+Z inputs are escaped ascii `^Z^Z^C^C^C^C^C^C`. #simworld
+
+I treated the equityfundingsource control-key transcript as a real follow-up bug, not as already covered.
+
+What is covered today: the supervisor detects forwarded `Ctrl+C` and `Ctrl+D`, and the Codex interrupt-clear path has state-scoped key planning so `C-g` is only sent for shell search. What I did not find is a `Ctrl+Z` policy or a deterministic test that proves forwarded `Ctrl+C`/`Ctrl+Z` bytes cannot become literal `^C`/`^Z` composer or transcript text while the agent-doc run keeps heartbeating.
+
+I added backlog item `#codexctrlz` to make that explicit: add SimWorld/local pty coverage for the forwarded control-key byte path, define the intended `Ctrl+Z` behavior, prevent Codex interrupt/clear routes from appending control glyphs into the composer/transcript, and log proof markers for the forwarded control-key handling.
+
+Inspection commands used:
+- `rg -n "Ctrl|C-c|C-z|send_key|send-keys|control|interrupt|suspend|SIGINT|SIGTSTP|\\^C|\\^Z" agent-doc-orchestration/src src specs VERSIONS.md`
+- `tsift --envelope search "send_key control interrupt codex" --budget normal`
+- `tsift --envelope search "Ctrl C Ctrl Z Codex" --budget normal`
+<!-- agent:boundary:6d4c6f54 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~/goal Using an agent doc with Codex, JB `Run Agent Doc` and JB `Clear Session Context` should submit the command sent on Codex. But a `\n` is sent instead of submit. This used to work but broke. Please identify when the regression occurred and provide a surgical & durable fix so this issue does not repeat. This regression has occurred several times in the life of agent-doc and it takes a while to fix. I want to fix this issue permanently by using a distinct primitive. #simworld~~
----
-All equityfundingsource.md codex session Ctrl+C Ctrl+Z inputs are escaped ascii `^Z^Z^C^C^C^C^C^C`. #simworld
-
-```
- agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
-[run] starting for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
-                                                                                                [diff] doc=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md snapshot=/home/brian/work/btakita/agent-loop/.agent-doc/snapshots/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.md doc_len=33777 snap_len=32718
-                                                                                                             [diff] stripped: doc_len=33403 snap_len=32344
-                                   [diff] changes detected, computing unified diff
-                                                                                  [perf] diff.compute total: 1ms
-                                                                                                                [run] diff computed (1304 bytes)
-                         [commit] detected post-commit local drift for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md — HEAD already contains the committed response; leaving later local working-tree edits uncommitted
-         [commit] staged snapshot already matches HEAD for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md — closing cycle as already committed
-                                                      [perf] commit total: 20ms
-                                                                               [diff] doc=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md snapshot=/home/brian/work/btakita/agent-loop/.agent-doc/snapshots/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.md doc_len=33777 snap_len=32718
-                                                                                            [diff] stripped: doc_len=33403 snap_len=32344
-                  [diff] changes detected, computing unified diff
-                                                                 [perf] diff.compute total: 1ms
-                                                                                               Submitting to codex...
-                                                                                                                     ^M^M^M^M^M^M^C^C^C^Zueoaueuoue^M^M^C^C^C^C^C^C[run] heartbeat phase=child_agent_wait elapsed_s=30 timeout_s=1800 cycle_id=cycle-1781557566920 cycle_phase=preflight_started cycle_age_s=30
-                                                                 ^C^C^C^C[run] heartbeat phase=child_agent_wait elapsed_s=60 timeout_s=1800 cycle_id=cycle-1781557600342 cycle_phase=preflight_started cycle_age_s=26
-                                                                                              ^Z^Z^C^C^C^C^C^C[run] heartbeat phase=child_agent_wait elapsed_s=90 timeout_s=1800 cycle_id=cycle-1781557600342 cycle_phase=preflight_started cycle_age_s=56
-            [run] heartbeat phase=child_agent_wait elapsed_s=120 timeout_s=1800 cycle_id=cycle-1781557600342 cycle_phase=preflight_started cycle_age_s=86
-```
----
-- ~~do [#stuckhandoff2]~~
 - do [#qt32]
 - do [#2v7b]
+- `agent:backlog` with `queue` is not adding items into the queue...in this document.
 - do [#efsmrgmarkers]
 - do [#snbc2]
 <!-- /agent:queue -->
@@ -702,6 +693,7 @@ What are #next-steps to fix bugs?
 - [ ] [#qt32] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#2v7b] #jbcodexsubmit / #jbclaudesubmit JB Run Agent Doc enters the routed prompt but does not submit it (operator presses Enter). CODE-COMPLETE 2026-06-13 (agent-doc 3b71cfeb, superproject 8fcdc067f): JB dispatch-only routes BOTH Claude and Codex through the same direct-pane send_command_unchecked path (merged text+CR send-keys), and TriggerStillVisible detection already covered both, but the one-shot Enter re-submit was gated codex-only. Generalized direct_pane_needs_codex_resubmit -> direct_pane_needs_enter_resubmit (codex|claude; opencode excluded; requires TimedOut+trigger_visible so no stray Enter into an empty composer); proof line route_submit_resubmit ... action=enter_key result=accepted|still_visible; 3 unit tests; make check 4369 passed 0 FAIL. Built+installed+recycled. GATE now operator-drive ONLY: run JB Run Agent Doc against a Claude pane AND a Codex pane, confirm ops.log shows route_submit_issue issue=prompt_not_submitted then route_submit_resubmit action=enter_key result=accepted with the queue starting. Plan: tasks/agent-doc/plan-jb-codex-submit.md
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.
+- [ ] [#codexctrlz] [clean-session] Codex forwarded operator Ctrl+C/Ctrl+Z input can surface as literal `^C`/`^Z` text in the child/session transcript instead of a controlled interrupt/stop path. Repro: tasks/professional/equityfundingsource.md Codex session showed `^Z^Z^C^C^C^C^C^C` while agent-doc heartbeats continued. Add SimWorld/local pty coverage for forwarded control-key bytes, define the Ctrl+Z policy, ensure Codex interrupt/clear routes do not append control glyphs into the composer/transcript, and log proof markers for forwarded Ctrl+C/Ctrl+Z handling.
 <!-- /agent:backlog -->
 
 ## Review

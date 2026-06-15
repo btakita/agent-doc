@@ -165,67 +165,36 @@ The `[sync] recovered live pane` / `resync: stash pane … skipping kill` lines 
 **What I did:** extended `tasks/agent-doc/plan-preset-queue-head-unstrikeable.md` with **Symptom 2** + **fix (5)**: on each dispatch, re-validate the spent-preset pause against the current queue — if the paused-on preset head is absent, **invalidate the pause and proceed/close**, never replay the stale receipt (with SimWorld coverage: pause on a spent preset, remove the head, next dispatch must not re-block). Committed as a plan-only edit; #qpresetstrike already points at that plan.
 
 **To unblock equityfundingsource.md right now** (operator, in that doc's session — the documented workaround): strike the head (`- ~~#advance-review~~`) and drop `go` from the `agent:queue` marker, then `agent-doc reset --from-current --preserve-session tasks/professional/equityfundingsource.md` + `commit`. If the line is genuinely already gone and the pause still replays, that confirms facet 2 — and the recovery is the same reset-from-current to rebuild the queue state from the current doc.
-<!-- agent:boundary:df6b1286 -->
+<!-- agent:boundary:f5b6306b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-~~~done
-Previous turn stalled and restart failed
-```
-● The racing writer is pid 1654897 — a stale --route-owned supervisor for this doc (my memory already names 1654897 as
-  the stale supervisor causing this exact drift). The socket listener is IntelliJ (pid 3724007). pid 314892 hosts
-  sift.md, not mine. Let me confirm 1654897 is a stale orphan and not my session host before acting:
-
-● Bash(cd /home/brian/work/btakita/agent-loop
-      echo "=== process tree of stale supervisor 1654897 (does it host a claude child?) ==="…)
-  ⎿  Error: Exit code 1
-     === process tree of stale supervisor 1654897 (does it host a claude child?) ===
-     agent-doc(1654897)-+-agent-doc(93343)
-                        |-agent-doc(327552)
-                        |-agent-doc(327773)
-                        |-agent-doc(410429)
-                        |-agent-doc(411670)
-                        |-agent-doc(582302)
-                        |-agent-doc(939525)
-                        |-agent-doc(940276)
-     … +5 lines (ctrl+o to expand)
-
-● Confirmed: pid 1654897's only children are defunct agent-doc workers — no claude child, so it does not host my session
-  (my shell 2336685 descends from 3732506, not 1654897). It's a stale orphan route-owned supervisor racing my writes
-  with a corrupt in-memory CRDT. Per the documented recovery ladder, killing this single orphan clears the drift:
-
-● Bash(cd /home/brian/work/btakita/agent-loop
-      echo "=== confirm 3732506 (my parent) is not 1654897-related ==="…)
-  ⎿  Waiting…
-
-✽ Razzmatazzing… (20m 40s · ↓ 77.0k tokens)
-  ⎿  Tip: Hit shift+tab to cycle between default mode, auto-accept edit mode, and plan mode
-
-
-  ❯ /clear
-  ❯ /agent-doc tasks/agent-doc/agent-doc-bugs2.md
-  ❯ /clear
-  ❯ /agent-doc tasks/agent-doc/agent-doc-bugs2.md
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ [1]    1654897 terminated  /home/brian/.cargo/bin/agent-doc start --route-owned
-──────────────────────────────────────────────────────────────────────────────────%
-~/work/btakita/agent-loop main ⇡29 *5 !36 ?13                                                                                                ✘ TERM 9h 59m 0s  agent-loop 00:42:11
-```
-
-I manually started the session. JB `Run Agent Doc` error
-```
-resync: pruned 9 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3522
-```
-~~~
 :pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
 ```
 resync: pruned 8 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3457
+```
+---
+:pushpin: equityfundingsource.md failed to restart
+```
+● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
+
+· Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
+
+
+  ❯ /clear
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
+  Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
+                                                                            [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
+                                               [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc bi  ❯ /clear
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────❯ [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)            ───────────────────────────────────────────────────────────────────────────────────────────────────────────[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execvepass permissions on (shift+tab to cycle)
+       [start] harness resolved: binary=claude source=frontmatter env=default
+                                                                             Registered session 62fe1f41 → pane %74
+                                                                                                                   Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
 ```
 ---
 :pushpin: JB `Run Agent Doc` should self-heal and complete the dispatch. There was no `- #advance-review` line. Seems to be stuck in an old state.
@@ -244,7 +213,7 @@ resync: stash pane %50 is unregistered but still hosts live supervisor tsift-v0.
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3460
 ```
 ---
-- :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
+:pushpin: - :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
 ---
 :pushpin: JB `Compact Exchange` on this document
 ```
@@ -279,6 +248,7 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 - do [#dfrefresh-retire]
 - do [#compactqattr]
 - do [#c2b6]
+- do [#goqnoise]
 <!-- /agent:queue -->
 ###
 <!--

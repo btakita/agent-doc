@@ -57,7 +57,11 @@ Repository status checked:
 - `lake build` from `src/lazily-spec/formal/lean` passed: `Build completed successfully (4 jobs).`
 
 Changed paths: no `lazily-rs` or `lazily-spec` source changes in this cycle; this is a status response only. Commands run: Lean/status search, doc reads, `lake build`, git status/log checks. CI check: `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`. Confidence: high. Escalation: none.
-<!-- agent:boundary:0a38c79f -->
+
+### Re: Artifact cleanup — gpt-5
+
+Cleaned the stale IPC artifacts from this session document: the Lean status answer above remains the response to the drained queue prompt, and the misplaced equityfundingsource route diagnostic was removed from the lazily-rs queue component.
+<!-- agent:boundary:d602cdbe -->
 <!-- /agent:exchange -->
 ###
 <!--

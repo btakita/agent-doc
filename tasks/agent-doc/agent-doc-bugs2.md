@@ -309,7 +309,7 @@ Verification:
 - parent repo gitlink: `dd6323551` (`agent-doc: update clear session submit fix`)
 - agent-doc submodule: `c57076c8` (`fix: submit clear session composer drafts`)
 - `make check` passed: 4533 tests, 238 skipped, doctests, and medium SimWorld budget test.
-❯ - `cargo check -p agent-doc`
+- `cargo check -p agent-doc`
 - `cargo test -p agent-doc session_actor_cmd -- --nocapture`
 - `cargo test -p agent-doc clear_submit_proof -- --nocapture`
 - `cargo test -p agent-doc clear_direct_submit_retry -- --nocapture`
@@ -338,6 +338,17 @@ Verification:
 ❯ - `cargo check -p agent-doc`
 - `make check` (4528 passed, 238 skipped; doctests and medium SimWorld passed)
 - GitHub Actions CI run `27570433719` passed (`make check` + `make tmux-ci`)
+- Parent repo has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
+- New `src/agent-doc` CI for `fecc63be` is running as `27571750330`.
+- Previous `src/agent-doc` CI for `c57076c8` passed.
+- `a7605c456` in parent: `agent-doc: cover MCP finalize capture recovery`
+- `fecc63be` in `src/agent-doc`: `test: cover MCP finalize capture recovery`
+- `make check` (4534 tests passed, 238 skipped, doctests passed, medium SimWorld budget test passed)
+❯ - `cargo check -p agent-doc`
+- `cargo test -p agent-doc --test test_cli mcp_finalize -- --nocapture`
+- `cargo test -p agent-doc --test test_cli mcp_finalize_close_after_capture_recovers_on_next_preflight_once -- --nocapture`
+- `src/agent-doc/VERSIONS.md` documents `#codexmcpfinalize` coverage.
+- `src/agent-doc/tests/test_cli.rs` adds `mcp_finalize_close_after_capture_recovers_on_next_preflight_once` and a small git commit-count helper.
 
 Pushed: `btakita/agent-doc@87324974`.
 
@@ -348,21 +359,21 @@ Implemented `#jbclearctxsubmit`.
 For the EFS compaction note: that churn is the already-compacted exchange summary being compacted again instead of treated as prior-summary metadata. The repeated compact payload carried the numbered lender-state list twice, in the existing reversed order. I did not edit the EFS document in this cycle; I kept this turn on the active queue head, `#jbclearctxsubmit`.
 
 What changed:
-❯ - `src/session_actor_cmd.rs` now polls after direct-pane clear submission, logs `session_clear_submit_observation ... issue=prompt_not_submitted` when `/clear` or `/new` remains in the active composer, and sends exactly one bare Enter retry for Codex/Claude only.
-❯ - The stale-scrollback guard treats a later prompt-prefix line as a newer composer, so an old visible `/clear` transcript does not trigger a stray Enter.
-❯ - `VERSIONS.md` records the behavior and coverage under `#jbclearctxsubmit`.
+- `src/session_actor_cmd.rs` now polls after direct-pane clear submission, logs `session_clear_submit_observation ... issue=prompt_not_submitted` when `/clear` or `/new` remains in the active composer, and sends exactly one bare Enter retry for Codex/Claude only.
+- The stale-scrollback guard treats a later prompt-prefix line as a newer composer, so an old visible `/clear` transcript does not trigger a stray Enter.
+- `VERSIONS.md` records the behavior and coverage under `#jbclearctxsubmit`.
 
 Verification:
-❯ - `cargo test -p agent-doc clear_command_visible -- --nocapture`
-❯ - `cargo test -p agent-doc clear_direct_submit_retry -- --nocapture`
-❯ - `cargo test -p agent-doc clear_submit_proof -- --nocapture`
-❯ - `cargo test -p agent-doc session_actor_cmd -- --nocapture`
+- `cargo test -p agent-doc clear_command_visible -- --nocapture`
+- `cargo test -p agent-doc clear_direct_submit_retry -- --nocapture`
+- `cargo test -p agent-doc clear_submit_proof -- --nocapture`
+- `cargo test -p agent-doc session_actor_cmd -- --nocapture`
 ❯ - `cargo check -p agent-doc`
-❯ - `make check` passed: 4533 tests, 238 skipped, doctests, and medium SimWorld budget test.
+- `make check` passed: 4533 tests, 238 skipped, doctests, and medium SimWorld budget test.
 
 Commits pushed:
-❯ - agent-doc submodule: `c57076c8` (`fix: submit clear session composer drafts`)
-❯ - parent repo gitlink: `dd6323551` (`agent-doc: update clear session submit fix`)
+- agent-doc submodule: `c57076c8` (`fix: submit clear session composer drafts`)
+- parent repo gitlink: `dd6323551` (`agent-doc: update clear session submit fix`)
 
 Post-push CI for the submodule was running as `27571278607` when checked; the previous CI run was green.
 
@@ -373,24 +384,24 @@ Added the regression guard for the Codex MCP finalize close-after-capture restar
 No production recovery patch was needed: the existing `repair` + preflight closeout path already handled this state. The change locks that behavior so the queue cannot regress into the captured-response restart stall again.
 
 Changed:
-- `src/agent-doc/tests/test_cli.rs` adds `mcp_finalize_close_after_capture_recovers_on_next_preflight_once` and a small git commit-count helper.
-- `src/agent-doc/VERSIONS.md` documents `#codexmcpfinalize` coverage.
+❯ - `src/agent-doc/tests/test_cli.rs` adds `mcp_finalize_close_after_capture_recovers_on_next_preflight_once` and a small git commit-count helper.
+❯ - `src/agent-doc/VERSIONS.md` documents `#codexmcpfinalize` coverage.
 
 Verification:
-- `cargo test -p agent-doc --test test_cli mcp_finalize_close_after_capture_recovers_on_next_preflight_once -- --nocapture`
-- `cargo test -p agent-doc --test test_cli mcp_finalize -- --nocapture`
-- `cargo check -p agent-doc`
-- `make check` (4534 tests passed, 238 skipped, doctests passed, medium SimWorld budget test passed)
+❯ - `cargo test -p agent-doc --test test_cli mcp_finalize_close_after_capture_recovers_on_next_preflight_once -- --nocapture`
+❯ - `cargo test -p agent-doc --test test_cli mcp_finalize -- --nocapture`
+❯ - `cargo check -p agent-doc`
+❯ - `make check` (4534 tests passed, 238 skipped, doctests passed, medium SimWorld budget test passed)
 
 Commits:
-- `fecc63be` in `src/agent-doc`: `test: cover MCP finalize capture recovery`
-- `a7605c456` in parent: `agent-doc: cover MCP finalize capture recovery`
+❯ - `fecc63be` in `src/agent-doc`: `test: cover MCP finalize capture recovery`
+❯ - `a7605c456` in parent: `agent-doc: cover MCP finalize capture recovery`
 
 CI:
-- Previous `src/agent-doc` CI for `c57076c8` passed.
-- New `src/agent-doc` CI for `fecc63be` is running as `27571750330`.
-- Parent repo has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
-<!-- agent:boundary:e5ca0429 -->
+❯ - Previous `src/agent-doc` CI for `c57076c8` passed.
+❯ - New `src/agent-doc` CI for `fecc63be` is running as `27571750330`.
+❯ - Parent repo has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
+<!-- agent:boundary:efe7e147 -->
 <!-- /agent:exchange -->
 
 ## Queue

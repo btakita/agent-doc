@@ -74,7 +74,16 @@ Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
 Verification: no app code changed; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
 Confidence: high that this resolves the interrupted queue-removal guard for `#xcvg-prod-email` while preserving the external production-email gate.
 Escalation: none.
-<!-- agent:boundary:fa890024 -->
+
+### Re: [#jnzs-approval-followup] — gpt-5
+
+> **Queue prompt:**
+>
+> [#jnzs-approval-followup]
+
+
+I can’t run the harness `/clear` from inside this loaded model context, and I won’t process `#jnzs-approval-followup` here. Please clear the Codex context and re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the next queue head runs with fresh context.
+<!-- agent:boundary:a917e203 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,7 +93,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~[#dzmm-writeback-replay]~~
 - ~~[#xcvg-prod-email]~~
-- [#jnzs-approval-followup]
+- ~~[#jnzs-approval-followup]~~
 - [#67v2-auto-advance]
 - [#zwws-vestings-local]
 - [#zwws-new-deal-email]

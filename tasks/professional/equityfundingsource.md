@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -80,7 +80,21 @@ Root cause: my first pass treated "apply for a deal" as a per-deal **funding com
 **Committed + pushed** (per `#spec-test-commit-push`): submodule `60a07f5` → origin/main, superproject pointer `bc0ec6283` → origin/main.
 
 ⚠️ **Not deployed** — this preset is commit + push only. The currently-live worker (`61df3c82`) still has the fund-only logic, so the bug persists on the live site until a deploy. Say the word (or use `#…-deploy`) and I'll run `bun run deploy:worker`.
-<!-- agent:boundary:f8ff972e -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed. The `#pending-deals` fix (a pending lender account application moves deals from Available → Pending deals) is now live.
+
+- **Cloudflare worker:** `https://equityfundingsource.brian-takita.workers.dev`
+- **Version:** `bf71d6ee-3e2c-457e-8809-db0b3e5af3ae` (replaces `61df3c82`, which had the fund-only logic).
+
+No code changes this cycle — deploy of the already-committed-and-pushed build (submodule `60a07f5`, superproject `bc0ec6283`). Reload the available-deals page and your applied deal should now sit under **Pending deals** with an "Application under review" badge.
+<!-- agent:boundary:33e149ad -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,7 +102,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -525,6 +525,44 @@ pub(crate) fn response_explicitly_targets_queue_head(response: &str, queue_head:
         .any(|topic| response_topic_matches_queue_head(topic, queue_head))
 }
 
+fn hash_ids_in_queue_head(queue_head: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut rest = queue_head;
+    while let Some(start) = rest.find("[#") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find(']') else {
+            break;
+        };
+        let id = normalize_done_id(&after[..end]);
+        if !id.is_empty() && !ids.contains(&id) {
+            ids.push(id);
+        }
+        rest = &after[end + 1..];
+    }
+    for token in queue_head.split_whitespace() {
+        if let Some(raw) = token.strip_prefix('#') {
+            let id = normalize_done_id(raw.trim_end_matches(|c: char| {
+                !c.is_ascii_alphanumeric() && c != '-' && c != '_'
+            }));
+            if !id.is_empty() && !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    ids
+}
+
+fn response_topic_targets_any_hash_id_in_queue_head(response: &str, queue_head: &str) -> bool {
+    let ids = hash_ids_in_queue_head(queue_head);
+    if ids.is_empty() {
+        return false;
+    }
+    response
+        .lines()
+        .filter_map(response_heading_topic)
+        .any(|topic| ids.iter().any(|id| topic_resolves_to_exact_id(topic, id)))
+}
+
 pub(crate) fn response_heading_topic(line: &str) -> Option<&str> {
     let trimmed = line.trim().trim_start_matches('❯').trim();
     let topic = trimmed.strip_prefix("### Re:")?.trim();
@@ -734,6 +772,18 @@ pub(crate) fn queue_consumption_allowed_for_response(
         && queue_head_is_free_text_prompt(current_content)?
         && let Some(head_text) = active_queue_head_text(current_content)?
     {
+        let first_visible_head_is_drainable =
+            crate::queue_continuation::live_drainable_continuation_prompt_text(
+                file,
+                current_content,
+            )
+            .is_some_and(|drainable| queue_prompt_text_matches(&drainable, &head_text));
+        if !first_visible_head_is_drainable {
+            return Ok(response_topic_targets_any_hash_id_in_queue_head(
+                response_body,
+                &head_text,
+            ));
+        }
         return Ok(!cycle_answered_foreign_exchange_prompt(
             baseline,
             current_content,
@@ -2726,6 +2776,43 @@ mod core_tests {
             "an answered free-text head must be consumed even on the IPC-timeout closeout"
         );
     }
+
+    #[test]
+    fn consume_decision_keeps_undrainable_free_text_before_drainable_id_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#snbc2] collapse baseline file into snapshot-store variant\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" priority go -->\n",
+            "- :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`.\n",
+            "- do [#snbc2]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        assert_eq!(
+            crate::queue_continuation::live_drainable_continuation_prompt_text(&doc, content)
+                .as_deref(),
+            Some("do [#snbc2]")
+        );
+        assert!(
+            !queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: Stop blocking the turn on CI\n\nDone.",
+                &[],
+                &[],
+                &[],
+            )
+            .unwrap(),
+            "an unrelated response must not consume an undrainable leading free-text queue line"
+        );
+    }
+
     #[test]
     fn consume_decision_strikes_synthetic_preset_head_on_heading_match() {
         let dir = tempfile::tempdir().unwrap();

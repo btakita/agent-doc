@@ -829,7 +829,32 @@ Verification:
 - `git diff --check`
 
 CI was checked passively only: latest `agent-doc` CI for `bfdcbfe4` was `in_progress` as run `27581657361`; I did not wait on it.
-<!-- agent:boundary:9756cd9c -->
+
+### Re: :pushpin: JB `Run Agent Doc` on monsterrodholders.md still sends a CR instead of submitting the command. Please consolidate all send command logic into a single function so we can make this behavior more reliable. Simplify, simplify, simplify... — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` on monsterrodholders.md still sends a CR instead of submitting the command. Please consolidate all send command logic into a single function so we can make this behavior more reliable. Simplify, simplify, simplify...
+
+
+This queue head was already addressed earlier in this session by `src/agent-doc` commit `55b86a61` (`fix: submit codex routes with enter key`), with parent repo commit `3fb6810f9` carrying that submodule update.
+
+The route/direct-pane submit logic now uses a harness-specific submit mode instead of treating Codex like the CR-byte path: Codex sends literal reopen text and then a real tmux `Enter` key in one ordered sequence. Claude remains on `tmux_literal_cr`, and OpenCode remains on the Kitty return path. The diagnostics now name the Codex path as `tmux_literal_text_enter_key` / `routed_trigger_enter_key`, so future logs distinguish it from the old `tmux_literal_cr` behavior.
+
+Changed paths in that fix:
+- `agent-doc-orchestration/src/sessions.rs`
+- `agent-doc-orchestration/src/route/dispatch.rs`
+- `agent-doc-orchestration/src/flow/routed_reopen.rs`
+- `agent-doc-orchestration/src/start.rs`
+- `src/ops_report.rs`
+- `src/session_actor_cmd.rs`
+- `tests/test_cli.rs`
+- `VERSIONS.md`
+
+Coverage already landed with the fix: `codex_submit_mode_uses_literal_text_plus_real_enter_key`, `routed_trigger_submit_diagnostic_names_codex_real_enter_key`, `direct_pane_submit_mode_is_harness_specific`, plus the updated idle-queue submit-mode regression.
+
+No additional code change was needed for this queue head; this closeout records the already-shipped fix and consumes the stale queue item.
+<!-- agent:boundary:bc155457 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -837,7 +862,7 @@ CI was checked passively only: latest `agent-doc` CI for `bfdcbfe4` was `in_prog
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: [#qrefmisstrike]~~
 - ~~:pushpin: Why was there so much churn in the last queue turn? I was editing unrelated queue items. Those should be ignored. Use AST instead of byte-by-byte comparison. Be selective using CRDT merges into the document model and other areas that can cause churn.~~
-- :pushpin: JB `Run Agent Doc` on monsterrodholders.md still sends a CR instead of submitting the command. Please consolidate all send command logic into a single function so we can make this behavior more reliable. Simplify, simplify, simplify...
+- ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md still sends a CR instead of submitting the command. Please consolidate all send command logic into a single function so we can make this behavior more reliable. Simplify, simplify, simplify...~~
 - :pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item. Any item I place should have `:pushpin:` added since I made the decision to add it in a position.
 - :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
 - The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex?

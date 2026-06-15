@@ -375,6 +375,8 @@ fn run_once(
         std::fs::write(file, &content_original)?;
     }
     content_original = normalize_direct_run_prompt_prefixes(file, &content_original, &the_diff)?;
+    let queue_diff_completion_id =
+        write::queue_diff_completion_id_for_current_head(file, &content_original, &the_diff)?;
     let owned_rc;
     let rc: &crate::graph::RunContext = if let Some(provided) = run_context {
         provided.set_file_path(file.to_path_buf());
@@ -647,7 +649,14 @@ fn run_once(
         if queue_synthetic_diff
             || write::should_consume_queue_prompt_for_diff(file, Some(&the_diff))?
         {
-            queue_consumption = write::consume_queue_prompt_with_outcome(file)?;
+            let queue_completion_ids = queue_diff_completion_id
+                .clone()
+                .into_iter()
+                .collect::<Vec<_>>();
+            queue_consumption = write::consume_queue_prompts_for_done_ids_with_outcome(
+                file,
+                &queue_completion_ids,
+            )?;
         } else {
             eprintln!("{}", write::queue_skip_diagnostic_for_file(file)?);
         }

@@ -394,6 +394,75 @@ pub(crate) fn queue_head_has_explicit_completion_signal(
         .any(|raw| names_head(raw)))
 }
 
+pub(crate) fn explicit_queue_completion_ids(
+    pending_done: &[String],
+    pending_gate: &[String],
+    pending_edit: &[String],
+) -> Vec<String> {
+    pending_done
+        .iter()
+        .chain(pending_gate.iter())
+        .chain(pending_edit.iter())
+        .map(|raw| {
+            raw.split_once('=')
+                .map(|(id, _)| id)
+                .unwrap_or(raw.as_str())
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// Return the id of the pre-commit queue head when this turn targeted that
+/// exact head through the prompt diff or response heading. The queue-consume
+/// planner rechecks the live head later, so this id cannot authorize striking a
+/// different head that was reordered into first position after the decision.
+pub(crate) fn queue_targeted_completion_id_for_current_head(
+    file: &Path,
+    baseline: Option<&str>,
+    current_content: &str,
+    response_body: &str,
+    pending_done: &[String],
+) -> Result<Option<String>> {
+    if queue_head_is_free_text_prompt(current_content)? {
+        return Ok(None);
+    }
+    let Some(queue_head) = active_queue_head_text(current_content)? else {
+        return Ok(None);
+    };
+    let Some(head_id) = queue_prompt_done_id(&queue_head) else {
+        return Ok(None);
+    };
+    if !response_body.trim().is_empty()
+        && response_explicitly_targets_queue_head(response_body, &queue_head)
+    {
+        return Ok(Some(head_id));
+    }
+    if should_consume_queue_prompt_for_write(file, baseline, current_content, pending_done)? {
+        return Ok(Some(head_id));
+    }
+    Ok(None)
+}
+
+pub(crate) fn queue_diff_completion_id_for_current_head(
+    file: &Path,
+    current_content: &str,
+    diff_text: &str,
+) -> Result<Option<String>> {
+    if queue_head_is_free_text_prompt(current_content)? {
+        return Ok(None);
+    }
+    let Some(queue_head) = active_queue_head_text(current_content)? else {
+        return Ok(None);
+    };
+    let Some(head_id) = queue_prompt_done_id(&queue_head) else {
+        return Ok(None);
+    };
+    if should_consume_queue_prompt_for_diff_content(file, current_content, Some(diff_text))? {
+        return Ok(Some(head_id));
+    }
+    Ok(None)
+}
+
 pub(crate) fn queue_head_matches_done_ids(content: &str, done_ids: &[String]) -> Result<bool> {
     if done_ids.is_empty() {
         return Ok(false);
@@ -1325,6 +1394,17 @@ pub(crate) fn plan_queue_prompt_consumption(
             "queue consume: queue_active is true but document queue has no prompt to consume"
         )
     })?;
+    if leading_done_consume_count == 0 && !queue_head_is_free_text_prompt(content)? {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_consume_refused_id_backed_head_without_explicit_signal file={} head={:?}",
+                file.display(),
+                consumed_text
+            ),
+        );
+        return Ok(None);
+    }
     let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
     let node_ops = consumed_node_keys
         .keys
@@ -1930,7 +2010,47 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         assert!(!queue_head_is_free_text_prompt(unregistered).unwrap());
-        assert!(!head_id_is_registered_preset(unregistered, "advance-review"));
+        assert!(!head_id_is_registered_preset(
+            unregistered,
+            "advance-review"
+        ));
+    }
+
+    #[test]
+    fn qmisstrike_regression_refuses_reordered_id_backed_head_without_explicit_signal() {
+        // #qmisstrike-regression: a stale free-text/head-reconciliation decision may
+        // arrive after the live queue has been reordered onto an id-backed head. The
+        // planner itself must refuse to strike that new head unless an explicit
+        // --done/--pending-gate/--pending-edit id matched it.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: old free-text head\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#staleheaddupcontent]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#staleheaddupcontent] still-open tracked work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let outcome = consume_queue_prompt_with_outcome(&doc).unwrap();
+        assert!(
+            outcome.is_none(),
+            "planner must not consume an id-backed head without explicit id proof"
+        );
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- do [#staleheaddupcontent]")
+                && !result.contains("~do [#staleheaddupcontent]~"),
+            "id-backed head must remain runnable:\n{result}"
+        );
     }
     #[test]
     fn queue_consume_reconciles_diverged_snapshot_instead_of_bailing() {

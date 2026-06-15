@@ -978,8 +978,25 @@ pub fn run_stream(
                     &[],
                 ) {
                     Ok(true) => {
+                        let mut queue_completion_ids = explicit_queue_completion_ids(
+                            &flags.pending_done_ids,
+                            &flags.pending_kept_open_ids,
+                            &[],
+                        );
+                        if let Some(head_id) = queue_targeted_completion_id_for_current_head(
+                            file,
+                            baseline,
+                            &content_current,
+                            &response,
+                            &flags.pending_done_ids,
+                        )? && !queue_completion_ids
+                            .iter()
+                            .any(|id| normalize_done_id(id) == head_id)
+                        {
+                            queue_completion_ids.push(head_id);
+                        }
                         if let Err(e) =
-                            consume_queue_prompts_with_outcome(file, &flags.pending_done_ids, true)
+                            consume_queue_prompts_with_outcome(file, &queue_completion_ids, true)
                         {
                             eprintln!(
                                 "[queue] warning: consume on stream IPC-timeout failed: {}",
@@ -988,7 +1005,7 @@ pub fn run_stream(
                         }
                         if let Err(e) = mark_completed_queue_prompts_for_done_ids(
                             file,
-                            &flags.pending_done_ids,
+                            &queue_completion_ids,
                             true,
                         ) {
                             eprintln!(
@@ -998,9 +1015,14 @@ pub fn run_stream(
                         }
                     }
                     Ok(false) => {
+                        let queue_completion_ids = explicit_queue_completion_ids(
+                            &flags.pending_done_ids,
+                            &flags.pending_kept_open_ids,
+                            &[],
+                        );
                         let marked = mark_completed_queue_prompts_for_done_ids(
                             file,
-                            &flags.pending_done_ids,
+                            &queue_completion_ids,
                             true,
                         )
                         .unwrap_or_else(|e| {

@@ -2048,18 +2048,37 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             &options.pending_gate,
             &options.pending_edit,
         )?;
+        let mut queue_completion_ids = explicit_queue_completion_ids(
+            &options.pending_done,
+            &options.pending_gate,
+            &options.pending_edit,
+        );
+        if queue_consumption_allowed
+            && let Some(head_id) = queue_targeted_completion_id_for_current_head(
+                file,
+                baseline.as_deref(),
+                &current_content,
+                &response_body,
+                &options.pending_done,
+            )?
+            && !queue_completion_ids
+                .iter()
+                .any(|id| normalize_done_id(id) == head_id)
+        {
+            queue_completion_ids.push(head_id);
+        }
         match commit_mode {
             CommitMode::None => {}
             CommitMode::BestEffort => {
                 if queue_consumption_allowed {
                     if let Err(e) =
-                        consume_queue_prompts_for_done_ids_with_outcome(file, &options.pending_done)
+                        consume_queue_prompts_for_done_ids_with_outcome(file, &queue_completion_ids)
                     {
                         eprintln!("[queue] warning: consumption failed: {}", e);
                     }
                     if let Err(e) = mark_completed_queue_prompts_for_done_ids(
                         file,
-                        &options.pending_done,
+                        &queue_completion_ids,
                         false,
                     ) {
                         eprintln!("[queue] warning: done-id marking failed: {}", e);
@@ -2067,7 +2086,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 } else {
                     match mark_completed_queue_prompts_for_done_ids(
                         file,
-                        &options.pending_done,
+                        &queue_completion_ids,
                         false,
                     ) {
                         Ok(0) => eprintln!("{}", queue_skip_diagnostic_for_file(file)?),
@@ -2078,12 +2097,12 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             }
             CommitMode::Required => {
                 if queue_consumption_allowed {
-                    consume_queue_prompts_for_done_ids_with_outcome(file, &options.pending_done)?;
-                    mark_completed_queue_prompts_for_done_ids(file, &options.pending_done, false)?;
+                    consume_queue_prompts_for_done_ids_with_outcome(file, &queue_completion_ids)?;
+                    mark_completed_queue_prompts_for_done_ids(file, &queue_completion_ids, false)?;
                 } else {
                     let marked = mark_completed_queue_prompts_for_done_ids(
                         file,
-                        &options.pending_done,
+                        &queue_completion_ids,
                         false,
                     )?;
                     if marked == 0 {

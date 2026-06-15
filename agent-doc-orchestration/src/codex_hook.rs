@@ -600,6 +600,17 @@ fn try_recover_repeated_queue_head_response(
                 });
             }
         };
+    let content_before_repair = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let queue_completion_ids = crate::write::queue_targeted_completion_id_for_current_head(
+        file,
+        None,
+        &content_before_repair,
+        &response_to_write,
+        &[],
+    )?
+    .into_iter()
+    .collect::<Vec<_>>();
 
     crate::repair::save_pending(file, &response_to_write)?;
     crate::ops_log::log_op(file, "codex_stop_repeated_queue_response_saved");
@@ -622,7 +633,10 @@ fn try_recover_repeated_queue_head_response(
     }
 
     if active_auto_queue_prompt(file)?.as_deref() == Some(prompt) {
-        match crate::write::consume_queue_prompt_with_outcome(file) {
+        match crate::write::consume_queue_prompts_for_done_ids_with_outcome(
+            file,
+            &queue_completion_ids,
+        ) {
             Ok(Some(outcome)) => {
                 note.push_str(&format!(
                     " The hook consumed the completed queue head {:?} before commit.",
@@ -1001,6 +1015,26 @@ fn attempt_stop_closeout(
     } else {
         false
     };
+    let queue_completion_ids = if queue_synthetic_cycle && captured_response_targets_queue_head {
+        match &payload {
+            crate::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+                let content_before_repair = std::fs::read_to_string(file)
+                    .with_context(|| format!("failed to read {}", file.display()))?;
+                crate::write::queue_targeted_completion_id_for_current_head(
+                    file,
+                    None,
+                    &content_before_repair,
+                    response.as_ref(),
+                    &[],
+                )?
+                .into_iter()
+                .collect::<Vec<_>>()
+            }
+            _ => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
 
     let mut note = String::new();
     match payload {
@@ -1032,7 +1066,10 @@ fn attempt_stop_closeout(
         && repair_outcome.replayed_response()
         && captured_response_targets_queue_head;
     if queue_repair_explicitly_closes_head {
-        match crate::write::consume_queue_prompt_with_outcome(file) {
+        match crate::write::consume_queue_prompts_for_done_ids_with_outcome(
+            file,
+            &queue_completion_ids,
+        ) {
             Ok(Some(outcome)) => {
                 note.push_str(&format!(
                     " The hook consumed the completed queue head {:?} before commit.",

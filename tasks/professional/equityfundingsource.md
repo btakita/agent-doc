@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -103,7 +103,7 @@ Result:
 - Smoke checks: `/` returned 200, `/funded-deals` returned 200, `/portal-admin/pipeline` returned 303 to `/login?role=admin&next=%2Fportal-admin%2Fpipeline` as expected for unauthenticated access.
 
 Changed paths: none in this deploy cycle; the EFS repo remained clean on `main...origin/main`. Escalation: none. Confidence: high.
-<!-- agent:boundary:0916daf6 -->
+<!-- agent:boundary:778a9af2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,6 +111,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- What are #next-steps to follow-up on #gq5c?
 <!-- /agent:queue -->
 
 ## Backlog

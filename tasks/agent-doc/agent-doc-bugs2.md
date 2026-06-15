@@ -637,7 +637,15 @@ Inspection commands used:
 - `rg -n "Ctrl|C-c|C-z|send_key|send-keys|control|interrupt|suspend|SIGINT|SIGTSTP|\\^C|\\^Z" agent-doc-orchestration/src src specs VERSIONS.md`
 - `tsift --envelope search "send_key control interrupt codex" --budget normal`
 - `tsift --envelope search "Ctrl C Ctrl Z Codex" --budget normal`
-<!-- agent:boundary:6d4c6f54 -->
+
+### Re: backlog queue sync check — gpt-5
+
+Confirmed against the current document state: backlog-to-queue sync is working here after preflight convergence.
+
+The `#codexctrlz` backlog item I added in the prior cycle is now present in `agent:queue` as `do [#codexctrlz]`. Preflight reported `synced backlog -> queue (Append, 5 active id(s))`, and the visible queue now contains that line after `#snbc2`. The apparent gap was timing plus the failed IPC closeout: the backlog item was added during the previous cycle, and the queue materialized it on the next preflight/maintenance pass.
+
+I did not add another backlog item for this line because the current evidence shows the document's `agent:backlog priority queue` sync did add the item to the queue.
+<!-- agent:boundary:2e0c6b1e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -645,9 +653,9 @@ Inspection commands used:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - do [#qt32]
 - do [#2v7b]
-- `agent:backlog` with `queue` is not adding items into the queue...in this document.
 - do [#efsmrgmarkers]
 - do [#snbc2]
+- do [#codexctrlz]
 <!-- /agent:queue -->
 ###
 <!--

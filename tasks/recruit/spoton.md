@@ -58,16 +58,16 @@ Confidence: medium-high for transcript text, medium for diarization. The diariza
 
 Added the requested contacts and created a versioned transcript artifact:
 
-❯ - [SpotOn call transcript - 2026-06-11](spoton-2026-06-11-call-transcript.md)
-❯ - Contacts included: Rafael Alonso (`https://www.linkedin.com/in/rafaalonso/`) and Mike Kai (`https://www.linkedin.com/in/mikekai/`)
+- [SpotOn call transcript - 2026-06-11](spoton-2026-06-11-call-transcript.md)
+- Contacts included: Rafael Alonso (`https://www.linkedin.com/in/rafaalonso/`) and Mike Kai (`https://www.linkedin.com/in/mikekai/`)
 
 The transcript file includes the contact table, speaker map, call summary, and the full timestamped diarized transcript. I used the local recording at `../../../../../Videos/2026-06-11 12-31-50-compressed.mp4`, extracted meeting frames with the `watch` workflow, read the visible Zoom labels, transcribed locally with Whisper `turbo`, then clustered speaker embeddings into Rafael / Brian / Mike. No external audio transcription API was used because the watch setup has no Whisper API key configured.
 
 Verification:
 
-❯ - `make check` passed.
-❯ - `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-❯ - `gh workflow list` shows only `Agent Doc`; the latest `Agent Doc` run was queued when checked.
+- `make check` passed.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+- `gh workflow list` shows only `Agent Doc`; the latest `Agent Doc` run was queued when checked.
 
 Confidence: medium-high for transcript text, medium for diarization. The diarization is automated and timestamped for review; short back-and-forth turns can still be merged into one speaker line near speaker changes.
 
@@ -96,8 +96,21 @@ The core workflow is already useful for me, and I am dogfooding it every day: ma
 
 The main reason it is not released yet is onboarding. I know the system well enough to be productive, and there is enough redundancy/recovery built in for me to work through rough edges. But someone new would still need to learn too much about the document structure and recovery signals before getting value.
 
+I want to respect your time, so I would rather share it once the docs, website, examples, and intro videos make the workflow clear without me walking you through it.
+❯ I edited the shorter response. I don't want to propose the team use it. Just have rafael-onso try it out. Please add moving from a turn-based system to real-time editing being a challenge with edge cases and architect work wrt solving race conditions with architecture changes.
+
+### Re: Shorter Rafael note — gpt-5
+
+Here is a shorter LinkedIn version:
+
+Hi Rafael, quick update on agent-doc. I am going to hold off a bit before sending you a release link because I want your first impression to be a good one.
+
+The core workflow is already useful for me, and I am dogfooding it every day: markdown docs as the interface to agents, queues/backlogs for work, edits while turns are running, and strict preflight/write/session-check paths so the work stays durable.
+
+The main reason it is not released yet is onboarding. I know the system well enough to be productive, and there is enough redundancy/recovery built in for me to work through rough edges. But someone new would still need to learn too much about the document structure and recovery signals before getting value.
+
 I want to respect your time, so I would rather share it once the docs, website, examples, and intro videos make the workflow clear without me walking you through it. I still think it could be relevant to your team, especially given how much you are leaning into AI-assisted engineering, but I want it to be ready enough that you can evaluate the idea instead of reverse-engineering my setup.
-<!-- agent:boundary:45fa19c8 -->
+<!-- agent:boundary:369c8b08 -->
 <!-- /agent:exchange -->
 
 ## Queue

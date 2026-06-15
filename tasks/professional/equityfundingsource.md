@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -88,7 +88,29 @@ Done — unified, spec + tests updated, committed, pushed, and deployed.
 - **Available deals empty state** (no published deals) → previously had a button-less notice and no form at all. It now surfaces the application form inline too, so the button always has a real target.
 - **Available deals** (featured deal) and **Deal detail** → the application form (`LenderAccountGate`) is rendered inline, so the button now **scrolls to it** via a new `#investor-lender-application-form` anchor (added `scroll-margin-top` so it lands cleanly below the topbar).
 - **Dashboard** (form not on page) → button links to `/portal-investor/available-deals`, where selecting a deal surfaces the form. (Unchanged.)
-<!-- agent:boundary:ba8b2c56 -->
+
+### Re: Remove "Lender account application — incomplete" notice from the Available deal dialog + deal page — opus-4-8
+
+> **Queue prompt:**
+>
+> Remove "Lender account application — incomplete" component from the Available deal dialog in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard and in https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3. deploy
+
+
+Done and deployed.
+
+The "Lender account application — incomplete" banner is the `LenderApplicationNotice` component. Both targets — the dashboard **Available-deal dialog** and the standalone **`/portal-investor/deals/<id>`** page — render the same `InvestorDealDetail` (the dialog embeds it), so the notice lived in one place: `deal_detail.tsx`. I removed it from the no-lender-account branch there; the `LenderAccountGate` below it already carries its own incomplete / awaiting-review status copy ("Complete your lender account application" + explanatory text), so the separate banner was redundant.
+
+**Changes** (`src/equityfundingsource-dev`, committed `5d8ba77`, pushed to origin/main):
+- `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — dropped `<LenderApplicationNotice …>` and its now-unused imports (`LenderApplicationNotice`, `LENDER_APPLICATION_FORM_HREF`).
+- `tests/lender-account-gate.test.ts` — updated the deal-detail assertions to expect the notice is absent while the gate stays.
+
+The dashboard's own Available-deals **card list** still keeps its notice (that's not the dialog, so it's out of scope for this request).
+
+**Verification:** full suite green (692 pass / 0 fail), `build` + `build:worker` clean. Deployed to Cloudflare twice — once for the change, then rebuilt + redeployed from current `main` after a rebase pulled in concurrent `#deal-first-apply-cta` work on the same files, so the live worker (version `852a23bb`) matches HEAD.
+<!-- agent:boundary:ba15237d -->
+- `tests/lender-account-gate.test.ts` — updated the deal-detail assertions to expect the notice is absent while the gate stays.
+- `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — dropped `<LenderApplicationNotice …>` and its now-unused imports (`LenderApplicationNotice`, `LENDER_APPLICATION_FORM_HREF`).
+<!-- agent:boundary:acc3d04e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,7 +118,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Remove "Lender account application — incomplete" component from the Available deal dialog in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard and in https://equityfundingsource.brian-takita.workers.dev/portal-investor/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3. deploy
 <!-- /agent:queue -->
 
 ## Backlog

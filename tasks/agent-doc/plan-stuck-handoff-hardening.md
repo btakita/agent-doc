@@ -196,3 +196,45 @@ within threshold; then fix whichever of (1)–(3) holds. Until M1 actually fires
 window is gc-cadence (minutes), not 45s. (Could not be re-filed into `agent:backlog` this
 session — the doc's fenced `<!-- agent:queue -->` examples break the granular-write parser,
 `#lintfence`.)
+
+## RESOLVED — 2026-06-15 (root cause = hypothesis #2; M1b structural watchdog landed)
+
+**Root cause confirmed in code (hypothesis #2).** `promote_handoff` (`rpc.rs` handler)
+flips a replacement straight to `handoff_state = Stable` and clears `handoff_started_at`
+the instant the client asks — `ControllerHandoffState::Promoted` is parsed/serialized/
+tested but **never written as a production transition**. The handoff client then does
+`std::fs::rename(temp_sock → public_sock)` (`handoff_stale_controller`). A client that dies
+*after* `promote_handoff` but *before* that rename leaves a `Stable`-in-memory controller
+**stranded on its temp `controller-handoff-*` socket**. M1's
+`controller_self_watchdog_should_suicide` predicate only fires on `Preparing`/`Promoted`,
+so it cannot see a `Stable` orphan — exactly why `stale_preparing_controller_self_reaped`
+had zero occurrences while the `/proc`-cmdline gc/M5 sweep (which keys off the frozen
+`--handoff-state preparing` cmdline) reaped them at 7–21 min. The wedged orphan races the
+IDE/ipc.sock buffer during that window (observed live 2026-06-15: it injected `❯ ` prompt
+glyphs and spliced duplicated/reordered response lines into agent-doc-bugs2.md mid-finalize).
+
+**Fix (M1b — structural stranded-replacement watchdog), `rpc.rs`:**
+- `controller_handoff_replacement_is_stranded(handoff_temp_socket, launched_elapsed, threshold)`
+  — independent of in-memory `handoff_state`. `serve_with_options` captures the launch
+  socket as `handoff_temp_socket` whenever it differs from the public socket (a
+  `controller-handoff-*` temp socket = a replacement). A *completed* handoff removes that
+  path via the promote rename, so a temp socket that **still exists past the threshold**
+  proves the promotion never finished → self-reap. The `launched_elapsed > threshold` guard
+  spares a healthy young handoff. Wired into the serve-loop `WouldBlock` branch as
+  `should_suicide || is_stranded`.
+- Hardened `controller_self_watchdog_suicide` with a generation-ownership guard: it now only
+  supersedes the **shared per-project** bootstrap state file with `Failed` while that file
+  still names THIS controller (pid + generation). A stranded replacement can be a stale
+  generation a newer clean controller already recorded — clobbering it to `Failed` would
+  churn the next bind into relaunching over a healthy controller. When the record is no
+  longer ours, the process still exits (that stops the buffer race) but leaves the on-disk
+  record correct.
+- Coverage (6 new deterministic unit tests in `project_controller.rs`):
+  stranded-when-temp-persists, not-stranded-after-rename, not-stranded-within-threshold,
+  none-socket-never-stranded, suicide-marks-failed-for-stranded-`Stable`,
+  suicide-preserves-superseded-generation.
+
+Net effect: a wedged handoff orphan now self-terminates within `threshold` (45s default)
+regardless of whether it died before or after `promote_handoff`, instead of surviving on
+the minutes-scale gc cadence. The binary clears the invalid state and the next bind promotes
+a clean controller — no manual `pkill` / `git checkout` recovery needed.

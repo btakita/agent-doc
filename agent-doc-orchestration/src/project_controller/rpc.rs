@@ -1434,6 +1434,117 @@ pub(crate) fn stale_supervisor_pid_from_pause_reason(reason: &str) -> Option<u32
     }
 }
 
+pub(crate) fn spent_preset_id_from_pause_reason(reason: &str) -> Option<String> {
+    let marker = " preset head is spent";
+    let lower = reason.to_ascii_lowercase();
+    let idx = lower.find(marker)?;
+    let candidate = lower[..idx]
+        .rsplit(|ch: char| ch.is_whitespace() || matches!(ch, ':' | ';' | ',' | '(' | '['))
+        .next()?
+        .trim()
+        .trim_start_matches('#');
+    if candidate.is_empty()
+        || !candidate
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    {
+        return None;
+    }
+    Some(candidate.to_string())
+}
+
+fn active_queue_head_is_registered_preset(content: &str, preset_id: &str) -> Result<bool> {
+    let Some(head) = crate::write::active_queue_head_text(content)? else {
+        return Ok(false);
+    };
+    let normalized = crate::write::normalize_queue_prompt_text(&head);
+    Ok(
+        crate::write::topic_resolves_to_exact_id(&normalized, preset_id)
+            && crate::write::head_id_is_registered_preset(content, preset_id),
+    )
+}
+
+fn resume_spent_preset_pause(
+    project_root: &Path,
+    file: &Path,
+    document_id: &str,
+    reason: &str,
+) -> Result<()> {
+    let conn = open_state_db(project_root)?;
+    state_store::upsert_queue_control_in_db(
+        &conn,
+        &state_store::QueueControlInsert {
+            scope_kind: "document",
+            scope_id: document_id,
+            state: "resumed",
+            reason: Some(reason),
+            operation_receipt_id: None,
+        },
+    )?;
+    crate::ops_log::log_op(file, reason);
+    Ok(())
+}
+
+fn repair_spent_preset_pause_before_dispatch(
+    project_root: &Path,
+    file: &Path,
+    document_id: &str,
+    control: &QueueControlStatus,
+) -> Result<bool> {
+    if control.state != "paused" {
+        return Ok(false);
+    }
+    let Some(reason) = control.reason.as_deref() else {
+        return Ok(false);
+    };
+    let Some(preset_id) = spent_preset_id_from_pause_reason(reason) else {
+        return Ok(false);
+    };
+    let content = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "spent-preset pause repair: failed to read {}",
+            file.display()
+        )
+    })?;
+    if !active_queue_head_is_registered_preset(&content, &preset_id)? {
+        resume_spent_preset_pause(
+            project_root,
+            file,
+            document_id,
+            &format!(
+                "spent_preset_pause_repaired file={} preset=#{} action=resume_absent_head result=cleared",
+                file.display(),
+                preset_id
+            ),
+        )?;
+        return Ok(true);
+    }
+
+    let outcome = crate::write::consume_queue_prompt_with_outcome(file).with_context(|| {
+        format!(
+            "spent-preset pause repair: failed to consume #{}",
+            preset_id
+        )
+    })?;
+    if let Some(outcome) = outcome {
+        resume_spent_preset_pause(
+            project_root,
+            file,
+            document_id,
+            &format!(
+                "spent_preset_pause_repaired file={} preset=#{} action=consume_head consumed={:?} remaining={} drained={} result=cleared",
+                file.display(),
+                preset_id,
+                outcome.consumed_text,
+                outcome.remaining,
+                outcome.drained
+            ),
+        )?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 /// `#ctlrecycle` — pure debounce decision shared by controller (R1) and supervisor
 /// (R3). Given whether the process currently "wants recycle AND is idle", the
 /// instant staleness was first observed, the clock, and the grace window, returns
@@ -2832,7 +2943,7 @@ pub(crate) fn handle_dispatch(
     }
     let record = actor_record_from_authority(bootstrap, runtime, &document_id)?
         .with_context(|| format!("missing actor record for dispatch {}", file.display()))?;
-    let queue_control = {
+    let mut queue_control = {
         let conn = open_state_db(&bootstrap.project_root)?;
         state_store::load_effective_queue_control_from_db(
             &conn,
@@ -2840,6 +2951,16 @@ pub(crate) fn handle_dispatch(
             &bootstrap.project_root.to_string_lossy(),
         )?
     };
+    if let Some(control) = queue_control.as_ref()
+        && repair_spent_preset_pause_before_dispatch(
+            &bootstrap.project_root,
+            &file,
+            &document_id,
+            control,
+        )?
+    {
+        queue_control = None;
+    }
     let queue_block_stage = queue_control.as_ref().and_then(|control| {
         if control.state == "paused" {
             Some("queue_paused")

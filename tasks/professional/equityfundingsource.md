@@ -53,7 +53,16 @@ Commands: `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-do
 Verification: no code changes; no app tests run. Document closeout is through `agent-doc finalize` and post-finalize session check.
 Confidence: high that implementation is blocked until the TMO write contract is known.
 Escalation: none.
-<!-- agent:boundary:8c95c214 -->
+
+### Re: [#xcvg-prod-email] — gpt-5
+
+> **Queue prompt:**
+>
+> [#xcvg-prod-email]
+
+
+I can’t perform a harness `/clear` from inside this already-loaded model context. I’m going to stop here rather than draining `#xcvg-prod-email` in the stale context; re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` after `/clear` so the queue head runs cleanly.
+<!-- agent:boundary:2e5ef687 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,7 +71,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~[#dzmm-writeback-replay]~~
-- [#xcvg-prod-email]
+- ~~[#xcvg-prod-email]~~
 - [#jnzs-approval-followup]
 - [#67v2-auto-advance]
 - [#zwws-vestings-local]

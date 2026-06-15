@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,46 @@ committed
 Compacted content:
 - Archived 6 response topic(s): Investor dashboard annual-requirements alert; Investor dashboard requirements dialog stack; Queue stall logged as #agent-doc-bug + state repaired; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:e8a2c1cf -->
+
+### Re: Annual requirements edit submission — gpt-5
+
+> **Queue prompt:**
+>
+> The "Annual requirements" edit page + dialog "Edit submission" button should open a dialog to edit the existing submission under review. deploy
+
+
+Implemented, pushed, and deployed.
+
+Changed paths:
+- `app/equityfundingsource/lib/investor/accreditation/index.ts`
+- `app/equityfundingsource/lib/investor/documents_repo.ts`
+- `app/equityfundingsource/lib/investor/routes.ts`
+- `app/equityfundingsource/lib/investor/shared.ts`
+- `lib/ui--browser--efs/portal/investor/accreditation.tsx`
+- `lib/ui--browser--efs/portal/investor/dashboard.tsx`
+- `tests/investor-documents.test.ts`
+- `tests/investor-portal-e2e.test.ts`
+
+What changed:
+- The Annual requirements page button now opens a modal dialog instead of an inline blank form.
+- The dashboard Requirements dialog `Edit submission` button now opens the same shared edit modal.
+- The edit modal receives the existing accreditation submission, preloads verification type and notes, and keeps replacement evidence uploads on the existing upload flow.
+- Added `PATCH /api/investor/accreditation` for metadata-only edits to the latest pending submission that already has evidence, so investors can update type/notes while EFS is reviewing without uploading another file.
+
+Commit:
+- `81b06ca fix(investor): edit under-review requirements submissions (#req-review)` pushed to `origin/main` in `src/equityfundingsource-dev`.
+
+Verification:
+- `bun test tests/investor-documents.test.ts tests/investor-portal-e2e.test.ts` passed.
+- `make check` passed: 706 tests, app build, and worker build all completed with exit 0.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` reported no remote migrations to apply before and after deploy.
+- `make deploy` completed and deployed Worker version `5601f050-a8cf-4b26-8b16-d396e37ff943`.
+- Live smoke checks: `/` returned `200`; `/portal-investor` returned `303` auth redirect.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:d6c50c7c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +85,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The "Annual requirements" edit page + dialog "Edit submission" button should open a dialog to edit the existing submission under review. deploy
 <!-- /agent:queue -->
 
 ## Backlog

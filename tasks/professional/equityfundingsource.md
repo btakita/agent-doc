@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,141 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-045133.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-055024.md`*
 
 Compacted content:
-- Archived 5 response topic(s): do [#cgw7]; last EFS call; deploy; 2 more
+- Archived 6 response topic(s): Investor dashboard annual-requirements alert; Investor dashboard requirements dialog stack; Queue stall logged as #agent-doc-bug + state repaired; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-
-### Re: Investor dashboard annual-requirements alert — opus-4-8
-
-> **Queue prompt:**
->
-> Add an alert in https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard about requirements activity and if the investor needs to complete the annual requirements document. deploy
-
-
-Added a requirements alert to the investor dashboard and deployed it.
-
-**What it does** — A banner now renders near the top of `/portal-investor/dashboard` (under the topbar) telling the investor the status of their annual requirements (investor questionnaire + accreditation) and whether they need to complete the annual requirements document. It fetches live status from `/api/investor/accreditation` and links to the Requirements page (`/portal-investor/accreditation`).
-
-It only shows when there is something to do, so a verified-and-current investor sees no noise:
-- **pending** → "action needed" (red) → *Complete requirements*
-- **rejected** → "resubmission needed" (red) → *Resubmit requirements*
-- **expired** → "renewal overdue" (red) → *Renew requirements*
-- **verified + renewal window open** (`renewal_opens_at <= now`) → "renewal open" (amber, with the expiry date) → *Renew requirements*
-
-**Files** — `lib/ui--browser--efs/portal/investor/dashboard.tsx` (new `RequirementsAlert` + `requirements_alert_` logic, mirrors the accreditation view shape) and a source-assertion test in `tests/investor-portal-e2e.test.ts`.
-
-**Verification** — `bun run check` green: 701 tests pass (36 in the investor-portal e2e file), worker bundle built. Committed in the EFS submodule as `fa6c587`.
-
-**Deployed** — `bun run deploy:worker` succeeded → https://equityfundingsource.brian-takita.workers.dev (version `6b27ec05-5a48-4abe-8338-67897bb35a73`). Live now.
-
-### Re: Investor dashboard requirements dialog stack — opus-4-8
-
-> **Queue prompt:**
->
-> On https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard, add the dialog stack for the Investor questionaire...both the Requirements and the Complete Requirements. Both the dialogs should match the https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation forms
-
-
-> **Queue prompt:**
->
-> On `/portal-investor/dashboard`, add the dialog stack for the Investor questionnaire — both the Requirements and the Complete Requirements. Both dialogs should match the `/portal-investor/accreditation` forms.
-
-The dashboard requirements alert now opens a **dialog stack in place** instead of navigating to the Requirements page, and both dialogs reuse the exact components the accreditation page renders, so they match it verbatim.
-
-**What it does**
-- The alert CTA (`Complete / Resubmit / Renew requirements`) is now a button that opens the **Requirements dialog** — the questionnaire status + requirements tracker read view (`RequirementsStatusView`).
-- Inside it, **Complete / Update questionnaire** opens the **Complete Requirements dialog** stacked on top (`z-[1001]`) — the upload form (`CompleteRequirementsForm`: verification type, CPA/attorney document drop zone, notes, submit-for-review).
-- On submit, the inner dialog closes, both the dialog and the dashboard alert reload live status (a verified-and-current investor sees the alert disappear).
-
-**How it matches the accreditation page** — I extracted `CompleteRequirementsForm` and `RequirementsStatusView` (plus the `accreditation_view_T` type) out of `accreditation.tsx` and now both the `/portal-investor/accreditation` page and the dashboard dialogs render the same components — no duplicated markup, guaranteed parity. The form still posts to `/api/investor/accreditation/upload`.
-
-**Files** — `lib/ui--browser--efs/portal/investor/accreditation.tsx` (extract + export the two components), `lib/ui--browser--efs/portal/investor/dashboard.tsx` (alert CTA → `RequirementsDialog` + `CompleteRequirementsDialog` stack), and `tests/investor-portal-e2e.test.ts` (two new source-assertion tests).
-
-**Verification** — `bun run check` green: **703 tests pass**, worker bundle built. Committed in the EFS submodule as `fc31aaa` and pushed to `origin/main`.
-
-Next in the queue: the multi-file CPA/attorney upload component, then deploy.
-
-### Re: Queue stall logged as #agent-doc-bug + state repaired — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Add multi-file upload to the "CPA / attorney letter or supporting document" field in https://equityfundingsource.brian-takita.workers.dev/portal-investor/accreditation — the dialog should allow multiple files using our standard multi-file upload component.
-
-
-The stalled-queue state is now logged as an agent-doc bug and the live queue is repaired so it can drain.
-
-**Root cause** — `queue_continuation::is_drainable_queue_head` classifies a free-text queue head as drainable only if it carries a `#id`, ends with `?`, or contains a verb from a hardcoded `QUEUE_DIRECTIVE_VERBS` list. That list is missing `deploy` entirely, and the CPA line's imperatives (`allow` / `use`) aren't in it either, so both genuine work items were demoted to `queue_stale_noise_lines` → `queue_continuation_required=false` → the drain stalled. The queue's own `preset="#spec-test-commit-push"` + `go` context (the preset supplies the verb per line) is ignored.
-
-**Bug logged (#goqnoise)** — Plan filed at `tasks/agent-doc/plan-go-queue-noise-misclassifies-directive-heads.md` (symptom, root cause, three fix options — preferred: make drainability preset-aware so every line in a `preset=`/`go` queue is a directive by construction; plus add the missing `deploy` verb regardless). Per the `#agent-doc-bug` preset, the fix is **not** implemented.
-  - The `agent-doc-bugs2.md` backlog pointer could **not** be added: that doc is owned by a different live pane (`%25`), so an IPC-safe cross-doc `write` is rejected and direct-editing a foreign live doc would trigger the very queue-churn this bug is about. Add it from the bugs2 session with:
-    `agent-doc write tasks/agent-doc/agent-doc-bugs2.md --commit --pending-add '[#goqnoise] go-mode queue misclassifies real directive heads as stale noise → drain stalls. Plan: tasks/agent-doc/plan-go-queue-noise-misclassifies-directive-heads.md'`
-
-**State repaired** — Reworded the two stalled queue lines so the current binary's classifier recognizes them as directives (meaning preserved):
-- CPA line now leads with `Add multi-file upload to the "CPA / attorney letter…" field …` (`add` is a recognized verb).
-- `deploy` → `Run deploy (bun run deploy:worker) to ship the changes.` (`run` is recognized).
-
-Preflight now reports `queue_drainable_head_count=2` / `queue_continuation_required=true` — the queue will drain: next the multi-file CPA/attorney upload component, then deploy.
-
-### Re: Multi-file upload for the CPA / attorney letter field — opus-4-8
-
-Already implemented and committed — no code change needed this cycle.
-
-The accreditation upload form (`lib/ui--browser--efs/portal/investor/accreditation.tsx`, `CompleteRequirementsForm`) already uses our standard multi-file upload component for the **"CPA / attorney letter or supporting document"** field:
-
-- **`FileDropZone`** with `multiple` (shared `portal/shared/ui.tsx` — renders `<input ... multiple>`, `onFiles` returns every selected/dropped file).
-- State is `files: File[]`; new selections accumulate (`set_files(prev => [...prev, ...fs])`).
-- **`SelectedFileList`** renders each chosen file with per-row remove.
-- Submit loops over `files`, POSTing each to `/api/investor/accreditation/upload`.
-- Drop-zone hint: "You can attach multiple files."
-
-This shipped in commit `5a0e0c4` ("investor requirements: multi-file CPA/attorney upload via standard component (#multi-file-list)"); working tree is clean. The same form backs both the `/portal-investor/accreditation` page and the dashboard Requirements dialog (`#req-dialog`), so multi-file works in both.
-
-Remaining queue head is the deploy (`bun run deploy:worker`) to ship it live — that drains next.
-
-### Re: Deploy (bun run deploy:worker) — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Run deploy (bun run deploy:worker) to ship the changes.
-
-
-Deployed. The worker is live with the multi-file CPA/attorney upload.
-
-- `bun run deploy:worker` succeeded — uploaded the new browser bundle (`index.browser-PWCMEDZG.js`, the one carrying the multi-file accreditation form).
-- **Version ID:** `84b1df88-8791-4b58-8221-15bc0da255bb`
-- **URL:** https://equityfundingsource.brian-takita.workers.dev
-- All bindings (D1, R2 documents/assets/tmo-cache, durable objects, rate limiter, email env) re-bound cleanly; worker startup 21 ms.
-
-Both queue heads are now drained: multi-file upload was already in code (`#multi-file-list`, `5a0e0c4`) and is now shipped live.
-
-### Re: Annual requirements — show "under review" + allow editing after submit — opus-4-8
-
-> **Queue prompt:**
->
-> In the lender Annual requirements flow, I submitted the form + documents. The stage should be locked in EFS review. This should allow editing the submission. However, "Complete questionnaire" button is still present and https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard still has the "Annual requirements — action needed" with "Complete requirements" alert. The alert should indicate the Annual requirements are under review and edits can be made. deploy
-
-
-> **Queue prompt:**
->
-> In the lender Annual requirements flow, I submitted the form + documents. The stage should be locked in EFS review. This should allow editing the submission. However, "Complete questionnaire" button is still present and the dashboard still shows the "Annual requirements — action needed" / "Complete requirements" alert. The alert should indicate the Annual requirements are under review and edits can be made. deploy
-
-Fixed. A submitted-but-not-yet-reviewed questionnaire now reads as **under review** everywhere, and editing the submission stays available. Shipped + deployed.
-
-**Root cause** — After you submit the form + documents, the backend keeps `status='pending'` and sets `has_evidence=true`; only an EFS admin flips it to `verified`/`rejected` (`documents_repo.ts:investor_accreditation_view_`). The requirements tracker already understood this ("Awaiting EFS reviewer approval"), but the **dashboard alert** and the **button labels** treated *all* `pending` as "not started" — so you saw "Annual requirements — action needed" / "Complete requirements" / "Complete questionnaire" even though it was already in review.
-
-**What changed** (the under-review state is now `status==='pending' && has_evidence`):
-- **Dashboard alert** (`dashboard.tsx`) — new branch *ahead of* the action-needed branch: heading **"Annual requirements — under review"**, reminder (amber) tone, copy "…under review by EFS. You can still edit your submission while it is being reviewed." The alert CTA reads **"Edit submission"**.
-- **Button labels** — the dialog's questionnaire button and the Requirements page button now read **"Edit submission"** while under review (still "Update questionnaire" once verified, "Complete questionnaire" before first submit). Editing the submission was always wired; the label just implied it wasn't done.
-- **Status pill** — the Questionnaire-status row now shows **"Under review"** instead of "Pending" once evidence is submitted.
-- Logic is centralized in three exported helpers in `accreditation.tsx` (`accreditation_under_review_`, `accreditation_display_status_`, `questionnaire_action_label_`) so the dashboard dialog and the Requirements page stay in lockstep.
-
-**Files** — `lib/ui--browser--efs/portal/investor/accreditation.tsx`, `lib/ui--browser--efs/portal/investor/dashboard.tsx`, `tests/investor-portal-e2e.test.ts` (new `#req-review` source-assertion test).
-
-**Verification** — `bun run check` green: **705 tests pass**, worker bundle built. Committed `b02dab6`, pushed to `origin/main`.
-
-**Deployed** — `bun run deploy:worker` succeeded → https://equityfundingsource.brian-takita.workers.dev (version `23323d36-36eb-4d12-8f3b-44314586107e`). Live now — reload the investor dashboard; with your submission in place the banner should read "Annual requirements — under review" with an **Edit submission** button.
-<!-- agent:boundary:5d7b29ee -->
+<!-- agent:boundary:e8a2c1cf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -175,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- The "Annual requirements" edit page + dialog "Edit submission" button should open a dialog to edit the existing submission under review. deploy
 <!-- /agent:queue -->
 
 ## Backlog

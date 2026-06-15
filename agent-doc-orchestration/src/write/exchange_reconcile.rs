@@ -346,7 +346,10 @@ pub(crate) fn is_exchange_code_fence_delimiter(trimmed: &str) -> bool {
     trimmed.chars().take_while(|ch| *ch == first).count() >= 3
 }
 
-pub(crate) fn dedupe_live_prompt_prefix_variants_in_tail(content: &str, file: &Path) -> (String, bool) {
+pub(crate) fn dedupe_live_prompt_prefix_variants_in_tail(
+    content: &str,
+    file: &Path,
+) -> (String, bool) {
     let Ok(components) = component::parse(content) else {
         return (content.to_string(), false);
     };
@@ -454,7 +457,10 @@ pub(crate) fn dedupe_live_prompt_prefix_variants_in_tail(content: &str, file: &P
     (repaired, true)
 }
 
-pub(crate) fn dedupe_adjacent_prompt_prefix_duplicates(content: &str, file: &Path) -> (String, bool) {
+pub(crate) fn dedupe_adjacent_prompt_prefix_duplicates(
+    content: &str,
+    file: &Path,
+) -> (String, bool) {
     let Ok(components) = component::parse(content) else {
         return (content.to_string(), false);
     };
@@ -508,7 +514,11 @@ pub(crate) fn dedupe_adjacent_prompt_prefix_duplicates(content: &str, file: &Pat
     (repaired, true)
 }
 
-pub(crate) fn dedupe_prompt_lines_against_before(before: &str, after: &str, file: &Path) -> (String, bool) {
+pub(crate) fn dedupe_prompt_lines_against_before(
+    before: &str,
+    after: &str,
+    file: &Path,
+) -> (String, bool) {
     let Some(before_exchange) = exchange_content(before) else {
         return (after.to_string(), false);
     };
@@ -662,6 +672,53 @@ mod core_tests {
         assert!(log.contains("ipc_prompt_duplicate_repaired"));
         assert!(log.contains("ipc_snapshot_deduped"));
     }
+
+    #[test]
+    fn ipc_snapshot_dedupes_duplicate_singleton_component_from_before_content() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let before = concat!(
+            "<!-- agent:status -->\n",
+            "ready\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Old content.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#canonical]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#canonical] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let after = before.replace(
+            "<!-- agent:backlog -->",
+            "<!-- agent:queue preset=\"#stale\" priority go -->\n- do [#stale]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->",
+        );
+        fs::write(&doc, before).unwrap();
+
+        let (repaired, changed) =
+            dedupe_ipc_snapshot_content(&doc, Some(before), &after, "test_ipc").unwrap();
+
+        assert!(changed);
+        assert_eq!(
+            repaired.matches("<!-- agent:queue").count(),
+            1,
+            "duplicate singleton queue block must be removed:\n{repaired}"
+        );
+        assert!(repaired.contains("- do [#canonical]"));
+        assert!(!repaired.contains("- do [#stale]"));
+        assert_eq!(
+            crate::component::structural_corruption_reason(&repaired),
+            None
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("duplicate_singleton_component_repaired"));
+        assert!(log.contains("ipc_snapshot_singleton_components_deduped"));
+        assert!(log.contains("ipc_snapshot_deduped"));
+    }
+
     #[test]
     fn duplicate_prompt_artifact_repair_runs_canonical_pipeline() {
         let dir = TempDir::new().unwrap();

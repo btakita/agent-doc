@@ -5,7 +5,10 @@ use super::*;
 /// Read the ack-content sidecar file written by the plugin after apply.
 /// Keyed by `patch_id` (same UUID the binary embedded in the patch payload).
 /// Deletes the sidecar on success. Returns None if no sidecar present (old plugin).
-pub(crate) fn read_ack_content_sidecar(project_root: &Path, patch_id: &str) -> Result<Option<String>> {
+pub(crate) fn read_ack_content_sidecar(
+    project_root: &Path,
+    patch_id: &str,
+) -> Result<Option<String>> {
     let sidecar = project_root
         .join(".agent-doc/ack-content")
         .join(format!("{patch_id}.md"));
@@ -30,7 +33,9 @@ pub(crate) fn read_ack_content_sidecar(project_root: &Path, patch_id: &str) -> R
 /// HEAD content via a substring check without false positives from common
 /// boilerplate. Returns the trimmed heading lines (without the trailing
 /// newline) in order of appearance.
-pub(crate) fn extract_response_headings_from_patches(patches: &[crate::template::PatchBlock]) -> Vec<String> {
+pub(crate) fn extract_response_headings_from_patches(
+    patches: &[crate::template::PatchBlock],
+) -> Vec<String> {
     let mut out = Vec::new();
     for patch in patches {
         for line in patch.content.lines() {
@@ -224,7 +229,11 @@ pub(crate) fn is_socket_ack_timeout_error(err: &anyhow::Error) -> bool {
     err.to_string().contains("IPC ack timeout")
 }
 
-pub(crate) fn remove_ipc_dewedge_marker(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
+pub(crate) fn remove_ipc_dewedge_marker(
+    project_root: &Path,
+    file: &Path,
+    reason: &str,
+) -> Result<()> {
     let marker = ipc_dewedge_marker_path(project_root, file)?;
     if marker.exists() {
         std::fs::remove_file(&marker).with_context(|| {
@@ -242,7 +251,11 @@ pub(crate) fn remove_ipc_dewedge_marker(project_root: &Path, file: &Path, reason
     Ok(())
 }
 
-pub(crate) fn clear_ipc_socket_ack_timeouts(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
+pub(crate) fn clear_ipc_socket_ack_timeouts(
+    project_root: &Path,
+    file: &Path,
+    reason: &str,
+) -> Result<()> {
     let Some(value) = ipc_dewedge_marker_for_current_session(project_root, file)? else {
         return Ok(());
     };
@@ -610,6 +623,18 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     ) {
         return false;
     }
+    if let Some(stale_message) = stale_supervisor_content_ours_adoption_warning(file) {
+        log_content_ours_adoption_refused_stale_supervisor(
+            file,
+            source,
+            patch_id,
+            "live_prompt_drift",
+            ours,
+            &stale_message,
+        );
+        let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
+        return false;
+    }
 
     let prior_source = decision.snap_source.label();
     crate::flow::proof::log_flow_event(
@@ -727,11 +752,8 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     // edits. Record the dropped `do [#id]` queue lines now; session-check
     // filters them against committed HEAD (preserved or consumed → cleared,
     // silently deleted → fail closed).
-    let dropped_queue = dropped_queue_prompt_lines_after_content_ours(
-        base,
-        &candidate,
-        &queue_reconciled_ours,
-    );
+    let dropped_queue =
+        dropped_queue_prompt_lines_after_content_ours(base, &candidate, &queue_reconciled_ours);
     if !dropped_queue.is_empty() {
         if let Err(e) = crate::cycle_state::record_dropped_queue_prompts(file, &dropped_queue) {
             eprintln!(
@@ -787,6 +809,18 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
     }
     let duplicate_count = user_prompt_count_growth(ours, &decision.snapshot_content);
     if duplicate_count == 0 {
+        return false;
+    }
+    if let Some(stale_message) = stale_supervisor_content_ours_adoption_warning(file) {
+        log_content_ours_adoption_refused_stale_supervisor(
+            file,
+            source,
+            patch_id,
+            "prompt_duplication",
+            ours,
+            &stale_message,
+        );
+        let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
         return false;
     }
 
@@ -1811,7 +1845,11 @@ pub(crate) fn repair_disk_from_ipc_dedupe(file: &Path, content: &str) -> Result<
 }
 
 #[cfg(test)]
-pub(crate) fn redeliver_ipc_dedupe_to_editor(file: &Path, content: &str, expected_bad_state: &str) -> bool {
+pub(crate) fn redeliver_ipc_dedupe_to_editor(
+    file: &Path,
+    content: &str,
+    expected_bad_state: &str,
+) -> bool {
     redeliver_full_content_repair_to_editor(
         file,
         content,
@@ -1909,15 +1947,27 @@ pub fn dedupe_ipc_snapshot_content(
     content: &str,
     source: &str,
 ) -> Result<(String, bool)> {
+    let (singleton_repaired, singleton_changed) =
+        repair_duplicate_singleton_components(file, before, content, source);
     let (deduped, report) = repair_duplicate_prompt_artifacts(
-        content,
+        &singleton_repaired,
         file,
         DuplicatePromptRepairOptions::new(source)
             .with_before(before)
             .preserving(before),
     )?;
-    let changed = deduped != content;
-    if report.changed() {
+    let changed = singleton_changed || deduped != content;
+    if singleton_changed {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "ipc_snapshot_singleton_components_deduped file={} source={} before_commit=true",
+                file.display(),
+                source
+            ),
+        );
+    }
+    if singleton_changed || report.changed() {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -1928,6 +1978,176 @@ pub fn dedupe_ipc_snapshot_content(
         );
     }
     Ok((deduped, changed))
+}
+
+fn canonical_singleton_component_name(name: &str) -> Option<&'static str> {
+    match name {
+        "exchange" => Some("exchange"),
+        "status" => Some("status"),
+        "queue" => Some("queue"),
+        component::BACKLOG_DONE_COMPONENT => Some(component::BACKLOG_DONE_COMPONENT),
+        _ if component::is_backlog_component(name) => Some(component::BACKLOG_COMPONENT),
+        _ if component::is_review_component(name) => Some(component::REVIEW_COMPONENT),
+        _ if component::is_icebox_component(name) => Some(component::ICEBOX_COMPONENT),
+        _ => None,
+    }
+}
+
+fn singleton_components_by_name(
+    doc: &str,
+) -> Option<HashMap<&'static str, Vec<component::Component>>> {
+    let components = component::parse(doc).ok()?;
+    let mut by_name: HashMap<&'static str, Vec<component::Component>> = HashMap::new();
+    for component in components {
+        if let Some(canonical) = canonical_singleton_component_name(&component.name) {
+            by_name.entry(canonical).or_default().push(component);
+        }
+    }
+    Some(by_name)
+}
+
+fn component_block<'a>(doc: &'a str, component: &component::Component) -> &'a str {
+    &doc[component.open_start..component.close_end]
+}
+
+fn repair_duplicate_singleton_components(
+    file: &Path,
+    before: Option<&str>,
+    content: &str,
+    source: &str,
+) -> (String, bool) {
+    let Some(before) = before else {
+        return (content.to_string(), false);
+    };
+    let Some(content_groups) = singleton_components_by_name(content) else {
+        return (content.to_string(), false);
+    };
+    let duplicate_groups: Vec<(&'static str, Vec<component::Component>)> = content_groups
+        .iter()
+        .filter(|(_, components)| components.len() > 1)
+        .map(|(name, components)| (*name, components.clone()))
+        .collect();
+    if duplicate_groups.is_empty() {
+        return (content.to_string(), false);
+    }
+
+    let Some(before_groups) = singleton_components_by_name(before) else {
+        return (content.to_string(), false);
+    };
+
+    let mut remove_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut details: Vec<String> = Vec::new();
+    for (name, components) in duplicate_groups {
+        let group_len = components.len();
+        let Some(before_components) = before_groups.get(name) else {
+            return (content.to_string(), false);
+        };
+        if before_components.len() != 1 {
+            return (content.to_string(), false);
+        }
+        let canonical_block = component_block(before, &before_components[0]);
+        let canonical_matches: Vec<&component::Component> = components
+            .iter()
+            .filter(|component| component_block(content, component) == canonical_block)
+            .collect();
+        if canonical_matches.len() != 1 {
+            return (content.to_string(), false);
+        }
+        let keep = (
+            canonical_matches[0].open_start,
+            canonical_matches[0].close_end,
+        );
+        for component in components {
+            let range = (component.open_start, component.close_end);
+            if range != keep {
+                remove_ranges.push(range);
+            }
+        }
+        details.push(format!("{name}={group_len}"));
+    }
+
+    remove_ranges.sort_by_key(|range| std::cmp::Reverse(range.0));
+    remove_ranges.dedup();
+    let removed = remove_ranges.len();
+    if removed == 0 {
+        return (content.to_string(), false);
+    }
+
+    let mut repaired = content.to_string();
+    for (start, end) in remove_ranges {
+        repaired.replace_range(start..end, "");
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "duplicate_singleton_component_repaired file={} source={} groups={} removed={} canonical_source=before before_commit=true",
+            file.display(),
+            source,
+            details.join(","),
+            removed
+        ),
+    );
+    (repaired, true)
+}
+
+fn stale_supervisor_content_ours_adoption_warning(file: &Path) -> Option<String> {
+    #[cfg(test)]
+    if TEST_FORCE_STALE_SUPERVISOR_CONTENT_OURS_REFUSAL.with(|flag| flag.get()) {
+        return Some("test supervisor_binary_stale".to_string());
+    }
+
+    crate::project_controller::stale_supervisor_warning_for_doc(file)
+}
+
+fn log_content_ours_adoption_refused_stale_supervisor(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    guard: &str,
+    content_ours: &str,
+    stale_message: &str,
+) {
+    let stale_message = stale_message.replace('\n', " ");
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "content_ours_adoption_refused_stale_supervisor file={} source={} patch_id={} guard={} reason=supervisor_binary_stale content_ours_len={} content_ours_hash={} warning={:?}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            guard,
+            content_ours.len(),
+            crate::ops_log::content_hash(content_ours),
+            stale_message
+        ),
+    );
+    log_ipc_proof_failure(
+        file,
+        source,
+        patch_id,
+        "supervisor_binary_stale",
+        "candidate_snapshot_kept",
+        &format!(
+            "guard={} content_ours_len={} content_ours_hash={}",
+            guard,
+            content_ours.len(),
+            crate::ops_log::content_hash(content_ours)
+        ),
+    );
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_FORCE_STALE_SUPERVISOR_CONTENT_OURS_REFUSAL: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn with_test_stale_supervisor_content_ours_refusal<T>(f: impl FnOnce() -> T) -> T {
+    TEST_FORCE_STALE_SUPERVISOR_CONTENT_OURS_REFUSAL.with(|flag| flag.set(true));
+    let result = f();
+    TEST_FORCE_STALE_SUPERVISOR_CONTENT_OURS_REFUSAL.with(|flag| flag.set(false));
+    result
 }
 
 /// Result of an IPC write attempt, including the patch_id used.
@@ -2015,10 +2235,8 @@ mod ack_content_snapshot_tests {
 
     // --- #dupcontent: structurally-corrupt content_ours is never adopted ---
 
-    const DC_BASELINE: &str =
-        "<!-- agent:status -->\nA\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
-    const DC_CANDIDATE: &str =
-        "<!-- agent:status -->\nB\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
+    const DC_BASELINE: &str = "<!-- agent:status -->\nA\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
+    const DC_CANDIDATE: &str = "<!-- agent:status -->\nB\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
 
     #[test]
     fn guard_refuses_structurally_corrupt_content_ours() {
@@ -2058,8 +2276,7 @@ mod ack_content_snapshot_tests {
         // A structurally-clean content_ours that absorbs live drift (differs
         // outside exchange from both baseline and candidate) must still adopt —
         // the #dupcontent structural gate does not break the normal path.
-        let clean_ours =
-            "<!-- agent:status -->\nC\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
+        let clean_ours = "<!-- agent:status -->\nC\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
         let mut decision = IpcRepairDecision::file_read(DC_CANDIDATE.to_string());
         let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
             &file,
@@ -2074,6 +2291,59 @@ mod ack_content_snapshot_tests {
             "a structurally-clean content_ours that absorbs drift must still be adopted"
         );
         assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+    }
+
+    #[test]
+    fn guard_refuses_stale_supervisor_content_ours_on_drift() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let clean_ours = "<!-- agent:status -->\nC\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
+        let mut decision = IpcRepairDecision::file_read(DC_CANDIDATE.to_string());
+
+        let adopted = with_test_stale_supervisor_content_ours_refusal(|| {
+            guard_ipc_snapshot_adoption_against_live_prompt_drift(
+                &file,
+                "test",
+                Some("p-stale"),
+                Some(DC_BASELINE),
+                Some(clean_ours),
+                &mut decision,
+            )
+        });
+
+        assert!(
+            !adopted,
+            "stale supervisor content_ours must be refused even when it would absorb drift"
+        );
+        assert_eq!(decision.snap_source, IpcSnapshotSource::FileRead);
+        assert_eq!(decision.snapshot_content, DC_CANDIDATE);
+    }
+
+    #[test]
+    fn guard_refuses_stale_supervisor_content_ours_on_prompt_duplication() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let content_ours = "<!-- agent:exchange -->\n❯ do [#x]\n<!-- /agent:exchange -->\n";
+        let duplicate_candidate =
+            "<!-- agent:exchange -->\n❯ do [#x]\n❯ do [#x]\n<!-- /agent:exchange -->\n";
+        let mut decision = IpcRepairDecision::file_read(duplicate_candidate.to_string());
+
+        let adopted = with_test_stale_supervisor_content_ours_refusal(|| {
+            guard_ipc_snapshot_adoption_against_prompt_duplication(
+                &file,
+                "test",
+                Some("p-stale-dup"),
+                Some(content_ours),
+                &mut decision,
+            )
+        });
+
+        assert!(
+            !adopted,
+            "stale supervisor content_ours must not become the repair snapshot"
+        );
+        assert_eq!(decision.snap_source, IpcSnapshotSource::FileRead);
+        assert_eq!(decision.snapshot_content, duplicate_candidate);
     }
 
     #[test]
@@ -2841,11 +3111,11 @@ Stale response that the operator cleared.
 <!-- agent:exchange patch=append -->
 <!-- /agent:exchange -->
 ";
-        crate::debounce::record_live_buffer_digest_content(&indicator_path, cleared_buffer).unwrap();
+        crate::debounce::record_live_buffer_digest_content(&indicator_path, cleared_buffer)
+            .unwrap();
 
         let repaired = bad_state; // the stale snapshot the repair would re-apply
-        let delivered =
-            redeliver_ipc_dedupe_to_editor(&doc, repaired, bad_state);
+        let delivered = redeliver_ipc_dedupe_to_editor(&doc, repaired, bad_state);
 
         assert!(
             !delivered,
@@ -3627,8 +3897,6 @@ do #verfpfx. spec-test-build-install-commit-push
     }
 }
 
-
-
 #[cfg(test)]
 mod core_tests {
     #![allow(unused_imports)]
@@ -4034,7 +4302,10 @@ mod core_tests {
         record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "queue_consume").unwrap();
         let degraded =
             record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "queue_consume").unwrap();
-        assert!(degraded, "two distinct ack timeouts must trip the degraded latch");
+        assert!(
+            degraded,
+            "two distinct ack timeouts must trip the degraded latch"
+        );
 
         let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
         assert!(

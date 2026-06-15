@@ -576,10 +576,9 @@ fn process_global_test_mutations_share_session_check_lock() {
     // integration-style tests + shared inspection helpers were bundled back inline
     // into `session_check.rs`'s own `#[cfg(test)] mod tests` (the helpers shadow
     // core fn names like `inspect`, so they stay in the core test mod).
-    let session_check_tests = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check.rs"),
-    )
-    .unwrap();
+    let session_check_tests =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+            .unwrap();
     assert!(
         session_check_tests.contains("fn inspect(file: &std::path::Path)")
             && session_check_tests.contains("fn inspect_with_warnings(file: &std::path::Path)")
@@ -841,7 +840,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // guards; only production `guard_` tokens are budgeted here now.
         ("agent-doc-orchestration/src/session_check.rs", "guard_") => 65,
         ("agent-doc-orchestration/src/session_check/closeout_guards.rs", "guard_") => 4,
-        ("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs", "guard_") => 6,
+        ("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs", "guard_") => {
+            6
+        }
         ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 8,
         ("agent-doc-orchestration/src/session_check/queue_head_guards.rs", "guard_") => 2,
         ("agent-doc-orchestration/src/session_check/partial_staging.rs", "guard_") => 2,
@@ -910,8 +911,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // + two `guard_ipc_snapshot_adoption_against_live_prompt_drift` calls in
         // those tests) and +2 `reason=` (the two `content_ours_adoption_refused_structural`
         // ops_log lines gating corrupt-buffer adoption on both content_ours guards).
-        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 10,
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 16,
+        // +4 `guard_` (#dupcontent2): two stale-supervisor adoption guard tests
+        // plus two calls through the existing guard functions; no new guard
+        // boundary is introduced. +1 `reason=` for the audited
+        // `content_ours_adoption_refused_stale_supervisor ... reason=supervisor_binary_stale`
+        // ops-log diagnostic routed through `log_ipc_proof_failure`.
+        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 14,
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 17,
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "guard_") => 8,
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 10,
         ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 5,

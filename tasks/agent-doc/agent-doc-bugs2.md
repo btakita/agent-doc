@@ -71,13 +71,32 @@ Done — agent-doc `a99a882d` (superproject pointer `fcf6d21ec`), pushed to `ori
 **Safety.** A real `agent:queue` marker carrying a quoted attribute value is NOT masked — the comment-open precedes the quotes, so the marker start is never inside a quoted span; attribute parsing is untouched (dedicated regression test). Coverage: quoted-marker/quoted-`#id`/fenced-marker(regression)/real-marker-with-quoted-attr tests + a `find_quoted_ranges` same-line/fail-safe unit. `make check` green — **4476 passed, 0 failed**, clippy clean. Not installed mid-session (`#no-mid-session-install`); promotes on next supervisor recycle.
 
 **⚠️ New bug observed live this cycle — compaction dropped a backlog item.** A concurrent compaction mid-finalize archived the exchange to `.agent-doc/archives/…-035227.md` (queue `preset`/`go` attrs preserved — no `#compactqattr` regression there) but **silently dropped the entire `[#0kjc]` backlog item** (pre-compact HEAD `f8a340c44` had 9 backlog items; post-compact `e4d597474` has 8, only `#0kjc` missing). Compaction must only archive the EXCHANGE and leave every other component byte-identical — dropping a backlog **item** is a worse blast-radius variant of `#compactqattr`. Filing as `#compactdropitem`. Because the item was dropped, I could not `--done` it; the completion is durable in git (`a99a882d`) and recorded here. A `--pending-add` to restore it was raced/no-op'd by the stale route-owned supervisor (pid 1654897), so I'm not fighting it further this cycle.
-<!-- agent:boundary:503387ce -->
+
+### Re: do [#compactdropitem] — opus-4-8
+
+Fixed. Compaction now **fails closed** if it would drop a whole item from any non-exchange list component, instead of silently committing the loss.
+
+**Root cause (confirmed in code, not the original hypothesis):** the deterministic compact rebuild (`comp.replace_content` on `exchange` only) and the post-compact CRDT refresh (`CrdtDoc::from_text(compacted).encode_state()`) are both pure round-trips — neither drops a backlog item. The live loss (pre-compact 9 → post-compact 8, `[#0kjc]` vanished with no `agent:done` entry) comes from a **concurrent stale-supervisor CRDT merge interleaving over the written file before the compact commit stages the snapshot**. A deterministic-path-only fix would not have caught it.
+
+**Fix** (`agent-doc-orchestration/src/compact.rs`, commit `b571c32c`):
+- `non_exchange_list_item_counts()` — per-component tracked item counts for every component except `exchange`.
+- `assert_non_exchange_items_preserved()` — bails (exit non-zero) if any non-exchange component's item count decreased; logs `compact_dropped_non_exchange_item file=… stage=… dropped=backlog 9→8` to `ops.log`.
+- Two guard points so a racing writer can't slip through:
+  - `apply_compacted_document` (`stage=apply`) — guards the intended rebuild before write.
+  - `run()` after re-reading the on-disk document (`stage=post_write`) — catches a concurrent CRDT merge that lands between the write and the commit, before the corrupt snapshot reaches HEAD.
+
+`status` reconciliation (top-backlog sentence) and the `exchange` archive are still allowed; only item-count *decreases* on backlog/review/done/queue/icebox fail closed. Same blast-radius family as `#compactqattr`, worse (full-item loss).
+
+**Verification:** `make check` green (exit 0). 4 new deterministic tests: counts backlog+review correctly; passes when only the exchange changes; fails closed with `backlog 3→2` on a dropped item; `run_component_compact` preserves backlog(3)+review(1) with no false positive. Submodule CI baseline green.
+
+**Not yet live:** the fix is committed + release-built but **not installed**, to avoid making the finalize client newer than the already-stale supervisor (pid 1654897) mid-cycle (`#no-mid-session-install`). I'll `cargo install --path .` + recycle the supervisor right after this closeout so the guard goes live. The pre-existing uncommitted `#autorecycle-on-install` work (`lib_install.rs` + `VERSIONS.md`) was left untouched — separate concern, not bundled.
+<!-- agent:boundary:5d26ff20 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
----
+~~~done
 I auto-restart occurred in equityfundingsource.md. But the restart was not successful and was stuck in the shell.
 ```
   Opus 4.8 ctx:10% ~/work/btakit    Finished `release` profile [optimized] target(s) in 0.08s
@@ -98,6 +117,8 @@ resync: pruned 9 stale session(s)
 [route] activated existing inactive agent:queue head "All \"Lender account application — incomplete\" components across all pages should be the same component...and have a button to complete the application. deploy" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3502
 ```
+~~~
+- do [#compactdropitem]
 ---
 :pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
 ```
@@ -135,7 +156,6 @@ JB `Run Agent Doc` on equityfundingsource.md
 [route] activated existing inactive agent:queue head "Please create sample borrower documents and sample investor documents that I can upload for testing. Place in the equityfundingsource-dev/tmp directory. Ensure tmp is in .gitignore." for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
 Error: project controller command `dispatch` failed: dispatch coalesced for tasks/professional/equityfundingsource.md: a dispatch for generation 66 is already in flight (#qflood); receipt_id=3310
 ```
-- ~~:round_pushpin: do [#ar27]~~
 :pushpin: JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equityfundingsource.md`
 ```
 ~/work/btakita/agent-loop main ⇡20 *5 !41 ?11                                                     agent-loop 23:02:05
@@ -148,12 +168,6 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
 :round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
 ---
-- ~~:pushpin: upgrade dependencies~~
----
-- ~~:pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)~~
-- ~~:pushpin: [#c2b6]~~
-- ~~:pushpin: [#pushpinaccum]~~
-- ~~:pushpin: [#0kjc]~~
 - :pushpin: [#compactqattr]
 - :pushpin: [#dupcontent]
 ---
@@ -164,8 +178,6 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 - :pushpin: do [#ar27-majors]
 - :pushpin: do [#dupcontent]
 - :pushpin: do [#compactqattr]
-- ~~:pushpin: do [#0kjc]~~
-- ~~:pushpin: do [#pushpinaccum]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -195,7 +207,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#compactdropitem] [clean-session] Compaction silently DROPS a whole backlog item (not just attributes). LIVE 2026-06-15 (agent-doc-bugs2.md): a concurrent compaction mid-finalize archived the exchange correctly (queue preset/go attrs preserved, so NOT #compactqattr) but pre-compact HEAD f8a340c44 had 9 agent:backlog items and post-compact HEAD e4d597474 had 8 — the [#0kjc] item vanished with no agent:done archive entry. Compaction must only archive/truncate the EXCHANGE and leave every other singleton component (backlog/review/queue/done) byte-identical. ROOT CAUSE (hypothesis): the post-compact CRDT refresh (compact.rs CRDT state refreshed from post-compact content) re-serializes/re-parses non-exchange components and can drop a list item when a concurrent stale-supervisor CRDT merge interleaves. FIX: snapshot every non-exchange component verbatim across compact + post-compact CRDT refresh and assert item-count parity (backlog/review/done) before/after; fail closed if any non-exchange component loses content. Same blast-radius family as #compactqattr, worse (full-item loss). CLEAN session (compaction/CRDT path).
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).

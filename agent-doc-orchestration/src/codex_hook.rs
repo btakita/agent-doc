@@ -471,6 +471,31 @@ fn log_codex_stop_queue_continuation(file: &Path, prompt: &str, source: &str) {
     );
 }
 
+fn log_codex_fresh_context_handoff(file: &Path, prompt: &str, source: &str, reason: &str) {
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "codex_fresh_context_handoff file={} source={} result=queued supervisor=idle_queue_watch prompt_bytes={} prompt_sha256={} reason={:?}",
+            file.display(),
+            source,
+            prompt.len(),
+            crate::ops_log::content_hash(prompt),
+            reason,
+        ),
+    );
+}
+
+fn fresh_context_handoff_response(
+    file: &Path,
+    prompt: &str,
+    source: &str,
+    context_reset_reason: Option<&str>,
+) -> Option<StopResponse> {
+    let reason = context_reset_reason?;
+    log_codex_fresh_context_handoff(file, prompt, source, reason);
+    Some(StopResponse::Continue { continue_: true })
+}
+
 enum RepeatedQueueHeadRecovery {
     Recovered { note: String },
     NotRecoverable { note: String },
@@ -677,6 +702,14 @@ fn tracked_repeated_queue_recovery_response(
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
     let _ = crate::queue_continuation::record_requested_head(file, &next_prompt);
     let context_reset_reason = codex_continuation_clear_reason(file, state.last_context_clear_at);
+    if let Some(response) = fresh_context_handoff_response(
+        file,
+        &next_prompt,
+        "tracked_state_after_recovery",
+        context_reset_reason.as_deref(),
+    ) {
+        return Ok(response);
+    }
     Ok(StopResponse::Block {
         decision: "block",
         reason: format!(
@@ -715,6 +748,14 @@ fn marker_repeated_queue_recovery_response(
     }
     crate::queue_continuation::record_requested_head(file, &next_prompt)?;
     let context_reset_reason = codex_continuation_clear_reason(file, None);
+    if let Some(response) = fresh_context_handoff_response(
+        file,
+        &next_prompt,
+        "durable_marker_after_recovery",
+        context_reset_reason.as_deref(),
+    ) {
+        return Ok(response);
+    }
     Ok(StopResponse::Block {
         decision: "block",
         reason: format!(
@@ -778,6 +819,14 @@ fn auto_queue_continuation_response(
     let _ = crate::queue_continuation::record_requested_head(file, &prompt);
     let context_reset_reason = codex_continuation_clear_reason(file, state.last_context_clear_at);
     log_codex_stop_queue_continuation(file, &prompt, "tracked_state");
+    if let Some(response) = fresh_context_handoff_response(
+        file,
+        &prompt,
+        "tracked_state",
+        context_reset_reason.as_deref(),
+    ) {
+        return Ok(Some(response));
+    }
     // #codex-self-reinvoke-prevent (Option B): redirect the auto-queue
     // continuation to an IN-PANE answer + persist instead of instructing Codex to
     // run `agent-doc <FILE>` again. Re-running the entrypoint from the owner pane
@@ -860,6 +909,14 @@ fn marker_fallback_continuation_response(
     crate::queue_continuation::record_requested_head(&file, &continuation.head_prompt)?;
     let context_reset_reason = codex_continuation_clear_reason(&file, None);
     log_codex_stop_queue_continuation(&file, &continuation.head_prompt, "durable_marker");
+    if let Some(response) = fresh_context_handoff_response(
+        &file,
+        &continuation.head_prompt,
+        "durable_marker",
+        context_reset_reason.as_deref(),
+    ) {
+        return Ok(Some(response));
+    }
     // #codex-self-reinvoke-prevent (Option B): in-pane continuation, not a CLI
     // re-run (see auto_queue_continuation_response).
     Ok(Some(StopResponse::Block {
@@ -1464,7 +1521,6 @@ fn now_millis() -> u128 {
         .unwrap_or_default()
         .as_millis()
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -2825,19 +2881,59 @@ agent-doc {}\n",
         })
         .unwrap();
 
-        match response {
-            StopResponse::Block { reason, .. } => {
-                assert!(reason.contains("Fresh context is required"), "{reason}");
-                assert!(
-                    reason.contains("Run `/clear` before continuing"),
-                    "{reason}"
-                );
-                assert!(reason.contains("re-invoke `agent-doc"), "{reason}");
-                assert!(reason.contains("send the final answer"), "{reason}");
-                assert!(!reason.contains("agent_doc_finalize"), "{reason}");
-            }
-            other => panic!("expected fresh-context continuation block, got {other:?}"),
-        }
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("codex_fresh_context_handoff")
+                && ops_log.contains("source=durable_marker")
+                && ops_log.contains("result=queued")
+                && ops_log.contains("supervisor=idle_queue_watch"),
+            "fresh-context continuation should be handed to the supervisor, not punted to the operator:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains("exchange was compacted after the last tracked context clear"),
+            "handoff proof should retain the reset reason:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn stop_tracked_state_hands_fresh_context_continuation_to_supervisor() {
+        let dir = setup_project();
+        fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "agent_doc_queue_context_reset = true\n",
+        )
+        .unwrap();
+        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
+        init_git_repo(dir.path(), &doc);
+        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Done.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let root = project_root_for(dir.path()).unwrap();
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(
+            state.last_auto_queue_head.as_deref(),
+            Some("do [#seopdp] deploy product page")
+        );
+        let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("codex_stop_queue_continuation")
+                && ops_log.contains("source=tracked_state")
+                && ops_log.contains("codex_fresh_context_handoff")
+                && ops_log.contains("source=tracked_state")
+                && ops_log.contains("result=queued"),
+            "tracked fresh-context continuation should be logged and handed to supervisor:\n{ops_log}"
+        );
     }
 
     /// `#clearcodex`: the Codex Stop-hook continuation now emits structured

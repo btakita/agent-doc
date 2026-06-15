@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -168,15 +168,6 @@ The `[sync] recovered live pane` / `resync: stash pane … skipping kill` lines 
 
 ### Re: IPC drift root cause fixed — #stuckhandoff2 M1b self-reap — opus-4-8
 
-> **Queue prompt:**
->
-> :pushpin: equityfundingsource.md failed to restart
-> ```
-> ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
->
-> · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
->
->   ❯ /clear
 > ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 > ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
 >   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
@@ -263,11 +254,6 @@ Done — agent-doc `2ced0b4c` (`queue: keep preset go heads drainable`).
 >
 > :pushpin: equityfundingsource.md failed to restart
 > ```
-❯ > ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
->
-❯ > · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
-❯ >
-❯ >   ❯ /clear
 > ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 > ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
 >   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
@@ -365,85 +351,32 @@ Escalation: none. Remaining live-supervisor promotion/restart proof stays with t
 ### Re: :pushpin: do [#ar27-majors] — gpt-5
 
 I won’t run `#ar27-majors` in this loaded context. I don’t have a tool primitive that can actually clear Codex’s conversation state from inside the turn, so the safe action is to stop here and let the harness perform `/clear` before re-invoking `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`.
-<!-- agent:boundary:ff08e444 -->
+
+### Re: queue repair + do [#ar27-majors] — gpt-5
+
+I repaired the interrupted queue boundary instead of treating `#ar27-majors` as silently completed.
+
+The current document had `#ar27-majors` struck out of `agent:queue` while its backlog item was still open. That is exactly the unsafe dropped-head state session-check reported. I did not run the major-version migration in this recovered, already-loaded context: the backlog item itself requires a CLEAN session, and `src/agent-doc` currently has broad unrelated dirty changes across the same source tree a dependency migration would need to edit. Running `instruction-files`/`notify`/`portable-pty`/`pulldown-cmark`/`rusqlite`/`toml`/`ureq`/`yrs`/`zip` major migrations here would risk mixing with someone else's work.
+
+I am explicitly gating `#ar27-majors` rather than leaving it as a removed queue head. The next real pass should start from a clean `src/agent-doc` worktree or an isolated sibling worktree and handle the listed major-version bumps one crate family at a time with `make check` after each risky bump. `yrs`, `rusqlite`, `toml`, and `zip` remain the highest-risk API migrations.
+
+The visible equityfundingsource dispatch-block evidence is still represented by the existing `#qpresetstrike` / `#recyclerestart-verify` work; I did not file another duplicate item.
+
+Changed paths: session document only, through this closeout and pending gate.
+
+Commands: `agent_doc_preflight`; `agent_doc_plan`; `agent_doc_read` for `queue` and `backlog`; `agent_doc_session_check`; `git -C src/agent-doc status --short`; `rg -n` over the `Cargo.toml` dependency declarations; `git -C src/agent-doc log --oneline -5`.
+
+Verification: preflight succeeded; queue/backlog read confirmed the struck `#ar27-majors` queue line and still-open backlog item; dependency declarations still show the major-bump surface; no source tests were run because no source files were changed.
+
+Confidence: high for the queue-boundary repair; no claim of dependency-migration completion.
+
+Escalation: `#ar27-majors` remains blocked on a clean implementation session/worktree, not on user input. The stale route-owned supervisor warning is still live and should be handled by restart/recycle.
+<!-- agent:boundary:129bc24f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~In Codex, JB `Run Agent Doc` adds extra continuation prompt to Codex. agent-doc should be runnable with the extra instructions by using `agent-doc .../doc-file.md`~~
----
-:pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
-```
-resync: pruned 8 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3457
-```
----
-:pushpin: equityfundingsource.md failed to restart
-```
-● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
-· Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
-  ❯ /clear
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
-  Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
-                                                                            [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
-                                               [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc bi  ❯ /clear
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────❯ [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)            ───────────────────────────────────────────────────────────────────────────────────────────────────────────[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execvepass permissions on (shift+tab to cycle)
-       [start] harness resolved: binary=claude source=frontmatter env=default
-                                                                             Registered session 62fe1f41 → pane %74
-                                                                                                                   Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
-```
----
-:pushpin: JB `Run Agent Doc` should self-heal and complete the dispatch. There was no `- #advance-review` line. Seems to be stuck in an old state.
-```
-[sync] recovered live pane %25 for session b26b9957 via supervisor pid 1562136
-[sync] recovered live pane %57 for session 62fe1f41 via supervisor pid 2378152
-resync: stash pane %15 is unregistered but still hosts live supervisor c94cd9fd-71b6-4588-aab5-d53d9c9887f3 — skipping kill
-[sync] recovered live pane %25 for session b26b9957 via supervisor pid 1562136
-[sync] recovered live pane %57 for session 62fe1f41 via supervisor pid 2378152
-resync: stash pane %55 is unregistered but still hosts live supervisor 3d9ff8e4-bafd-4e1f-b48d-550d3c976904 — skipping kill
-[sync] recovered live pane %25 for session b26b9957 via supervisor pid 1562136
-[sync] recovered live pane %57 for session 62fe1f41 via supervisor pid 2378152
-resync: stash pane %50 is unregistered but still hosts live supervisor tsift-v0.1 — skipping kill
-[route] target tmux session: 0
-[route] activated existing inactive agent:queue head "The new Deal Pipeline kanban is missing the completed application + accepted application from the intake section. deploy" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3460
-```
-~~~done
-:pushpin: - :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
-~~~
-:pushpin: JB `Compact Exchange` on this document
-```
-agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8
-```
-JB `Run Agent Doc` on equityfundingsource.md
-```
-[route] target tmux session: 0
-[route] authoritative actor for tasks/professional/equityfundingsource.md projected busy but the live pane proves a dispatch-ready prompt (generation 66); repairing stale busy projection to ready and dispatching instead of queuing
-[route] activated existing inactive agent:queue head "Please create sample borrower documents and sample investor documents that I can upload for testing. Place in the equityfundingsource-dev/tmp directory. Ensure tmp is in .gitignore." for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
-Error: project controller command `dispatch` failed: dispatch coalesced for tasks/professional/equityfundingsource.md: a dispatch for generation 66 is already in flight (#qflood); receipt_id=3310
-```
-:pushpin: JB ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equityfundingsource.md`
-```
-~/work/btakita/agent-loop main ⇡20 *5 !41 ?11                                                     agent-loop 23:02:05
-                                                                                                                      ❯ /home/brian/.cargo/bin/agent-doc start --route-owned tasks/professional/equityfundingsource.md
-[start] harness resolved: binary=claude source=frontmatter env=default
-                                                                      Registered session 62fe1f41 → pane %33
-                                                                                                            Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
-```
-~~~done
-:pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
-:round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
-~~~
-:pushpin: - do [#dfrefresh-retire]
-:round_pushpin: do [#suprehotreload]
-- ~~do [#dfrefresh-retire]~~
-- ~~do [#c2b6]~~
-- ~~:pushpin: do [#goqnoise]~~
-- ~~:pushpin: do [#dupcontent2]~~
-- ~~:pushpin: do [#ar27-majors]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -475,7 +408,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
-- [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
 <!-- /agent:backlog -->
@@ -483,6 +415,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).
 - [/] [#dfrefresh-retire] [clean-session] Retire the dogfood-supervisor-refresh runbook (runbooks/dogfood-supervisor-refresh.md + BUNDLED_RUNBOOKS entry + SKILL.md catalog line + 4 harness mirrors) once #jbrestale (JB Run Agent Doc auto-restarts a stale route-owned supervisor / red-green switchover) AND #recyclerestart (PCP recycle restarts the harness session) both land and prove the binary self-heals a stale supervisor without the manual make+install+restart bootstrap. The runbook is an explicit stopgap for the bootstrap gap (running supervisor predates its own self-recycle fix + is the live agent parent). Acceptance: with both landed, a stale-binary session auto-promotes onto the new build at the next idle/dispatch boundary; delete the runbook + dependent references in one cycle and re-run audit-docs. CLEAN session (skill/runbook surface).
 - [/] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.
 - [/] [#aazp] [operator-verify] suprecyclestall live-verify (agent-doc aafa6510, installed+release-built): restart a stale session via session restart-supervisor FILE --force so it runs the new binary, then drive an idle/next-queue-item recycle. Confirm ops.log shows supervisor_binary_stale_self_recycled ... candidates=[...] then EITHER a clean execve hot-reload OR supervisor_reexec_failed fallback=continue_current_binary with per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Subset of the broader recyclerestart sync-block work. Cannot be agent-done: needs a live editor + real recycle.

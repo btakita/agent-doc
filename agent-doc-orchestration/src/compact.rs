@@ -2107,6 +2107,45 @@ mod tests {
     }
 
     #[test]
+    fn component_compact_empty_message_advances_snapshot_after_exchange_clear() {
+        // #clearexchstale: a successful exchange clear must advance the durable
+        // merge base, otherwise later preflight/repair paths can replay the
+        // stale pre-clear exchange from the snapshot.
+        let doc = concat!(
+            "---\nagent_doc_session: test-clear-exchange\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: stale topic\n\nThis response should stay archived after clear.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        run_component_compact(&file, doc, "exchange", Some(""), false).unwrap();
+
+        let cleared = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            !cleared.contains("stale topic"),
+            "cleared exchange must not leave stale content in the visible file:\n{cleared}"
+        );
+        let snapshot_after = snapshot::load(&file).unwrap().unwrap();
+        assert_eq!(
+            snapshot_after, cleared,
+            "successful exchange clear must advance the snapshot merge base to the cleared document"
+        );
+        assert!(
+            !snapshot_after.contains("stale topic"),
+            "snapshot merge base must not retain stale pre-clear exchange content:\n{snapshot_after}"
+        );
+    }
+
+    #[test]
     fn component_compact_direct_fallback_rejects_late_post_exchange_scratch_comment() {
         let prompt = "The post-exchange scratch comment was typed while compact exchange was being computed. #spec-test-build-install-commit-push";
         let doc = concat!(

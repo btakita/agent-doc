@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -121,7 +121,38 @@ No code change since the prior deploy — the EFS submodule is clean and already
 - Smoke test: `/` → 200, `/funded-deals` → 200.
 
 Next queue head is `[#58j3]` (align the investor positions API with the no-servicing model).
-<!-- agent:boundary:a670b473 -->
+
+### Re: do [#58j3] — align investor positions API with the no-servicing model — opus-4-8
+
+> **Queue prompt:**
+>
+> [#58j3]
+
+
+> **Queue prompt (preset `#spec-test-commit-push`):**
+>
+> [#58j3]
+
+Done — the investor **My Positions** / portfolio surface now matches what EFS actually knows. EFS *arranges* loans and does not service them, so the API no longer implies it tracks received payments.
+
+**API (server)**
+- `investor_positions_R_` (`lib/investor/shared.ts`) drops the per-loan `payment_schedule` (which read as a live servicing feed) and instead returns `scheduled_monthly_interest` — the estimated interest-only payment from origination terms: `funded amount × sold rate ÷ 12` (via the existing, unit-tested `monthly_distribution_calc_`).
+- `GET /api/investor/positions` (`portfolio/index.ts`) drops `yield_mix` / `annual_yield` and `next_payment_date`. It still returns property, `amount_funded`/`loan_amount`/`ownership_pct`, `rate`, `position_type`, maturity inputs, and the new estimate.
+- `GET /api/investor/dashboard` drops the position `next_payment_date` too (same servicing-flavored field).
+
+**Portal (client)**
+- `my_positions.tsx`: removed the **Yield mix** card; the positions table now shows an **Est. monthly interest** column. Funded-allocation pie + position-type totals stay.
+- `dashboard.tsx` `PositionThumb`: the **"Upcoming payment"** date chip became **"Est. monthly interest"** (an amount), with copy "Estimated from origination terms. EFS arranges loans and does not service payments."
+
+**Decision worth confirming:** I compute the estimate on the investor's **funded amount** (their stake), not the full loan amount — that's the figure that's meaningful on *My* Positions, and it equals the full-loan payment for whole notes. The backlog text said "loan amount × rate / 12"; if you specifically want the full-loan payment shown on a fractional position instead, say so and I'll switch the basis (one-line change).
+
+**Spec + tests + ship**
+- `docs/formula.md`: new "Scheduled Monthly Interest (Estimate)" section + no-servicing notes on Yield Mix and Scheduled Investor Distribution.
+- Added an `investor-portal-e2e` assertion locking in the new shape (no yield mix / next-payment date; estimate present).
+- **700 pass / 0 fail**; `build` + `build:worker` clean. Committed EFS `36e06ef` and **pushed to `origin/main`** (`0ebaff0..36e06ef`); superproject pointer bumped to `dd76a0dea`.
+
+(No deploy — the preset was `#spec-test-commit-push`. Say `deploy` to push it live.)
+<!-- agent:boundary:cb48f529 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,13 +160,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- [#58j3]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#58j3] #posnosrv [recommended] Align investor "My Positions"/portfolio API with the no-servicing model: drop yield_mix/annual_yield and next_payment_date/payment_schedule from the investor_positions response (lib/investor/portfolio/index.ts + shared.ts still compute them even though the 2026-06-03 call + #zwws P3 8d40c66 already removed them from the dashboard); keep addr/amount/rate/position_type and relabel the per-loan "payment" as the scheduled interest-only payment (est., loan amount x rate / 12) so the portal never implies EFS tracks received payments.
 <!-- /agent:backlog -->
 
 ## Review

@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -488,39 +488,12 @@ For the context-threshold item specifically, Codex now reads real `token_count` 
 After those implementation responses were in the exchange, I used the binary `agent-doc queue consume --count 3` path to drain the answered free-text queue heads and clear `queue_active`; I did not manually edit the markdown queue. The queue is now empty because the work corresponding to the visible heads is done and verified.
 
 Verification evidence already recorded for the code work includes focused Rust tests, dirty-tree `make check`, clean-tree `make check` at `28ac88d9`, `cargo build --release`, and `cargo install --path .`. `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this repo.
-
-<!-- agent:boundary:7659e03e -->
+<!-- agent:boundary:481e7aa7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
----
-:pushpin: JB `Run Agent Doc`
-```
-[route] target tmux session: 0
-[route] activated existing inactive agent:queue head "#advance-review" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3568
-```
----
-agent-doc Codex should use the PCP/supervisor to handle tasks that cannot be done in an agent-doc turn
-```
-• Stop hook (blocked)
-  feedback: agent-doc Stop hook kept an active `agent:queue auto` moving for /home/brian/work/btakita/agent-loop/tasks/
-  professional/equityfundingsource.md. The next queue prompt is "[#zwws-new-deal-email]". Do NOT answer the next queue
-  prompt in this already-loaded Codex context. Fresh context is required because exchange was compacted after the last
-  tracked context clear; compaction shrinks the document but not the already-loaded conversation. Run `/clear` before
-  continuing, then re-invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
-  from the fresh context so the next queue head runs after the reset. Do not send the final answer yet.
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-• I can’t execute /clear from inside this already-loaded model context, and I will not process #zwws-new-deal-email
-  here. Clear the Codex context first, then re-invoke agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/
-  equityfundingsource.md so that queue head runs with fresh context.
-```
----
-- ~~:pushpin: Fix `agent:backlog queue` not adding items to the backlog.~~
-- ~~:pushpin: #advance-review. This should add items to the backlog and since backlog has the `queue` attribute, the new backlog items should go into the queue.~~
-- :pushpin: agent-doc is not clearing the agent context when the context threshold is reached.
 <!-- /agent:queue -->
 ###
 <!--

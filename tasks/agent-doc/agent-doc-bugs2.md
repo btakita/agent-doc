@@ -513,7 +513,24 @@ Preserved as backlog **`#autorecycle-on-install`** (the actionable home for a fe
 **Stopping the auto-loop here** — a `session-check` interruption is an explicit stop condition, and a real user prompt mid-loop takes precedence. I'm not implementing the feature this turn: it touches the install/supervisor path and deserves a clean focused session (ironically, *this* session runs on the stale supervisor it would fix). It's queued as backlog for that.
 
 This drain run closed: `#rtwbcast` (done — code already landed `cddad87b`, operator verify captured), `#recyclerestart` (done — Q1/Q2 committed `0b31e90c`/`fa6a230a`, verify captured), `#pushpinaccum` (done — idempotent pin **shipped** `c5ce1e7d`, `make check` green). `#cleandrainsup-verify` log-check: evidence absent (supervisor never recycled onto the 1f8c9f63 build). The remaining drainable heads are clean-session code fixes (`#dupcontent`/`#compactqattr`/`#0kjc`/`#ar27-majors`) best done from a fresh session once the supervisor is promoted.
-<!-- agent:boundary:52d8242e -->
+
+### Re: do [#autorecycle-on-install] — opus-4-8
+
+Done — `agent-doc lib-install` now **auto-recycles** running controllers instead of only printing the hint. Upgrades `#ctlrecycle` R4 (print-only) to action.
+
+**Change** (`src/lib_install.rs`): after a successful install, `run_paths` calls `agent_doc_orchestration::project_controller::recycle_controllers_all_projects()` directly, so every running controller is marked to recycle at its next idle boundary — the **same idle-gated `recycle` RPC** that `admin recycle --all-projects` sends. It fires only at a turn / inter-queue-item boundary (never mid-turn), so triggering it from install is safe, matching the operator's "scheduled at an opportune/idle time" note. Reports `[lib-install] auto-recycle: N marked … M skipped`.
+
+- **Best-effort:** a recycle error never fails the install — logs a warning and falls back to the manual `agent-doc admin recycle --all-projects` hint (no swallowed errors).
+- **Opt out:** falsey `AGENT_DOC_RECYCLE_ON_INSTALL` (`0`/`false`/`no`/`off`) restores the print-only hint.
+
+This closes the recurring `supervisor_binary_stale` / `#fcc0` / `#no-mid-session-install` pain (the JB plugin hot-reloads the cdylib by mtime, but running controllers kept serving the prior binary until manually recycled). Pairs with `#supselfheal` (supervisor self-recycle) + `#supautoinstall` (auto-install) so a fresh build goes live everywhere without a manual recycle step.
+
+**Coverage:** `lib_install::tests::recycle_on_install_default_on_and_opt_out_is_falsey` (default-on + falsey opt-out). The cross-project process recycle itself is not SimWorld-modelable. Full suite green (4470 passed, 238 skipped); latest CI run 27521449581 is green; VERSIONS.md updated.
+
+**Live promotion is operator-gated** (needs a live editor + an actual install): run `agent-doc lib-install` from a `#autorecycle-on-install` build and confirm ops.log shows the auto-recycle line and running supervisors pick up the new binary at their next idle boundary. The currently-running supervisor is the pre-fix binary, so it won't self-promote retroactively.
+
+Queue note: active go-mode drain, exchange at 484 lines / 28 sections — continuing to drain.
+<!-- agent:boundary:b09ac53c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -639,7 +656,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#autorecycle-on-install] When a new agent-doc install / lib-install occurs, automatically run agent-doc admin recycle --all-projects so running supervisors promote onto the fresh binary instead of staying stale — operator: it is scheduled at an opportune/idle time so it should be safe. Closes the gap where lib-install only PRINTS the recycle hint (running controllers still serve the prior binary). Directly targets the recurring supervisor_binary_stale / #fcc0 / #no-mid-session-install pain hit all session. Related #supautoinstall/#supselfheal. CLEAN session (install/supervisor path).
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).

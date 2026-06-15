@@ -365,7 +365,32 @@ Commits pushed:
 ❯ - parent repo gitlink: `dd6323551` (`agent-doc: update clear session submit fix`)
 
 Post-push CI for the submodule was running as `27571278607` when checked; the previous CI run was green.
-<!-- agent:boundary:49c53aa9 -->
+
+### Re: codexmcpfinalize — gpt-5
+
+Added the regression guard for the Codex MCP finalize close-after-capture restart path. The new CLI integration test seeds the same durable state left after `agent_doc_finalize` captures a response and the transport closes before write/commit, then drives the real `agent-doc preflight` recovery path. It proves the next preflight creates exactly one closeout commit, commits the captured response exactly once, clears the pending response, and leaves `agent-doc session-check` green without a manual reset.
+
+No production recovery patch was needed: the existing `repair` + preflight closeout path already handled this state. The change locks that behavior so the queue cannot regress into the captured-response restart stall again.
+
+Changed:
+- `src/agent-doc/tests/test_cli.rs` adds `mcp_finalize_close_after_capture_recovers_on_next_preflight_once` and a small git commit-count helper.
+- `src/agent-doc/VERSIONS.md` documents `#codexmcpfinalize` coverage.
+
+Verification:
+- `cargo test -p agent-doc --test test_cli mcp_finalize_close_after_capture_recovers_on_next_preflight_once -- --nocapture`
+- `cargo test -p agent-doc --test test_cli mcp_finalize -- --nocapture`
+- `cargo check -p agent-doc`
+- `make check` (4534 tests passed, 238 skipped, doctests passed, medium SimWorld budget test passed)
+
+Commits:
+- `fecc63be` in `src/agent-doc`: `test: cover MCP finalize capture recovery`
+- `a7605c456` in parent: `agent-doc: cover MCP finalize capture recovery`
+
+CI:
+- Previous `src/agent-doc` CI for `c57076c8` passed.
+- New `src/agent-doc` CI for `fecc63be` is running as `27571750330`.
+- Parent repo has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
+<!-- agent:boundary:e5ca0429 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -496,7 +521,7 @@ Please explain the cause of this churn. I don't understand why this is necessary
 ```
 ---
 - ~~do [#jbclearctxsubmit]~~
-- do [#codexmcpfinalize]
+- ~~do [#codexmcpfinalize]~~
 - do [#ar27-majors]
 - do [#dfrefresh-retire]
 - do [#fcc0]
@@ -542,7 +567,6 @@ What are #next-steps to fix bugs?
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
-- [ ] [#codexmcpfinalize] [clean-session] Fix Codex MCP finalize transport-close after response capture: agent_doc_finalize can leave session-check interrupted when the MCP transport closes after capture but before write/commit. Add regression coverage that forces the close-after-capture path and proves the next CLI/preflight/write path commits exactly once, clears cycle state, and does not require manual reset. Related observed cycle: 2026-06-15 tasks/agent-doc/agent-doc-bugs2.md.
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).
 - [ ] [#dfrefresh-retire] [clean-session] Retire the dogfood-supervisor-refresh runbook (runbooks/dogfood-supervisor-refresh.md + BUNDLED_RUNBOOKS entry + SKILL.md catalog line + 4 harness mirrors) once #jbrestale (JB Run Agent Doc auto-restarts a stale route-owned supervisor / red-green switchover) AND #recyclerestart (PCP recycle restarts the harness session) both land and prove the binary self-heals a stale supervisor without the manual make+install+restart bootstrap. The runbook is an explicit stopgap for the bootstrap gap (running supervisor predates its own self-recycle fix + is the live agent parent). Acceptance: with both landed, a stale-binary session auto-promotes onto the new build at the next idle/dispatch boundary; delete the runbook + dependent references in one cycle and re-run audit-docs. CLEAN session (skill/runbook surface).
 - [ ] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.

@@ -281,6 +281,15 @@ Verification:
 - `cargo test -p agent-doc --test test_cli -- --nocapture`
 - `cargo test -p agent-doc-orchestration queue_cmd -- --nocapture`
 - `cargo test -p agent-doc --test test_cli test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit -- --nocapture`
+- GitHub Actions CI run `27570433719` passed (`make check` + `make tmux-ci`)
+- `make check` (4528 passed, 238 skipped; doctests and medium SimWorld passed)
+- `cargo check -p agent-doc`
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `cargo test -p agent-doc-orchestration free_text_queue_head_guard -- --nocapture`
+- `cargo test -p agent-doc-orchestration queue_head_removal_guard -- --nocapture`
+- `cargo test -p agent-doc-orchestration proof_source -- --nocapture`
+- `free_text_queue_head_guard_logs_response_proof_source_for_removed_head`
+- `queue_head_removal_guard_logs_proof_source_for_authorized_id_removals`
 
 Pushed: `btakita/agent-doc@66f7de43`.
 
@@ -291,12 +300,12 @@ Implemented and pushed `src/agent-doc` commit `46906792` (`test: prove monsterro
 `agent-doc queue sync` now reports active backlog ids that were not materialized because an existing queue prompt already represents the same `#id` (for example `advance [#mrhfeed-prop]`), and reports the ids it newly materialized. The regression covers the monsterrodholders-style `queue: start` + `agent:queue ... priority go` + `agent:backlog priority queue` document, preserves the existing `advance [#id]` heads, appends missing `do [#id]` heads, commits the synced document, and proves `session-check` stays clean afterward.
 
 Verification:
-❯ - `cargo test -p agent-doc --test test_cli test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit -- --nocapture`
-❯ - `cargo test -p agent-doc-orchestration queue_cmd -- --nocapture`
-❯ - `cargo test -p agent-doc --test test_cli -- --nocapture`
+- `cargo test -p agent-doc --test test_cli test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit -- --nocapture`
+- `cargo test -p agent-doc-orchestration queue_cmd -- --nocapture`
+- `cargo test -p agent-doc --test test_cli -- --nocapture`
 ❯ - `cargo check -p agent-doc`
-❯ - `make check` (4526 passed, 238 skipped; doctests and medium SimWorld passed)
-❯ - GitHub Actions CI run `27569561694` passed (`make check` + `make tmux-ci`)
+- `make check` (4526 passed, 238 skipped; doctests and medium SimWorld passed)
+- GitHub Actions CI run `27569561694` passed (`make check` + `make tmux-ci`)
 
 Pushed: `btakita/agent-doc@46906792`.
 
@@ -307,20 +316,20 @@ Implemented and pushed `src/agent-doc` commit `87324974` (`test: log queue remov
 The queue preservation mechanics were already present in `HEAD`; this slice tightens the required diagnostics so queue removals are auditable instead of only count-based. `session-check` now logs authorized id-backed queue head removals with the removed `#id` and proof source (`backlog_resolved_or_removed`, `cycle_lifecycle_outcome`, or `current_directive_target`), and logs removed free-text heads when committed response history proves they were answered. Missing proof still fails closed through the existing queue-head provenance guards.
 
 Coverage added:
-- `queue_head_removal_guard_logs_proof_source_for_authorized_id_removals`
-- `free_text_queue_head_guard_logs_response_proof_source_for_removed_head`
+❯ - `queue_head_removal_guard_logs_proof_source_for_authorized_id_removals`
+❯ - `free_text_queue_head_guard_logs_response_proof_source_for_removed_head`
 
 Verification:
-- `cargo test -p agent-doc-orchestration proof_source -- --nocapture`
-- `cargo test -p agent-doc-orchestration queue_head_removal_guard -- --nocapture`
-- `cargo test -p agent-doc-orchestration free_text_queue_head_guard -- --nocapture`
-- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
-- `cargo check -p agent-doc`
-- `make check` (4528 passed, 238 skipped; doctests and medium SimWorld passed)
-- GitHub Actions CI run `27570433719` passed (`make check` + `make tmux-ci`)
+❯ - `cargo test -p agent-doc-orchestration proof_source -- --nocapture`
+❯ - `cargo test -p agent-doc-orchestration queue_head_removal_guard -- --nocapture`
+❯ - `cargo test -p agent-doc-orchestration free_text_queue_head_guard -- --nocapture`
+❯ - `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+❯ - `cargo check -p agent-doc`
+❯ - `make check` (4528 passed, 238 skipped; doctests and medium SimWorld passed)
+❯ - GitHub Actions CI run `27570433719` passed (`make check` + `make tmux-ci`)
 
 Pushed: `btakita/agent-doc@87324974`.
-<!-- agent:boundary:1668478b -->
+<!-- agent:boundary:8b79ed4e -->
 <!-- /agent:exchange -->
 
 ## Queue

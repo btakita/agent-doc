@@ -329,16 +329,38 @@ Verification:
 ❯ - GitHub Actions CI run `27570433719` passed (`make check` + `make tmux-ci`)
 
 Pushed: `btakita/agent-doc@87324974`.
-<!-- agent:boundary:8b79ed4e -->
+
+### Re: clear session context submit — gpt-5
+
+Implemented `#jbclearctxsubmit`.
+
+For the EFS compaction note: that churn is the already-compacted exchange summary being compacted again instead of treated as prior-summary metadata. The repeated compact payload carried the numbered lender-state list twice, in the existing reversed order. I did not edit the EFS document in this cycle; I kept this turn on the active queue head, `#jbclearctxsubmit`.
+
+What changed:
+- `src/session_actor_cmd.rs` now polls after direct-pane clear submission, logs `session_clear_submit_observation ... issue=prompt_not_submitted` when `/clear` or `/new` remains in the active composer, and sends exactly one bare Enter retry for Codex/Claude only.
+- The stale-scrollback guard treats a later prompt-prefix line as a newer composer, so an old visible `/clear` transcript does not trigger a stray Enter.
+- `VERSIONS.md` records the behavior and coverage under `#jbclearctxsubmit`.
+
+Verification:
+- `cargo test -p agent-doc clear_command_visible -- --nocapture`
+- `cargo test -p agent-doc clear_direct_submit_retry -- --nocapture`
+- `cargo test -p agent-doc clear_submit_proof -- --nocapture`
+- `cargo test -p agent-doc session_actor_cmd -- --nocapture`
+- `cargo check -p agent-doc`
+- `make check` passed: 4533 tests, 238 skipped, doctests, and medium SimWorld budget test.
+
+Commits pushed:
+- agent-doc submodule: `c57076c8` (`fix: submit clear session composer drafts`)
+- parent repo gitlink: `dd6323551` (`agent-doc: update clear session submit fix`)
+
+Post-push CI for the submodule was running as `27571278607` when checked; the previous CI run was green.
+<!-- agent:boundary:9e143dc6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority prest="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: JB `Run Agent Doc` sent `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` into the Codex input but did not submit. #simworld~~
-- ~~/goal Do the actual work in the queue. Stop punting on the queue work. Fix the root cause(s) of the punting. The work in the queue should be done.~~
-- ~~do [#compactdrift-agent]~~
----
+~~~done
 :pushpin: The equityfundingsource.md compaction is duplicated and the numeric list is in reverse order:
 ```
 ### Session Summary
@@ -371,15 +393,7 @@ Compacted content:
 - **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
 - **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
 ```
----
-- ~~do [#cleandrainsup-agent]~~
-- ~~do [#rtwbcast-simproof]~~
-- ~~do [#recyclerestart-agent]~~
-- ~~do [#lazilyqrestore-agent]~~
-- ~~do [#suprehotreload-agent]~~
-- ~~do [#qmisstrike-regression]~~
-- ~~do [#staleheaddupcontent]~~
-- ~~do [#mrhbacklogqueuesync]~~
+~~~
 ---
 Please explain the cause of this churn. I don't understand why this is necessary. Just run the current task. Use the document editor buffer as the source of truth. It seems simple. Why this extra complexity?
 ```
@@ -470,7 +484,6 @@ Please explain the cause of this churn. I don't understand why this is necessary
     - https://www.youtube.com/shorts/hA8C9PQx0zI
 ```
 ---
-- ~~do [#mrhqueuepreserve]~~
 - do [#jbclearctxsubmit]
 - do [#codexmcpfinalize]
 - do [#ar27-majors]
@@ -518,7 +531,6 @@ What are #next-steps to fix bugs?
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
-- [ ] [#jbclearctxsubmit] [clean-session] Fix JB Clear Session Context submit on Codex: calling Clear Session Context for tasks/monsterrodholders.md inserted /clear into the Codex composer but did not submit it. Implement submit-proof + one-shot Enter retry for the clear-session route, with stale-scrollback guards and SimWorld/unit coverage. Plan: tasks/agent-doc/plan-jb-clear-session-context-submit.md
 - [ ] [#codexmcpfinalize] [clean-session] Fix Codex MCP finalize transport-close after response capture: agent_doc_finalize can leave session-check interrupted when the MCP transport closes after capture but before write/commit. Add regression coverage that forces the close-after-capture path and proves the next CLI/preflight/write path commits exactly once, clears cycle state, and does not require manual reset. Related observed cycle: 2026-06-15 tasks/agent-doc/agent-doc-bugs2.md.
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).
 - [ ] [#dfrefresh-retire] [clean-session] Retire the dogfood-supervisor-refresh runbook (runbooks/dogfood-supervisor-refresh.md + BUNDLED_RUNBOOKS entry + SKILL.md catalog line + 4 harness mirrors) once #jbrestale (JB Run Agent Doc auto-restarts a stale route-owned supervisor / red-green switchover) AND #recyclerestart (PCP recycle restarts the harness session) both land and prove the binary self-heals a stale supervisor without the manual make+install+restart bootstrap. The runbook is an explicit stopgap for the bootstrap gap (running supervisor predates its own self-recycle fix + is the live agent parent). Acceptance: with both landed, a stale-binary session auto-promotes onto the new build at the next idle/dispatch boundary; delete the runbook + dependent references in one cycle and re-run audit-docs. CLEAN session (skill/runbook surface).

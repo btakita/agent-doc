@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -80,7 +80,7 @@ Root cause: my first pass treated "apply for a deal" as a per-deal **funding com
 **Committed + pushed** (per `#spec-test-commit-push`): submodule `60a07f5` → origin/main, superproject pointer `bc0ec6283` → origin/main.
 
 ⚠️ **Not deployed** — this preset is commit + push only. The currently-live worker (`61df3c82`) still has the fund-only logic, so the bug persists on the live site until a deploy. Say the word (or use `#…-deploy`) and I'll run `bun run deploy:worker`.
-<!-- agent:boundary:870b9aa2 -->
+<!-- agent:boundary:f8ff972e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,6 +88,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -80,7 +80,30 @@ Verification:
 - `gh run list --workflow CI --limit 1` found no workflow named `CI` in both the EFS submodule and superproject, so there was no latest CI run to inspect.
 
 Escalation: none. Confidence: high. Unrelated non-EFS dirty files remain in the superproject and were not staged.
-<!-- agent:boundary:ca565036 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed the pushed EFS Worker state.
+
+Commands:
+- `bun run deploy:worker` from `src/equityfundingsource-dev`.
+- Confirmed Wrangler's remote D1 migration prompt for 4 pending migrations: `0066_document_dropbox_sync_contract.sql`, `0066_investor_deal_interest_workflow.sql`, `0067_investor_fund_allocations.sql`, and `0068_deal_interest_document_requests.sql`.
+- `bun run cf:d1:migrations:list:remote` after deploy.
+- Smoke checks with `curl` against `/`, `/funded-deals`, and `/portal-admin/pipeline`.
+
+Result:
+- Worker deployed at `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Version ID: `434a72ba-681c-4698-8490-ebcdbbeec8ab`.
+- Remote D1 now reports `No migrations to apply!`.
+- Smoke checks: `/` returned 200, `/funded-deals` returned 200, `/portal-admin/pipeline` returned 303 to `/login?role=admin&next=%2Fportal-admin%2Fpipeline` as expected for unauthenticated access.
+
+Changed paths: none in this deploy cycle; the EFS repo remained clean on `main...origin/main`. Escalation: none. Confidence: high.
+<!-- agent:boundary:0916daf6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,8 +111,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~commit + push all dirty EFS files.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

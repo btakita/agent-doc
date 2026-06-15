@@ -480,13 +480,28 @@ Summary: added a shared set-based between-turn enqueue planner; wired the superv
 Verification: clean-worktree `cargo test -p agent-doc-orchestration between_turn_enqueue_plan -- --nocapture`; clean-worktree `cargo test -p agent-doc qdedup_between_turn_enqueue -- --nocapture`; clean-worktree `cargo test -p agent-doc-orchestration clean_session_reset_ops_log_precedes_drain_submit -- --nocapture`; clean-worktree `cargo check -p agent-doc`.
 
 Commits: src/agent-doc `054d792c`; parent `4aecc7ed3`. Push: both pushed to `origin/main`.
-<!-- agent:boundary:53999541 -->
+
+### Re: #clearexchstale — gpt-5
+
+Closed `#clearexchstale` with explicit regression coverage for the stale exchange revival class.
+
+The core exchange compaction/clear path already routes through the editor-convergence / guarded-disk boundary from the `#fcc0` / `#q7jm` work, including stale editor-cache rejection. I added the missing targeted proof that a successful empty exchange replacement advances the durable snapshot merge base to the cleared document, so later preflight or repair paths cannot replay the archived pre-clear exchange from stale HEAD/snapshot state. I also added a `VERSIONS.md` entry tying the existing stale-cache guard and new merge-base regression to this bug.
+
+Commits pushed:
+- `src/agent-doc` `0ec1cdf4` (`test: cover exchange clear stale replay`)
+- parent `agent-loop` `1c503a78b` (`agent-doc: cover exchange clear stale replay`)
+
+Verification passed in the dirty dev tree and again in a clean adjacent worktree with only this patch applied:
+- `cargo test -p agent-doc-orchestration component_compact_empty_message_advances_snapshot_after_exchange_clear -- --nocapture`
+- `cargo test -p agent-doc-orchestration component_compact_rejects_stale_editor_cache_when_snapshot_is_stale -- --nocapture`
+- `cargo check -p agent-doc`
+<!-- agent:boundary:3bd63c81 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
----
+~~~done
 :pushpin: The equityfundingsource.md compaction is duplicated and the numeric list is in reverse order:
 ```
 ### Session Summary
@@ -519,7 +534,7 @@ Compacted content:
 - **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
 - **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
 ```
----
+~~~
 ---
 Please explain the cause of this churn. I don't understand why this is necessary. Just run the current task. Use the document editor buffer as the source of truth. It seems simple. Why this extra complexity?
 ```
@@ -603,15 +618,24 @@ Please explain the cause of this churn. I don't understand why this is necessary
   │ cp src/boost-client/tasks/monsterrodholders.md "$tmpdir/monsterrodholders.md"
   │ ( cd src/agent-doc && cargo run -p agent-doc -- queue sync "$tmpdir/monsterrodholders.md" )
   │ … +1 lines
-  └ <!-- no-queue-removal-guard -->
-    <!-- queue edited live by user during the #hydroweb-size-specs turn: added [#hydroweb-ad-url-apply] and annotated
+  └ &lt;!-- no-queue-removal-guard --&gt;
+    &lt;!-- queue edited live by user during the #hydroweb-size-specs turn: added [#hydroweb-ad-url-apply] and annotated
     … +33 lines (ctrl + t to view transcript)
     OG
     - https://www.youtube.com/shorts/hA8C9PQx0zI
 ```
 ---
-- do [#qdedup]
-- do [#clearexchstale]
+- ~~do [#qdedup]~~
+- ~~do [#clearexchstale]~~
+---
+JB `Run Agent Doc` on lazily-rs
+```
+resync: pruned 1 stale session(s)
+[route] target tmux session: 0
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3605
+```
+---
+/goal Using an agent doc with Codex, JB `Run Agent Doc` and JB `Clear Session Context` should submit the command sent on Codex. But a `\n` is sent instead of submit. This used to work but broke. Please identify when the regression occurred and provide a surgical & durable fix so this issue does not repeat. This regression has occurred several times in the life of agent-doc and it takes a while to fix. I want to fix this issue permanently by using a distinct primitive. #simworld
 - do [#snbc2]
 - do [#efscodexsubmit]
 - do [#stuckhandoff2]
@@ -658,7 +682,6 @@ What are #next-steps to fix bugs?
 - [ ] [#aazp] [operator-verify] suprecyclestall live-verify (agent-doc aafa6510, installed+release-built): restart a stale session via session restart-supervisor FILE --force so it runs the new binary, then drive an idle/next-queue-item recycle. Confirm ops.log shows supervisor_binary_stale_self_recycled ... candidates=[...] then EITHER a clean execve hot-reload OR supervisor_reexec_failed fallback=continue_current_binary with per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Subset of the broader recyclerestart sync-block work. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#4myd] [operator-verify] #suprecyclestall live-verify: with the new binary installed (cargo install + cargo build --release done, pushed agent-doc aafa6510), restart a stale session and drive an idle/next-queue-item recycle. Confirm ops.log shows `supervisor_binary_stale_self_recycled ... candidates=[...]` then EITHER a clean execve hot-reload OR `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
-- [ ] [#clearexchstale] [clean-session] JB Clear Exchange clears the exchange but the content comes back (from a stale HEAD/snapshot replay); same session, a deleted+retyped prompt also revived. Same disk-vs-buffer convergence family as #fcc0: a redeliver/replay path re-applies HEAD/snapshot over the cleared buffer, and clear does not advance the durable merge base. FIX: route clear through converge_document_or_disk + advance merge base; gate redeliver on fresh editor-buffer proof (#dvre/#eprf). CLEAN session. Plan: tasks/agent-doc/plan-jb-clear-exchange-stale-head-revival.md
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse baselines/<hash>.md into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = resolve_current_doc(newest-of(disk,buffer)), NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
 - [ ] [#efscodexsubmit] JB Run Agent Doc in equityfundingsource.md enters but does not submit the prompt to Codex (operator must press Enter). Same class as #2v7b/#jbcodexsubmit: Codex direct-pane dispatch (route.rs send_command_unchecked) detects prompt_not_submitted (merged text+CR not treated as submit by the Codex TUI) but has no Enter re-submit fallback. FIX: Codex-scoped one-shot Enter re-submit + route_submit_resubmit proof logging + SimWorld coverage (operator-requested). CLEAN session required (touches route.rs; submodule carries dirty #fintol tree). Plan: tasks/agent-doc/plan-jb-codex-submit.md

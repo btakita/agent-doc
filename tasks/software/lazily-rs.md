@@ -54,7 +54,20 @@ All 7 remaining `agent:review` items are **operator-gated**, not agent-drainable
 - **`#57by`** Shuttle async model — NO-GO per `#shuttleeval` (defer)
 
 No code, build, or publish steps are agent-runnable until you supply the gated tokens/answers/live endpoints above. Nothing else to do this cycle.
-<!-- agent:boundary:ffb1f3df -->
+
+### Re: Make lazily-zig compliant with lazily-spec — gpt-5
+
+Already complete. `src/lazily-zig` is at `ba7e965` (`feat: add lazily-spec IPC conformance`), which added the serde-shaped lazily-spec IPC model, shared-blob support, capability handshakes, JSON encode/decode, and conformance tests against the canonical `lazily-spec/conformance` fixtures.
+
+Re-verified this cycle with no source changes:
+
+- `zig test src/lazily/ipc.zig` → 6/6 fixture tests passed
+- `mise run test_master` → 33/33 tests passed on Zig master / 0.16
+- `mise run test_0_15_2` → 28/28 tests passed on Zig 0.15.2
+- `zig build` → passed
+
+The lazily-zig worktree is clean. No new commit or push was needed because the compliance implementation is already committed and published in the submodule history. The visible document queue is currently inactive (`queue: stop`); I preserved its inactive Lean-evaluation residue rather than draining it as part of this stale lazily-zig continuation.
+<!-- agent:boundary:01992cc3 -->
 <!-- /agent:exchange -->
 ###
 <!--

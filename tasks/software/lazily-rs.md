@@ -34,40 +34,20 @@ queue: stop
 <!-- agent:exchange -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260615-063344.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260615-065534.md`*
 
 Compacted content:
-❯ - Archived 8 response topic(s): release lazily-zig; Make lazily-py compliant with the lazily-spec (release + publish); queue go → off (no agent work pending); 5 more
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-
-### Re: queue go → off (no agent work pending) — opus-4-8
-
-Acknowledged — you cleared `go` from the queue header, so auto-drain is off. The queue is already empty and frontmatter is `queue: stop`, so there's nothing for me to drain.
-
-All 7 remaining `agent:review` items are **operator-gated**, not agent-drainable:
-
-- **`#kb9b`** lazily-py v0.11.0 publish — PyPI token + passkey 2FA + pre-publish live-test confirm
-- **`#12b1`** lazily-rs v0.11.0 publish — blocked on a revoked crates.io token (rotate + store at `passage btak/CARGO_REGISTRY_TOKEN`)
-- **`#kabc`** / **`#sstz`** LinkedIn drafts — review + publish Tue 2026-06-16 / Mon 2026-06-15
-- **`#h6qb`** Str0mNet cross-host e2e — needs two live hosts + the deployed signaling Worker
-- **`#xccx`** Holons integration — blocked on Steve Melville's 7 open-question answers
-- **`#57by`** Shuttle async model — NO-GO per `#shuttleeval` (defer)
-
-No code, build, or publish steps are agent-runnable until you supply the gated tokens/answers/live endpoints above. Nothing else to do this cycle.
-
-### Re: Make lazily-zig compliant with lazily-spec — gpt-5
-
-Already complete. `src/lazily-zig` is at `ba7e965` (`feat: add lazily-spec IPC conformance`), which added the serde-shaped lazily-spec IPC model, shared-blob support, capability handshakes, JSON encode/decode, and conformance tests against the canonical `lazily-spec/conformance` fixtures.
-
-Re-verified this cycle with no source changes:
-
-- `zig test src/lazily/ipc.zig` → 6/6 fixture tests passed
-- `mise run test_master` → 33/33 tests passed on Zig master / 0.16
-- `mise run test_0_15_2` → 28/28 tests passed on Zig 0.15.2
-- `zig build` → passed
-
-The lazily-zig worktree is clean. No new commit or push was needed because the compliance implementation is already committed and published in the submodule history. The visible document queue is currently inactive (`queue: stop`); I preserved its inactive Lean-evaluation residue rather than draining it as part of this stale lazily-zig continuation.
-<!-- agent:boundary:01992cc3 -->
+- Archived 2 response topic(s): queue go → off (no agent work pending); Make lazily-zig compliant with lazily-spec
+- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e...
+1. Add a small `formal/lean` or `src/lazily-spec/lean` Lake package.
+2. Model only `NodeId`, node state, graph edges, `Snapshot`, `Delta`, and `DeltaOp`.
+3. Prove three or four high-leverage theorems: sequential delta application preserves epoch monotonicity; non-sequential deltas are rejected; batch output has a coalesced frontier; eager signals publish materialized values.
+4. Mirror the existing conformance fixtures as Lean examples, but do not try to generate Rust yet.
+5. If `lake build` stays fast and the model stays small, add it to CI as a spec check.
+Evaluate Lean Language. Can this be useful for lazily-rs and lazily-spec and the rest of the lazily ecosystem?
+https://lean-lang.org/
+https://www.youtube.com/watch?v=oTDcJcvrfCU
+<!-- agent:boundary:d84f5ce8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,6 +61,7 @@ The lazily-zig worktree is clean. No new commit or push was needed because the c
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#4zvn] #lzleanmodel=[recommended] Spike Lean 4 as a formal spec companion for lazily-spec/lazily-rs: create a small Lake package that models IPC Snapshot/Delta state transitions and proves epoch sequencing, gap fail-closed resync, batch coalescing, PartialEq/memo suppression, and Signal slot_value/no-bare-invalidate invariants; only wire `lake build` into CI if the first spike stays small and maintainable.
 <!-- /agent:backlog -->
 
 ## Review

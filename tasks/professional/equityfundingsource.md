@@ -154,7 +154,29 @@ Cycle proof: changed paths are the session document only; no source files change
 The lender/deal pipeline Mermaid diagram has been added above. It keeps annual requirements and eligibility in the Lender Pipeline, keeps Ready to Commit / Committed / Wire Confirmed in the Deal Pipeline, and shows renewal due/expired as warning or hold signals that do not rewind already-funded deal participation.
 
 Cycle proof: changed paths are the session document only; no source files changed; no tests were run because this was a diagram/document response; escalation none; confidence high.
-<!-- agent:boundary:d504270b -->
+❯ corky gpu transcribe + diarize conversations with robert-waldman
+❯ [phone_20260615-141048_8059070885.m4a](../../mail/contacts/robert-waldman/recordings/phone_20260615-141048_8059070885.m4a)
+❯ [phone_20260615-142316_8059070885.m4a](../../mail/contacts/robert-waldman/recordings/phone_20260615-142316_8059070885.m4a)
+❯ [phone_20260615-133630_8059070885.m4a](../../mail/contacts/robert-waldman/recordings/phone_20260615-133630_8059070885.m4a)
+
+### Re: Robert Waldman call transcripts — gpt-5
+
+Corky GPU transcription + diarization is complete for the three Robert Waldman recordings. Each run used `--diarize --speakers Brian,Robert --language en`; Corky reported CUDA enabled on the RTX 5090 and `Full-audio diarization quality OK` for all three files.
+
+Created transcripts:
+
+- `mail/contacts/robert-waldman/recordings/phone_20260615-133630_8059070885.md` — 10:50, 189 lines
+- `mail/contacts/robert-waldman/recordings/phone_20260615-141048_8059070885.md` — 12:06, 90 lines
+- `mail/contacts/robert-waldman/recordings/phone_20260615-142316_8059070885.md` — 17:05, 150 lines
+
+Commit proof: the transcript files are committed inside `mail` as `440c79c Add Robert Waldman call transcripts`; the parent repo submodule pointer is committed as `eb34c6293 chore: record Robert Waldman call transcripts`. Existing unrelated dirty mailbox/sync content in `mail` was left untouched.
+
+Verification: checked the transcript files for unresolved `Unknown`, `SPEAKER`, blank-audio, hallucination, and inaudible placeholder labels; no matches. `make check` passed. `gh run list --workflow CI --limit 1` could not inspect CI because this repo has no workflow named `CI`.
+
+Preflight warning note: agent-doc also flagged three unrelated review items that may already be resolved (`#dropbox-sync-adapter`, `#dzmm-writeback-replay`, `#zwws-vestings-local`); I did not mutate those items in this transcription cycle.
+
+Cycle proof: changed paths are the three new transcript markdown files in `mail`, the parent `mail` submodule pointer, and this session document closeout; commands included three `corky transcribe` runs, output inspection, targeted git staging/commits, `make check`, and CI lookup; escalation none; confidence high for transcription completion and medium-high for diarization speaker labels because they are automated and not manually corrected.
+<!-- agent:boundary:c29d425e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -162,7 +184,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
-- :pushpin: Create a #mermaid with the Lender Pipeline & the Deal Pipeline.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -176,7 +176,42 @@ Verification: checked the transcript files for unresolved `Unknown`, `SPEAKER`, 
 Preflight warning note: agent-doc also flagged three unrelated review items that may already be resolved (`#dropbox-sync-adapter`, `#dzmm-writeback-replay`, `#zwws-vestings-local`); I did not mutate those items in this transcription cycle.
 
 Cycle proof: changed paths are the three new transcript markdown files in `mail`, the parent `mail` submodule pointer, and this session document closeout; commands included three `corky transcribe` runs, output inspection, targeted git staging/commits, `make check`, and CI lookup; escalation none; confidence high for transcription completion and medium-high for diarization speaker labels because they are automated and not manually corrected.
-<!-- agent:boundary:c29d425e -->
+
+### Re: conversation/system architecture review — gpt-5
+
+> **Queue prompt:**
+>
+> Please review the conversations against our current system. Use terminology such as a lender is "interested in loan" instead of applying to lend, "fractionalization" for multi-lender deals, etc. Is the current system architecture in line, additional work needed, with what we discussed in these conversations?
+
+
+Short answer: the current architecture is directionally in line with the conversations, but I would not call it fully aligned yet. The core split is right: borrowers apply for loans, brokers submit deals, admins publish approved/open loans as available investor deals, and lenders express interest in loans rather than "applying" to lend.
+
+What is already aligned:
+
+- The investor portal has the right first action: **I'm interested**. It persists `investor_deal_interests`, sends staff/investor notifications, and the admin Deal Detail has an **Interested** tab/count.
+- The admin side can see multiple interested lenders for a deal, which matches Robert's point that EFS may choose among several interested lenders.
+- Funding records support multiple lenders on a deal at the data level: `funds` has `pending`/`active`, amount, lender account, and `position_type` of `fractional_interest` or `whole_note`.
+- Vestings and special instructions are already modeled EFS-local with multiple vestings per investor, which fits the "one person may fund through trust / personal / IRA / entity" discussion.
+- The lender/deal pipeline split from the prior response remains correct: the lender pipeline should track eligibility/account readiness; the deal pipeline should track deal-specific interest, selection, conditions, wire, funding, recording, and closeout.
+
+The main gaps:
+
+1. **Terminology is inconsistent.** Some PRD/business-logic text and UI still say investors/lenders "commit funds" as the first action, "apply" for deals, or have "applied deals." Based on the calls, reserve **apply/application** for borrower loan applications and lender-account setup/request. For investment opportunities use **interested in this loan**, **request package**, **selected lender**, **funding commitment**, **fractionalization**, and **multi-lender transaction**.
+
+2. **The lender-side commitment flow is too self-service.** The current investor detail has **Commit Funding** and **Sign Deal Documents**. Robert described commitment as usually verbal/email/admin-mediated after package review and a Judith/April conversation. He also clarified the lender generally does not sign the loan docs; the borrower signs/notarizes loan docs, the lender wires, and the lender receives the required purchase/disclosure statement. So the investor signature step should be removed or reframed as a lightweight acknowledgement/internal workflow marker, not the business commitment.
+
+3. **Interest should become an admin work queue, not just a notification.** After a lender marks interest, EFS may send a fuller package, schedule/have a call, record requested conditions or special doc language, decide whether the lender is selected, then mark the verbal commitment / ready-to-draw-docs state. The current system stores interest and emails, but does not yet model package sent, call status, selected lender(s), pre-doc conditions, or prior-to-funding conditions.
+
+4. **Fractionalization is supported but not operationalized.** Multiple `funds` rows can represent a fractionalized loan, but there is not yet a first-class allocation workflow for up to 10 lenders, one lender using multiple vestings/entities, multiple wires, or the majority-control / 50%+ warning Robert described. That can stay light, but the admin should be able to see and manage allocations deliberately instead of inferring them from raw fund rows.
+
+5. **The loan/funding lifecycle needs the Robert sequence exposed.** A useful admin deal flow is: available loan -> lender interested -> package/call -> selected or conditional -> ready for docs -> borrower signs/notarizes docs -> lender wires -> funded -> recorded/closed. TMO/ABS can remain the system of record for some stages, but if TMO does not expose all of them cleanly, EFS needs local admin markers so the UI matches how Judith/April actually work.
+
+I added three follow-up backlog items: `#lender-terminology-audit`, `#deal-interest-workflow`, and `#fractionalization-allocations`. The existing `#investor-pipeline-resequence` review item still looks like the right parent for the lender/deal pipeline split.
+
+Preflight note: agent-doc also flagged likely already-resolved review items (`#dropbox-sync-adapter`, `#dzmm-writeback-replay`, `#zwws-vestings-local`); I did not mutate those in this review cycle. Session-size note: preflight warned the exchange is large, but the queue was active, so I kept draining.
+
+Cycle proof: changed paths are the session document only via finalize/backlog mutation; source inspected included the three June 15 Robert Waldman transcripts, `docs/business-logic.md`, `prds/rpzm-investor-dashboard-rework.md`, `prds/investor-pipeline-admin.md`, the investor deal marketplace/detail UI, admin deal detail, migrations, and investor portal tests. Commands included `agent-doc preflight/plan/read`, `tsift status/search`, and targeted `rg`/`sed`. No tests were run because this was a review/document response with no source changes. Escalation none. Confidence high.
+<!-- agent:boundary:d072414d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -184,12 +219,14 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Please review the conversations against our current system. Use terminology such as a lender is "interested in loan" instead of applying to lend, "fractionalization" for multi-lender deals, etc. Is the current system architecture in line, additional work needed, with what we discussed in these conversations?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lender-terminology-audit] [recommended] Investor/lender terminology audit: reserve "apply/application" for borrower loan applications and lender-account requests; use "interested in this loan/deal", "request package", "funding commitment", and "fractionalization"/"multi-lender transaction" in investor/admin UI, PRDs, and tests. Advances #investor-pipeline-resequence/#rpzm.
+- [ ] [#deal-interest-workflow] [recommended] Deal-interest workflow pass: make investor interest create an admin work queue for package sent, call scheduled/completed, selected lender(s), pre-doc conditions/instructions, and admin-recorded verbal funding commitment; remove or reframe lender-side "Sign Deal Documents" as a non-binding acknowledgement if retained. Advances #investor-pipeline-resequence/#67v2/#rpzm.
+- [ ] [#fractionalization-allocations] [recommended] Fractionalization/multi-lender model: define per-deal lender allocations linked to investor vestings/entities, support multiple wires/beneficiaries, up-to-10 lender guidance, 50%+ control warning, and TMO writeback mapping once #7a4d/#dzmm unblock. Advances #zwws/#dzmm/#investor-pipeline-resequence.
 <!-- /agent:backlog -->
 
 ## Review

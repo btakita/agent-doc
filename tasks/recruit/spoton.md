@@ -37,16 +37,16 @@ prompt_presets:
 
 Added the requested contacts and created a versioned transcript artifact:
 
-❯ - [SpotOn call transcript - 2026-06-11](spoton-2026-06-11-call-transcript.md)
-❯ - Contacts included: Rafael Alonso (`https://www.linkedin.com/in/rafaalonso/`) and Mike Kai (`https://www.linkedin.com/in/mikekai/`)
+- [SpotOn call transcript - 2026-06-11](spoton-2026-06-11-call-transcript.md)
+- Contacts included: Rafael Alonso (`https://www.linkedin.com/in/rafaalonso/`) and Mike Kai (`https://www.linkedin.com/in/mikekai/`)
 
 The transcript file includes the contact table, speaker map, call summary, and the full timestamped diarized transcript. I used the local recording at `../../../../../Videos/2026-06-11 12-31-50-compressed.mp4`, extracted meeting frames with the `watch` workflow, read the visible Zoom labels, transcribed locally with Whisper `turbo`, then clustered speaker embeddings into Rafael / Brian / Mike. No external audio transcription API was used because the watch setup has no Whisper API key configured.
 
 Verification:
 
-❯ - `make check` passed.
-❯ - `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-❯ - `gh workflow list` shows only `Agent Doc`; the latest `Agent Doc` run was queued when checked.
+- `make check` passed.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+- `gh workflow list` shows only `Agent Doc`; the latest `Agent Doc` run was queued when checked.
 
 Confidence: medium-high for transcript text, medium for diarization. The diarization is automated and timestamped for review; short back-and-forth turns can still be merged into one speaker line near speaker changes.
 ❯ I sent rafael-onso a message:
@@ -84,7 +84,20 @@ The reason I do not want to call it released yet is that the rough edges are mos
 That is fine for me as the builder, but I want to value your time and anyone else's time. I would rather wait until the first-run experience is clearer: better documentation, a website, concise intro videos, and examples that show the intended workflow end to end. The release work now is less about adding flashy features and more about making the system easy to understand, safe to operate, and credible for someone who is not already living inside my development environment.
 
 I still want to share it with you, especially because your team is already leaning into AI-assisted engineering and strong ownership. I just want to send it when it is ready enough that you can evaluate the workflow itself, not spend the first hour reverse-engineering my tooling.
-<!-- agent:boundary:950ae021 -->
+❯ This is a bit long. Please give me a shorter version for rafael-onso.
+
+### Re: Shorter Rafael note — gpt-5
+
+Here is a shorter LinkedIn version:
+
+Hi Rafael, quick update on agent-doc. I am going to hold off a bit before sending you a release link because I want your first impression to be a good one.
+
+The core workflow is already useful for me, and I am dogfooding it every day: markdown docs as the interface to agents, queues/backlogs for work, edits while turns are running, and strict preflight/write/session-check paths so the work stays durable.
+
+The main reason it is not released yet is onboarding. I know the system well enough to be productive, and there is enough redundancy/recovery built in for me to work through rough edges. But someone new would still need to learn too much about the document structure and recovery signals before getting value.
+
+I want to respect your time, so I would rather share it once the docs, website, examples, and intro videos make the workflow clear without me walking you through it. I still think it could be relevant to your team, especially given how much you are leaning into AI-assisted engineering, but I want it to be ready enough that you can evaluate the idea instead of reverse-engineering my setup.
+<!-- agent:boundary:45fa19c8 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -232,6 +232,11 @@ Push: I will push `main` after this closeout commit.
 
 > **Queue prompt:**
 >
+> :pushpin: We need a better way to prevent merge wedges while I am typing. Can the document model support CRDT with no conflicts? There are too many `File Cache Conflicts`. We should never write directly to disk while the plugin is running.
+
+
+> **Queue prompt:**
+>
 > :pushpin: The stale head caused the duplicate content corrupt document issue.
 
 
@@ -272,14 +277,14 @@ Commit:
 Escalation: none.
 Confidence: high that the corruption report is now actionable and tied to an exact plan file.
 Push: I will push `main` after this closeout commit.
-<!-- agent:boundary:ae364157 -->
+<!-- agent:boundary:218ca0db -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: The stale head caused the duplicate content corrupt document issue.~~
-- :pushpin: We need a better way to prevent merge wedges while I am typing. Can the document model support CRDT with no conflicts? There are too many `File Cache Conflicts`. We should never write directly to disk while the plugin is running.
+- ~~:pushpin: We need a better way to prevent merge wedges while I am typing. Can the document model support CRDT with no conflicts? There are too many `File Cache Conflicts`. We should never write directly to disk while the plugin is running.~~
 ---
 :pushpin: Codex finalize error
 ```
@@ -314,8 +319,6 @@ Push: I will push `main` after this closeout commit.
             Transport closed
 ```
 ---
-- ~~:pushpin: Codex asks for MCP permissions every reinstall. This stalls loops. How can we avoid this permission request?~~
-- ~~JB `Run Agent Doc` on Codex sends `agent-doc tasks/monsterrodholders.md` to the Codex input, but does not submit. #simworld~~
 - :pushpin: Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.
 ---
 :pushpin: JB `Run Agent Doc`
@@ -325,7 +328,6 @@ Push: I will push `main` after this closeout commit.
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3568
 ```
 ---
-- ~~do [#mrhbacklogqueuesync]~~
 - do [#staleheaddupcontent]
 <!-- /agent:queue -->
 ###

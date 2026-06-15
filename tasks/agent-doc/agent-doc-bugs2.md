@@ -189,69 +189,6 @@ The `[sync] recovered live pane` / `resync: stash pane … skipping kill` lines 
 > ```
 
 
-> **Queue prompt:**
->
-> :pushpin: equityfundingsource.md failed to restart
-> ```
-> ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
->
-> · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
->
->   ❯ /clear
-> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-> ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
->   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
->                                                                             [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
->                                                [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc bi  ❯ /clear
-> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────❯ [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)            ───────────────────────────────────────────────────────────────────────────────────────────────────────────[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execvepass permissions on (shift+tab to cycle)
->        [start] harness resolved: binary=claude source=frontmatter env=default
->                                                                              Registered session 62fe1f41 → pane %74
->                                                                                                                    Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
-> ```
-
-
-> **Queue prompt:**
->
-> :pushpin: equityfundingsource.md failed to restart
-> ```
-> ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
->
-> · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
->
->   ❯ /clear
-> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-> ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
->   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
->                                                                             [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
->                                                [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc bi  ❯ /clear
-> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────❯ [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)            ───────────────────────────────────────────────────────────────────────────────────────────────────────────[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execvepass permissions on (shift+tab to cycle)
->        [start] harness resolved: binary=claude source=frontmatter env=default
->                                                                              Registered session 62fe1f41 → pane %74
->                                                                                                                    Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
-> ```
-
-
-> **Queue prompt:**
->
-> :pushpin: equityfundingsource.md failed to restart
-> ```
-> ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
->
-> · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
->
->   ❯ /clear
-> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-> ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
->   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
->                                                                             [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
->                                                [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc bi  ❯ /clear
-> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────❯ [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)            ───────────────────────────────────────────────────────────────────────────────────────────────────────────[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execvepass permissions on (shift+tab to cycle)
->        [start] harness resolved: binary=claude source=frontmatter env=default
->                                                                              Registered session 62fe1f41 → pane %74
->                                                                                                                    Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
-> ```
-
-
 
 Operator `/goal`: "Fix the IPC drift cause… clear the invalid state, restart, and fix the root cause." Done and live.
 
@@ -320,7 +257,43 @@ Verification: preflight succeeded and showed the restart failure as the drainabl
 Confidence: medium-high.
 
 Escalation: operator verification remains required for `#recyclerestart-verify`; if `start_session` still fails after the supervisor is confirmed on the fresh binary, attach that live repro to that item.
-<!-- agent:boundary:56ed8578 -->
+Done — agent-doc `2ced0b4c` (`queue: keep preset go heads drainable`).
+
+> **Queue prompt:**
+>
+> :pushpin: equityfundingsource.md failed to restart
+> ```
+> ● Committed 5a0e0c4 and pushed. Now finalize this drained head into the session doc.
+>
+> · Spelunking… (12m 50s · ↓ 46.3k tokens · thought for 1s)
+>
+>
+>   ❯ /clear
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+> ❯ [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)──────────────────────────────────────────────────────────────────
+>   Opus 4.8 ctx:23% ~/…/src/equityfundingsource-dev ma[lib-install] auto-recycle: 2 controller(s) marked to recycle at n✢xSpelunking…dary, 08skipped (7et AGENT)
+>                                                                             [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
+>                                                [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc bi  ❯ /clear
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────❯ [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)            ───────────────────────────────────────────────────────────────────────────────────────────────────────────[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execvepass permissions on (shift+tab to cycle)
+>        [start] harness resolved: binary=claude source=frontmatter env=default
+>                                                                              Registered session 62fe1f41 → pane %74
+>                                                                                                                    Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
+> ```
+
+
+Fix: `queue_continuation` now carries the queue marker's `preset` context into the drainability classifier. A queue with `preset="..."` treats each non-empty, non-fenced free-text prompt line as drainable because the preset supplies the directive verb; fenced console/evidence pastes still remain noise. `deploy` is also recognized as a standalone directive verb for non-preset queues.
+
+Coverage added in `agent-doc-orchestration/src/queue_continuation.rs`: preset go-queue lines exercise `detect`, `live_drainable_continuation_head`, `drainable_head_count`, and `queue_stale_noise_lines`; fenced multiline prompt evidence remains non-drainable under a preset queue; `deploy` is covered as a normal directive. Updated `specs/07-orchestration-commands.md` and `VERSIONS.md` for the contract.
+
+Verification:
+- Focused tests: `cargo test -p agent-doc-orchestration queue_continuation::tests:: -- --nocapture` passed.
+- Full suite: `make check` passed in a clean sibling worktree with only the three `#goqnoise` files applied.
+- CI: latest `CI` run on `main` was `completed/success` (`27526061281`, 2026-06-15T05:30:10Z).
+
+Caveat: I did not run `make install` from the live working tree because the submodule has unrelated concurrent dirty work; preflight correctly warns the installed binary/cdylib still predate `2ced0b4c`. Promote this fix from a clean build before expecting live supervisors to use it.
+
+Changed paths in the source commit: `VERSIONS.md`, `agent-doc-orchestration/src/queue_continuation.rs`, `specs/07-orchestration-commands.md`. This closeout marks `#goqnoise` done and commits the superproject `src/agent-doc` pointer.
+<!-- agent:boundary:6c57bcb0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -405,6 +378,9 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 :round_pushpin: do [#suprehotreload]
 - ~~do [#dfrefresh-retire]~~
 - ~~do [#c2b6]~~
+- ~~:pushpin: do [#goqnoise]~~
+- :pushpin: do [#dupcontent2]
+- :pushpin: do [#ar27-majors]
 <!-- /agent:queue -->
 ###
 <!--
@@ -434,7 +410,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue --> 
-- [ ] [#goqnoise] go-mode queue misclassifies real directive heads as stale noise → queue_continuation_required=false stalls the drain with genuine work stranded. `is_drainable_queue_head` only accepts a closed `QUEUE_DIRECTIVE_VERBS` list; `deploy` is missing entirely and preset-bearing go-queues (preset supplies the verb per line) are ignored. Live repro 2026-06-15 equityfundingsource.md (CPA multi-file line + `deploy` both flagged noise). Plan: tasks/agent-doc/plan-go-queue-noise-misclassifies-directive-heads.md
 - [ ] [#dupcontent2] [clean-session] Harden content_ours adoption (follow-up from #dupcontent, e11c218b landed fix #1+#3): (#2) fail closed when the serving supervisor is classified supervisor_binary_stale (#fcc0) — refuse its IPC buffer as the snapshot base regardless of structural shape, preferring candidate/HEAD; (#4) de-dup singleton component blocks on parse so a recoverable single-block buffer is repaired to the canonical (HEAD-derived) block instead of only rejected. Plan: tasks/agent-doc/plan-content-ours-duplicate-corruption.md
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

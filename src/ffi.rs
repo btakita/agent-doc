@@ -90,7 +90,7 @@ static SYNC_LOCK_ACQUIRED_AT_MS: std::sync::atomic::AtomicU64 =
 /// Default stale bound for the cross-editor sync guard. Sized above the JetBrains
 /// plugin's `SYNC_PROCESS_TIMEOUT_MS` (30s) plus margin so a legitimately in-flight sync
 /// is never superseded — only a guard held past this bound (a wedged/dead holder) is.
-const DEFAULT_SYNC_LOCK_STALE_BOUND_MS: u64 = 45_000;
+pub const DEFAULT_SYNC_LOCK_STALE_BOUND_MS: u64 = 45_000;
 
 /// `#recyclerestart` Q2 — pure decision for acquiring the cross-editor sync guard, split
 /// out so the self-heal is unit-testable without real threads/clocks. A free guard is
@@ -98,13 +98,13 @@ const DEFAULT_SYNC_LOCK_STALE_BOUND_MS: u64 = 45_000;
 /// (the prior holder wedged and never released); an unknown-age (`acquired_at_ms == 0`)
 /// or still-fresh holder is deferred so a legitimately in-flight sync keeps the guard.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum SyncLockDecision {
+pub enum SyncLockDecision {
     Acquire,
     SupersedeStaleHolder { held_ms: u64 },
     Defer,
 }
 
-pub(crate) fn sync_lock_acquire_decision(
+pub fn sync_lock_acquire_decision(
     currently_locked: bool,
     acquired_at_ms: u64,
     now_ms: u64,
@@ -1754,7 +1754,6 @@ fn force_link_core_ffi_symbols() {
         agent_doc_reposition_boundary_to_end_preserve_head_with_id;
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1817,7 +1816,11 @@ mod tests {
             0,
             "unlock clears the holder timestamp"
         );
-        assert_eq!(agent_doc_sync_try_lock(), 1, "guard is free again after unlock");
+        assert_eq!(
+            agent_doc_sync_try_lock(),
+            1,
+            "guard is free again after unlock"
+        );
         agent_doc_sync_unlock();
     }
 

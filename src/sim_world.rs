@@ -167,6 +167,15 @@ enum SimCommand {
     SyncRerequestVisibleEditorManual,
     SyncRerequestVisibleEditorPassive,
     SyncFocusStashedMoveBeforeSelect,
+    /// `#recyclerestart-agent`: a killed/recycling pane left a manual
+    /// `Sync Tmux Layout` subprocess holding the plugin sync guard.
+    StartBlockingSyncAfterKillPane,
+    /// Advance the simulated clock past the production sync stale-holder bound.
+    AdvanceSyncGuardBeyondBound,
+    /// Manual `Sync Tmux Layout` click through the production FFI acquire decision.
+    SyncLayoutClick,
+    /// The sync subprocess exits normally and releases the plugin-local guard.
+    FinishSyncLayout,
     /// `#clearcontresume` recycle + clear pipeline. Driven only by targeted
     /// tests, not the random generator, so the seed corpus traces are unchanged.
     ///
@@ -443,6 +452,27 @@ impl Default for SyncProjection {
 }
 
 #[derive(Debug, Clone)]
+struct SyncGuardModel {
+    locked: bool,
+    acquired_at_ms: u64,
+    now_ms: u64,
+    stale_bound_ms: u64,
+    killed_pane_path: bool,
+}
+
+impl Default for SyncGuardModel {
+    fn default() -> Self {
+        Self {
+            locked: false,
+            acquired_at_ms: 0,
+            now_ms: 1,
+            stale_bound_ms: agent_doc::ffi::DEFAULT_SYNC_LOCK_STALE_BOUND_MS,
+            killed_pane_path: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct RouteModel {
     durable: ActorState,
     projection: ActorState,
@@ -615,6 +645,23 @@ struct Coverage {
     /// `#qflood2`: a drain dispatch was skipped because the routed trigger was
     /// already pending in the composer (de-dup: only one trigger lands).
     drain_dedup_skips: usize,
+    /// `#recyclerestart-agent`: a killed-pane sync path was modeled instead of
+    /// requiring live JB/manual verification.
+    sync_kill_pane_proofs: usize,
+    /// `#recyclerestart-agent`: a fresh in-flight sync guard correctly deferred a
+    /// later click.
+    sync_guard_defers: usize,
+    /// `#recyclerestart-agent`: a stale plugin-local sync guard was superseded by
+    /// the production FFI stale-holder decision.
+    sync_guard_stale_releases: usize,
+    /// `#recyclerestart-agent`: a sync holder reached its normal finally/unlock path.
+    sync_guard_completions: usize,
+    /// `#recyclerestart-agent`: proof that recycle promoted the binary instead of
+    /// silently killing the session.
+    recycle_binary_promotion_proofs: usize,
+    /// `#recyclerestart-agent`: proof that the following clear/drain path re-cleared
+    /// or restarted the session before the next queue head.
+    recycle_session_reclear_proofs: usize,
 }
 
 impl Coverage {
@@ -744,6 +791,12 @@ impl Coverage {
         self.go_drain_dispatches += other.go_drain_dispatches;
         self.drain_settle_skips += other.drain_settle_skips;
         self.drain_dedup_skips += other.drain_dedup_skips;
+        self.sync_kill_pane_proofs += other.sync_kill_pane_proofs;
+        self.sync_guard_defers += other.sync_guard_defers;
+        self.sync_guard_stale_releases += other.sync_guard_stale_releases;
+        self.sync_guard_completions += other.sync_guard_completions;
+        self.recycle_binary_promotion_proofs += other.recycle_binary_promotion_proofs;
+        self.recycle_session_reclear_proofs += other.recycle_session_reclear_proofs;
     }
 }
 
@@ -759,6 +812,8 @@ struct SimWorld {
     route: RouteModel,
     recycle_clear: RecycleClearModel,
     sync: SyncProjection,
+    sync_guard: SyncGuardModel,
+    ops_log: Vec<String>,
     next_prompt: usize,
     coverage: Coverage,
 }
@@ -2187,6 +2242,86 @@ fn restart_supervisor_reexec_failure_falls_back_to_relaunch() {
         "the failed reexec leaves the binary stale (operator restarts cleanly to upgrade)"
     );
     assert_eq!(world.route.durable.generation, gen_before);
+}
+
+#[test]
+fn recyclerestart_agent_verifies_kill_pane_sync_guard_and_reclear_proofs() {
+    // `#recyclerestart-agent`: replace the remaining live-only operator proof with
+    // a deterministic model that covers both reported symptoms:
+    // 1. recycle promotes the binary and the next queue item is re-cleared/drained;
+    // 2. `Sync Tmux Layout` after a killed pane does not leave the plugin guard held forever.
+    let mut world = SimWorld::new(6_150);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    let gen_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world
+        .apply(SimCommand::EnableSupervisorAutoRecycle)
+        .unwrap();
+    world.apply(SimCommand::OperatorRecycleMark).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+
+    assert_eq!(world.coverage.supervisor_recycles, 1);
+    assert_eq!(world.coverage.recycle_binary_promotion_proofs, 1);
+    assert_eq!(world.route.durable.generation, gen_before + 1);
+    assert_eq!(
+        world.route.durable.pane_id, pane_before,
+        "the hot reload must preserve the live pane"
+    );
+
+    world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
+    world.apply(SimCommand::SessionClear).unwrap();
+    for _ in 0..4 {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    }
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+
+    assert_eq!(world.coverage.recycle_session_reclear_proofs, 1);
+    assert_eq!(world.coverage.clear_cooldown_resumes, 1);
+    assert_eq!(world.coverage.go_drain_dispatches, 1);
+
+    world
+        .apply(SimCommand::StartBlockingSyncAfterKillPane)
+        .unwrap();
+    world.apply(SimCommand::SyncLayoutClick).unwrap();
+    assert_eq!(
+        world.coverage.sync_guard_defers, 1,
+        "a legitimately fresh holder may defer one later click"
+    );
+
+    world
+        .apply(SimCommand::AdvanceSyncGuardBeyondBound)
+        .unwrap();
+    world.apply(SimCommand::SyncLayoutClick).unwrap();
+    assert_eq!(
+        world.coverage.sync_guard_stale_releases, 1,
+        "the stale-holder decision must supersede a wedged guard"
+    );
+    world.apply(SimCommand::FinishSyncLayout).unwrap();
+    world.apply(SimCommand::SyncLayoutClick).unwrap();
+    assert_eq!(
+        world.coverage.sync_guard_completions, 1,
+        "the superseded sync reaches the normal unlock path"
+    );
+
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("supervisor_recycle_action result=binary_promoted"),
+        "ops log must distinguish binary promotion:\n{ops_log}"
+    );
+    assert!(
+        ops_log.contains("recycle_session_reclear action=session_clear")
+            && ops_log.contains("recycle_session_reclear action=idle_queue_drain result=dispatch"),
+        "ops log must prove the post-recycle session clear/drain:\n{ops_log}"
+    );
+    assert!(
+        ops_log.contains("sync_kill_pane_path pane_killed=true guard=held")
+            && ops_log.contains("sync_guard_released reason=stale_holder_superseded")
+            && ops_log.contains("sync_guard_released reason=sync_complete"),
+        "ops log must prove killed-pane sync guard recovery:\n{ops_log}"
+    );
 }
 
 #[test]

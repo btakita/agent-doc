@@ -20,6 +20,8 @@ impl SimWorld {
                 ..RecycleClearModel::default()
             },
             sync: SyncProjection::default(),
+            sync_guard: SyncGuardModel::default(),
+            ops_log: Vec::new(),
             next_prompt: 1,
             coverage: Coverage::default(),
         }
@@ -425,6 +427,18 @@ impl SimWorld {
                 self.sync.focus_doc_move_before_select("requested");
                 self.coverage.sync_move_before_select_focuses += 1;
             }
+            SimCommand::StartBlockingSyncAfterKillPane => {
+                self.start_blocking_sync_after_kill_pane();
+            }
+            SimCommand::AdvanceSyncGuardBeyondBound => {
+                self.advance_sync_guard_beyond_bound();
+            }
+            SimCommand::SyncLayoutClick => {
+                self.sync_layout_click();
+            }
+            SimCommand::FinishSyncLayout => {
+                self.finish_sync_layout();
+            }
             SimCommand::ActivateGoModeQueueHead => {
                 self.recycle_clear.queue_active_head = Some("#govqueuehead".to_string());
             }
@@ -480,6 +494,74 @@ impl SimWorld {
                     self.coverage.sync_focus_handoffs += 1;
                 }
             }
+        }
+    }
+
+    fn record_ops_proof(&mut self, marker: impl Into<String>) {
+        self.ops_log.push(marker.into());
+    }
+
+    pub(crate) fn start_blocking_sync_after_kill_pane(&mut self) {
+        self.sync_guard.killed_pane_path = true;
+        self.sync_guard.locked = true;
+        self.sync_guard.acquired_at_ms = self.sync_guard.now_ms.max(1);
+        self.coverage.sync_kill_pane_proofs += 1;
+        self.record_ops_proof(format!(
+            "sync_kill_pane_path pane_killed=true guard=held acquired_at_ms={}",
+            self.sync_guard.acquired_at_ms
+        ));
+    }
+
+    pub(crate) fn advance_sync_guard_beyond_bound(&mut self) {
+        self.sync_guard.now_ms = self
+            .sync_guard
+            .acquired_at_ms
+            .saturating_add(self.sync_guard.stale_bound_ms);
+    }
+
+    pub(crate) fn sync_layout_click(&mut self) {
+        let decision = agent_doc::ffi::sync_lock_acquire_decision(
+            self.sync_guard.locked,
+            self.sync_guard.acquired_at_ms,
+            self.sync_guard.now_ms,
+            self.sync_guard.stale_bound_ms,
+        );
+        match decision {
+            agent_doc::ffi::SyncLockDecision::Acquire => {
+                self.sync_guard.locked = true;
+                self.sync_guard.acquired_at_ms = self.sync_guard.now_ms;
+                self.record_ops_proof(format!(
+                    "sync_guard_acquired reason=free_guard at_ms={}",
+                    self.sync_guard.now_ms
+                ));
+            }
+            agent_doc::ffi::SyncLockDecision::SupersedeStaleHolder { held_ms } => {
+                self.sync_guard.locked = true;
+                self.sync_guard.acquired_at_ms = self.sync_guard.now_ms;
+                self.coverage.sync_guard_stale_releases += 1;
+                self.record_ops_proof(format!(
+                    "sync_guard_released reason=stale_holder_superseded held_ms={held_ms} bound_ms={}",
+                    self.sync_guard.stale_bound_ms
+                ));
+            }
+            agent_doc::ffi::SyncLockDecision::Defer => {
+                self.coverage.sync_guard_defers += 1;
+                self.record_ops_proof(format!(
+                    "sync_guard_deferred reason=fresh_holder held_ms={}",
+                    self.sync_guard
+                        .now_ms
+                        .saturating_sub(self.sync_guard.acquired_at_ms)
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn finish_sync_layout(&mut self) {
+        if self.sync_guard.locked {
+            self.sync_guard.locked = false;
+            self.sync_guard.acquired_at_ms = 0;
+            self.coverage.sync_guard_completions += 1;
+            self.record_ops_proof("sync_guard_released reason=sync_complete");
         }
     }
 
@@ -554,6 +636,10 @@ impl SimWorld {
         self.recycle_clear.clear_cooldown_active = true;
         self.recycle_clear.clear_cooldown_idle_ticks = 0;
         self.coverage.session_clears += 1;
+        self.coverage.recycle_session_reclear_proofs += 1;
+        self.record_ops_proof(
+            "recycle_session_reclear action=session_clear result=cooldown_started",
+        );
         Ok(())
     }
 
@@ -624,6 +710,9 @@ impl SimWorld {
             self.recycle_clear.clear_cooldown_idle_ticks = 0;
             self.recycle_clear.last_dispatched = None;
             self.coverage.clear_cooldown_resumes += 1;
+            self.record_ops_proof(
+                "recycle_session_reclear action=clear_cooldown_resume result=ready",
+            );
             // Production `continue`s (idle_watch.rs:204) so the normal drain
             // decision dispatches the head on the NEXT tick with the cooldown
             // already cleared. Return early to model that re-evaluation boundary.
@@ -764,6 +853,9 @@ impl SimWorld {
             }
             self.recycle_clear.last_dispatched = head;
             self.coverage.go_drain_dispatches += 1;
+            self.record_ops_proof(
+                "recycle_session_reclear action=idle_queue_drain result=dispatch",
+            );
         }
         Ok(())
     }
@@ -785,6 +877,12 @@ impl SimWorld {
         };
         self.route.projection = self.route.durable.clone();
         self.route.supervisor_lease_generation = Some(generation);
+        self.coverage.recycle_binary_promotion_proofs += 1;
+        self.record_ops_proof(format!(
+            "supervisor_recycle_action result=binary_promoted generation={} pane_preserved={}",
+            generation,
+            self.route.durable.pane_id.is_some()
+        ));
     }
 
     pub(crate) fn restart_supervisor(

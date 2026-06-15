@@ -43,11 +43,6 @@ Compacted content:
 
 > **Queue prompt:**
 >
-> Analyze the last EFS call transcript. EFS does not handle payments. Are the positions something that makes sense to keep?
-
-
-> **Queue prompt:**
->
 > do [#cgw7]
 
 
@@ -60,13 +55,35 @@ Done. Broker events now generate in-app notifications and (opt-in) email. New mo
 Design notes:
 - In-app notifications (`notification_create_` → shared `notifications` table, surfaced by the existing `GET /api/broker/notifications`) **always fire**. Email is opt-in behind `BROKER_EMAIL_NOTIFICATIONS_ENABLED` (Cloudflare Email Service or local capture), mirroring the borrower-message notify pattern. `BROKER_NOTIFICATION_FROM` overrides the From (falls back to `EFS_EMAIL_FROM`). Both documented in `.env.example`.
 - Side-effects run via `notify_after_` (`ctx.waitUntil`) and swallow errors, so a notification failure never breaks the broker request.
-- `next_payment_date` / `payment_schedule` (and `loan_payments`) — these read as a live servicing schedule EFS can't authoritatively maintain.
-- `yield_mix` / `annual_yield` — the call said *no yield tracking*;
 
 Added `lib/broker/notify.test.ts` (4 tests, all pass). Full suite green: **699 pass / 0 fail**, plus `build` + `build:worker` (typecheck) clean. Committed in the submodule (`2f3337b`) and bumped the superproject pointer (`b06386894`).
 
 One follow-up not in scope here: the broker portal needs a **deal-detail view** at `/portal-broker/deals/:id` for the status-email link to resolve — added as a backlog note if that route doesn't exist yet.
-<!-- agent:boundary:e506fe9f -->
+
+### Re: last EFS call — do the "positions" make sense given EFS doesn't service loans? — opus-4-8
+
+> **Queue prompt:**
+>
+> Analyze the last EFS call transcript. EFS does not handle payments. Are the positions something that makes sense to keep?
+
+
+Short answer: **yes, keep the investor "My Positions" / portfolio view — but it's a static record of what an investor funded, not a servicing view.** That's exactly the line the 2026-06-03 call drew, and the code is most of the way there.
+
+**What the call decided (2026-06-03, `docs/calls/2026-06-03 16-58-49`).** Robert/Judith explicitly cut the servicing-dependent sections from the investor portal — *"distribution and statements… we don't need that section at all. Returns… we don't need that at all… because my positions covers that and we don't do statements,"* and Brian confirms *"because we don't service."* What they kept ("My Positions") is, per Judith, a per-loan list of **property address, loan amount, interest rate, and payment** for *"each loan that they have with us."* So "positions" = the investor's holdings/history, which EFS knows because it *arranged* each loan — none of it requires servicing.
+
+**The one nuance — "payment".** EFS doesn't collect or track payments, so the "payment" shown must be the **scheduled interest-only payment** (these are interest-only loans: ≈ loan amount × rate ÷ 12), a figure computed from origination terms — **not** an actual-received / payment-status feed. Shown that way it's fine and is what Judith asked for. Shown as live cash-flow it would overstate what EFS knows.
+
+**Where the code still drifts from that.** P3 of the dashboard rework (`8d40c66`, #zwws) already dropped Avg-yield / YTD-distributions / Next-distribution from the dashboard *citing "EFS does not service loans."* But the underlying **positions API didn't get the same cleanup** — `lib/investor/portfolio/index.ts` (+ `lib/investor/shared.ts`) still compute and return:
+
+- `yield_mix` / `annual_yield` — the call said *no yield tracking*;
+- `next_payment_date` / `payment_schedule` (and `loan_payments`) — these read as a live servicing schedule EFS can't authoritatively maintain.
+
+So the *concept* is sound and worth keeping; the *API still leaks servicing-flavored fields* the call already retired on the front end.
+
+**Recommendation.** Keep "My Positions." Finish the no-servicing alignment in the API: drop `yield_mix`/`annual_yield` and `next_payment_date`/`payment_schedule` from the `investor_positions` response, keep `addr` / `amount` / `rate` / `position_type`, and relabel the per-loan `payment` as "scheduled monthly interest (est.)". Queued as **#58j3 / #posnosrv** (in backlog) rather than ripping out API surface inside an analysis turn — it's a small relabel-vs-remove call I'd rather you green-light first. Say the word and I'll do it as a `#spec-test-commit-push`.
+
+(Note: "positions" also surfaces as **lien positions** — "first, second, and other junior lien positions" — but that's loan-structure copy, unrelated to payments/servicing, and is fine as-is.)
+<!-- agent:boundary:0cdc1ce5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,7 +92,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - [#58j3]
-- deploy
+- :round_pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

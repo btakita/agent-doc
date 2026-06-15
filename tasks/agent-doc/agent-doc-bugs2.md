@@ -227,16 +227,57 @@ Commit:
 Escalation: none.
 Confidence: high that the report is now actionable and tied to an exact plan file.
 Push: I will push `main` after this closeout commit.
-<!-- agent:boundary:6de1b591 -->
+
+### Re: Stale Queue Head Corruption — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: The stale head caused the duplicate content corrupt document issue.
+
+
+Captured the stale-head duplicate-content corruption report as a plan-backed backlog item.
+
+Added:
+- `#staleheaddupcontent` for stale queue heads replaying old content and corrupting managed document sections. Plan: `tasks/agent-doc/plan-stale-queue-head-duplicate-content.md`.
+
+Changed paths:
+- `tasks/agent-doc/plan-stale-queue-head-duplicate-content.md`
+- Session backlog/queue state in this document.
+
+Commands:
+- `sed -n '230,250p' tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md`
+- `apply_patch` added the plan file.
+- `git add tasks/agent-doc/plan-stale-queue-head-duplicate-content.md`
+- `git diff --cached --name-only`
+- `git diff --cached --stat`
+- `git log --oneline -- tasks/agent-doc/plan-stale-queue-head-duplicate-content.md`
+- `git show --stat --oneline db6e86a63`
+
+Verification:
+- Waited for the queue line to settle from truncated text to the complete stale-head corruption report.
+- Plan file records reproduction, implementation, diagnostics, and acceptance criteria.
+- The plan file was committed by the concurrent `equityfundingsource` session in `db6e86a63`, so I did not create a duplicate plan commit.
+- No source tests were run for this planning-only cycle; the plan defines the required regression and `make check` gate for implementation.
+
+Commit:
+- Plan file landed in `db6e86a63 agent-doc(equityfundingsource): 2026-06-15 04:49:35`.
+
+Escalation: none.
+Confidence: high that the corruption report is now actionable and tied to an exact plan file.
+Push: I will push `main` after this closeout commit.
+<!-- agent:boundary:dde71d52 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: do [#jbclearctxsubmit]
-- :pushpin: do [#mrhqueuepreserve]
+- ~~:pushpin: The stale head caused the duplicate content corrupt document issue.~~
+- We need a better way to prevent merge wedges while I am typing. Can the document model support CRDT with no conflicts? There are too many `File Cache Conflicts`. We should 
+- ~~:pushpin: do [#jbclearctxsubmit]~~
+- ~~:pushpin: do [#mrhqueuepreserve]~~
 ---
-Codex finalize error
+:pushpin: Codex finalize error
 ```
 • Finalize’s backlog-capture guard interpreted the closeout note as a possible follow-up. I’m rerunning with an explicit
   no-follow-up marker; no code or doc content was written by the failed attempt.
@@ -271,16 +312,16 @@ Codex finalize error
 ---
 - ~~:pushpin: Codex asks for MCP permissions every reinstall. This stalls loops. How can we avoid this permission request?~~
 - ~~JB `Run Agent Doc` on Codex sends `agent-doc tasks/monsterrodholders.md` to the Codex input, but does not submit. #simworld~~
-- Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.
+- :pushpin: Go through all `[operator-verify]` tasks in the backlog. Add backlog items to enable these items to be completed using an agent. This could be by having adequete logging to prove/disprove the item. Or Simworld tests.
 ---
-JB `Run Agent Doc`
+:pushpin: JB `Run Agent Doc`
 ```
 [route] target tmux session: 0
 [route] activated existing inactive agent:queue head "#advance-review" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3568
 ```
 ---
-- do [#mrhbacklogqueuesync]
+- ~~do [#mrhbacklogqueuesync]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -310,6 +351,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#staleheaddupcontent] [clean-session] Fix stale queue head duplicate-content corruption: a stale agent:queue head can replay old exchange/queue content and corrupt the document. Add stale-head mismatch coverage, refuse stale queue snapshot replay without live-head match or consume/strike proof, and log live/snapshot/stale head identities. Plan: tasks/agent-doc/plan-stale-queue-head-duplicate-content.md
 - [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md

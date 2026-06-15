@@ -34,43 +34,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260613-183544.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260615-195250.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #bugs-observed + improve prompt caching; do [#avbq]
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #bugs-observed — opus-4-8
-
-> **Queue prompt:**
->
-> #advance-review
-
-
-> **Queue prompt:**
->
-> :pushpin: Add backlog items for tsift to improve prompt caching?
-
-
-> **Queue prompt:**
->
-> :pushpin: #bugs-observed
-
-
-
-No new **tsift** bugs this session — tsift itself (search, session-review, context-pack, build/install) behaved correctly. The prompt-caching backlog it spawned earlier (#0g7c remediation, #avbq cross-run persistence, #wwm1 inline surfacing) is now fully shipped and pushed (tsift `f29f7a2`).
-
-Note for the record: #wwm1's `### Re:` response section was lost from this document when a compaction ran mid-closeout (archive `…-183544.md`) between the `--done` strike and `finalize`; the **code** shipped fine (f29f7a2, backlog marked done), only the in-doc narrative was dropped. That is an **agent-doc** workflow bug, not a tsift bug:
-
-- **Observed:** a bare `agent-doc write --done <id>` (no response body) applied the backlog strike, a compaction then rewrote the exchange, and the next `agent-doc finalize` refused with `snapshot is 8684 bytes but the visible file is 3516 bytes … looks like a manual cleanup`. Recovery was `reset --from-current --preserve-session` → re-preflight.
-- **Scope:** per session scope discipline I am **not** adding this to the tsift backlog (wrong project) and am **not** cross-repo editing `agent-doc-bugs2.md` from this tsift session. It should be filed via `#agent-doc-bug` in the agent-doc session (compaction-vs-finalize snapshot-drift race when a `--done` strike precedes the response write).
-
-So: nothing added to the tsift backlog for this item — no tsift-scoped observed bug to capture (`no-pending-capture`).
-- **Scope:** per session scope discipline I am **not** adding this to the tsift backlog (wrong project) and am **not** cross-repo editing `agent-doc-bugs2.md` from this tsift session. It should be filed via `#agent-doc-bug` in the agent-doc session (compaction-vs-finalize snapshot-drift race when a `--done` strike precedes the response write).
-- **Observed:** a bare `agent-doc write --done <id>` (no response body) applied the backlog strike, a compaction then rewrote the exchange, and the next `agent-doc finalize` refused with `snapshot is 8684 bytes but the visible file is 3516 bytes … looks like a manual cleanup`. Recovery was `reset --from-current --preserve-session` → re-preflight.
-3. Force-move the `v0.1.70` tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC and publishes.
-2. `gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true`.
-1. Register a Trusted Publisher on crates.io for each of the 23 tsift crates (repo `btakita/tsift`, workflow `release.yml`, no environment): `tsift-core`, `tsift-md-ast`, `tsift-graph`, `tsift-sqlite`, `tsift-algorithms`, `tsift-resolution`, `tsift-cache`, `tsift-tokensave`, `tsift-libsql`, `tsift-index`, `tsift-summarize`, `tsift-quality`, `tsift-agent-doc`, `tsift-digest`, `tsift-search`, `tsift-status`, `tsift-session`, `tsift-memory`, `tsift-memgraphrag`, `tsift-surrealdb`, `tsift-cli`, `tsift`, `tsift-sim-world`.
+❯ - Archived 2 response topic(s): #bugs-observed; #advance-review
+❯ - Prior summary/context: prior compacted content: Archived 2 response topic(s): #bugs-observed + improve prompt caching; do [#avbq]
+- **[#1td4]** crates.io publish job migrated to OIDC trusted publishing. **Code complete and on origin/main** (fe4144b -> f29f7a2; `rust-lang/crates-io-auth-action@v1`, `id-token: write`, no `CARGO_REGISTRY_TOKEN`). Its actionable continuation **already exists in the backlog as [#vmax]** — register the Trusted Publisher for all 23 crates, set `TSIFT_ENABLE_CRATES_PUBLISH=true`, re-tag `v0.1.70` to verify OIDC publish. Those steps require a crates.io account + browser 2FA, which an agent cannot perform, so #vmax is correctly `[operator-verify]` and #1td4 stays `[/]` gated until the operator completes registration.
 
 ### Re: #advance-review — opus-4-8
 
@@ -86,14 +55,13 @@ Went through `agent:review`. There is exactly one item, and it is already advanc
 **Net:** nothing new to add. The review item is already paired with its actionable backlog item; the only thing left is operator-gated crates.io registration — adding another item would just duplicate #vmax. #1td4 stays gated; #vmax stays the operator handle.
 
 This empties the `#advance-review` drain; #vmax is `[operator-verify]` so go-mode defers it (queue has no remaining agent-drainable head).
-<!-- agent:boundary:c0b0ac40 -->
-- **[#1td4]** crates.io publish job migrated to OIDC trusted publishing. **Code complete and on origin/main** (fe4144b -> f29f7a2; `rust-lang/crates-io-auth-action@v1`, `id-token: write`, no `CARGO_REGISTRY_TOKEN`). Its actionable continuation **already exists in the backlog as [#vmax]** — register the Trusted Publisher for all 23 crates, set `TSIFT_ENABLE_CRATES_PUBLISH=true`, re-tag `v0.1.70` to verify OIDC publish. Those steps require a crates.io account + browser 2FA, which an agent cannot perform, so #vmax is correctly `[operator-verify]` and #1td4 stays `[/]` gated until the operator completes registration.
-<!-- agent:boundary:368e14d9 -->
+<!-- agent:boundary:e701f526 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#vmax]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

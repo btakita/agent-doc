@@ -607,6 +607,11 @@ The durable rule is what you described: use the document/editor buffer as the cu
 
 ### Re: #efscodexsubmit — gpt-5
 
+> **Queue prompt:**
+>
+> /goal Using an agent doc with Codex, JB `Run Agent Doc` and JB `Clear Session Context` should submit the command sent on Codex. But a `\n` is sent instead of submit. This used to work but broke. Please identify when the regression occurred and provide a surgical & durable fix so this issue does not repeat. This regression has occurred several times in the life of agent-doc and it takes a while to fix. I want to fix this issue permanently by using a distinct primitive. #simworld
+
+
 Closed `#efscodexsubmit` as already implemented in the committed `src/agent-doc` history.
 
 Committed HEAD includes the durable direct-pane submit fix: `direct_pane_needs_enter_resubmit` covers Codex timed-out submissions with the trigger still visible, sends one bare `Enter`, polls acceptance again, and records the operator-greppable `route_submit_resubmit ... action=enter_key result=accepted|still_visible` proof line. The original Codex-only fix landed in `d14dd12f` / `38ad3bc0`; the current generalized path for Codex and Claude is in `3b71cfeb`, with existing-draft resubmission hardening in `4345a2f9`. No new source changes were needed in this cycle.
@@ -615,22 +620,13 @@ Verified from a clean adjacent worktree at committed `src/agent-doc` HEAD (`0ec1
 - `cargo test -p agent-doc-orchestration direct_pane -- --nocapture`
 - `cargo test -p agent-doc-orchestration route_submit_resubmit -- --nocapture`
 - `cargo check -p agent-doc`
-<!-- agent:boundary:a11f6144 -->
+<!-- agent:boundary:22d9cb79 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-~~~done
-JB `Run Agent Doc` on lazily-rs
-```
-resync: pruned 1 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3605
-```
-~~~
-/goal Using an agent doc with Codex, JB `Run Agent Doc` and JB `Clear Session Context` should submit the command sent on Codex. But a `\n` is sent instead of submit. This used to work but broke. Please identify when the regression occurred and provide a surgical & durable fix so this issue does not repeat. This regression has occurred several times in the life of agent-doc and it takes a while to fix. I want to fix this issue permanently by using a distinct primitive. #simworld
-- do [#efscodexsubmit]
+- ~~/goal Using an agent doc with Codex, JB `Run Agent Doc` and JB `Clear Session Context` should submit the command sent on Codex. But a `\n` is sent instead of submit. This used to work but broke. Please identify when the regression occurred and provide a surgical & durable fix so this issue does not repeat. This regression has occurred several times in the life of agent-doc and it takes a while to fix. I want to fix this issue permanently by using a distinct primitive. #simworld~~
 ---
 All equityfundingsource.md codex session Ctrl+C Ctrl+Z inputs are escaped ascii `^Z^Z^C^C^C^C^C^C`. #simworld
 
@@ -656,10 +652,11 @@ All equityfundingsource.md codex session Ctrl+C Ctrl+Z inputs are escaped ascii 
             [run] heartbeat phase=child_agent_wait elapsed_s=120 timeout_s=1800 cycle_id=cycle-1781557600342 cycle_phase=preflight_started cycle_age_s=86
 ```
 ---
-- do [#stuckhandoff2]
+- ~~do [#stuckhandoff2]~~
 - do [#qt32]
 - do [#2v7b]
 - do [#efsmrgmarkers]
+- do [#snbc2]
 <!-- /agent:queue -->
 ###
 <!--
@@ -702,7 +699,6 @@ What are #next-steps to fix bugs?
 - [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse `baselines/<hash>.md` into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = `resolve_current_doc(newest-of(disk,buffer))`, NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
-- [ ] [#stuckhandoff2] Stuck-handoff hardening: controllers wedged in --handoff-state preparing survive IDE restart + keep corrupting the worktree over ipc.sock. ROOT CAUSE: two-phase handoff (prepare_handoff->promote_handoff, project_controller.rs:3307/3318) is client-driven; if the client dies/RPC fails between the two, the controller stays Preparing forever. The existing reaper (#kqr6/#sjwm/#stuckhandoff, 45s) is bootstrap-RECORD-scoped (kills only bootstrap.pid), same-project-only, and fires on bind/gc not a timer -> orphaned + cross-project + no-new-invoke wedges survive (operator must pkill -f 'controller serve ... --handoff-state preparing'). FIX (defense-in-depth): M1 controller self-watchdog/suicide-timer on Preparing [strongest], M2 gate worktree/ipc writes on Stable [symptom-killer, overlaps #pcwc], M3 proc-scan reaper for orphans, M4 client handoff drop-guard, M5 cross-project gc sweep. M1+M2 are the durable core; land together with SimWorld coverage. CLEAN session required (submodule carries uncommitted #fintol work). Plan: tasks/agent-doc/plan-stuck-handoff-hardening.md
 - [ ] [#qt32] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#2v7b] #jbcodexsubmit / #jbclaudesubmit JB Run Agent Doc enters the routed prompt but does not submit it (operator presses Enter). CODE-COMPLETE 2026-06-13 (agent-doc 3b71cfeb, superproject 8fcdc067f): JB dispatch-only routes BOTH Claude and Codex through the same direct-pane send_command_unchecked path (merged text+CR send-keys), and TriggerStillVisible detection already covered both, but the one-shot Enter re-submit was gated codex-only. Generalized direct_pane_needs_codex_resubmit -> direct_pane_needs_enter_resubmit (codex|claude; opencode excluded; requires TimedOut+trigger_visible so no stray Enter into an empty composer); proof line route_submit_resubmit ... action=enter_key result=accepted|still_visible; 3 unit tests; make check 4369 passed 0 FAIL. Built+installed+recycled. GATE now operator-drive ONLY: run JB Run Agent Doc against a Claude pane AND a Codex pane, confirm ops.log shows route_submit_issue issue=prompt_not_submitted then route_submit_resubmit action=enter_key result=accepted with the queue starting. Plan: tasks/agent-doc/plan-jb-codex-submit.md
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.

@@ -157,19 +157,34 @@ Verification:
 - `git -C src/agent-doc status --short`
 - `rg -n "agent_doc_finalize|response_captured|missing_response_probe|direct_write_fallback|socket_ack_content|capture" src/agent-doc -g '*.rs'`
 - Session/backlog state only; no source code changes in this cycle.
+- `6ed9c0005 agent-doc: plan codex queue submit bugs`
+- No source tests were run for this planning-only cycle; the plans define the required focused tests for the implementation cycles.
+- Verified only the two new plan files were staged for the manual repo commit.
+- Confirmed the full text of both new queue reports after the initial truncated preflight line.
+- `git commit -m "agent-doc: plan codex queue submit bugs"`
+- `git diff --cached --stat`
+- `git diff --cached --name-only`
+- `git add tasks/agent-doc/plan-jb-clear-session-context-submit.md tasks/agent-doc/plan-monsterrodholders-queue-preservation.md`
+- `sed -n '160,225p' tasks/agent-doc/agent-doc-bugs2.md`
+- Session backlog/queue state in this document.
+- `tasks/agent-doc/plan-monsterrodholders-queue-preservation.md`
+- `tasks/agent-doc/plan-jb-clear-session-context-submit.md`
+- `#mrhqueuepreserve` for active-turn queue convergence deleting user-added queue items in `tasks/monsterrodholders.md`. Plan: `tasks/agent-doc/plan-monsterrodholders-queue-preservation.md`.
+- `#jbclearctxsubmit` for JB `Clear Session Context` placing `/clear` into the Codex composer without submitting it. Plan: `tasks/agent-doc/plan-jb-clear-session-context-submit.md`.
 
 Escalation: none.
 Confidence: high for the repair state; medium for the new backlog diagnosis until the forced transport-close regression is implemented.
 Push: I will push `main` immediately after this binary-owned closeout commit exists.
-<!-- agent:boundary:907204de -->
+<!-- agent:boundary:fdc54c2b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: [#codexmcpfinalize]
-- JB `Clear Session Context` added `/clear` to the Codex input but did not sub
+- ~~:pushpin: [#codexmcpfinalize]~~
+- JB `Clear Session Context` added `/clear` to the Codex input but did not submit when called on monsterrodholders.md
 - agent-doc deleted all the queue items I added in monsterrodholders.md
+- monsterrodholders.md has `agent:backlog priority queue`...but the items are not added to `agent:queue`.
 ---
 Codex finalize error
 ```
@@ -244,6 +259,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#jbclearctxsubmit] [clean-session] Fix JB Clear Session Context submit on Codex: calling Clear Session Context for tasks/monsterrodholders.md inserted /clear into the Codex composer but did not submit it. Implement submit-proof + one-shot Enter retry for the clear-session route, with stale-scrollback guards and SimWorld/unit coverage. Plan: tasks/agent-doc/plan-jb-clear-session-context-submit.md
+- [ ] [#mrhqueuepreserve] [clean-session] Prevent active-turn queue convergence from deleting user-added queue items in tasks/monsterrodholders.md. Add regression coverage for live queue edits during a running turn, require explicit consume/strike/remove proof before queue deletion, and log the proof source for removed queue nodes. Plan: tasks/agent-doc/plan-monsterrodholders-queue-preservation.md
 - [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md

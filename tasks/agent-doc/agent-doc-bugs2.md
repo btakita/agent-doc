@@ -909,7 +909,25 @@ Verification passed: focused tests, `cargo check -p agent-doc`, and local `make 
 Confirmed. The passive-CI rule is in `src/agent-doc/AGENTS.md`: CI is turn evidence, not a blocking gate; use one-shot checks such as `gh run list --workflow CI --limit 1`, record queued/in-progress/success/failure, and do not run `gh run watch` unless explicitly asked.
 
 I also fixed the queue-consume recovery bug exposed by this restart: stale discarded captures and undrainable leading queue notes can no longer be used as positional proof to strike the next free-text head. The incorrectly struck SimWorld queue line was restored, and the latest CI checks were observed passively only: agent-doc `CI` and parent `Agent Doc` were both `in_progress` when checked.
-<!-- agent:boundary:2d209c7d -->
+
+### Re: Stop blocking the turn on CI. Add this instruction to agent-doc's AGENTS.md. Passively check on CI but don't block the turn. It takes too long. — gpt-5
+
+Done. The passive-CI instruction is in agent-doc's `AGENTS.md` and the installed agent-doc skill: CI is turn evidence, not a blocking gate; use one-shot checks such as `gh run list --workflow CI --limit 1`, record queued/in-progress/success/failure, and do not run `gh run watch` unless explicitly asked.
+
+I also fixed the restart closeout path exposed while applying this: session-check backlog side scans now warn, rather than hard-block, when archived/transcript component-marker noise trips auxiliary parsing. The queue remains preserved for the next drainable item instead of being treated as silently dropped.
+
+Changed commits:
+- agent-doc `87fac050` (`fix: warn on backlog guard parse noise`), pushed to `origin/main`
+- parent `e9979f6dd` (`agent-doc: update backlog guard parse handling`), pushed to `origin/main`
+
+Verification:
+- `cargo test -p agent-doc-orchestration backlog_guards -- --nocapture` passed
+- `cargo check -p agent-doc` passed
+- `make check` passed via tsift digest runner (`tart-33d356ea14`)
+- `git diff --check` passed
+
+Passive CI snapshot only, no waiting: agent-doc `CI` was `in_progress` for run `27584402991`; parent `Agent Doc` run `27584417442` had already failed with empty job steps/no failed log available, so I recorded it as CI-start evidence rather than blocking this turn.
+<!-- agent:boundary:16222c23 -->
 <!-- /agent:exchange -->
 
 ## Queue

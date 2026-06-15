@@ -396,7 +396,36 @@ Fixed and committed (agent-doc `6c85ed42`).
 **Tests + verification.** Added `repair::first_queue_head_free_text_check_excludes_id_backed_head` (all id-backed spellings classify as not-free-text; a genuine no-`#id` head still strikes; inactive queue strikes nothing) and extended `write::queue_consume::free_text_queue_head_detection` with the bare/pinned `[#id]` spellings. `make check` green — 4464 passed, 238 skipped, clippy clean (FlowCore token-budget gate included). Plan: `tasks/agent-doc/plan-finalize-misstrike-next-head.md`.
 
 Note: this is a `[clean-session]` binary fix — the live build/install + supervisor recycle (so a running session uses the new strike guard) is handled by the default-on `#supselfheal`/`#supautoinstall` path at the next idle boundary.
-<!-- agent:boundary:2673ea34 -->
+
+### Re: do [#aazp] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#aazp]
+
+
+`#aazp` is `[operator-verify]` (the `#suprecyclestall` live-verify). I did the agent-doable half and confirmed the code is in the running binary; the live recycle proof is the part only you can drive. Gating it (code-complete, operator-gated).
+
+**Code present (the `aafa6510` fix):** the production emission lives in `agent-doc-orchestration/src/start/idle_watch.rs` —
+- `idle_watch.rs:612` `supervisor_binary_stale_self_recycled via=execve_preserve_child boundary=… candidates=[…]`
+- `idle_watch.rs:674` the `via=process_exit` boundary variant
+- `idle_watch.rs:639/645` `supervisor_reexec_failed fallback=continue_current_binary error=…` (the non-fatal fallback)
+
+Installed binary is `0.34.1` @ submodule HEAD `6c85ed42` — newer than `aafa6510`, so it carries the code. cargo `install` + release build sub-steps are already recorded done on the item.
+
+**ops.log check (agent-doable):** **zero** real, timestamp-anchored emissions of any of the three markers (`supervisor_binary_stale_self_recycled`, `supervisor_reexec_failed`, `supervisor_restart_drain_reexec`). The only textual matches are those marker names quoted *inside* prior `queue_diff_active_prompt_differs` prompt text — not events. So no live stale-recycle has ever fired through this code path yet.
+
+**Why I'm not driving it:** I won't run `session restart-supervisor … --force` against *this* live session — recycling mid-cycle races my own finalize, which is the exact churn family this doc keeps hitting. Same recycle `#4myd` wants.
+
+**Operator step to produce the proof:**
+```
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
+# or all docs: agent-doc admin recycle --all-projects
+```
+Then drive one idle / next-queue-item boundary and confirm ops.log shows `supervisor_binary_stale_self_recycled … candidates=[…]` followed by EITHER a clean execve hot-reload OR `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case the pane stays alive (no hang) with the restart hint shown.
+
+Not mutating queue state or auto-looping — `#aazp` is operator-gated.
+<!-- agent:boundary:76b0ef48 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -407,7 +436,7 @@ Note: this is a `[clean-session]` binary fix — the live build/install + superv
 - ~~:pushpin: [#mphaseloop]~~
 - ~~:round_pushpin: do [#fcc0]~~
 - ~~:pushpin: [#qmisstrike]~~
-- :pushpin: do [#aazp]
+- ~~:pushpin: do [#aazp]~~
 - :round_pushpin: do [#rtwbcast]
 ---
 :pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
@@ -517,7 +546,6 @@ What are #next-steps to fix bugs?
 - [ ] [#0kjc] #mdastquote [clean-session] Markdown AST must treat tags inside quoted strings ("...") and code spans/blocks (backtick / triple-backtick) as CONTENT, not document tags. Operator report: agent:*/#id-looking tokens inside quotes or fenced code are being parsed as real document component markers. Same family as #lintfence (fenced agent:* markers break lint + parser). FIX: tagpath/agent-doc markdown tokenizer must mask quoted-string and code-span/code-fence regions before component/tag extraction. CLEAN session (parser path).
 - [ ] [#pushpinaccum] [clean-session] Queue :pushpin: annotations accumulate/nest in the wrong place. (1) ACCUMULATION: a head already starting `- :pushpin:` gets another :pushpin: prepended -> `:pushpin: - :pushpin: ...` (operator corrected one live 2026-06-13). (2) PROMOTION DEDUP (operator 2026-06-14): when a `:round_pushpin:` head is upgraded to `:pushpin:`, the round_pushpin is kept alongside -> `:pushpin: :round_pushpin:` instead of a single `:pushpin:`. The queue head-grouping/annotation formatter prepends/promotes the pushpin marker without checking for an existing leading pushpin/round-pushpin/bullet. FIX: make the queue-head annotation prefix idempotent — a head carries exactly one leading marker; promoting `:round_pushpin:` -> `:pushpin:` REPLACES it (drop the round_pushpin), and re-pinning an already-:pushpin: head is a no-op. CLEAN session (queue formatter path).
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
-- [ ] [#aazp] [operator-verify] suprecyclestall live-verify (agent-doc aafa6510, installed+release-built): restart a stale session via session restart-supervisor FILE --force so it runs the new binary, then drive an idle/next-queue-item recycle. Confirm ops.log shows supervisor_binary_stale_self_recycled ... candidates=[...] then EITHER a clean execve hot-reload OR supervisor_reexec_failed fallback=continue_current_binary with per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Subset of the broader recyclerestart sync-block work. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#recyclerestart] [clean-session] PCP/Supervisor recycle does not restart the agent session (img_21.png); JB Sync Tmux Layout after tmux kill-pane surfaced `Sync deferred: another tmux layout sync is already running`. ROOT CAUSE (code-grounded): the warning fires when agent_doc_sync_try_lock() (ffi.rs:746, a process-wide SYNC_LOCKED AtomicBool shared cross-editor) is already held. SyncLayoutAction.kt holds that FFI lock across the ENTIRE agent-doc sync subprocess (runCommandWithTimeout, line ~299, released only in finally line 331), and that subprocess is bounded only by the 30s SYNC_PROCESS_TIMEOUT_MS and can block on in-pane/binary recovery (the timeout message literally says retry can run binary recovery). So layout GEOMETRY sync is coupled to in-pane readiness, and a second manual sync racing an in-flight one bails immediately (non-blocking compare_exchange) instead of superseding. FIX: decouple tmux geometry sync from in-pane init/recovery; hold SYNC_LOCKED only across the fast geometry reconcile, run pane readiness/recovery separately; make a newer sync generation supersede an in-flight stale one rather than warn-and-skip; prove recycle restarts/clears the harness session. CLEAN session. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast] [clean-session] rtwatch rung 4 — multi-editor CRDT broadcast. Phases rtwbcast-id (editor_id in FFI buffer-report + per-editor live_buffer_snapshot_path), then deliver/merge/verify. CLEAN session required; live two-IDE convergence verify is operator-drive. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 <!-- /agent:backlog -->
@@ -525,6 +553,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#aazp] [operator-verify] suprecyclestall live-verify (agent-doc aafa6510, installed+release-built): restart a stale session via session restart-supervisor FILE --force so it runs the new binary, then drive an idle/next-queue-item recycle. Confirm ops.log shows supervisor_binary_stale_self_recycled ... candidates=[...] then EITHER a clean execve hot-reload OR supervisor_reexec_failed fallback=continue_current_binary with per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Subset of the broader recyclerestart sync-block work. Cannot be agent-done: needs a live editor + real recycle.
 - [/] [#fcc0] [TOP] [clean-session] Zero JB File Cache Conflict dialogs. Route all document-mutating disk writes through one shared converge_document_or_disk() behind the listener-active gate (editor_ipc primary + disk_fallback); resolve the ipcdrift/stuckhandoff2 wedge that forces fallbacks. CLEAN session required (live write path); 0-dialogs proof operator-drive live JB. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md
 - [/] [#4myd] [operator-verify] #suprecyclestall live-verify: with the new binary installed (cargo install + cargo build --release done, pushed agent-doc aafa6510), restart a stale session and drive an idle/next-queue-item recycle. Confirm ops.log shows `supervisor_binary_stale_self_recycled ... candidates=[...]` then EITHER a clean execve hot-reload OR `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Cannot be agent-done: needs a live editor + real recycle.
 - [/] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.

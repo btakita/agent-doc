@@ -425,19 +425,36 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force
 Then drive one idle / next-queue-item boundary and confirm ops.log shows `supervisor_binary_stale_self_recycled … candidates=[…]` followed by EITHER a clean execve hot-reload OR `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case the pane stays alive (no hang) with the restart hint shown.
 
 Not mutating queue state or auto-looping — `#aazp` is operator-gated.
-<!-- agent:boundary:76b0ef48 -->
+
+### Re: [#cleardrainsim] — opus-4-8
+
+Drained. Added the integration-layer coverage `#cleardrainsim` asked for — pinning the **full preflight JSON drainability contract**, not just the `queue_continuation::drainable_head_count` unit. Two new `tests/test_cli.rs` cases run the real `agent-doc preflight` binary and assert its JSON:
+
+- **All heads deferred/noise** (`[operator-verify]` id-head + an inert bare observation): `queue_drainable_head_count: 0`, `queue_continuation_required: false`, **and** `queue_continuation_guidance` absent — the `#qchurn` no-op-loop guard the SKILL auto-loop and supervisor idle-watch both key off.
+- **A real drainable head remains** (`[clean-session]` id-head, which drains in place per `#qcontdrain`, + a free-text directive head): `queue_drainable_head_count: 2`, `queue_continuation_required: true`, and the guidance string carries the degraded-IPC no-stall contract (`file-IPC` … `NOT stop reasons`).
+
+Note I updated the item's expectation to the **current** contract: the original text said `[clean-session]` heads count as undrainable "under a live editor-IPC listener", but `#qcontdrain` made `[clean-session]` always drain in place, so only `[operator-verify]` + inert noise yield count 0.
+
+`make check` green (EXIT=0, zero FAILED). Committed agent-doc `d5e4b83e`, superproject pointer `063cbc285`, both pushed to `origin/main`. CI for `d5e4b83e` is in progress (prior `4f4755be` was a clean success). **`cargo install`/`lib-install` deferred on purpose**: this is a test-only change with no runtime behavior delta, and reinstalling mid-drain would re-stale *this* live route-owned supervisor (the exit-75 churn family this doc keeps hitting).
+
+**On the equityfundingsource auto-restart you logged** — that maps onto two already-tracked items, no new bug needed:
+- The `dispatch blocked … advance-review preset head is spent … Operator can clear the '- #advance-review' line` (receipts 3502/3457) is `#qpresetstrike` (review) — a spent preset head fails **closed** with a manual-deletion prescription instead of auto-striking and re-dispatching once. Live-re-confirmed again here.
+- The auto-restart that "was stuck in the shell" until you manually restarted is `#recyclerestart` (backlog) / `#jbrestale` — PCP/supervisor recycle not cleanly restarting the harness session. Your manual-restart-then-Run-Agent-Doc workaround is the current stopgap.
+<!-- agent:boundary:f7e1d0a1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~[#freshgrant]. I put this here. leave this here. You should not override my decision unless there is another dependency for this to be complete.~~
-- ~~:round_pushpin: do [#4myd]~~
-- ~~:pushpin: [#mphaseloop]~~
-- ~~:round_pushpin: do [#fcc0]~~
-- ~~:pushpin: [#qmisstrike]~~
-- ~~:pushpin: do [#aazp]~~
 - :round_pushpin: do [#rtwbcast]
+---
+I auto-restart occurred in equityfundingsource.md. But the restart was not successful and was stuck in the shell. I manually restarted then ran JB `Run Agent Doc`.
+```
+resync: pruned 9 stale session(s)
+[route] target tmux session: 0
+[route] activated existing inactive agent:queue head "All \"Lender account application — incomplete\" components across all pages should be the same component...and have a button to complete the application. deploy" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3502
+```
 ---
 :pushpin: :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md. This should self-heal. Not obvious why this is blocked as well.
 ```
@@ -486,7 +503,6 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 ```
 ---
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
-- [#cleardrainsim]
 :round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
 ---
 - :pushpin: upgrade dependencies
@@ -538,7 +554,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue --> 
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
-- [ ] [#cleardrainsim] [clean-session] Add SimWorld/integration coverage asserting the full preflight JSON contract (not just the queue_continuation::drainable_head_count unit) emits queue_continuation_required=false + queue_drainable_head_count=0 for an active go-mode queue whose only materialized heads are [clean-session] (under a live editor-IPC listener) / [operator-verify] / inert-noise, and =true with the right count when a real drainable head remains. Locks the #cleardrainsignal contract the SKILL auto-loop now depends on. Landed: agent-doc 5c8b2891.
 - [ ] [#dfrefresh-retire] [clean-session] Retire the dogfood-supervisor-refresh runbook (runbooks/dogfood-supervisor-refresh.md + BUNDLED_RUNBOOKS entry + SKILL.md catalog line + 4 harness mirrors) once #jbrestale (JB Run Agent Doc auto-restarts a stale route-owned supervisor / red-green switchover) AND #recyclerestart (PCP recycle restarts the harness session) both land and prove the binary self-heals a stale supervisor without the manual make+install+restart bootstrap. The runbook is an explicit stopgap for the bootstrap gap (running supervisor predates its own self-recycle fix + is the live agent parent). Acceptance: with both landed, a stale-binary session auto-promotes onto the new build at the next idle/dispatch boundary; delete the runbook + dependent references in one cycle and re-run audit-docs. CLEAN session (skill/runbook surface).
 - [ ] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.
 - [ ] [#dupcontent] [clean-session] Duplicate-content / malformed-attribute document corruption when finalize adopts a stale-supervisor `content_ours` snapshot. LIVE 2026-06-14 (monsterrodholders.md, stale route-owned supervisor pid1328300 started 02:15:48 < binary mtime 02:28:10, session-check `#fcc0`): `finalize --stream` hit `mid-turn cycle rotation ... #adoc-compact-during-turn-response-loss` then `live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar content_ours_len=40827 > candidate 39216` then `snapshot from content_ours`. The adopted buffer was CORRUPT and written to disk: 273 lines vs 181 in clean HEAD, TWO `agent:queue` blocks (held one at ~88 PLUS a stale re-armed `preset="#spec-test-commit-push" priority go` block at ~181) and a truncated marker `<!-- agent:queue tasks=" -->`. The lint-gate caught `empty-attr-value` only AFTER the corrupt content already landed on disk (interrupt, no commit; HEAD stayed clean). Repair: `git checkout HEAD -- <file>` + `reset --from-current --preserve-session`. ROOT CAUSE (hypothesis): `content_ours`/`ack_content_sidecar` buffer is adopted verbatim as the snapshot base without structural validation, so a bad prior CRDT merge (duplicate singleton component blocks + attribute split across a merge boundary) is taken as truth and written before the lint-gate runs; the known-stale supervisor is still trusted as an IPC content source. FIX: (1) structurally validate before adopting any content_ours snapshot — reject/repair >1 open marker for a singleton component (exchange/status/queue/backlog/review/icebox/done) or a malformed/unterminated attribute, falling back to candidate/HEAD; (2) fail closed when the serving supervisor is already classified `supervisor_binary_stale` (#fcc0) — do not ingest its buffer; (3) run the structural/lint check on the candidate BEFORE the disk write, not after; (4) de-dup singleton blocks on parse instead of concatenating. CLEAN session (snapshot-adoption / converge write path). Related #fcc0/#compactqattr/#adoc-compact-during-turn-response-loss. Plan: tasks/agent-doc/plan-content-ours-duplicate-corruption.md

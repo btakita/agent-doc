@@ -47,7 +47,31 @@ Compacted content:
 Evaluate Lean Language. Can this be useful for lazily-rs and lazily-spec and the rest of the lazily ecosystem?
 https://lean-lang.org/
 https://www.youtube.com/watch?v=oTDcJcvrfCU
-<!-- agent:boundary:d84f5ce8 -->
+
+### Re: Evaluate Lean Language for lazily — gpt-5
+
+Short answer: yes, Lean looks useful for the lazily ecosystem, but the right first use is a compact formal model of the stable semantic core, not a rewrite target and not whole-crate Rust verification.
+
+The strongest fit is `lazily-spec`. The current spec already has language-agnostic Snapshot/Delta schemas, conformance fixtures, capability negotiation, epoch rules, and cross-language bindings. Lean can turn the invariants that currently live in prose and tests into a compiled contract: `Delta.base_epoch == last_epoch`, `Delta.epoch == base_epoch + 1`, gaps fail closed into resync, outermost batch flush advances epoch once, equal `Cell` writes emit no downstream ops, memo-equal recompute suppresses propagation, and eager `Signal` changes lower to concrete `slot_value` rather than a bare `invalidate`.
+
+For `lazily-rs`, I would use Lean as an external semantic model before trying extraction or deep source verification. The Rust crate has closures, dynamic dependency discovery, type erasure, `RefCell`/mutex internals, async stale-completion behavior, Loom tests, and transport surfaces. Those are awkward to verify wholesale. A smaller Lean model can still be valuable: define the abstract graph state and transition rules, prove the invariants above, then use the model to generate or review conformance traces that `lazily-rs`, `lazily-py`, `lazily-zig`, and `@lazily/signaling` all consume.
+
+The video’s useful point is directly relevant: tests can catch a mismatch, but an agent can make the mismatch disappear while weakening the architecture. The speaker’s Lean example separates two concepts that local code had blurred, then uses the formal model as the source of truth for whether the implementation fix preserved the intended distinction. That maps well to lazily’s own high-risk distinctions: lazy versus eager, dirty versus unset, invalidation versus concrete value publication, slot-local recomputation versus cross-language state sync, and sender-side value mirrors versus future distributed compute replication.
+
+I would not use Lean to replace JSON Schema, conformance fixtures, property tests, Loom/Shuttle-style concurrency checks, or live Str0mNet/WebRTC validation. Lean should sit one layer above those as a precise semantic oracle. The JSON wire format remains normative for compatibility; Lean proves the state-machine laws the wire messages are supposed to preserve.
+
+Best first spike:
+
+1. Add a small `formal/lean` or `src/lazily-spec/lean` Lake package.
+2. Model only `NodeId`, node state, graph edges, `Snapshot`, `Delta`, and `DeltaOp`.
+3. Prove three or four high-leverage theorems: sequential delta application preserves epoch monotonicity; non-sequential deltas are rejected; batch output has a coalesced frontier; eager signals publish materialized values.
+4. Mirror the existing conformance fixtures as Lean examples, but do not try to generate Rust yet.
+5. If `lake build` stays fast and the model stays small, add it to CI as a spec check.
+
+I added a recommended backlog item for that spike. Sources inspected: [Lean homepage](https://lean-lang.org/), [Lean Language Reference](https://lean-lang.org/doc/reference/latest/), Lean use cases for [Aeneas/Rust verification](https://lean-lang.org/use-cases/aeneas/), [Veil/distributed protocol verification](https://lean-lang.org/use-cases/veil/), [Cedar production verification](https://lean-lang.org/use-cases/cedar/), and the captioned video [How Agents Quietly Break Architecture](https://www.youtube.com/watch?v=oTDcJcvrfCU). Locally, I checked `src/lazily-rs/README.md`, `src/lazily-rs/SPEC.md`, and `src/lazily-spec/protocol.md`.
+
+Cycle notes: no code changed and no test suite was run; this was a prompt-response evaluation. The YouTube pass used native captions with `--no-whisper` because no local Whisper API key is configured.
+<!-- agent:boundary:d154b7c8 -->
 <!-- /agent:exchange -->
 ###
 <!--

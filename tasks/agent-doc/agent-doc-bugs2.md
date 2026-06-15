@@ -475,7 +475,21 @@ Verification:
 
 The installed `agent-doc` binary is now built from the clean `28ac88d9` tree. `gh run list --workflow CI --limit 1` could not find a workflow named `CI`, so there was no GitHub CI run to inspect.
 
-<!-- agent:boundary:b957461b -->
+### Re: Queue Work Was Actually Done — gpt-5
+
+You were right to push back. I stopped treating the queue as something to clean up cosmetically and did the actual implementation work behind the remaining heads:
+
+- `#codexpcphandoff`: implemented in `src/agent-doc` commit `f5ac694c`, parent commit `bb3dfb649`.
+- `#qpresetstrike`: implemented in `src/agent-doc` commit `6d65a12e`, parent commit `8349da51a`.
+- Codex context-threshold clears: implemented in `src/agent-doc` commit `28ac88d9`, parent commit `2574caa99`, then built and installed from a clean detached worktree.
+
+For the context-threshold item specifically, Codex now reads real `token_count` events from the matching `~/.codex/sessions/**/rollout-*.jsonl`, computes ctx% including cached input tokens, logs the numeric `[s760]` clear decision, and hands off to the supervisor when the configured threshold is crossed. That is the actual code path the queue item requested.
+
+After those implementation responses were in the exchange, I used the binary `agent-doc queue consume --count 3` path to drain the answered free-text queue heads and clear `queue_active`; I did not manually edit the markdown queue. The queue is now empty because the work corresponding to the visible heads is done and verified.
+
+Verification evidence already recorded for the code work includes focused Rust tests, dirty-tree `make check`, clean-tree `make check` at `28ac88d9`, `cargo build --release`, and `cargo install --path .`. `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this repo.
+
+<!-- agent:boundary:7659e03e -->
 <!-- /agent:exchange -->
 
 ## Queue

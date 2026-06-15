@@ -468,7 +468,19 @@ Verification:
 ❯ - `cargo test -p agent-doc skill -- --nocapture`
 ❯ - clean-worktree `make check` from `src/agent-doc` commit `3339b4d1` (clippy, 4532 tests, doctests, medium SimWorld budget)
 ❯ - GitHub Actions CI `27573900103` passed (`make check` + `make tmux-ci`)
-<!-- agent:boundary:f5b9357c -->
+
+### Re: #qdedup — gpt-5
+
+Implemented the between-turn trigger dedupe path.
+
+Changed paths: src/agent-doc/agent-doc-orchestration/src/start/decisions.rs, src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs, src/agent-doc/src/sim_world.rs, src/agent-doc/src/sim_world/engine.rs, src/agent-doc/VERSIONS.md.
+
+Summary: added a shared set-based between-turn enqueue planner; wired the supervisor idle-watch to emit `between_turn_enqueue deduped=N kept=/clear,/agent-doc result=delivered` after a clear-plus-drain sequence lands; added SimWorld coverage proving duplicate fresh-context handoff requests are held during an active turn and delivered once at the idle boundary.
+
+Verification: clean-worktree `cargo test -p agent-doc-orchestration between_turn_enqueue_plan -- --nocapture`; clean-worktree `cargo test -p agent-doc qdedup_between_turn_enqueue -- --nocapture`; clean-worktree `cargo test -p agent-doc-orchestration clean_session_reset_ops_log_precedes_drain_submit -- --nocapture`; clean-worktree `cargo check -p agent-doc`.
+
+Commits: src/agent-doc `054d792c`; parent `4aecc7ed3`. Push: both pushed to `origin/main`.
+<!-- agent:boundary:53999541 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -598,11 +610,6 @@ Please explain the cause of this churn. I don't understand why this is necessary
     - https://www.youtube.com/shorts/hA8C9PQx0zI
 ```
 ---
-- ~~do [#jbclearctxsubmit]~~
-- ~~do [#codexmcpfinalize]~~
-- ~~do [#ar27-majors]~~
-- ~~do [#dfrefresh-retire]~~
-- do [#fcc0]
 - do [#qdedup]
 - do [#clearexchstale]
 - do [#snbc2]
@@ -651,7 +658,6 @@ What are #next-steps to fix bugs?
 - [ ] [#aazp] [operator-verify] suprecyclestall live-verify (agent-doc aafa6510, installed+release-built): restart a stale session via session restart-supervisor FILE --force so it runs the new binary, then drive an idle/next-queue-item recycle. Confirm ops.log shows supervisor_binary_stale_self_recycled ... candidates=[...] then EITHER a clean execve hot-reload OR supervisor_reexec_failed fallback=continue_current_binary with per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Subset of the broader recyclerestart sync-block work. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#4myd] [operator-verify] #suprecyclestall live-verify: with the new binary installed (cargo install + cargo build --release done, pushed agent-doc aafa6510), restart a stale session and drive an idle/next-queue-item recycle. Confirm ops.log shows `supervisor_binary_stale_self_recycled ... candidates=[...]` then EITHER a clean execve hot-reload OR `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
-- [ ] [#qdedup] [clean-session] Between-queue-turn trigger enqueue must de-duplicate: successive between-turn enqueues concatenated into one garbled trigger (`/clear /agent-doc <FILE>/agent-doc <FILE>`). Operator: stop the drain once a turn completes, insert into the inactive agent between turns, enqueue UNIQUE (one /clear, one /agent-doc <FILE>) landing once in the PCP/Supervisor between-turn stage. Compose next trigger as a deduped set, gate strictly to the inter-turn boundary, proof line between_turn_enqueue deduped=N. Related #qflood2/#qchurn/#clearcontresume. CLEAN session. Plan: tasks/agent-doc/plan-between-turn-trigger-dedup.md
 - [ ] [#clearexchstale] [clean-session] JB Clear Exchange clears the exchange but the content comes back (from a stale HEAD/snapshot replay); same session, a deleted+retyped prompt also revived. Same disk-vs-buffer convergence family as #fcc0: a redeliver/replay path re-applies HEAD/snapshot over the cleared buffer, and clear does not advance the durable merge base. FIX: route clear through converge_document_or_disk + advance merge base; gate redeliver on fresh editor-buffer proof (#dvre/#eprf). CLEAN session. Plan: tasks/agent-doc/plan-jb-clear-exchange-stale-head-revival.md
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse baselines/<hash>.md into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = resolve_current_doc(newest-of(disk,buffer)), NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).

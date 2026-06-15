@@ -434,7 +434,17 @@ Changed paths: session document only. Verification: recovery preflight ran and i
 Continued the interrupted closeout. `agent-doc preflight` recovered the `response_captured` cycle and committed the buffer-convergence response, so the session is back on the binary-owned write path.
 
 The PCP/supervisor handoff requirement remains captured as gated review item `#codexpcphandoff` with plan `tasks/agent-doc/plan-codex-pcp-supervisor-fresh-context-handoff.md`. No source edits were made in this follow-up cycle.
-<!-- agent:boundary:a48a807d -->
+
+### Re: Actual Codex PCP/Supervisor Fix — gpt-5
+
+I did the implementation instead of leaving this as an operator gate. `#codexpcphandoff` is fixed in `src/agent-doc` commit `f5ac694c`, and the parent repo now points at it in commit `bb3dfb649`.
+
+The Codex Stop hook now treats fresh-context queue continuation as supervisor work: it logs `codex_fresh_context_handoff ... result=queued supervisor=idle_queue_watch` and returns control to the supervisor idle watch instead of telling the operator to run `/clear`. Normal same-context continuation still uses the existing MCP/finalize guidance.
+
+Verification completed: `cargo fmt --check`; `cargo test -p agent-doc-orchestration codex_hook::tests -- --nocapture`; `make check`; `cargo build --release`; `cargo install --path .`.
+
+I did not clear the remaining review items because those are separate bugs and were not implemented in this cycle.
+<!-- agent:boundary:a3316236 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -512,7 +522,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#codexpcphandoff] [clean-session] Codex Stop-hook/fresh-context blocks must hand off to PCP/supervisor instead of punting to the operator: when a Codex turn cannot execute /clear or must not process the next queue head after compaction/context-clear, enqueue one deduped supervisor fresh-context continuation that preserves launch permissions and logs proof. Plan: tasks/agent-doc/plan-codex-pcp-supervisor-fresh-context-handoff.md
 - [/] [#compactdrift-agent] [clean-session] Make #c2b6 compactdrift agent-verifiable: add an editor-IPC/fixture regression for JB Compact Exchange on a doc whose HEAD contains a finalized Re: response, proving no typed_component_drift/out-of-band historical response bail without needing live JB.
 - [/] [#cleandrainsup-agent] [clean-session] Make #cleandrainsup-verify agent-verifiable: add local supervisor/ops-log coverage for idle_queue_watch_context_reset reason=#cleandrainsup followed by draining a [clean-session] head with one fresh agent per item. Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [/] [#rtwbcast-simproof] [clean-session] Make #rtwbcast-verify agent-verifiable: add a headless two-editor/SimWorld CRDT broadcast convergence test that exercises simultaneous managed-doc edits and proves both buffers converge without clobber. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

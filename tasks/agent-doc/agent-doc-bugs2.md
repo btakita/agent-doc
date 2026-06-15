@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -422,7 +422,13 @@ Push: I will push `main` after this closeout commit.
 Captured this as `#codexpcphandoff`. The failure is not that Codex cannot type `/clear`; it is that agent-doc should not leave a fresh-context continuation as operator work when PCP/supervisor can own the boundary.
 
 I added `tasks/agent-doc/plan-codex-pcp-supervisor-fresh-context-handoff.md` with acceptance around Stop-hook fresh-context handoff, between-turn dedupe, preserved Codex launch contract, and proof logging. I put the item in gated review rather than editing `src/agent-doc` here because that tree is already dirty with overlapping route/queue/supervisor work.
-<!-- agent:boundary:2ded2dbb -->
+
+### Re: Buffer Convergence — gpt-5
+
+No new implementation work in this recovery pass. The live buffer edits struck the clean-session directive line after `#codexpcphandoff` was captured, and the durable item remains in gated review with its plan file committed.
+
+Changed paths: session document only. Verification: recovery preflight ran and identified this as buffer convergence on the already-captured PCP/supervisor handoff requirement.
+<!-- agent:boundary:e82d4691 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -454,7 +460,6 @@ agent-doc Codex should use the PCP/supervisor to handle tasks that cannot be don
   equityfundingsource.md so that queue head runs with fresh context.
 ```
 ---
-- If agent-doc Codex task requires a clean session, use PCP/Supervisor to coordinate a clean session to run the task. 
 - ~~do [#suprehotreload-agent]~~
 - ~~do [#lazilyqrestore-agent]~~
 - ~~do [#recyclerestart-agent]~~

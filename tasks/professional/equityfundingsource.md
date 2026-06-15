@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -61,7 +61,7 @@ Once approved, the implementation should be split into a focused per-interested-
 I would not add a new duplicate backlog item for this cycle. Use `#gq5c` as history, `#investor-pipeline-resequence` as the approval gate, and `#xcvg` for the borrower/admin email round-trip piece.
 
 Changed paths: session document only. Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg #gq5c`, and this `agent-doc finalize`. Verification: prompt-only closeout; no app tests needed. Escalation: none. Confidence: high.
-<!-- agent:boundary:f8e9fc15 -->
+<!-- agent:boundary:6b2f00fa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,7 +69,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#investor-pipeline-resequence]
 <!-- /agent:queue -->
 
 ## Backlog

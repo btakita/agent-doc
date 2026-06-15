@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -172,7 +172,7 @@ Built an **mdBook** site, same convention as the lazily-spec site from the previ
 **Build + deploy** — `mdbook build` clean (all includes resolved, no leftover `{{#include}}`, internal links resolve). `.github/workflows/mdbook.yml` (`taiki-e/install-action@mdbook` + `actions/deploy-pages@v4`) deploys on push to `main`; enabled Pages with `build_type=workflow` via the API. Deploy run `27516826402` finished **success**. `/book` added to `.gitignore`.
 
 Re the `#spec-test-build-install-commit-push` preset: "install" is N/A for a static docs site; build + commit + push done, live-site verified. **Both GitHub Pages queue items are now complete** — the queue is drained. (Session note: exchange is large / 2 prior no-op closeouts flagged `session_accretion: warn`, but per the active-queue guidance I kept draining rather than pausing to compact.)
-<!-- agent:boundary:add74679 -->
+<!-- agent:boundary:3a350a8d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -181,6 +181,7 @@ Re the `#spec-test-build-install-commit-push` preset: "install" is N/A for a sta
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Add https://lazily-hub.github.io/lazily-rs/ and https://lazily-hub.github.io/lazily-spec/ links into the lazily articles on briantakita.me
 <!-- /agent:queue -->
 
 ## Backlog

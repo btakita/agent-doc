@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -103,15 +103,17 @@ Result:
 - Smoke checks: `/` returned 200, `/funded-deals` returned 200, `/portal-admin/pipeline` returned 303 to `/login?role=admin&next=%2Fportal-admin%2Fpipeline` as expected for unauthenticated access.
 
 Changed paths: none in this deploy cycle; the EFS repo remained clean on `main...origin/main`. Escalation: none. Confidence: high.
-<!-- agent:boundary:778a9af2 -->
+Preflight found no new changes to respond to in `tasks/professional/equityfundingsource.md`, so I stopped per the agent-doc workflow.
+
+It did auto-commit a previously written response and cleared the already-drained queue, setting `queue: stop`. The only notable warning is that the exchange is large; compaction is available with `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md --commit` if you want it.
+<!-- agent:boundary:e961161d -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- What are #next-steps to follow-up on #gq5c?
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

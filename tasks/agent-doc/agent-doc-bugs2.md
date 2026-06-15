@@ -37,7 +37,41 @@ queue: start
 Compacted content:
 - Archived 32 response topic(s): [#r18j] supervisor auto-install; make [#r18j] live + push; [#r18j] live + proven; 29 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:990439f3 -->
+
+### Re: do [#0kjc] — quoted-string masking in the marker parser (shipped) — opus-4-8
+
+> **Queue prompt:**
+>
+> I auto-restart occurred in equityfundingsource.md. But the restart was not successful and was stuck in the shell.
+> ```
+>   Opus 4.8 ctx:10% ~/work/btakit    Finished `release` profile [optimized] target(s) in 0.08s
+>   ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents                               [lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.1.so (symlink: libagent_doc.so)
+>                          [lib-install] note: running controllers still serve the prior binary — run `agent-doc admin recycle --all-projects` (or restart sessions) to promote the new build
+>                                                                     [agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
+>                                        [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+>                                                [start] harness resolved: binary=claude source=frontmatter env=default
+>                                                                                                                      Registered session 62fe1f41 → pane %74
+>                                     Starting claude...
+>                                                       [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+> ```
+>
+> I manually restarted then ran JB `Run Agent Doc`.
+> ```
+> resync: pruned 9 stale session(s)
+> [route] target tmux session: 0
+> [route] activated existing inactive agent:queue head "All \"Lender account application — incomplete\" components across all pages should be the same component...and have a button to complete the application. deploy" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3502
+> ```
+
+
+Done — agent-doc `a99a882d` (superproject pointer `fcf6d21ec`), pushed to `origin/main`.
+
+**Fix.** Half of #0kjc was already implemented: `component::find_code_ranges` (pulldown-cmark) already masks inline code spans and fenced/indented code blocks for marker/tag extraction (`parse()`, `find_non_agent_html_comment_ranges`, `pending.rs`). The missing piece was **double-quoted prose spans** — a marker quoted by name in queue/backlog prose was scanned as a real component, opening an unmatched component and erroring the whole parse (corruption family, alongside `#lintfence`). New `component::find_quoted_ranges(doc)` returns same-line double-quoted spans (backslash escapes handled like `gate_verify::strip_quoted_spans` `#gng8`; an unterminated quote masks only the rest of its own line — fail-safe). `parse()` and `find_non_agent_html_comment_ranges` now skip any comment-open whose start byte is inside a code **or** quoted range.
+
+**Safety.** A real `agent:queue` marker carrying a quoted attribute value is NOT masked — the comment-open precedes the quotes, so the marker start is never inside a quoted span; attribute parsing is untouched (dedicated regression test). Coverage: quoted-marker/quoted-`#id`/fenced-marker(regression)/real-marker-with-quoted-attr tests + a `find_quoted_ranges` same-line/fail-safe unit. `make check` green — **4476 passed, 0 failed**, clippy clean. Not installed mid-session (`#no-mid-session-install`); promotes on next supervisor recycle.
+
+**⚠️ New bug observed live this cycle — compaction dropped a backlog item.** A concurrent compaction mid-finalize archived the exchange to `.agent-doc/archives/…-035227.md` (queue `preset`/`go` attrs preserved — no `#compactqattr` regression there) but **silently dropped the entire `[#0kjc]` backlog item** (pre-compact HEAD `f8a340c44` had 9 backlog items; post-compact `e4d597474` has 8, only `#0kjc` missing). Compaction must only archive the EXCHANGE and leave every other component byte-identical — dropping a backlog **item** is a worse blast-radius variant of `#compactqattr`. Filing as `#compactdropitem`. Because the item was dropped, I could not `--done` it; the completion is durable in git (`a99a882d`) and recorded here. A `--pending-add` to restore it was raced/no-op'd by the stale route-owned supervisor (pid 1654897), so I'm not fighting it further this cycle.
+<!-- agent:boundary:138ed9aa -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -114,23 +148,23 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 :pushpin: Spurrious post-compaction in monsterrodholders.md deleted all attributes in `agent:queue` including `preset` and `priority`. Too much blast radius.
 :round_pushpin: This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`.
 ---
-- :pushpin: upgrade dependencies
+- ~~:pushpin: upgrade dependencies~~
 ---
 - ~~:pushpin: [#recyclerestart]: Stall occurred ![img_23.png](img_23.png)~~
 - :pushpin: [#c2b6]
 - ~~:pushpin: [#pushpinaccum]~~
-- :pushpin: [#0kjc]
+- ~~:pushpin: [#0kjc]~~
 - :pushpin: [#compactqattr]
 - :pushpin: [#dupcontent]
 ---
-- do [#dfrefresh-retire]
+:pushpin: - do [#dfrefresh-retire]
 - do [#1j8q]
 ---
 :round_pushpin: do [#suprehotreload]
 - :pushpin: do [#ar27-majors]
 - :pushpin: do [#dupcontent]
 - :pushpin: do [#compactqattr]
-- :pushpin: do [#0kjc]
+- ~~:pushpin: do [#0kjc]~~
 - ~~:pushpin: do [#pushpinaccum]~~
 <!-- /agent:queue -->
 ###

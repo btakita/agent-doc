@@ -297,7 +297,7 @@ Already implemented and verified. This is the `#0kjc` / `#mdastquote` / `#lintfe
 `find_code_ranges()` uses pulldown-cmark offsets to mask inline code, fenced code blocks, and indented code blocks before component/tag scanning, so marker text inside backticks is treated as content. `find_quoted_ranges()` masks same-line double-quoted prose spans, including escaped quotes, so quoted marker/tag text is also treated as content. Real component markers still parse normally, including marker attributes like `preset="..."`, because the marker open precedes the quoted attribute value.
 
 Verification already recorded in this document: `cargo test -p agent-doc-core --lib component::` passed with direct coverage for fenced markers, inline markers, quoted marker prose, quoted `#id` prose, and real markers with quoted attributes. No new source changes are needed for this prompt.
-<!-- agent:boundary:16e1ee19 -->
+<!-- agent:boundary:eeddad9a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -352,11 +352,9 @@ resync: stash pane %50 is unregistered but still hosts live supervisor tsift-v0.
 [route] activated existing inactive agent:queue head "The new Deal Pipeline kanban is missing the completed application + accepted application from the intake section. deploy" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line. receipt_id=3460
 ```
----
 ~~~done
 :pushpin: - :pushpin: Ensure the markdown AST is properly handling strings (quoted text) and code blocks (backtick or triple backtick). Tags within the blocks should be treated as the content, not as part of the document tags.
 ~~~
----
 :pushpin: JB `Compact Exchange` on this document
 ```
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-23 [compact] CRDT state compacted: 26692 → 26692 bytes [compact] CRDT state refreshed from post-compact content [compact] discarded 1 stale capture sidecar(s) for archived response(s) in tasks/agent-doc/agent-doc-bugs2.md [compact] Archived 148 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260613-022946.md Error: refusing to auto-adopt committed historical response patchback for tasks/agent-doc/agent-doc-bugs2.md: HEAD contains an out-of-band typed_component_drift mutation with response marker ### Re: do [#rtwbcast] — multi-editor CRDT broadcast — opus-4-8

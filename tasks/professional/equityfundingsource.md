@@ -211,7 +211,37 @@ I added three follow-up backlog items: `#lender-terminology-audit`, `#deal-inter
 Preflight note: agent-doc also flagged likely already-resolved review items (`#dropbox-sync-adapter`, `#dzmm-writeback-replay`, `#zwws-vestings-local`); I did not mutate those in this review cycle. Session-size note: preflight warned the exchange is large, but the queue was active, so I kept draining.
 
 Cycle proof: changed paths are the session document only via finalize/backlog mutation; source inspected included the three June 15 Robert Waldman transcripts, `docs/business-logic.md`, `prds/rpzm-investor-dashboard-rework.md`, `prds/investor-pipeline-admin.md`, the investor deal marketplace/detail UI, admin deal detail, migrations, and investor portal tests. Commands included `agent-doc preflight/plan/read`, `tsift status/search`, and targeted `rg`/`sed`. No tests were run because this was a review/document response with no source changes. Escalation none. Confidence high.
-<!-- agent:boundary:5c85699d -->
+
+### Re: lender terminology audit — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lender-terminology-audit]
+
+
+Completed and pushed the investor-facing lender terminology pass in the EFS submodule.
+
+Changed paths covered the investor dashboard API/data, investor portal screens, investor portal e2e test, and related docs/PRDs:
+
+- `app/equityfundingsource/lib/investor/dashboard/index.ts`
+- `lib/ui--browser--efs/portal/investor/{available_deals,dashboard,data,deal_detail,lender_account}.tsx`
+- `docs/{business-logic,current_progress,qa-investor-portal}.md`
+- `prds/{equity-funding-source-lending-portal-prd,rpzm-investor-dashboard-rework}.md`
+- `tests/investor-portal-e2e.test.ts`
+
+Behavior now distinguishes lender-account application/request language from deal-package interest, funding commitment, and deal-package acknowledgement. Removed stale investor-facing “applied deals”, “commit funding”, and “sign deal documents” wording from the audited surface. The remaining broader matches are admin/internal “fund commitment” model language and were left as-is.
+
+Verification:
+
+- `bun test tests/investor-portal-e2e.test.ts` passed: 41 pass, 0 fail.
+- `bun run check` passed: 718 pass, 0 fail, app build and worker build passed.
+- Targeted terminology `rg` scan found no stale audited investor-facing strings.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` and `gh run list --limit 5` returned no workflows/runs for the EFS repo.
+
+Committed and pushed EFS submodule commit `6d0bc97` (`fix: align investor deal terminology`) to `origin/main`; staged only the parent gitlink update for this session closeout. Existing unrelated admin/Dropbox dirty work in the EFS submodule was left untouched.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:af65faba -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -219,7 +249,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lender-terminology-audit]
+- ~~do [#lender-terminology-audit]~~
 - do [#deal-interest-workflow]
 - do [#fractionalization-allocations]
 <!-- /agent:queue -->
@@ -227,7 +257,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lender-terminology-audit] [recommended] Investor/lender terminology audit: reserve "apply/application" for borrower loan applications and lender-account requests; use "interested in this loan/deal", "request package", "funding commitment", and "fractionalization"/"multi-lender transaction" in investor/admin UI, PRDs, and tests. Advances #investor-pipeline-resequence/#rpzm.
 - [ ] [#deal-interest-workflow] [recommended] Deal-interest workflow pass: make investor interest create an admin work queue for package sent, call scheduled/completed, selected lender(s), pre-doc conditions/instructions, and admin-recorded verbal funding commitment; remove or reframe lender-side "Sign Deal Documents" as a non-binding acknowledgement if retained. Advances #investor-pipeline-resequence/#67v2/#rpzm.
 - [ ] [#fractionalization-allocations] [recommended] Fractionalization/multi-lender model: define per-deal lender allocations linked to investor vestings/entities, support multiple wires/beneficiaries, up-to-10 lender guidance, 50%+ control warning, and TMO writeback mapping once #7a4d/#dzmm unblock. Advances #zwws/#dzmm/#investor-pipeline-resequence.
 <!-- /agent:backlog -->

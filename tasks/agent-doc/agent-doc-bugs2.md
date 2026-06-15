@@ -433,13 +433,34 @@ Verification:
 ❯ - `cargo test -p tsift-memory -p tsift-sqlite -p tsift-tokensave -p tsift-summarize -p tsift-cli` in `src/tsift`
 
 Note: full `cargo test` in `src/tagpath` still fails on the pre-existing live fixture lint for `tasks/software/tsift.md` line 43 (`agent:boundary` contains a UUID instead of the current hex/slug boundary form); the library tests and the `agent-doc` dependency path are clean.
-<!-- agent:boundary:6ef884a5 -->
+
+### Re: #dfrefresh-retire — gpt-5
+
+Done. Retired the dogfood supervisor refresh stopgap now that the dogfood auto-install plus stale-binary recycle path owns that bootstrap.
+
+Changed:
+- Deleted the bundled `runbooks/dogfood-supervisor-refresh.md` and removed its `BUNDLED_RUNBOOKS` entry.
+- Removed the dogfood refresh catalog entry from the canonical skill text and installed harness mirrors.
+- Deleted the four parent harness runbook mirrors under `.claude`, `.codex`, `.cursor`, and `.opencode`.
+- Updated the remaining `#supautoinstall` comments so they refer to the historical manual refresh steps without pointing at a deleted runbook.
+- Fixed the prior CI-only dependency break by publishing `tsift-core 0.1.70` and `tsift-memory 0.1.70`, then resolving `tsift-memory = "0.1.70"` from crates.io instead of `../../tsift/...`.
+
+Commits pushed:
+- `src/agent-doc` `3339b4d1` (`docs: retire dogfood supervisor refresh runbook`)
+- superproject `885d1e7` (`agent-doc: retire dogfood supervisor refresh runbook`)
+
+Verification:
+- `cargo check -p agent-doc`
+- `cargo test -p agent-doc skill -- --nocapture`
+- clean-worktree `make check` from `src/agent-doc` commit `3339b4d1` (clippy, 4532 tests, doctests, medium SimWorld budget)
+- GitHub Actions CI `27573900103` passed (`make check` + `make tmux-ci`)
+<!-- agent:boundary:6e505cd9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority prest="#spec-test-build-install-commit-push" go -->
----
+~~~done
 :pushpin: The equityfundingsource.md compaction is duplicated and the numeric list is in reverse order:
 ```
 ### Session Summary
@@ -472,7 +493,7 @@ Compacted content:
 - **Committed**: the lender has at least one pending fund commitment, usually awaiting wire confirmation.
 - **Lender Ready**: a lender/TMO account is linked, so the person can be used as a funding source.
 ```
----
+~~~
 ---
 Please explain the cause of this churn. I don't understand why this is necessary. Just run the current task. Use the document editor buffer as the source of truth. It seems simple. Why this extra complexity?
 ```
@@ -575,6 +596,7 @@ Please explain the cause of this churn. I don't understand why this is necessary
 - do [#stuckhandoff2]
 - do [#qt32]
 - do [#2v7b]
+- do [#efsmrgmarkers]
 <!-- /agent:queue -->
 ###
 <!--
@@ -611,7 +633,6 @@ What are #next-steps to fix bugs?
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
-- [ ] [#dfrefresh-retire] [clean-session] Retire the dogfood-supervisor-refresh runbook (runbooks/dogfood-supervisor-refresh.md + BUNDLED_RUNBOOKS entry + SKILL.md catalog line + 4 harness mirrors) once #jbrestale (JB Run Agent Doc auto-restarts a stale route-owned supervisor / red-green switchover) AND #recyclerestart (PCP recycle restarts the harness session) both land and prove the binary self-heals a stale supervisor without the manual make+install+restart bootstrap. The runbook is an explicit stopgap for the bootstrap gap (running supervisor predates its own self-recycle fix + is the live agent parent). Acceptance: with both landed, a stale-binary session auto-promotes onto the new build at the next idle/dispatch boundary; delete the runbook + dependent references in one cycle and re-run audit-docs. CLEAN session (skill/runbook surface).
 - [ ] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.
 - [ ] [#aazp] [operator-verify] suprecyclestall live-verify (agent-doc aafa6510, installed+release-built): restart a stale session via session restart-supervisor FILE --force so it runs the new binary, then drive an idle/next-queue-item recycle. Confirm ops.log shows supervisor_binary_stale_self_recycled ... candidates=[...] then EITHER a clean execve hot-reload OR supervisor_reexec_failed fallback=continue_current_binary with per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Subset of the broader recyclerestart sync-block work. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#fcc0] [TOP] [clean-session] Zero JB File Cache Conflict dialogs. Route all document-mutating disk writes through one shared converge_document_or_disk() behind the listener-active gate (editor_ipc primary + disk_fallback); resolve the ipcdrift/stuckhandoff2 wedge that forces fallbacks. CLEAN session required (live write path); 0-dialogs proof operator-drive live JB. Plan: tasks/agent-doc/plan-zero-file-cache-conflict.md

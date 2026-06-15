@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -134,7 +134,30 @@ Commands run: `corky linkedin auth --profile btakita` to refresh the expired OAu
 Verification: Corky dry-run passed before publish; live publish returned the post URL; live comment returned a comment ID; `make check` passed; parent `Agent Doc` workflow run `27557245366` was queued after push. There is no workflow named `CI` in the parent repo or `mail`, and `mail` has no workflows listed. Session note: the exchange is large, but the queue was active, so I kept draining rather than compacting.
 
 Confidence: high. Escalation: browser OAuth approval was required for the expired LinkedIn token.
-<!-- agent:boundary:64f6db7b -->
+
+### Re: LinkedIn replacement post — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: The article is not complete https://www.linkedin.com/feed/update/urn:li:activity:7472308587910934528/ please fix ![img_1.png](img_1.png). I deleted the post
+
+
+The incomplete/deleted LinkedIn post has been replaced with a complete post body and a separate first comment for links.
+
+New post: https://www.linkedin.com/feed/update/urn:li:share:7472312924733198337
+
+First comment posted with the deep-dive and repository links. Corky returned comment ID `7472312958027628544`.
+
+I kept the replacement post body link-free and used the fuller Slot -> Cell -> Signal copy so LinkedIn receives the complete text in the main post. The dry-run printed the full 1,079-character body before publish.
+
+Changed paths: `mail/social/20260615-lazily-slot-cell-signal-linkedin-repost.md` in the `mail` submodule, plus the parent `mail` gitlink. Commits pushed: `mail` `5317b10 chore: record lazily LinkedIn repost`; parent `241912145 chore: update mail lazily LinkedIn repost`. A concurrent agent-doc commit later advanced parent HEAD, and HEAD still records `mail` at `5317b10`.
+
+Commands run: `corky linkedin publish --dry-run ...`, `corky linkedin publish ...`, `corky linkedin comment ...`, targeted git add/commit/push in `mail`, targeted parent gitlink add/commit/push, `make check`, `gh run list --workflow CI --limit 1`, `gh workflow list`, and `gh run view` / `gh api` for the available `Agent Doc` workflow.
+
+Verification: live publish returned the new LinkedIn URL; live comment returned the comment ID; `make check` passed. The parent repo has no workflow named `CI`; `gh workflow list` shows `Agent Doc`. The latest `Agent Doc` run on a concurrent monsterrodholders HEAD failed before runner startup: both jobs had `runner_id: 0`, empty runner names, no steps, and no logs, so I’m treating that as external CI-start failure rather than a local regression.
+
+Confidence: high. Escalation: none. Session note: the exchange is large, but the queue is active, so I kept draining instead of compacting.
+<!-- agent:boundary:b58513ec -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -143,7 +166,6 @@ Confidence: high. Escalation: browser OAuth approval was required for the expire
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- The article is not complete https://www.linkedin.com/feed/update/urn:li:activity:7472308587910934528/ please fix
 <!-- /agent:queue -->
 
 ## Backlog

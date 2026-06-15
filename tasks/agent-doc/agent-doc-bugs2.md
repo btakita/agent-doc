@@ -280,7 +280,20 @@ Remaining queue after this head:
 - `#goqnoise` — real, agent-doable bug (go-mode misclassifies directive heads as noise). `[clean-session]` source edit; drains next.
 
 I did not manually edit the queue (IPC supervisor is live — manual queue edits race+corrupt); the gate goes through the binary's pending path.
-<!-- agent:boundary:1aed24a7 -->
+
+### Re: do [#compactqattr] — deterministic compaction is innocent; added coverage + fail-closed guard — opus-4-8
+
+Diagnosed `#compactqattr` from the code; the named hypothesis ("post-compact CRDT refresh re-serializes component opening tags and drops inline attrs") is **falsified**:
+
+- `Component::replace_content` is byte-offset based — it splices new inner content between `open_end..close_start` and copies everything else (all other markers and the target's own opening marker) verbatim, so it cannot drop attributes.
+- `CrdtDoc::from_text` / `to_text` is a faithful text round-trip (`text.insert` → `get_string`), no marker parsing — the post-compact CRDT refresh preserves the doc byte-for-byte.
+
+Proven empirically by `compact_preserves_queue_marker_inline_attributes`: compacting a doc whose marker is `&lt;!-- agent:queue priority preset="#spec-test-build-install-commit-push" go --&gt;` leaves it byte-identical in both the visible file and the post-compact CRDT round-trip. That is the coverage the item requested.
+
+So the monsterrodholders.md attribute-wipe was a concurrent **stale-supervisor CRDT interleave** over the written file (the class `#compactdropitem` names; root-fixed by `#recyclerestart`), not a compaction-code regression.
+
+Shipped (agent-doc `f94ca7cd`): the regression test above; `assert_non_exchange_markers_preserved` wired into `apply_compacted_document` (fails closed if a rebuild alters any non-exchange opening marker — marker-level sibling of `assert_non_exchange_items_preserved`); `marker_guard_fires_when_queue_attributes_dropped`. `make check`: 4496 passed, 0 failed. Live promotion deferred per `#no-mid-session-install`; live JB re-verify tracked as `#c2b6`.
+<!-- agent:boundary:8b5c43a1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -361,7 +374,7 @@ Error: project controller command `dispatch` failed: dispatch coalesced for task
 - ~~do [#ar27-majors]~~
 - ~~do [#cleandrainsup-verify]~~
 - do [#dfrefresh-retire]
-- do [#compactqattr]
+- ~~do [#compactqattr]~~
 - do [#c2b6]
 - do [#goqnoise]
 <!-- /agent:queue -->
@@ -399,7 +412,6 @@ What are #next-steps to fix bugs?
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#ar27-majors] [clean-session] Major-version dependency bumps held back by Cargo.toml constraints in src/agent-doc (each needs a focused API-migration review, NOT a blanket bump): instruction-files 0.2->0.3, notify 7->8, portable-pty 0.8->0.9, pulldown-cmark 0.12->0.13, rusqlite 0.34->0.40, sha2 0.10->0.11, signal-hook 0.3->0.4, similar 2->3, toml 0.8->1.1, ureq 2->3, yrs 0.21->0.27 (CRDT core, highest risk), zip 2->8, generic-array 0.14.7->0.14.9. Do per-crate with its own make check; yrs/rusqlite/toml/zip are the breaking ones. Follow-up from #ar27 (compatible cargo update landed d0f5475d). CLEAN session (rebuild/reinstall re-stales the live supervisor).
 - [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
-- [ ] [#compactqattr] [clean-session] Compaction wipes agent:queue inline attributes (preset, priority, likely go) from the opening marker — operator observed in monsterrodholders.md: post-compaction deleted all agent:queue attributes. Too much blast radius. Compaction should only archive/truncate the EXCHANGE component and must leave every other component opening marker byte-identical. HYPOTHESIS: the post-compact CRDT refresh (compact.rs, CRDT state refreshed from post-compact content) re-serializes component opening tags from parsed structure and drops inline attrs. FIX: preserve the verbatim opening marker (all inline attributes) for every non-archived component across compact + the post-compact CRDT refresh; add coverage that compacting a doc whose agent:queue carries preset/priority/go leaves that marker unchanged. CLEAN session (compaction/CRDT path).
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
 <!-- /agent:backlog -->
 

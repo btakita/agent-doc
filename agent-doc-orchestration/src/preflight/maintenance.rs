@@ -914,6 +914,7 @@ pub(crate) struct QueueState {
     /// this session. False when inactive OR every remaining head is deferred/noise.
     pub(crate) queue_continuation_required: bool,
     pub(crate) synced_queue_ids: Vec<String>,
+    pub(crate) queued_exchange_prompts: Vec<String>,
     pub(crate) warnings: Vec<PreflightWarning>,
 }
 
@@ -969,6 +970,149 @@ pub(crate) struct BacklogQueueSyncRequest {
     pub(crate) ids: Vec<String>,
     pub(crate) enqueue_ids: Vec<String>,
     pub(crate) priority: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExchangeQueueSyncRequest {
+    pub(crate) mode: crate::queue::BacklogQueueSyncMode,
+    pub(crate) prompts: Vec<String>,
+    pub(crate) raw_blocks: Vec<String>,
+    pub(crate) priority: bool,
+}
+
+fn exchange_component_body<'a>(
+    components: &'a [crate::component::Component],
+    content: &'a str,
+) -> Option<&'a str> {
+    components
+        .iter()
+        .find(|component| component.name == "exchange")
+        .map(|component| component.content(content))
+}
+
+pub(crate) fn exchange_queue_prompt_text(block: &str) -> Option<String> {
+    let mut lines = Vec::new();
+    for line in block.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("<!-- agent:boundary:") {
+            continue;
+        }
+        let without_prompt_prefix = trimmed
+            .strip_prefix('❯')
+            .or_else(|| trimmed.strip_prefix('>'))
+            .map(str::trim)
+            .unwrap_or(trimmed);
+        if !without_prompt_prefix.is_empty() {
+            lines.push(without_prompt_prefix.to_string());
+        }
+    }
+    let text = lines.join("\n").trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+pub(crate) fn collect_exchange_queue_sync(
+    components: &[crate::component::Component],
+    content: &str,
+    snapshot_content: Option<&str>,
+) -> Option<ExchangeQueueSyncRequest> {
+    let mut mode: Option<crate::queue::BacklogQueueSyncMode> = None;
+    let mut priority = false;
+    let mut raw_blocks = Vec::new();
+    let mut prompts = Vec::new();
+    let snapshot_components = snapshot_content.and_then(|snapshot| crate::component::parse(snapshot).ok());
+    let previous_exchange = snapshot_content
+        .zip(snapshot_components.as_deref())
+        .and_then(|(snapshot, components)| exchange_component_body(components, snapshot))
+        .unwrap_or("");
+
+    for comp in components {
+        if comp.name != "exchange" {
+            continue;
+        }
+        let Some(value) = comp.attrs.get("queue") else {
+            continue;
+        };
+        let Some(comp_mode) = crate::queue::BacklogQueueSyncMode::parse(value) else {
+            continue;
+        };
+        if mode.is_none() {
+            mode = Some(comp_mode);
+        }
+        priority |= comp.attrs.contains_key("priority");
+        let current_exchange = comp.content(content);
+        let Some(diff) =
+            crate::diff::unified_diff_from_contents(previous_exchange, current_exchange)
+        else {
+            continue;
+        };
+        for block in crate::diff::extract_required_response_blocks(&diff) {
+            if let Some(prompt) = exchange_queue_prompt_text(&block) {
+                raw_blocks.push(block);
+                prompts.push(prompt);
+            }
+        }
+    }
+
+    mode.map(|m| ExchangeQueueSyncRequest {
+        mode: m,
+        prompts,
+        raw_blocks,
+        priority,
+    })
+}
+
+fn remove_block_once(text: &mut String, block: &str) -> bool {
+    let Some(start) = text.rfind(block) else {
+        return false;
+    };
+    let mut end = start + block.len();
+    if text[end..].starts_with('\n') {
+        end += 1;
+    }
+    text.replace_range(start..end, "");
+    true
+}
+
+pub(crate) fn remove_exchange_queue_blocks(content: &str, blocks: &[String]) -> Result<Option<String>> {
+    if blocks.is_empty() {
+        return Ok(None);
+    }
+    let components = crate::component::parse(content)?;
+    let Some(exchange) = components.iter().find(|component| component.name == "exchange") else {
+        return Ok(None);
+    };
+    let mut body = exchange.content(content).to_string();
+    let mut removed = 0usize;
+    for block in blocks {
+        if remove_block_once(&mut body, block) {
+            removed += 1;
+        }
+    }
+    if removed == 0 {
+        return Ok(None);
+    }
+    Ok(Some(exchange.replace_content(content, &body)))
+}
+
+fn replace_component_region_from_current(
+    snapshot_content: &str,
+    current_content: &str,
+    component_name: &str,
+) -> Option<String> {
+    let current_components = crate::component::parse(current_content).ok()?;
+    let current_component = current_components
+        .iter()
+        .find(|component| component.name == component_name)?;
+    let snapshot_components = crate::component::parse(snapshot_content).ok()?;
+    let snapshot_component = snapshot_components
+        .iter()
+        .find(|component| component.name == component_name)?;
+    let region = &current_content[current_component.open_start..current_component.close_end];
+    let mut rebuilt = String::with_capacity(snapshot_content.len() + region.len());
+    rebuilt.push_str(&snapshot_content[..snapshot_component.open_start]);
+    rebuilt.push_str(region);
+    rebuilt.push_str(&snapshot_content[snapshot_component.close_end..]);
+    Some(rebuilt)
 }
 
 pub(crate) fn collect_backlog_queue_sync(
@@ -1165,7 +1309,9 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     let mut current_content = content.clone();
     let mut queue_warnings = Vec::new();
     let mut synced_queue_ids = Vec::new();
+    let mut queued_exchange_prompts = Vec::new();
     let mut source_queue_priority = false;
+    let mut exchange_queue_synced = false;
     let mut queue_tag_attrs_normalized = false;
 
     let raw_queue_tag = &current_content[comp.open_start..comp.open_end];
@@ -1368,6 +1514,50 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             entries = synced;
             mutated = true;
         }
+    }
+
+    // Exchange→queue sync: when `agent:exchange` carries a `queue` attribute,
+    // newly-added prompt blocks are moved into `agent:queue` instead of being
+    // served as immediate exchange work. This lets an operator add follow-up
+    // prompts while a queue is already running without interrupting the current
+    // head or leaving unanswered exchange tails behind.
+    let snapshot_content_for_exchange = snapshot::load(file).ok().flatten();
+    let current_components = crate::component::parse(&current_content)?;
+    if let Some(exchange_request) = collect_exchange_queue_sync(
+        &current_components,
+        &current_content,
+        snapshot_content_for_exchange.as_deref(),
+    ) && !exchange_request.prompts.is_empty()
+    {
+            source_queue_priority |= exchange_request.priority;
+            if let Some(synced) = crate::queue::sync_prompts_into_queue(
+                &entries,
+                &exchange_request.prompts,
+                exchange_request.mode,
+            ) {
+                let new_body = crate::queue::render(&synced);
+                current_content = {
+                    let comps = crate::component::parse(&current_content)?;
+                    let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                    q.replace_content(&current_content, &new_body)
+                };
+                entries = synced;
+                mutated = true;
+                exchange_queue_synced = true;
+                eprintln!(
+                    "[preflight] queue: moved {} exchange prompt(s) into agent:queue ({:?})",
+                    exchange_request.prompts.len(),
+                    exchange_request.mode
+                );
+            }
+            if let Some(without_blocks) =
+                remove_exchange_queue_blocks(&current_content, &exchange_request.raw_blocks)?
+            {
+                current_content = without_blocks;
+                mutated = true;
+                exchange_queue_synced = true;
+            }
+            queued_exchange_prompts = exchange_request.prompts;
     }
 
     // Queue priority ordering (#backlog-priority-attribute): when the queue
@@ -1694,6 +1884,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 queue_drainable_head_count: 0,
                 queue_continuation_required: false,
                 synced_queue_ids,
+                queued_exchange_prompts,
                 warnings: Vec::new(),
             });
         }
@@ -1711,6 +1902,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 queue_drainable_head_count: 0,
                 queue_continuation_required: false,
                 synced_queue_ids,
+                queued_exchange_prompts,
                 warnings: Vec::new(),
             });
         }
@@ -1836,6 +2028,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                         queue_drainable_head_count: 0,
                         queue_continuation_required: false,
                         synced_queue_ids,
+                        queued_exchange_prompts,
                         warnings: Vec::new(),
                     });
                 }
@@ -1960,6 +2153,19 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             }
         }
 
+        if exchange_queue_synced {
+            if let Some(updated) =
+                replace_component_region_from_current(&new_snap, &current_content, "exchange")
+            {
+                new_snap = updated;
+            }
+            if let Some(updated) =
+                replace_component_region_from_current(&new_snap, &current_content, "queue")
+            {
+                new_snap = updated;
+            }
+        }
+
         if need_sync_newly_activated_queue_snapshot
             && let Ok(current_comps) = crate::component::parse(&current_content)
             && let Some(current_q) = current_comps
@@ -2050,7 +2256,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // Claude Code auto-loop stop without re-deriving drainability from prose, even
     // when the route-owned supervisor predates the idle-watch filter (#qchurn).
     let queue_drainable_head_count = if activation.active {
-        crate::queue_continuation::drainable_head_count(file, &content)
+        crate::queue_continuation::drainable_head_count(file, &current_content)
     } else {
         0
     };
@@ -2074,6 +2280,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         queue_drainable_head_count,
         queue_continuation_required,
         synced_queue_ids,
+        queued_exchange_prompts,
         warnings: queue_warnings,
     })
 }
@@ -2447,6 +2654,70 @@ fn run_queue_maintenance_enqueue_marker_populates_queue_without_backlog_attr() {
     assert!(
         !updated.contains("- do [#gated]"),
         "gated marked item must not append:\n{updated}"
+    );
+}
+#[test]
+fn run_queue_maintenance_moves_exchange_queue_prompts_into_active_queue() {
+    let dir = setup_project();
+    let doc = dir.path().join("session.md");
+    let snapshot_content = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange queue patch=append -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue go -->\n",
+        "- existing queue head\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let content = snapshot_content.replace(
+        "<!-- /agent:exchange -->",
+        "❯ follow-up while queue is running\n<!-- /agent:exchange -->",
+    );
+    std::fs::write(&doc, &content).unwrap();
+    snapshot::save(&doc, snapshot_content).unwrap();
+
+    let state = run_queue_maintenance(&doc, None).unwrap();
+    let updated = std::fs::read_to_string(&doc).unwrap();
+
+    assert_eq!(
+        state.queued_exchange_prompts,
+        vec!["follow-up while queue is running".to_string()]
+    );
+    assert!(
+        updated.contains("- existing queue head\n- follow-up while queue is running\n"),
+        "exchange prompt should append after the current queue head:\n{updated}"
+    );
+    let exchange_body = crate::component::parse(&updated)
+        .unwrap()
+        .into_iter()
+        .find(|component| component.name == "exchange")
+        .unwrap()
+        .content(&updated)
+        .to_string();
+    assert!(
+        !exchange_body.contains("follow-up while queue is running"),
+        "moved prompt must not remain as an unanswered exchange tail:\n{updated}"
+    );
+    let snap_result = snapshot::load(&doc).unwrap().unwrap();
+    assert!(
+        snap_result.contains("- existing queue head\n- follow-up while queue is running\n"),
+        "snapshot must adopt the moved queue prompt:\n{snap_result}"
+    );
+    let snap_exchange = crate::component::parse(&snap_result)
+        .unwrap()
+        .into_iter()
+        .find(|component| component.name == "exchange")
+        .unwrap()
+        .content(&snap_result)
+        .to_string();
+    assert!(
+        !snap_exchange.contains("follow-up while queue is running"),
+        "snapshot exchange must also drop the moved prompt:\n{snap_result}"
     );
 }
 #[test]

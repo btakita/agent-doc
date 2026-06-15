@@ -553,6 +553,90 @@ pub fn sync_backlog_into_queue(
     }
 }
 
+fn prompt_entry(text: &str) -> QueueEntry {
+    QueueEntry::Prompt(QueuePrompt {
+        text: text.to_string(),
+        multiline: text.contains('\n'),
+    })
+}
+
+fn prompt_identity(text: &str) -> String {
+    strip_priority_markers(text)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase()
+}
+
+/// Sync arbitrary prompt text into the queue per `mode`.
+///
+/// Unlike backlog sync, this preserves the prompt text verbatim (minus caller
+/// normalization) instead of rendering `do [#id]`. It is used by
+/// `agent:exchange queue`, where newly-typed exchange prompt blocks are moved
+/// into the running queue. Append/prepend de-duplicate against live `Prompt`
+/// entries only, so a later intentional repeat is allowed after the previous
+/// copy has been consumed.
+pub fn sync_prompts_into_queue(
+    entries: &[QueueEntry],
+    prompts: &[String],
+    mode: BacklogQueueSyncMode,
+) -> Option<Vec<QueueEntry>> {
+    let mut seen = std::collections::HashSet::new();
+    let ordered_prompts: Vec<String> = prompts
+        .iter()
+        .map(|prompt| prompt.trim())
+        .filter(|prompt| !prompt.is_empty())
+        .filter(|prompt| seen.insert(prompt_identity(prompt)))
+        .map(str::to_string)
+        .collect();
+
+    let existing_prompts: std::collections::HashSet<String> = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            QueueEntry::Prompt(prompt) => Some(prompt_identity(&prompt.text)),
+            _ => None,
+        })
+        .collect();
+
+    let new_entries: Vec<QueueEntry> = match mode {
+        BacklogQueueSyncMode::Sync => ordered_prompts
+            .iter()
+            .map(|prompt| prompt_entry(prompt))
+            .collect(),
+        BacklogQueueSyncMode::Append => {
+            let mut rebuilt = entries.to_vec();
+            for prompt in &ordered_prompts {
+                if !existing_prompts.contains(&prompt_identity(prompt)) {
+                    rebuilt.push(prompt_entry(prompt));
+                }
+            }
+            rebuilt
+        }
+        BacklogQueueSyncMode::Prepend => {
+            let missing: Vec<QueueEntry> = ordered_prompts
+                .iter()
+                .filter(|prompt| !existing_prompts.contains(&prompt_identity(prompt)))
+                .map(|prompt| prompt_entry(prompt))
+                .collect();
+            if missing.is_empty() {
+                entries.to_vec()
+            } else {
+                let mut rebuilt = missing;
+                rebuilt.extend(entries.iter().cloned());
+                rebuilt
+            }
+        }
+    };
+
+    if new_entries == entries {
+        None
+    } else {
+        Some(new_entries)
+    }
+}
+
 /// Stable-sort the `Prompt` entries of a queue by the priority `rank` of their
 /// `do [#id]` id (`#backlog-priority-attribute`), preserving every non-prompt
 /// entry (completed, preset, dispatch, fence, freeform) at its original

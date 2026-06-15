@@ -17,6 +17,43 @@ pub fn run(file: &Path) -> Result<()> {
     run_with_options(file, PreflightOptions::default())
 }
 
+fn queued_exchange_prompt_identity(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            line.trim()
+                .strip_prefix('❯')
+                .or_else(|| line.trim().strip_prefix('>'))
+                .map(str::trim)
+                .unwrap_or_else(|| line.trim())
+                .to_string()
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase()
+}
+
+fn diff_contains_only_queued_exchange_prompts(diff_text: &str, queued_prompts: &[String]) -> bool {
+    if queued_prompts.is_empty() {
+        return false;
+    }
+    let queued = queued_prompts
+        .iter()
+        .map(|prompt| queued_exchange_prompt_identity(prompt))
+        .collect::<std::collections::HashSet<_>>();
+    let changes = diff::classify_prompt_bearing_changes(diff_text);
+    let mut saw_prompt_target = false;
+    changes.iter().all(|change| match change.kind {
+        diff::PromptBearingChangeKind::PromptTarget => {
+            saw_prompt_target = true;
+            queued.contains(&queued_exchange_prompt_identity(&change.text))
+        }
+        diff::PromptBearingChangeKind::BoundaryArtifact => true,
+        diff::PromptBearingChangeKind::ContentEdit
+        | diff::PromptBearingChangeKind::RecoveryArtifact => false,
+    }) && saw_prompt_target
+}
+
 pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -612,6 +649,20 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         QueueState::default()
     });
     warnings.extend(queue_state.warnings.clone());
+    if let Some(diff_text) = diff_result.as_deref()
+        && diff_contains_only_queued_exchange_prompts(diff_text, &queue_state.queued_exchange_prompts)
+    {
+        diff_result = None;
+        classification = None;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "exchange_queue_prompt_diff_suppressed file={} moved={}",
+                file.display(),
+                queue_state.queued_exchange_prompts.len()
+            ),
+        );
+    }
     // `#agent-doc-bug` auto-queue stall: when there is no real user/document diff
     // this cycle, an active queue head is synthesized as the cycle's prompt diff.
     // That synthetic head is queue *continuation*, not user intent — so it must
@@ -1211,6 +1262,32 @@ fn preflight_produces_valid_json() {
     run(&doc).unwrap();
     // If run() returns Ok(()), the JSON was printed to stdout without error.
     // The test verifies no panic and no error return.
+}
+#[test]
+fn queued_exchange_prompt_diff_suppression_matches_moved_prompt_targets() {
+    let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,4 @@\n\
+### Re: prior\n\
++❯ follow-up while queue is running\n\
+<!-- /agent:exchange -->\n";
+    assert!(
+        diff_contains_only_queued_exchange_prompts(
+            diff,
+            &["follow-up while queue is running".to_string()]
+        ),
+        "the moved exchange prompt should be suppressed as direct prompt work"
+    );
+
+    let unrelated = "--- snapshot\n+++ document\n@@ -1,2 +1,4 @@\n\
+### Re: prior\n\
++❯ different prompt\n\
+<!-- /agent:exchange -->\n";
+    assert!(
+        !diff_contains_only_queued_exchange_prompts(
+            unrelated,
+            &["follow-up while queue is running".to_string()]
+        ),
+        "unmoved prompt targets must remain visible"
+    );
 }
 #[test]
 fn preflight_fails_closed_when_required_ssh_doc_mapping_resolves_no_targets() {

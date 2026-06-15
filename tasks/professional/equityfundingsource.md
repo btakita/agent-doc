@@ -148,7 +148,13 @@ flowchart LR
 The key rule: **Annual Renewal Due** moves the lender into a renewal/requirements branch on the lender pipeline. It should warn or block future commitments depending on due vs. expired, but it should not move an already funded deal backward from `Wire Confirmed / Funded` or `Active Deal Participation`.
 
 Cycle proof: changed paths are the session document only; no source files changed; no tests were run because this was a diagram/proposal response; escalation none; confidence high.
-<!-- agent:boundary:0934caad -->
+
+### Re: Mermaid diagram closeout — gpt-5
+
+The lender/deal pipeline Mermaid diagram has been added above. It keeps annual requirements and eligibility in the Lender Pipeline, keeps Ready to Commit / Committed / Wire Confirmed in the Deal Pipeline, and shows renewal due/expired as warning or hold signals that do not rewind already-funded deal participation.
+
+Cycle proof: changed paths are the session document only; no source files changed; no tests were run because this was a diagram/document response; escalation none; confidence high.
+<!-- agent:boundary:d504270b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -156,6 +162,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
+- :pushpin: Create a #mermaid with the Lender Pipeline & the Deal Pipeline.
 <!-- /agent:queue -->
 
 ## Backlog

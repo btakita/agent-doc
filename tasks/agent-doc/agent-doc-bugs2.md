@@ -670,7 +670,46 @@ Changed paths:
 - this session document via finalize / `--done wfinvcatalog`
 
 Exchange accretion is high, but the queue is active and still drainable; I did not stop to compact. Confidence: high. Escalation: none.
-<!-- agent:boundary:296c151c -->
+
+### Re: do [#wfinvdoctor] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#wfinvdoctor]
+
+
+Implemented `#wfinvdoctor`.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/doctor.rs`
+- `src/agent-doc/agent-doc-orchestration/src/lib.rs`
+- `src/agent-doc/src/main.rs`
+- `src/agent-doc/src/commands.rs`
+- `src/agent-doc/specs/08b-single-process-control-plane.md`
+- `src/agent-doc/VERSIONS.md`
+
+What changed:
+- Added `agent-doc doctor <FILE>` with alias `agent-doc diagnose <FILE>`.
+- The doctor evaluates `workflow-invariant-catalog-v1` against optional preflight/session-check JSON plus live session-check inspection, cycle state, ops-log markers, controller freshness, git/snapshot state, parent gitlink drift, and editor sidecars.
+- Each invariant reports `ok`, `recoverable`, `operator`, or `blocked` with evidence, missing fact sources, exact repair commands, or operator actions.
+- Added focused coverage for closeout recovery, parent gitlink drift, and missing queue-continuation evidence.
+
+Commands and verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration doctor` passed.
+- `cargo run -p agent-doc -- doctor /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --json --limit 10` passed.
+- `make check` passed locally through `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` with artifact `tart-18a4081529`.
+- `cargo install --path .` succeeded and replaced `/home/brian/.cargo/bin/agent-doc`.
+- GitHub Actions check: submodule `agent-doc` CI run `27642324416` for `architecture: add workflow invariant doctor` was still `in_progress` when polled; no failing remote run was observed. Parent `agent-loop` has no workflow named `CI`.
+
+Commits:
+- Submodule `btakita/agent-doc`: `60e1367c` (`architecture: add workflow invariant doctor`), pushed to `origin/main`.
+- Parent `btakita/agent-loop`: `f7ff1ba88` (`agent-doc: add workflow invariant doctor`), pushed to `origin/main`.
+
+Confidence: high. The implementation is covered by focused tests, CLI smoke, full local `make check`, installed-binary verification, and current push/CI polling.
+
+Escalation: none.
+<!-- agent:boundary:0e4a802a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -699,7 +738,7 @@ Exchange accretion is high, but the queue is active and still drainable; I did n
 - ~~do [#cwsp]~~
 - ~~Create a plan to orchestrate subagents to manage specific roles such as architecture, testing, implementation, refactoring. The main agent will coordinate the subagents to synthesize the solution. Ensure there is feedback between the subagents and the coordinating agent to ensure reliable, well designed outcomes, that appropriately solve the issues. Find root causes and factor the codebase to consolidate logic.~~
 - ~~do [#wfinvcatalog]~~
-- do [#wfinvdoctor]
+- ~~do [#wfinvdoctor]~~
 - do [#wfinvautofix]
 <!-- /agent:queue -->
 ###
@@ -730,7 +769,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#wfinvdoctor] Add an agent-doc workflow doctor/diagnose command that evaluates the invariant catalog against preflight/session-check JSON, ops.log markers, cycle_state, actor state, git state, and editor proof sidecars; output typed ok/recoverable/blocked/operator results with exact repair commands.
 - [ ] [#wfinvautofix] Add an invariant-driven autofix planner that executes only proven safe repairs automatically, gates destructive/operator actions, de-duplicates repeated symptoms by invariant id, and records proof markers so queue/backlog items do not multiply for the same root cause.
 <!-- /agent:backlog -->
 

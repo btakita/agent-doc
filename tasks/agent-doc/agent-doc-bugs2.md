@@ -260,6 +260,19 @@ Verification:
 - `agent-doc-orchestration/src/start/decisions.rs`
 - `agent-doc-orchestration/src/start/idle_watch.rs`
 - `agent-doc-orchestration/src/project_controller/rpc.rs`
+- Latest `src/agent-doc` GitHub Actions `CI` for `cdbc1a78` is in progress: run `27593485048`, started 2026-06-16T04:08:16Z. Per the closeout rules, I recorded it as pending instead of blocking on `gh run watch`.
+- Parent repo is even with `origin/main` for committed work, but still has unrelated dirty files and untracked work outside this queue head.
+- `src/agent-doc` is clean and even with `origin/main`.
+- `agent-doc lib-install`
+- `cargo install --path .`
+- `cargo build`
+- `make check`
+- `cargo test -p agent-doc-orchestration supervisor_auto_install`
+- `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
+- `git diff --check`
+- `cargo fmt --check`
+- Parent repo: committed the `src/agent-doc` submodule pointer as `37bee5bcc` (`agent-doc: checkpoint submodule updates`) and pushed `main` to `github.com:btakita/agent-loop.git`.
+- `src/agent-doc`: committed `cdbc1a78` (`chore: checkpoint agent-doc updates`) and pushed `main` to `github.com:btakita/agent-doc.git`.
 
 JetBrains plugin note: this fix does require the JetBrains plugin update. The checked-in plugin version is now `0.2.167`, and the local signed artifact exists at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.167-signed.zip`.
 
@@ -272,26 +285,26 @@ Fixed the auto-install scope bug. The live logs confirmed the failure mode: rout
 Root cause: `dogfood_agent_doc_crate_root` only checked whether the current superproject contained an `agent-doc` crate. Since this repo has `src/agent-doc`, every session document under the superproject could inherit dogfood build/install behavior. The resolver now also proves the served document is an agent-doc dogfood session document: inside the agent-doc source checkout, under `tasks/agent-doc/`, or one of the legacy agent-doc task docs. Sibling docs such as `tasks/professional/equityfundingsource.md` and `tasks/software/lazily-rs.md` now resolve no auto-install crate root even if the env/frontmatter/project auto-install knob is truthy.
 
 Changed paths:
-❯ - `agent-doc-orchestration/src/project_controller/rpc.rs`
-❯ - `agent-doc-orchestration/src/start/idle_watch.rs`
-❯ - `agent-doc-orchestration/src/start/decisions.rs`
-❯ - `agent-doc-orchestration/src/project_controller.rs`
-❯ - `agent-doc-core/src/frontmatter.rs`
-❯ - `agent-doc-core/src/project_config.rs`
-❯ - `specs/08b-single-process-control-plane.md`
-❯ - `VERSIONS.md`
+- `agent-doc-orchestration/src/project_controller/rpc.rs`
+- `agent-doc-orchestration/src/start/idle_watch.rs`
+- `agent-doc-orchestration/src/start/decisions.rs`
+- `agent-doc-orchestration/src/project_controller.rs`
+- `agent-doc-core/src/frontmatter.rs`
+- `agent-doc-core/src/project_config.rs`
+- `specs/08b-single-process-control-plane.md`
+- `VERSIONS.md`
 
 Verification:
 ❯ - `cargo fmt --check`
-❯ - `git diff --check` on the touched paths
+- `git diff --check` on the touched paths
 ❯ - `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
 ❯ - `cargo test -p agent-doc-orchestration supervisor_auto_install`
 ❯ - `make check`
 ❯ - `cargo build`
 ❯ - `cargo install --path .`
 ❯ - `agent-doc lib-install`
-❯ - `agent-doc --version` reports `agent-doc 0.34.1` at `/home/brian/.cargo/bin/agent-doc`
-❯ - Latest GitHub Actions `CI` on `main` is green: run `27588543817`, completed successfully on 2026-06-16T01:47:40Z.
+- `agent-doc --version` reports `agent-doc 0.34.1` at `/home/brian/.cargo/bin/agent-doc`
+- Latest GitHub Actions `CI` on `main` is green: run `27588543817`, completed successfully on 2026-06-16T01:47:40Z.
 
 `agent-doc lib-install` installed `/home/brian/.cargo/bin/libagent_doc-0.34.1.so` and marked 2 controllers for idle recycle. No escalation was needed. Source commit/push was not done because `src/agent-doc` already has broad unrelated dirty changes, including some of the same files; staging whole files would mix this fix with pre-existing work.
 
@@ -305,26 +318,26 @@ Verification:
 Committed and pushed the uncommitted `src/agent-doc` submodule files.
 
 Commit/push proof:
-- `src/agent-doc`: committed `cdbc1a78` (`chore: checkpoint agent-doc updates`) and pushed `main` to `github.com:btakita/agent-doc.git`.
-- Parent repo: committed the `src/agent-doc` submodule pointer as `37bee5bcc` (`agent-doc: checkpoint submodule updates`) and pushed `main` to `github.com:btakita/agent-loop.git`.
+❯ - `src/agent-doc`: committed `cdbc1a78` (`chore: checkpoint agent-doc updates`) and pushed `main` to `github.com:btakita/agent-doc.git`.
+❯ - Parent repo: committed the `src/agent-doc` submodule pointer as `37bee5bcc` (`agent-doc: checkpoint submodule updates`) and pushed `main` to `github.com:btakita/agent-loop.git`.
 
 Verification carried into the commit:
-- `cargo fmt --check`
-- `git diff --check`
-- `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
-- `cargo test -p agent-doc-orchestration supervisor_auto_install`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- `agent-doc lib-install`
+❯ - `cargo fmt --check`
+❯ - `git diff --check`
+❯ - `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
+❯ - `cargo test -p agent-doc-orchestration supervisor_auto_install`
+❯ - `make check`
+❯ - `cargo build`
+❯ - `cargo install --path .`
+❯ - `agent-doc lib-install`
 
 Current state:
-- `src/agent-doc` is clean and even with `origin/main`.
-- Parent repo is even with `origin/main` for committed work, but still has unrelated dirty files and untracked work outside this queue head.
-- Latest `src/agent-doc` GitHub Actions `CI` for `cdbc1a78` is in progress: run `27593485048`, started 2026-06-16T04:08:16Z. Per the closeout rules, I recorded it as pending instead of blocking on `gh run watch`.
+❯ - `src/agent-doc` is clean and even with `origin/main`.
+❯ - Parent repo is even with `origin/main` for committed work, but still has unrelated dirty files and untracked work outside this queue head.
+❯ - Latest `src/agent-doc` GitHub Actions `CI` for `cdbc1a78` is in progress: run `27593485048`, started 2026-06-16T04:08:16Z. Per the closeout rules, I recorded it as pending instead of blocking on `gh run watch`.
 
 No escalation was needed.
-<!-- agent:boundary:ced8e25e -->
+<!-- agent:boundary:4d804c7e -->
 <!-- /agent:exchange -->
 
 ## Queue

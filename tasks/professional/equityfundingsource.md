@@ -41,6 +41,11 @@ Compacted content:
 
 ### Re: inactive queued Interested Lenders ordering request — gpt-5
 
+> **Queue prompt:**
+>
+> :pushpin: Move "Interested Lenders" above "Final Loan Documents". deploy
+
+
 I did not move the section or deploy from this cycle. Preflight found the new request inside `agent:queue`, but the document frontmatter still has `queue: stop`, and `agent-doc plan` produced no repo actions for this turn. I treated the queue line as inactive queue residue rather than executable repo work.
 
 I repaired the stale agent-doc snapshot/CRDT sidecars with `agent-doc reset --from-current` after the first finalize attempt refused to write. The requested work is preserved as actionable backlog item `#efs-interest-order`: move the admin loan detail `Interested Lenders` section above `Final Loan Documents`, update spec/tests, commit, push, and deploy.
@@ -54,7 +59,14 @@ Proof:
 - Verification: no application code changed; no tests or deploy run.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:6cbdfdaf -->
+- Confidence: high.
+- CI review: `gh run list --workflow CI --limit 1` found no workflow named `CI`; `gh workflow list` and `gh run list --limit 5` returned no workflows/runs for this repo.
+- Commits: EFS app `0f9576b` (`fix(admin): show interested lenders before final docs (#efs-interest-order)`); superproject `b15d329d5` (`chore(efs): update deployed app pointer (#efs-interest-order)`). Both pushed to `main`.
+- Deploy: Worker version `5419a0d0-d28b-490f-bf41-14811884e177` at `https://equityfundingsource.brian-takita.workers.dev`.
+- Verification: focused test passed 3/3; `make check` passed 750 tests plus app and worker builds; remote D1 reported no migrations before or after deploy; live `/` returned `200`; live `/portal-admin` returned auth redirect `303`.
+- Commands: `bun test tests/tmo-loan-details-density.test.ts`, `make check`, `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`, `make deploy`, post-deploy migration check, and live smoke `curl` checks.
+- Changed paths: `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`, `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`, `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`, plus the `src/equityfundingsource-dev` submodule pointer in `agent-loop`.
+<!-- agent:boundary:6d421ddd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,14 +74,13 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Move "Interested Lenders" above "Final Loan Documents". deploy
+- ~~:pushpin: Move "Interested Lenders" above "Final Loan Documents". deploy~~
 - do [#efs-interest-order]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#efs-interest-order] Move the admin loan detail `Interested Lenders` section above `Final Loan Documents`, update spec/tests, commit, push, and deploy.
 <!-- /agent:backlog -->
 
 ## Review

@@ -309,7 +309,7 @@ Preflight reported high exchange accretion and one session-drift warning; queue 
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

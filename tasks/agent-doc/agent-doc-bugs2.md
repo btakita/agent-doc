@@ -295,16 +295,19 @@ Changed paths:
 - `VERSIONS.md`
 
 Verification:
-❯ - `cargo fmt --check`
+- `cargo fmt --check`
 - `git diff --check` on the touched paths
-❯ - `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
-❯ - `cargo test -p agent-doc-orchestration supervisor_auto_install`
-❯ - `make check`
-❯ - `cargo build`
-❯ - `cargo install --path .`
-❯ - `agent-doc lib-install`
+- `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
+- `cargo test -p agent-doc-orchestration supervisor_auto_install`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc lib-install`
 - `agent-doc --version` reports `agent-doc 0.34.1` at `/home/brian/.cargo/bin/agent-doc`
 - Latest GitHub Actions `CI` on `main` is green: run `27588543817`, completed successfully on 2026-06-16T01:47:40Z.
+- A follow-up `agent-doc preflight` repaired the historical exchange snapshot drift, committed that repair, and opened this fresh cycle for the new queue note.
+- `agent-doc session-check tasks/agent-doc/agent-doc-bugs2.md` then reported the old cycle `cycle-1781582845265` as `committed` and consumed the `commit + push uncommitted agent-doc files` queue head.
+- Replayed the preserved captured response through `agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md`.
 
 `agent-doc lib-install` installed `/home/brian/.cargo/bin/libagent_doc-0.34.1.so` and marked 2 controllers for idle recycle. No escalation was needed. Source commit/push was not done because `src/agent-doc` already has broad unrelated dirty changes, including some of the same files; staging whole files would mix this fix with pre-existing work.
 
@@ -318,23 +321,23 @@ Verification:
 Committed and pushed the uncommitted `src/agent-doc` submodule files.
 
 Commit/push proof:
-❯ - `src/agent-doc`: committed `cdbc1a78` (`chore: checkpoint agent-doc updates`) and pushed `main` to `github.com:btakita/agent-doc.git`.
-❯ - Parent repo: committed the `src/agent-doc` submodule pointer as `37bee5bcc` (`agent-doc: checkpoint submodule updates`) and pushed `main` to `github.com:btakita/agent-loop.git`.
+- `src/agent-doc`: committed `cdbc1a78` (`chore: checkpoint agent-doc updates`) and pushed `main` to `github.com:btakita/agent-doc.git`.
+- Parent repo: committed the `src/agent-doc` submodule pointer as `37bee5bcc` (`agent-doc: checkpoint submodule updates`) and pushed `main` to `github.com:btakita/agent-loop.git`.
 
 Verification carried into the commit:
-❯ - `cargo fmt --check`
-❯ - `git diff --check`
-❯ - `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
-❯ - `cargo test -p agent-doc-orchestration supervisor_auto_install`
-❯ - `make check`
-❯ - `cargo build`
-❯ - `cargo install --path .`
-❯ - `agent-doc lib-install`
+- `cargo fmt --check`
+- `git diff --check`
+- `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
+- `cargo test -p agent-doc-orchestration supervisor_auto_install`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc lib-install`
 
 Current state:
-❯ - `src/agent-doc` is clean and even with `origin/main`.
-❯ - Parent repo is even with `origin/main` for committed work, but still has unrelated dirty files and untracked work outside this queue head.
-❯ - Latest `src/agent-doc` GitHub Actions `CI` for `cdbc1a78` is in progress: run `27593485048`, started 2026-06-16T04:08:16Z. Per the closeout rules, I recorded it as pending instead of blocking on `gh run watch`.
+- `src/agent-doc` is clean and even with `origin/main`.
+- Parent repo is even with `origin/main` for committed work, but still has unrelated dirty files and untracked work outside this queue head.
+- Latest `src/agent-doc` GitHub Actions `CI` for `cdbc1a78` is in progress: run `27593485048`, started 2026-06-16T04:08:16Z. Per the closeout rules, I recorded it as pending instead of blocking on `gh run watch`.
 
 No escalation was needed.
 
@@ -355,14 +358,14 @@ I recovered the live wedge and captured the narrower bug.
 What happened here was a real closeout failure, not just a stale supervisor warning. The previous turn reached `response_captured` for `commit + push uncommitted agent-doc files`, then the visible document changed while that response was still not committed. After restart, `write --commit`, `repair`, and route dispatch all hit the same guard: the captured response baseline no longer matched the current document, so JB `Run Agent Doc` could not drain the active closeout before dispatch.
 
 Recovery proof from this cycle:
-- Replayed the preserved captured response through `agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md`.
-- `agent-doc session-check tasks/agent-doc/agent-doc-bugs2.md` then reported the old cycle `cycle-1781582845265` as `committed` and consumed the `commit + push uncommitted agent-doc files` queue head.
-- A follow-up `agent-doc preflight` repaired the historical exchange snapshot drift, committed that repair, and opened this fresh cycle for the new queue note.
+❯ - Replayed the preserved captured response through `agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md`.
+❯ - `agent-doc session-check tasks/agent-doc/agent-doc-bugs2.md` then reported the old cycle `cycle-1781582845265` as `committed` and consumed the `commit + push uncommitted agent-doc files` queue head.
+❯ - A follow-up `agent-doc preflight` repaired the historical exchange snapshot drift, committed that repair, and opened this fresh cycle for the new queue note.
 
 I added backlog item `#queueeditcap` for the root fix: captured-response closeout must preserve post-preflight queue edits while replaying or safely retiring the captured response, so JB `Run Agent Doc` can recover/drain instead of surfacing `captured response baseline no longer matches current document`.
 
 No source files were changed in this response cycle. The route-owned supervisor is still reported as stale, but that is now a warning rather than the closeout blocker; I did not force-restart or interrupt the busy pane from this cycle.
-<!-- agent:boundary:107b5599 -->
+<!-- agent:boundary:64826f91 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -205,7 +205,42 @@ Proof:
 - Source context read: archived architecture discussion, `tasks/agent-doc/plan-run-agent-doc-closeout-recovery-state-machine.md`, and `runbooks/architecture-first.md`.
 - Mutation path: `agent-doc finalize --pending-add-back ...` with explicit ids and enqueue markers.
 - No source code changed in this cycle.
-<!-- agent:boundary:301dc14c -->
+
+### Re: JB Run Agent Doc stale queue pause — gpt-5
+
+Fixed the JetBrains `Run Agent Doc` restart error path in `src/agent-doc`.
+
+Root cause: the newer route recovery already knew how to restart/retry a stale-supervisor `queue_paused` dispatch, but only when the controller error carried the new `supervisor_restart_redirect` marker. The failing live path was produced by an older route-owned supervisor, so the error was markerless even though the reason clearly said `#qchurn ... stale host supervisor pid ...`. Route surfaced that old error instead of using the existing one-shot restart/retry policy.
+
+Architecture contract:
+
+- Invariant: stale-supervisor `queue_paused` dispatch recovery has one owner; JB/route callers must not parse separate low-level error strings.
+- Policy owner: `project_controller::dispatch_error_supervisor_restart_redirect`.
+- Transition rows covered: marked stale-supervisor pause -> recover with extracted pid; legacy markerless stale-supervisor pause -> recover with extracted pid; spent-preset/operator pause -> fail closed; stale-generation/coalesce -> not this recovery path.
+- Edited surfaces: controller dispatch classifier plus queue/format specs and changelog. Route recovery code stays on the same classifier boundary.
+- Out of scope: live JetBrains proof still needs a fresh route-owned supervisor process; the current session supervisor is still reported stale.
+
+What changed:
+
+- `dispatch_error_supervisor_restart_redirect` now recognizes both the current marker form and the legacy markerless `failed_stage=queue_paused reason=#qchurn ... stale host supervisor pid<N> ...` form.
+- Added regression coverage using the exact reported error shape.
+- Updated `specs/02-document-format.md`, `specs/07-orchestration-commands.md`, and `VERSIONS.md` for the compatibility contract.
+
+Proof:
+
+- Changed paths: `agent-doc-orchestration/src/project_controller/rpc.rs`, `specs/02-document-format.md`, `specs/07-orchestration-commands.md`, `VERSIONS.md`.
+- Targeted tests passed: `dispatch_error_supervisor_restart_redirect_classification`, `pause_reason_stale_supervisor_churn_stop_classification`, `dispatch_queue_paused_stale_supervisor_emits_restart_redirect_marker`.
+- Full local verification passed: `make check`.
+- Local install completed: `make install` installed `agent-doc 0.34.1` and `libagent_doc-0.34.1.so`.
+- Submodule commit pushed: `9061e87e fix: recover legacy stale queue pauses`.
+- Parent gitlink commit created locally: `9c89e6e75 chore: update agent-doc submodule`.
+- CI: agent-doc CI run `27602534379` is in progress after push; it was not red when checked.
+- Escalation: none.
+- Confidence: high for the markerless stale-supervisor dispatch error; live proof still requires restarting/recycling the stale route-owned supervisor so JB uses the installed build.
+
+I left the unrelated pre-existing `src/agent-doc` PCP/control-plane edits unstaged: `agent-doc-orchestration/src/start/decisions.rs` and `specs/08b-single-process-control-plane.md`.
+
+<!-- agent:boundary:0a28c0be -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -157,7 +157,13 @@ Changed paths: session document only. Verification: reviewed current EFS PRD/UI 
 Correction to the previous closeout: I cleared the self-created `#ghl-stage-bridge` backlog entry instead of leaving it in this priority queue. The GHL stage bridge remains the recommended implementation direction, but it is not an active queued task from this answer.
 
 Changed paths: session document only. Verification: pending `session-check` after this repair write. Escalation: none. Confidence: high.
-<!-- agent:boundary:814756bd -->
+
+### Re: GHL stage bridge parked — gpt-5
+
+Parked `#ghl-stage-bridge` in the icebox instead of the priority backlog so the recommendation is preserved without starting an implementation queue item.
+
+Changed paths: session document only. Verification: pending `session-check` after this repair write. Escalation: none. Confidence: high.
+<!-- agent:boundary:d9f5aaab -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -193,6 +199,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Completed / Reaped
 
 <!-- agent:icebox -->
+- [ ] [#ghl-stage-bridge] [recommended] Implement an event-driven GHL stage bridge from EFS Deal Pipeline state to HighLevel contacts/opportunities/workflows for Processing, Underwriting, Terms negotiation, and Closing while keeping EFS/D1 canonical for loan, lender-selection, borrower portal, document, audit, and funding state.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.
@@ -200,8 +207,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
 - [ ] [#p40t] [recommended] Google Calendar/G Suite notification integration after Google admin credentials are available
 - [ ] [#q2x2] HTML email templates: lighter navy + gold, 2-3 drip for PBM orphan investor outreach
-- [ ] [#x5rn] Convert EFS logo JPEG → transparent PNG/SVG (Robert sent JPEG)
-- [ ] [#kzt6] Collect testimonials for carousel (6–12 min: investors, brokers, borrowers) — push Judith + Robert helping
+- [ ] [#x5rn] Convert EFS logo JPEG -> transparent PNG/SVG (Robert sent JPEG)
+- [ ] [#kzt6] Collect testimonials for carousel (6-12 min: investors, brokers, borrowers) — push Judith + Robert helping
 - [ ] [#kxsx] Form submission pipeline
 - [ ] [#4vb5] Online presence cleanup (after Judith approves)
 - [ ] [#a3gc] Consolidate domains under equityfundingsource.com

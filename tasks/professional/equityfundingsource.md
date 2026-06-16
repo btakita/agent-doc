@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,24 @@ committed
 Compacted content:
 - Archived 1 response topic(s): copy-button layout + deploy
 - Prior summary/context: prior compacted content: Archived 8 response topic(s): compact card labels + deploy; Borrower Info inline values + ge...
-<!-- agent:boundary:4de88f84 -->
+
+### Re: lender selection pipeline — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Continue setting up the lender selection pipeline. Where lenders are sent information, communication with the lender, etc.
+
+
+Continued the lender selection pipeline setup by adding structured lender communication follow-up fields to the existing deal-interest workflow. The Lender Pipeline modal now records last lender contact time, method, contact summary, and next follow-up date alongside the package/call/selection/verbal-commitment milestones.
+
+Changed paths: `src/equityfundingsource-dev/app/equityfundingsource/migrations/0070_deal_interest_lender_communication.sql`, admin investor workflow API/types, `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`, `prds/investor-pipeline-admin.md`, and `tests/admin-investor-pipeline.test.ts`.
+
+Verification: `bun test tests/admin-investor-pipeline.test.ts` passed (61 tests); `make check` passed (741 tests, app build, Worker build); `git diff --check` passed. GitHub Actions note: neither the EFS submodule nor the parent repo has a workflow named `CI`; the parent repo's available `Agent Doc` workflow was queued as run `27599285422` after the push.
+
+Committed and pushed: EFS submodule `6ba172b` (`feat(admin): track lender communication follow-ups (#deal-interest-communication)`) to `btakita/equityfundingsource-dev:main`; parent repo pointer `7f62390ad` (`chore(efs): advance lender communication pipeline`) to `btakita/agent-loop:main`.
+
+Escalation: none. Confidence: high. No deploy was run; this queue item used the `#spec-test-commit-push` path, and the new D1 migration will be applied by the normal deploy path. Exchange is large, but the active queue was drainable, so I did not pause for compaction.
+<!-- agent:boundary:8e1184b5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +63,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Continue setting up the lender selection pipeline. Where lenders are sent information, communication with the lender, etc.
 <!-- /agent:queue -->
 
 ## Backlog

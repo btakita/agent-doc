@@ -630,7 +630,47 @@ Changed paths: session document only via finalize. Commands: `agent-doc prefligh
 ### Re: subagent orchestration closeout repair — gpt-5
 
 Closeout repair for the already-committed subagent orchestration plan. The plan text above is the intended answer, but stale-supervisor IPC writeback left part of that numbered plan looking like a prompt-only tail. This response closes the malformed tail. No source files changed in this repair step.
-<!-- agent:boundary:d2652c22 -->
+
+### Re: do [#wfinvcatalog] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#wfinvcatalog]
+
+
+Implemented `#wfinvcatalog` in `src/agent-doc`.
+
+What changed:
+
+- Added `flow::workflow_invariants`, a serializable `workflow-invariant-catalog-v1` data contract with stable ids, fact sources, `ok_predicate` clauses, disproof markers, severity, safe remediation, operator-gated remediation, and SimWorld/regression coverage.
+- Seeded the catalog with the requested invariants: `queue_continuation`, `stale_supervisor`, `closeout_commit`, `editor_convergence`, `generation_redirect`, and `parent_gitlink`.
+- Added catalog tests for required ids, field completeness, declared fact-source references, and JSON serialization.
+- Documented the catalog in `specs/08b-single-process-control-plane.md` and added the `VERSIONS.md` release note.
+
+Commits:
+
+- Submodule: `3e56d6d6` (`architecture: add workflow invariant catalog`).
+- Parent gitlink: `a58fa371b` (`agent-doc: update workflow invariant catalog`).
+
+Verification:
+
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration workflow_invariant_catalog` passed: 4 tests.
+- `cargo test -p agent-doc-orchestration workflow_state` passed: 6 tests.
+- `make check` passed after the final patch: clippy, 4,592 nextest tests, doctests, and the ignored medium SimWorld corpus test.
+- `gh run list --workflow CI --limit 1` shows latest CI `27607675117` succeeded on `main`.
+
+Changed paths:
+
+- `src/agent-doc/agent-doc-orchestration/src/flow/workflow_invariants.rs`
+- `src/agent-doc/agent-doc-orchestration/src/flow/mod.rs`
+- `src/agent-doc/specs/08b-single-process-control-plane.md`
+- `src/agent-doc/VERSIONS.md`
+- parent `src/agent-doc` gitlink
+- this session document via finalize / `--done wfinvcatalog`
+
+Exchange accretion is high, but the queue is active and still drainable; I did not stop to compact. Confidence: high. Escalation: none.
+<!-- agent:boundary:296c151c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -658,7 +698,7 @@ Closeout repair for the already-committed subagent orchestration plan. The plan 
 - ~~do [#archuistates]~~
 - ~~do [#cwsp]~~
 - ~~Create a plan to orchestrate subagents to manage specific roles such as architecture, testing, implementation, refactoring. The main agent will coordinate the subagents to synthesize the solution. Ensure there is feedback between the subagents and the coordinating agent to ensure reliable, well designed outcomes, that appropriately solve the issues. Find root causes and factor the codebase to consolidate logic.~~
-- do [#wfinvcatalog]
+- ~~do [#wfinvcatalog]~~
 - do [#wfinvdoctor]
 - do [#wfinvautofix]
 <!-- /agent:queue -->
@@ -690,7 +730,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#wfinvcatalog] Create a machine-readable workflow invariant catalog: each invariant has id, fact sources, ok predicate, disproof markers, severity, safe remediation, operator-gated remediation, and SimWorld/regression coverage. Start with queue continuation, stale supervisor, closeout commit, editor convergence, generation redirect, and parent gitlink invariants.
 - [ ] [#wfinvdoctor] Add an agent-doc workflow doctor/diagnose command that evaluates the invariant catalog against preflight/session-check JSON, ops.log markers, cycle_state, actor state, git state, and editor proof sidecars; output typed ok/recoverable/blocked/operator results with exact repair commands.
 - [ ] [#wfinvautofix] Add an invariant-driven autofix planner that executes only proven safe repairs automatically, gates destructive/operator actions, de-duplicates repeated symptoms by invariant id, and records proof markers so queue/backlog items do not multiply for the same root cause.
 <!-- /agent:backlog -->

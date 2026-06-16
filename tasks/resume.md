@@ -1,9 +1,10 @@
 ---
+agent_doc_session: 172ab7a0-fbd3-4f10-8f7d-4993f2bc3316
+agent: claude
+opencode_model: GLM-5.1
 tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
-agent: claude
-opencode_model: GLM-5.1
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 codex_network_access: enabled
@@ -15,6 +16,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
+queue: start
 ---
 
 
@@ -64,7 +66,7 @@ prompt_presets:
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/98e0966f...
-<!-- agent:boundary:b57ed547 -->
+<!-- agent:boundary:df674f7a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,7 +74,8 @@ Compacted content:
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- Update my Resume.md with my latest work.
 <!-- /agent:queue -->
 
 ## Backlog

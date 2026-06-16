@@ -65,9 +65,20 @@ Proof for this cycle:
 - Verification: no source, build, or instruction-surface edits were made; this was a source/spec confirmation response. The relevant regression coverage is already present in the checked implementation tests.
 - Confidence: high that this exact pasted error is already fixed in source as `#jbrestale`; live confidence still depends on installed binary and supervisor freshness.
 - Escalation: none.
+- Escalation: none.
+- Confidence: high.
+- Verification: no source/build/test surfaces changed; verification was document state plus committed closeout/provenance evidence. `tasks/software/lazily-rs.md` session-check is green and current queue/backlog are empty.
+- Commands: `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc session-check tasks/software/lazily-rs.md`, `rg` searches over task docs and agent-doc logs, `git log -- tasks/software/lazily-rs.md tasks/software/lazily-rs.done.md`, `find .agent-doc ...lazily...`, `tsift diff-digest --revision 89139f376 tasks/software/lazily-rs.md`, `tsift diff-digest --revision 494709f2a tasks/software/lazily-rs.md`.
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only via finalize/done mutation.
+- Ops log evidence for the LinkedIn head shows activation, continuation, editor-IPC queue consume, commit success, live prompt drift auto-recovery, and repeated durable `free_text_queue_head_provenance_proof` entries for the exact removed prompt.
+- `tsift diff-digest --revision 494709f2a tasks/software/lazily-rs.md` shows the later LinkedIn response plus the review item update from the draft-ready `#kabc` note to the managed Corky social-draft proof.
+- `tsift diff-digest --revision 89139f376 tasks/software/lazily-rs.md` shows the release/publish response and the pending LinkedIn prompt state.
+- The two recent lazily-rs queue heads are present in committed exchange history: `release + publish` and `The linked in post scheduled for today has not gone out.`
+- Current `tasks/software/lazily-rs.md` has an empty `agent:queue` and empty `agent:backlog`; its remaining items are operator-drive review/icebox entries, not lost queue heads.
+- `agent-doc session-check tasks/software/lazily-rs.md` is OK: latest cycle `cycle-1781622292889` is committed, with no next queue head and no continuation required.
 
 Remaining queue heads are operator-verify/live-proof items, so this cycle should stop after closeout rather than auto-looping into them.
-<!-- agent:boundary:64bbb52a -->
+<!-- agent:boundary:1ccf0679 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -75,6 +86,8 @@ Remaining queue heads are operator-verify/live-proof items, so this cycle should
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~If we orchestrate a team of subagents with different roles, will the output quality improve on this project?~~
 - ~~Look at bugs from recent sessions from the JB, agent-doc, and Codex session logs. What are #next-steps to fix? How can we improve the architecture to fix these workflow issues? Are the workflows properly defined?~~
+- How can we use binary logic to resolve "Run Agent Doc stale queue pause" issues and other conflict issues? Are we creating too many conflicts?
+- How can we strengthen architectural primitives so agentic work is easier to reason about and work can be done without regressions?
 ---
 - do [#lazilyqrestore]
 - do [#recyclerestart-verify]
@@ -115,7 +128,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#cwsp] [operator-verify] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38 and recycling the live supervisor onto that build, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
-- [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.

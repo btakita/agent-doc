@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -143,13 +143,61 @@ Product moves that could raise signup-to-install conversion:
 The interview question I would ask: “Do signed merchants drop before hardware financing, during financing approval, after hardware order, or closer to install day, and do we tag the reason clearly enough to know whether this is financing anxiety versus implementation friction?”
 
 Verification note: this synthesis is based on the watched YouTube video transcript and frame contact sheet. No code changed and no test suite was applicable.
-<!-- agent:boundary:975e327e -->
+
+### Re: CRM-backed onboarding work — gpt-5
+
+> **Queue prompt:**
+>
+> I'm assuming that Spoton is using a CRM. What sort of work is needed to improve the onboarding experience?
+
+
+Assuming SpotOn uses a CRM is reasonable, but the important interview point is: **a CRM alone does not solve onboarding.** CRM usually tells sales and ops what account/deal exists; onboarding improves when that record becomes a live activation system connected to implementation, hardware, financing, menu build, scheduling, support, and product telemetry.
+
+The work needed is probably in these layers:
+
+1. **Define the activation object.** Create a real “merchant onboarding” or “activation plan” entity, not just a CRM deal stage. It should track signed date, target go-live date, restaurant type, install type, owner, next action, blocker, SLA, risk level, and completion criteria.
+
+2. **Make stage definitions precise.** Signed, underwriting/financing approved, hardware ordered, install scheduled, menu received, menu configured, merchant approved, staff trained, installed, first transaction, and retained should be separate states. If these are fuzzy or manually updated, the team cannot know where conversion is leaking.
+
+3. **Preserve sales context.** When a deal closes, implementation needs the promises and constraints from sales: pain points, existing POS, integrations needed, financing expectations, equipment expectations, hours, decision makers, deadline, menu source, network/printer setup, and anything sales promised. A lot of cold feet comes from merchants being asked to repeat themselves.
+
+4. **Connect systems instead of relying on notes.** CRM should sync with contract/e-signature, financing/underwriting, hardware fulfillment, scheduling, menu-building tools, support tickets, communications, and POS events. The big question is whether onboarding status is real-time or buried in Salesforce notes, Slack threads, spreadsheets, and call logs.
+
+5. **Build an internal implementation console.** Implementation teams need a queue that says: who is stuck, why, how long, who owns the next action, and what should happen next. This should prioritize risk and urgency, not just oldest account first.
+
+6. **Build a merchant-facing launch checklist.** The owner should see a short, concrete plan: schedule install, confirm equipment, upload/review menu, approve financing/hardware, prepare network/printers, train staff, run first transaction. The CRM can own state, but the merchant needs a product experience, not a sales pipeline view.
+
+7. **Automate low-value follow-up.** Use reminders, self-scheduling, reschedule links, document/photo upload, menu review tasks, financing clarifications, and status updates. Human outreach should happen when the merchant is high-risk or high-intent, not because every stage requires another call.
+
+8. **Add blocker taxonomy and risk scoring.** Tag drop-off reasons consistently: financing anxiety, hardware cost, integration concern, menu not ready, no-show, staff-training concern, owner unavailable, support trust issue, new-opening delay, competitor reversal. Then score risk from age, missed calls, missing artifacts, financing status, install complexity, and unanswered outreach.
+
+9. **Instrument product outcomes.** Measure install conversion, days-to-install, stage aging, no-show rate, reschedule rate, financing completion, hardware-order completion, menu defect rate, first-transaction time, support load on install day, and early churn. The CRM is only useful if it helps connect operational work to these outcomes.
+
+10. **Use AI where workflow already exists.** Good AI use cases: summarize sales notes into implementation fields, classify blockers from call/email notes, recommend next best action, flag financing-cold-feet language, draft owner-specific reminders, validate menu data, and detect accounts likely to miss install. I would avoid leading with “AI chatbot”; the real problem is state, ownership, and timing.
+
+The interview framing I would use:
+
+> I would not start by asking whether they have a CRM. I would ask whether their CRM represents a live activation journey or only a closed-won sales record. To improve onboarding, I would map every post-signature state, define the owner and next action for each state, connect CRM data to implementation and product events, and expose a simple launch plan to the merchant. Then I would use automation and risk scoring to keep low-risk merchants moving asynchronously while routing humans to the merchants most likely to fall out.
+
+Specific questions to ask:
+
+- “What is the system of record for onboarding after a deal is signed?”
+- “Can implementation see every merchant blocked by financing, menu readiness, hardware, scheduling, or integrations?”
+- “Which onboarding fields are structured versus buried in notes?”
+- “Do merchants have their own launch checklist, or is progress only visible internally?”
+- “What post-signature promises from sales most often create implementation friction?”
+- “Where do reps spend time on repetitive follow-up that product could absorb?”
+- “Do CRM stage changes get triggered by actual events, or are they manually updated after calls?”
+
+One-line note on session state: the document exchange is large, but the queue was active, so I answered and closed the item rather than pausing for compaction.
+
+Closeout proof: changed path is the session document only. Commands included `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, and this `agent-doc finalize`. No code tests were run because no code changed. No escalation was needed. Confidence is medium-high; exact SpotOn CRM/vendor details were not verified and are not needed for this product/workflow answer.
+<!-- agent:boundary:219c579f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- I'm assuming that Spoton is using a CRM. What sort of work is needed to improve the onboarding experience?
 <!-- /agent:queue -->
 
 ## Backlog

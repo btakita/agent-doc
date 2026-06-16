@@ -54,7 +54,7 @@ Proof:
 - Verification: no application code changed; no tests or deploy run.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:19020586 -->
+<!-- agent:boundary:8899decc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,6 +63,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
 - :pushpin: Move "Interested Lenders" above "Final Loan Documents". deploy
+- do [#efs-interest-order]
 <!-- /agent:queue -->
 
 ## Backlog

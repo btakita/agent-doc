@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -71,7 +71,7 @@ Commits/push:
 - Parent pushed: `39840abf3 chore(efs): advance available deal admin UI (#67v2)`.
 
 Confidence: high. No escalation needed. The parent repo still has unrelated pre-existing dirty files, but the EFS submodule is clean and synced with `origin/main`.
-<!-- agent:boundary:4bd5efd4 -->
+<!-- agent:boundary:3b3e77d3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,6 +79,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

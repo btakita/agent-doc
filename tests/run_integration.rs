@@ -1,3 +1,5 @@
+use agent_doc_core::turn_scope::{Address, TurnScope};
+use agent_doc_orchestration::{cycle_state, turn_scope_store};
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
@@ -969,6 +971,57 @@ fn codex_owned_pane_active_auto_queue_hands_off_without_drift() {
     assert!(content.contains("<!-- agent:queue auto -->"));
 }
 
+#[test]
+fn codex_owned_pane_independent_queue_edit_defers_until_closeout() {
+    // #cwsp: a user/operator queue edit can arrive while the Codex owner pane is
+    // busy answering an earlier queue head. That edit must stay as document
+    // state for the current closeout to merge; re-running `agent-doc <FILE>` in
+    // the owner pane must not reinterpret the sibling edit as an immediate
+    // owner-pane queue handoff or increment the wedge counter.
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do [#active]\n<!-- /agent:queue -->\n";
+    fs::write(&doc, committed).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+    write_codex_owner_session(tmp.path(), &doc);
+    save_active_queue_turn_scope(&doc, "active", 1);
+    cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+
+    let edited = committed.replace(
+        "- do [#active]\n<!-- /agent:queue -->",
+        "- do [#new]\n- do [#active]\n<!-- /agent:queue -->",
+    );
+    fs::write(&doc, &edited).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE")
+        .env_remove("CLAUDE_CODE_SESSION")
+        .env_remove("OPENCODE")
+        .env_remove("OPENCODE_CLIENT")
+        .env("CODEX_SESSION", "codex-session")
+        .env("TMUX_PANE", "%77")
+        .arg(doc.to_str().unwrap())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "owner-pane queue edit deferred until current closeout",
+        ));
+
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        edited,
+        "independent queue edit must remain visible for the active closeout"
+    );
+    let state = cycle_state::load(&doc).unwrap().unwrap();
+    assert!(
+        state.is_open(),
+        "the existing owner cycle should stay open for the active closeout"
+    );
+}
+
 fn write_codex_owner_session(root: &Path, doc: &Path) {
     fs::write(
         root.join(".agent-doc/sessions.json"),
@@ -979,6 +1032,14 @@ fn write_codex_owner_session(root: &Path, doc: &Path) {
         ),
     )
     .unwrap();
+}
+
+fn save_active_queue_turn_scope(doc: &Path, id: &str, exchange_tail_floor: usize) {
+    let scope = TurnScope::for_driver_with_exchange_tail(
+        Some(Address::node("queue", 0, &format!("queue:0:{id}:0"))),
+        Some(exchange_tail_floor),
+    );
+    turn_scope_store::save(doc, &scope).unwrap();
 }
 
 #[test]
@@ -1115,6 +1176,77 @@ fn preflight_emits_owned_pane_self_invocation_for_active_queue_head() {
             .as_str()
             .unwrap()
             .contains("agent-doc finalize")
+    );
+}
+
+#[test]
+fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() {
+    // #cwsp: preflight still reports the raw prompt-bearing queue edit for
+    // compatibility, but the turn-scoped user-intent surface and owner-pane
+    // self-invocation contract must not treat an independent sibling queue edit
+    // as work for the busy owner pane.
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do [#active]\n<!-- /agent:queue -->\n";
+    fs::write(&doc, committed).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+    write_codex_owner_session(tmp.path(), &doc);
+    save_active_queue_turn_scope(&doc, "active", 1);
+    cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+
+    let edited = committed.replace(
+        "- do [#active]\n<!-- /agent:queue -->",
+        "- do [#new]\n- do [#active]\n<!-- /agent:queue -->",
+    );
+    fs::write(&doc, edited).unwrap();
+
+    let out = agent_doc()
+        .current_dir(tmp.path())
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE")
+        .env_remove("CLAUDE_CODE_SESSION")
+        .env_remove("OPENCODE")
+        .env_remove("OPENCODE_CLIENT")
+        .env("CODEX_SESSION", "codex-session")
+        .env("TMUX_PANE", "%77")
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "preflight failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        json["owned_pane_self_invocation"].is_null(),
+        "independent queue edit must not emit owner-pane self-invocation: {json}"
+    );
+    assert!(
+        !json["prompt_bearing_changes"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .is_empty(),
+        "raw prompt-bearing compatibility surface should still report the queue edit: {json}"
+    );
+    let user_intent_empty = json["user_intent_prompt_changes"]
+        .as_array()
+        .map_or(true, |changes| changes.is_empty());
+    assert!(
+        user_intent_empty,
+        "independent queue edit must not count as user intent: {json}"
+    );
+    let persisted_scope = turn_scope_store::load(&doc).expect("turn scope should remain");
+    assert_eq!(
+        persisted_scope
+            .driver
+            .as_ref()
+            .and_then(|driver| driver.node_key.as_deref()),
+        Some("queue:0:active:0"),
+        "recursive preflight must preserve the active owner's turn scope"
     );
 }
 

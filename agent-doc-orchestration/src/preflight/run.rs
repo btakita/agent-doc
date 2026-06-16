@@ -754,22 +754,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // for the prompts this turn is answering.
     let turn_scope = derive_turn_scope(&diff_result_with_current.current, &prompt_targets);
 
-    // #nm1x: persist the scope so the later finalize-path drift gate (a separate
-    // process invocation) can intersect incoming document ops against the same
-    // scope. Best effort — a write failure must never block a preflight cycle, and
-    // a stale scope is cleared so the gate falls back to its coarse behavior.
-    match turn_scope.as_ref() {
-        Some(scope) => {
-            if let Err(err) = crate::turn_scope_store::save(file, scope) {
-                eprintln!("[preflight] turn-scope persist skipped: {err}");
-            }
-        }
-        None => {
-            if let Err(err) = crate::turn_scope_store::delete(file) {
-                eprintln!("[preflight] turn-scope clear skipped: {err}");
-            }
-        }
-    }
+    // Capture the previously persisted owner-turn scope before this preflight
+    // considers writing a new scope. A same-owner recursive preflight caused by
+    // a sibling queue edit must compare against, and preserve, the active
+    // owner's original turn scope (#cwsp).
+    let persisted_turn_scope = crate::turn_scope_store::load(file);
 
     // #op-scoped-drift-3: classify this cycle's node ops against the TurnScope so
     // independent / provenance-spoofed edits integrate without affecting the turn.
@@ -786,6 +775,57 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         }
         _ => None,
     };
+    let active_scope_cycle_is_open = crate::cycle_state::load(file)
+        .ok()
+        .flatten()
+        .is_some_and(|state| state.is_open());
+    let active_turn_affectedness = match (
+        active_scope_cycle_is_open,
+        semantic_diff.as_ref(),
+        persisted_turn_scope.as_ref(),
+    ) {
+        (true, Some(summary), Some(scope)) => {
+            let document_path = file.to_string_lossy().to_string();
+            let ops = build_ops_from_semantic_diff(
+                &document_path,
+                initial_frontmatter.session.as_deref(),
+                "",
+                summary,
+            );
+            Some(agent_doc_core::turn_scope::classify_cycle(&ops, scope))
+        }
+        _ => None,
+    };
+    let prompt_edit_independent_of_active_turn =
+        active_turn_affectedness
+            .as_ref()
+            .is_some_and(|affectedness| {
+                !affectedness.turn_affected && !affectedness.classified.is_empty()
+            });
+
+    // #nm1x: persist the scope so the later finalize-path drift gate (a separate
+    // process invocation) can intersect incoming document ops against the same
+    // scope. Best effort — a write failure must never block a preflight cycle, and
+    // a stale scope is cleared so the gate falls back to its coarse behavior.
+    //
+    // #cwsp: when the diff is independent of an already-open active owner turn,
+    // do not replace that owner's persisted scope with the sibling queue edit's
+    // derived scope. The edit must stay as document state until the current
+    // closeout merges it.
+    if !prompt_edit_independent_of_active_turn {
+        match turn_scope.as_ref() {
+            Some(scope) => {
+                if let Err(err) = crate::turn_scope_store::save(file, scope) {
+                    eprintln!("[preflight] turn-scope persist skipped: {err}");
+                }
+            }
+            None => {
+                if let Err(err) = crate::turn_scope_store::delete(file) {
+                    eprintln!("[preflight] turn-scope clear skipped: {err}");
+                }
+            }
+        }
+    }
 
     // Step 4d: Extract slash commands from user-added diff lines (classified into skill vs built-in).
     let mut parsed_commands = command_diff_result
@@ -1085,6 +1125,18 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let session_accretion = crate::session_accretion::inspect(file)
         .ok()
         .filter(|report| !report.is_healthy());
+
+    // `#queue-no-stop-unrelated-edit`: compute before owner-pane detection so
+    // same-pane recursion signals use only prompt changes that affect this turn.
+    let mut user_intent_prompt_changes = compute_user_intent_prompt_changes(
+        &prompt_bearing_changes,
+        diff_from_queue_head_only,
+        op_affectedness.as_ref(),
+    );
+    if prompt_edit_independent_of_active_turn {
+        user_intent_prompt_changes.clear();
+    }
+
     // #codex-owned-pane-prompt-miss-followups: surface a structured owner-pane
     // self-invocation contract so Codex guidance can drive an in-pane response
     // cycle. Non-null only under a Codex owner-pane self-invocation with
@@ -1094,7 +1146,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         // change) rather than the boundary-keyed exchange detector: preflight's
         // commit has already inserted a trailing boundary, which would hide a
         // freshly-committed prompt from `unresolved_exchange_prompt`.
-        let unresolved_prompt = prompt_bearing_changes
+        let unresolved_prompt = user_intent_prompt_changes
             .iter()
             .find(|change| {
                 matches!(
@@ -1103,16 +1155,26 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 )
             })
             .map(|change| change.text.clone());
+        let suppress_active_queue_head = !diff_from_queue_head_only
+            && !prompt_bearing_changes.is_empty()
+            && user_intent_prompt_changes.is_empty()
+            && (prompt_edit_independent_of_active_turn
+                || op_affectedness.as_ref().is_some_and(|affectedness| {
+                    !affectedness.turn_affected && !affectedness.classified.is_empty()
+                }));
         let current = std::fs::read_to_string(file).unwrap_or_default();
         match frontmatter::parse_for_file_with_context(&current, file, &rc) {
             Ok((owner_fm, _)) => match owner_fm.session.as_deref() {
                 Some(session_id) => {
                     let agent_name = owner_fm.agent.as_deref().unwrap_or("claude");
-                    crate::run::detect_owned_pane_self_invocation(
+                    crate::run::detect_owned_pane_self_invocation_with_options(
                         file,
                         session_id,
                         agent_name,
                         unresolved_prompt,
+                        crate::run::OwnedPaneSelfInvocationOptions {
+                            suppress_active_queue_head,
+                        },
                     )
                     .unwrap_or(None)
                 }
@@ -1123,14 +1185,6 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     };
 
     let pipeline = resolve_pipeline_state(file)?;
-
-    // `#queue-no-stop-unrelated-edit`: compute before the struct move so the
-    // affectedness classifier can be borrowed (it is moved into the struct below).
-    let user_intent_prompt_changes = compute_user_intent_prompt_changes(
-        &prompt_bearing_changes,
-        diff_from_queue_head_only,
-        op_affectedness.as_ref(),
-    );
 
     let output = PreflightOutput {
         warnings,

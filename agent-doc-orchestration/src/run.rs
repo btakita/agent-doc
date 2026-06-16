@@ -498,6 +498,27 @@ fn run_once(
     if content_original != raw_content {
         std::fs::write(file, &content_original)?;
     }
+    if !dry_run {
+        let early_rc = crate::graph::RunContext::new(file.to_path_buf());
+        let (early_fm, _) =
+            frontmatter::parse_for_file_with_context(&content_original, file, &early_rc)?;
+        let early_agent_name = agent_name
+            .or(early_fm.agent.as_deref())
+            .or(config.default_agent.as_deref())
+            .unwrap_or("claude");
+        if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, early_agent_name)
+            && let Some(continuation) = crate::queue_continuation::detect(file)?
+            && !queue_synthetic_diff
+            && owner_pane_queue_edit_should_defer_until_closeout(file, &the_diff, &content_original)
+        {
+            return Ok(owner_pane_queue_edit_deferred_outcome(
+                file,
+                queue_synthetic_diff,
+                &detail,
+                &continuation,
+            ));
+        }
+    }
     content_original = normalize_direct_run_prompt_prefixes(file, &content_original, &the_diff)?;
     let queue_diff_completion_id =
         write::queue_diff_completion_id_for_current_head(file, &content_original, &the_diff)?;
@@ -631,6 +652,16 @@ fn run_once(
     if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, agent_name)
         && let Some(continuation) = crate::queue_continuation::detect(file)?
     {
+        if !queue_synthetic_diff
+            && owner_pane_queue_edit_should_defer_until_closeout(file, &the_diff, &content_original)
+        {
+            return Ok(owner_pane_queue_edit_deferred_outcome(
+                file,
+                queue_synthetic_diff,
+                &detail,
+                &continuation,
+            ));
+        }
         // #recguard-wedge-escape: a busy owner pane re-invoking `agent-doc <FILE>`
         // mid-turn trips this guard (Option B `#codex-self-reinvoke-prevent` only
         // redirects the *Stop-hook* continuation, not a mid-turn re-run). One
@@ -1284,6 +1315,27 @@ pub fn detect_owned_pane_self_invocation(
     agent_name: &str,
     unresolved_prompt: Option<String>,
 ) -> Result<Option<OwnedPaneSelfInvocation>> {
+    detect_owned_pane_self_invocation_with_options(
+        file,
+        session_id,
+        agent_name,
+        unresolved_prompt,
+        OwnedPaneSelfInvocationOptions::default(),
+    )
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct OwnedPaneSelfInvocationOptions {
+    pub suppress_active_queue_head: bool,
+}
+
+pub(crate) fn detect_owned_pane_self_invocation_with_options(
+    file: &Path,
+    session_id: &str,
+    agent_name: &str,
+    unresolved_prompt: Option<String>,
+    options: OwnedPaneSelfInvocationOptions,
+) -> Result<Option<OwnedPaneSelfInvocation>> {
     if owned_pane_self_invocation_detail(file, session_id, agent_name).is_none() {
         return Ok(None);
     }
@@ -1311,7 +1363,9 @@ pub fn detect_owned_pane_self_invocation(
             persistence_command,
         }));
     }
-    if let Some(continuation) = crate::queue_continuation::detect(file)? {
+    if !options.suppress_active_queue_head
+        && let Some(continuation) = crate::queue_continuation::detect(file)?
+    {
         return Ok(Some(OwnedPaneSelfInvocation {
             file: file.display().to_string(),
             current_pane,
@@ -1325,6 +1379,69 @@ pub fn detect_owned_pane_self_invocation(
         }));
     }
     Ok(None)
+}
+
+fn owner_pane_queue_edit_should_defer_until_closeout(
+    file: &Path,
+    diff_text: &str,
+    current_content: &str,
+) -> bool {
+    let open_cycle = crate::cycle_state::load(file)
+        .ok()
+        .flatten()
+        .is_some_and(|state| state.is_open());
+    if !open_cycle {
+        return false;
+    }
+    let Some(scope) = crate::turn_scope_store::load(file) else {
+        return false;
+    };
+    let prompt_bearing_changes = diff::classify_prompt_bearing_changes(diff_text);
+    if prompt_bearing_changes.is_empty() {
+        return false;
+    }
+    let Some(previous) = snapshot::load(file).ok().flatten() else {
+        return false;
+    };
+    let Some(summary) = crate::preflight::semantic_diff_summary(
+        &previous,
+        current_content,
+        &prompt_bearing_changes,
+    ) else {
+        return false;
+    };
+    let document_path = file.to_string_lossy().to_string();
+    let ops = crate::preflight::build_ops_from_semantic_diff(&document_path, None, "", &summary);
+    let affectedness = agent_doc_core::turn_scope::classify_cycle(&ops, &scope);
+    !affectedness.turn_affected
+}
+
+fn owner_pane_queue_edit_deferred_outcome(
+    file: &Path,
+    queue_synthetic_diff: bool,
+    detail: &str,
+    continuation: &crate::queue_continuation::QueueContinuation,
+) -> RunCycleOutcome {
+    eprintln!(
+        "[run] owner-pane queue edit deferred until current closeout for {} (head_id={} {})",
+        file.display(),
+        continuation.head_id.as_deref().unwrap_or("<none>"),
+        detail
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "run_owned_pane_queue_edit_deferred file={} head_id={} {}",
+            file.display(),
+            continuation.head_id.as_deref().unwrap_or("<none>"),
+            detail
+        ),
+    );
+    RunCycleOutcome {
+        dispatched: false,
+        queue_synthetic_diff,
+        queue_consumption: None,
+    }
 }
 
 fn recursive_codex_direct_invocation_diagnostic(

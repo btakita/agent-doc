@@ -178,7 +178,9 @@ pub(crate) fn compute_user_intent_prompt_changes(
         // Synthetic auto-queue continuation only — no user intent this cycle.
         return Vec::new();
     }
-    if op_affectedness.is_some_and(|affectedness| !affectedness.turn_affected) {
+    if op_affectedness.is_some_and(|affectedness| {
+        !affectedness.turn_affected && !affectedness.classified.is_empty()
+    }) {
         // The classifier ran and scoped every user op this cycle as independent
         // of the turn — nothing affects it, so the drain must not halt.
         return Vec::new();

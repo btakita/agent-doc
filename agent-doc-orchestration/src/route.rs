@@ -2597,7 +2597,12 @@ fn dispatch_only_starting_pane_ready_timeout_for_binary(
 }
 
 fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duration {
-    dispatch_only_starting_pane_ready_timeout_for_binary(Some(harness.binary.as_str()), cfg!(test))
+    wait_for_ready_override().unwrap_or_else(|| {
+        dispatch_only_starting_pane_ready_timeout_for_binary(
+            Some(harness.binary.as_str()),
+            cfg!(test),
+        )
+    })
 }
 
 fn dispatch_only_starting_pane_recovery_timeout(harness: Option<&HarnessConfig>) -> Duration {
@@ -7357,6 +7362,28 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert_eq!(
             dispatch_only_busy_refusal_wait_secs(Duration::from_secs(8)),
             8
+        );
+    }
+    #[test]
+    fn dispatch_only_starting_pane_ready_timeout_honors_override_then_default() {
+        use std::time::Duration;
+
+        let codex = crate::harness::HarnessConfig::codex();
+        assert_eq!(
+            dispatch_only_starting_pane_ready_timeout(&codex),
+            Duration::from_millis(250)
+        );
+
+        let guard = WaitForReadyOverrideGuard::set(Some(Duration::from_secs(60)));
+        assert_eq!(
+            dispatch_only_starting_pane_ready_timeout(&codex),
+            Duration::from_secs(60)
+        );
+        drop(guard);
+
+        assert_eq!(
+            dispatch_only_starting_pane_ready_timeout(&codex),
+            Duration::from_millis(250)
         );
     }
     #[test]

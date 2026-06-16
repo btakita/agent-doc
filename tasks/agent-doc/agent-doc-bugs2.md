@@ -207,7 +207,22 @@ Proof for this cycle:
 - Verification: log inspection only; no repo code changed in this cycle. The relevant source fix remains `2464ba38`, but live install proof is still missing.
 - Confidence: high on the split diagnosis; medium on the live interruption until tested after installing the source fix.
 - Escalation: none.
-<!-- agent:boundary:86e25b3b -->
+
+### Re: #cwsp — gpt-5
+
+I did not implement `#cwsp` as code in this cycle because its precondition is not satisfied yet.
+
+`#cwsp` is conditional: add a busy-owner queue-edit suppression guard **if** queue editing still interrupts an active Codex owner **after** installing `src/agent-doc` `2464ba38` and recycling the live supervisor onto that build. Current preflight still warns the installed binary/cdylib predate `2464ba38`, and the log check found no `route_dispatch_drain_closeout_wait_existing_queue` marker. That means there is no valid post-install repro to implement against yet.
+
+I reclassified `#cwsp` as `[operator-verify]` so go-mode will not keep draining it as ordinary implementation work. The unblock is: install/recycle `2464ba38`, reproduce typing into the queue during an active Codex owner turn, and only if it still interrupts, implement the suppression guard described by `#cwsp`.
+
+Proof for this cycle:
+- Changed paths: this session document/backlog only.
+- Commands: `agent-doc preflight ...`; `agent-doc plan ...`; `agent-doc read ... --component queue`; `agent-doc read ... --component backlog`.
+- Verification: state inspection only; no code changed. The blocker is the stale live install plus missing post-install repro marker.
+- Confidence: high that `#cwsp` should be operator-verify gated rather than implemented now.
+- Escalation: none.
+<!-- agent:boundary:cfde3cf8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -232,7 +247,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 ---
 - ~~:pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.~~
-- :pushpin: do [#cwsp]
+- ~~:pushpin: do [#cwsp]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -262,7 +277,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#cwsp] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
+- [ ] [#cwsp] [operator-verify] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38 and recycling the live supervisor onto that build, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

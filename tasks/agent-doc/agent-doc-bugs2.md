@@ -42,16 +42,6 @@ Compacted content:
 
 > **Queue prompt:**
 >
-> :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
-> ```
-> resync: pruned 3 stale session(s)
-> [route] target tmux session: 0
-> Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3649 blocked_head_bytes=132 blocked_head_sha256=ae121dad65e5b00a6c504db706985aee4e8d6ed00988ba4244f51196952739d7 trigger_bytes=44 trigger_sha256=a55a6572fd4dc952bc476bd516d3a7801b1e63409715f063b4b7351ea112ade5
-> ```
-
-
-> **Queue prompt:**
->
 > If we orchestrate a team of subagents with different roles, will the output quality improve on this project?
 
 
@@ -73,17 +63,41 @@ Proof for this cycle:
 - Verification: no new source, test, build, or instruction-surface edits were made in this cycle. The gated state-machine batch is already backed by local `make check`, `make install`, and passing GitHub CI run `27607675117` from `#smtransitiontests`.
 - Confidence: high.
 - Escalation: none.
-- Confidence: high that this exact pasted error is already fixed in source as `#jbrestale`; live confidence still depends on installed binary and supervisor freshness.
-- Verification: no source, build, or instruction-surface edits were made; this was a source/spec confirmation response. The relevant regression coverage is already present in the checked implementation tests.
-- Commands: `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc session-check`, `tsift status`, `rg -n "qchurn|queue_paused|no-op churn|Run Agent Doc.*errors|restart.*Run Agent Doc" tasks src/agent-doc -S`, and targeted `sed` reads of the version/spec/implementation/test surfaces.
-- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only.
-- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs` adds the restart-redirect marker for stale-supervisor queue pauses while leaving deliberate operator pauses terminal.
-- `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs` has the classifier/test for this exact pasted error string and extracts pid `2715614` as recoverable.
-- `src/agent-doc/specs/02-document-format.md` and `src/agent-doc/specs/07-orchestration-commands.md` both specify the one-shot recovery for markerless `failed_stage=queue_paused reason=#qchurn ... stale host supervisor pid<N> ...` errors.
-- `src/agent-doc/VERSIONS.md` records `#jbrestale` in Unreleased: legacy stale-supervisor queue pauses recover instead of surfacing a hard JB error.
 
 The repeated `/clear` lines are terminal builtins, not additional repo work for this queue item. I kept draining the active queue head and closed `#archfirstgate`.
-<!-- agent:boundary:5179a2c5 -->
+
+### Re: JB Run Agent Doc stale queue pause — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
+> ```
+> resync: pruned 3 stale session(s)
+> [route] target tmux session: 0
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3649 blocked_head_bytes=132 blocked_head_sha256=ae121dad65e5b00a6c504db706985aee4e8d6ed00988ba4244f51196952739d7 trigger_bytes=44 trigger_sha256=a55a6572fd4dc952bc476bd516d3a7801b1e63409715f063b4b7351ea112ade5
+> ```
+
+This should not surface as a JetBrains `Run Agent Doc` error on the current source. The pasted failure is the legacy markerless stale-supervisor `queue_paused` shape from `#jbrestale`: `failed_stage=queue_paused reason=#qchurn ... stale host supervisor pid 2715614 ...`. Current `src/agent-doc` treats that as recoverable by restarting the stale supervisor once, lifting the pause, and retrying dispatch rather than failing closed.
+
+Evidence checked this cycle:
+
+- `src/agent-doc/VERSIONS.md` records `#jbrestale` in Unreleased: legacy stale-supervisor queue pauses recover instead of surfacing a hard JB error.
+- `src/agent-doc/specs/02-document-format.md` and `src/agent-doc/specs/07-orchestration-commands.md` both specify the one-shot recovery for markerless `failed_stage=queue_paused reason=#qchurn ... stale host supervisor pid<N> ...` errors.
+- `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs` has the classifier/test for this exact pasted error string and extracts pid `2715614` as recoverable.
+- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs` adds the restart-redirect marker for stale-supervisor queue pauses while leaving deliberate operator pauses terminal.
+
+So I am not adding a new backlog item for this specific report. If JetBrains still shows this exact error after installing the current agent-doc build and recycling the route-owned supervisor, that becomes a live promotion/verification failure, not a new untracked design bug; it should be handled under the existing operator-verify recycle / JB live-proof heads.
+
+Proof for this cycle:
+
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only.
+- Commands: `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc session-check`, `agent-doc queue recover-lost`, `agent-doc queue consume`, `agent-doc queue --help`, `agent-doc write --help`, `tsift status`, `rg -n "qchurn|queue_paused|no-op churn|Run Agent Doc.*errors|restart.*Run Agent Doc" tasks src/agent-doc -S`, and targeted `sed` reads of the version/spec/implementation/test surfaces.
+- Verification: no source, build, or instruction-surface edits were made; this was a source/spec confirmation response. The relevant regression coverage is already present in the checked implementation tests.
+- Confidence: high that this exact pasted error is already fixed in source as `#jbrestale`; live confidence still depends on installed binary and supervisor freshness.
+- Escalation: none.
+
+The normal finalize/queue-consume path hit a live-buffer guard and then a delayed queue-consume patch mis-struck id-backed heads. I repaired the visible session document here and left the remaining operator-verify heads open.
+<!-- agent:boundary:b465b8dc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -91,14 +105,7 @@ The repeated `/clear` lines are terminal builtins, not additional repo work for 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~If we orchestrate a team of subagents with different roles, will the output quality improve on this project?~~
 ---
-:pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
-```
-resync: pruned 3 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3649 blocked_head_bytes=132 blocked_head_sha256=ae121dad65e5b00a6c504db706985aee4e8d6ed00988ba4244f51196952739d7 trigger_bytes=44 trigger_sha256=a55a6572fd4dc952bc476bd516d3a7801b1e63409715f063b4b7351ea112ade5
-```
----
-- ~~do [#lazilyqrestore]~~
+- do [#lazilyqrestore]
 - do [#recyclerestart-verify]
 - do [#rtwbcast-verify]
 - do [#c2b6]

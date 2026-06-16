@@ -957,7 +957,20 @@ Commits pushed:
 Passive CI snapshot, not blocking closeout:
 - agent-doc `CI`: run `27584948926`, `in_progress`
 - parent `Agent Doc`: run `27584968997`, `queued`
-<!-- agent:boundary:3ca1f84e -->
+
+### Re: do #opverify-submit-proof — gpt-5
+
+I ran the requested submit-proof sweep and found disproof rather than closure for the live Codex path.
+
+Log evidence:
+- Parent ops log, `tasks/professional/equityfundingsource.md`, pane `%101`, 2026-06-15 18:51:46 EDT: Codex direct-pane dispatch had `route_dispatch_only_sent ... submit_mode=tmux_literal_cr proof=consumed proof_scope=dispatch_start`. That proves dispatch start, but it is still the old CR submit mode, not the intended `tmux_literal_text_enter_key` / `routed_trigger_enter_key` contract.
+- Boost-client ops log, `tasks/mrh-servers.md`, pane `%103`, 2026-06-15 20:04:08 EDT: `route_submit_observation ... result=accepted ... trigger_visible=false`, followed by `route_dispatch_only_sent ... submit_mode=tmux_literal_cr proof=accepted proof_scope=accepted_only`.
+- Same pane `%103`, 2026-06-15 20:07:17 EDT latest retry: `route_dispatch_only_starting_pane_not_ready ... outcome=active codex turn`, after repeated `timed_out` starting-not-ready refusals.
+
+I did not find any `tmux_literal_text_enter_key` or `routed_trigger_enter_key` markers in the searched parent, boost-client, qchurnfix, or session-share ops logs. Claude evidence is present in older logs as accepted-only direct-pane submits, but the current blocker is Codex: it still shows the CR path and an accepted-only/no-dispatch proof on `mrh-servers.md`.
+
+No code changed in this sweep. I am closing the proof-sweep item because it produced the exact missing-harness/pane/timestamp evidence requested; the live queue already has the concrete `mrh-servers.md` failure and SimWorld follow-up to drive the fix.
+<!-- agent:boundary:07f3dfe2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -974,7 +987,7 @@ Error: dispatch-only codex reopen refused to inject into pane %103 for tasks/mrh
 ---
 - :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
 - ~~do [#codexctrlz]~~
-- do [#opverify-submit-proof]
+- ~~do [#opverify-submit-proof]~~
 - do [#opverify-editor-proof]
 - do [#opverify-recycle-proof]
 <!-- /agent:queue -->
@@ -1006,7 +1019,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#opverify-submit-proof] [clean-session] Replacement for cleared review #2v7b / #jbcodexsubmit / #jbclaudesubmit. After installing and recycling agent-doc 55b86a61 (no JetBrains plugin update required for this Rust CLI/cdylib submit-path fix), correlate ops.log for JB Run Agent Doc submit proof across Claude and Codex panes. Required proof per harness: route_direct/direct-pane submit diagnostics show the intended backend (Codex submit_mode=tmux_literal_text_enter_key / routed_trigger_enter_key; OpenCode remains Kitty Return; Claude remains CR), followed by route_dispatch_start_proven or route_dispatch_only_sent proof_scope=dispatch_start. If a harness still needs a manual Enter or only has accepted-only/no-proof output, update this item with the exact missing harness, pane, and latest log timestamp instead of moving it back to review.
 - [ ] [#opverify-editor-proof] [clean-session] Operator-verify editor/IPC proof sweep: correlate #qt32, #fcc0-live-verify, #c2b6, and #rtwbcast-verify against ops.log markers write_authority action=routed, plugin_watch_readonly, supervisor_host_gate hosting=in-process, queue_consume_writeback transport=editor_ipc, compact_writeback transport=editor_ipc, and disproof markers live_prompt_drift_after_preflight / crdt_merge_base_overlay_stale / File Cache Conflict. Close only items with exact zero-drift proof; otherwise update each with missing marker(s).
 - [ ] [#opverify-recycle-proof] [clean-session] Operator-verify supervisor recycle proof sweep: correlate #suprehotreload, #recyclerestart-verify, #1j8q, #aazp, #4myd, #anw0verify, and #cleandrainsup-verify against ops.log markers supervisor_binary_stale_self_recycled, supervisor_reexec_failed fallback=continue_current_binary, dispatch_stale_generation_redirect, idle_queue_watch_context_reset, and subsequent drain/dispatch proof. Close duplicates with exact proof or update each item with the missing live step.
 - [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.

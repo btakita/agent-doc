@@ -17,14 +17,17 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
+agent_doc_pipeline:
+  run_id: cycle-1781638030591
+  step: write_applied
 ---
 
 ## Status
 
  <!-- agent:status patch=replace -->
 
-#jbcompactcrdt CODE-COMPLETE (concurrent-edit convergence coverage landed agent-doc 3083b821; #w42v compact editor-IPC path shipped). Operator-drive remainder: lib-install + live Compact Exchange verify. #rtwbcast remains queued (separate multi-editor item).
+complete
 <!-- /agent:status -->
 
 ## Exchange
@@ -611,17 +614,17 @@ Closeout repair for the already-committed `#cwsp` response: the implementation s
 
 Use a coordinator-led, invariant-driven loop for the next workflow fixes. The coordinator owns scope, root-cause synthesis, final architecture decisions, and closeout proof. Subagents should be role-scoped and short-lived, with handoffs expressed as facts, failing examples, proposed invariants, and concrete code touchpoints rather than general recommendations.
 
-❯ 1. Architecture agent. Build the workflow state model and name the durable invariants. Inputs are preflight JSON, session-check JSON, cycle state, actor/session registry state, ops log markers, editor proof sidecars, and git/submodule state. Output is an invariant catalog entry shape with fact sources, ok predicates, disproof markers, safe remediation, operator-gated remediation, and required regression class. This feeds `#wfinvcatalog`.
+1. Architecture agent. Build the workflow state model and name the durable invariants. Inputs are preflight JSON, session-check JSON, cycle state, actor/session registry state, ops log markers, editor proof sidecars, and git/submodule state. Output is an invariant catalog entry shape with fact sources, ok predicates, disproof markers, safe remediation, operator-gated remediation, and required regression class. This feeds `#wfinvcatalog`.
 
-❯ 2. Testing and SimWorld agent. Convert each invariant into deterministic tests before implementation changes where possible. It should produce minimal reproductions for queue continuation, stale supervisor routing, closeout commit convergence, editor IPC/writeback drift, generation redirect, parent gitlink proof, and independent queue edits during an active turn. Output is a test matrix with gaps and exact commands.
+2. Testing and SimWorld agent. Convert each invariant into deterministic tests before implementation changes where possible. It should produce minimal reproductions for queue continuation, stale supervisor routing, closeout commit convergence, editor IPC/writeback drift, generation redirect, parent gitlink proof, and independent queue edits during an active turn. Output is a test matrix with gaps and exact commands.
 
-❯ 3. Implementation agent. Implement only catalog-backed repairs. It should avoid broad route rewrites and instead add typed facts, decision helpers, and command surfaces that make the doctor/autofix path explainable. This feeds `#wfinvdoctor` and later `#wfinvautofix`.
+3. Implementation agent. Implement only catalog-backed repairs. It should avoid broad route rewrites and instead add typed facts, decision helpers, and command surfaces that make the doctor/autofix path explainable. This feeds `#wfinvdoctor` and later `#wfinvautofix`.
 
-❯ 4. Refactoring agent. Identify duplicated decision logic across preflight, run, route, session-check, repair, write/finalize, and JetBrains surfaces. It should propose extractions only when at least two call sites currently disagree or can drift. The coordinator decides which extractions become part of the implementation batch.
+4. Refactoring agent. Identify duplicated decision logic across preflight, run, route, session-check, repair, write/finalize, and JetBrains surfaces. It should propose extractions only when at least two call sites currently disagree or can drift. The coordinator decides which extractions become part of the implementation batch.
 
-❯ 5. Coordinator feedback loop. For each invariant, the coordinator asks every role for three things: the root cause it explains, the proof that would disprove the diagnosis, and the smallest code/test change that would make the invariant enforceable. If those disagree, the coordinator records the disagreement as a catalog field or splits the invariant.
+5. Coordinator feedback loop. For each invariant, the coordinator asks every role for three things: the root cause it explains, the proof that would disprove the diagnosis, and the smallest code/test change that would make the invariant enforceable. If those disagree, the coordinator records the disagreement as a catalog field or splits the invariant.
 
-❯ 6. Closeout standard. A workflow fix is complete only when the invariant catalog names the behavior, the doctor can diagnose it from durable facts, the autofix planner either performs a safe remediation or emits an exact operator-gated command, and regression coverage proves both the broken and recovered states. This avoids adding gates without a path to completion.
+6. Closeout standard. A workflow fix is complete only when the invariant catalog names the behavior, the doctor can diagnose it from durable facts, the autofix planner either performs a safe remediation or emits an exact operator-gated command, and regression coverage proves both the broken and recovered states. This avoids adding gates without a path to completion.
 
 No new backlog items are needed from this planning turn because the existing queued heads already form the implementation sequence: `#wfinvcatalog`, then `#wfinvdoctor`, then `#wfinvautofix`.
 
@@ -709,37 +712,59 @@ Commits:
 Confidence: high. The implementation is covered by focused tests, CLI smoke, full local `make check`, installed-binary verification, and current push/CI polling.
 
 Escalation: none.
-<!-- agent:boundary:0e4a802a -->
+❯ <<<<<<< agent-response
+
+### Re: do [#wfinvautofix] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#wfinvautofix]
+
+
+Implemented `#wfinvautofix`.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/autofix.rs`
+- `src/agent-doc/agent-doc-orchestration/src/doctor.rs`
+- `src/agent-doc/agent-doc-orchestration/src/lib.rs`
+- `src/agent-doc/src/main.rs`
+- `src/agent-doc/src/commands.rs`
+- `src/agent-doc/specs/08b-single-process-control-plane.md`
+- `src/agent-doc/VERSIONS.md`
+
+What changed:
+- Added `agent-doc autofix <FILE>`.
+- The autofix planner consumes the doctor report and `workflow-invariant-catalog-v1`, then plans repair steps keyed by invariant id and root-cause fingerprint.
+- It records append-only `workflow_autofix:<invariant>:<hash>` proof markers in the proof ledger unless `--dry-run` is used.
+- It de-duplicates repeated symptoms by existing proof marker, while ignoring prior `status=planned` markers when a later `--apply` run requests execution.
+- `--apply` executes only the v1 automatic whitelist: stale-supervisor recycle and captured-response `agent-doc write --commit`. Queue drain, generation reroute, git commit, editor conflict, shell-compound, and missing-proof actions remain gated/planned instead of auto-run.
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration autofix` passed.
+- `cargo test -p agent-doc-orchestration doctor` passed.
+- `agent-doc autofix /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --dry-run --json --limit 10` passed with the installed binary and did not write proof-ledger rows.
+- `make check` passed locally through `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` with artifact `tart-703be18e0e`.
+- `cargo install --path .` succeeded and replaced `/home/brian/.cargo/bin/agent-doc`.
+- GitHub Actions: submodule `agent-doc` CI run `27643581550` for `architecture: add workflow invariant autofix` was still `in_progress` after polling; no failing remote run was observed. Parent `agent-loop` has no workflow named `CI`.
+
+Commits:
+- Submodule `btakita/agent-doc`: `ce26d32c` (`architecture: add workflow invariant autofix`), pushed to `origin/main`.
+- Parent `btakita/agent-loop`: `96b0828b7` (`agent-doc: add workflow invariant autofix`), pushed to `origin/main`.
+
+Confidence: high. The planner is isolated behind a command surface, covered by focused tests and full local `make check`, and the installed dry-run smoke verifies the live safety split without mutating the proof ledger.
+
+Escalation: none.
+❯ ||||||| original
+❯ =======
+❯ >>>>>>> your-edits
+<!-- agent:boundary:64ad619e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 ---
-- ~~do [#recyclerestart-verify]: This is automatable. You are misattributing it to operator driven.~~
-- ~~do [#rtwbcast-verify]~~
-- ~~do [#c2b6]~~
-- ~~do [#1j8q]~~
-- ~~do [#anw0verify]~~
-- ~~I have a good feel for when agent-doc behaves correctly. Can we lock down behavior invariants that the agent can use to determine if there are workflow issues...so we can automate bug detection and fixes?~~
-- ~~Please add and prioritize backlog + queue items to implement recommendations from "binary logic for stale queue pauses and conflicts" response.~~
-- ~~:round_pushpin: do [#binoutcomes]~~
-- ~~:round_pushpin: do [#binstalepause]~~
-- ~~:round_pushpin: do [#binconflictscope]~~
-- ~~:round_pushpin: do [#binconflictdedupe]~~
-- ~~do [#qflood2]~~
-- ~~do [#qt32]~~
-- ~~do [#fcc0-live-verify]~~
-- ~~do [#archstatekernel]~~
-- ~~do [#archproofledger]~~
-- ~~do [#archcomponentmerge]~~
-- ~~do [#archsimworldmatrix]~~
-- ~~do [#archuistates]~~
-- ~~do [#cwsp]~~
-- ~~Create a plan to orchestrate subagents to manage specific roles such as architecture, testing, implementation, refactoring. The main agent will coordinate the subagents to synthesize the solution. Ensure there is feedback between the subagents and the coordinating agent to ensure reliable, well designed outcomes, that appropriately solve the issues. Find root causes and factor the codebase to consolidate logic.~~
-- ~~do [#wfinvcatalog]~~
-- ~~do [#wfinvdoctor]~~
-- do [#wfinvautofix]
 <!-- /agent:queue -->
 ###
 <!--
@@ -769,7 +794,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#wfinvautofix] Add an invariant-driven autofix planner that executes only proven safe repairs automatically, gates destructive/operator actions, de-duplicates repeated symptoms by invariant id, and records proof markers so queue/backlog items do not multiply for the same root cause.
 <!-- /agent:backlog -->
 
 ## Review

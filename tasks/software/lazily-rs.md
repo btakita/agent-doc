@@ -86,7 +86,41 @@ Verification:
 - `gh run list --workflow CI --limit 1` reports that this repo has no workflow named `CI`.
 
 I did not publish the post publicly from this cycle because `#kabc` is operator-drive and LinkedIn publishing is an external public side effect. The ready command is `corky schedule run` (or direct `corky linkedin publish mail/social/20260616-lazily-architecture-linkedin.md`). After publish, the first-comment text is still in `mail/drafts/linkedin/2026-06-16-lazily-architecture.md` and should be posted with `corky linkedin comment` against the published social draft.
-<!-- agent:boundary:a09fea83 -->
+
+### Re: LinkedIn post repair — gpt-5
+
+> **Queue prompt:**
+>
+> You did not publish the entire linkedin post. Please edit to include the full post. https://www.linkedin.com/feed/update/urn:li:activity:7472666757267107840/
+>
+> ```
+> I built a reactive signals library in Rust that does zero wasted work by default — then realized it could sync its graph across the internet.
+>
+> This is the architecture of lazily-rs.
+>
+> The core is small: three primitives 
+> ```
+
+Edited the published LinkedIn post with the full body from `mail/social/20260616-lazily-architecture-linkedin.md`. Corky reported success for the mapped share URL: https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848
+
+Changed paths and commits:
+- `mail/social/20260616-lazily-architecture-linkedin.md` now records `status: published`, `published_at`, `post_id`, and `post_url`; committed in `mail` as `07a9ea1`.
+- The parent `mail` submodule pointer advanced in `agent-loop` commit `e7e0b08c1`.
+- The session document was finalized through agent-doc.
+
+Commands and verification:
+- Ran `corky linkedin edit mail/social/20260616-lazily-architecture-linkedin.md`; it returned `Updated LinkedIn post`.
+- `corky schedule list` now reports no scheduled items.
+- `corky linkedin list` shows `20260616-lazily-architecture-linkedin.md [published]`.
+- Re-read the managed draft and confirmed the full body includes the text after `The core is small: three primitives ...` through the closing question.
+- `gh run list --workflow CI --limit 1` still reports this repo has no workflow named `CI`.
+
+Escalation/confidence:
+- No sandbox escalation was needed. This was an explicit user-authorized public LinkedIn edit through Corky.
+- Confidence is high from Corky's successful edit response plus the local published metadata and full-body verification.
+
+Preflight also warned that the installed `agent-doc` binary/cdylib may be stale relative to source commit `a447beb1`; that did not block this LinkedIn repair.
+<!-- agent:boundary:3bd912fa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -95,6 +129,14 @@ I did not publish the post publicly from this cycle because `#kabc` is operator-
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+You did not publish the entire linkedin post. Please edit to include the full post. https://www.linkedin.com/feed/update/urn:li:activity:7472666757267107840/
+```
+I built a reactive signals library in Rust that does zero wasted work by default — then realized it could sync its graph across the internet.
+
+This is the architecture of lazily-rs.
+
+The core is small: three primitives 
+```
 <!-- /agent:queue -->
 
 ## Backlog
@@ -106,7 +148,7 @@ I did not publish the post publicly from this cycle because `#kabc` is operator-
 
 <!-- agent:review -->
 - [/] [#kb9b] #lzpypub011=[operator-drive] Publish lazily-py v0.11.0: build artifacts are ready in src/lazily-py/dist/ (lazily-0.11.0-{whl,tar.gz}). From src/lazily-py: tag v0.11.0 + push, gh release create v0.11.0 --generate-notes, then python -m twine upload dist/* (needs PyPI token + browser/passkey 2FA). Gated on the pre-publish live-test confirm per the testing-gate rule. Commit 28f23e4 + superproject gitlink 6339ab2e1 already pushed.
-- [/] [#kabc] #lipostlazilyarch=[operator-drive] Managed Corky draft is ready and due: mail/social/20260616-lazily-architecture-linkedin.md (created from mail/drafts/linkedin/2026-06-16-lazily-architecture.md; dry-run passes). Publish with `corky schedule run` or `corky linkedin publish mail/social/20260616-lazily-architecture-linkedin.md`; after publish, post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>`. Not agent-published in this cycle because posting to LinkedIn is a public external side effect.
+- [/] [#kabc] #lipostlazilyarch=[operator-drive] Main LinkedIn post is published and repaired: Corky edit updated mail/social/20260616-lazily-architecture-linkedin.md / https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848 with the full body after the public post truncated at "The core is small: three primitives". Local metadata is committed in mail commit 07a9ea1 and superproject gitlink e7e0b08c1. Remaining operator follow-up: post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>` if still desired.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet networked backend through the LIVE #yxjw signaling Worker (two real hosts / NAT, not localhost). The localhost two-socket round trip (tests/str0m_net.rs) already proves the real UDP/DTLS/SCTP/timer path in-process; this remaining slice needs two live endpoints + the deployed Worker so it cannot be agent-run headless. Wire SignalingClient offer/answer/ice to Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} and confirm a Snapshot crosses between hosts.
 - [/] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.
 - [/] [#57by] #lzasyncshuttle=[operator-gated, NO-GO for now per #shuttleeval] Exhaustive Shuttle async-resolve-loop model. Spike result: Shuttle can model async (has an executor, unlike Loom) but is randomized-not-exhaustive, needs ~140 cfg-swaps + a custom notifier (no tokio::watch equiv) in the hot path, and the two #k03k windows are already deterministically covered. Defer until the async graph grows more concurrency-critical paths. See tasks/software/plan-lazily-async-loom.md.

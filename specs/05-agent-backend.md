@@ -91,7 +91,8 @@ the same ranked miss causes used by session-cost diagnostics.
 
 ## Direct Run Heartbeats
 
-- Non-streaming `agent-doc run` child waits are parent-visible: while the backend blocks, `run` emits `[run] heartbeat phase=child_agent_wait ...` stderr every 30 seconds by default.
+- Non-streaming `agent-doc run` child waits are parent-visible in ordinary terminal runs: while the backend blocks, `run` emits `[run] heartbeat phase=child_agent_wait ...` stderr every 30 seconds by default.
+- When `run` executes with terminal stderr inside a tmux pane owned by a Codex/OpenCode parent harness, routine `[run]` / `[diff]` / `[commit]` stderr is redirected to `.agent-doc/logs/run-stderr.log` so progress output cannot paint over the foreground TUI. `AGENT_DOC_TMUX_INPUT_DIAG` / `AGENT_DOC_DEBUG_STDIN` opt back into foreground stderr for diagnostics.
 - `AGENT_DOC_RUN_HEARTBEAT_SECS` overrides the interval for tests and local diagnostics; values below 1 second clamp to 1.
 - Each heartbeat also updates the open cycle state's `updated_at` and `last_event` without advancing the phase, so `session-check` and operators can distinguish a progressing long wait from a stale `preflight_started` cycle.
 

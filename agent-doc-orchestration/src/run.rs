@@ -111,6 +111,9 @@
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::fs::OpenOptions;
+use std::io::IsTerminal;
+#[cfg(unix)]
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread::JoinHandle;
@@ -122,6 +125,122 @@ use crate::{
 
 const AGENT_DOC_RUN_HEARTBEAT_SECS_ENV: &str = "AGENT_DOC_RUN_HEARTBEAT_SECS";
 const DEFAULT_RUN_HEARTBEAT_SECS: u64 = 30;
+
+#[cfg(unix)]
+struct RunStderrRedirect {
+    saved_stderr: Option<OwnedFd>,
+}
+
+#[cfg(unix)]
+impl RunStderrRedirect {
+    fn inactive() -> Self {
+        Self { saved_stderr: None }
+    }
+
+    fn maybe_start(file: &Path) -> Self {
+        if !run_stderr_redirect_needed() {
+            return Self::inactive();
+        }
+        match Self::start(file) {
+            Ok(guard) => guard,
+            Err(err) => {
+                eprintln!("[run] warning: could not redirect stderr for managed TUI: {err:#}");
+                Self::inactive()
+            }
+        }
+    }
+
+    fn start(file: &Path) -> Result<Self> {
+        let canonical = file
+            .canonicalize()
+            .with_context(|| format!("failed to canonicalize {}", file.display()))?;
+        let project_root = crate::snapshot::find_project_root(&canonical)
+            .with_context(|| format!("failed to resolve project root for {}", file.display()))?;
+        let logs_dir = project_root.join(".agent-doc").join("logs");
+        std::fs::create_dir_all(&logs_dir)
+            .with_context(|| format!("failed to create {}", logs_dir.display()))?;
+        let stderr_path = logs_dir.join("run-stderr.log");
+        let log_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&stderr_path)
+            .with_context(|| format!("failed to open {}", stderr_path.display()))?;
+        let saved_fd = unsafe { libc::dup(libc::STDERR_FILENO) };
+        if saved_fd < 0 {
+            anyhow::bail!("dup(stderr) failed: {}", std::io::Error::last_os_error());
+        }
+        let saved_stderr = unsafe { OwnedFd::from_raw_fd(saved_fd) };
+        let redirected = unsafe { libc::dup2(log_file.as_raw_fd(), libc::STDERR_FILENO) };
+        if redirected < 0 {
+            anyhow::bail!("dup2(stderr) failed: {}", std::io::Error::last_os_error());
+        }
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "run_stderr_redirect harness={} tmux_pane={} target={}",
+                agent_doc_core::model_tier::detect_harness(),
+                std::env::var("TMUX_PANE").unwrap_or_else(|_| "<unset>".to_string()),
+                stderr_path.display()
+            ),
+        );
+        eprintln!(
+            "[run] stderr redirected to {} for managed TUI",
+            stderr_path.display()
+        );
+        Ok(Self {
+            saved_stderr: Some(saved_stderr),
+        })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for RunStderrRedirect {
+    fn drop(&mut self) {
+        let Some(saved_stderr) = self.saved_stderr.take() else {
+            return;
+        };
+        let restored = unsafe { libc::dup2(saved_stderr.as_raw_fd(), libc::STDERR_FILENO) };
+        if restored < 0 {
+            let msg = b"[run] warning: failed to restore stderr after managed TUI redirect\n";
+            unsafe {
+                libc::write(
+                    saved_stderr.as_raw_fd(),
+                    msg.as_ptr().cast::<libc::c_void>(),
+                    msg.len(),
+                );
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+struct RunStderrRedirect;
+
+#[cfg(not(unix))]
+impl RunStderrRedirect {
+    fn inactive() -> Self {
+        Self
+    }
+
+    fn maybe_start(_file: &Path) -> Self {
+        Self
+    }
+}
+
+fn run_stderr_redirect_needed() -> bool {
+    if crate::input_diag::verbose_enabled() || std::env::var_os("TMUX_PANE").is_none() {
+        return false;
+    }
+    if std::env::var_os("AGENT_DOC_FORCE_RUN_STDERR_REDIRECT").is_none()
+        && !std::io::stderr().is_terminal()
+    {
+        return false;
+    }
+    matches!(
+        agent_doc_core::model_tier::detect_harness().as_str(),
+        "codex" | "opencode"
+    )
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RunMode {
@@ -191,6 +310,11 @@ pub fn run_with_context(
     config: &Config,
     run_context: Option<&crate::graph::RunContext>,
 ) -> Result<()> {
+    let _stderr_redirect = if !dry_run && file.exists() {
+        RunStderrRedirect::maybe_start(file)
+    } else {
+        RunStderrRedirect::inactive()
+    };
     // #jb-tsift-pane-sync diagnostic: log if this run is executing inside a tmux
     // pane that owns a *different* document (cross-document contamination vector
     // — e.g. a tsift.md-owned pane running agent-doc-bugs2.md's cycle). The

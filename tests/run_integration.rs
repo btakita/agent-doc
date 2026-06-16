@@ -723,6 +723,7 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
     let mut child = ProcessCommand::new(bin)
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
+        .env("AGENT_DOC_TMUX_INPUT_DIAG", "1")
         .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "10")
         .env("AGENT_DOC_RUN_HEARTBEAT_SECS", "1")
         .args(["run", doc.to_str().unwrap()])
@@ -752,6 +753,90 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("### Re: delayed — gpt-5"));
+    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+}
+
+#[test]
+fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, template_doc()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let script = write_delayed_mock_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: delayed — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        3,
+    );
+    let config_root = write_config(tmp.path(), &script);
+    let bin = std::env::var("CARGO_BIN_EXE_agent-doc").unwrap();
+
+    let child = ProcessCommand::new(bin)
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "10")
+        .env("AGENT_DOC_RUN_HEARTBEAT_SECS", "1")
+        .env("AGENT_DOC_FORCE_RUN_STDERR_REDIRECT", "1")
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE")
+        .env_remove("CLAUDE_CODE_SESSION")
+        .env_remove("OPENCODE")
+        .env_remove("OPENCODE_CLIENT")
+        .env("CODEX_SESSION", "codex-session")
+        .env("TMUX_PANE", "%77")
+        .args(["run", doc.to_str().unwrap()])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let mut saw_persisted_heartbeat = false;
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(100));
+        if let Ok(state) = std::panic::catch_unwind(|| read_cycle_state(tmp.path()))
+            && state["last_event"]
+                .as_str()
+                .unwrap_or("")
+                .contains("run_heartbeat phase=child_agent_wait")
+        {
+            saw_persisted_heartbeat = true;
+            break;
+        }
+    }
+
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "run should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        saw_persisted_heartbeat,
+        "expected hidden run heartbeat to update cycle progress while the child was still running"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("[run] heartbeat phase=child_agent_wait"),
+        "managed TUI stderr must not contain routine heartbeat output:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("[diff]"),
+        "managed TUI stderr must not contain routine diff output:\n{stderr}"
+    );
+    let redirected = fs::read_to_string(tmp.path().join(".agent-doc/logs/run-stderr.log")).unwrap();
+    assert!(
+        redirected.contains("[run] stderr redirected"),
+        "redirect log should explain the managed-TUI stderr target:\n{redirected}"
+    );
+    assert!(
+        redirected.contains("[run] heartbeat phase=child_agent_wait"),
+        "redirect log should retain heartbeat diagnostics:\n{redirected}"
+    );
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("### Re: delayed — gpt-5")
+    );
     assert_eq!(read_cycle_phase(tmp.path()), "committed");
 }
 

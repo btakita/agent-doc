@@ -178,6 +178,12 @@ Proof for this cycle:
 - Verification: no source/build/test surfaces changed. Runtime verification used controller recycle, sync execution, admin freshness inspection, and ops-log proof markers.
 - Confidence: medium-high. The automated path proves recycle freshness/re-clear and sync no-defer from CLI; it does not require a human JetBrains click.
 - Escalation: none.
+❯ - Git: submodule commits must have matching parent gitlink commits before the closeout is called complete.
+❯ - Editor convergence: no direct disk write is allowed to count as healthy when an editor IPC listener should have converged the buffer; `File Cache Conflict` is always a disproof marker.
+❯ - Supervisor freshness: installed binary newer than serving supervisor implies recoverable stale-supervisor state, not random IPC drift.
+❯ - Runtime ownership: one authoritative actor owns a document generation; stale generation dispatch either redirects once to N+1 or fails closed with a typed reason.
+❯ - Closeout: a response is not complete until document, snapshot, git commit, cycle state, and session-check agree.
+❯ - Queue: if `queue_continuation_required=true`, the next head must either advance, be explicitly deferred, or have a durable handoff marker. No silent no-op loops.
 
 ### Re: do [#rtwbcast-verify] — gpt-5
 
@@ -234,7 +240,33 @@ Source change: `src/agent-doc` commit `81ceb07e` (`test: assert stale-generation
 Install/verification: `make install` completed after the source commit, replacing `/home/brian/.cargo/bin/agent-doc`, installing `libagent_doc-0.34.1.so`, and marking 1 controller for recycle at the next idle boundary. Commands: `tsift rewrite --run 'cargo test -p agent-doc-orchestration anw0'` passed (3 tests); `make check` passed with clippy, 4565 nextest tests, doctests, and the wider deterministic closeout sim.
 
 Changed paths: `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`, parent `src/agent-doc` gitlink, and this session document. Confidence: high. Escalation: none.
-<!-- agent:boundary:32cca29c -->
+
+### Re: behavior invariants for automated bug detection — gpt-5
+
+> **Queue prompt:**
+>
+> I have a good feel for when agent-doc behaves correctly. Can we lock down behavior invariants that the agent can use to determine if there are workflow issues...so we can automate bug detection and fixes?
+
+
+Yes. The right shape is an invariant registry, not more ad hoc bug heuristics.
+
+Each invariant should be a binary predicate over typed facts: `ok` or `not ok`, with the non-ok branch classified as `recoverable`, `blocked`, or `operator`. The facts already exist in scattered form: `preflight` JSON, `session-check`, `ops.log` markers, cycle state, actor generation/state, git state, editor ack sidecars, and SimWorld traces. The work is to make those checks explicit, named, and reusable.
+
+The useful invariant set is small at first:
+
+❯ - Queue: if `queue_continuation_required=true`, the next head must either advance, be explicitly deferred, or have a durable handoff marker. No silent no-op loops.
+❯ - Closeout: a response is not complete until document, snapshot, git commit, cycle state, and session-check agree.
+❯ - Runtime ownership: one authoritative actor owns a document generation; stale generation dispatch either redirects once to N+1 or fails closed with a typed reason.
+❯ - Supervisor freshness: installed binary newer than serving supervisor implies recoverable stale-supervisor state, not random IPC drift.
+❯ - Editor convergence: no direct disk write is allowed to count as healthy when an editor IPC listener should have converged the buffer; `File Cache Conflict` is always a disproof marker.
+❯ - Git: submodule commits must have matching parent gitlink commits before the closeout is called complete.
+
+Then automation becomes mechanical. A doctor command evaluates facts against the catalog and returns exact outcomes: `healthy`, `safe_fix_available`, `needs_restart_supervisor`, `needs_operator_two_editor_verify`, `bug_repro_captured`, etc. An autofix planner can execute only the safe actions, such as preflight repair, stale pause clearing, queue head de-dup, or projection repair. Anything destructive or live-editor-dependent stays gated but still gets a precise missing-proof statement.
+
+This also reduces conflict creation. Right now repeated symptoms become repeated backlog items because the system lacks a stable invariant id. If every detector reports `invariant=supervisor_freshness` or `invariant=queue_head_progress`, we can coalesce reports, attach new evidence to the same root cause, and avoid spawning five queue entries for one stale supervisor.
+
+I added backlog items for the invariant catalog, a workflow doctor, and invariant-driven autofix planner. Changed paths: session document only. Commands: local spec/code scan plus `agent-doc finalize`. Verification: design-only response; no source change in this cycle. Confidence: high. Escalation: none.
+<!-- agent:boundary:5da9d84a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -246,7 +278,8 @@ Changed paths: `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc
 - ~~do [#c2b6]~~
 - ~~do [#1j8q]~~
 - ~~do [#anw0verify]~~
-- I have a good feel for when agent-doc behaves correctly. Can we lock down behavior invariants that the agent can use to determine if there are workflow issues...so we can automate bug detection and fixes?
+- ~~I have a good feel for when agent-doc behaves correctly. Can we lock down behavior invariants that the agent can use to determine if there are workflow issues...so we can automate bug detection and fixes?~~
+- Please add and prioritize backlog + queue items to implement recommendations from "binary logic for stale queue pauses and conflicts" response.
 - do [#qflood2]
 - do [#qt32]
 - do [#fcc0-live-verify]
@@ -294,6 +327,9 @@ What are #next-steps to fix bugs?
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#qt32] [operator-verify] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.
+- [ ] [#wfinvcatalog] Create a machine-readable workflow invariant catalog: each invariant has id, fact sources, ok predicate, disproof markers, severity, safe remediation, operator-gated remediation, and SimWorld/regression coverage. Start with queue continuation, stale supervisor, closeout commit, editor convergence, generation redirect, and parent gitlink invariants.
+- [ ] [#wfinvdoctor] Add an agent-doc workflow doctor/diagnose command that evaluates the invariant catalog against preflight/session-check JSON, ops.log markers, cycle_state, actor state, git state, and editor proof sidecars; output typed ok/recoverable/blocked/operator results with exact repair commands.
+- [ ] [#wfinvautofix] Add an invariant-driven autofix planner that executes only proven safe repairs automatically, gates destructive/operator actions, de-duplicates repeated symptoms by invariant id, and records proof markers so queue/backlog items do not multiply for the same root cause.
 <!-- /agent:backlog -->
 
 ## Review

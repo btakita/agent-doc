@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -196,7 +196,46 @@ Yes — `mail/drafts/linkedin/2026-06-15-slot-cell-signal.md` is correctly forma
 - The first comment claims "~8ns single-threaded on the v0.11.0 Criterion benchmarks" — consistent with your 2026-06-16 draft, so no conflict.
 
 Ready to post as-is. When you're set, `corky linkedin post mail/drafts/linkedin/2026-06-15-slot-cell-signal.md` publishes the body and adds the first comment.
-<!-- agent:boundary:8dd0a669 -->
+
+### Re: LinkedIn publish truncation — gpt-5
+
+Fixed.
+
+What went wrong:
+- The local Corky social files for the Lazily posts retained the full bodies, so the truncation was not caused by markdown storage.
+- The Lazily session already showed that `corky linkedin edit` repaired a truncated published post with the same full body. That isolates the risky boundary to LinkedIn create-time publishing: `POST /rest/posts` accepted the request and returned success, but the live post could still appear truncated.
+- The installed LinkedIn skill also advertised `corky linkedin post`, while the CLI only exposed `corky linkedin publish`, which made the documented posting path stale.
+
+Changed paths:
+- `src/corky/crates/corky-social/src/social/publish.rs` now marks the created draft published first, then immediately re-applies the full body via LinkedIn `PARTIAL_UPDATE`. If reconciliation fails, the draft stays published with the post id so a retry does not create a duplicate; the error tells the operator to run `corky linkedin edit`.
+- `src/corky/src/cli.rs` adds `corky linkedin post` as an alias for `publish`.
+- `src/corky/tests/test_linkedin_api.rs` asserts the create payload carries full commentary and the update endpoint sends the full commentary patch.
+- `src/corky/tests/test_cli.rs` covers the `linkedin post` alias.
+- Updated `README.md`, `SPEC.md`, `VERSIONS.md`, and LinkedIn skill/runbook copies to document the reconciliation behavior and current managed-draft posting path.
+
+Commands and verification:
+- `cargo fmt --check` passed.
+- `cargo test --workspace --features transcribe-cuda update_post_sends_full_commentary_patch` passed.
+- `cargo test --workspace --features transcribe-cuda create_post_text_only` passed.
+- `cargo test --workspace --features transcribe-cuda test_cli_linkedin_post_alias` passed.
+- `make precommit` passed: CUDA-feature clippy, full workspace tests, and `audit-docs`.
+- `make release` passed and refreshed `.bin/corky`.
+- `make install` passed and installed `~/.cargo/bin/corky`.
+- `./.bin/corky --version` and `corky --version` both report `corky 0.29.0`.
+- `corky linkedin post --help` resolves to the publish command.
+- Corky GitHub Actions `CI` for `d35d9c0` was `in_progress` when checked; owner repo has no workflow named `CI` (`gh workflow list` only shows `Agent Doc`).
+
+Commits and push:
+- Pushed Corky submodule commit `d35d9c0` (`Fix LinkedIn publish body reconciliation`) to `btakita/corky main`.
+- Pushed owner repo commit `46e802e6a` (`Update corky submodule for LinkedIn publish fix`) to `btakita/agent-loop main`.
+
+Notes:
+- I left the pre-existing unstaged `src/corky/AGENTS.md` tsift marker change untouched.
+- I did not perform another live LinkedIn post mutation; verification is local API contract coverage plus build/install.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:d1ee3de8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -207,6 +246,7 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+I make a couple of linkedin posts via lazily-rs.md. Both posts were deployed truncated. Please evaluate what went wrong and fix.
 <!-- /agent:queue -->
 
 ## Backlog

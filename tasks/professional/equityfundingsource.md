@@ -74,8 +74,6 @@ Deploy:
 CI note:
 - EFS repo has no workflow named `CI` and no recent Actions runs listed.
 - Parent repo has no workflow named `CI`; latest `Agent Doc` run for the pushed parent commit did not start jobs because GitHub reports account billing/spending-limit blockage, not a test failure: https://github.com/btakita/agent-loop/actions/runs/27649381906
-<!-- agent:boundary:55f86bc0 -->
-- Parent repo has no workflow named `CI`; latest `Agent Doc` run for the pushed parent commit did not start jobs because GitHub reports account billing/spending-limit blockage, not a test failure: https://github.com/btakita/agent-loop/actions/runs/27649381906
 - EFS repo has no workflow named `CI` and no recent Actions runs listed.
 - Smoke checks: public root returned `200`; `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` and `/portal-admin/pipeline` returned `303`, matching Cloudflare Access redirect behavior.
 - Worker version: `943aa5ee-a72f-4e0f-97f1-e7f6d87c4a60`.
@@ -91,7 +89,22 @@ CI note:
 - Kept the Deal Pipeline dialog path covered because loan cards still embed `<AdminLoanDetail loan_id={loan_id} embedded />`; the new section appears there without a separate pipeline-only fork.
 - Added `AdminLoanInterestedLendersSection` to `AdminLoanDetail`, so `/portal-admin/loans/:id` now shows interested lenders inline with selected-lender summary, TMO account, workflow stage/next action, document request count, verbal amount, and a select action.
 - Added `GET /api/admin/loans/:id/interests`, which resolves the loan's available-deal rows and returns the same admin interested-lender response shape used by the deal detail page.
-<!-- agent:boundary:cedaca04 -->
+
+### Re: inactive queued EFS deal-interest request — gpt-5
+
+I did not run the EFS repo work or deploy from this cycle. Preflight found the new EFS directive inside `agent:queue`, but the document frontmatter says `queue: stop` and the queue block has no active `go`, so agent-doc classified it as inactive queue residue rather than executable repo work.
+
+I captured it as actionable backlog item `#efs-deals-interest-admin-sync` so it is not lost: rename the investor dashboard label to "Deals of interest", fix the lender-interest action so `btak.dev+investor@gmail.com` appears in admin Available Deal Interested lenders, update spec/tests, commit, push, and deploy.
+
+Warnings surfaced:
+- Preflight flagged `#dropbox-sync-adapter`, `#dzmm-writeback-replay`, and `#zwws-vestings-local` as possible stale review items because related done entries may already cover them. I left them unchanged.
+
+Proof:
+- Changed paths: session document/backlog only.
+- Commands: `tsift status` in the parent repo, `tsift status` in the EFS submodule, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
+- Verification: no application code changed; no tests or deploy run.
+- Escalation: none.
+<!-- agent:boundary:5e4c1579 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -104,6 +117,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#efs-deals-interest-admin-sync] Rename investor dashboard "Pending deals" to "Deals of interest" and fix lender interest creation so `btak.dev+investor@gmail.com` appears in admin Available Deal Interested lenders; update spec/tests, commit, push, and deploy.
 <!-- /agent:backlog -->
 
 ## Review

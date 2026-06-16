@@ -43,7 +43,6 @@ queue: start
 - `cargo build` passed.
 - `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/agent-doc`; `agent-doc --version` reports `0.34.1`.
 - Latest `CI` on `main` was green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`, completed successfully on 2026-06-16.
-- Latest `CI` on `main` was green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`, completed successfully on 2026-06-16.
 - `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/agent-doc`; `agent-doc --version` reports `0.34.1`.
 - `cargo build` passed.
 - `make check` passed: clippy, 4542 nextest tests, doctests, and the ignored medium sim-world budget test.
@@ -104,7 +103,20 @@ Changed source paths include `agent-doc-orchestration/src/sessions.rs`, `agent-d
 Source commit/push status: not done. The `src/agent-doc` checkout already had broad unrelated dirty changes before this turn, and `cargo fmt` exposed large pre-existing formatting churn across many files. Staging whole files would include unrelated work, and a partial source commit built on the dirty tree would not be a trustworthy standalone commit. The safe next step is to isolate this patch on a clean branch or explicitly approve staging the broader dirty set.
 
 JetBrains plugin status: no JetBrains plugin source changed, so no JB plugin update is required for this fix. The installed `agent-doc` CLI binary was updated. The route-owned supervisor for this document was still running an older binary during preflight, so it should be restarted to use the new submit policy.
-<!-- agent:boundary:e0726988 -->
+
+### Re: OpenCode tmux Enter — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Does agent-doc use `tmux send-keys -t target "command" Enter` to submit a prompt? Would this work with opencode? I don't want to hardcode a kitty return b/c kitty is specific to my environment...not universal. I'm concerned that it wont work on other terminals. I tried `tmux send-keys -t .1 "Hello" Enter` on opencode and it worked.
+
+
+Yes. For live tmux panes, agent-doc now submits with literal text followed by a named tmux `Enter`: `tmux send-keys -t <pane> -l <command>; tmux send-keys -t <pane> Enter`. That is the terminal-neutral version of `tmux send-keys -t target "command" Enter`, and it should work with OpenCode just like your `tmux send-keys -t .1 "Hello" Enter` test.
+
+OpenCode no longer gets `tmux_literal_kitty_return` as its submit profile. The only remaining OpenCode Kitty handling is the separate PTY filter that preserves Kitty keyboard mode for permission-prompt navigation; it is not used to submit `agent-doc <FILE>` prompts.
+
+Verification is unchanged from the implementation closeout: `cargo test submit`, `cargo test queue_dispatch`, `cargo test -p agent-doc-orchestration submit`, `make check`, `cargo build`, and `cargo install --path .` all passed after the OpenCode Enter change.
+<!-- agent:boundary:2246ec97 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -112,9 +124,10 @@ JetBrains plugin status: no JetBrains plugin source changed, so no JB plugin upd
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Both JB `Clear Session Context` and JB `Run Agent Doc` send a CR instead of submitting ![img_24.png](img_24.png). There is also an extra prompt that bleeds into the input ![img_25.png](img_25.png). Why is this so difficult to fix? Can we design a way to detect what is sent and how it is processed by the agent? Fix root causes. #simworld~~
 - ~~:pushpin: Why are we ever using `tmux_literal_cr` and not `tmux_literal_text_enter_key`? Why do we have so much duplicate logic with the submit keys all over the codebase? Each harness' tmux_literal should be defined in a single place. No tmux_literal values spread all over the place. Why tmux_literal_kitty_return for opencode? Is tmux_literal_text_enter_key not working? #simworld~~
-- :pushpin: Does agent-doc use `tmux send-keys -t target "command" Enter` to submit a prompt? Would this work with opencode? I don't want to hardcode a kitty return b/c kitty is specific to my environment...not universal. I'm concerned that it wont work on other terminals. I tried `tmux send-keys -t .1 "Hello" Enter` on opencode and it worked.
+- ~~:pushpin: Does agent-doc use `tmux send-keys -t target "command" Enter` to submit a prompt? Would this work with opencode? I don't want to hardcode a kitty return b/c kitty is specific to my environment...not universal. I'm concerned that it wont work on other terminals. I tried `tmux send-keys -t .1 "Hello" Enter` on opencode and it worked.~~
 - :pushpin: Can we use lazily-rs to avoid duplicate logic with the submit keys all over the codebase?
 - :pushpin: Issue with restart on Codex ![img_26.png](img_26.png) ![screenshot.png](../../../../../Pictures/agent-loop/screenshot.png)
+- agent-doc start to 
 - :pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.
 <!-- /agent:queue -->
 ###

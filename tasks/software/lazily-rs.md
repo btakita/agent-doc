@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -69,7 +69,7 @@ Verification:
 Escalation/confidence:
 - Used the stored `passage btak/CARGO_REGISTRY_TOKEN`; the token is valid now and publish succeeded.
 - Confidence is high: package dry-run, full local check, crates.io search, pushed tag, and GitHub release all line up. Remaining external watch item is the in-progress lazily-rs CI run for the release-note commit.
-<!-- agent:boundary:b2033e51 -->
+<!-- agent:boundary:5b7d2f99 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,7 +77,9 @@ Escalation/confidence:
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go --><!-- /agent:queue -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- The linked in post scheduled for today has not gone out.
+<!-- /agent:queue -->
 
 ## Backlog
 

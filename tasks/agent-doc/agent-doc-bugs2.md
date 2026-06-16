@@ -451,7 +451,7 @@ Changed paths:
 - `src/agent-doc/agent-doc-orchestration/src/flow/proof_ledger.rs`
 - `src/agent-doc/agent-doc-orchestration/src/flow/mod.rs`
 - `src/agent-doc/specs/08b-single-process-control-plane.md`
-❯ - parent gitlink `src/agent-doc`
+- parent gitlink `src/agent-doc`
 
 What changed:
 - Added a typed append-only JSONL proof ledger under `flow::proof_ledger`.
@@ -464,7 +464,16 @@ What changed:
 Verification:
 - `cargo fmt`
 - `cargo test -p agent-doc-orchestration proof_ledger`
-❯ - `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
+- `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+- `make check` (clippy, 4,584 nextest tests, doctests, medium SimWorld corpus)
+- `cargo test -p agent-doc-orchestration workflow_state`
+- `cargo fmt`
+- Each row asserts the typed decision, allowed mutation, and exact proof obligations so future decision changes must update the matrix deliberately.
+- The matrix names the required architecture primitives: stale supervisor recycle, operator-only/no-drainable queue no-op, queue edit during unresolved closeout, degraded/file-IPC materialized response fallback, compact/replay captured response, attributed live-buffer drift, and unattributed live-buffer drift.
+- Added a table-driven workflow architecture matrix test for the mirror-mode state kernel.
+❯ - parent gitlink `src/agent-doc`
+- `src/agent-doc/agent-doc-orchestration/src/flow/workflow_state.rs`
+- `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
 ❯ - `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
 
 Confidence: high. The implementation is isolated, tested for validation/document scoping/append-only behavior/required vocabulary, and the full repo check passed.
@@ -481,26 +490,26 @@ Escalation: none.
 Implemented `#archcomponentmerge` in submodule commit `ec24c571` (`fix: fence queue consume editor convergence`).
 
 Changed paths:
-❯ - `src/agent-doc/VERSIONS.md`
-❯ - `src/agent-doc/agent-doc-orchestration/src/write/converge.rs`
-❯ - `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
-❯ - `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/PatchGenerationFenceTest.kt`
-❯ - `src/agent-doc/specs/07-orchestration-commands.md`
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/agent-doc-orchestration/src/write/converge.rs`
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/PatchGenerationFenceTest.kt`
+- `src/agent-doc/specs/07-orchestration-commands.md`
 ❯ - parent gitlink `src/agent-doc`
 
 What changed:
-❯ - Reused the existing `turn_scope` managed-component contract for broad component-scoped conflict semantics.
-❯ - Enforced the queue-consume editor convergence case at node scope: queue completion now travels as an exact `node_patches` strike keyed to the consumed queue node.
-❯ - Removed the broad legacy `queue` component replacement from queue-consume editor IPC when a queue node patch is available, so sibling queue edits are not conflated with the consumed head.
-❯ - Added raw and transient-marker-normalized baseline hashes to convergence payloads.
-❯ - Extended the JetBrains generation fence so delayed socket/file patches are dropped when the live buffer no longer matches either baseline, while `(HEAD)`, boundary comments, guard markers, and pipeline frontmatter churn remain tolerated.
-❯ - Documented the queue-consume editor IPC rule and added a release note.
+- Reused the existing `turn_scope` managed-component contract for broad component-scoped conflict semantics.
+- Enforced the queue-consume editor convergence case at node scope: queue completion now travels as an exact `node_patches` strike keyed to the consumed queue node.
+- Removed the broad legacy `queue` component replacement from queue-consume editor IPC when a queue node patch is available, so sibling queue edits are not conflated with the consumed head.
+- Added raw and transient-marker-normalized baseline hashes to convergence payloads.
+- Extended the JetBrains generation fence so delayed socket/file patches are dropped when the live buffer no longer matches either baseline, while `(HEAD)`, boundary comments, guard markers, and pipeline frontmatter churn remain tolerated.
+- Documented the queue-consume editor IPC rule and added a release note.
 
 Verification:
-❯ - `cargo test -p agent-doc-orchestration queue_consume_editor_convergence_payload_is_node_keyed_and_fenced`
-❯ - `cargo test -p agent-doc-core turn_scope`
-❯ - `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
-❯ - `/usr/bin/zsh -lc 'GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin'` from `src/agent-doc/editors/jetbrains`
+- `cargo test -p agent-doc-orchestration queue_consume_editor_convergence_payload_is_node_keyed_and_fenced`
+- `cargo test -p agent-doc-core turn_scope`
+- `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
+- `/usr/bin/zsh -lc 'GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin'` from `src/agent-doc/editors/jetbrains`
 ❯ - `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
 
 Confidence: high. The broad component-scope classifier remains covered by `turn_scope` tests, and this commit adds focused enforcement for the risky queue-consume editor IPC path.
@@ -517,24 +526,24 @@ Escalation: none.
 Implemented `#archsimworldmatrix` in submodule commit `3fab370f` (`test: cover workflow architecture matrix`).
 
 Changed paths:
-- `src/agent-doc/agent-doc-orchestration/src/flow/workflow_state.rs`
-- parent gitlink `src/agent-doc`
+❯ - `src/agent-doc/agent-doc-orchestration/src/flow/workflow_state.rs`
+❯ - parent gitlink `src/agent-doc`
 
 What changed:
-- Added a table-driven workflow architecture matrix test for the mirror-mode state kernel.
-- The matrix names the required architecture primitives: stale supervisor recycle, operator-only/no-drainable queue no-op, queue edit during unresolved closeout, degraded/file-IPC materialized response fallback, compact/replay captured response, attributed live-buffer drift, and unattributed live-buffer drift.
-- Each row asserts the typed decision, allowed mutation, and exact proof obligations so future decision changes must update the matrix deliberately.
+❯ - Added a table-driven workflow architecture matrix test for the mirror-mode state kernel.
+❯ - The matrix names the required architecture primitives: stale supervisor recycle, operator-only/no-drainable queue no-op, queue edit during unresolved closeout, degraded/file-IPC materialized response fallback, compact/replay captured response, attributed live-buffer drift, and unattributed live-buffer drift.
+❯ - Each row asserts the typed decision, allowed mutation, and exact proof obligations so future decision changes must update the matrix deliberately.
 
 Verification:
-- `cargo fmt`
-- `cargo test -p agent-doc-orchestration workflow_state`
-- `make check` (clippy, 4,584 nextest tests, doctests, medium SimWorld corpus)
-- `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+❯ - `cargo fmt`
+❯ - `cargo test -p agent-doc-orchestration workflow_state`
+❯ - `make check` (clippy, 4,584 nextest tests, doctests, medium SimWorld corpus)
+❯ - `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
 
 Confidence: high. This is isolated deterministic coverage over the pure workflow-state kernel, and the full repo check passed.
 
 Escalation: none.
-<!-- agent:boundary:6aeafeb5 -->
+<!-- agent:boundary:3a5ed2f8 -->
 <!-- /agent:exchange -->
 
 ## Queue

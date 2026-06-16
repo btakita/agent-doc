@@ -406,7 +406,40 @@ Verification:
 ❯ - Submodule commit: `f9e2b932 architecture: add workflow state kernel`.
 
 Confidence: high. The new kernel is intentionally mirror-mode; runtime call-site replacement belongs to the later controller cutover work.
-<!-- agent:boundary:99bc74ec -->
+
+### Re: do [#archproofledger] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#archproofledger]
+
+
+Implemented `#archproofledger` in submodule commit `cf43747e` (`architecture: add operation proof ledger`).
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/flow/proof_ledger.rs`
+- `src/agent-doc/agent-doc-orchestration/src/flow/mod.rs`
+- `src/agent-doc/specs/08b-single-process-control-plane.md`
+- parent gitlink `src/agent-doc`
+
+What changed:
+- Added a typed append-only JSONL proof ledger under `flow::proof_ledger`.
+- Ledger records carry `operation_id`, `content_hash`, operation kind, outcome, proof kind, proof text, optional subject id, and deterministic timestamp input.
+- Covered required operation kinds: queue heads, response captures, patch writes, actor generations, and terminal proofs.
+- Covered queue-head outcomes needed for consumed/deferred/retried/superseded rows.
+- Added append/read helpers that create `.agent-doc/proof-ledger/<document-hash>.jsonl` and only append lines; existing rows are never rewritten.
+- Documented the mirror-mode ledger in the single-process control-plane spec.
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration proof_ledger`
+- `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
+- `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+
+Confidence: high. The implementation is isolated, tested for validation/document scoping/append-only behavior/required vocabulary, and the full repo check passed.
+
+Escalation: none.
+<!-- agent:boundary:37097ed5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -428,7 +461,7 @@ Confidence: high. The new kernel is intentionally mirror-mode; runtime call-site
 - ~~do [#qt32]~~
 - ~~do [#fcc0-live-verify]~~
 - ~~do [#archstatekernel]~~
-- do [#archproofledger]
+- ~~do [#archproofledger]~~
 - do [#archcomponentmerge]
 - do [#archsimworldmatrix]
 - do [#archuistates]
@@ -465,7 +498,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#archproofledger] Add an append-only operation proof ledger for queue heads, response captures, patch writes, actor generations, and terminal proofs. Every consumed/deferred/retried/superseded head should have one durable proof row keyed by operation id and content hash.
 - [ ] [#archcomponentmerge] Define and enforce managed-component merge semantics: queue, exchange, backlog, status, review, and done archive each have separate bases and conflict rules; only same-component incompatible edits become user-visible conflicts.
 - [ ] [#archsimworldmatrix] Add SimWorld/property transition-table coverage for the architecture primitives: stale supervisor recycle, queue edit during closeout, degraded/file-IPC fallback, live buffer drift, compact/replay, and operator-only/no-drainable queue outcomes.
 - [ ] [#archuistates] Replace raw route/write conflict strings in JB/Codex/OpenCode surfaces with a small typed outcome vocabulary: queued behind owner, recovered and retried, deferred for operator proof, no drainable work, real component conflict, and blocked with exact unblocker.

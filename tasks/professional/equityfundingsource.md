@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -99,7 +99,7 @@ Commits/push:
 - Parent repo `main` pushed through session commit `3dc937ce1`.
 
 Confidence: high for deploy completion. Escalation: none.
-<!-- agent:boundary:964136ee -->
+<!-- agent:boundary:d2669310 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -107,6 +107,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- The https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline Available Deals dialog & https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f page should have the data more condensed. Not a full-width label + field layout.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -143,6 +143,32 @@ How I would use it by stage:
 4. **Closing**
    - GHL can send closing reminders, internal notifications, calendar links, and possibly documents/contracts where the document is suitable for GHL.
    - EFS should still own final closing state, deal close action, wire/funding records, lender allocation, borrower portal state, document archive, and TMO writeback.
+   - Add tests around adapter planning, outbox idempotency, status/error persistence, borrower-message notification routing, and webhook signature/thread-token rejection.
+   - Start in dry-run/manual-link mode for one or two deals, then enable outbound package workflow, then stage-bridge workflows, then inbound reply threading.
+   - Store secrets in Worker env, redact GHL errors in user-facing UI, and log full adapter failures only in admin/debug surfaces.
+   - Send secure portal links, not private borrower/lender documents as GHL attachments unless explicitly approved.
+6. **Security, observability, and rollout**
+   - Do not let inbound GHL events select a lender, approve terms, release documents, or close/fund a deal without explicit EFS admin action.
+   - Ingest lender/borrower replies, appointment events, workflow completion, and bounce/failure events as communication history and next-action hints.
+   - Add GHL webhook or polling ingestion only after outbound IDs are stable.
+5. **Reply/event ingestion**
+   - Email reply back into chat should terminate at EFS, not GHL-owned state: require signed thread tokens or verified inbound routing, append the reply to D1, and only mirror an event summary to GHL.
+   - Admin replies in EFS: EFS creates the D1 chat message, then GHL can send the borrower an email/SMS notification that links back to the borrower portal.
+   - Borrower sends secure message: EFS creates the D1 chat message, notifies the owning admin in-app, and optionally creates/sends a GHL conversation notification with a secure EFS portal link.
+   - Keep `chat_sessions` and `chat_messages` canonical in EFS.
+4. **Borrower/admin secure-message bridge**
+   - Make the outbox idempotent by EFS entity ID + stage + event type, with retry/dead-letter state, rate-limit handling, and an admin-visible last sync/error summary.
+   - Map Processing, Underwriting, Terms negotiation, and Closing to GHL workflow enrollment and optional opportunity-stage mirroring.
+   - On EFS stage transitions, enqueue an outbound sync job rather than calling GHL inline from the UI.
+3. **Deal-stage bridge**
+   - Store the returned contact/conversation/opportunity/message/workflow IDs and sync status in EFS, and keep the EFS deal-interest row as the source of truth for selected lender, verbal commitment, conditions, allocation, and funding state.
+   - Upsert or link the lender contact, optionally create/update the GHL opportunity, then either enroll the contact into a package workflow or send a direct conversation message.
+   - Use the existing `investor_deal_interests` GHL fields as the first production bridge.
+2. **Lender package send from the Available Deal dialog**
+   - Define the mirrored GHL opportunity pipeline stages for visibility only: Processing, Underwriting, Terms negotiation, Closing, Funded/Closed, Parked/Lost.
+   - Define GHL custom fields/tags for EFS IDs: `efs_user_id`, `efs_loan_id`, `efs_deal_id`, `efs_deal_interest_id`, role (`borrower`, `lender`, `broker`), stage, and portal URL.
+   - Confirm Robert's HighLevel location/sub-account, plan/API access, sending domains, phone/SMS capability, calendar ownership, and whether this should use a Private Integration Token or OAuth.
+1. **Credentials and GHL model setup**
 
 Current HighLevel docs support this architecture: HighLevel documents REST APIs for contacts, messaging, workflows, calendars, payments, webhooks, and related CRM functions, but says V1 API support ended on **December 31, 2025**, so new work should use current marketplace docs / V2 private integration or OAuth surfaces: https://help.gohighlevel.com/support/solutions/articles/48001060529-highlevel-api-documentation. The Conversations API exposes `POST /conversations/messages`: https://marketplace.gohighlevel.com/docs/ghl/conversations/send-a-new-message/. Contacts can be enrolled into a workflow with `POST /contacts/:contactId/workflow/:workflowId`: https://marketplace.gohighlevel.com/docs/ghl/contacts/add-contact-to-workflow/. Opportunities can be created/updated through the Opportunities API: https://marketplace.gohighlevel.com/docs/ghl/opportunities/create-opportunity/. Workflows currently include communication actions, internal notifications, appointment actions, opportunity actions, and document/contract actions: https://help.gohighlevel.com/support/solutions/articles/155000002294-what-are-workflow-actions-complete-list-.
 
@@ -163,7 +189,7 @@ Changed paths: session document only. Verification: pending `session-check` afte
 Parked `#ghl-stage-bridge` in the icebox instead of the priority backlog so the recommendation is preserved without starting an implementation queue item.
 
 Changed paths: session document only. Verification: pending `session-check` after this repair write. Escalation: none. Confidence: high.
-<!-- agent:boundary:d9f5aaab -->
+<!-- agent:boundary:a0135102 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -171,6 +197,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: Create a plan for the GHL integration. I will park this in the icebox for now.
 <!-- /agent:queue -->
 
 ## Backlog

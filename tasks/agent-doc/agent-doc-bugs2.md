@@ -85,7 +85,35 @@ Proof for this cycle:
 - Verification: focused route tests passed; `make check` passed clippy, 4,550 nextest tests, doctests, and the ignored medium SimWorld closeout corpus. Latest GitHub CI on `main` is green (`27594082265`).
 - Confidence: high for this JB Run Agent Doc failure mode; medium for the full family until more route/repair/session-check decisions are collapsed into the shared closeout recovery layer.
 - Escalation: none.
-<!-- agent:boundary:59a3f5dd -->
+
+### Re: How can agents think architecturally instead of sprawl code? — gpt-5
+
+> **Queue prompt:**
+>
+> How can we have the agents think architecturally instead of the default sprawl code?
+
+
+You get architectural behavior by making architecture a required artifact of the task, not by asking the agent to be more thoughtful in prose.
+
+The practical pattern is:
+
+1. Name the invariant before code changes. For this class: "route, repair, session-check, and write may not each invent their own closeout recovery policy." If the invariant cannot be stated, the agent is not ready to edit.
+2. Name the owner boundary. One module or state machine owns the decision; adapters call it. Local call sites may gather facts or apply effects, but they do not decide policy independently.
+3. Force a transition table. For closeout recovery, every input shape must land in one of: replay, retire stale capture, reset sidecars, queue behind active closeout, already committed, or blocked. A missing row is a bug.
+4. Make new abstractions pay rent. The rule should be: no new helper/module unless it deletes duplicated policy, makes an impossible state unrepresentable, or gives tests a stable seam to hit. Otherwise it is sprawl.
+5. Require negative design notes. The agent should say what it is deliberately not abstracting and why. This catches "architecture theater" early.
+6. Put the architecture in tests. Exhaustive enum matches, SimWorld/property tests, and small pure decision tests are what keep the design from collapsing back into string-matched exceptions.
+7. Treat Lean/TLA as a second-stage tool. It can model a small stable kernel once the Rust boundary exists. It will not rescue a codebase where the policy boundary is still implicit.
+
+So the agent prompt should not be "think architecturally." It should be closer to: "Before editing, identify the invariant, the policy owner, the transition table, the minimal touched surfaces, and the tests that prove no local exception bypasses the owner. If you cannot do that, stop with a plan instead of adding code." That turns architecture from taste into a checkable contract.
+
+Proof for this cycle:
+- Changed paths: this session document only.
+- Commands: `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc plan tasks/agent-doc/agent-doc-bugs2.md`.
+- Verification: document response only; no code changed in this cycle.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:10c3ffa3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -94,7 +122,7 @@ Proof for this cycle:
 - ~~:pushpin: JB `Run Agent Doc` still does not work. What is wrong with the codebase? This is disturbing? Seems like we need a refactoring project to be able to reliably make this fix.~~
 - ~~:pushpin: [#jbruncloseoutstate]~~
 - ~~Would lean-lang help to create proper invariants? So agents can create unnecessary architecture sprawl?~~
-- How can we have the agents think architecturally instead of the default sprawl code?
+- ~~How can we have the agents think architecturally instead of the default sprawl code?~~
 ---
 Typing into the queue during the turn cause the conversation to be interrupted. ![img_30.png](img_30.png). A pre-finalize response was uncommitted causing the response to be treated as a user prompt ![img_31.png](img_31.png). After restart, JB `Run Agent Doc` error.
 

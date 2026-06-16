@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -71,7 +71,31 @@ Commits/push:
 - Parent pushed: `39840abf3 chore(efs): advance available deal admin UI (#67v2)`.
 
 Confidence: high. No escalation needed. The parent repo still has unrelated pre-existing dirty files, but the EFS submodule is clean and synced with `origin/main`.
-<!-- agent:boundary:3b3e77d3 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed the current EFS Worker build from `src/equityfundingsource-dev` commit `3340f6d fix(admin): reorder available deal documents (#67v2)`.
+
+Changed paths:
+- None in this cycle; deploy-only run. The EFS submodule was already clean and synced with `origin/main`.
+
+Commands / verification:
+- `git pull --rebase origin main` in `src/equityfundingsource-dev`: already up to date.
+- `make check`: passed — 750 Bun tests, app build, and worker build.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`: no migrations to apply before deploy.
+- `make deploy`: passed — build, remote D1 migration step, and Worker deploy completed.
+- Deployed Worker version: `e150c1ed-4618-4e16-abbd-c7d051f753f4`.
+- Post-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`: no migrations to apply.
+- Smoke test `https://equityfundingsource.brian-takita.workers.dev/`: `200`.
+- Smoke test `https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline`: `303`, expected Cloudflare Access redirect for admin route.
+
+Confidence: high. No escalation needed. The parent repo still has unrelated pre-existing dirty files and local agent-doc commits ahead of origin; I left those untouched.
+<!-- agent:boundary:b79b1c6f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,7 +103,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

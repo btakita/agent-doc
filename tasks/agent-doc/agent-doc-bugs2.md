@@ -306,7 +306,31 @@ Proof for this cycle:
 - Verification: code-navigation and log diagnosis only; no source code changed, so I did not run the build/test suite.
 - Confidence: high on the location map; high that latest route submitted/was consumed; medium on the remaining operator-facing “still does not submit” symptom until the exact current JB UI/status text is captured after a `route_success` attempt.
 - Escalation: none.
-<!-- agent:boundary:add525a6 -->
+
+### Re: Fix JB Run Agent Doc submit — gpt-5
+
+Fixed the current JB `Run Agent Doc` submit failure class in `src/agent-doc`.
+
+Root cause: the JetBrains command correctly invoked `agent-doc route --dispatch-only --plain-trigger --wait-for-ready 60`, but the dispatch-only `latest run is still booting` readiness probe ignored that explicit 60s editor budget and used the hard-coded Codex dispatch-only starting-pane default instead. That matched the live failure: the latest attempt failed after about 10s with `latest run is still booting ... (timed_out)` even though the editor command asked route to wait longer before surfacing a startup-readiness error.
+
+The fix makes the dispatch-only starting-pane readiness helper honor the active `--wait-for-ready` override. The default short timeout still applies for normal callers, but editor-triggered JB routes now get the full explicit readiness window on this pre-submit boot probe. I also strengthened the tmux/session spec so this path cannot regress back to the short Codex default.
+
+No JetBrains plugin update is needed for this fix; the plugin already passes the correct route flag. I installed the updated `agent-doc` binary locally. `agent-doc admin inspect` now shows the controller is fresh against the installed binary, but the route-owned supervisor for this live session is still mapped to the prior binary inode. For live JB verification, recycle or restart that supervisor at an idle boundary; this is a supervisor/binary recycle, not a JB plugin reinstall.
+
+Architecture contract:
+- Invariant: JB's explicit readiness budget must be the actual pre-submit wait on every dispatch-only slow-start path.
+- Policy owner: route readiness policy in `agent-doc-orchestration/src/route.rs` and the dispatch-only adapter in `route/dispatch_only.rs`.
+- Transition rows covered: default dispatch-only starting-pane timeout, explicit editor override, active-turn blocker, and prompt-ready success.
+- Out of scope: no plugin/UI refactor; the plugin was already constructing the right command.
+
+Proof for this cycle:
+- Changed paths: `src/agent-doc/agent-doc-orchestration/src/route.rs`, `src/agent-doc/specs/07-session-tmux-commands.md`, parent submodule pointer `src/agent-doc`, and this session document.
+- Code commits: `src/agent-doc` `3cc88c04` (`fix(route): honor editor wait budget for boot probe`); parent repo `8d26b15fe` (`chore: bump agent-doc route wait fix`). Both were pushed to `origin/main`.
+- Commands: `tsift status`; `agent-doc --version`; `agent-doc preflight ...`; `agent-doc plan ...`; `agent-doc read ...`; `agent-doc admin inspect ... --json`; targeted `tsift`/`rg` source and log inspections; `cargo fmt`; `cargo test -p agent-doc-orchestration dispatch_only_starting_pane_ready_timeout -- --nocapture`; `git diff --check`; `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`; `gh run list --workflow CI --limit 1`; `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`; `git commit`; `git push origin main`.
+- Verification: focused timeout tests passed; `make check` passed; `cargo install --path .` succeeded; latest pre-push `src/agent-doc` CI was green, and the new pushed `src/agent-doc` CI run `27597293180` was in progress when checked. The parent repo has no workflow named `CI`.
+- Confidence: high for the timeout-budget regression; medium for live JB proof until the stale route-owned supervisor is recycled and the operator reruns `Run Agent Doc` from the IDE.
+- Escalation: none.
+<!-- agent:boundary:5d83bbf5 -->
 <!-- /agent:exchange -->
 
 ## Queue

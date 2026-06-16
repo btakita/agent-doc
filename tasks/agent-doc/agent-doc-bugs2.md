@@ -149,14 +149,15 @@ Commits pushed:
 - superproject: `04b461e52 chore: update agent-doc submodule`
 
 I left the pre-existing unstaged PCP/control-plane edits in `src/agent-doc` alone: `agent-doc-orchestration/src/start/decisions.rs` and `specs/08b-single-process-control-plane.md`.
-<!-- agent:boundary:68b8732d -->
+<!-- agent:boundary:cdad911c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - [#cwsp]
-- restart mangles the console ![img_32.png](img_32.png)
+- :pushpin: What are #next-steps to refactor State Machines or other architecture to fix reoccurring classes of bugs?
+- :pushpin: Add the tasks for the State Machines and architecture to the end of `agent:queue`.
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
 ```

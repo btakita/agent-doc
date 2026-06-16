@@ -19,7 +19,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -215,7 +215,7 @@ Parking: I would leave this in the icebox under the existing GHL items (`#z3kx` 
 Docs checked: HighLevel API overview / V1 end-of-support note (https://help.gohighlevel.com/support/solutions/articles/48001060529-highlevel-api-documentation), Conversations `POST /conversations/messages` (https://marketplace.gohighlevel.com/docs/ghl/conversations/send-a-new-message/), contact workflow enrollment (https://marketplace.gohighlevel.com/docs/ghl/contacts/add-contact-to-workflow/), opportunity creation (https://marketplace.gohighlevel.com/docs/ghl/opportunities/create-opportunity/), and workflow actions (https://help.gohighlevel.com/support/solutions/articles/155000002294-what-are-workflow-actions-complete-list-).
 
 Changed paths: session document only. Verification: agent-doc preflight/plan passed; reviewed the shipped EFS GHL adapter and borrower-message PRD notes; checked current official HighLevel docs. No code/tests were run because this was plan-only. Escalation: none. Confidence: high.
-<!-- agent:boundary:4042e0e0 -->
+<!-- agent:boundary:8d980d7c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -223,6 +223,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: What can we implement for the lender selection process in the admin Available Deals UIs? I want a workflow where the admin can see the Interested Lenders, select an Interested Lender (in the UI and bi-directional sync with TMO).
 <!-- /agent:queue -->
 
 ## Backlog

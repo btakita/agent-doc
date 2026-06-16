@@ -219,7 +219,22 @@ Resolved `#1j8q` with a deterministic controller-launch-lock proof instead of le
 Source change: `src/agent-doc` commit `60912bbf` (`test: prove launch-lock waiter adopts controller`). It adds `LaunchLock::waited()` so the launch path can tell when it actually blocked on `controller-launch.lock`, logs `controller_launch_lock_waiter_adopted_published_controller` when a contended waiter adopts a compatible controller published by another launcher, and adds `connect_or_launch_adopts_controller_published_during_launch_lock_contention`. That regression holds the launch lock, starts a controller while the caller is waiting, forces the waiter through the bounded-contention path, and asserts the old `controller launch already in progress` failure is not logged.
 
 Changed paths: `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`, `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`, the parent `src/agent-doc` gitlink, and this session document. Commands: `cargo fmt`; `tsift rewrite --run 'cargo test -p agent-doc-orchestration connect_or_launch_adopts_controller_published_during_launch_lock_contention'`; `tsift rewrite --run 'cargo test -p agent-doc-orchestration launch_lock'`; `make check`. Verification: targeted regression passed, launch-lock filter passed (4 passed), and `make check` passed with clippy, 4565 nextest tests, doctests, and the wider deterministic closeout sim. Confidence: high. Escalation: none.
-<!-- agent:boundary:42c1f8cc -->
+
+### Re: do [#anw0verify] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#anw0verify]
+
+
+Resolved `#anw0verify` as agent-verifiable. The original live item wanted `dispatch_stale_generation_redirect` followed by `dispatch_retry_after_stale_generation` and no terminal generation-closed failure. The source already had the redirect and self-heal behavior; this cycle tightened the deterministic proof so the regression now asserts the exact ops-log marker pair and asserts the redirectable stale dispatch does not degrade into an `is closed` terminal proof.
+
+Source change: `src/agent-doc` commit `81ceb07e` (`test: assert stale-generation redirect proof markers`). It updates `anw0_racing_dispatch_self_heals_against_new_generation` in `agent-doc-orchestration/src/project_controller/rpc.rs` to require both `dispatch_stale_generation_redirect` and `dispatch_retry_after_stale_generation` in the temp repo ops log after the retry lands on generation N+1.
+
+Install/verification: `make install` completed after the source commit, replacing `/home/brian/.cargo/bin/agent-doc`, installing `libagent_doc-0.34.1.so`, and marking 1 controller for recycle at the next idle boundary. Commands: `tsift rewrite --run 'cargo test -p agent-doc-orchestration anw0'` passed (3 tests); `make check` passed with clippy, 4565 nextest tests, doctests, and the wider deterministic closeout sim.
+
+Changed paths: `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`, parent `src/agent-doc` gitlink, and this session document. Confidence: high. Escalation: none.
+<!-- agent:boundary:32cca29c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -230,7 +245,8 @@ Changed paths: `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
 - ~~do [#rtwbcast-verify]~~
 - ~~do [#c2b6]~~
 - ~~do [#1j8q]~~
-- do [#anw0verify]
+- ~~do [#anw0verify]~~
+- I have a good feel for when agent-doc behaves correctly. Can we lock down behavior invariants that the agent can use to determine if there are workflow issues...so we can automate bug detection and fixes?
 - do [#qflood2]
 - do [#qt32]
 - do [#fcc0-live-verify]
@@ -275,7 +291,6 @@ What are #next-steps to fix bugs?
 - [ ] [#archsimworldmatrix] Add SimWorld/property transition-table coverage for the architecture primitives: stale supervisor recycle, queue edit during closeout, degraded/file-IPC fallback, live buffer drift, compact/replay, and operator-only/no-drainable queue outcomes.
 - [ ] [#archuistates] Replace raw route/write conflict strings in JB/Codex/OpenCode surfaces with a small typed outcome vocabulary: queued behind owner, recovered and retried, deferred for operator proof, no drainable work, real component conflict, and blocked with exact unblocker.
 - [ ] [#cwsp] [operator-verify] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38 and recycling the live supervisor onto that build, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
-- [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#qt32] [operator-verify] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.

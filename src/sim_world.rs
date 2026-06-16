@@ -3773,6 +3773,156 @@ fn ipc_snapshot_guard_blocks_live_queue_drift_after_preflight() {
     );
 }
 
+#[test]
+fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
+    use agent_doc_orchestration::flow::closeout::{
+        CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, CloseoutRecoveryState,
+        closeout_recovery_decision_from_state,
+    };
+    use agent_doc_orchestration::flow::document_mutation::FullContentVisibleReplacementDecision;
+
+    let file = Path::new("sim.md");
+
+    // Queue edits around capture/write fragmentation stay visible, but do not get
+    // adopted into the committed snapshot.
+    let mut queue_world = SimWorld::new(2_260);
+    queue_world
+        .insert_after_exchange("\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n")
+        .unwrap();
+    let baseline = queue_world.doc.clone();
+    let response = response_patch("transition queue drift");
+    let (patches, unmatched) = crate::template::parse_patches(&response).unwrap();
+    let content_ours =
+        crate::template::apply_patches(&baseline, &patches, &unmatched, file).unwrap();
+    let live_queue_prompt = "- do #transitionqueue. spec-test-build-install-commit-push";
+    let queue_candidate = content_ours.replace(
+        "<!-- agent:queue -->\n<!-- /agent:queue -->",
+        &format!("<!-- agent:queue -->\n{live_queue_prompt}\n<!-- /agent:queue -->"),
+    );
+    queue_world.adopt_ipc_snapshot_candidate(&baseline, &content_ours, &queue_candidate);
+    assert_eq!(queue_world.coverage.ipc_snapshot_live_prompt_blocks, 1);
+    assert!(queue_world.doc.contains(live_queue_prompt));
+    assert!(!queue_world.snapshot.contains(live_queue_prompt));
+    assert_eq!(
+        closeout_recovery_decision_from_state(
+            file,
+            CloseoutRecoveryState::UnsafeUserContentDrift,
+            CloseoutRecoveryDecisionInput::default(),
+        )
+        .as_str(),
+        "blocked"
+    );
+
+    // Compaction/full-content replacement must reject stale source buffers after
+    // live typing, which maps to an open closeout block unless route/JB prompt
+    // context is available to queue behind it.
+    let mut compact_world = SimWorld::new(2_261);
+    assert_eq!(
+        compact_world
+            .stale_full_content_visible_replacement(FullContentReplacementSource::CompactExchange),
+        FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
+    );
+    assert_eq!(compact_world.coverage.stale_source_buffer_skips, 1);
+    match closeout_recovery_decision_from_state(
+        file,
+        CloseoutRecoveryState::OpenCycle,
+        CloseoutRecoveryDecisionInput::default(),
+    ) {
+        CloseoutRecoveryDecision::Blocked { missing_proof, .. } => {
+            assert!(missing_proof.contains("open cycle"), "{missing_proof}");
+        }
+        other => panic!("open closeout without prompt context must block: {other:?}"),
+    }
+    assert_eq!(
+        closeout_recovery_decision_from_state(
+            file,
+            CloseoutRecoveryState::OpenCycle,
+            CloseoutRecoveryDecisionInput {
+                prompt_context_available: true,
+                blocker_reason: Some("JB Run Agent Doc during open closeout"),
+                stale_capture_supersession_proof: None,
+            },
+        ),
+        CloseoutRecoveryDecision::QueuePromptForAfterCloseout {
+            state: CloseoutRecoveryState::OpenCycle,
+            reason: "JB Run Agent Doc during open closeout".to_string(),
+        }
+    );
+
+    // Stale/sidecar-only ACK evidence is kept distinct from visible-file repair,
+    // and superseded captures retire only with proof.
+    let mut ack_world = SimWorld::new(2_262);
+    ack_world.doc = template_doc(
+        "❯ do #transitionack. spec-test-build-install-commit-push\n<!-- agent:boundary:live -->\n",
+    );
+    ack_world.snapshot = template_doc("<!-- agent:boundary:base -->\n");
+    let ack_content = template_doc(
+        "❯ do #transitionack. spec-test-build-install-commit-push\n### Re: #transitionack — gpt-5\n\nDone.\n<!-- agent:boundary:ack -->\n",
+    );
+    ack_world.apply_ack_sidecar_only_repair(&ack_content);
+    assert_eq!(ack_world.coverage.ack_sidecar_only_repairs, 1);
+    assert_eq!(ack_world.snapshot, ack_content);
+    assert_eq!(
+        closeout_recovery_decision_from_state(
+            file,
+            CloseoutRecoveryState::SidecarVisibleDrift,
+            CloseoutRecoveryDecisionInput::default(),
+        )
+        .as_str(),
+        "reset_sidecars_from_visible"
+    );
+    assert_eq!(
+        closeout_recovery_decision_from_state(
+            file,
+            CloseoutRecoveryState::MissingResponseBody,
+            CloseoutRecoveryDecisionInput {
+                stale_capture_supersession_proof: Some("visible response superseded stale ACK"),
+                ..CloseoutRecoveryDecisionInput::default()
+            },
+        ),
+        CloseoutRecoveryDecision::RetireStaleCapture {
+            state: CloseoutRecoveryState::MissingResponseBody,
+            proof: "visible response superseded stale ACK".to_string(),
+        }
+    );
+
+    // The already_applied ACK path recovers dropped response content without
+    // duplicating it; this is the stale-ACK counterexample for unsafe replay.
+    let mut already_world = SimWorld::new(2_263);
+    already_world
+        .append_to_exchange("❯ Please reply\n")
+        .unwrap();
+    let baseline = already_world.doc.clone();
+    let content_ours = baseline.replace(
+        "<!-- /agent:exchange -->",
+        "### Re: Please reply — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->",
+    );
+    already_world.doc = baseline.replace(
+        "<!-- /agent:exchange -->",
+        "❯ next prompt while ACK is stale\n<!-- /agent:exchange -->",
+    );
+    already_world.recover_already_applied_diverged_response(
+        &content_ours,
+        "### Re: Please reply — gpt-5\n\nAnswered.",
+    );
+    assert_eq!(
+        already_world.coverage.already_applied_response_recoveries,
+        1
+    );
+    assert_eq!(
+        already_world
+            .doc
+            .matches("### Re: Please reply — gpt-5")
+            .count(),
+        1
+    );
+    assert!(
+        already_world
+            .doc
+            .contains("❯ next prompt while ACK is stale")
+    );
+}
+
 // -------- #queue-strike-on-halt: a halt/refusal response must not strike the
 // active auto-queue head; only an explicit closeout flag advances it. The Codex
 // Stop-hook heading path is exact-match only. See

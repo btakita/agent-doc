@@ -1,3 +1,7 @@
+use agent_doc_orchestration::flow::closeout::{
+    CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, CloseoutRecoveryState,
+    closeout_recovery_decision_from_state,
+};
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use proptest::prelude::*;
@@ -88,6 +92,41 @@ fn unsafe_snapshot_source(hazard: CloseoutHazard, source: SnapshotSource) -> boo
             )
         }
         CloseoutHazard::StalePatchReplay => true,
+    }
+}
+
+fn expected_closeout_recovery_decision(
+    state: CloseoutRecoveryState,
+    prompt_context_available: bool,
+    proof_available: bool,
+) -> &'static str {
+    if prompt_context_available {
+        return "queue_prompt_for_after_closeout";
+    }
+    if state == CloseoutRecoveryState::Clean {
+        return "already_committed";
+    }
+    if proof_available
+        && matches!(
+            state,
+            CloseoutRecoveryState::MissingResponseBody
+                | CloseoutRecoveryState::UnsafeUserContentDrift
+        )
+    {
+        return "retire_stale_capture";
+    }
+    match state {
+        CloseoutRecoveryState::Clean => "already_committed",
+        CloseoutRecoveryState::DirectResponsePatchback
+        | CloseoutRecoveryState::BoundaryOnlyDrift
+        | CloseoutRecoveryState::NestedParentPointerStale
+        | CloseoutRecoveryState::OpenEmptyPreflight
+        | CloseoutRecoveryState::QueueMetadataDrift => "replay_safe",
+        CloseoutRecoveryState::SidecarVisibleDrift => "reset_sidecars_from_visible",
+        CloseoutRecoveryState::OpenCycle
+        | CloseoutRecoveryState::MissingResponseBody
+        | CloseoutRecoveryState::EscapedTemplatePatch
+        | CloseoutRecoveryState::UnsafeUserContentDrift => "blocked",
     }
 }
 
@@ -351,6 +390,71 @@ fn ipc_closeout_transition_table_forbids_unsafe_commits() {
 }
 
 proptest! {
+    #[test]
+    fn closeout_recovery_decision_table_preserves_priority_and_source_state(
+        state_index in 0usize..CloseoutRecoveryState::ALL.len(),
+        prompt_context_available in any::<bool>(),
+        proof_index in 0usize..3,
+    ) {
+        let state = CloseoutRecoveryState::ALL[state_index];
+        let blocker_reason = (proof_index == 2).then_some("route blocked by open closeout");
+        let proof = (proof_index > 0).then_some("visible response superseded capture");
+        let decision = closeout_recovery_decision_from_state(
+            Path::new("session.md"),
+            state,
+            CloseoutRecoveryDecisionInput {
+                prompt_context_available,
+                blocker_reason,
+                stale_capture_supersession_proof: proof,
+            },
+        );
+        let expected = expected_closeout_recovery_decision(
+            state,
+            prompt_context_available,
+            proof.is_some(),
+        );
+
+        prop_assert_eq!(
+            decision.as_str(),
+            expected,
+            "state={:?} prompt_context_available={} proof={:?}",
+            state,
+            prompt_context_available,
+            proof
+        );
+        prop_assert_eq!(
+            decision.state(),
+            if expected == "already_committed" { None } else { Some(state) },
+            "decision must preserve the source recovery state unless no recovery remains"
+        );
+
+        match &decision {
+            CloseoutRecoveryDecision::AlreadyCommitted => {
+                prop_assert!(!prompt_context_available);
+                prop_assert_eq!(state, CloseoutRecoveryState::Clean);
+            }
+            CloseoutRecoveryDecision::ReplaySafe { command, .. }
+            | CloseoutRecoveryDecision::ResetSidecarsFromVisible { command, .. } => {
+                prop_assert!(command.contains("session.md"));
+            }
+            CloseoutRecoveryDecision::RetireStaleCapture { proof: actual, .. } => {
+                prop_assert_eq!(Some(actual.as_str()), proof);
+            }
+            CloseoutRecoveryDecision::QueuePromptForAfterCloseout { reason, .. } => {
+                prop_assert!(prompt_context_available);
+                prop_assert_eq!(reason.as_str(), blocker_reason.unwrap_or(state.as_str()));
+            }
+            CloseoutRecoveryDecision::Blocked {
+                missing_proof,
+                recommended,
+                ..
+            } => {
+                prop_assert!(!missing_proof.is_empty());
+                prop_assert!(recommended.contains("session.md"));
+            }
+        }
+    }
+
     #[test]
     fn ipc_closeout_state_model_never_commits_unsafe_snapshot_source(
         transport_index in 0usize..3,

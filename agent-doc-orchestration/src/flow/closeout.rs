@@ -546,6 +546,20 @@ pub enum CloseoutRecoveryState {
 }
 
 impl CloseoutRecoveryState {
+    pub const ALL: [Self; 11] = [
+        Self::Clean,
+        Self::OpenCycle,
+        Self::MissingResponseBody,
+        Self::DirectResponsePatchback,
+        Self::EscapedTemplatePatch,
+        Self::BoundaryOnlyDrift,
+        Self::NestedParentPointerStale,
+        Self::OpenEmptyPreflight,
+        Self::QueueMetadataDrift,
+        Self::SidecarVisibleDrift,
+        Self::UnsafeUserContentDrift,
+    ];
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Clean => "clean",
@@ -1936,85 +1950,113 @@ mod tests {
         use CloseoutRecoveryState::*;
         let f = Path::new("tasks/doc.md");
 
-        assert_eq!(
-            closeout_recovery_decision_from_state(
+        let default_cases = [
+            (Clean, "already_committed"),
+            (OpenCycle, "blocked"),
+            (MissingResponseBody, "blocked"),
+            (DirectResponsePatchback, "replay_safe"),
+            (EscapedTemplatePatch, "blocked"),
+            (BoundaryOnlyDrift, "replay_safe"),
+            (NestedParentPointerStale, "replay_safe"),
+            (OpenEmptyPreflight, "replay_safe"),
+            (QueueMetadataDrift, "replay_safe"),
+            (SidecarVisibleDrift, "reset_sidecars_from_visible"),
+            (UnsafeUserContentDrift, "blocked"),
+        ];
+        assert_eq!(default_cases.len(), CloseoutRecoveryState::ALL.len());
+
+        for (state, expected) in default_cases {
+            let decision = closeout_recovery_decision_from_state(
                 f,
-                Clean,
-                CloseoutRecoveryDecisionInput::default()
-            ),
-            AlreadyCommitted
-        );
-
-        assert_eq!(
-            closeout_recovery_decision_from_state(
-                f,
-                OpenCycle,
-                CloseoutRecoveryDecisionInput {
-                    prompt_context_available: true,
-                    blocker_reason: Some("active closeout"),
-                    stale_capture_supersession_proof: None,
-                },
-            ),
-            QueuePromptForAfterCloseout {
-                state: OpenCycle,
-                reason: "active closeout".to_string(),
-            }
-        );
-
-        match closeout_recovery_decision_from_state(
-            f,
-            DirectResponsePatchback,
-            CloseoutRecoveryDecisionInput::default(),
-        ) {
-            ReplaySafe { state, command } => {
-                assert_eq!(state, DirectResponsePatchback);
-                assert!(command.contains("write --commit"), "{command}");
-            }
-            other => panic!("direct patchback should be replay-safe: {other:?}"),
-        }
-
-        match closeout_recovery_decision_from_state(
-            f,
-            SidecarVisibleDrift,
-            CloseoutRecoveryDecisionInput::default(),
-        ) {
-            ResetSidecarsFromVisible { state, command } => {
-                assert_eq!(state, SidecarVisibleDrift);
-                assert!(command.contains("reset --from-current"), "{command}");
-            }
-            other => panic!("sidecar drift should reset sidecars: {other:?}"),
-        }
-
-        assert_eq!(
-            closeout_recovery_decision_from_state(
-                f,
-                MissingResponseBody,
-                CloseoutRecoveryDecisionInput {
-                    stale_capture_supersession_proof: Some("heading already answered"),
-                    ..CloseoutRecoveryDecisionInput::default()
-                },
-            ),
-            RetireStaleCapture {
-                state: MissingResponseBody,
-                proof: "heading already answered".to_string(),
-            }
-        );
-
-        match closeout_recovery_decision_from_state(
-            f,
-            MissingResponseBody,
-            CloseoutRecoveryDecisionInput::default(),
-        ) {
-            Blocked {
                 state,
-                missing_proof,
-                recommended,
-            } => {
-                assert_eq!(state, MissingResponseBody);
-                assert!(missing_proof.contains("response body"), "{missing_proof}");
-                assert!(recommended.contains("write --commit"), "{recommended}");
+                CloseoutRecoveryDecisionInput::default(),
+            );
+            assert_eq!(
+                decision.as_str(),
+                expected,
+                "unexpected default decision for {state:?}: {decision:?}"
+            );
+            assert_eq!(
+                decision.state(),
+                if state == Clean { None } else { Some(state) },
+                "decision should retain its source state for {state:?}: {decision:?}"
+            );
+            match decision {
+                AlreadyCommitted => {}
+                ReplaySafe { command, .. } | ResetSidecarsFromVisible { command, .. } => {
+                    assert!(
+                        command.contains("tasks/doc.md"),
+                        "action command should name the file for {state:?}: {command:?}"
+                    );
+                }
+                Blocked {
+                    missing_proof,
+                    recommended,
+                    ..
+                } => {
+                    assert!(
+                        !missing_proof.is_empty(),
+                        "blocked decision should name missing proof for {state:?}"
+                    );
+                    assert!(
+                        recommended.contains("tasks/doc.md"),
+                        "blocked decision should include a file-specific recommendation for {state:?}: {recommended:?}"
+                    );
+                }
+                other => panic!("default path unexpectedly produced {other:?} for {state:?}"),
             }
-            other => panic!("missing response body should block: {other:?}"),
+        }
+
+        for state in CloseoutRecoveryState::ALL {
+            assert_eq!(
+                closeout_recovery_decision_from_state(
+                    f,
+                    state,
+                    CloseoutRecoveryDecisionInput {
+                        prompt_context_available: true,
+                        blocker_reason: Some("active closeout"),
+                        stale_capture_supersession_proof: Some("superseded"),
+                    },
+                ),
+                QueuePromptForAfterCloseout {
+                    state,
+                    reason: "active closeout".to_string(),
+                },
+                "prompt context must take priority for {state:?}"
+            );
+            assert_eq!(
+                closeout_recovery_decision_from_state(
+                    f,
+                    state,
+                    CloseoutRecoveryDecisionInput {
+                        prompt_context_available: true,
+                        blocker_reason: None,
+                        stale_capture_supersession_proof: None,
+                    },
+                ),
+                QueuePromptForAfterCloseout {
+                    state,
+                    reason: state.as_str().to_string(),
+                },
+                "prompt context fallback reason should be the state name for {state:?}"
+            );
+        }
+
+        for state in [MissingResponseBody, UnsafeUserContentDrift] {
+            assert_eq!(
+                closeout_recovery_decision_from_state(
+                    f,
+                    state,
+                    CloseoutRecoveryDecisionInput {
+                        stale_capture_supersession_proof: Some("heading already answered"),
+                        ..CloseoutRecoveryDecisionInput::default()
+                    },
+                ),
+                RetireStaleCapture {
+                    state,
+                    proof: "heading already answered".to_string(),
+                }
+            );
         }
     }
 

@@ -456,7 +456,8 @@ pub fn send_submitted_text(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()>
 ///
 /// The submit profile is the single place that defines harness-specific tmux
 /// key boundaries. Codex, Claude, OpenCode, and the default harness profile use
-/// hex-encoded text plus the profile submit byte in one tmux `send-keys -H` operation.
+/// normalized text plus the named profile submit key in one tmux `send-keys`
+/// operation.
 pub fn send_submitted_text_for_harness(
     tmux: &Tmux,
     pane_id: &str,
@@ -1327,50 +1328,38 @@ mod tests {
 
     #[test]
     fn submit_profiles_keep_harness_submit_policy_in_one_place() {
-        assert_eq!(tmux_submit_mode_for_harness("codex"), "tmux_text_enter");
-        assert_eq!(
-            tmux_submit_transform_for_harness("codex"),
-            "tmux_text_enter"
-        );
-        assert_eq!(tmux_submit_key_for_harness("codex"), "Enter");
-        assert_eq!(
-            submitted_text_without_trailing_line_endings("agent-doc plan.md\r\n"),
-            "agent-doc plan.md"
-        );
-        assert_eq!(
-            text_submit_command_args(
-                "%7",
-                "agent-doc plan.md\n",
-                tmux_submit_profile_for_harness("codex")
-            ),
-            ["send-keys", "-t", "%7", "agent-doc plan.md", "Enter"]
-                .into_iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(
-            text_submit_command_args("%7", "\n", tmux_submit_profile_for_harness("codex")),
-            ["send-keys", "-t", "%7", "Enter"]
-                .into_iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(tmux_submit_mode_for_harness("claude"), "tmux_text_enter");
-        assert_eq!(
-            tmux_submit_transform_for_harness("claude"),
-            "tmux_text_enter"
-        );
-        assert_eq!(tmux_submit_key_for_harness("claude"), "Enter");
-        assert_eq!(
-            tmux_submit_mode_for_harness("unknown-harness"),
-            "tmux_text_enter"
-        );
-        assert_eq!(tmux_submit_mode_for_harness("opencode"), "tmux_text_enter");
-        assert_eq!(
-            tmux_submit_transform_for_harness("opencode"),
-            "tmux_text_enter"
-        );
-        assert_eq!(tmux_submit_key_for_harness("opencode"), "Enter");
+        for harness in ["codex", "claude", "opencode", "unknown-harness"] {
+            assert_eq!(tmux_submit_mode_for_harness(harness), "tmux_text_enter");
+            assert_eq!(
+                tmux_submit_transform_for_harness(harness),
+                "tmux_text_enter"
+            );
+            assert_eq!(tmux_submit_key_for_harness(harness), "Enter");
+            assert_eq!(
+                submitted_text_without_trailing_line_endings("agent-doc plan.md\r\n"),
+                "agent-doc plan.md"
+            );
+            assert_eq!(
+                text_submit_command_args(
+                    "%7",
+                    "agent-doc plan.md\r\n",
+                    tmux_submit_profile_for_harness(harness)
+                ),
+                ["send-keys", "-t", "%7", "agent-doc plan.md", "Enter"]
+                    .into_iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                "{harness} must submit tmux text with one named Enter key"
+            );
+            assert_eq!(
+                text_submit_command_args("%7", "\n", tmux_submit_profile_for_harness(harness)),
+                ["send-keys", "-t", "%7", "Enter"]
+                    .into_iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                "{harness} empty resubmit must send only the named Enter key"
+            );
+        }
     }
 
     #[test]

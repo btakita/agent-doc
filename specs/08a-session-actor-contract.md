@@ -154,10 +154,11 @@ Later phases may refine caller values without changing the field names.
   `route_submit_issue issue=accepted_without_dispatch_start_proof`.
 - Direct-pane submit profiles get one bare submit-key re-submit
   (`#jbcodexsubmit` / `#jbclaudesubmit`). Codex, Claude, OpenCode, and default
-  tmux submits send hex-encoded text plus a carriage-return byte in one `send-keys -H` operation; when a submit
-  still times out with the trigger visibly drafted, route sends one separate
-  a literal CR submit and re-polls the acceptance window exactly once, recording
-  `route_submit_resubmit ... action=submit_key key=CR result=accepted|still_visible`.
+  tmux submits send normalized text plus a named `Enter` key in one
+  `send-keys -t <pane> <text> Enter` operation; when a submit still times out
+  with the trigger visibly drafted, route sends one separate named `Enter` key
+  and re-polls the acceptance window exactly once, recording
+  `route_submit_resubmit ... action=submit_key key=Enter result=accepted|still_visible`.
   If the exact same routed trigger is already visible in the composer before
   route sends anything, route takes that same one-submit-key path first instead of
   appending another trigger; a later idle prompt below the trigger classifies it

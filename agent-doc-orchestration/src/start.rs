@@ -1254,7 +1254,7 @@ fn auto_trigger_inject_command(
         "child_pty",
         &submitted_text,
         Some(&shared.harness_binary),
-        "pty_submit_cr",
+        "raw_pty_submit_enter_byte",
         "Enter",
     );
 
@@ -1319,7 +1319,7 @@ fn auto_trigger_clear_command(
         "child_pty",
         &submitted_text,
         Some(&shared.harness_binary),
-        "pty_clear_submit_cr",
+        "raw_pty_clear_enter_byte",
         "Enter",
     );
 

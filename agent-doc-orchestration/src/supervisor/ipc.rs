@@ -167,6 +167,10 @@ pub fn normalize_submit_text(text: &str) -> String {
 }
 
 /// Build the canonical raw-PTY submit bytes for a single-line harness input.
+///
+/// This is only for direct child-PTY fallback writes. Tmux-bound submissions
+/// use the shared `send-keys <text> Enter` helper and must not route through
+/// this raw carriage-return encoding.
 pub fn submit_bytes(text: &str) -> String {
     let payload = normalize_submit_text(text);
     format!("{payload}\r")
@@ -524,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn submit_bytes_uses_single_carriage_return_submit() {
+    fn raw_pty_submit_bytes_use_single_carriage_return_enter() {
         assert_eq!(submit_bytes("/clear"), "/clear\r");
         assert_eq!(submit_bytes("/clear\n"), "/clear\r");
         assert_eq!(submit_bytes("/clear\r\n"), "/clear\r");

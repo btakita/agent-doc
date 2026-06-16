@@ -59,7 +59,7 @@ Proof for this cycle:
 - Verification: whitespace checks passed; latest `src/agent-doc` CI is green; no Rust build/test/install was run because this cycle added a plan and backlog item, not source code.
 - Confidence: high on diagnosis; medium on sufficiency until the refactor lands.
 - Escalation: none.
-<!-- agent:boundary:8d0c03d0 -->
+<!-- agent:boundary:65d9206e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -115,7 +115,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jbruncloseoutstate] [clean-session] Refactor JB `Run Agent Doc` closeout recovery into a typed recovery state machine so route/repair/capture/session-check share one recovery decision boundary. Plan: tasks/agent-doc/plan-run-agent-doc-closeout-recovery-state-machine.md
+- [ ] [#jbruncloseoutstate] [clean-session] Implement the closeout recovery state-machine refactor from tasks/agent-doc/plan-run-agent-doc-closeout-recovery-state-machine.md: introduce typed CloseoutRecoveryDecision/evidence API, route/JB Run Agent Doc through it, unify sidecar reset/replay/retire mutations, and add SimWorld transition-table coverage.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

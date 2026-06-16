@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -336,7 +336,7 @@ Commands: `agent-doc preflight`, `agent-doc plan`, `git status --short`, and tar
 Verification: code inspection only; no tests run because no code changed.
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:18fb8809 -->
+<!-- agent:boundary:eb652e52 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -344,19 +344,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-In "Available Deal" -> "Interested Lenders" tab
-
-"Deal interest workflow" should always be expanded.
-
-Do these steps + fields relate to TMO state?
-- ~~Mark Call Completed~~
-- ~~Start Underwriting~~
-- ~~Call scheduled~~
-- ~~Verbal amount~~
-- ~~Contact method~~
-- ~~Pre-doc conditions~~
-- ~~Pre-doc instructions~~
-- Lender contact summary
 <!-- /agent:queue -->
 
 ## Backlog

@@ -78,7 +78,6 @@ Verification:
 - Downloaded deployed `/index.browser-D33O2I3Y.js`; it contains `tmo-kv--unlabeled`, `display_pairs_(record, fields)`, and the hidden-label Name/Email/Phone borrower fields.
 - `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
 - `src/equityfundingsource-dev` is clean after deploy.
-- `src/equityfundingsource-dev` is clean after deploy.
 - `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
 - Downloaded deployed `/index.browser-5XVXGJGR.js`; it contains `AdminBorrowerInfoField`, `body_style: ADMIN_BORROWER_INFO_STYLE`, and the inline Borrower Info entries.
 - Live `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned `303` to admin login, expected for the protected route.
@@ -100,7 +99,48 @@ Verification:
 Preflight warning note: the document used `go` on `agent:backlog`, which the binary ignores as a queue attribute. I treated the backlog text as the requested work for this cycle and cleared it after completion.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:e6c89b96 -->
+
+### Re: Borrower Info inline values + generic inline field + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: "Borrower Info" should use inline values...not surrounded by boxes. Make the overall design elegant. Remove unnecessary noise. deploy
+
+
+Completed both queued prompts. Borrower Info now renders as quiet inline contact/address values instead of separate bordered field boxes, and the borrower-specific helper was immediately generalized to `AdminInlineInfoField` plus `ADMIN_INLINE_INFO_*` styles so the same inline rule can be reused by other admin cards.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev` parent gitlink
+
+Commits/push:
+- EFS submodule: `eed3296 fix(admin): inline borrower info details` pushed to `origin/main`.
+- EFS submodule: `1a2c384 refactor(admin): generalize inline info fields` pushed to `origin/main`.
+- Parent repo: `710ab9c1a chore(efs): update borrower info layout submodule` pushed to `origin/main`.
+- Parent repo: `0067c4ee2 chore(efs): update inline info refactor submodule` pushed to `origin/main`.
+
+Deploy proof:
+- `make deploy` completed successfully after the generic refactor.
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker version: `8733c338-1626-4b18-a3e8-0c204f4dfd4b`
+- Deployed browser asset: `/index.browser-GLC2TLBG.js`
+- Remote D1 migrations: no migrations to apply.
+
+Verification:
+- Focused test passed: `bun test tests/tmo-loan-details-density.test.ts` — 3 tests.
+- EFS `make check` passed after the visual change and again after the generic refactor: 739 tests, app build, Worker build.
+- Live `/` returned `200`.
+- Live `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned `303` to admin login, expected for the protected route.
+- Downloaded deployed `/index.browser-GLC2TLBG.js`; it contains `AdminInlineInfoField`, `body_style: ADMIN_INLINE_INFO_STYLE`, and the inline Borrower Info entries.
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
+- `src/equityfundingsource-dev` is clean after deploy.
+
+Note: the exchange is large and the queue is active, so I continued the requested drain without compacting.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:77198480 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,8 +148,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: "Borrower Info" should use inline values...not surrounded by boxes. Make the overall design elegant. Remove unnecessary noise. deploy
+- ~~:pushpin: "Borrower Info" should use inline values...not surrounded by boxes. Make the overall design elegant. Remove unnecessary noise. deploy~~
 - Make AdminBorrowInfoField more generic, because I want to have this rule in other cards.
+- Format Borrower Detail like an address. Improve formatting of Collateral. ![img_19.png](img_19.png)
+- Improve formatting of Borrower Onboarding Data. Remove redundant Property 
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

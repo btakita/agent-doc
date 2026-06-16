@@ -235,44 +235,29 @@ impl Multiplexer for Tmux {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TmuxSubmitProfile {
-    delivery: TmuxSubmitDelivery,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TmuxSubmitDelivery {
-    HexTextCarriageReturn,
-}
+pub struct TmuxSubmitProfile;
 
 impl TmuxSubmitProfile {
     pub const fn mode(self) -> &'static str {
-        match self.delivery {
-            TmuxSubmitDelivery::HexTextCarriageReturn => "tmux_hex_text_cr",
-        }
+        "tmux_hex_text_cr"
     }
 
     pub const fn transform(self) -> &'static str {
-        match self.delivery {
-            TmuxSubmitDelivery::HexTextCarriageReturn => "tmux_hex_text_cr",
-        }
+        "tmux_hex_text_cr"
     }
 
     pub const fn submit_key(self) -> &'static str {
-        match self.delivery {
-            TmuxSubmitDelivery::HexTextCarriageReturn => "CR",
-        }
+        "CR"
     }
 
     pub const fn pending_draft_enter_resubmit(self) -> bool {
-        matches!(self.delivery, TmuxSubmitDelivery::HexTextCarriageReturn)
+        true
     }
 }
 
 pub const fn tmux_submit_profile_for_harness(harness: &str) -> TmuxSubmitProfile {
     let _ = harness;
-    TmuxSubmitProfile {
-        delivery: TmuxSubmitDelivery::HexTextCarriageReturn,
-    }
+    TmuxSubmitProfile
 }
 
 pub const fn tmux_submit_mode_for_harness(harness: &str) -> &'static str {
@@ -291,21 +276,17 @@ fn submitted_text_without_trailing_line_endings(text: &str) -> &str {
     text.trim_end_matches(['\r', '\n'])
 }
 
-fn text_submit_command_args(pane_id: &str, text: &str, profile: TmuxSubmitProfile) -> Vec<String> {
+fn text_submit_command_args(pane_id: &str, text: &str, _profile: TmuxSubmitProfile) -> Vec<String> {
     let text = submitted_text_without_trailing_line_endings(text);
     let payload = format!("{text}\r");
-    match profile.delivery {
-        TmuxSubmitDelivery::HexTextCarriageReturn => {
-            let mut args = vec![
-                "send-keys".to_string(),
-                "-t".to_string(),
-                pane_id.to_string(),
-                "-H".to_string(),
-            ];
-            args.extend(payload.as_bytes().iter().map(|byte| format!("{byte:02x}")));
-            args
-        }
-    }
+    let mut args = vec![
+        "send-keys".to_string(),
+        "-t".to_string(),
+        pane_id.to_string(),
+        "-H".to_string(),
+    ];
+    args.extend(payload.as_bytes().iter().map(|byte| format!("{byte:02x}")));
+    args
 }
 
 /// Submit text and the carriage-return byte in one tmux call. Codex/Claude TUI
@@ -334,11 +315,7 @@ fn send_submitted_text_with_profile(
     text: &str,
     profile: TmuxSubmitProfile,
 ) -> Result<()> {
-    match profile.delivery {
-        TmuxSubmitDelivery::HexTextCarriageReturn => {
-            send_text_with_submit_key(tmux, pane_id, text, profile)
-        }
-    }
+    send_text_with_submit_key(tmux, pane_id, text, profile)
 }
 
 /// Return the path to the sessions registry file (relative to CWD).

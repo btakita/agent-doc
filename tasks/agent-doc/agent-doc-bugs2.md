@@ -246,7 +246,37 @@ Verification:
 JetBrains plugin note: this fix does require the JetBrains plugin update. The checked-in plugin version is now `0.2.167`, and the local signed artifact exists at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.167-signed.zip`.
 
 No new source changes were made in this closeout turn; this cycle verified the already-pushed fix and closed the live EFS auto-sync queue item with proof.
-<!-- agent:boundary:6accfbfe -->
+
+### Re: Only agent-doc dogfooding sessions should auto-build + install — gpt-5
+
+Fixed the auto-install scope bug. The live logs confirmed the failure mode: route-owned supervisors for `tasks/professional/equityfundingsource.md`, `tasks/software/lazily-rs.md`, and other sibling project docs were resolving `src/agent-doc` and running `supervisor_auto_install_started ... crate_root=src/agent-doc`. That was wrong.
+
+Root cause: `dogfood_agent_doc_crate_root` only checked whether the current superproject contained an `agent-doc` crate. Since this repo has `src/agent-doc`, every session document under the superproject could inherit dogfood build/install behavior. The resolver now also proves the served document is an agent-doc dogfood session document: inside the agent-doc source checkout, under `tasks/agent-doc/`, or one of the legacy agent-doc task docs. Sibling docs such as `tasks/professional/equityfundingsource.md` and `tasks/software/lazily-rs.md` now resolve no auto-install crate root even if the env/frontmatter/project auto-install knob is truthy.
+
+Changed paths:
+- `agent-doc-orchestration/src/project_controller/rpc.rs`
+- `agent-doc-orchestration/src/start/idle_watch.rs`
+- `agent-doc-orchestration/src/start/decisions.rs`
+- `agent-doc-orchestration/src/project_controller.rs`
+- `agent-doc-core/src/frontmatter.rs`
+- `agent-doc-core/src/project_config.rs`
+- `specs/08b-single-process-control-plane.md`
+- `VERSIONS.md`
+
+Verification:
+- `cargo fmt --check`
+- `git diff --check` on the touched paths
+- `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
+- `cargo test -p agent-doc-orchestration supervisor_auto_install`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc lib-install`
+- `agent-doc --version` reports `agent-doc 0.34.1` at `/home/brian/.cargo/bin/agent-doc`
+- Latest GitHub Actions `CI` on `main` is green: run `27588543817`, completed successfully on 2026-06-16T01:47:40Z.
+
+`agent-doc lib-install` installed `/home/brian/.cargo/bin/libagent_doc-0.34.1.so` and marked 2 controllers for idle recycle. No escalation was needed. Source commit/push was not done because `src/agent-doc` already has broad unrelated dirty changes, including some of the same files; staging whole files would mix this fix with pre-existing work.
+<!-- agent:boundary:4d4ce7d2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -255,6 +285,7 @@ No new source changes were made in this closeout turn; this cycle verified the a
 - ~~JB `Run Agent Doc` on equityfundingsource.md after a fresh auto-sync did not submit the prompt.~~
 - Why not just shell out `tmux send-keys "Command" Enter`?
 - commit + push uncommitted agent-doc files
+- Only agent-doc dogfooding sessions should auto-build + install. The equityfundingsource.md session should not auto-install ![img_29.png](img_29.png)  
 - :pushpin: How can I tell if the supervisor + CPC are up to date? Why is the formatting all messed up? ![2026-06-15_22-56.png](../../../../../Pictures/agent-loop/2026-06-15_22-56.png) Also I'm seeing some shells from the supervisor are 2 lines too low. See where the `agent-doc admin --help` starts in the screenshot.
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.

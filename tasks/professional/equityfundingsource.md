@@ -238,7 +238,33 @@ Verification:
 Note: the exchange is large and the queue is active, so I continued the requested drain without compacting. Preflight warned that the route-owned agent-doc supervisor is stale; I did not restart it mid-drain.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:66f1d4e1 -->
+
+### Re: Borrower Onboarding Data cleanup — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Improve formatting of Borrower Onboarding Data. Remove individual Property fields made redundant by Subject Property Address. ![img_20.png](img_20.png)
+
+
+Closed the onboarding-data formatting head. `Borrower Onboarding Data` now removes the individual property street/city/state/ZIP tiles when `Subject Property Address` is present, so the composed address is the single visible source for that property address.
+
+Implemented in:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+
+Commit/deploy already completed in the same formatting pass:
+- EFS submodule: `418a246 fix(admin): format loan address detail cards` pushed to `origin/main`.
+- Parent repo: `6e01ce598 chore(efs): update loan detail formatting submodule` pushed to `origin/main`.
+- Deployed Worker version: `9065933c-245e-4c75-b3f3-b5adf754aa98`.
+
+Verification:
+- `bun test tests/tmo-loan-details-density.test.ts` passed: 3 tests.
+- `make check` passed: 739 tests, app build, Worker build.
+- Deployed `/index.browser-4IEYQSU7.js` contains `ADMIN_REDUNDANT_SUBJECT_PROPERTY_FIELD_KEYS` and the `subjectpropertyaddress` filter.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:79e03719 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -249,7 +275,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - ~~:pushpin: "Borrower Info" should use inline values...not surrounded by boxes. Make the overall design elegant. Remove unnecessary noise. deploy~~
 - ~~Make AdminBorrowInfoField more generic, because I want to have this rule in other cards.~~
 - ~~Format Borrower Detail like an address. Improve formatting of Collateral. ![img_19.png](img_19.png)~~
-- :pushpin: Improve formatting of Borrower Onboarding Data. Remove individual Property fields made redundant by Subject Property Address. ![img_20.png](img_20.png)
+- ~~:pushpin: Improve formatting of Borrower Onboarding Data. Remove individual Property fields made redundant by Subject Property Address. ![img_20.png](img_20.png)~~
 - deploy
 <!-- /agent:queue -->
 

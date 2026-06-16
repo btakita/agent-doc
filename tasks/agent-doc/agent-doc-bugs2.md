@@ -291,7 +291,24 @@ Commits:
 CI: GitHub Actions CI run `27604164952` is in progress for `93a6bfc1`; the previous `f75086a2` run completed successfully.
 
 Note: the submodule still has unrelated pre-existing dirty files, `agent-doc-orchestration/src/start/decisions.rs` and `specs/08b-single-process-control-plane.md`; I left them unstaged.
-<!-- agent:boundary:ca692e9a -->
+Implemented `#smrouteconsume`.
+
+Route/JB closeout drain classification now keeps the typed `CloseoutRecoveryDecision` through the route boundary instead of returning raw blocker text. Wait/fail route branches render `CloseoutRecoveryDecision::route_terminal_reason()`, so existing queue heads wait behind closeout with a typed `closeout recovery ...` blocker and terminal route failures name the state, missing proof, and recommended recovery command without exposing the low-level captured-response baseline error. Prompt-bearing route attempts still queue behind unresolved closeout.
+
+Regression coverage now builds an actual open-cycle fixture for the route closeout-block decisions and asserts route-visible blocker text does not leak `captured response baseline no longer matches current document`.
+
+Commits:
+- agent-doc submodule: `1e4aa53d fix: route consumes closeout recovery decisions`
+- parent pointer: `d5b2eb5f5 chore: update agent-doc submodule`
+
+Verification:
+- `cargo test -p agent-doc-orchestration closeout_block_decision`
+- `cargo test -p agent-doc-orchestration recovery_decision_maps_states_to_typed_outcomes`
+- `git diff --check`
+- `make check`
+- `make install` (`agent-doc 0.34.1`)
+- GitHub Actions CI `27604939243` passed (`make check`, `make tmux-ci`)
+<!-- agent:boundary:357a5f79 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -320,7 +337,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - do [#fcc0-live-verify]
 - ~~do [#smcloseoutdecision]~~
 - ~~do [#smcloseoutevidence]~~
-- do [#smrouteconsume]
+- ~~do [#smrouteconsume]~~
 - do [#smrecoverymutate]
 - do [#smtransitiontests]
 - do [#archfirstgate]
@@ -363,7 +380,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#qt32] [operator-verify] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.
-- [ ] [#smrouteconsume] :inbox_tray: Move route and JB Run Agent Doc recovery paths to consume CloseoutRecoveryDecision only; remove low-level string parsing/rephrasing of captured-response baseline errors at route edges.
 - [ ] [#smrecoverymutate] :inbox_tray: Unify recovery mutations through one replay/sidecar primitive so reset --from-current --preserve-session, stale-capture retirement, reset-from-visible, and safe queue-only replay cannot diverge.
 - [ ] [#smtransitiontests] :inbox_tray: Add SimWorld/property/pure-decision coverage for the full closeout recovery transition table: queue edits around capture/write fragmentation, compaction, stale snapshots, stale ack-content, and JB Run Agent Doc during open closeout with and without prompt context.
 - [ ] [#archfirstgate] :inbox_tray: Apply runbooks/architecture-first.md as the closeout gate for agent-doc state-machine refactors: each implementation must state invariant, policy owner, transition rows covered by tests, edited surfaces, and explicit out-of-scope/operator-verify work.

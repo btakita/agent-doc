@@ -336,7 +336,18 @@ Changed paths: `src/agent-doc/agent-doc-core/src/turn_scope.rs`, `src/agent-doc/
 Implemented `#binconflictdedupe` in `src/agent-doc` commit `5c3f7f99` (`feat: dedupe tracked workflow symptoms`). Backlog/review additions can now carry a `[symptom-key invariant=<id> document=<doc-id> component=<component> content_hash=<hash>]` marker; repeated symptoms with the same key attach an indented `evidence:` continuation to the existing open/gated item instead of inserting another tracked backlog/review row. The attachment is logged as `symptom_dedupe_attached ...` with invariant/document/component/content_hash fields, and same-cycle-added ids now record only real insertions.
 
 Changed paths: `src/agent-doc/agent-doc-core/src/pending.rs`, `src/agent-doc/agent-doc-orchestration/src/pending_cmd.rs`, `src/agent-doc/agent-doc-orchestration/src/write.rs`, `src/agent-doc/specs/02-document-format.md`, `src/agent-doc/tests/pending_integration.rs`, the parent `src/agent-doc` gitlink, and this session document. Verification: `tsift rewrite --run 'cargo test -p agent-doc-core op_add_dedupes_symptom_key_by_attaching_evidence'`, `tsift rewrite --run 'cargo test --test pending_integration write_pending_add_dedupes_symptom_key_into_existing_backlog_item'`, `tsift rewrite --run 'cargo test --test pending_integration write_review_add_dedupes_symptom_key_into_existing_review_item'`, `tsift rewrite --run 'cargo test -p agent-doc-core pending'`, `tsift rewrite --run 'cargo test --test pending_integration'`, `make check` (clippy, 4574 nextest tests, doctests, closeout SimWorld), and `gh run list --workflow CI --limit 1` all passed/green. Install was not run because the submodule still contains unrelated pre-existing dirty files; installing from that tree would promote unrelated work into the local binary. Confidence: high. Escalation: none.
-<!-- agent:boundary:979b96b3 -->
+
+### Re: do [#qflood2] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#qflood2]
+
+
+Resolved `#qflood2` as an existing landed implementation plus verification pass, with no new source edits in this cycle. The route/controller fix is already in `src/agent-doc` commit `9bc62c6f` (`fix(route): report benign in-flight dispatch coalesce as deduped-success not exit-1 (#qflood2)`): the controller’s benign duplicate-dispatch bail carries `failed_stage=coalesced_in_flight`, route classifies that marker across the IPC wrapping, returns the already-running pane as a deduped-success result, and logs `route_dispatch_deduped ... reason=in_flight_coalesce` instead of surfacing an exit-1. The SimWorld proof landed in `7bfc82e3`, and the between-turn `/clear` settle/composer-trigger dedupe proof landed in `fe4cf0d5`.
+
+Verification run this cycle: `cargo test -p agent-doc-orchestration qflood2_coalesce_marker_survives_ipc_wrapping`, `cargo test -p agent-doc-orchestration qflood_coalesces_busy_in_flight_redispatch_and_releases_on_ready`, `cargo test -p agent-doc qflood2_in_flight_coalesce_is_deduped_success_not_a_dispatch_failure`, `cargo test -p agent-doc qflood2_drain_dedups_trigger_already_pending_in_composer`, `cargo test -p agent-doc qflood2_drain_holds_trigger_until_own_clear_settles`, and `gh run list --workflow CI --limit 1` all passed/green. Changed paths this cycle: session document only via `--done qflood2`; the unrelated dirty submodule files were left unstaged. No JB plugin update is needed specifically for `#qflood2`; live operator testing should use a freshly installed/recycled agent-doc binary/cdylib, but I did not run install here because the submodule has unrelated dirty source changes and installing from that tree would promote unrelated work. Confidence: high. Escalation: none.
+<!-- agent:boundary:a7cc1694 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -354,7 +365,7 @@ Changed paths: `src/agent-doc/agent-doc-core/src/pending.rs`, `src/agent-doc/age
 - ~~:round_pushpin: do [#binstalepause]~~
 - ~~:round_pushpin: do [#binconflictscope]~~
 - ~~:round_pushpin: do [#binconflictdedupe]~~
-- do [#qflood2]
+- ~~do [#qflood2]~~
 - do [#qt32]
 - do [#fcc0-live-verify]
 - do [#archstatekernel]
@@ -401,7 +412,6 @@ What are #next-steps to fix bugs?
 - [ ] [#archsimworldmatrix] Add SimWorld/property transition-table coverage for the architecture primitives: stale supervisor recycle, queue edit during closeout, degraded/file-IPC fallback, live buffer drift, compact/replay, and operator-only/no-drainable queue outcomes.
 - [ ] [#archuistates] Replace raw route/write conflict strings in JB/Codex/OpenCode surfaces with a small typed outcome vocabulary: queued behind owner, recovered and retried, deferred for operator proof, no drainable work, real component conflict, and blocked with exact unblocker.
 - [ ] [#cwsp] [operator-verify] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38 and recycling the live supervisor onto that build, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
-- [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#qt32] [operator-verify] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.
 - [ ] [#wfinvcatalog] Create a machine-readable workflow invariant catalog: each invariant has id, fact sources, ok predicate, disproof markers, severity, safe remediation, operator-gated remediation, and SimWorld/regression coverage. Start with queue continuation, stale supervisor, closeout commit, editor convergence, generation redirect, and parent gitlink invariants.

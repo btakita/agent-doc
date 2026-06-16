@@ -30,6 +30,19 @@ queue: start
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+- Added one centralized `TmuxSubmitProfile` in `agent-doc-orchestration/src/sessions.rs`; `tmux_submit_mode_for_harness`, `tmux_submit_transform_for_harness`, and `tmux_submit_key_for_harness` delegate to it.
+- Routed JB `Run Agent Doc`, JB `Clear Session Context`, queue dispatch, auto-trigger inject, and supervisor-owned tmux inject logging through that shared profile.
+- Removed OpenCode as a default Kitty Return submit special case. The separate OpenCode PTY filtering for Kitty keyboard-mode permission prompts remains, because that is not the command-submit path.
+- Kept owned PTY injection as `pty_cr`; the change is for tmux-bound live pane submit, not the supervisor child-PTY write boundary.
+- Updated visible-draft recovery to be profile-driven, so a timed-out visible draft gets exactly one bare `Enter` retry for OpenCode too.
+- Updated specs/docs/tests and the static ops-report example so the only tmux live-pane submit mode is `tmux_literal_text_enter_key`.
+- `cargo test submit` passed.
+- `cargo test queue_dispatch` passed.
+- `cargo test -p agent-doc-orchestration submit` passed.
+- `make check` passed: clippy, 4542 nextest tests, doctests, and the ignored medium sim-world budget test.
+- `cargo build` passed.
+- `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/agent-doc`; `agent-doc --version` reports `0.34.1`.
+- Latest `CI` on `main` was green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`, completed successfully on 2026-06-16.
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260616-020038.md`*
@@ -50,30 +63,30 @@ Fixed the tmux-bound submit root cause in `src/agent-doc`: the default live-pane
 Answer to the direct tmux question: yes, the submit path now uses the terminal-neutral shape you tested, but with literal text protection: `tmux send-keys -t <pane> -l <text>; tmux send-keys -t <pane> Enter`. The split `-l` text + named `Enter` avoids tmux interpreting prompt text as keys while still delivering the real Enter key event. Codex, Claude, OpenCode, and unknown/default harnesses all resolve through that same profile now.
 
 What changed:
-- Added one centralized `TmuxSubmitProfile` in `agent-doc-orchestration/src/sessions.rs`; `tmux_submit_mode_for_harness`, `tmux_submit_transform_for_harness`, and `tmux_submit_key_for_harness` delegate to it.
-- Routed JB `Run Agent Doc`, JB `Clear Session Context`, queue dispatch, auto-trigger inject, and supervisor-owned tmux inject logging through that shared profile.
-- Removed OpenCode as a default Kitty Return submit special case. The separate OpenCode PTY filtering for Kitty keyboard-mode permission prompts remains, because that is not the command-submit path.
-- Kept owned PTY injection as `pty_cr`; the change is for tmux-bound live pane submit, not the supervisor child-PTY write boundary.
-- Updated visible-draft recovery to be profile-driven, so a timed-out visible draft gets exactly one bare `Enter` retry for OpenCode too.
-- Updated specs/docs/tests and the static ops-report example so the only tmux live-pane submit mode is `tmux_literal_text_enter_key`.
+❯ - Added one centralized `TmuxSubmitProfile` in `agent-doc-orchestration/src/sessions.rs`; `tmux_submit_mode_for_harness`, `tmux_submit_transform_for_harness`, and `tmux_submit_key_for_harness` delegate to it.
+❯ - Routed JB `Run Agent Doc`, JB `Clear Session Context`, queue dispatch, auto-trigger inject, and supervisor-owned tmux inject logging through that shared profile.
+❯ - Removed OpenCode as a default Kitty Return submit special case. The separate OpenCode PTY filtering for Kitty keyboard-mode permission prompts remains, because that is not the command-submit path.
+❯ - Kept owned PTY injection as `pty_cr`; the change is for tmux-bound live pane submit, not the supervisor child-PTY write boundary.
+❯ - Updated visible-draft recovery to be profile-driven, so a timed-out visible draft gets exactly one bare `Enter` retry for OpenCode too.
+❯ - Updated specs/docs/tests and the static ops-report example so the only tmux live-pane submit mode is `tmux_literal_text_enter_key`.
 
 I did not add `lazily-rs` here. The duplication was removed at the policy boundary instead: a small Rust enum/function is enough, avoids adding another dependency, and keeps submit semantics greppable from one place. If we later need generated dispatch tables for more harness behavior, that is a separate design pass.
 
 Verification:
-- `cargo test submit` passed.
-- `cargo test queue_dispatch` passed.
-- `cargo test -p agent-doc-orchestration submit` passed.
-- `make check` passed: clippy, 4542 nextest tests, doctests, and the ignored medium sim-world budget test.
-- `cargo build` passed.
-- `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/agent-doc`; `agent-doc --version` reports `0.34.1`.
-- Latest `CI` on `main` was green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`, completed successfully on 2026-06-16.
+❯ - `cargo test submit` passed.
+❯ - `cargo test queue_dispatch` passed.
+❯ - `cargo test -p agent-doc-orchestration submit` passed.
+❯ - `make check` passed: clippy, 4542 nextest tests, doctests, and the ignored medium sim-world budget test.
+❯ - `cargo build` passed.
+❯ - `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/agent-doc`; `agent-doc --version` reports `0.34.1`.
+❯ - Latest `CI` on `main` was green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`, completed successfully on 2026-06-16.
 
 Changed source paths include `agent-doc-orchestration/src/sessions.rs`, `agent-doc-orchestration/src/route/dispatch.rs`, `agent-doc-orchestration/src/flow/routed_reopen.rs`, `agent-doc-orchestration/src/start/idle_watch.rs`, `agent-doc-orchestration/src/start.rs`, `agent-doc-orchestration/src/start/supervisor_io.rs`, `src/queue_dispatch.rs`, `src/session_actor_cmd.rs`, `src/orchestrate/dispatch.rs`, `src/sim_world.rs`, `src/ops_report.rs`, `README.md`, and the tmux/session-routing supervisor specs.
 
 Source commit/push status: not done. The `src/agent-doc` checkout already had broad unrelated dirty changes before this turn, and `cargo fmt` exposed large pre-existing formatting churn across many files. Staging whole files would include unrelated work, and a partial source commit built on the dirty tree would not be a trustworthy standalone commit. The safe next step is to isolate this patch on a clean branch or explicitly approve staging the broader dirty set.
 
 JetBrains plugin status: no JetBrains plugin source changed, so no JB plugin update is required for this fix. The installed `agent-doc` CLI binary was updated. The route-owned supervisor for this document was still running an older binary during preflight, so it should be restarted to use the new submit policy.
-<!-- agent:boundary:a05de7d4 -->
+<!-- agent:boundary:c7c85092 -->
 <!-- /agent:exchange -->
 
 ## Queue

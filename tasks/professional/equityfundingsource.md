@@ -41,14 +41,37 @@ Compacted content:
 No new changes were detected in `tasks/professional/equityfundingsource.md`.
 
 Preflight reports the previous cycle is already committed, the queue is inactive, and `queue_continuation_required=false`, so there is no agent-doc work to run this cycle.
-<!-- agent:boundary:764c8643 -->
+
+### Re: copy-button layout + deploy — gpt-5
+
+Implemented the copy-button layout fix and deployed it.
+
+Changed `src/equityfundingsource-dev` so copyable full-line fields keep the copy button pinned to the right edge with no-wrap/ellipsized field text, while compact inline TMO metadata keeps the copy icon inline with the value. Covered the TMO card address/name rows, shared `CopyValue`, admin borrower info copy-value overrides, and the dense pipeline PRD/test expectations.
+
+Verification:
+- `bun test tests/tmo-loan-details-density.test.ts tests/boolean-checkbox-fields.test.ts` passed.
+- `make check` passed: 739 tests, app build, and Worker build.
+- Remote D1 migrations list: no migrations to apply before and after deploy.
+- Live smoke checks: `/` returned `200`; `/portal-admin/loans/example` returned `303` behind Access.
+
+Committed and pushed:
+- EFS submodule: `42e08ff` (`fix(admin): keep copy field controls inline (#pipeline-dialog-density)`) pushed to `btakita/equityfundingsource-dev:main`.
+- Superproject pointer: `227e708fa` (`chore(efs): advance copy field layout deploy`) pushed to `btakita/agent-loop:main`.
+
+Deployed through `make deploy`; Worker version ID: `b896bea9-ef6f-42c3-993a-e6843f4efca9`.
+
+GitHub Actions note: neither the EFS submodule nor the root repo has a workflow named `CI`. The root repo's available `Agent Doc` workflow was queued for the superproject push as run `27595064029`.
+<!-- agent:boundary:badd1e99 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+All full line fields with a copy button should make the copy button right-aligned and the field no-wrap. ![img_24.png](img_24.png)
+Inline fields with a copy button should make the copy button inline as well.
+deploy
 <!-- /agent:queue -->
 
 ## Backlog

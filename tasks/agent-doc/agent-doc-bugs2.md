@@ -37,13 +37,49 @@ queue: start
 Compacted content:
 ❯ - Archived 4 response topic(s): JB Run Agent Doc Codex boot timeout; JB Run Agent Doc Logging; Queue Repair Closeout; 1 more
 ❯ - Prior summary/context: prior compacted content: Archived 39 response topic(s): #compactdrift-agent; Compact Closeout Guard Follow-Up; Restor...
-<!-- agent:boundary:764dd574 -->
+
+### Re: tmux submit profile and OpenCode Enter — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Both JB `Clear Session Context` and JB `Run Agent Doc` send a CR instead of submitting ![img_24.png](img_24.png). There is also an extra prompt that bleeds into the input ![img_25.png](img_25.png). Why is this so difficult to fix? Can we design a way to detect what is sent and how it is processed by the agent? Fix root causes. #simworld
+
+
+Fixed the tmux-bound submit root cause in `src/agent-doc`: the default live-pane path no longer sends a raw CR, and OpenCode no longer has a Kitty Return submit profile.
+
+Answer to the direct tmux question: yes, the submit path now uses the terminal-neutral shape you tested, but with literal text protection: `tmux send-keys -t <pane> -l <text>; tmux send-keys -t <pane> Enter`. The split `-l` text + named `Enter` avoids tmux interpreting prompt text as keys while still delivering the real Enter key event. Codex, Claude, OpenCode, and unknown/default harnesses all resolve through that same profile now.
+
+What changed:
+- Added one centralized `TmuxSubmitProfile` in `agent-doc-orchestration/src/sessions.rs`; `tmux_submit_mode_for_harness`, `tmux_submit_transform_for_harness`, and `tmux_submit_key_for_harness` delegate to it.
+- Routed JB `Run Agent Doc`, JB `Clear Session Context`, queue dispatch, auto-trigger inject, and supervisor-owned tmux inject logging through that shared profile.
+- Removed OpenCode as a default Kitty Return submit special case. The separate OpenCode PTY filtering for Kitty keyboard-mode permission prompts remains, because that is not the command-submit path.
+- Kept owned PTY injection as `pty_cr`; the change is for tmux-bound live pane submit, not the supervisor child-PTY write boundary.
+- Updated visible-draft recovery to be profile-driven, so a timed-out visible draft gets exactly one bare `Enter` retry for OpenCode too.
+- Updated specs/docs/tests and the static ops-report example so the only tmux live-pane submit mode is `tmux_literal_text_enter_key`.
+
+I did not add `lazily-rs` here. The duplication was removed at the policy boundary instead: a small Rust enum/function is enough, avoids adding another dependency, and keeps submit semantics greppable from one place. If we later need generated dispatch tables for more harness behavior, that is a separate design pass.
+
+Verification:
+- `cargo test submit` passed.
+- `cargo test queue_dispatch` passed.
+- `cargo test -p agent-doc-orchestration submit` passed.
+- `make check` passed: clippy, 4542 nextest tests, doctests, and the ignored medium sim-world budget test.
+- `cargo build` passed.
+- `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/agent-doc`; `agent-doc --version` reports `0.34.1`.
+- Latest `CI` on `main` was green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`, completed successfully on 2026-06-16.
+
+Changed source paths include `agent-doc-orchestration/src/sessions.rs`, `agent-doc-orchestration/src/route/dispatch.rs`, `agent-doc-orchestration/src/flow/routed_reopen.rs`, `agent-doc-orchestration/src/start/idle_watch.rs`, `agent-doc-orchestration/src/start.rs`, `agent-doc-orchestration/src/start/supervisor_io.rs`, `src/queue_dispatch.rs`, `src/session_actor_cmd.rs`, `src/orchestrate/dispatch.rs`, `src/sim_world.rs`, `src/ops_report.rs`, `README.md`, and the tmux/session-routing supervisor specs.
+
+Source commit/push status: not done. The `src/agent-doc` checkout already had broad unrelated dirty changes before this turn, and `cargo fmt` exposed large pre-existing formatting churn across many files. Staging whole files would include unrelated work, and a partial source commit built on the dirty tree would not be a trustworthy standalone commit. The safe next step is to isolate this patch on a clean branch or explicitly approve staging the broader dirty set.
+
+JetBrains plugin status: no JetBrains plugin source changed, so no JB plugin update is required for this fix. The installed `agent-doc` CLI binary was updated. The route-owned supervisor for this document was still running an older binary during preflight, so it should be restarted to use the new submit policy.
+<!-- agent:boundary:a05de7d4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: Both JB `Clear Session Context` and JB `Run Agent Doc` send a CR instead of submitting ![img_24.png](img_24.png). There is also an extra prompt that bleeds into the input ![img_25.png](img_25.png). Why is this so difficult to fix? Can we design a way to detect what is sent and how it is processed by the agent? Fix root causes. #simworld
+- ~~:pushpin: Both JB `Clear Session Context` and JB `Run Agent Doc` send a CR instead of submitting ![img_24.png](img_24.png). There is also an extra prompt that bleeds into the input ![img_25.png](img_25.png). Why is this so difficult to fix? Can we design a way to detect what is sent and how it is processed by the agent? Fix root causes. #simworld~~
 - :pushpin: Why are we ever using `tmux_literal_cr` and not `tmux_literal_text_enter_key`? Why do we have so much duplicate logic with the submit keys all over the codebase? Each harness' tmux_literal should be defined in a single place. No tmux_literal values spread all over the place. Why tmux_literal_kitty_return for opencode? Is tmux_literal_text_enter_key not working? #simworld
 - :pushpin: Does agent-doc use `tmux send-keys -t target "command" Enter` to submit a prompt? Would this work with opencode? I don't want to hardcode a kitty return b/c kitty is specific to my environment...not universal. I'm concerned that it wont work on other terminals. I tried `tmux send-keys -t .1 "Hello" Enter` on opencode and it worked.
 - :pushpin: Can we use lazily-rs to avoid duplicate logic with the submit keys all over the codebase?

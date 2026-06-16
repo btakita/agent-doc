@@ -79,7 +79,13 @@ The missing proof is around the manual JB route attempt: `RunAgentDocAttemptLedg
 Changed paths this cycle: session document only via `agent-doc finalize` response/backlog mutation. Source inspected but not edited: `agent-doc-orchestration/src/input_diag.rs`, `agent-doc-orchestration/src/route.rs`, `agent-doc-orchestration/src/route/dispatch.rs`, `agent-doc-orchestration/src/route/dispatch_only.rs`, `agent-doc-orchestration/src/project_controller/rpc.rs`, `agent-doc-orchestration/src/start.rs`, `agent-doc-orchestration/src/start/idle_watch.rs`, and JetBrains `SubmitAction.kt`, `TerminalUtil.kt`, `RunAgentDocAttemptLedger.kt`.
 
 Verification: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, root/submodule `tsift status`, targeted `rg`/source inspection, and live `.agent-doc/logs` / `.agent-doc/state/editor-route-errors` inspection. No tests/build were run because I did not change source code. Push: not performed; no source commit was made.
-<!-- agent:boundary:7a8bff3a -->
+
+### Re: Queue Repair Closeout — gpt-5
+
+Closed the recovery bookkeeping from the previous response. The earlier closeout answered the JB logging question and added `#jbrunlogproof`; session-check then caught an unintended strike of `#lazilyqrestore`, so I restored that queue head and left the new `do [#jbrunlogproof]` implementation item queued rather than marking it done in this diagnostic-only turn.
+
+Changed paths this repair: session document only. Verification: `agent-doc preflight`, `agent-doc plan`, queue/exchange reads, and session-check diagnostics during recovery. No source tests/build were run because this repair did not change source code.
+<!-- agent:boundary:131907a0 -->
 <!-- /agent:exchange -->
 
 ## Queue

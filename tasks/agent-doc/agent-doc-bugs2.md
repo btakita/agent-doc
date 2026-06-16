@@ -344,7 +344,30 @@ Verification:
 - `make check`
 - `make install`
 - GitHub CI `27607675117` passed with `make check` and `make tmux-ci`
-<!-- agent:boundary:31ac3032 -->
+
+### Re: do [#archfirstgate] — gpt-5
+
+Applied `runbooks/architecture-first.md` as the closeout gate for the completed closeout recovery state-machine batch.
+
+Architecture-first gate proof:
+
+- Invariant: closeout recovery has one typed policy boundary; route/JB, repair, capture, write, and session-check code may gather evidence or apply returned effects, but they must not independently choose recovery by parsing low-level closeout errors.
+- Policy owner: `src/agent-doc/agent-doc-orchestration/src/flow/closeout.rs`, specifically `CloseoutRecoveryState`, `CloseoutRecoveryDecision`, `gather_closeout_recovery_evidence`, and `apply_closeout_recovery_mutation`.
+- Transition rows covered by tests: all 11 `CloseoutRecoveryState::ALL` rows: `clean`, `open_cycle`, `missing_response_body`, `direct_response_patchback`, `escaped_template_patch`, `boundary_only_drift`, `nested_parent_pointer_stale`, `open_empty_preflight`, `queue_metadata_drift`, `sidecar_visible_drift`, and `unsafe_user_content_drift`. The tests also cover prompt-context priority for every row and stale-capture supersession proof for `missing_response_body` / `unsafe_user_content_drift`.
+- Test layers: pure decision-table coverage in `recovery_decision_maps_states_to_typed_outcomes`; property-style generated coverage in `closeout_recovery_decision_table_preserves_priority_and_source_state`; SimWorld coverage in `closeout_recovery_transition_scenarios_cover_simworld_inputs` for queue edits during write fragmentation, stale compaction/full-content source rejection, stale/sidecar ACK proof, already-applied ACK recovery, and JB `Run Agent Doc` prompt-context queuing during open closeout.
+- Edited surfaces and sufficiency: the state-machine batch put policy/evidence/mutation ownership in `flow/closeout.rs`, kept route/JB consumption at the typed decision boundary, localized IPC degraded evidence behind the write adapter, routed capture/repair recovery effects through the mutation primitive, and documented the contract in `VERSIONS.md` plus `specs/07-closeout-commands.md`. No additional source edits were needed for this gate cycle.
+- Out of scope / operator-verify: live IDE and stale-supervisor proofs remain in the existing operator-verify items (`#cwsp`, `#fcc0-live-verify`, and related live proof heads). Lean/TLA formalization was not introduced; the Rust enum/table/property/SimWorld coverage is the current gate.
+
+Proof for this cycle:
+
+- Changed paths: session document only.
+- Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift status`, `tsift status --fix`, targeted `rg` searches, and targeted source/spec/test reads with `sed`.
+- Verification: no new source, test, build, or instruction-surface edits were made in this cycle. The gated state-machine batch is already backed by local `make check`, `make install`, and passing GitHub CI run `27607675117` from `#smtransitiontests`.
+- Confidence: high.
+- Escalation: none.
+
+The repeated `/clear` lines are terminal builtins, not additional repo work for this queue item. I kept draining the active queue head and closed `#archfirstgate`.
+<!-- agent:boundary:a4481cc7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -376,7 +399,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - ~~do [#smrouteconsume]~~
 - ~~do [#smrecoverymutate]~~
 - ~~do [#smtransitiontests]~~
-- do [#archfirstgate]
+- ~~do [#archfirstgate]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -416,7 +439,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#qt32] [operator-verify] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.
-- [ ] [#archfirstgate] :inbox_tray: Apply runbooks/architecture-first.md as the closeout gate for agent-doc state-machine refactors: each implementation must state invariant, policy owner, transition rows covered by tests, edited surfaces, and explicit out-of-scope/operator-verify work.
 <!-- /agent:backlog -->
 
 ## Review

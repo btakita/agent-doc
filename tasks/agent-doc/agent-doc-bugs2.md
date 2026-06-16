@@ -82,6 +82,11 @@ Remaining queue heads are operator-verify/live-proof items, so this cycle should
 
 > **Queue prompt:**
 >
+> How can we strengthen architectural primitives so agentic work is easier to reason about and work can be done without regressions?
+
+
+> **Queue prompt:**
+>
 > How can we use binary logic to resolve "Run Agent Doc stale queue pause" issues and other conflict issues? Are we creating too many conflicts?
 
 
@@ -112,7 +117,22 @@ Proof for this cycle:
 - Verification: no source/build/test surfaces changed; this was a document answer only.
 - Confidence: medium-high. The stale-pause source path was checked in the prior head; this response is the architectural synthesis, not a new code audit.
 - Escalation: none.
-<!-- agent:boundary:cb3813b2 -->
+- Confidence: high for the decomposition; medium until the primitives are implemented and covered by transition tests.
+- Verification: no source/build/test surfaces changed; this was a document/backlog architecture response.
+- Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read --component exchange`, `agent-doc read --component backlog`, `agent-doc finalize`.
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` via finalize, including five backlog additions.
+- `#archuistates` — typed UI outcome vocabulary.
+- `#archsimworldmatrix` — transition-table SimWorld/property coverage.
+- `#archcomponentmerge` — component-scoped merge semantics.
+- `#archproofledger` — durable operation proof ledger.
+- `#archstatekernel` — pure typed workflow state kernel.
+6. **Regression safety comes from transition tables.** Each new architecture change should add rows to SimWorld/property tests: evidence in, decision out, mutation/proof required. That is the bar that keeps “fix one live bug, regress another closeout path” from continuing.
+5. **The UI only renders typed outcomes.** JetBrains, Codex, and OpenCode should not expose raw route/write internals as errors. They should map the binary outcome to a small vocabulary: queued behind owner, recovered and retried, deferred for operator proof, no drainable work, real component conflict, or blocked with exact unblocker.
+4. **Every transition writes proof.** A queue head is not “gone”; it is `consumed` with response proof, `done`, `operator_deferred`, `user_removed`, `superseded`, or still open. A stale supervisor is not a conflict; it is `recycled`, `retried`, or `blocked` with exact evidence. The proof ledger should make session-check and UI messages deterministic.
+3. **Mutations are narrow and component-scoped.** Queue consume, exchange append, backlog/done mutation, status replacement, review resolution, and editor CRDT writeback are separate managed components with explicit merge rules. Most regressions come from treating the markdown file as one blob when the workflow already knows which component it owns.
+2. **A pure decision kernel owns policy.** It returns outcomes like `AppendResponse`, `ReplayCapturedResponse`, `RetireStaleCapture`, `RetryOnCurrentGeneration`, `DeferOperatorOnlyQueue`, `RecoverViaFileIpc`, `MergeIndependentComponents`, or `BlockRealComponentConflict`. No route edge should independently parse a captured-response error string and invent its own recovery.
+1. **Evidence is gathered once.** Current doc hash, snapshot hash, live editor hash, active cycle phase, queue head id/hash, actor generation, supervisor freshness, IPC transport state, and owner/busy state become a typed `Evidence` record.
+<!-- agent:boundary:acc27122 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -121,7 +141,7 @@ Proof for this cycle:
 - ~~If we orchestrate a team of subagents with different roles, will the output quality improve on this project?~~
 - ~~Look at bugs from recent sessions from the JB, agent-doc, and Codex session logs. What are #next-steps to fix? How can we improve the architecture to fix these workflow issues? Are the workflows properly defined?~~
 - ~~How can we use binary logic to resolve "Run Agent Doc stale queue pause" issues and other conflict issues? Are we creating too many conflicts?~~
-- How can we strengthen architectural primitives so agentic work is easier to reason about and work can be done without regressions?
+- ~~How can we strengthen architectural primitives so agentic work is easier to reason about and work can be done without regressions?~~
 ---
 - ~~do [#lazilyqrestore]~~
 - do [#recyclerestart-verify]
@@ -161,6 +181,11 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#archstatekernel] Implement a pure typed workflow state kernel for agent-doc route/queue/closeout/editor-write decisions: input evidence -> decision enum -> allowed mutation -> required proof. Move stale-supervisor, queue-drainability, captured-response, and live-buffer decisions behind this boundary before adding more route-edge guards.
+- [ ] [#archproofledger] Add an append-only operation proof ledger for queue heads, response captures, patch writes, actor generations, and terminal proofs. Every consumed/deferred/retried/superseded head should have one durable proof row keyed by operation id and content hash.
+- [ ] [#archcomponentmerge] Define and enforce managed-component merge semantics: queue, exchange, backlog, status, review, and done archive each have separate bases and conflict rules; only same-component incompatible edits become user-visible conflicts.
+- [ ] [#archsimworldmatrix] Add SimWorld/property transition-table coverage for the architecture primitives: stale supervisor recycle, queue edit during closeout, degraded/file-IPC fallback, live buffer drift, compact/replay, and operator-only/no-drainable queue outcomes.
+- [ ] [#archuistates] Replace raw route/write conflict strings in JB/Codex/OpenCode surfaces with a small typed outcome vocabulary: queued behind owner, recovered and retried, deferred for operator proof, no drainable work, real component conflict, and blocked with exact unblocker.
 - [ ] [#cwsp] [operator-verify] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38 and recycling the live supervisor onto that build, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

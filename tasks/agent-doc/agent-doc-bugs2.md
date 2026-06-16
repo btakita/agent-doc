@@ -223,6 +223,21 @@ resync: pruned 3 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3649 blocked_head_bytes=132 blocked_head_sha256=ae121dad65e5b00a6c504db706985aee4e8d6ed00988ba4244f51196952739d7 trigger_bytes=44 trigger_sha256=a55a6572fd4dc952bc476bd516d3a7801b1e63409715f063b4b7351ea112ade5
 ```
 ---
+- do [#lazilyqrestore]
+- do [#recyclerestart-verify]
+- do [#rtwbcast-verify]
+- do [#c2b6]
+- do [#1j8q]
+- do [#anw0verify]
+- do [#qflood2]
+- do [#qt32]
+- do [#fcc0-live-verify]
+- do [#smcloseoutdecision]
+- do [#smcloseoutevidence]
+- do [#smrouteconsume]
+- do [#smrecoverymutate]
+- do [#smtransitiontests]
+- do [#archfirstgate]
 <!-- /agent:queue -->
 ###
 <!--

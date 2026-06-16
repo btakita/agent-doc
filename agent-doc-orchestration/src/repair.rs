@@ -98,7 +98,7 @@ fn capture_is_repairable(capture: &crate::capture::CaptureRecord) -> bool {
     )
 }
 
-fn first_response_heading_line(response: &str) -> Option<&str> {
+pub(crate) fn first_response_heading_line(response: &str) -> Option<&str> {
     response
         .lines()
         .map(str::trim)
@@ -1486,7 +1486,7 @@ fn retire_superseded_captured_only_orphan_if_drifted(
 /// True when the live document's `agent:exchange` already contains a `### Re:`
 /// response heading whose normalized topic matches `heading` — i.e. the prompt
 /// the orphan answered is already answered by a landed response.
-fn live_exchange_answers_heading(doc_content: &str, heading: &str) -> bool {
+pub(crate) fn live_exchange_answers_heading(doc_content: &str, heading: &str) -> bool {
     let target = normalize_replay_topic(heading);
     if target.is_empty() {
         return false;

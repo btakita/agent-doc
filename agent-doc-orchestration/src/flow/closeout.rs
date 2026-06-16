@@ -683,12 +683,233 @@ impl CloseoutRecoveryDecision {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloseoutRecoveryEvidence {
+    pub visible_markdown_hash: String,
+    pub snapshot_hash: Option<String>,
+    pub active_cycle: Option<CloseoutCycleEvidence>,
+    pub active_capture: Option<CloseoutCaptureEvidence>,
+    pub response_body: CloseoutResponseBodyEvidence,
+    pub queue_only_drift: Option<CloseoutQueueOnlyDriftEvidence>,
+    pub editor_ipc: CloseoutEditorIpcEvidence,
+    pub binary_freshness: CloseoutBinaryFreshnessEvidence,
+}
+
+impl CloseoutRecoveryEvidence {
+    pub fn stale_capture_supersession_proof(&self) -> Option<&str> {
+        match &self.response_body {
+            CloseoutResponseBodyEvidence::SupersededByVisibleExchange { proof, .. } => {
+                Some(proof.as_str())
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloseoutCycleEvidence {
+    pub cycle_id: String,
+    pub phase: crate::cycle_state::CyclePhase,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloseoutCaptureEvidence {
+    pub capture_id: String,
+    pub cycle_id: String,
+    pub state: crate::capture::CaptureState,
+    pub response_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloseoutResponseBodyEvidence {
+    NoActiveCapture,
+    EmptyCapture { capture_id: String },
+    PresentInVisible { capture_id: String },
+    SupersededByVisibleExchange { capture_id: String, proof: String },
+    MissingFromVisible { capture_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloseoutQueueOnlyDriftEvidence {
+    pub file_hash_mismatch: bool,
+    pub snapshot_hash_mismatch: bool,
+    pub proven_queue_only: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloseoutEditorIpcEvidence {
+    NoLiveBuffer {
+        socket_degraded: bool,
+    },
+    FreshLiveBuffer {
+        live_buffer_count: usize,
+        socket_degraded: bool,
+    },
+    DivergedLiveBuffer {
+        live_buffer_count: usize,
+        editor_id: Option<String>,
+        live_len: usize,
+        live_hash: String,
+        socket_degraded: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloseoutBinaryFreshnessEvidence {
+    NoStaleWarning,
+    Stale { warning: String },
+}
+
+pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecoveryEvidence> {
+    let visible = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "failed to read {} for closeout recovery evidence",
+            file.display()
+        )
+    })?;
+    let visible_markdown_hash = crate::capture::replay_file_hash(&visible);
+    let snapshot = crate::snapshot::load(file)?;
+    let snapshot_hash = snapshot.as_deref().map(crate::ops_log::content_hash);
+    let cycle = crate::cycle_state::load(file)?;
+    let active_cycle = cycle.as_ref().map(|state| CloseoutCycleEvidence {
+        cycle_id: state.cycle_id.clone(),
+        phase: state.phase,
+    });
+    let capture = crate::capture::load_active(file)?;
+    let active_capture = capture.as_ref().map(|capture| CloseoutCaptureEvidence {
+        capture_id: capture.capture_id.clone(),
+        cycle_id: capture.cycle_id.clone(),
+        state: capture.state.clone(),
+        response_sha256: capture.response_sha256.clone(),
+    });
+    let response_body = closeout_response_body_evidence(&visible, capture.as_ref());
+    let queue_only_drift = closeout_queue_only_drift_evidence(
+        &visible,
+        snapshot.as_deref(),
+        visible_markdown_hash.as_str(),
+        snapshot_hash.as_deref(),
+        capture.as_ref(),
+    )?;
+    let editor_ipc = closeout_editor_ipc_evidence(file, &visible);
+    let binary_freshness = match crate::project_controller::stale_supervisor_warning_for_doc(file) {
+        Some(warning) => CloseoutBinaryFreshnessEvidence::Stale { warning },
+        None => CloseoutBinaryFreshnessEvidence::NoStaleWarning,
+    };
+
+    Ok(CloseoutRecoveryEvidence {
+        visible_markdown_hash,
+        snapshot_hash,
+        active_cycle,
+        active_capture,
+        response_body,
+        queue_only_drift,
+        editor_ipc,
+        binary_freshness,
+    })
+}
+
+fn closeout_response_body_evidence(
+    visible: &str,
+    capture: Option<&crate::capture::CaptureRecord>,
+) -> CloseoutResponseBodyEvidence {
+    let Some(capture) = capture else {
+        return CloseoutResponseBodyEvidence::NoActiveCapture;
+    };
+    if capture.response_body.trim().is_empty() {
+        return CloseoutResponseBodyEvidence::EmptyCapture {
+            capture_id: capture.capture_id.clone(),
+        };
+    }
+    if crate::repair::response_already_applied(visible, &capture.response_body)
+        || crate::repair::response_already_applied_after_prefix_strip(
+            visible,
+            &capture.response_body,
+        )
+    {
+        return CloseoutResponseBodyEvidence::PresentInVisible {
+            capture_id: capture.capture_id.clone(),
+        };
+    }
+    if let Some(heading) = crate::repair::first_response_heading_line(&capture.response_body)
+        && crate::repair::live_exchange_answers_heading(visible, heading)
+    {
+        return CloseoutResponseBodyEvidence::SupersededByVisibleExchange {
+            capture_id: capture.capture_id.clone(),
+            proof: format!("response heading {heading:?} is already answered in live exchange"),
+        };
+    }
+    CloseoutResponseBodyEvidence::MissingFromVisible {
+        capture_id: capture.capture_id.clone(),
+    }
+}
+
+fn closeout_queue_only_drift_evidence(
+    visible: &str,
+    snapshot: Option<&str>,
+    visible_hash: &str,
+    snapshot_hash: Option<&str>,
+    capture: Option<&crate::capture::CaptureRecord>,
+) -> Result<Option<CloseoutQueueOnlyDriftEvidence>> {
+    let Some(capture) = capture else {
+        return Ok(None);
+    };
+    let file_hash_mismatch = capture.file_hash.as_deref() != Some(visible_hash);
+    let snapshot_hash_mismatch = capture.snapshot_hash.as_deref() != snapshot_hash;
+    let proven_queue_only = file_hash_mismatch
+        && !snapshot_hash_mismatch
+        && crate::capture::live_drift_is_queue_only_against_snapshot(visible, snapshot)?;
+    Ok(Some(CloseoutQueueOnlyDriftEvidence {
+        file_hash_mismatch,
+        snapshot_hash_mismatch,
+        proven_queue_only,
+    }))
+}
+
+fn closeout_editor_ipc_evidence(file: &Path, visible: &str) -> CloseoutEditorIpcEvidence {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let file_key = canonical.to_string_lossy().to_string();
+    let live_buffers = crate::debounce::live_buffer_snapshots(&file_key);
+    let socket_degraded = crate::snapshot::find_project_root(&canonical)
+        .and_then(|root| crate::write::ipc_direct_disk_degraded_for_file(&root, &canonical).ok())
+        .unwrap_or(false);
+    if let Some(diverged) = crate::debounce::live_buffer_diverges_from_content(&file_key, visible) {
+        return CloseoutEditorIpcEvidence::DivergedLiveBuffer {
+            live_buffer_count: live_buffers.len().max(1),
+            editor_id: diverged.editor_id,
+            live_len: diverged.len,
+            live_hash: diverged.hash,
+            socket_degraded,
+        };
+    }
+    if live_buffers.is_empty() {
+        CloseoutEditorIpcEvidence::NoLiveBuffer { socket_degraded }
+    } else {
+        CloseoutEditorIpcEvidence::FreshLiveBuffer {
+            live_buffer_count: live_buffers.len(),
+            socket_degraded,
+        }
+    }
+}
+
 pub fn decide_closeout_recovery(
     file: &Path,
     input: CloseoutRecoveryDecisionInput<'_>,
 ) -> CloseoutRecoveryDecision {
     let state = classify_closeout_recovery_state(file);
-    closeout_recovery_decision_from_state(file, state, input)
+    let evidence = gather_closeout_recovery_evidence(file).ok();
+    let stale_capture_supersession_proof = input.stale_capture_supersession_proof.or_else(|| {
+        evidence
+            .as_ref()
+            .and_then(CloseoutRecoveryEvidence::stale_capture_supersession_proof)
+    });
+    closeout_recovery_decision_from_state(
+        file,
+        state,
+        CloseoutRecoveryDecisionInput {
+            stale_capture_supersession_proof,
+            ..input
+        },
+    )
 }
 
 pub fn closeout_recovery_decision_from_state(
@@ -1588,6 +1809,142 @@ mod tests {
             }
             other => panic!("missing response body should block: {other:?}"),
         }
+    }
+
+    #[test]
+    fn recovery_evidence_gathers_hash_cycle_capture_and_fresh_editor_state() {
+        let base = "---\nsession: test\n---\n\n## Exchange\n\nUser prompt\n";
+        let response = "### Re: user prompt — gpt-5\n\nDone.\n";
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let capture = crate::capture::capture_response(&doc, response).unwrap();
+        let visible = format!("{base}\n{response}");
+        std::fs::write(&doc, &visible).unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        crate::debounce::record_live_buffer_digest_content(
+            canonical.to_string_lossy().as_ref(),
+            &visible,
+        )
+        .unwrap();
+
+        let evidence = gather_closeout_recovery_evidence(&doc).unwrap();
+        assert_eq!(
+            evidence.visible_markdown_hash,
+            crate::capture::replay_file_hash(&visible)
+        );
+        assert_eq!(
+            evidence.snapshot_hash.as_deref(),
+            Some(crate::ops_log::content_hash(base).as_str())
+        );
+        assert_eq!(
+            evidence.active_cycle,
+            Some(CloseoutCycleEvidence {
+                cycle_id: capture.cycle_id.clone(),
+                phase: crate::cycle_state::CyclePhase::ResponseCaptured,
+            })
+        );
+        assert_eq!(
+            evidence.active_capture,
+            Some(CloseoutCaptureEvidence {
+                capture_id: capture.capture_id.clone(),
+                cycle_id: capture.cycle_id.clone(),
+                state: crate::capture::CaptureState::Captured,
+                response_sha256: capture.response_sha256.clone(),
+            })
+        );
+        assert_eq!(
+            evidence.response_body,
+            CloseoutResponseBodyEvidence::PresentInVisible {
+                capture_id: capture.capture_id.clone(),
+            }
+        );
+        assert_eq!(
+            evidence.editor_ipc,
+            CloseoutEditorIpcEvidence::FreshLiveBuffer {
+                live_buffer_count: 1,
+                socket_degraded: false,
+            }
+        );
+        assert_eq!(
+            evidence.binary_freshness,
+            CloseoutBinaryFreshnessEvidence::NoStaleWarning
+        );
+    }
+
+    #[test]
+    fn recovery_evidence_proves_queue_only_drift() {
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "user prompt\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- first head\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::capture::capture_response(
+            &doc,
+            "<!-- patch:exchange -->\n### Re: first head — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
+        )
+        .unwrap();
+        let current = base.replace(
+            "- first head\n",
+            "- first head\n- user typed a new queue note during closeout\n",
+        );
+        std::fs::write(&doc, current).unwrap();
+
+        let evidence = gather_closeout_recovery_evidence(&doc).unwrap();
+        assert_eq!(
+            evidence.queue_only_drift,
+            Some(CloseoutQueueOnlyDriftEvidence {
+                file_hash_mismatch: true,
+                snapshot_hash_mismatch: false,
+                proven_queue_only: true,
+            })
+        );
+    }
+
+    #[test]
+    fn recovery_evidence_reports_superseded_capture_heading() {
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier — gpt-5\n\nOlder.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let capture = crate::capture::capture_response(
+            &doc,
+            "### Re: repeated prompt — gpt-5\n\nCaptured but stale.\n",
+        )
+        .unwrap();
+        let visible = base.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: repeated prompt — gpt-5\n\nA later answer already landed.\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, visible).unwrap();
+
+        let evidence = gather_closeout_recovery_evidence(&doc).unwrap();
+        match &evidence.response_body {
+            CloseoutResponseBodyEvidence::SupersededByVisibleExchange { capture_id, proof } => {
+                assert_eq!(capture_id, &capture.capture_id);
+                assert!(
+                    proof.contains("repeated prompt"),
+                    "proof should name the answered heading: {proof}"
+                );
+            }
+            other => panic!("expected supersession proof, got {other:?}"),
+        }
+        assert!(
+            evidence.stale_capture_supersession_proof().is_some(),
+            "decision input should be able to borrow the supersession proof"
+        );
     }
 
     #[test]

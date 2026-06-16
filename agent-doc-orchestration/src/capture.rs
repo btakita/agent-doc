@@ -449,7 +449,7 @@ pub fn latest_committed(file: &Path) -> Result<Option<CaptureRecord>> {
 /// a terminal phase), so a raw hash would read that managed write as document
 /// drift and fail the replay baseline. Stripping it keeps replay validation
 /// invariant to the mirror, matching the diff layer.
-fn replay_file_hash(content: &str) -> String {
+pub(crate) fn replay_file_hash(content: &str) -> String {
     crate::ops_log::content_hash(&agent_doc_core::frontmatter::strip_pipeline_block_lines(
         content,
     ))
@@ -582,7 +582,7 @@ fn response_body_intact_in_current(
     ))
 }
 
-fn live_drift_is_queue_only_against_snapshot(
+pub(crate) fn live_drift_is_queue_only_against_snapshot(
     current_file: &str,
     current_snapshot: Option<&str>,
 ) -> Result<bool> {

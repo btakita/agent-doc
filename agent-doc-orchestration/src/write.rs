@@ -2409,6 +2409,10 @@ pub fn resolve_ipc_project_root_pub(canonical: &Path) -> std::path::PathBuf {
     resolve_ipc_project_root(canonical)
 }
 
+pub(crate) fn ipc_direct_disk_degraded_for_file(project_root: &Path, file: &Path) -> Result<bool> {
+    ipc::ipc_direct_disk_degraded(project_root, file)
+}
+
 /// Helper: extract boundary_id for a named component from the document.
 ///
 /// Searches for `<!-- agent:boundary:UUID -->` inside the component's content,

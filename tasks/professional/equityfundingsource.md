@@ -1,5 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
+resume: 019ed201-3acf-79e2-8b39-876609f3c6b3
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -189,6 +190,9 @@ Changed paths: session document only. Verification: pending `session-check` afte
 Parked `#ghl-stage-bridge` in the icebox instead of the priority backlog so the recommendation is preserved without starting an implementation queue item.
 
 Changed paths: session document only. Verification: pending `session-check` after this repair write. Escalation: none. Confidence: high.
+Added the clean parked GHL integration plan to `tasks/professional/equityfundingsource.md` and committed it as `0304d828c`. The queue item is consumed, and no active backlog item was added; the plan stays parked against existing icebox items `#z3kx` and `#ghl-stage-bridge`.
+
+Verification: `agent-doc finalize` completed and `session-check` passed. No code/tests were run because this was plan-only. Preflight still reports existing warnings about a stale local `agent-doc` install and possible semantic matches in older review items; I did not change those.
 
 ### Re: GHL integration plan — gpt-5
 
@@ -211,7 +215,7 @@ Parking: I would leave this in the icebox under the existing GHL items (`#z3kx` 
 Docs checked: HighLevel API overview / V1 end-of-support note (https://help.gohighlevel.com/support/solutions/articles/48001060529-highlevel-api-documentation), Conversations `POST /conversations/messages` (https://marketplace.gohighlevel.com/docs/ghl/conversations/send-a-new-message/), contact workflow enrollment (https://marketplace.gohighlevel.com/docs/ghl/contacts/add-contact-to-workflow/), opportunity creation (https://marketplace.gohighlevel.com/docs/ghl/opportunities/create-opportunity/), and workflow actions (https://help.gohighlevel.com/support/solutions/articles/155000002294-what-are-workflow-actions-complete-list-).
 
 Changed paths: session document only. Verification: agent-doc preflight/plan passed; reviewed the shipped EFS GHL adapter and borrower-message PRD notes; checked current official HighLevel docs. No code/tests were run because this was plan-only. Escalation: none. Confidence: high.
-<!-- agent:boundary:f2b54ff8 -->
+<!-- agent:boundary:4042e0e0 -->
 <!-- /agent:exchange -->
 ###
 <!--

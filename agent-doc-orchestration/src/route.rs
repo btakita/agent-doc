@@ -360,6 +360,13 @@ enum RouteCloseoutDrainOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum RouteCloseoutBlockDecision {
+    EnqueuePromptForAfterCloseout,
+    WaitForActiveQueueHead { head: String, reason: String },
+    FailClosed { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RouteQueueEnqueueOutcome {
     prompt_text: String,
     appended: bool,
@@ -2078,6 +2085,23 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
     Ok(RouteCloseoutDrainOutcome::Blocked(last_reason))
 }
 
+fn classify_route_closeout_block(
+    file: &Path,
+    reason: String,
+    has_prompt_context: bool,
+) -> RouteCloseoutBlockDecision {
+    if has_prompt_context {
+        return RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout;
+    }
+    let active_queue_head = std::fs::read_to_string(file)
+        .ok()
+        .and_then(|content| crate::queue_continuation::live_continuation_head(file, &content));
+    if let Some(head) = active_queue_head {
+        return RouteCloseoutBlockDecision::WaitForActiveQueueHead { head, reason };
+    }
+    RouteCloseoutBlockDecision::FailClosed { reason }
+}
+
 fn queue_prompt_text_for_route_change(change_text: &str) -> Option<String> {
     let mut lines = Vec::new();
     for line in change_text.lines() {
@@ -3016,38 +3040,62 @@ fn route_via_authoritative_actor(
             }
         }
         RouteCloseoutDrainOutcome::Blocked(reason) => {
-            if let Some(context) = prompt_context {
-                // #jb-run-preempt-autoloop-priority: manual reroute prompt preempts.
-                let queued = match enqueue_exchange_slash_command_for_idle_drain(
-                    file,
-                    context,
-                    "open_closeout_blocked",
-                )? {
-                    Some(queued) => queued,
-                    None => enqueue_route_dispatch_prompt(
+            match classify_route_closeout_block(file, reason, prompt_context.is_some()) {
+                RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout => {
+                    let Some(context) = prompt_context else {
+                        unreachable!("prompt-context decision requires a prompt context");
+                    };
+                    // #jb-run-preempt-autoloop-priority: manual reroute prompt preempts.
+                    let queued = match enqueue_exchange_slash_command_for_idle_drain(
                         file,
-                        &context.prompt_text,
+                        context,
                         "open_closeout_blocked",
-                        true,
-                    )?,
-                };
-                eprintln!(
-                    "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={})",
-                    file.display(),
-                    queued.prompt_text,
-                    queued.appended,
-                    queued.already_present,
-                    queued.superseded
-                );
-                return Ok(dispatch_pane);
+                    )? {
+                        Some(queued) => queued,
+                        None => enqueue_route_dispatch_prompt(
+                            file,
+                            &context.prompt_text,
+                            "open_closeout_blocked",
+                            true,
+                        )?,
+                    };
+                    eprintln!(
+                        "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={})",
+                        file.display(),
+                        queued.prompt_text,
+                        queued.appended,
+                        queued.already_present,
+                        queued.superseded
+                    );
+                    return Ok(dispatch_pane);
+                }
+                RouteCloseoutBlockDecision::WaitForActiveQueueHead { head, reason } => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "route_dispatch_drain_closeout_wait_existing_queue file={} head={} blocker={}",
+                            file.display(),
+                            crate::secret_redact::redact(&head),
+                            crate::secret_redact::redact(&reason)
+                        ),
+                    );
+                    eprintln!(
+                        "[route] active closeout for {} could not be drained before reroute; existing queue head {:?} remains queued behind the closeout",
+                        file.display(),
+                        head
+                    );
+                    return Ok(dispatch_pane);
+                }
+                RouteCloseoutBlockDecision::FailClosed { reason } => {
+                    anyhow::bail!(
+                        "authoritative actor generation {} for {} owns pane {} but route could not drain the active closeout before dispatch: {}",
+                        actor.record.generation,
+                        file.display(),
+                        dispatch_pane,
+                        reason
+                    );
+                }
             }
-            anyhow::bail!(
-                "authoritative actor generation {} for {} owns pane {} but route could not drain the active closeout before dispatch: {}",
-                actor.record.generation,
-                file.display(),
-                dispatch_pane,
-                reason
-            );
         }
     }
     if let Some(context) = prompt_context
@@ -6002,6 +6050,59 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
         assert!(after.contains("[#keep1]"), "open backlog item must remain");
     }
+
+    #[test]
+    fn closeout_block_decision_queues_prompt_context_before_failing_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("route-block.md");
+        let reason = "captured response baseline no longer matches current document".to_string();
+
+        assert_eq!(
+            super::classify_route_closeout_block(&doc, reason, true),
+            super::RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout
+        );
+    }
+
+    #[test]
+    fn closeout_block_decision_waits_on_existing_active_queue_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("route-block.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- :pushpin: [#jbruncloseoutstate]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        let reason = "captured response baseline no longer matches current document".to_string();
+
+        assert_eq!(
+            super::classify_route_closeout_block(&doc, reason.clone(), false),
+            super::RouteCloseoutBlockDecision::WaitForActiveQueueHead {
+                head: "jbruncloseoutstate".to_string(),
+                reason,
+            }
+        );
+    }
+
+    #[test]
+    fn closeout_block_decision_fails_closed_without_prompt_or_active_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("route-block.md");
+        std::fs::write(&doc, "---\nagent_doc_session: test\n---\n\n").unwrap();
+        let reason = "open closeout has no safe recovery proof".to_string();
+
+        assert_eq!(
+            super::classify_route_closeout_block(&doc, reason.clone(), false),
+            super::RouteCloseoutBlockDecision::FailClosed { reason }
+        );
+    }
+
     #[test]
     fn route_latency_message_marks_budget_status() {
         let harness = HarnessConfig::codex();

@@ -140,16 +140,37 @@ Proof for this cycle:
 - Verification: document diagnosis only; no new code changed in this cycle. The referenced route fix remains verified by the prior `make check` run.
 - Confidence: high that the pasted route error is covered by `2464ba38`; medium on the interruption part until tested on an installed build.
 - Escalation: none.
-<!-- agent:boundary:44c40f23 -->
+
+### Re: architecture-first runbook — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Create a skill/runbook to apply the architecture strategy that you recommended.
+
+
+Created the architecture-first runbook for agent-doc implementation turns.
+
+The canonical guidance is in `.claude/skills/agent-doc/runbooks/architecture-first.md`, with a top-level pointer at `runbooks/architecture-first.md` and an `AGENTS.md` runbook listing update so Codex/OpenCode prompt reuse can discover it. The runbook turns the earlier architecture strategy into a required contract: invariant, policy owner, transition table, evidence inputs, allowed edit surfaces, verification, and explicit out-of-scope work before broad code changes.
+
+The durable rule is now concrete: if an agent cannot name the invariant or policy owner, it should stop with a plan instead of adding another local exception. For closeout-recovery work, the runbook also calls out typed state-machine decisions, edge-localized error text, SimWorld/property coverage, and Lean/TLA only as a second-stage validation tool after the Rust boundary is stable.
+
+No new backlog item is needed from this response; the requested runbook now exists and is committed.
+
+Proof for this cycle:
+- Changed paths: `.claude/skills/agent-doc/runbooks/architecture-first.md`, `runbooks/architecture-first.md`, `AGENTS.md`, and this session document.
+- Repo commit: `b606d87e3` (`docs(agent-doc): add architecture-first runbook`).
+- Commands: `agent-doc preflight ...`; `agent-doc plan ...`; `sed`/`rg` inspections of skill and runbook surfaces; `git diff --check`; `make check`; `gh run list --workflow CI --limit 1`; `gh workflow list`; `gh run list --workflow "Agent Doc" --limit 1`; `gh run view 27595064029 --json ...`; `gh run view 27595064029 --log-failed`; `git commit -m "docs(agent-doc): add architecture-first runbook"`.
+- Verification: `git diff --check` passed; `make check` passed, including instruction-files tests and the `src/agent-doc` check suite. The root repo has no workflow named `CI`; the latest `Agent Doc` workflow run (`27595064029`) is red on pushed head `227e708`, but both jobs had empty steps and `--log-failed` returned `log not found`, so I treated that as an external CI-start failure rather than a failure from this local runbook commit.
+- Confidence: high for the runbook coverage and discoverability.
+- Escalation: none.
+<!-- agent:boundary:78457879 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: JB `Run Agent Doc` still does not work. What is wrong with the codebase? This is disturbing? Seems like we need a refactoring project to be able to reliably make this fix.~~
-- ~~:pushpin: [#jbruncloseoutstate]~~
-- ~~Would lean-lang help to create proper invariants? So agents can create unnecessary architecture sprawl?~~
-- ~~How can we have the agents think architecturally instead of the default sprawl code?~~
+- ~~:pushpin: Create a skill/runbook to apply the architecture strategy that you recommended.~~
+- The architecture first runbook should only apply to agent-doc development & dogfooding...It should not be installed.
 ---
 Typing into the queue during the turn cause the conversation to be interrupted. ![img_30.png](img_30.png). A pre-finalize response was uncommitted causing the response to be treated as a user prompt ![img_31.png](img_31.png). After restart, JB `Run Agent Doc` error.
 
@@ -166,8 +187,8 @@ resync: pruned 3 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3649 blocked_head_bytes=132 blocked_head_sha256=ae121dad65e5b00a6c504db706985aee4e8d6ed00988ba4244f51196952739d7 trigger_bytes=44 trigger_sha256=a55a6572fd4dc952bc476bd516d3a7801b1e63409715f063b4b7351ea112ade5
 ```
 ---
-- ~~:pushpin: agent-doc start to codex misformatted ![img_27.png](img_27.png) ![img_28.png](img_28.png)~~
 - :pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.
+- :pushpin: do [#cwsp]
 <!-- /agent:queue -->
 ###
 <!--

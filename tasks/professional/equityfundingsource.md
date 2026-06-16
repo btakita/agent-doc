@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,61 +33,22 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260615-225127.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260616-003823.md`*
 
 Compacted content:
-- Archived 2 response topic(s): compact archive summary / no-op closeout; #gq5c follow-up next steps
-- Prior summary/context: prior compacted content: Archived 3 response topic(s): Available Deals lender workflow; commit + push all dirty EFS f...
-
-### Re: #investor-pipeline-resequence and borrower portal messages — gpt-5
-
-Implemented `#investor-pipeline-resequence` in `src/equityfundingsource-dev`.
-
-What changed:
-- Lender Pipeline is now account eligibility: Signed Up, Requirements Review, Requirements Current, Renewal Due, Expired / Hold, Lender Ready.
-- Pending/active funding no longer moves a lender card. Pending commitments remain context on the lender card; wire/funded state belongs to Deal Pipeline / Funding Commits.
-- Deal Pipeline labels now read Available, Ready to Commit, Committed / Awaiting Wire, Wire Confirmed / Funded, Closed.
-- Deal Pipeline cards now include lender compliance chips for ready, renewal due, and hold counts, aggregated from interested/committed lenders.
-- Admin UI copy, source tests, poll-refresh expectations, and PRDs were updated to match the resequenced model.
-
-Borrower portal messaging answer:
-- Yes, there is an admin side for borrower portal messages. The admin Messages UI can list borrower threads and reply.
-- Email notifications for borrower/admin chat are already wired behind `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED`; production config enables outbound notifications with the currently verified Cloudflare sender.
-- Borrowers can receive email when an admin replies, through the same notification path.
-- Email reply back into chat is implemented as `/api/email/inbound`, but it remains disabled in production until inbound provider routing, `MESSAGE_EMAIL_INBOUND_ENABLED`, and `MESSAGE_EMAIL_INBOUND_SECRET` are configured. It also requires the inbound sender to resolve to an authorized admin.
-
-Verification:
-- `bun test tests/admin-investor-pipeline.test.ts tests/admin-pipeline.test.ts` passed: 112 tests, 705 assertions.
-- `make check` passed: 729 tests, app build, worker build.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` and `gh run list --limit 1` returned no workflows/runs for this submodule repository.
-
-Changed paths:
-- `app/equityfundingsource/lib/admin/repo.ts`
-- `app/equityfundingsource/lib/admin/shared.ts`
-- `app/equityfundingsource/lib/admin/loan_management/index.ts`
-- `app/equityfundingsource/lib/admin/investor_management/index.ts`
-- `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `lib/ui--browser--efs/portal/admin/pipeline.tsx`
-- `tests/admin-investor-pipeline.test.ts`
-- `tests/admin-pipeline.test.ts`
-- `tests/admin-poll-refresh.test.ts`
-- `prds/investor-pipeline-admin.md`
-- `prds/equity-funding-source-lending-portal-prd.md`
-
-Commit/push proof:
-- EFS submodule: `1dc930b feat(admin): resequence lender pipeline`, pushed to `btakita/equityfundingsource-dev` `main`.
-- Parent repo pointer: `ebf25ff9a chore: bump equityfundingsource-dev`, pushed to `btakita/agent-loop` `main`.
-
-Escalation: none.
-Confidence: high.
-<!-- agent:boundary:bcca8091 -->
+- Archived 1 response topic(s): #investor-pipeline-resequence and borrower portal messages
+- Prior summary/context: prior compacted content: Archived 2 response topic(s): compact archive summary / no-op closeout; #gq5c follow-up next...
+<!-- agent:boundary:052d7604 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- What are #next-steps to have the "Available Deals" subpipeline which includes Processing + Underwriting steps in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?
+- Remove redundant "Published deals" in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

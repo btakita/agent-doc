@@ -234,7 +234,53 @@ I did not rerun the full test suite in this deploy-only pass because the previou
 Preflight reported high exchange accretion, but the active queue was drainable, so I continued the deploy cycle.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:5cbb18e9 -->
+
+### Re: tighten loan detail cards + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> Space should be horizontally consolidated ![img_17.png](img_17.png)
+> Final Loan Documents can be a card view and narrower.
+> Borrower Onboarding Data should be a card view and narrower.
+>
+> deploy
+
+Tightened the admin loan detail layout and deployed it. The standalone admin loan detail page and embedded Deal Pipeline loan dialog now use the same denser layout.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev` parent gitlink
+
+What changed:
+- TMO cards now keep the bounded card layout but consolidate fields horizontally with `repeat(auto-fit,minmax(120px,1fr))` inside each card, so `Loan Terms`, `Borrower Detail`, and `Collateral` use less vertical space.
+- `Final Loan Documents` now has a narrower max-width card and compact field tiles instead of full-width `detail-row` rows.
+- `Borrower Onboarding Data` now has the same narrower card treatment and compact field tiles instead of full-width `detail-row` rows.
+
+Commits/push:
+- EFS app: `2cb9210 fix(admin): tighten loan detail cards` pushed to `origin/main`.
+- Parent gitlink: `0b98f7a07 chore(efs): update tightened loan detail layout submodule` committed locally; parent push follows this agent-doc closeout.
+
+Deploy proof:
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker version: `12384ecc-b60a-446a-b637-b667facd72ea`
+- Remote D1 migrations: no migrations to apply
+- Deployed browser asset: `/index.browser-ZUVMIG4L.js`
+
+Verification:
+- `bun test tests/tmo-loan-details-density.test.ts tests/final-loan-docs.test.ts tests/boolean-checkbox-fields.test.ts` passed: 16 tests.
+- `make check` in `src/equityfundingsource-dev` passed: 739 tests, app build, and Worker build.
+- Top-level `make check` passed.
+- `/` returned HTTP 200.
+- `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned HTTP 303 to admin login, expected for the protected route.
+- `/portal-admin/pipeline` returned HTTP 303 to admin login, expected for the protected route.
+- The downloaded deployed browser bundle contains `TMO_DETAIL_FIELD_GRID_STYLE`, `grid-template-columns:repeat(auto-fit,minmax(120px,1fr))`, `ADMIN_LOAN_NARROW_CARD_STYLE`, `Final Loan Documents`, and `Borrower Onboarding Data`.
+- GitHub Actions check: both the EFS submodule and parent repo report no workflow named `CI`.
+
+Preflight reported high exchange accretion and one session-drift warning; queue work was still actionable, so I completed the implementation and deploy. Confidence: high. Escalation: none.
+<!-- agent:boundary:97e3f97a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -242,6 +288,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+Space should be horizontally consolidated ![img_17.png](img_17.png)
+Final Loan Documents can be a card view and narrower.
+Borrower Onboarding Data should be a card view and narrower.
+
+deploy
 <!-- /agent:queue -->
 
 ## Backlog

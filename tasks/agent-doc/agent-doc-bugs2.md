@@ -178,6 +178,10 @@ Proof for this cycle:
 - Verification: no source/build/test surfaces changed. Runtime verification used controller recycle, sync execution, admin freshness inspection, and ops-log proof markers.
 - Confidence: medium-high. The automated path proves recycle freshness/re-clear and sync no-defer from CLI; it does not require a human JetBrains click.
 - Escalation: none.
+4. `#binconflictdedupe` coalesces repeated symptoms by invariant/document/component/content hash so one root cause does not spawn repeated queue conflicts.
+3. `#binconflictscope` makes conflict classification component-scoped across exchange, queue, backlog, status, review, done/archive, gitlink, and editor writeback.
+2. `#binstalepause` applies that contract to stale queue pauses so stale supervisor / pause / no-drainable-head cases recover or defer with proof instead of surfacing as conflicts.
+1. `#binoutcomes` defines the shared outcome contract first: `ok`, `recoverable`, `blocked`, or `operator`, with invariant id, proof marker, and one allowed next action.
 ❯ - Git: submodule commits must have matching parent gitlink commits before the closeout is called complete.
 ❯ - Editor convergence: no direct disk write is allowed to count as healthy when an editor IPC listener should have converged the buffer; `File Cache Conflict` is always a disproof marker.
 ❯ - Supervisor freshness: installed binary newer than serving supervisor implies recoverable stale-supervisor state, not random IPC drift.
@@ -276,15 +280,15 @@ I added backlog items for the invariant catalog, a workflow doctor, and invarian
 
 I added the binary-logic implementation slice as the next architecture layer ahead of the existing state-kernel work. The new work is intentionally narrow and ordered:
 
-1. `#binoutcomes` defines the shared outcome contract first: `ok`, `recoverable`, `blocked`, or `operator`, with invariant id, proof marker, and one allowed next action.
-2. `#binstalepause` applies that contract to stale queue pauses so stale supervisor / pause / no-drainable-head cases recover or defer with proof instead of surfacing as conflicts.
-3. `#binconflictscope` makes conflict classification component-scoped across exchange, queue, backlog, status, review, done/archive, gitlink, and editor writeback.
-4. `#binconflictdedupe` coalesces repeated symptoms by invariant/document/component/content hash so one root cause does not spawn repeated queue conflicts.
+❯ 1. `#binoutcomes` defines the shared outcome contract first: `ok`, `recoverable`, `blocked`, or `operator`, with invariant id, proof marker, and one allowed next action.
+❯ 2. `#binstalepause` applies that contract to stale queue pauses so stale supervisor / pause / no-drainable-head cases recover or defer with proof instead of surfacing as conflicts.
+❯ 3. `#binconflictscope` makes conflict classification component-scoped across exchange, queue, backlog, status, review, done/archive, gitlink, and editor writeback.
+❯ 4. `#binconflictdedupe` coalesces repeated symptoms by invariant/document/component/content hash so one root cause does not spawn repeated queue conflicts.
 
 Those should run before `#archstatekernel`, `#archproofledger`, `#archcomponentmerge`, `#archsimworldmatrix`, and `#archuistates`, because they define the binary vocabulary the architecture primitives should implement rather than leaving each primitive to invent its own classification rules. The workflow-invariant items remain useful follow-ons: they can consume these outcome ids once the contract exists.
 
 Changed paths: session document only. Commands: `agent-doc session-check`, `git status --short`, `agent-doc read --component queue`, `agent-doc read --component backlog`, `agent-doc finalize --help`, `agent-doc queue --help`, `agent-doc queue sync --help`, targeted spec/runbook reads, and this `agent-doc finalize` with ordered pending additions. Verification: no source/build/test surfaces changed; this is backlog/queue prioritization work. Confidence: high.
-<!-- agent:boundary:05967abd -->
+<!-- agent:boundary:40ba1f0c -->
 <!-- /agent:exchange -->
 
 ## Queue

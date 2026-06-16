@@ -421,7 +421,15 @@ CI:
 ❯ - The parent repo does not have a workflow named `CI`.
 
 No escalation was needed.
-<!-- agent:boundary:ba42862b -->
+
+### Re: queue-edit closeout note cleanup — gpt-5
+
+This queue note is now resolved by the `#queueeditcap` implementation and closeout above.
+
+The original failure mode was the interrupted `response_captured` cycle after an in-turn `agent:queue` edit. The product fix is committed and pushed in `src/agent-doc` as `0d403254` and the parent pointer is pushed as `9b1bfc55d`. The session document also records `#queueeditcap` as completed.
+
+No additional source changes were made in this cleanup cycle. I used `--force-disk` for this closeout to avoid another stale-supervisor IPC writeback.
+<!-- agent:boundary:b6762714 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -439,7 +447,7 @@ Error: authoritative actor generation 438 for tasks/agent-doc/agent-doc-bugs2.md
 ---
 - ~~Why not just shell out `tmux send-keys "Command" Enter`? Is the JB `Run Agent Doc` not-submiting an issue or is it the fact that logic is still spread all over the codebase and we are hitting the various conditions that use this spaghetti logic?~~
 - ~~:pushpin: Only agent-doc dogfooding sessions should auto-build + install. The equityfundingsource.md session should not auto-install ![img_29.png](img_29.png)~~
-- :pushpin: How can I tell if the supervisor + CPC are up to date? Why is the formatting all messed up? ![2026-06-15_22-56.png](../../../../../Pictures/agent-loop/2026-06-15_22-56.png) Also I'm seeing some shells from the supervisor are 2 lines too low. See where the `agent-doc admin --help` starts in the screenshot.
+- ~~:pushpin: How can I tell if the supervisor + CPC are up to date? Why is the formatting all messed up? ![2026-06-15_22-56.png](../../../../../Pictures/agent-loop/2026-06-15_22-56.png) Also I'm seeing some shells from the supervisor are 2 lines too low. See where the `agent-doc admin --help` starts in the screenshot.~~
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
 ```

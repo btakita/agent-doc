@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -34,96 +34,12 @@ queue: stop
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260615-204620.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260616-230815.md`*
 
 Compacted content:
-- Archived 7 response topic(s): Closeout repair; Lean status; Artifact cleanup; 4 more
-- Prior summary/context: prior compacted content: Archived 3 response topic(s): Evaluate Lean Language for lazily; do [#4zvn]; #4zvn
-
-### Re: release + publish — gpt-5
-
-> **Queue prompt:**
->
-> release + publish
-
-
-Completed the lazily-rs v0.11.0 release and publish.
-
-Changed paths:
-- `src/lazily-rs/RELEASE_NOTES_v0.11.0.md` refreshed to match the current v0.11.0 payload, including eager Signal support and the Lean CI gate.
-- `src/lazily-rs` superproject gitlink advanced to the release-notes commit.
-
-Release actions:
-- Pushed lazily-rs `main` at `45da443c26273abd2aeffcc39cd4a6ee6d1c49a2`.
-- Moved the unpublished pushed tag `v0.11.0` from `2fb8e80` to `45da443` so the tag matches the published crate payload.
-- Published `lazily v0.11.0` to crates.io. `cargo search lazily --limit 1` now reports `lazily = "0.11.0"`.
-- Created GitHub Release: https://github.com/lazily-hub/lazily-rs/releases/tag/v0.11.0
-- Pushed the superproject pointer commit `8ab88a5c5` on `agent-loop/main`.
-
-Verification:
-- `make check` passed locally through `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`.
-- `cargo publish --dry-run --no-verify` passed after the release-note commit: 72 files, 1.1 MiB package, 232.8 KiB compressed.
-- Latest lazily-rs GitHub Actions CI for `45da443` was still `in_progress` at closeout; the previous `main` CI was green before the release-note-only commit.
-- Root `agent-loop` has no workflow named `CI`.
-
-Escalation/confidence:
-- Used the stored `passage btak/CARGO_REGISTRY_TOKEN`; the token is valid now and publish succeeded.
-- Confidence is high: package dry-run, full local check, crates.io search, pushed tag, and GitHub release all line up. Remaining external watch item is the in-progress lazily-rs CI run for the release-note commit.
-
-### Re: LinkedIn scheduled post — gpt-5
-
-> **Queue prompt:**
->
-> The linked in post scheduled for today has not gone out.
-
-I found why it did not go out: Corky had no pending scheduled item, and the file referenced by `#kabc` was a plain working note under `mail/drafts/linkedin/`, not a managed `mail/social/` draft. `corky linkedin publish --dry-run` rejected that original file because it had no YAML frontmatter.
-
-I created the managed social draft at `mail/social/20260616-lazily-architecture-linkedin.md` with `status: ready` and `scheduled_at: 2026-06-16T15:00:00Z`, then committed it in `mail` as `6419127` and advanced the superproject gitlink in `cd0b1372e`.
-
-Verification:
-- `corky schedule list` now shows `mail/social/20260616-lazily-architecture-linkedin.md` as `[DUE]` for LinkedIn.
-- `corky linkedin publish --dry-run mail/social/20260616-lazily-architecture-linkedin.md` passes and validates the 1405-character public payload for `btakita`.
-- `gh run list --workflow CI --limit 1` reports that this repo has no workflow named `CI`.
-
-I did not publish the post publicly from this cycle because `#kabc` is operator-drive and LinkedIn publishing is an external public side effect. The ready command is `corky schedule run` (or direct `corky linkedin publish mail/social/20260616-lazily-architecture-linkedin.md`). After publish, the first-comment text is still in `mail/drafts/linkedin/2026-06-16-lazily-architecture.md` and should be posted with `corky linkedin comment` against the published social draft.
-
-### Re: LinkedIn post repair — gpt-5
-
-> **Queue prompt:**
->
-> You did not publish the entire linkedin post. Please edit to include the full post. https://www.linkedin.com/feed/update/urn:li:activity:7472666757267107840/
->
-> ```
-> I built a reactive signals library in Rust that does zero wasted work by default — then realized it could sync its graph across the internet.
->
-> This is the architecture of lazily-rs.
->
-> The core is small: three primitives 
-> ```
-
-Edited the published LinkedIn post with the full body from `mail/social/20260616-lazily-architecture-linkedin.md`. Corky reported success for the mapped share URL: https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848
-
-Changed paths and commits:
-- `mail/social/20260616-lazily-architecture-linkedin.md` now records `status: published`, `published_at`, `post_id`, and `post_url`; committed in `mail` as `07a9ea1`.
-- The parent `mail` submodule pointer advanced in `agent-loop` commit `e7e0b08c1`.
-- The session document was finalized through agent-doc.
-
-Commands and verification:
-- Ran `corky linkedin edit mail/social/20260616-lazily-architecture-linkedin.md`; it returned `Updated LinkedIn post`.
-- `corky schedule list` now reports no scheduled items.
-- `corky linkedin list` shows `20260616-lazily-architecture-linkedin.md [published]`.
-- Re-read the managed draft and confirmed the full body includes the text after `The core is small: three primitives ...` through the closing question.
-- `gh run list --workflow CI --limit 1` still reports this repo has no workflow named `CI`.
-
-Escalation/confidence:
-- No sandbox escalation was needed. This was an explicit user-authorized public LinkedIn edit through Corky.
-- Confidence is high from Corky's successful edit response plus the local published metadata and full-body verification.
-
-Preflight also warned that the installed `agent-doc` binary/cdylib may be stale relative to source commit `a447beb1`; that did not block this LinkedIn repair.
-No new agent-doc changes to handle in `tasks/software/lazily-rs.md`.
-
-CLI preflight completed and reported `no_changes: true`; the queue is drained and no continuation is required. It also surfaced the existing stale `agent-doc` install warning and tmux session drift warning, but neither created work for this document cycle.
-<!-- agent:boundary:f74309fa -->
+- Archived 3 response topic(s): release + publish; LinkedIn scheduled post; LinkedIn post repair
+- Prior summary/context: prior compacted content: Archived 7 response topic(s): Closeout repair; Lean status; Artifact cleanup; 4 more
+<!-- agent:boundary:f4b36063 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -137,7 +53,6 @@ CLI preflight completed and reported `no_changes: true`; the queue is drained an
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-The post https://www.linkedin.com/feed/update/urn:li:activity:7472666757267107840/ is still truncated
 <!-- /agent:backlog -->
 
 ## Review

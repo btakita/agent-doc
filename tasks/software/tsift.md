@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -144,12 +144,13 @@ Sources checked: NVIDIA RTX 5090 specs, Qwen3 model family, Qwen2.5-Coder, Qwen3
 No code changed this cycle. Verification was document/research only: `tsift status`, `agent-doc preflight`, `agent-doc plan/read`, current-source web checks for model families, and `git status`. `tsift status` still reports one missing workspace scope, so I did not rely on tsift search/graph evidence for this answer. The worktree had unrelated existing changes; I left them untouched.
 
 Source links: [NVIDIA RTX 5090](https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5090/), [Qwen3](https://qwenlm.github.io/blog/qwen3/), [Qwen2.5-Coder](https://qwenlm.github.io/blog/qwen2.5-coder-family/), [Qwen3-Coder](https://github.com/QwenLM/Qwen3-Coder), [Devstral](https://mistral.ai/news/devstral-2-vibe-cli/), [gpt-oss](https://openai.com/index/introducing-gpt-oss/), [Gemma](https://ai.google.dev/gemma/docs/core), [Phi](https://azure.microsoft.com/en-us/products/phi), [Qwen3 Embedding/Reranker](https://github.com/QwenLM/Qwen3-Embedding), [BGE-M3](https://bge-model.com/bge/bge_m3.html), [Ollama OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility), [llama.cpp grammars](https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md).
-<!-- agent:boundary:e08ab740 -->
+<!-- agent:boundary:9aca03f8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Can I use the Qwen2.5-Coder-32B with my current available vRAM?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

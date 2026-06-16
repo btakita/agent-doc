@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -55,7 +55,7 @@ Went through `agent:review`. There is exactly one item, and it is already advanc
 **Net:** nothing new to add. The review item is already paired with its actionable backlog item; the only thing left is operator-gated crates.io registration — adding another item would just duplicate #vmax. #1td4 stays gated; #vmax stays the operator handle.
 
 This empties the `#advance-review` drain; #vmax is `[operator-verify]` so go-mode defers it (queue has no remaining agent-drainable head).
-<!-- agent:boundary:e701f526 -->
+<!-- agent:boundary:d697643d -->
 <!-- /agent:exchange -->
 
 ## Queue

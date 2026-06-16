@@ -4238,7 +4238,7 @@ mod tests {
     /// must stay terminal (no marker → fail closed).
     #[test]
     fn dispatch_queue_paused_stale_supervisor_emits_restart_redirect_marker() {
-        fn paused_dispatch_error(pause_reason: &str) -> String {
+        fn paused_dispatch_error(pause_reason: &str) -> (String, String) {
             let dir = tempfile::TempDir::new().unwrap();
             std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
             let doc = dir.path().join("tasks/jbrestale.md");
@@ -4310,12 +4310,14 @@ mod tests {
             let envelope: ControllerEnvelope<DispatchAuthorization> =
                 serde_json::from_str(&response).unwrap();
             assert!(!envelope.ok);
-            envelope.error.unwrap_or_default()
+            let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+                .unwrap_or_default();
+            (envelope.error.unwrap_or_default(), ops_log)
         }
 
         // Stale-supervisor churn-stop → recoverable: marker + pid present so the route
         // path restarts the supervisor and re-dispatches once.
-        let recoverable = paused_dispatch_error(
+        let (recoverable, recoverable_ops_log) = paused_dispatch_error(
             "churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain",
         );
         assert!(recoverable.contains("failed_stage=queue_paused"));
@@ -4328,9 +4330,17 @@ mod tests {
             crate::project_controller::dispatch_error_supervisor_restart_redirect(&recoverable),
             Some(1368698)
         );
+        assert!(
+            recoverable_ops_log.contains("binary_outcome=recoverable"),
+            "recoverable stale queue pause must emit a typed outcome proof: {recoverable_ops_log}"
+        );
+        assert!(recoverable_ops_log.contains("invariant=stale_queue_pause"));
+        assert!(recoverable_ops_log.contains("proof_marker=supervisor_restart_redirect"));
+        assert!(recoverable_ops_log.contains("next_action=restart_supervisor_once_and_retry"));
 
         // Deliberate operator pause → terminal: no marker, stays fail-closed.
-        let terminal = paused_dispatch_error("operator paused this queue for manual review");
+        let (terminal, terminal_ops_log) =
+            paused_dispatch_error("operator paused this queue for manual review");
         assert!(terminal.contains("failed_stage=queue_paused"));
         assert!(
             !terminal
@@ -4340,6 +4350,10 @@ mod tests {
         assert_eq!(
             crate::project_controller::dispatch_error_supervisor_restart_redirect(&terminal),
             None
+        );
+        assert!(
+            !terminal_ops_log.contains("binary_outcome=recoverable"),
+            "operator pauses must not emit stale-pause recovery outcomes: {terminal_ops_log}"
         );
     }
     #[test]

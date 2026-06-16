@@ -347,8 +347,8 @@ pub(crate) fn authorize_controller_dispatch(
         // `session restart-supervisor --force`. A deliberate operator/spent-preset pause
         // carries no marker and falls through to the terminal arm.
         Err(err) => {
-            if let Some(stale_pid) =
-                crate::project_controller::dispatch_error_supervisor_restart_redirect(
+            if let Some(recovery) =
+                crate::project_controller::dispatch_error_stale_queue_pause_recovery(
                     &err.to_string(),
                 )
             {
@@ -357,7 +357,7 @@ pub(crate) fn authorize_controller_dispatch(
                     session_id,
                     &base_dir,
                     generation,
-                    stale_pid,
+                    recovery,
                     &dispatch_request,
                     err,
                 )
@@ -380,15 +380,17 @@ fn recover_dispatch_via_supervisor_restart(
     session_id: &str,
     base_dir: &Path,
     generation: u64,
-    stale_pid: u32,
+    recovery: crate::project_controller::StaleQueuePauseRecovery,
     dispatch_request: &dyn Fn() -> crate::project_controller::DispatchRequest,
     original_err: anyhow::Error,
 ) -> Result<RouteDispatchAuthorization> {
+    let stale_pid = recovery.stale_pid;
+    let outcome_fields = recovery.outcome.log_fields();
     if !restart_via_supervisor(file, session_id) {
         crate::ops_log::log_op(
             file,
             &format!(
-                "route_dispatch_recovery action=restart_supervisor cause=churn_stop_stale_supervisor stale_pid={stale_pid} result=reexec_failed"
+                "route_dispatch_recovery action=restart_supervisor cause=churn_stop_stale_supervisor stale_pid={stale_pid} result=reexec_failed {outcome_fields}"
             ),
         );
         return Err(original_err);
@@ -414,7 +416,7 @@ fn recover_dispatch_via_supervisor_restart(
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_dispatch_recovery action=restart_supervisor cause=churn_stop_stale_supervisor stale_pid={stale_pid} result=restarted"
+            "route_dispatch_recovery action=restart_supervisor cause=churn_stop_stale_supervisor stale_pid={stale_pid} result=restarted {outcome_fields}"
         ),
     );
     match crate::project_controller::authorize_dispatch(base_dir, dispatch_request()) {

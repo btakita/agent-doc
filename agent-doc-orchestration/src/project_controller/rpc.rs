@@ -391,6 +391,28 @@ pub const DISPATCH_STALE_GENERATION_REDIRECT_MARKER: &str = "stale_generation_re
 /// …` IPC wrapping. The bail still carries the human reason + the manual hint, so a
 /// `reexec_failed` fallback stays actionable.
 pub const DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER: &str = "supervisor_restart_redirect";
+pub const STALE_QUEUE_PAUSE_INVARIANT_ID: &str = "stale_queue_pause";
+pub const STALE_QUEUE_PAUSE_NEXT_ACTION: &str = "restart_supervisor_once_and_retry";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaleQueuePauseRecovery {
+    pub stale_pid: u32,
+    pub outcome: crate::flow::outcome::BinaryOutcome,
+}
+
+impl StaleQueuePauseRecovery {
+    fn new(stale_pid: u32) -> Self {
+        Self {
+            stale_pid,
+            outcome: crate::flow::outcome::BinaryOutcome::recoverable(
+                STALE_QUEUE_PAUSE_INVARIANT_ID,
+                DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER,
+                STALE_QUEUE_PAUSE_NEXT_ACTION,
+            )
+            .expect("static stale queue pause outcome tokens are field-safe"),
+        }
+    }
+}
 
 /// `#jbrestale`: classify a failed dispatch as a recoverable stale-supervisor
 /// churn-stop and extract the stale supervisor PID named in the bail (`stale_pid=<N>`
@@ -408,7 +430,7 @@ pub const DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER: &str = "supervisor_restar
 /// Returns `None` for every other failure so a deliberate operator pause, a
 /// spent-preset pause, or a genuinely-wedged queue stays terminal and never triggers a
 /// restart. Pure and UTF-8 safe.
-pub fn dispatch_error_supervisor_restart_redirect(message: &str) -> Option<u32> {
+pub fn dispatch_error_stale_queue_pause_recovery(message: &str) -> Option<StaleQueuePauseRecovery> {
     if message.contains(DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER) {
         let pid = message
             .split("stale_pid=")
@@ -420,14 +442,20 @@ pub fn dispatch_error_supervisor_restart_redirect(message: &str) -> Option<u32> 
             })
             .and_then(|digits| digits.parse::<u32>().ok())
             .unwrap_or(0);
-        return Some(pid);
+        return Some(StaleQueuePauseRecovery::new(pid));
     }
     if message.contains("failed_stage=queue_paused")
         && pause_reason_is_stale_supervisor_churn_stop(message)
     {
-        return Some(stale_supervisor_pid_from_pause_reason(message).unwrap_or(0));
+        return Some(StaleQueuePauseRecovery::new(
+            stale_supervisor_pid_from_pause_reason(message).unwrap_or(0),
+        ));
     }
     None
+}
+
+pub fn dispatch_error_supervisor_restart_redirect(message: &str) -> Option<u32> {
+    dispatch_error_stale_queue_pause_recovery(message).map(|recovery| recovery.stale_pid)
 }
 
 /// `#anw0`: classify a failed dispatch as a stale-generation redirect and extract the
@@ -3175,13 +3203,15 @@ pub(crate) fn handle_dispatch(
         let recovery_suffix =
             if stage == "queue_paused" && pause_reason_is_stale_supervisor_churn_stop(reason) {
                 let stale_pid = stale_supervisor_pid_from_pause_reason(reason).unwrap_or(0);
+                let recovery = StaleQueuePauseRecovery::new(stale_pid);
                 crate::ops_log::log_op(
                     &file,
                     &format!(
-                        "dispatch_queue_paused_stale_supervisor file={} stale_pid={} marker={}",
+                        "dispatch_queue_paused_stale_supervisor file={} stale_pid={} marker={} {}",
                         file.display(),
                         stale_pid,
-                        DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER
+                        DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER,
+                        recovery.outcome.log_fields(),
                     ),
                 );
                 format!(" {DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER} stale_pid={stale_pid}")
@@ -5239,14 +5269,26 @@ mod tests {
     }
     #[test]
     fn dispatch_error_supervisor_restart_redirect_classification() {
+        use super::dispatch_error_stale_queue_pause_recovery as recover;
         use super::dispatch_error_supervisor_restart_redirect as r;
         // `#jbrestale`: a queue_paused bail tagged with the restart-redirect marker is
         // recoverable; the named stale pid is extracted for the proof line.
+        let tagged = "project controller command `dispatch` failed: dispatch blocked for x.md: failed_stage=queue_paused reason=churn-stop: stale supervisor pid1368698; needs operator recycle receipt_id=42 supervisor_restart_redirect stale_pid=1368698";
+        assert_eq!(r(tagged), Some(1368698));
+        let tagged_recovery = recover(tagged).unwrap();
+        assert_eq!(tagged_recovery.stale_pid, 1368698);
         assert_eq!(
-            r(
-                "project controller command `dispatch` failed: dispatch blocked for x.md: failed_stage=queue_paused reason=churn-stop: stale supervisor pid1368698; needs operator recycle receipt_id=42 supervisor_restart_redirect stale_pid=1368698"
-            ),
-            Some(1368698)
+            tagged_recovery.outcome.class,
+            crate::flow::outcome::BinaryOutcomeClass::Recoverable
+        );
+        assert_eq!(tagged_recovery.outcome.invariant_id, "stale_queue_pause");
+        assert_eq!(
+            tagged_recovery.outcome.proof_marker,
+            super::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER
+        );
+        assert_eq!(
+            tagged_recovery.outcome.next_action,
+            "restart_supervisor_once_and_retry"
         );
         // Marker present but no pid named → recoverable with pid 0 (proof line still emits).
         assert_eq!(
@@ -5275,6 +5317,7 @@ mod tests {
             r("dispatch coalesced for x.md (#qflood); receipt_id=3"),
             None
         );
+        assert!(recover("dispatch coalesced for x.md (#qflood); receipt_id=3").is_none());
         assert_eq!(
             r(
                 "dispatch rejected: requested generation 1, current generation 2 (stale_generation_redirect retry_generation=2)"

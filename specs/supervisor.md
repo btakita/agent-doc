@@ -474,7 +474,7 @@ distinct from the one-shot restart auto-trigger:
   payload itself. A failed inject is not recorded as dispatched, so it retries on
   the next idle tick. Successful drains log `idle_queue_watch_drain` with
   `payload_kind=trigger` and
-  `submit_mode=tmux_literal_text_enter_key|pty_cr`; failures log
+  `submit_mode=tmux_hex_text_cr|pty_cr`; failures log
   `idle_queue_watch_drain_failed`.
 - **Stale-busy self-heal (`#stale-busy-after-auto-inject-no-clear`).** The
   one-shot busy→ready completion transition on the pty→stdout thread is

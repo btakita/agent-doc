@@ -114,6 +114,18 @@ fn idle_queue_pending_payload_needs_enter_resubmit(
         && !already_resubmitted
 }
 
+fn context_reset_dedupe_head<'a>(
+    active_head: Option<&'a str>,
+    last_context_reset_head: Option<&'a str>,
+    context_reset_in_flight: bool,
+) -> Option<&'a str> {
+    if context_reset_in_flight {
+        active_head
+    } else {
+        last_context_reset_head
+    }
+}
+
 fn idle_queue_resubmit_pending_payload(
     file: &Path,
     shared: &SupervisorShared,
@@ -129,24 +141,26 @@ fn idle_queue_resubmit_pending_payload(
     else {
         return AutoTriggerOutcome::SendFailed;
     };
+    let submit_key = crate::sessions::tmux_submit_key_for_harness(&harness.binary);
     crate::input_diag::log_text_submit(
         Some(file),
         "supervisor.idle_queue_resubmit",
         &format!("pane:{pane}"),
         "",
         Some(&harness.binary),
-        "idle_queue_pending_payload_enter",
-        "Enter",
+        "idle_queue_pending_payload_submit_key",
+        submit_key,
     );
     let tmux = crate::sessions::Tmux::default_server();
-    match crate::sessions::send_key(&tmux, &pane, "Enter") {
+    match crate::sessions::send_submitted_text_for_harness(&tmux, &pane, "", &harness.binary) {
         Ok(()) => {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "idle_queue_watch_resubmit file={} harness={} action=enter_key result=sent target={} payload_kind={} head_bytes={} head_sha256={} payload_bytes={}",
+                    "idle_queue_watch_resubmit file={} harness={} action=submit_key key={} result=sent target={} payload_kind={} head_bytes={} head_sha256={} payload_bytes={}",
                     file.display(),
                     harness.binary,
+                    submit_key,
                     pane,
                     payload_kind,
                     active_head.len(),
@@ -160,9 +174,10 @@ fn idle_queue_resubmit_pending_payload(
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "idle_queue_watch_resubmit file={} harness={} action=enter_key result=send_failed target={} payload_kind={} head_bytes={} head_sha256={} error={:?}",
+                    "idle_queue_watch_resubmit file={} harness={} action=submit_key key={} result=send_failed target={} payload_kind={} head_bytes={} head_sha256={} error={:?}",
                     file.display(),
                     harness.binary,
+                    submit_key,
                     pane,
                     payload_kind,
                     active_head.len(),
@@ -171,8 +186,8 @@ fn idle_queue_resubmit_pending_payload(
                 ),
             );
             eprintln!(
-                "[agent-doc] idle-queue watch: {} pending payload Enter re-submit failed for pane {}: {err:#}",
-                harness.binary, pane
+                "[agent-doc] idle-queue watch: {} pending payload {} re-submit failed for pane {}: {err:#}",
+                harness.binary, submit_key, pane
             );
             AutoTriggerOutcome::SendFailed
         }
@@ -193,6 +208,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut last_dispatched: Option<String> = None;
             let mut last_context_clear_at: Option<u64> = None;
             let mut last_context_reset_head: Option<String> = None;
+            let mut context_reset_in_flight = false;
             let mut last_pending_enter_resubmitted: Option<String> = None;
             let mut clear_cooldown_logged = false;
             // `#cleardecisionflood`: the `[s760] clear-decision …` diagnostic is
@@ -325,6 +341,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 }
 
                 let active_head = idle_watch_active_queue_head(&path);
+                if active_head.is_none() {
+                    context_reset_in_flight = false;
+                    last_context_reset_head = None;
+                }
                 let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
                 let turn_active = turn_active_for_owned_pane(&path, &shared);
 
@@ -879,6 +899,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 last_dispatched = None;
                                 last_context_clear_at = Some(current_epoch_secs());
                                 awaiting_clear_settle = true;
+                                context_reset_in_flight = true;
                                 clear_settle_idle_ticks = 0;
                                 if let Some(head) = active_head.clone() {
                                     last_context_reset_head = Some(head);
@@ -1006,11 +1027,16 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                     }
                 };
+                let reset_already_sent_for_active_slot = context_reset_dedupe_head(
+                    active_head.as_deref(),
+                    last_context_reset_head.as_deref(),
+                    context_reset_in_flight,
+                );
                 match idle_queue_context_reset_decision(
                     prompt_visible,
                     turn_active,
                     active_head.as_deref(),
-                    last_context_reset_head.as_deref(),
+                    reset_already_sent_for_active_slot,
                     context_reset_reason.is_some(),
                 ) {
                     IdleQueueContextResetDecision::Reset => {
@@ -1041,6 +1067,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 AutoTriggerOutcome::Sent => {
                                     last_pending_enter_resubmitted = Some(resubmit_key);
                                     last_context_reset_head = active_head.clone();
+                                    context_reset_in_flight = true;
                                     awaiting_clear_settle = true;
                                     clear_settle_idle_ticks = 0;
                                     log_event(
@@ -1068,6 +1095,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                         if drain_dispatch_dedup_skip(clear_already_pending) {
                             last_context_reset_head = active_head.clone();
+                            context_reset_in_flight = true;
                             awaiting_clear_settle = true;
                             clear_settle_idle_ticks = 0;
                             log_event(
@@ -1092,6 +1120,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             AutoTriggerOutcome::Sent => {
                                 last_context_clear_at = Some(current_epoch_secs());
                                 last_context_reset_head = active_head.clone();
+                                context_reset_in_flight = true;
                                 last_dispatched = None;
                                 awaiting_clear_settle = true;
                                 clear_settle_idle_ticks = 0;
@@ -1195,7 +1224,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         let slash_command = idle_queue_head_slash_command(&head);
                         // `#qflood2`: never stack a trigger already pending in the
                         // composer. For Enter-key profiles, a proven-pending
-                        // draft may simply be waiting for the bare Enter, so
+                        // draft may simply be waiting for the bare submit key, so
                         // submit it once.
                         let payload_already_pending =
                             supervisor_pane_payload_already_pending(&shared, &drain_payload);
@@ -1262,6 +1291,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                         match auto_trigger_submit_queue_command(&shared, &stop, &drain_payload) {
                             AutoTriggerOutcome::Sent => {
+                                context_reset_in_flight = false;
                                 if last_context_reset_head.as_deref() == Some(head.as_str())
                                     && !crate::queue_command::is_context_clear_command(
                                         &drain_payload,
@@ -1291,6 +1321,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     if crate::queue_command::is_context_clear_command(command) {
                                         last_context_clear_at = Some(current_epoch_secs());
                                         last_context_reset_head = Some(head.clone());
+                                        context_reset_in_flight = true;
                                         // `#qflood2`: a dispatched `/clear` head
                                         // must settle before the next head's
                                         // trigger fires, same as the context-reset
@@ -1407,6 +1438,37 @@ mod tests {
             Some(true),
             true
         ));
+    }
+
+    #[test]
+    fn context_reset_in_flight_dedupes_active_head_edits() {
+        let edited_head = Some("operator is still typing the active queue head");
+        let previous_head = Some("operator is still typing");
+
+        assert_eq!(
+            context_reset_dedupe_head(edited_head, previous_head, true),
+            edited_head
+        );
+        assert_eq!(
+            crate::start::decisions::idle_queue_context_reset_decision(
+                true,
+                false,
+                edited_head,
+                context_reset_dedupe_head(edited_head, previous_head, true),
+                true,
+            ),
+            IdleQueueContextResetDecision::SkipAlreadyResetHead
+        );
+        assert_eq!(
+            crate::start::decisions::idle_queue_context_reset_decision(
+                true,
+                false,
+                edited_head,
+                context_reset_dedupe_head(edited_head, previous_head, false),
+                true,
+            ),
+            IdleQueueContextResetDecision::Reset
+        );
     }
 
     #[test]

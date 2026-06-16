@@ -49,7 +49,7 @@ shared closeout path, not as permission to add a Codex-specific write-back path.
 |-----------|----------|--------|
 | **SKILL.md** | References Claude Code `Skill` tool, `/agent-doc` slash command | Codex has no skill/slash-command system — needs `.codex/AGENTS.md` adapter |
 | **start.rs** | Hardcoded `claude` binary, `--continue`, prompt detection (`❯`) | Must parameterize binary + restart flags per harness |
-| **route.rs** | Sends the active harness trigger via tmux `send-keys` or supervisor IPC | Codex uses a bare `agent-doc <file>` trigger and named tmux `Enter` submit, so command injection must stay harness-aware |
+| **route.rs** | Sends the active harness trigger via tmux `send-keys` or supervisor IPC | Codex uses a bare `agent-doc <file>` trigger and hex-text+CR tmux submit, so command injection must stay harness-aware |
 | **agent/claude.rs** | `-p`, `--output-format json`, `--permission-mode`, `--resume`, `--fork-session` | Codex uses `exec --json`, `resume <id>`, different sandbox flags |
 | **stream.rs** | `--output-format stream-json` (Claude-specific) | Codex has `--json` (JSONL) with different event schema |
 | **frontmatter** | `claude_args` field | Rename to generic `agent_args` (keep `claude_args` as compat alias) |

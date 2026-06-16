@@ -241,37 +241,37 @@ pub struct TmuxSubmitProfile {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TmuxSubmitDelivery {
-    LiteralTextEnterKey,
+    HexTextCarriageReturn,
 }
 
 impl TmuxSubmitProfile {
     pub const fn mode(self) -> &'static str {
         match self.delivery {
-            TmuxSubmitDelivery::LiteralTextEnterKey => "tmux_literal_text_enter_key",
+            TmuxSubmitDelivery::HexTextCarriageReturn => "tmux_hex_text_cr",
         }
     }
 
     pub const fn transform(self) -> &'static str {
         match self.delivery {
-            TmuxSubmitDelivery::LiteralTextEnterKey => "tmux_text_enter_key",
+            TmuxSubmitDelivery::HexTextCarriageReturn => "tmux_hex_text_cr",
         }
     }
 
     pub const fn submit_key(self) -> &'static str {
         match self.delivery {
-            TmuxSubmitDelivery::LiteralTextEnterKey => "Enter",
+            TmuxSubmitDelivery::HexTextCarriageReturn => "CR",
         }
     }
 
     pub const fn pending_draft_enter_resubmit(self) -> bool {
-        matches!(self.delivery, TmuxSubmitDelivery::LiteralTextEnterKey)
+        matches!(self.delivery, TmuxSubmitDelivery::HexTextCarriageReturn)
     }
 }
 
 pub const fn tmux_submit_profile_for_harness(harness: &str) -> TmuxSubmitProfile {
     let _ = harness;
     TmuxSubmitProfile {
-        delivery: TmuxSubmitDelivery::LiteralTextEnterKey,
+        delivery: TmuxSubmitDelivery::HexTextCarriageReturn,
     }
 }
 
@@ -291,50 +291,39 @@ fn submitted_text_without_trailing_line_endings(text: &str) -> &str {
     text.trim_end_matches(['\r', '\n'])
 }
 
-fn literal_text_command_args(pane_id: &str, text: &str) -> Option<Vec<String>> {
+fn text_submit_command_args(pane_id: &str, text: &str, profile: TmuxSubmitProfile) -> Vec<String> {
     let text = submitted_text_without_trailing_line_endings(text);
-    if text.is_empty() {
-        return None;
-    }
-    Some(vec![
-        "send-keys".to_string(),
-        "-t".to_string(),
-        pane_id.to_string(),
-        "-l".to_string(),
-        text.to_string(),
-    ])
-}
-
-fn enter_key_command_args(pane_id: &str) -> Vec<String> {
-    vec![
-        "send-keys".to_string(),
-        "-t".to_string(),
-        pane_id.to_string(),
-        "Enter".to_string(),
-    ]
-}
-
-/// Submit text and the named Enter key as separate tmux calls so a successful
-/// draft write cannot hide a missed Enter after supervisor restart/reexec.
-fn send_literal_text_then_enter_key(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()> {
-    if let Some(args) = literal_text_command_args(pane_id, text) {
-        let status = tmux
-            .cmd()
-            .args(args)
-            .status()
-            .context("failed to run tmux send-keys (literal text)")?;
-        if !status.success() {
-            anyhow::bail!("tmux send-keys literal text failed for pane {}", pane_id);
+    let payload = format!("{text}\r");
+    match profile.delivery {
+        TmuxSubmitDelivery::HexTextCarriageReturn => {
+            let mut args = vec![
+                "send-keys".to_string(),
+                "-t".to_string(),
+                pane_id.to_string(),
+                "-H".to_string(),
+            ];
+            args.extend(payload.as_bytes().iter().map(|byte| format!("{byte:02x}")));
+            args
         }
     }
+}
 
+/// Submit text and the carriage-return byte in one tmux call. Codex/Claude TUI
+/// panes can leave named submit keys as drafted input in raw mode; a literal CR
+/// matches the supervisor PTY submit byte while still going through tmux.
+fn send_text_with_submit_key(
+    tmux: &Tmux,
+    pane_id: &str,
+    text: &str,
+    profile: TmuxSubmitProfile,
+) -> Result<()> {
     let status = tmux
         .cmd()
-        .args(enter_key_command_args(pane_id))
+        .args(text_submit_command_args(pane_id, text, profile))
         .status()
-        .context("failed to run tmux send-keys (Enter)")?;
+        .context("failed to run tmux send-keys (text + submit key)")?;
     if !status.success() {
-        anyhow::bail!("tmux send-keys Enter failed for pane {}", pane_id);
+        anyhow::bail!("tmux send-keys text submit failed for pane {}", pane_id);
     }
     Ok(())
 }
@@ -346,8 +335,8 @@ fn send_submitted_text_with_profile(
     profile: TmuxSubmitProfile,
 ) -> Result<()> {
     match profile.delivery {
-        TmuxSubmitDelivery::LiteralTextEnterKey => {
-            send_literal_text_then_enter_key(tmux, pane_id, text)
+        TmuxSubmitDelivery::HexTextCarriageReturn => {
+            send_text_with_submit_key(tmux, pane_id, text, profile)
         }
     }
 }
@@ -488,7 +477,7 @@ pub fn send_submitted_text(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()>
 ///
 /// The submit profile is the single place that defines harness-specific tmux
 /// key boundaries. Codex, Claude, OpenCode, and the default harness profile use
-/// literal text followed by a named tmux `Enter`.
+/// hex-encoded text plus the profile submit byte in one tmux `send-keys -H` operation.
 pub fn send_submitted_text_for_harness(
     tmux: &Tmux,
     pane_id: &str,
@@ -1359,55 +1348,73 @@ mod tests {
 
     #[test]
     fn submit_profiles_keep_harness_submit_policy_in_one_place() {
-        assert_eq!(
-            tmux_submit_mode_for_harness("codex"),
-            "tmux_literal_text_enter_key"
-        );
+        assert_eq!(tmux_submit_mode_for_harness("codex"), "tmux_hex_text_cr");
         assert_eq!(
             tmux_submit_transform_for_harness("codex"),
-            "tmux_text_enter_key"
+            "tmux_hex_text_cr"
         );
-        assert_eq!(tmux_submit_key_for_harness("codex"), "Enter");
+        assert_eq!(tmux_submit_key_for_harness("codex"), "CR");
         assert_eq!(
             submitted_text_without_trailing_line_endings("agent-doc plan.md\r\n"),
             "agent-doc plan.md"
         );
         assert_eq!(
-            literal_text_command_args("%7", "agent-doc plan.md\n"),
-            Some(
-                ["send-keys", "-t", "%7", "-l", "agent-doc plan.md"]
-                    .into_iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-            )
+            text_submit_command_args(
+                "%7",
+                "agent-doc plan.md\n",
+                tmux_submit_profile_for_harness("codex")
+            ),
+            [
+                "send-keys",
+                "-t",
+                "%7",
+                "-H",
+                "61",
+                "67",
+                "65",
+                "6e",
+                "74",
+                "2d",
+                "64",
+                "6f",
+                "63",
+                "20",
+                "70",
+                "6c",
+                "61",
+                "6e",
+                "2e",
+                "6d",
+                "64",
+                "0d",
+            ]
+            .into_iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
         );
-        assert_eq!(literal_text_command_args("%7", "\n"), None);
         assert_eq!(
-            enter_key_command_args("%7"),
-            vec!["send-keys", "-t", "%7", "Enter"]
+            text_submit_command_args("%7", "\n", tmux_submit_profile_for_harness("codex")),
+            ["send-keys", "-t", "%7", "-H", "0d"]
+                .into_iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
         );
-        assert_eq!(
-            tmux_submit_mode_for_harness("claude"),
-            "tmux_literal_text_enter_key"
-        );
+        assert_eq!(tmux_submit_mode_for_harness("claude"), "tmux_hex_text_cr");
         assert_eq!(
             tmux_submit_transform_for_harness("claude"),
-            "tmux_text_enter_key"
+            "tmux_hex_text_cr"
         );
-        assert_eq!(tmux_submit_key_for_harness("claude"), "Enter");
+        assert_eq!(tmux_submit_key_for_harness("claude"), "CR");
         assert_eq!(
             tmux_submit_mode_for_harness("unknown-harness"),
-            "tmux_literal_text_enter_key"
+            "tmux_hex_text_cr"
         );
-        assert_eq!(
-            tmux_submit_mode_for_harness("opencode"),
-            "tmux_literal_text_enter_key"
-        );
+        assert_eq!(tmux_submit_mode_for_harness("opencode"), "tmux_hex_text_cr");
         assert_eq!(
             tmux_submit_transform_for_harness("opencode"),
-            "tmux_text_enter_key"
+            "tmux_hex_text_cr"
         );
-        assert_eq!(tmux_submit_key_for_harness("opencode"), "Enter");
+        assert_eq!(tmux_submit_key_for_harness("opencode"), "CR");
     }
 
     #[test]
@@ -1650,31 +1657,45 @@ mod tests {
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn opencode_submit_uses_literal_text_enter_key() {
-        let t = IsolatedTmux::new("agent-doc-test-opencode-enter-key");
+    fn opencode_submit_uses_hex_text_cr() {
+        let t = IsolatedTmux::new("agent-doc-test-opencode-hex-cr");
         let tmp = TempDir::new().unwrap();
         let pane_id = t.new_session("test", tmp.path()).unwrap();
         let output_path = tmp.path().join("input.bin");
         let done_path = tmp.path().join("done");
-        // This shell-bootstrapped raw reader observes tmux's named Enter key as LF;
-        // the policy test above locks that the submit path uses a named Enter event.
-        let expected = b"agent-doc plan.md\n";
+        let ready_path = tmp.path().join("ready");
+        let expected = b"agent-doc plan.md\r";
 
-        t.send_keys(
-            &pane_id,
-            &format!(
-                "sh -lc 'stty raw -echo; dd bs=1 count={} of=\"{}\" 2>/dev/null; touch \"{}\"'",
-                expected.len(),
-                output_path.display(),
-                done_path.display()
-            ),
-        )
-        .unwrap();
-        std::thread::sleep(Duration::from_millis(150));
+        let reader = format!(
+            "sh -lc 'stty raw -echo; touch \"{}\"; dd bs=1 count={} of=\"{}\" 2>/dev/null; touch \"{}\"'",
+            ready_path.display(),
+            expected.len(),
+            output_path.display(),
+            done_path.display()
+        );
+        let setup_status = t
+            .cmd()
+            .args(["send-keys", "-t", &pane_id, "-l"])
+            .arg(&reader)
+            .status()
+            .unwrap();
+        assert!(setup_status.success(), "raw reader setup command failed");
+        t.send_key(&pane_id, "Enter").unwrap();
+
+        for _ in 0..60 {
+            if ready_path.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            ready_path.exists(),
+            "expected raw reader to enter raw mode before payload submit"
+        );
 
         send_submitted_text_for_harness(&t, &pane_id, "agent-doc plan.md\n", "opencode").unwrap();
 
-        for _ in 0..40 {
+        for _ in 0..60 {
             if done_path.exists() {
                 break;
             }

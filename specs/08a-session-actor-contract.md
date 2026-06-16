@@ -152,14 +152,14 @@ Later phases may refine caller values without changing the field names.
   issue=prompt_not_submitted`; when Codex hook tracking or OpenCode pane-state
   tracking requires dispatch proof but only acceptance is observed, it logs
   `route_submit_issue issue=accepted_without_dispatch_start_proof`.
-- Enter-key direct-pane submit profiles get one bare-`Enter` re-submit
+- Direct-pane submit profiles get one bare submit-key re-submit
   (`#jbcodexsubmit` / `#jbclaudesubmit`). Codex, Claude, OpenCode, and default
-  tmux submits send literal text followed by a named tmux `Enter`; when a submit
+  tmux submits send hex-encoded text plus a carriage-return byte in one `send-keys -H` operation; when a submit
   still times out with the trigger visibly drafted, route sends one separate
-  `Enter` key event and re-polls the acceptance window exactly once, recording
-  `route_submit_resubmit ... action=enter_key result=accepted|still_visible`.
+  a literal CR submit and re-polls the acceptance window exactly once, recording
+  `route_submit_resubmit ... action=submit_key key=CR result=accepted|still_visible`.
   If the exact same routed trigger is already visible in the composer before
-  route sends anything, route takes that same one-`Enter` path first instead of
+  route sends anything, route takes that same one-submit-key path first instead of
   appending another trigger; a later idle prompt below the trigger classifies it
   as stale scrollback, not active draft input. This recovery never loops on a
   genuinely stuck pane.

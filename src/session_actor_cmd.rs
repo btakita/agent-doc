@@ -1622,18 +1622,21 @@ fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Re
         "direct_pane_acceptance",
     );
     if clear_direct_submit_needs_enter_resubmit(harness, &first) {
+        let submit_key = agent_doc_orchestration::sessions::tmux_submit_key_for_harness(harness);
         agent_doc_orchestration::input_diag::log_text_submit(
             Some(file),
             "session_clear.direct_pane_resubmit",
             &format!("pane:{pane}"),
             "",
             Some(harness),
-            "clear_resubmit_enter_key",
-            "Enter",
+            "clear_resubmit_submit_key",
+            submit_key,
         );
-        if let Err(err) = agent_doc_orchestration::sessions::send_key(tmux, pane, "Enter") {
+        if let Err(err) = agent_doc_orchestration::sessions::send_submitted_text_for_harness(
+            tmux, pane, "", harness,
+        ) {
             eprintln!(
-                "[clear] warning: {harness} clear resubmit Enter failed for pane {pane}: {err}"
+                "[clear] warning: {harness} clear resubmit {submit_key} failed for pane {pane}: {err}"
             );
         }
         let second = poll_clear_direct_submit_acceptance(
@@ -1801,11 +1804,13 @@ fn clear_direct_submit_resubmit_proof_line(
         ClearDirectSubmitStatus::TimedOut => "still_visible",
         ClearDirectSubmitStatus::CaptureFailed => "capture_failed",
     };
+    let submit_key = agent_doc_orchestration::sessions::tmux_submit_key_for_harness(harness);
     format!(
-        "session_clear_submit_resubmit file={} pane={} harness={} action=enter_key result={} elapsed_ms={}",
+        "session_clear_submit_resubmit file={} pane={} harness={} action=submit_key key={} result={} elapsed_ms={}",
         file.display(),
         pane,
         harness,
+        submit_key,
         result,
         observation.elapsed.as_millis()
     )
@@ -4322,7 +4327,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             },
         );
         assert!(retry.contains("session_clear_submit_resubmit"), "{retry}");
-        assert!(retry.contains("action=enter_key"), "{retry}");
+        assert!(retry.contains("action=submit_key key=CR"), "{retry}");
         assert!(retry.contains("result=accepted"), "{retry}");
     }
 

@@ -146,19 +146,19 @@ Proof for this cycle:
 - Verification: no source/build/test surfaces changed; this closeout only resolves the open preflight cycle and records the operator-verify boundary.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:6cd71ae4 -->
+- Escalation: none.
+- Confidence: high.
+- Verification: session-check is expected after this commit boundary; no source/build/test surfaces changed.
+- Commands: `agent-doc read --component queue`, `agent-doc read --component backlog`, `agent-doc queue sync`, `agent-doc session-check`, `agent-doc write --commit`.
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` via `agent-doc queue sync` and this `agent-doc write --commit` repair.
+<!-- agent:boundary:4f3d9cc7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~If we orchestrate a team of subagents with different roles, will the output quality improve on this project?~~
-- ~~Look at bugs from recent sessions from the JB, agent-doc, and Codex session logs. What are #next-steps to fix? How can we improve the architecture to fix these workflow issues? Are the workflows properly defined?~~
-- ~~How can we use binary logic to resolve "Run Agent Doc stale queue pause" issues and other conflict issues? Are we creating too many conflicts?~~
-- ~~How can we strengthen architectural primitives so agentic work is easier to reason about and work can be done without regressions?~~
 ---
-- ~~do [#lazilyqrestore]~~
-- do [#recyclerestart-verify]
+- do [#recyclerestart-verify]: This is automatable. You are misattributing it to operator driven.
 - do [#rtwbcast-verify]
 - do [#c2b6]
 - do [#1j8q]
@@ -166,6 +166,12 @@ Proof for this cycle:
 - do [#qflood2]
 - do [#qt32]
 - do [#fcc0-live-verify]
+- do [#archstatekernel]
+- do [#archproofledger]
+- do [#archcomponentmerge]
+- do [#archsimworldmatrix]
+- do [#archuistates]
+- do [#cwsp]
 <!-- /agent:queue -->
 ###
 <!--
@@ -201,7 +207,7 @@ What are #next-steps to fix bugs?
 - [ ] [#archsimworldmatrix] Add SimWorld/property transition-table coverage for the architecture primitives: stale supervisor recycle, queue edit during closeout, degraded/file-IPC fallback, live buffer drift, compact/replay, and operator-only/no-drainable queue outcomes.
 - [ ] [#archuistates] Replace raw route/write conflict strings in JB/Codex/OpenCode surfaces with a small typed outcome vocabulary: queued behind owner, recovered and retried, deferred for operator proof, no drainable work, real component conflict, and blocked with exact unblocker.
 - [ ] [#cwsp] [operator-verify] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38 and recycling the live supervisor onto that build, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
-- [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
+- [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion remains open; requires the operator to recycle/restart the supervisor onto the current build and confirm live JB/supervisor behavior from ops.log. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
 - [ ] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.

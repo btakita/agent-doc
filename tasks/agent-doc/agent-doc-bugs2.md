@@ -188,7 +188,24 @@ Proof:
 ❯ - Confidence: high for the snapshot/logging and split-submit behavior. If Enter still misses in the live restart path, the next `ops.log` plus the referenced snapshot file should show whether the composer kept the draft, consumed it without hook proof, or failed capture.
 
 I left the unrelated pre-existing PCP handoff edits in `src/agent-doc` unstaged: `agent-doc-orchestration/src/start/decisions.rs` and `specs/08b-single-process-control-plane.md`.
-<!-- agent:boundary:72c744f7 -->
+
+### Re: Add State Machine architecture tasks — gpt-5
+
+Added six State Machine / architecture tasks as stable backlog items at the tail, each marked with `:inbox_tray:` so `agent:queue` sync can materialize them at the end of the live queue:
+
+- `#smcloseoutdecision`: implement the full typed `CloseoutRecoveryDecision` boundary from `tasks/agent-doc/plan-run-agent-doc-closeout-recovery-state-machine.md`.
+- `#smcloseoutevidence`: centralize recovery evidence gathering behind one typed API.
+- `#smrouteconsume`: make route and JB `Run Agent Doc` consume typed closeout recovery decisions instead of parsing low-level capture errors.
+- `#smrecoverymutate`: unify replay, stale-capture retirement, reset-from-visible, and safe queue-only replay through one mutation primitive.
+- `#smtransitiontests`: cover the full closeout recovery transition table with pure decision, SimWorld, and property-style tests.
+- `#archfirstgate`: apply `runbooks/architecture-first.md` as the closeout gate for these state-machine refactors.
+
+Proof:
+
+- Source context read: archived architecture discussion, `tasks/agent-doc/plan-run-agent-doc-closeout-recovery-state-machine.md`, and `runbooks/architecture-first.md`.
+- Mutation path: `agent-doc finalize --pending-add-back ...` with explicit ids and enqueue markers.
+- No source code changed in this cycle.
+<!-- agent:boundary:301dc14c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -245,6 +262,12 @@ What are #next-steps to fix bugs?
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#qt32] [operator-verify] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.
+- [ ] [#smcloseoutdecision] :inbox_tray: Implement the full typed CloseoutRecoveryDecision boundary for closeout recovery across route, repair, session-check, and write/commit. Include AlreadyCommitted, ReplaySafe, RetireStaleCapture, ResetSidecarsFromVisible, QueuePromptForAfterCloseout, and Blocked outcomes. Reference tasks/agent-doc/plan-run-agent-doc-closeout-recovery-state-machine.md.
+- [ ] [#smcloseoutevidence] :inbox_tray: Centralize closeout recovery evidence gathering behind one typed API: visible markdown hash, snapshot hash, active cycle phase, capture state, response-body/supersession proof, queue-only drift proof, editor IPC freshness, and controller/supervisor binary freshness.
+- [ ] [#smrouteconsume] :inbox_tray: Move route and JB Run Agent Doc recovery paths to consume CloseoutRecoveryDecision only; remove low-level string parsing/rephrasing of captured-response baseline errors at route edges.
+- [ ] [#smrecoverymutate] :inbox_tray: Unify recovery mutations through one replay/sidecar primitive so reset --from-current --preserve-session, stale-capture retirement, reset-from-visible, and safe queue-only replay cannot diverge.
+- [ ] [#smtransitiontests] :inbox_tray: Add SimWorld/property/pure-decision coverage for the full closeout recovery transition table: queue edits around capture/write fragmentation, compaction, stale snapshots, stale ack-content, and JB Run Agent Doc during open closeout with and without prompt context.
+- [ ] [#archfirstgate] :inbox_tray: Apply runbooks/architecture-first.md as the closeout gate for agent-doc state-machine refactors: each implementation must state invariant, policy owner, transition rows covered by tests, edited surfaces, and explicit out-of-scope/operator-verify work.
 <!-- /agent:backlog -->
 
 ## Review

@@ -60,7 +60,7 @@ Changed paths in `src/agent-doc`: `editors/jetbrains/src/main/kotlin/com/github/
 Commits pushed: `agent-doc` `f5844c53` (`fix(jb): surface codex boot timeouts`) and parent repo `e858a951e` (`chore: update agent-doc submodule`). I also installed the rebuilt JetBrains plugin `0.2.165` into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ IDEA to activate it.
 
 Verification: focused JetBrains `TerminalUtilTest` passed, `make check` passed in the normal checkout, the failed tmux sync test from the first run passed in isolation, `make check` passed again on the clean replayed commit under the normal sibling layout, and `./gradlew buildPlugin` succeeded from that replayed commit. GitHub Actions for `agent-doc` was still in progress (`27586552150`) when checked; the parent repo has no workflow named `CI`.
-<!-- agent:boundary:780f1b62 -->
+<!-- agent:boundary:fdeb6a02 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -75,7 +75,7 @@ resync: pruned 1 stale session(s)
 Error: dispatch-only codex reopen refused to inject into pane %103 for tasks/mrh-servers.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
 ```
 ---
-- [#lazilyqrestore]
+- ~~[#lazilyqrestore]~~
 - [#c2b6]
 - [#1j8q]
 - [#anw0verify]

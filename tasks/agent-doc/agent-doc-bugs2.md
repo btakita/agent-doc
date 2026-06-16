@@ -506,7 +506,35 @@ Verification:
 Confidence: high. The broad component-scope classifier remains covered by `turn_scope` tests, and this commit adds focused enforcement for the risky queue-consume editor IPC path.
 
 Escalation: none.
-<!-- agent:boundary:99d9c93c -->
+
+### Re: do [#archsimworldmatrix] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#archsimworldmatrix]
+
+
+Implemented `#archsimworldmatrix` in submodule commit `3fab370f` (`test: cover workflow architecture matrix`).
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/flow/workflow_state.rs`
+- parent gitlink `src/agent-doc`
+
+What changed:
+- Added a table-driven workflow architecture matrix test for the mirror-mode state kernel.
+- The matrix names the required architecture primitives: stale supervisor recycle, operator-only/no-drainable queue no-op, queue edit during unresolved closeout, degraded/file-IPC materialized response fallback, compact/replay captured response, attributed live-buffer drift, and unattributed live-buffer drift.
+- Each row asserts the typed decision, allowed mutation, and exact proof obligations so future decision changes must update the matrix deliberately.
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration workflow_state`
+- `make check` (clippy, 4,584 nextest tests, doctests, medium SimWorld corpus)
+- `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+
+Confidence: high. This is isolated deterministic coverage over the pure workflow-state kernel, and the full repo check passed.
+
+Escalation: none.
+<!-- agent:boundary:6aeafeb5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -530,7 +558,7 @@ Escalation: none.
 - ~~do [#archstatekernel]~~
 - ~~do [#archproofledger]~~
 - ~~do [#archcomponentmerge]~~
-- do [#archsimworldmatrix]
+- ~~do [#archsimworldmatrix]~~
 - do [#archuistates]
 - do [#cwsp]
 - do [#wfinvcatalog]
@@ -565,7 +593,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#archsimworldmatrix] Add SimWorld/property transition-table coverage for the architecture primitives: stale supervisor recycle, queue edit during closeout, degraded/file-IPC fallback, live buffer drift, compact/replay, and operator-only/no-drainable queue outcomes.
 - [ ] [#archuistates] Replace raw route/write conflict strings in JB/Codex/OpenCode surfaces with a small typed outcome vocabulary: queued behind owner, recovered and retried, deferred for operator proof, no drainable work, real component conflict, and blocked with exact unblocker.
 - [ ] [#cwsp] [operator-verify] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38 and recycling the live supervisor onto that build, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
 - [ ] [#wfinvcatalog] Create a machine-readable workflow invariant catalog: each invariant has id, fact sources, ok predicate, disproof markers, severity, safe remediation, operator-gated remediation, and SimWorld/regression coverage. Start with queue continuation, stale supervisor, closeout commit, editor convergence, generation redirect, and parent gitlink invariants.

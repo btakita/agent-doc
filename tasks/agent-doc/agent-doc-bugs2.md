@@ -140,14 +140,51 @@ Pushed:
 - parent instruction commit `f804b3ccf docs: clarify CI closeout check`.
 
 Confidence: high for the restart/race class. The fix keeps JB thin and moves the state machine into the shared Rust path used by both JB and CLI entrypoints.
-<!-- agent:boundary:18ef0213 -->
+
+### Re: JB Run Agent Doc state machine — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` still does not send Enter. Should we have more state machine logic to prevent race conditions?
+
+Yes. I implemented the missing JetBrains-side state machine. The remaining race was not only the tmux `Enter` shape; repeated `Run Agent Doc` clicks after the short coalesce window could cancel the older in-flight route process before it finished its submit/proof wait, and normal `Clear Session Context` could still interleave with a route process at the editor action layer.
+
+Changed behavior:
+- Repeated `Run Agent Doc` while a plugin-spawned route process is alive no longer cancels that process. The first route owns the submit/proof window; later clicks are visibly deduped and recorded in the attempt ledger as `route_already_in_flight` / `route_process_already_in_flight`.
+- Normal `Clear Session Context` is rejected while `Run Agent Doc` dispatch is active. `Interrupt and Clear Session Context` remains the explicit discard path.
+- If `Run Agent Doc` is clicked while a normal clear command is already running, the latest Run intent queues behind that clear and starts only after the clear completes synchronously. A binary-deferred clear does not release the queued Run immediately.
+
+Changed paths: `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorCommandStateMachine.kt`, `TerminalUtil.kt`, JetBrains tests, `editors/jetbrains/SPEC.md`, `editors/jetbrains/gradle.properties`, and `VERSIONS.md`.
+
+Verification passed:
+- `./gradlew test`
+- `./gradlew test buildPlugin`
+- `make check` (clippy, 4,607 nextest tests, doctests, medium SimWorld corpus)
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.1`
+- `git diff --check`
+
+Install/build proof:
+- Built JetBrains plugin ZIP: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.168.zip`.
+- Installed local JetBrains plugin `0.2.168` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
+- IntelliJ IDEA must be restarted to activate the plugin update.
+- `make install` installed the updated binary/shared library and marked 2 controllers for recycle at the next idle boundary.
+
+Pushed:
+- `src/agent-doc`: `d1945e3e fix: serialize jetbrains run and clear actions`
+- parent repo gitlink: `26949a90c agent-doc: update jetbrains run clear state machine`
+
+CI: latest `src/agent-doc` CI run `27653709874` is `in_progress`; local full verification passed, so I recorded it and did not wait. The parent repo still has no workflow named `CI`.
+
+Escalation: none. Confidence: high for stopping the repeated-click cancellation and Run/Clear interleaving class. Live proof after restarting IntelliJ should show either a single route process reaching submit/proof or a visible dedupe/block notice, rather than a second click killing the process that would press `Enter`.
+<!-- agent:boundary:5b05f33c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Clear Session Context` does not submit with Enter. JB `Run Agent Doc` sends a `/clear` and restart. After a couple restart JB `Run Agent Doc` still does not send Enter. Should we remove Codex-specific logic with JB commands and just use the same path as with Claude Code?~~
-- :pushpin: JB `Run Agent Doc` still does not send Enter. Should we have more state machine logic to prevent race conditions?
+- ~~:pushpin: JB `Run Agent Doc` still does not send Enter. Should we have more state machine logic to prevent race conditions?~~
 - [#resprectail]
 <!-- /agent:queue -->
 ###

@@ -45,7 +45,6 @@ Compacted content:
 >
 > :pushpin: Continue setting up the lender selection pipeline. Where lenders are sent information, communication with the lender, etc.
 
-
 Continued the lender selection pipeline setup by adding structured lender communication follow-up fields to the existing deal-interest workflow. The Lender Pipeline modal now records last lender contact time, method, contact summary, and next follow-up date alongside the package/call/selection/verbal-commitment milestones.
 
 Changed paths: `src/equityfundingsource-dev/app/equityfundingsource/migrations/0070_deal_interest_lender_communication.sql`, admin investor workflow API/types, `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`, `prds/investor-pipeline-admin.md`, and `tests/admin-investor-pipeline.test.ts`.
@@ -61,7 +60,6 @@ Escalation: none. Confidence: high. No deploy was run; this queue item used the 
 > **Queue prompt:**
 >
 > I'm talking about the Deal Pipeline. https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f and the Available Deal dialog. The admin will communicate with lenders over email and select a lender. Would Go High Level integration be a good idea here?
-
 
 Yes, GHL is a good fit here, but only as the communication/CRM layer, not as the source of truth for the Deal Pipeline.
 
@@ -87,7 +85,6 @@ Changed paths: session document only. Verification: reviewed local EFS Deal Pipe
 >
 > do [#deal-pipeline-ghl-adapter]
 
-
 Implemented the GoHighLevel adapter foundation for the Deal Pipeline lender-selection workflow. EFS/D1 stays the source of truth for Available Deal lender selection, documents, audit history, verbal commitment, allocations, and TMO gates; GHL is now modeled as a CRM/outreach adapter around each `investor_deal_interests` work item.
 
 What shipped:
@@ -107,7 +104,7 @@ Verification: `bun test tests/admin-investor-pipeline.test.ts` passed (63 tests)
 Committed and pushed: EFS submodule `89b9558` (`feat(admin): add GHL deal pipeline adapter state`) to `btakita/equityfundingsource-dev:main`; parent repo pointer `a11c22952` (`chore(efs): advance GHL adapter state`) to `btakita/agent-loop:main`.
 
 Escalation: none. Confidence: high. No deploy was run; this queue item used the `#spec-test-commit-push` path, and the new D1 migration will be applied by the normal deploy path.
-<!-- agent:boundary:afdc3d89 -->
+<!-- agent:boundary:40938bf4 -->
 <!-- /agent:exchange -->
 ###
 <!--

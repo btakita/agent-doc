@@ -365,7 +365,43 @@ Recovery proof from this cycle:
 I added backlog item `#queueeditcap` for the root fix: captured-response closeout must preserve post-preflight queue edits while replaying or safely retiring the captured response, so JB `Run Agent Doc` can recover/drain instead of surfacing `captured response baseline no longer matches current document`.
 
 No source files were changed in this response cycle. The route-owned supervisor is still reported as stale, but that is now a warning rather than the closeout blocker; I did not force-restart or interrupt the busy pane from this cycle.
-<!-- agent:boundary:64826f91 -->
+
+### Re: do [#queueeditcap] — gpt-5
+
+Implemented `#queueeditcap` in `src/agent-doc` and pushed it.
+
+What changed:
+- `capture::validate_replay` now has a narrow queue-only drift recovery. If the captured snapshot still matches the current snapshot, the live file hash drifted, and replacing the live `agent:queue` body with the snapshot queue body restores the document byte-for-byte after managed pipeline stripping, the capture refreshes only its file hash and lets the normal replay path apply the preserved response onto the current queue-edited document.
+- Non-queue drift, missing/multiple queue components, snapshot drift, and structural marker drift still fail closed.
+- Added regression coverage: `validate_replay_refreshes_baseline_for_queue_only_drift`.
+- Updated `specs/07-closeout-commands.md` and `VERSIONS.md` with the `#queueeditcap` invariant.
+
+Changed paths:
+- `agent-doc-orchestration/src/capture.rs`
+- `specs/07-closeout-commands.md`
+- `VERSIONS.md`
+
+Verification:
+- `cargo fmt --check`
+- `git diff --check`
+- `cargo test -p agent-doc-orchestration validate_replay_refreshes_baseline_for_queue_only_drift`
+- `cargo test -p agent-doc-orchestration validate_replay`
+- `make check` passed: clippy, 4547 tests, doctests, and the ignored medium SimWorld budget test.
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc lib-install`
+- `agent-doc --version` reports `agent-doc 0.34.1`.
+
+Commit/push proof:
+- `src/agent-doc`: `0d403254` (`fix: replay captured responses across queue-only drift`) pushed to `origin/main`.
+- Parent repo: `9b1bfc55d` (`agent-doc: update closeout recovery`) pushed to `origin/main`.
+
+CI:
+- Latest `src/agent-doc` GitHub Actions `CI` is in progress for `0d403254`: run `27594082265`, started 2026-06-16T04:25:34Z.
+- The parent repo does not have a workflow named `CI`.
+
+No escalation was needed.
+<!-- agent:boundary:262afad6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -373,14 +409,14 @@ No source files were changed in this response cycle. The route-owned supervisor 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~JB `Run Agent Doc` on equityfundingsource.md after a fresh auto-sync did not submit the prompt.~~
 - ~~commit + push uncommitted agent-doc files~~
----
+~~~done
 Typing into the queue during the turn cause the conversation to be interrupted. ![img_30.png](img_30.png). A pre-finalize response was uncommitted causing the response to be treated as a user prompt ![img_31.png](img_31.png). After restart, JB `Run Agent Doc` error.
 
 ```
 [route] target tmux session: 0
 Error: authoritative actor generation 438 for tasks/agent-doc/agent-doc-bugs2.md owns pane %110 but route could not drain the active closeout before dispatch: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
 ```
----
+~~~
 - ~~Why not just shell out `tmux send-keys "Command" Enter`? Is the JB `Run Agent Doc` not-submiting an issue or is it the fact that logic is still spread all over the codebase and we are hitting the various conditions that use this spaghetti logic?~~
 - :pushpin: Only agent-doc dogfooding sessions should auto-build + install. The equityfundingsource.md session should not auto-install ![img_29.png](img_29.png)
 - :pushpin: How can I tell if the supervisor + CPC are up to date? Why is the formatting all messed up? ![2026-06-15_22-56.png](../../../../../Pictures/agent-loop/2026-06-15_22-56.png) Also I'm seeing some shells from the supervisor are 2 lines too low. See where the `agent-doc admin --help` starts in the screenshot.
@@ -394,6 +430,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ---
 - :pushpin: agent-doc start to codex misformatted ![img_27.png](img_27.png) ![img_28.png](img_28.png)
 - :pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.
+- ~~do [#queueeditcap]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -423,7 +460,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#queueeditcap] #agent-doc-bug: Captured-response closeout can deadlock after a user edits `agent:queue` mid-turn: preserve post-preflight queue edits while replaying or safely retiring the captured response, and make JB `Run Agent Doc` recover/drain instead of surfacing `captured response baseline no longer matches current document`. Live repro: `tasks/agent-doc/agent-doc-bugs2.md` generation 438 / `cycle-1781582845265`; related #stale-capture-captured-only-drift.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

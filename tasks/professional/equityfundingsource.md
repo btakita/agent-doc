@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -278,9 +278,31 @@ Verification:
 - `/portal-admin/pipeline` returned HTTP 303 to admin login, expected for the protected route.
 - The downloaded deployed browser bundle contains `TMO_DETAIL_FIELD_GRID_STYLE`, `grid-template-columns:repeat(auto-fit,minmax(120px,1fr))`, `ADMIN_LOAN_NARROW_CARD_STYLE`, `Final Loan Documents`, and `Borrower Onboarding Data`.
 - GitHub Actions check: both the EFS submodule and parent repo report no workflow named `CI`.
+- `tsift status` reports one unrelated missing workspace scope, but the `equityfundingsource-dev` scope refreshed cleanly and was fresh for this work.
+- There is unrelated dirty/partial-staging state under `src/agent-doc`; I left it untouched.
+- `agent-doc` reported a stale installed binary/cdylib relative to source commit `f27a388b`; rebuild with `make install` in `src/agent-doc` if you want that refreshed.
+- `gh run list --workflow CI --limit 1` in both EFS and parent reports no workflow named `CI`.
+- Downloaded deployed `/index.browser-AJ723CPL.js` and confirmed it contains the new flex styles, bounded card widths, `Final Loan Documents`, and `Borrower Onboarding Data`.
+  - `/portal-admin/pipeline` returned `303` to admin login.
+  - `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned `303` to admin login.
+  - `/` returned `200`.
+- Live route smoke checks after deploy:
+- Parent `make check` passed.
+- EFS `make check` passed: 739 tests, app build, Worker build.
+- Focused tests: `bun test tests/tmo-loan-details-density.test.ts tests/final-loan-docs.test.ts tests/boolean-checkbox-fields.test.ts` passed: 16 tests, 125 expectations.
+- Remote D1 migrations: no migrations to apply.
+- Deployed asset: `/index.browser-AJ723CPL.js`.
+- Deployed Worker version: `6bb5cbd2-015a-41c9-ba8d-1f2559e625f6`.
+- Ran `make deploy` from `src/equityfundingsource-dev`.
+- Parent gitlink: `c5bb5d0f2 chore(efs): update flex-wrapped loan detail layout submodule`.
+- EFS submodule: `56d0360 fix(admin): flex wrap loan detail cards` and pushed to `btakita/equityfundingsource-dev:main`.
+- `prds/67v2-admin-loan-pipeline-kanban.md`: Phase I notes now describe the flex-wrapping card behavior.
+- `tests/tmo-loan-details-density.test.ts`: updated guards for the flex stack and bounded card widths.
+- `lib/ui--browser--efs/portal/admin/loan_detail.tsx`: Loan Status, Application Record, and Borrower Info now use the same wrapping summary stack, with each card capped in width.
+- `lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx`: TMO Loan Terms, Borrower Detail, Collateral, and Encumbrance now render as peer flex cards with `flex-wrap`, bounded widths, and consolidated field columns.
 
 Preflight reported high exchange accretion and one session-drift warning; queue work was still actionable, so I completed the implementation and deploy. Confidence: high. Escalation: none.
-<!-- agent:boundary:4300e609 -->
+<!-- agent:boundary:c68bc6c2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -291,14 +313,13 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 Space should be horizontally consolidated ![img_17.png](img_17.png)
 Final Loan Documents can be a card view and narrower.
 Borrower Onboarding Data should be a card view and narrower.
-
 deploy
+- do [#jrnz]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jrnz] Use display flex so the cards can stack horizontally. ![img_18.png](img_18.png)
 <!-- /agent:backlog -->
 
 ## Review

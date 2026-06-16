@@ -439,13 +439,19 @@ distinct from the one-shot restart auto-trigger:
   `session_accretion::queue_context_reset_reason` policy as direct `agent-doc
   run`. If the active queue should continue from fresh context and no manual
   clear cooldown is pausing dispatch, the watch injects the harness-native
-  context reset command at the idle gap (`/clear` for Claude/Codex, `/new` for
-  OpenCode), records that clear for Codex/OpenCode hook state, latches the
-  current head as reset, and waits for a later idle tick to drain the same head.
-  The latch prevents a large exchange from clearing forever without dispatching;
-  once the head advances, another reset may be interleaved if the accretion
-  policy still requires it. A manual clear cooldown remains authoritative for a
-  plain operator clear with no active queue (it suppresses passive dispatch until
+context reset command at the idle gap (`/clear` for Claude/Codex, `/new` for
+OpenCode), records that clear for Codex/OpenCode hook state, latches the
+current head as reset, writes a short-lived
+`.agent-doc/context-clear-in-flight/<doc-hash>.json` marker, and waits for a
+later idle tick to drain the same head. The in-memory latch prevents a large
+exchange from clearing forever without dispatching; the marker survives
+supervisor recycle/restart so the replacement watcher blocks drains until the
+clear settles, or presses the shared submit key once when the clear command is
+still visible in the composer. Once the pane settles for
+`CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls the marker is cleared.
+After the head advances, another reset may be interleaved if the accretion
+policy still requires it. A manual clear cooldown remains authoritative for a
+plain operator clear with no active queue (it suppresses passive dispatch until
   cleared by the existing operator route path) and for an operator-deferred clear
   that explicitly paused the loop. But a manual clear cooldown must NOT suppress
   an active go-mode queue drain forever (`#clearcontresume`): the cooldown only

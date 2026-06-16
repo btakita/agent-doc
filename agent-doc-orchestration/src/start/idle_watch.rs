@@ -7,6 +7,9 @@
 //! and `supervisor_perform_reexec` directly through `use super::*`.
 
 use super::*;
+use crate::start::decisions::{
+    IdleQueueContextClearInFlightDecision, IdleQueueContextClearInFlightFacts,
+};
 
 const CLEAN_SESSION_CONTEXT_RESET_REASON: &str = "active queue head is a [clean-session] item - clearing to give it a fresh agent context (#cleandrainsup)";
 
@@ -86,6 +89,46 @@ fn log_idle_queue_context_reset_submit(
             reason,
         ),
     );
+}
+
+fn record_context_clear_in_flight_marker(
+    file: &Path,
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+    clear_cmd: &str,
+    active_head: Option<&str>,
+) {
+    let target = shared
+        .inject_pane
+        .as_deref()
+        .or_else(|| {
+            shared
+                .actor_runtime
+                .as_ref()
+                .map(|runtime| runtime.pane_id.as_str())
+        })
+        .unwrap_or("child_pty");
+    if let Err(err) = crate::context_clear_in_flight::record_context_clear_in_flight(
+        file,
+        target,
+        &harness.binary,
+        clear_cmd,
+        active_head,
+    ) {
+        eprintln!(
+            "[agent-doc] idle-queue watch: failed to record context-clear marker for {}: {err:#}",
+            file.display()
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "idle_queue_watch_context_clear_marker_failed file={} harness={} error={:?}",
+                file.display(),
+                harness.binary,
+                err.to_string()
+            ),
+        );
+    }
 }
 
 fn log_between_turn_enqueue_delivery(file: &Path, clear_cmd: &str, drain_payload: &str) {
@@ -391,31 +434,153 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         );
                         route_submit_in_flight_logged = true;
                     }
-                } else {
-                    route_submit_in_flight_logged = false;
-                }
-                // `#qflood2`: advance the post-`/clear` settle debounce. Require
-                // consecutive fresh-idle polls (reset on any busy/non-idle tick)
-                // so the next drain trigger is never injected into an in-flight
-                // `/clear`. Once the cleared pane has settled, drop the gate so
-                // the normal drain dispatches the head.
+            } else {
+                route_submit_in_flight_logged = false;
+            }
+            let context_clear_marker =
+                match crate::context_clear_in_flight::context_clear_in_flight(&path) {
+                    Ok(marker) => marker,
+                    Err(err) => {
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "idle_queue_watch_skipped harness={} reason=context_clear_marker_error file={} error={:?}",
+                                harness.binary,
+                                path.display(),
+                                err.to_string()
+                            ),
+                        );
+                        eprintln!(
+                            "[agent-doc] idle-queue watch: failed to inspect context-clear marker for {}: {err:#}",
+                            path.display()
+                        );
+                        None
+                    }
+                };
+            let context_clear_pending = context_clear_marker.as_ref().and_then(|marker| {
+                supervisor_pane_payload_already_pending(&shared, &marker.command)
+            });
+            if context_clear_marker.is_some() {
+                context_reset_in_flight = true;
+                awaiting_clear_settle = true;
+            }
+            // `#qflood2`: advance the post-`/clear` settle debounce. Require
+            // consecutive fresh-idle polls (reset on any busy/non-idle tick)
+            // so the next drain trigger is never injected into an in-flight
+            // `/clear`. Once the cleared pane has settled, drop the gate so
+            // the normal drain dispatches the head.
                 if awaiting_clear_settle
-                    && prompt_visible
-                    && !turn_active
-                    && !route_submit_in_flight
-                {
-                    clear_settle_idle_ticks = clear_settle_idle_ticks.saturating_add(1);
-                } else {
-                    clear_settle_idle_ticks = 0;
+                && prompt_visible
+                && !turn_active
+                && !route_submit_in_flight
+                && !drain_dispatch_dedup_skip(context_clear_pending)
+            {
+                clear_settle_idle_ticks = clear_settle_idle_ticks.saturating_add(1);
+            } else {
+                clear_settle_idle_ticks = 0;
+            }
+            let clear_settled_now =
+                awaiting_clear_settle && clear_settle_idle_ticks >= CLEAR_COOLDOWN_RESUME_IDLE_TICKS;
+            if let Some(marker) = context_clear_marker.as_ref() {
+                let marker_key = marker
+                    .head_sha256
+                    .clone()
+                    .unwrap_or_else(|| marker.written_at.to_string());
+                let resubmit_key = format!("context_clear_marker:{marker_key}");
+                match crate::start::decisions::idle_queue_context_clear_in_flight_decision(
+                    IdleQueueContextClearInFlightFacts {
+                        marker_active: true,
+                        prompt_visible,
+                        turn_active,
+                        route_submit_in_flight,
+                        clear_already_pending: context_clear_pending,
+                        already_resubmitted: last_pending_enter_resubmitted.as_deref()
+                            == Some(resubmit_key.as_str()),
+                        settled_idle_ticks: clear_settle_idle_ticks,
+                        settle_threshold: CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+                    },
+                ) {
+                    IdleQueueContextClearInFlightDecision::ResubmitPendingClear => {
+                        let head_label = active_head
+                            .as_deref()
+                            .or(marker.head_sha256.as_deref())
+                            .unwrap_or("<unknown>");
+                        match idle_queue_resubmit_pending_payload(
+                            &path,
+                            &shared,
+                            &harness,
+                            "context_clear",
+                            head_label,
+                            &marker.command,
+                        ) {
+                            AutoTriggerOutcome::Sent => {
+                                last_pending_enter_resubmitted = Some(resubmit_key);
+                                context_reset_in_flight = true;
+                                awaiting_clear_settle = true;
+                                clear_settle_idle_ticks = 0;
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "idle_queue_watch_context_clear_marker_resubmit harness={} reason=clear_already_pending target={} cmd=\"{}\"",
+                                        harness.binary, marker.target, marker.command
+                                    ),
+                                );
+                                continue;
+                            }
+                            AutoTriggerOutcome::Cancelled => return,
+                            outcome => {
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "idle_queue_watch_context_clear_marker_resubmit_failed harness={} outcome={}",
+                                        harness.binary,
+                                        outcome.as_str()
+                                    ),
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    IdleQueueContextClearInFlightDecision::WaitForIdle
+                    | IdleQueueContextClearInFlightDecision::WaitForPendingClear
+                    | IdleQueueContextClearInFlightDecision::AwaitSettle => continue,
+                    IdleQueueContextClearInFlightDecision::Settled => {
+                        if let Err(err) =
+                            crate::context_clear_in_flight::clear_context_clear_in_flight(&path)
+                        {
+                            eprintln!(
+                                "[agent-doc] idle-queue watch: failed to clear context-clear marker for {}: {err:#}",
+                                path.display()
+                            );
+                            crate::ops_log::log_op(
+                                &path,
+                                &format!(
+                                    "idle_queue_watch_context_clear_marker_clear_failed file={} error={:?}",
+                                    path.display(),
+                                    err.to_string()
+                                ),
+                            );
+                        } else {
+                            crate::ops_log::log_op(
+                                &path,
+                                &format!(
+                                    "idle_queue_watch_context_clear_marker_cleared file={} harness={} after_ticks={}",
+                                    path.display(),
+                                    harness.binary,
+                                    CLEAR_COOLDOWN_RESUME_IDLE_TICKS
+                                ),
+                            );
+                        }
+                    }
+                    IdleQueueContextClearInFlightDecision::Ignore => {}
                 }
-                if awaiting_clear_settle
-                    && clear_settle_idle_ticks >= CLEAR_COOLDOWN_RESUME_IDLE_TICKS
-                {
-                    awaiting_clear_settle = false;
-                    clear_settle_idle_ticks = 0;
-                    log_event(
-                        &mut session_log,
-                        &format!(
+            }
+            if clear_settled_now {
+                awaiting_clear_settle = false;
+                clear_settle_idle_ticks = 0;
+                log_event(
+                    &mut session_log,
+                    &format!(
                             "idle_queue_watch_clear_settled harness={} after_ticks={}",
                             harness.binary, CLEAR_COOLDOWN_RESUME_IDLE_TICKS
                         ),
@@ -959,14 +1124,21 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 if let Some(head) = active_head.clone() {
                                     last_context_reset_head = Some(head);
                                 }
-                                record_context_clear_prompt_for_hooks(
-                                    &shared,
-                                    &path,
-                                    &harness,
-                                    &clear_cmd,
-                                );
-                                clear_cooldown_logged = false;
-                                log_event(
+                        record_context_clear_prompt_for_hooks(
+                            &shared,
+                            &path,
+                            &harness,
+                            &clear_cmd,
+                        );
+                        record_context_clear_in_flight_marker(
+                            &path,
+                            &shared,
+                            &harness,
+                            &clear_cmd,
+                            active_head.as_deref(),
+                        );
+                        clear_cooldown_logged = false;
+                        log_event(
                                     &mut session_log,
                                     &format!(
                                         "idle_queue_watch_deferred_clear_delivered harness={} cmd=\"{}\"",
@@ -1120,15 +1292,22 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 head,
                                 clear_cmd,
                             ) {
-                                AutoTriggerOutcome::Sent => {
-                                    last_pending_enter_resubmitted = Some(resubmit_key);
-                                    last_context_reset_head = active_head.clone();
-                                    context_reset_in_flight = true;
-                                    awaiting_clear_settle = true;
-                                    clear_settle_idle_ticks = 0;
-                                    log_event(
-                                        &mut session_log,
-                                        &format!(
+                        AutoTriggerOutcome::Sent => {
+                            last_pending_enter_resubmitted = Some(resubmit_key);
+                            last_context_reset_head = active_head.clone();
+                            context_reset_in_flight = true;
+                            awaiting_clear_settle = true;
+                            clear_settle_idle_ticks = 0;
+                            record_context_clear_in_flight_marker(
+                                &path,
+                                &shared,
+                                &harness,
+                                clear_cmd,
+                                Some(head),
+                            );
+                            log_event(
+                                &mut session_log,
+                                &format!(
                                             "idle_queue_watch_context_reset_resubmit harness={} reason=clear_already_pending head={:?}",
                                             harness.binary, head
                                         ),
@@ -1188,15 +1367,22 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 // clean-session head (`#cleandrainsup`) still happens
                                 // above (`active_head_is_clean_session`); it just no
                                 // longer records a grant sidecar.
-                                record_context_clear_prompt_for_hooks(
-                                    &shared,
-                                    &path,
-                                    &harness,
-                                    clear_cmd,
-                                );
-                                log_idle_queue_context_reset_submit(
-                                    &path,
-                                    &shared,
+                        record_context_clear_prompt_for_hooks(
+                            &shared,
+                            &path,
+                            &harness,
+                            clear_cmd,
+                        );
+                        record_context_clear_in_flight_marker(
+                            &path,
+                            &shared,
+                            &harness,
+                            clear_cmd,
+                            Some(head),
+                        );
+                        log_idle_queue_context_reset_submit(
+                            &path,
+                            &shared,
                                     &harness,
                                     clear_cmd,
                                     head,
@@ -1301,12 +1487,24 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 &head,
                                 &drain_payload,
                             ) {
-                                AutoTriggerOutcome::Sent => {
-                                    last_pending_enter_resubmitted = Some(resubmit_key);
-                                    last_dispatched = Some(head.clone());
-                                    log_event(
-                                        &mut session_log,
-                                        &format!(
+                        AutoTriggerOutcome::Sent => {
+                            last_pending_enter_resubmitted = Some(resubmit_key);
+                            last_dispatched = Some(head.clone());
+                            if slash_command
+                                .as_deref()
+                                .is_some_and(crate::queue_command::is_context_clear_command)
+                            {
+                                record_context_clear_in_flight_marker(
+                                    &path,
+                                    &shared,
+                                    &harness,
+                                    &drain_payload,
+                                    Some(&head),
+                                );
+                            }
+                            log_event(
+                                &mut session_log,
+                                &format!(
                                             "idle_queue_watch_drain_resubmit harness={} reason=trigger_already_pending payload_kind={}",
                                             harness.binary, payload_kind
                                         ),
@@ -1386,13 +1584,20 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         // path, so they cannot concatenate.
                                         awaiting_clear_settle = true;
                                         clear_settle_idle_ticks = 0;
-                                        record_context_clear_prompt_for_hooks(
-                                            &shared,
-                                            &path,
-                                            &harness,
-                                            command,
-                                        );
-                                    }
+                            record_context_clear_prompt_for_hooks(
+                                &shared,
+                                &path,
+                                &harness,
+                                command,
+                            );
+                            record_context_clear_in_flight_marker(
+                                &path,
+                                &shared,
+                                &harness,
+                                command,
+                                Some(&head),
+                            );
+                        }
                                     last_dispatched = if completed { None } else { Some(head) };
                                 } else {
                                     last_dispatched = Some(head);

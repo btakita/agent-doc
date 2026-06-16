@@ -67,6 +67,28 @@ pub(crate) enum IdleQueueContextResetDecision {
     SkipNoResetNeeded,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IdleQueueContextClearInFlightDecision {
+    Ignore,
+    WaitForIdle,
+    ResubmitPendingClear,
+    WaitForPendingClear,
+    AwaitSettle,
+    Settled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct IdleQueueContextClearInFlightFacts {
+    pub marker_active: bool,
+    pub prompt_visible: bool,
+    pub turn_active: bool,
+    pub route_submit_in_flight: bool,
+    pub clear_already_pending: Option<bool>,
+    pub already_resubmitted: bool,
+    pub settled_idle_ticks: u32,
+    pub settle_threshold: u32,
+}
+
 /// `#cleandrainsup`: whether the supervisor idle-watch must force a context
 /// `/clear` before dispatching the active queue head because it is a
 /// `[clean-session]` item. A `[clean-session]` tag is an explicit per-item request
@@ -207,8 +229,9 @@ pub fn clear_cooldown_resume_ready(
 /// concatenated line (the operator-observed `/clear /agent-doc <FILE>`). This is
 /// the same debounce idea as `clear_cooldown_resume_ready`, but for the
 /// supervisor's OWN clears (which never write the manual cooldown marker), so it
-/// is tracked entirely in idle-watch memory. Pure so the settle gate is
-/// unit-testable without a live pane.
+/// is tracked by idle-watch memory and mirrored to a short-lived marker that
+/// survives supervisor recycle/restart. Pure so the settle gate is unit-testable
+/// without a live pane.
 pub fn drain_blocked_awaiting_clear_settle(
     awaiting_clear_settle: bool,
     prompt_visible: bool,
@@ -225,6 +248,32 @@ pub fn drain_blocked_awaiting_clear_settle(
         return true;
     }
     settled_idle_ticks < settle_threshold
+}
+
+/// Decide how a restarted idle-queue watcher should honor a persisted
+/// supervisor-owned context clear marker. A visible pending clear is recovered
+/// by one bare submit key, then the watcher waits for the normal settle debounce.
+pub(crate) fn idle_queue_context_clear_in_flight_decision(
+    facts: IdleQueueContextClearInFlightFacts,
+) -> IdleQueueContextClearInFlightDecision {
+    if !facts.marker_active {
+        return IdleQueueContextClearInFlightDecision::Ignore;
+    }
+    if !facts.prompt_visible || facts.turn_active || facts.route_submit_in_flight {
+        return IdleQueueContextClearInFlightDecision::WaitForIdle;
+    }
+    if drain_dispatch_dedup_skip(facts.clear_already_pending) {
+        return if facts.already_resubmitted {
+            IdleQueueContextClearInFlightDecision::WaitForPendingClear
+        } else {
+            IdleQueueContextClearInFlightDecision::ResubmitPendingClear
+        };
+    }
+    if facts.settled_idle_ticks >= facts.settle_threshold {
+        IdleQueueContextClearInFlightDecision::Settled
+    } else {
+        IdleQueueContextClearInFlightDecision::AwaitSettle
+    }
 }
 
 /// `#qflood2` — whether the idle-queue watch should skip injecting the next
@@ -1058,6 +1107,111 @@ mod tests {
         assert!(!drain_blocked_awaiting_clear_settle(
             true, true, false, 4, THRESHOLD
         ));
+    }
+
+    #[test]
+    fn context_clear_marker_resubmits_visible_pending_clear_once() {
+        use IdleQueueContextClearInFlightDecision::*;
+        const THRESHOLD: u32 = 4;
+
+        assert_eq!(
+            idle_queue_context_clear_in_flight_decision(IdleQueueContextClearInFlightFacts {
+                marker_active: true,
+                prompt_visible: true,
+                turn_active: false,
+                route_submit_in_flight: false,
+                clear_already_pending: Some(true),
+                already_resubmitted: false,
+                settled_idle_ticks: 0,
+                settle_threshold: THRESHOLD,
+            }),
+            ResubmitPendingClear
+        );
+        assert_eq!(
+            idle_queue_context_clear_in_flight_decision(IdleQueueContextClearInFlightFacts {
+                marker_active: true,
+                prompt_visible: true,
+                turn_active: false,
+                route_submit_in_flight: false,
+                clear_already_pending: Some(true),
+                already_resubmitted: true,
+                settled_idle_ticks: 0,
+                settle_threshold: THRESHOLD,
+            }),
+            WaitForPendingClear
+        );
+    }
+
+    #[test]
+    fn context_clear_marker_blocks_until_settled_idle_prompt() {
+        use IdleQueueContextClearInFlightDecision::*;
+        const THRESHOLD: u32 = 4;
+
+        assert_eq!(
+            idle_queue_context_clear_in_flight_decision(IdleQueueContextClearInFlightFacts {
+                marker_active: false,
+                prompt_visible: true,
+                turn_active: false,
+                route_submit_in_flight: false,
+                clear_already_pending: Some(false),
+                already_resubmitted: false,
+                settled_idle_ticks: 99,
+                settle_threshold: THRESHOLD,
+            }),
+            Ignore
+        );
+        assert_eq!(
+            idle_queue_context_clear_in_flight_decision(IdleQueueContextClearInFlightFacts {
+                marker_active: true,
+                prompt_visible: false,
+                turn_active: false,
+                route_submit_in_flight: false,
+                clear_already_pending: Some(false),
+                already_resubmitted: false,
+                settled_idle_ticks: 99,
+                settle_threshold: THRESHOLD,
+            }),
+            WaitForIdle
+        );
+        assert_eq!(
+            idle_queue_context_clear_in_flight_decision(IdleQueueContextClearInFlightFacts {
+                marker_active: true,
+                prompt_visible: true,
+                turn_active: false,
+                route_submit_in_flight: true,
+                clear_already_pending: Some(false),
+                already_resubmitted: false,
+                settled_idle_ticks: 99,
+                settle_threshold: THRESHOLD,
+            }),
+            WaitForIdle
+        );
+        assert_eq!(
+            idle_queue_context_clear_in_flight_decision(IdleQueueContextClearInFlightFacts {
+                marker_active: true,
+                prompt_visible: true,
+                turn_active: false,
+                route_submit_in_flight: false,
+                clear_already_pending: Some(false),
+                already_resubmitted: false,
+                settled_idle_ticks: THRESHOLD - 1,
+                settle_threshold: THRESHOLD,
+            }),
+            AwaitSettle
+        );
+        assert_eq!(
+            idle_queue_context_clear_in_flight_decision(IdleQueueContextClearInFlightFacts {
+                marker_active: true,
+                prompt_visible: true,
+                turn_active: false,
+                route_submit_in_flight: false,
+                clear_already_pending: Some(false),
+                already_resubmitted: false,
+                settled_idle_ticks: THRESHOLD,
+                settle_threshold: THRESHOLD,
+            }),
+            Settled
+        );
     }
 
     #[test]

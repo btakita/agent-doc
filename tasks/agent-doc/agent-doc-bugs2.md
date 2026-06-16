@@ -156,33 +156,33 @@ Using `lazily-rs` here would add indirection without reducing meaningful runtime
 I found and fixed the concrete JB `Run Agent Doc` error path from the pasted output. The existing recovery code already knew how to restart/resume on `queue_paused` when the reason said `stale supervisor pid...`, but your live reason said `stale host supervisor pid 2715614`. That wording did not match the classifier, so the controller treated the pause as terminal and JB surfaced it as an error.
 
 Changed source path:
-❯ - `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`
+- `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`
 
 What changed:
-❯ - `pause_reason_is_stale_supervisor_churn_stop` now recognizes `stale host supervisor` as the same recoverable stale-supervisor churn-stop class.
-❯ - Regression tests now cover the exact `#qchurn ... stale host supervisor pid 2715614 ...` wording and PID extraction.
-❯ - I cleared this document's stale durable queue pause with `agent-doc admin queue resume ...`; `agent-doc admin inspect tasks/agent-doc/agent-doc-bugs2.md --json` now reports `queue_control: null`.
+- `pause_reason_is_stale_supervisor_churn_stop` now recognizes `stale host supervisor` as the same recoverable stale-supervisor churn-stop class.
+- Regression tests now cover the exact `#qchurn ... stale host supervisor pid 2715614 ...` wording and PID extraction.
+- I cleared this document's stale durable queue pause with `agent-doc admin queue resume ...`; `agent-doc admin inspect tasks/agent-doc/agent-doc-bugs2.md --json` now reports `queue_control: null`.
 
 How to tell whether CPC + supervisor are up to date:
-❯ - `agent-doc --version` confirms the installed CLI version.
-❯ - `agent-doc controller status` confirms the CPC is active, stable, and shows controller pid/generation.
-❯ - `agent-doc admin inspect <doc> --json` confirms the document actor, supervisor pid/socket/runtime state, and whether a queue pause is active.
-❯ - The definitive freshness check today is inode identity: `stat -Lc '%i %s %Y %n' /home/brian/.cargo/bin/agent-doc /proc/<controller_pid>/exe /proc/<supervisor_pid>/exe`. Same inode means the process is running the installed binary; different inode means recycle/restart.
+- `agent-doc --version` confirms the installed CLI version.
+- `agent-doc controller status` confirms the CPC is active, stable, and shows controller pid/generation.
+- `agent-doc admin inspect <doc> --json` confirms the document actor, supervisor pid/socket/runtime state, and whether a queue pause is active.
+- The definitive freshness check today is inode identity: `stat -Lc '%i %s %Y %n' /home/brian/.cargo/bin/agent-doc /proc/<controller_pid>/exe /proc/<supervisor_pid>/exe`. Same inode means the process is running the installed binary; different inode means recycle/restart.
 
 Current local state:
-❯ - `agent-doc --version` is `0.34.1`.
+- `agent-doc --version` is `0.34.1`.
 - `cargo build` passed.
-❯ - `cargo install --path .` replaced `/home/brian/.cargo/bin/agent-doc`.
-❯ - `agent-doc lib-install` installed `/home/brian/.cargo/bin/libagent_doc-0.34.1.so` and marked controllers for recycle.
-❯ - The CPC recycled onto a fresh process (`controller_generation=1263`).
-❯ - This document's route-owned supervisor restart correctly refused while pane `%110` is busy with this active turn, so I did not force-interrupt it. After this turn is idle, it can recycle/restart onto the new binary; no JetBrains plugin update is needed for this fix.
+- `cargo install --path .` replaced `/home/brian/.cargo/bin/agent-doc`.
+- `agent-doc lib-install` installed `/home/brian/.cargo/bin/libagent_doc-0.34.1.so` and marked controllers for recycle.
+- The CPC recycled onto a fresh process (`controller_generation=1263`).
+- This document's route-owned supervisor restart correctly refused while pane `%110` is busy with this active turn, so I did not force-interrupt it. After this turn is idle, it can recycle/restart onto the new binary; no JetBrains plugin update is needed for this fix.
 
 On the formatting screenshot: direct `agent-doc admin --help` output is normal in a plain command run. The screenshot shows corruption in the route-owned Codex pane/supervisor display path: help/start output is scattered and the Codex shell appears offset. That is a separate PTY/screen-model bug, not the help text itself. I added a backlog item to capture it with logging and a reproduction instead of hand-waving it.
 
 Verification:
-❯ - `cargo test -p agent-doc-orchestration stale_supervisor` passed after the change.
-❯ - `make check` passed locally before the install: clippy/build/full test suite through the project check target.
-❯ - Latest GitHub Actions `CI` on `main` is green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`.
+- `cargo test -p agent-doc-orchestration stale_supervisor` passed after the change.
+- `make check` passed locally before the install: clippy/build/full test suite through the project check target.
+- Latest GitHub Actions `CI` on `main` is green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`.
 
 Source commit/push status: not done. The `src/agent-doc` submodule already has broad unrelated dirty changes, including the same file, and a whole-file commit would include unrelated work. I left the source change in the working tree and committed this session response through `agent-doc` only.
 
@@ -242,6 +242,24 @@ Verification:
 - `cargo test -p agent-doc-orchestration dispatch_only` passed: 32 passed, 0 failed, 13 ignored.
 - `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.SubmitActionTest --tests com.github.btakita.agentdoc.TerminalUtilTest` passed.
 - `gh run list --workflow CI --limit 1` shows the latest CI run for `fix(jb): add run-agent-doc proof logging` completed successfully on `main`.
+- Latest GitHub Actions `CI` on `main` is green: run `27588543817`, completed successfully on 2026-06-16T01:47:40Z.
+- `agent-doc --version` reports `agent-doc 0.34.1` at `/home/brian/.cargo/bin/agent-doc`
+- `agent-doc lib-install`
+- `cargo install --path .`
+- `cargo build`
+- `make check`
+- `cargo test -p agent-doc-orchestration supervisor_auto_install`
+- `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
+- `git diff --check` on the touched paths
+- `cargo fmt --check`
+- `VERSIONS.md`
+- `specs/08b-single-process-control-plane.md`
+- `agent-doc-core/src/project_config.rs`
+- `agent-doc-core/src/frontmatter.rs`
+- `agent-doc-orchestration/src/project_controller.rs`
+- `agent-doc-orchestration/src/start/decisions.rs`
+- `agent-doc-orchestration/src/start/idle_watch.rs`
+- `agent-doc-orchestration/src/project_controller/rpc.rs`
 
 JetBrains plugin note: this fix does require the JetBrains plugin update. The checked-in plugin version is now `0.2.167`, and the local signed artifact exists at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.167-signed.zip`.
 
@@ -254,38 +272,38 @@ Fixed the auto-install scope bug. The live logs confirmed the failure mode: rout
 Root cause: `dogfood_agent_doc_crate_root` only checked whether the current superproject contained an `agent-doc` crate. Since this repo has `src/agent-doc`, every session document under the superproject could inherit dogfood build/install behavior. The resolver now also proves the served document is an agent-doc dogfood session document: inside the agent-doc source checkout, under `tasks/agent-doc/`, or one of the legacy agent-doc task docs. Sibling docs such as `tasks/professional/equityfundingsource.md` and `tasks/software/lazily-rs.md` now resolve no auto-install crate root even if the env/frontmatter/project auto-install knob is truthy.
 
 Changed paths:
-- `agent-doc-orchestration/src/project_controller/rpc.rs`
-- `agent-doc-orchestration/src/start/idle_watch.rs`
-- `agent-doc-orchestration/src/start/decisions.rs`
-- `agent-doc-orchestration/src/project_controller.rs`
-- `agent-doc-core/src/frontmatter.rs`
-- `agent-doc-core/src/project_config.rs`
-- `specs/08b-single-process-control-plane.md`
-- `VERSIONS.md`
+❯ - `agent-doc-orchestration/src/project_controller/rpc.rs`
+❯ - `agent-doc-orchestration/src/start/idle_watch.rs`
+❯ - `agent-doc-orchestration/src/start/decisions.rs`
+❯ - `agent-doc-orchestration/src/project_controller.rs`
+❯ - `agent-doc-core/src/frontmatter.rs`
+❯ - `agent-doc-core/src/project_config.rs`
+❯ - `specs/08b-single-process-control-plane.md`
+❯ - `VERSIONS.md`
 
 Verification:
-- `cargo fmt --check`
-- `git diff --check` on the touched paths
-- `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
-- `cargo test -p agent-doc-orchestration supervisor_auto_install`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- `agent-doc lib-install`
-- `agent-doc --version` reports `agent-doc 0.34.1` at `/home/brian/.cargo/bin/agent-doc`
-- Latest GitHub Actions `CI` on `main` is green: run `27588543817`, completed successfully on 2026-06-16T01:47:40Z.
+❯ - `cargo fmt --check`
+❯ - `git diff --check` on the touched paths
+❯ - `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
+❯ - `cargo test -p agent-doc-orchestration supervisor_auto_install`
+❯ - `make check`
+❯ - `cargo build`
+❯ - `cargo install --path .`
+❯ - `agent-doc lib-install`
+❯ - `agent-doc --version` reports `agent-doc 0.34.1` at `/home/brian/.cargo/bin/agent-doc`
+❯ - Latest GitHub Actions `CI` on `main` is green: run `27588543817`, completed successfully on 2026-06-16T01:47:40Z.
 
 `agent-doc lib-install` installed `/home/brian/.cargo/bin/libagent_doc-0.34.1.so` and marked 2 controllers for idle recycle. No escalation was needed. Source commit/push was not done because `src/agent-doc` already has broad unrelated dirty changes, including some of the same files; staging whole files would mix this fix with pre-existing work.
-<!-- agent:boundary:4d4ce7d2 -->
+<!-- agent:boundary:093a8f3f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~JB `Run Agent Doc` on equityfundingsource.md after a fresh auto-sync did not submit the prompt.~~
-- Why not just shell out `tmux send-keys "Command" Enter`?
 - commit + push uncommitted agent-doc files
-- Only agent-doc dogfooding sessions should auto-build + install. The equityfundingsource.md session should not auto-install ![img_29.png](img_29.png)  
+- Why not just shell out `tmux send-keys "Command" Enter`?
+- :pushpin: Only agent-doc dogfooding sessions should auto-build + install. The equityfundingsource.md session should not auto-install ![img_29.png](img_29.png)
 - :pushpin: How can I tell if the supervisor + CPC are up to date? Why is the formatting all messed up? ![2026-06-15_22-56.png](../../../../../Pictures/agent-loop/2026-06-15_22-56.png) Also I'm seeing some shells from the supervisor are 2 lines too low. See where the `agent-doc admin --help` starts in the screenshot.
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.

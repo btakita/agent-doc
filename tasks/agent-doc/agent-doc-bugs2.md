@@ -162,34 +162,34 @@ Confidence: high for the restart/race class. The fix keeps JB thin and moves the
 Yes. I implemented the missing JetBrains-side state machine. The remaining race was not only the tmux `Enter` shape; repeated `Run Agent Doc` clicks after the short coalesce window could cancel the older in-flight route process before it finished its submit/proof wait, and normal `Clear Session Context` could still interleave with a route process at the editor action layer.
 
 Changed behavior:
-❯ - Repeated `Run Agent Doc` while a plugin-spawned route process is alive no longer cancels that process. The first route owns the submit/proof window; later clicks are visibly deduped and recorded in the attempt ledger as `route_already_in_flight` / `route_process_already_in_flight`.
-❯ - Normal `Clear Session Context` is rejected while `Run Agent Doc` dispatch is active. `Interrupt and Clear Session Context` remains the explicit discard path.
-❯ - If `Run Agent Doc` is clicked while a normal clear command is already running, the latest Run intent queues behind that clear and starts only after the clear completes synchronously. A binary-deferred clear does not release the queued Run immediately.
+- Repeated `Run Agent Doc` while a plugin-spawned route process is alive no longer cancels that process. The first route owns the submit/proof window; later clicks are visibly deduped and recorded in the attempt ledger as `route_already_in_flight` / `route_process_already_in_flight`.
+- Normal `Clear Session Context` is rejected while `Run Agent Doc` dispatch is active. `Interrupt and Clear Session Context` remains the explicit discard path.
+- If `Run Agent Doc` is clicked while a normal clear command is already running, the latest Run intent queues behind that clear and starts only after the clear completes synchronously. A binary-deferred clear does not release the queued Run immediately.
 
 Changed paths: `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorCommandStateMachine.kt`, `TerminalUtil.kt`, JetBrains tests, `editors/jetbrains/SPEC.md`, `editors/jetbrains/gradle.properties`, and `VERSIONS.md`.
 
 Verification passed:
-❯ - `./gradlew test`
-❯ - `./gradlew test buildPlugin`
-❯ - `make check` (clippy, 4,607 nextest tests, doctests, medium SimWorld corpus)
-❯ - `make install`
-❯ - `agent-doc --version` -> `agent-doc 0.34.1`
-❯ - `git diff --check`
+- `./gradlew test`
+- `./gradlew test buildPlugin`
+- `make check` (clippy, 4,607 nextest tests, doctests, medium SimWorld corpus)
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.1`
+- `git diff --check`
 
 Install/build proof:
-❯ - Built JetBrains plugin ZIP: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.168.zip`.
-❯ - Installed local JetBrains plugin `0.2.168` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
-❯ - IntelliJ IDEA must be restarted to activate the plugin update.
-❯ - `make install` installed the updated binary/shared library and marked 2 controllers for recycle at the next idle boundary.
+- Built JetBrains plugin ZIP: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.168.zip`.
+- Installed local JetBrains plugin `0.2.168` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
+- IntelliJ IDEA must be restarted to activate the plugin update.
+- `make install` installed the updated binary/shared library and marked 2 controllers for recycle at the next idle boundary.
 
 Pushed:
-❯ - `src/agent-doc`: `d1945e3e fix: serialize jetbrains run and clear actions`
-❯ - parent repo gitlink: `26949a90c agent-doc: update jetbrains run clear state machine`
+- `src/agent-doc`: `d1945e3e fix: serialize jetbrains run and clear actions`
+- parent repo gitlink: `26949a90c agent-doc: update jetbrains run clear state machine`
 
 CI: latest `src/agent-doc` CI run `27653709874` is `in_progress`; local full verification passed, so I recorded it and did not wait. The parent repo still has no workflow named `CI`.
 
 Escalation: none. Confidence: high for stopping the repeated-click cancellation and Run/Clear interleaving class. Live proof after restarting IntelliJ should show either a single route process reaching submit/proof or a visible dedupe/block notice, rather than a second click killing the process that would press `Enter`.
-<!-- agent:boundary:e48d9471 -->
+<!-- agent:boundary:217354df -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -198,6 +198,16 @@ Escalation: none. Confidence: high for stopping the repeated-click cancellation 
 - ~~:pushpin: JB `Clear Session Context` does not submit with Enter. JB `Run Agent Doc` sends a `/clear` and restart. After a couple restart JB `Run Agent Doc` still does not send Enter. Should we remove Codex-specific logic with JB commands and just use the same path as with Claude Code?~~
 - ~~:pushpin: JB `Run Agent Doc` still does not send Enter. Should we have more state machine logic to prevent race conditions?~~
 - [#resprectail]
+- :pushpin: JB `Run Agent Doc` on monsterrodholders.md still does not send Enter. Consolidate logic + simplify more. We should only send Enter, never CR or /n to tmux. Claude + Codex send-keys logic should be identical.
+---
+:pushpin: JB `Run Agent Doc` on lazily-rs.md/opencode. I closed a Codex session then opened the opencode session. When closing a session in the cli, agent-doc should detect this and immediately clear the state. Heartbeats with the new session in the same supervisor should immediately replace the old session.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3746 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=38 trigger_sha256=573c763642d25af5610128bad867d311cdfdbc5be1bee680610d94c2fcf5250d
+```
+---
+- :pushpin: agent-doc monsterrodholders.md interrupted a running conversation ![img_35.png](img_35.png)
 <!-- /agent:queue -->
 ###
 <!--

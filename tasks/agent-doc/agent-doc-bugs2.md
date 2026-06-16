@@ -264,7 +264,34 @@ Commits:
 CI: GitHub Actions CI run `27603358247` is in progress for `f75086a2`; the previous run `27602534379` for `9061e87e` completed successfully.
 
 Note: the submodule still has unrelated pre-existing dirty files, `agent-doc-orchestration/src/start/decisions.rs` and `specs/08b-single-process-control-plane.md`; I left them unstaged.
-<!-- agent:boundary:5494c5bf -->
+
+### Re: do [#smcloseoutevidence] — gpt-5
+
+Implemented `#smcloseoutevidence` as the read-only evidence layer for closeout recovery.
+
+What changed:
+- Added `flow::closeout::gather_closeout_recovery_evidence` and typed evidence records for visible markdown hash, snapshot hash, active cycle phase, active capture state, response-body presence/supersession, queue-only drift proof, editor live-buffer/IPC degraded state, and controller/supervisor binary freshness warning.
+- Reused the existing pure queue-only drift and superseded-heading helpers instead of duplicating recovery logic.
+- Added a narrow `write::ipc_direct_disk_degraded_for_file` wrapper so closeout evidence can record IPC degraded state without exposing the whole IPC module.
+- Let `decide_closeout_recovery` consume gathered supersession evidence when the caller does not pass explicit stale-capture proof.
+- Documented the evidence boundary in `VERSIONS.md` and `specs/07-closeout-commands.md`.
+
+Verification:
+- `cargo test -p agent-doc-orchestration recovery_evidence_`
+- `cargo test -p agent-doc-orchestration recovery_decision_maps_states_to_typed_outcomes`
+- `cargo test -p agent-doc-orchestration closeout_block_decision`
+- `git diff --check`
+- `make check`
+- `make install`
+
+Commits:
+- submodule `93a6bfc1 fix: gather closeout recovery evidence`
+- parent `effaf8e9d chore: update agent-doc submodule`
+
+CI: GitHub Actions CI run `27604164952` is in progress for `93a6bfc1`; the previous `f75086a2` run completed successfully.
+
+Note: the submodule still has unrelated pre-existing dirty files, `agent-doc-orchestration/src/start/decisions.rs` and `specs/08b-single-process-control-plane.md`; I left them unstaged.
+<!-- agent:boundary:ca692e9a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -292,7 +319,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - do [#qt32]
 - do [#fcc0-live-verify]
 - ~~do [#smcloseoutdecision]~~
-- do [#smcloseoutevidence]
+- ~~do [#smcloseoutevidence]~~
 - do [#smrouteconsume]
 - do [#smrecoverymutate]
 - do [#smtransitiontests]
@@ -336,7 +363,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#qt32] [operator-verify] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.
-- [ ] [#smcloseoutevidence] :inbox_tray: Centralize closeout recovery evidence gathering behind one typed API: visible markdown hash, snapshot hash, active cycle phase, capture state, response-body/supersession proof, queue-only drift proof, editor IPC freshness, and controller/supervisor binary freshness.
 - [ ] [#smrouteconsume] :inbox_tray: Move route and JB Run Agent Doc recovery paths to consume CloseoutRecoveryDecision only; remove low-level string parsing/rephrasing of captured-response baseline errors at route edges.
 - [ ] [#smrecoverymutate] :inbox_tray: Unify recovery mutations through one replay/sidecar primitive so reset --from-current --preserve-session, stale-capture retirement, reset-from-visible, and safe queue-only replay cannot diverge.
 - [ ] [#smtransitiontests] :inbox_tray: Add SimWorld/property/pure-decision coverage for the full closeout recovery transition table: queue edits around capture/write fragmentation, compaction, stale snapshots, stale ack-content, and JB Run Agent Doc during open closeout with and without prompt context.

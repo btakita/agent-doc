@@ -78,19 +78,48 @@ Changed paths: `src/agent-doc` submodule only, including `agent-doc-orchestratio
 Commits pushed:
 - `src/agent-doc`: `58e549d6 fix: fence route submit from idle queue clears`
 - parent repo: `b6ff39dcd agent-doc: fence route submit from idle queue clears`
+- parent AGENTS rule: `f804b3ccf docs: clarify CI closeout check`, pushed to `btakita/agent-loop main`.
+- parent gitlink: `a23cbfcbe agent-doc: update context clear race fix`, pushed to `btakita/agent-loop main`.
+- `src/agent-doc`: `7752bfc6 fix: persist supervisor context clear state`, pushed to `btakita/agent-doc main`.
+- `gh run list --workflow CI --limit 1` currently reports the pushed `fix: persist supervisor context clear state` CI run as `in_progress`, so I recorded it and did not wait.
+- `make install` completed; installed binary reports `agent-doc 0.34.1`.
+- `make check` passed locally: clippy, 4,607 nextest tests, doctests, and the ignored medium SimWorld corpus check.
+- `git diff --check`
+- `cargo test -p agent-doc-orchestration context_reset --lib`
+- `cargo test -p agent-doc-orchestration route_submit --lib`
+- `cargo test -p agent-doc-orchestration idle_queue --lib`
+- `cargo test -p agent-doc-orchestration pending_payload_enter_resubmit --lib`
+- `cargo test -p agent-doc-orchestration drain_settle_gate --lib`
+- `cargo test -p agent-doc-orchestration context_clear_marker --lib`
+- `cargo fmt`
+- `AGENTS.md`
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/specs/supervisor.md`
+- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/decisions.rs`
+- `src/agent-doc/agent-doc-orchestration/src/lib.rs`
+- `src/agent-doc/agent-doc-orchestration/src/context_clear_in_flight.rs`
+- Updated `AGENTS.md` so agents inspect CI once with `gh run list --workflow CI --limit 1`, record queued/in-progress state, and do not use `gh run watch` as a closeout gate unless explicitly asked.
+- Updated `specs/supervisor.md` and `VERSIONS.md` for the new contract.
+- Added pure decision coverage and marker persistence tests.
+- Marker writes are attached to all supervisor-owned clear sends: deferred operator clear delivery, context-reset clear sends/resubmits, and `/clear` queue-head dispatches.
+- The idle-queue watcher now treats that marker as authoritative after supervisor recycle/restart: it blocks drains while the clear is settling, sends one shared Enter-profile submit key if the clear is still visible in the composer, and clears the marker only after the existing fresh-idle debounce.
+- Added a short-lived `.agent-doc/context-clear-in-flight/<doc-hash>.json` marker for supervisor-owned context clears.
 
 Verification passed: `cargo test -p agent-doc-orchestration route_submit --lib`, `cargo test -p agent-doc-orchestration idle_queue --lib`, full `make check` (4,603 nextest tests plus the ignored SimWorld budget test used by the check target), `make install`, and installed `agent-doc --version` reports `0.34.1`. `make install` installed the updated binary/shared library and marked one controller to recycle at the next idle boundary.
 
 Remote CI: `src/agent-doc` GitHub Actions `CI` run `27651569734` is still `in_progress`; local full verification passed, so I did not wait on `gh run watch`. The parent repo has no workflow named `CI`.
 
 Escalation: none. No JetBrains plugin update is required for this fix; it is in the Rust CLI/orchestration path. Confidence: high for preventing route/supervisor input concatenation and for the new proof marker.
-<!-- agent:boundary:b4c1e0cf -->
+<!-- agent:boundary:7bc20ae2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: JB `Clear Session Context` does not submit with Enter. JB `Run Agent Doc` sends a `/clear` and restart. After a couple restart JB `Run Agent Doc` still does not send Enter. Should we remove Codex-specific logic with JB commands and just use the same path as with Claude Code? Should we have more state machine logic to prevent race conditions?
+- :pushpin: JB `Clear Session Context` does not submit with Enter. JB `Run Agent Doc` sends a `/clear` and restart. After a couple restart JB `Run Agent Doc` still does not send Enter. Should we remove Codex-specific logic with JB commands and just use the same path as with Claude Code?
+- Should we have more state machine logic to prevent race conditions?
+- [#resprectail]
 <!-- /agent:queue -->
 ###
 <!--

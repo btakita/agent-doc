@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -64,14 +64,15 @@ GitHub Actions note: neither the EFS submodule nor the root repo has a workflow 
 No document changes were detected in `/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`; preflight closed the cycle as already committed, so there was no response to write.
 
 Preflight did surface semantic-completion warnings for gated review items that may already be resolved: `#dropbox-sync-adapter`, `#dzmm-writeback-replay`, and `#zwws-vestings-local`.
-<!-- agent:boundary:80342316 -->
+<!-- agent:boundary:05665289 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: Continue setting up the lender selection pipeline. Where lenders are sent information, communication with the lender, etc.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -75,7 +75,7 @@ resync: pruned 1 stale session(s)
 Error: dispatch-only codex reopen refused to inject into pane %103 for tasks/mrh-servers.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
 ```
 ---
-- ~~[#lazilyqrestore]~~
+- [#lazilyqrestore]
 - [#c2b6]
 - [#1j8q]
 - [#anw0verify]

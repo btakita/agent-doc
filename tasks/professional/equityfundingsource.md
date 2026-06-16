@@ -180,10 +180,10 @@ Confidence: high. Escalation: none.
 Closed the generic-field queue head. The borrower-specific inline helper is now `AdminInlineInfoField` with `ADMIN_INLINE_INFO_*` styles, and the density test explicitly rejects the old `AdminBorrowerInfoField` name so the reusable version stays in place for other admin cards.
 
 Changed paths:
-❯ - `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
-❯ - `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
-❯ - `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
-❯ - `src/equityfundingsource-dev` parent gitlink
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev` parent gitlink
 
 Commits/push:
 - EFS submodule: `1a2c384 refactor(admin): generalize inline info fields` pushed to `origin/main`.
@@ -193,7 +193,16 @@ Verification:
 - `bun test tests/tmo-loan-details-density.test.ts` passed: 3 tests.
 - `make check` passed: 739 tests, app build, Worker build.
 - Latest deployment after this refactor is Worker version `8733c338-1626-4b18-a3e8-0c204f4dfd4b` with asset `/index.browser-GLC2TLBG.js` containing `AdminInlineInfoField`.
-❯ - `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
+- Deployed `/index.browser-4IEYQSU7.js` contains `ADMIN_REDUNDANT_SUBJECT_PROPERTY_FIELD_KEYS` and the `subjectpropertyaddress` filter.
+- `make check` passed: 739 tests, app build, Worker build.
+- `bun test tests/tmo-loan-details-density.test.ts` passed: 3 tests.
+- Deployed Worker version: `9065933c-245e-4c75-b3f3-b5adf754aa98`.
+- Parent repo: `6e01ce598 chore(efs): update loan detail formatting submodule` pushed to `origin/main`.
+- EFS submodule: `418a246 fix(admin): format loan address detail cards` pushed to `origin/main`.
+❯ - `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+❯ - `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+❯ - `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
 
 Note: the exchange is large and the queue is active, so I continued the requested drain without compacting. Preflight also warned that the live agent-doc supervisor is stale; I did not recycle it mid-drain.
 
@@ -209,31 +218,31 @@ Confidence: high. Escalation: none.
 Implemented and deployed the address-formatting pass. TMO Borrower Detail now renders as an address block: borrower name, street, then city/state/ZIP, with email/phone as metadata below. Collateral now uses the same address-first treatment instead of splitting street/city/state/ZIP into separate grid fragments. Borrower Onboarding Data now hides individual `property_street` / `property_city` / `property_state` / `property_zip` fields when `subject_property_address` already composes them.
 
 Changed paths:
-❯ - `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx`
 ❯ - `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
 ❯ - `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
 ❯ - `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
-❯ - `src/equityfundingsource-dev` parent gitlink
+- `src/equityfundingsource-dev` parent gitlink
 
 Commits/push:
 ❯ - EFS submodule: `418a246 fix(admin): format loan address detail cards` pushed to `origin/main`.
 ❯ - Parent repo: `6e01ce598 chore(efs): update loan detail formatting submodule` pushed to `origin/main`.
 
 Deploy proof:
-❯ - `make deploy` completed successfully.
-❯ - Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
-❯ - Worker version: `9065933c-245e-4c75-b3f3-b5adf754aa98`
-❯ - Deployed browser asset: `/index.browser-4IEYQSU7.js`
-❯ - Remote D1 migrations: no migrations to apply.
+- `make deploy` completed successfully.
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker version: `9065933c-245e-4c75-b3f3-b5adf754aa98`
+- Deployed browser asset: `/index.browser-4IEYQSU7.js`
+- Remote D1 migrations: no migrations to apply.
 
 Verification:
-❯ - Focused test passed: `bun test tests/tmo-loan-details-density.test.ts` — 3 tests.
-❯ - EFS `make check` passed: 739 tests, app build, Worker build.
-❯ - Live `/` returned `200`.
-❯ - Live `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned `303` to admin login, expected for the protected route.
-❯ - Downloaded deployed `/index.browser-4IEYQSU7.js`; it contains `BorrowerDetailRecord`, `CollateralDetailRecord`, `AddressBlock`, and `ADMIN_REDUNDANT_SUBJECT_PROPERTY_FIELD_KEYS`.
-❯ - `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
-❯ - `src/equityfundingsource-dev` is clean after deploy.
+- Focused test passed: `bun test tests/tmo-loan-details-density.test.ts` — 3 tests.
+- EFS `make check` passed: 739 tests, app build, Worker build.
+- Live `/` returned `200`.
+- Live `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned `303` to admin login, expected for the protected route.
+- Downloaded deployed `/index.browser-4IEYQSU7.js`; it contains `BorrowerDetailRecord`, `CollateralDetailRecord`, `AddressBlock`, and `ADMIN_REDUNDANT_SUBJECT_PROPERTY_FIELD_KEYS`.
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
+- `src/equityfundingsource-dev` is clean after deploy.
 
 Note: the exchange is large and the queue is active, so I continued the requested drain without compacting. Preflight warned that the route-owned agent-doc supervisor is stale; I did not restart it mid-drain.
 
@@ -249,22 +258,22 @@ Confidence: high. Escalation: none.
 Closed the onboarding-data formatting head. `Borrower Onboarding Data` now removes the individual property street/city/state/ZIP tiles when `Subject Property Address` is present, so the composed address is the single visible source for that property address.
 
 Implemented in:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
-- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
-- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+❯ - `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+❯ - `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+❯ - `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
 
 Commit/deploy already completed in the same formatting pass:
-- EFS submodule: `418a246 fix(admin): format loan address detail cards` pushed to `origin/main`.
-- Parent repo: `6e01ce598 chore(efs): update loan detail formatting submodule` pushed to `origin/main`.
-- Deployed Worker version: `9065933c-245e-4c75-b3f3-b5adf754aa98`.
+❯ - EFS submodule: `418a246 fix(admin): format loan address detail cards` pushed to `origin/main`.
+❯ - Parent repo: `6e01ce598 chore(efs): update loan detail formatting submodule` pushed to `origin/main`.
+❯ - Deployed Worker version: `9065933c-245e-4c75-b3f3-b5adf754aa98`.
 
 Verification:
-- `bun test tests/tmo-loan-details-density.test.ts` passed: 3 tests.
-- `make check` passed: 739 tests, app build, Worker build.
-- Deployed `/index.browser-4IEYQSU7.js` contains `ADMIN_REDUNDANT_SUBJECT_PROPERTY_FIELD_KEYS` and the `subjectpropertyaddress` filter.
+❯ - `bun test tests/tmo-loan-details-density.test.ts` passed: 3 tests.
+❯ - `make check` passed: 739 tests, app build, Worker build.
+❯ - Deployed `/index.browser-4IEYQSU7.js` contains `ADMIN_REDUNDANT_SUBJECT_PROPERTY_FIELD_KEYS` and the `subjectpropertyaddress` filter.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:79e03719 -->
+<!-- agent:boundary:c4f98377 -->
 <!-- /agent:exchange -->
 ###
 <!--

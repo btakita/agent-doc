@@ -65,7 +65,6 @@ Proof for this cycle:
 - Verification: no source, build, or instruction-surface edits were made; this was a source/spec confirmation response. The relevant regression coverage is already present in the checked implementation tests.
 - Confidence: high that this exact pasted error is already fixed in source as `#jbrestale`; live confidence still depends on installed binary and supervisor freshness.
 - Escalation: none.
-- Escalation: none.
 - Confidence: high.
 - Verification: no source/build/test surfaces changed; verification was document state plus committed closeout/provenance evidence. `tasks/software/lazily-rs.md` session-check is green and current queue/backlog are empty.
 - Commands: `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc session-check tasks/software/lazily-rs.md`, `rg` searches over task docs and agent-doc logs, `git log -- tasks/software/lazily-rs.md tasks/software/lazily-rs.done.md`, `find .agent-doc ...lazily...`, `tsift diff-digest --revision 89139f376 tasks/software/lazily-rs.md`, `tsift diff-digest --revision 494709f2a tasks/software/lazily-rs.md`.
@@ -78,7 +77,42 @@ Proof for this cycle:
 - `agent-doc session-check tasks/software/lazily-rs.md` is OK: latest cycle `cycle-1781622292889` is committed, with no next queue head and no continuation required.
 
 Remaining queue heads are operator-verify/live-proof items, so this cycle should stop after closeout rather than auto-looping into them.
-<!-- agent:boundary:1ccf0679 -->
+
+### Re: binary logic for stale queue pauses and conflicts — gpt-5
+
+> **Queue prompt:**
+>
+> How can we use binary logic to resolve "Run Agent Doc stale queue pause" issues and other conflict issues? Are we creating too many conflicts?
+
+
+Yes, we are creating too many *user-visible conflicts*, but not because every event is a real write conflict. The problem is that several recoverable binary states still surface like conflicts: stale supervisor, busy owner, degraded IPC, no drainable queue head, operator-only queue, live buffer drift, and real concurrent edits. Those need distinct typed outcomes, not one generic conflict/error path.
+
+The binary should make the decision before the UI has to guess:
+
+1. **Queue head state must be durable and typed.** Each head should have stable text/hash/source, activation state, owner generation, and terminal proof: `consumed`, `done`, `operator_deferred`, `user_removed`, or `superseded`. If a head disappears without one of those proofs, that is a bug. If proof exists, the UI should not show a conflict.
+
+2. **Stale queue pause is a recoverable route state.** For the `Run Agent Doc stale queue pause` shape, the binary should classify: stale supervisor + markerless `queue_paused` + `#qchurn` + zero drainable heads is not a document conflict. It is either `restart_supervisor_once_and_retry` when a newer binary/supervisor can own the route, or `no_drainable_work` when only operator-verify heads remain. JetBrains should render that as recovered/deferred, not as a hard error.
+
+3. **One writer owns document mutation.** The session actor/write queue should be the authority for queue consume, exchange append, backlog/done mutation, and CRDT/editor writeback. The editor plugin should become a transport/view/client of that authority. Any path where both plugin WatchService and supervisor/disk fallback can independently decide to write will keep producing false conflicts.
+
+4. **Conflicts should be component-scoped.** A queue edit, an exchange response append, and a backlog status mutation are different managed components. Binary logic should merge non-overlapping component edits and reserve "conflict" for two writers changing the same component from incompatible bases. Most current File Cache Conflict-style cases are convergence/rebase cases, not semantic conflicts.
+
+5. **Generations should redirect instead of failing.** Dispatchers should treat superseded actor/supervisor generations as `retry_on_current_generation`, not terminal failure. A stale generation is only an error if the current generation cannot be found or cannot prove ownership.
+
+6. **The UI vocabulary should shrink.** The operator should usually see one of five states: `queued behind active owner`, `recovered and retried`, `deferred for operator proof`, `no drainable work`, or `real concurrent edit conflict`. Everything else belongs in ops.log as diagnostics.
+
+So the direction is right: use binary logic to reduce ambiguity. But the important architectural move is not adding more guard names. It is collapsing the workflow into fewer authoritative state transitions, then making every UI message derive from those transitions. A hard conflict should mean "the binary cannot safely merge this exact component edit," not "something was stale, busy, delayed, or retried."
+
+I did not add a new backlog item in this response because the next queued head already asks for the broader primitive-strengthening plan. That is where the actionable design backlog belongs.
+
+Proof for this cycle:
+
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only via finalize.
+- Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, plus the prior-cycle evidence still present in this exchange for `#lazilyqrestore` recovery.
+- Verification: no source/build/test surfaces changed; this was a document answer only.
+- Confidence: medium-high. The stale-pause source path was checked in the prior head; this response is the architectural synthesis, not a new code audit.
+- Escalation: none.
+<!-- agent:boundary:cb3813b2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -86,10 +120,10 @@ Remaining queue heads are operator-verify/live-proof items, so this cycle should
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~If we orchestrate a team of subagents with different roles, will the output quality improve on this project?~~
 - ~~Look at bugs from recent sessions from the JB, agent-doc, and Codex session logs. What are #next-steps to fix? How can we improve the architecture to fix these workflow issues? Are the workflows properly defined?~~
-- How can we use binary logic to resolve "Run Agent Doc stale queue pause" issues and other conflict issues? Are we creating too many conflicts?
+- ~~How can we use binary logic to resolve "Run Agent Doc stale queue pause" issues and other conflict issues? Are we creating too many conflicts?~~
 - How can we strengthen architectural primitives so agentic work is easier to reason about and work can be done without regressions?
 ---
-- do [#lazilyqrestore]
+- ~~do [#lazilyqrestore]~~
 - do [#recyclerestart-verify]
 - do [#rtwbcast-verify]
 - do [#c2b6]

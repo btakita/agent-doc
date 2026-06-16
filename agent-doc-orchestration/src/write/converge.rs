@@ -499,9 +499,11 @@ pub fn try_editor_converge(
         return Ok(false);
     }
 
-    let patches = live_prompt_drift_convergence_patches(current_content, target)?;
-    let frontmatter = live_prompt_drift_convergence_frontmatter(current_content, target);
-    if patches.is_empty() && frontmatter.is_none() {
+    let canonical = file.canonicalize()?;
+    let patch_id = uuid::Uuid::new_v4().to_string();
+    let Some(payload) =
+        editor_convergence_payload(&canonical, target, current_content, source, &patch_id)?
+    else {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -510,32 +512,21 @@ pub fn try_editor_converge(
             ),
         );
         return Ok(false);
-    }
-
-    let canonical = file.canonicalize()?;
-    let patch_id = uuid::Uuid::new_v4().to_string();
-    let mut payload = serde_json::json!({
-        "type": "patch",
-        "file": canonical.to_string_lossy(),
-        "patches": patches,
-        "node_patches": [],
-        "unmatched": "",
-        "baseline": current_content,
-        "reposition_boundary": false,
-        "patch_id": patch_id.clone(),
-    });
-    if let Some(frontmatter) = frontmatter {
-        payload["frontmatter"] = serde_json::Value::String(frontmatter);
-    }
+    };
 
     crate::ops_log::log_op(
         file,
         &format!(
-            "{source}_editor_convergence_attempt file={} patch_id={} patches={} frontmatter={}",
+            "{source}_editor_convergence_attempt file={} patch_id={} patches={} node_patches={} frontmatter={}",
             file.display(),
             patch_id,
             payload
                 .get("patches")
+                .and_then(|value| value.as_array())
+                .map(Vec::len)
+                .unwrap_or(0),
+            payload
+                .get("node_patches")
                 .and_then(|value| value.as_array())
                 .map(Vec::len)
                 .unwrap_or(0),
@@ -634,6 +625,68 @@ pub fn try_editor_converge(
             Ok(false)
         }
     }
+}
+
+pub(crate) fn editor_convergence_payload(
+    canonical_file: &Path,
+    target: &str,
+    current_content: &str,
+    source: &str,
+    patch_id: &str,
+) -> Result<Option<serde_json::Value>> {
+    let mut patches = live_prompt_drift_convergence_patches(current_content, target)?;
+    let frontmatter = live_prompt_drift_convergence_frontmatter(current_content, target);
+    let node_patches = queue_consume_node_patches(current_content, target, source);
+
+    if !node_patches.is_empty() {
+        let node_patched_components = node_patches
+            .iter()
+            .filter_map(|patch| patch.get("component").and_then(|value| value.as_str()))
+            .map(str::to_string)
+            .collect::<HashSet<_>>();
+        patches.retain(|patch| {
+            patch
+                .get("component")
+                .and_then(|value| value.as_str())
+                .is_none_or(|component| !node_patched_components.contains(component))
+        });
+    }
+
+    if patches.is_empty() && node_patches.is_empty() && frontmatter.is_none() {
+        return Ok(None);
+    }
+
+    let normalized_baseline = crate::git::normalize_transient_agent_doc_markers(current_content);
+    let mut payload = serde_json::json!({
+        "type": "patch",
+        "file": canonical_file.to_string_lossy(),
+        "patches": patches,
+        "node_patches": node_patches,
+        "unmatched": "",
+        "baseline": current_content,
+        "baseline_hash": crate::debounce::content_hash(current_content),
+        "baseline_normalized_hash": crate::debounce::content_hash(&normalized_baseline),
+        "reposition_boundary": false,
+        "patch_id": patch_id,
+    });
+    if let Some(frontmatter) = frontmatter {
+        payload["frontmatter"] = serde_json::Value::String(frontmatter);
+    }
+    Ok(Some(payload))
+}
+
+fn queue_consume_node_patches(
+    current_content: &str,
+    target: &str,
+    source: &str,
+) -> Vec<serde_json::Value> {
+    if source != "queue_consume" {
+        return Vec::new();
+    }
+    build_ipc_node_patches_json(Some(current_content), Some(target))
+        .into_iter()
+        .filter(|patch| patch.get("component").and_then(|value| value.as_str()) == Some("queue"))
+        .collect()
 }
 
 /// `#fcc0`: the single converge-or-disk gate every document-mutating write site
@@ -914,6 +967,55 @@ mod core_tests {
         assert!(
             !log.contains("transport=disk_fallback"),
             "a converged queue consume must not also take the disk fallback:\n{log}"
+        );
+    }
+    #[test]
+    fn queue_consume_editor_convergence_payload_is_node_keyed_and_fenced() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+
+        let payload = editor_convergence_payload(
+            &doc.canonicalize().unwrap(),
+            &target,
+            &source,
+            "queue_consume",
+            "patch-queue-consume",
+        )
+        .unwrap()
+        .expect("queue consume should produce an editor convergence payload");
+
+        assert_eq!(
+            payload["baseline_hash"].as_str(),
+            Some(crate::debounce::content_hash(&source).as_str()),
+            "socket convergence payloads must carry the raw generation fence"
+        );
+        assert_eq!(
+            payload["baseline_normalized_hash"].as_str(),
+            Some(
+                crate::debounce::content_hash(&crate::git::normalize_transient_agent_doc_markers(
+                    &source
+                ))
+                .as_str()
+            ),
+            "socket convergence payloads must also carry the transient-marker-normalized fence"
+        );
+        assert!(
+            payload["patches"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|patch| patch["component"] != "queue"),
+            "queue consume must not send a broad legacy queue component replace: {payload:?}"
+        );
+        let node_patches = payload["node_patches"].as_array().unwrap();
+        assert!(
+            node_patches
+                .iter()
+                .any(|patch| { patch["component"] == "queue" && patch["op"] == "strike" }),
+            "queue consume must be expressed as an exact node-keyed strike: {payload:?}"
         );
     }
     #[test]

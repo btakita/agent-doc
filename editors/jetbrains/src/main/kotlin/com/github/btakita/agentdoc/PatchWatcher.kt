@@ -952,6 +952,11 @@ class PatchWatcher(private val project: Project) : Disposable {
         val content = document.text
         val proof = EditorApplyProof(content, document.modificationStamp)
 
+        if (isPatchGenerationSuperseded(patch, content)) {
+            LOG.info("[patch-watcher] generation fence: rejecting superseded live-buffer patch for ${patch.file}")
+            return false
+        }
+
         if (!patch.fullContent.isNullOrEmpty()) {
             LOG.warn("[patch-watcher] full-content IPC is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")
             return false
@@ -1694,23 +1699,30 @@ class PatchWatcher(private val project: Project) : Disposable {
             return bytes.joinToString("") { "%02x".format(it) }
         }
 
+        fun generationFenceContentHash(content: String): String =
+            contentHash(normalizeGenerationFenceContent(content))
+
         /**
          * Apply-side generation fence (`#late-ipc-patch-plugin-apply-fence`).
          *
          * A queued file patch tagged by the binary
          * ([queue_file_ipc_reposition_boundary] in write.rs) carries a generation
-         * token: `cycle_id` (the cycle that produced it) and `baseline_hash`
-         * (SHA-256 of the live doc the patch targeted). A LATE applier — this
-         * watcher, possibly running minutes after the producing cycle committed —
-         * must DROP a patch whose generation is already superseded instead of
+         * token: `cycle_id` (the cycle that produced it), `baseline_hash`
+         * (SHA-256 of the live doc the patch targeted), and optionally
+         * `baseline_normalized_hash` (the same baseline after transient
+         * agent-doc markers are stripped). A LATE applier — this watcher,
+         * possibly running minutes after the producing cycle committed — must
+         * DROP a patch whose generation is already superseded instead of
          * re-applying it and re-materializing a duplicate `### Re:` block:
          *
          *  - **cycle already committed:** the document's persisted `cycle_state`
          *    advanced the SAME `cycle_id` this patch was produced in to
          *    `committed`. The cycle is closed; replaying its reposition can only
          *    duplicate (mirrors the write-side `try_ipc` `already_committed` guard).
-         *  - **baseline drift:** the live doc no longer hashes to `baseline_hash`.
-         *    A later cycle rewrote the doc, so the patch targets a stale baseline.
+         *  - **baseline drift:** the live doc no longer hashes to `baseline_hash`
+         *    or, when provided, `baseline_normalized_hash`. A later cycle rewrote
+         *    the doc, so the patch targets a stale baseline. Transient `(HEAD)` /
+         *    boundary marker churn is tolerated by the normalized token.
          *
          * Fails OPEN: returns false on any IO/parse error or when the patch
          * carries no generation token, so a legitimate patch is never dropped
@@ -1718,8 +1730,11 @@ class PatchWatcher(private val project: Project) : Disposable {
          */
         fun isPatchGenerationSuperseded(patch: IpcPatch, liveContent: String?): Boolean {
             // Baseline drift: live doc moved on from the baseline this patch targeted.
-            if (patch.baselineHash != null && liveContent != null) {
-                if (contentHash(liveContent) != patch.baselineHash) {
+            if ((patch.baselineHash != null || patch.baselineNormalizedHash != null) && liveContent != null) {
+                val rawMatches = patch.baselineHash != null && contentHash(liveContent) == patch.baselineHash
+                val normalizedMatches = patch.baselineNormalizedHash != null &&
+                    generationFenceContentHash(liveContent) == patch.baselineNormalizedHash
+                if (!rawMatches && !normalizedMatches) {
                     LOG.info(
                         "[patch-watcher] generation fence: baseline drift (live doc moved on from queued baseline) for ${patch.file}",
                     )
@@ -1738,7 +1753,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         /** EDT/file-thread variant that reads the live doc content from disk. */
         private fun isPatchGenerationSuperseded(patch: IpcPatch): Boolean {
-            if (patch.baselineHash == null && patch.cycleId == null) return false
+            if (patch.baselineHash == null && patch.baselineNormalizedHash == null && patch.cycleId == null) return false
             val liveContent = try {
                 val f = File(patch.file)
                 if (f.exists()) f.readText() else null
@@ -1827,6 +1842,11 @@ data class IpcPatch(
      * doc no longer hashes to this value — the doc moved on to a later cycle.
      */
     val baselineHash: String? = null,
+    /**
+     * Generation token for editor-visible socket convergence. SHA-256 hex of the
+     * targeted live document after transient agent-doc markers are stripped.
+     */
+    val baselineNormalizedHash: String? = null,
     /** Node-keyed mutation plan carried alongside legacy component patches. */
     val nodePatches: List<NodePatch> = emptyList(),
     /** Target editor id for per-editor broadcast patches. */
@@ -2114,6 +2134,74 @@ private fun findComponentRangeUtil(doc: String, component: String): Pair<Int, In
     return Pair(contentStart, closeIdx)
 }
 
+private fun normalizeGenerationFenceContent(content: String): String {
+    val withoutBoundaries = rustStyleLines(content)
+        .filterNot { it.trim().startsWith("<!-- agent:boundary:") }
+        .joinToString("\n")
+    val withoutHeadMarkers = stripTransientHeadMarkers(withoutBoundaries)
+    val withoutGuardMarkers = stripGenerationFenceGuardMarkers(withoutHeadMarkers)
+    val withoutPipeline = stripGenerationFencePipelineBlock(withoutGuardMarkers)
+    return rustStyleLines(withoutPipeline).joinToString("\n")
+}
+
+private fun rustStyleLines(content: String): List<String> {
+    val normalized = content.replace("\r\n", "\n").replace('\r', '\n')
+    if (normalized.isEmpty()) return emptyList()
+    val lines = normalized.split("\n")
+    return if (normalized.endsWith("\n")) lines.dropLast(1) else lines
+}
+
+private fun stripGenerationFenceGuardMarkers(content: String): String {
+    val markers = listOf("<!-- no-pending-capture -->", "<!-- no-pending-done-guard -->")
+    val result = mutableListOf<String>()
+    for (line in rustStyleLines(content)) {
+        if (markers.any { marker -> line.trim() == marker }) {
+            continue
+        }
+        if (markers.any { marker -> line.contains(marker) }) {
+            var cleaned = line
+            for (marker in markers) {
+                cleaned = cleaned.replace(marker, "")
+            }
+            result.add(cleaned.trimEnd())
+        } else {
+            result.add(line)
+        }
+    }
+    return result.joinToString("\n")
+}
+
+private fun stripGenerationFencePipelineBlock(content: String): String {
+    val lines = content.split("\n")
+    if (lines.firstOrNull()?.trimEnd() != "---") return content
+    val closeIdx = lines.withIndex()
+        .drop(1)
+        .firstOrNull { it.value.trimEnd() == "---" }
+        ?.index ?: return content
+
+    val out = mutableListOf<String>()
+    var skipping = false
+    for ((index, line) in lines.withIndex()) {
+        if (index == 0 || index >= closeIdx) {
+            skipping = false
+            out.add(line)
+            continue
+        }
+        if (skipping) {
+            if (line.startsWith(" ") || line.startsWith("\t")) {
+                continue
+            }
+            skipping = false
+        }
+        if (line.trimStart().startsWith("agent_doc_pipeline:")) {
+            skipping = true
+            continue
+        }
+        out.add(line)
+    }
+    return out.joinToString("\n")
+}
+
 private fun stripTransientHeadMarkers(content: String): String {
     val lines = content.split("\n")
     val result = mutableListOf<String>()
@@ -2141,11 +2229,17 @@ private fun stripTransientHeadMarkers(content: String): String {
             continue
         }
 
-        if (Regex("""^\s*#{1,6}\s""").containsMatchIn(line) && line.endsWith(" (HEAD)")) {
-            result.add(line.removeSuffix(" (HEAD)"))
-        } else {
-            result.add(line)
+        if (line.endsWith(" (HEAD)")) {
+            val stripped = line.removeSuffix(" (HEAD)")
+            val withoutSuffix = stripped.trimEnd()
+            if (Regex("""^\s*#{1,6}\s""").containsMatchIn(line) ||
+                (trimmed.startsWith("**") && withoutSuffix.trimStart().endsWith("**"))
+            ) {
+                result.add(stripped)
+                continue
+            }
         }
+        result.add(line)
     }
 
     return result.joinToString("\n")
@@ -2389,6 +2483,7 @@ fun parsePatchJson(json: String): IpcPatch? {
         val queueAuto = root.get("queue_auto")?.let { if (it.isJsonNull) null else it.asBoolean }
         val cycleId = root.get("cycle_id")?.let { if (it.isJsonNull) null else it.asString }
         val baselineHash = root.get("baseline_hash")?.let { if (it.isJsonNull) null else it.asString }
+        val baselineNormalizedHash = root.get("baseline_normalized_hash")?.let { if (it.isJsonNull) null else it.asString }
         val nodePatches = root.getAsJsonArray("node_patches")
             ?.mapNotNull { elem ->
                 val obj = elem.asJsonObject
@@ -2422,6 +2517,7 @@ fun parsePatchJson(json: String): IpcPatch? {
             queueAuto,
             cycleId,
             baselineHash,
+            baselineNormalizedHash,
             nodePatches,
             editorId,
             originEditorId,

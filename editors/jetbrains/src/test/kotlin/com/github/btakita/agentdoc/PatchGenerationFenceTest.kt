@@ -16,7 +16,12 @@ import java.io.File
  */
 class PatchGenerationFenceTest {
 
-    private fun patchWith(file: String, cycleId: String?, baselineHash: String?): IpcPatch =
+    private fun patchWith(
+        file: String,
+        cycleId: String?,
+        baselineHash: String?,
+        baselineNormalizedHash: String? = null,
+    ): IpcPatch =
         IpcPatch(
             file = file,
             patches = emptyList(),
@@ -26,17 +31,19 @@ class PatchGenerationFenceTest {
             repositionBoundary = true,
             cycleId = cycleId,
             baselineHash = baselineHash,
+            baselineNormalizedHash = baselineNormalizedHash,
         )
 
     @Test
-    fun `parses cycle_id and baseline_hash tokens`() {
+    fun `parses cycle_id and baseline hash tokens`() {
         val json =
             """{"type":"patch","file":"/tmp/plan.md","patches":[],"reposition_boundary":true,
-               "cycle_id":"cycle-123","baseline_hash":"deadbeef"}"""
+               "cycle_id":"cycle-123","baseline_hash":"deadbeef","baseline_normalized_hash":"facefeed"}"""
         val patch = parsePatchJson(json)
         assertNotNull(patch)
         assertEquals("cycle-123", patch!!.cycleId)
         assertEquals("deadbeef", patch.baselineHash)
+        assertEquals("facefeed", patch.baselineNormalizedHash)
     }
 
     @Test
@@ -46,6 +53,7 @@ class PatchGenerationFenceTest {
         assertNotNull(patch)
         assertNull(patch!!.cycleId)
         assertNull(patch.baselineHash)
+        assertNull(patch.baselineNormalizedHash)
     }
 
     @Test
@@ -66,6 +74,63 @@ class PatchGenerationFenceTest {
         val live = "doc body the patch targeted\n"
         val patch = patchWith("/tmp/plan.md", cycleId = null, baselineHash = PatchWatcher.contentHash(live))
         assertTrue(PatchWatcher.isPatchGenerationSuperseded(patch, "the doc moved on to a later cycle\n"))
+    }
+
+    @Test
+    fun `normalized baseline hash tolerates transient editor markers`() {
+        val baseline = """
+            ---
+            keep: true
+            agent_doc_pipeline:
+              phase: write_applied
+            ---
+
+            <!-- agent:exchange -->
+            ### Re: stale queue
+            Body
+            <!-- /agent:exchange -->
+        """.trimIndent()
+        val live = """
+            ---
+            keep: true
+            agent_doc_pipeline:
+              phase: write_applied
+            ---
+
+            <!-- agent:boundary:abc123 -->
+            <!-- agent:exchange -->
+            ### Re: stale queue (HEAD)
+            Body <!-- no-pending-capture -->
+            <!-- /agent:exchange -->
+        """.trimIndent() + "\n"
+        val patch = patchWith(
+            "/tmp/plan.md",
+            cycleId = null,
+            baselineHash = PatchWatcher.contentHash(baseline),
+            baselineNormalizedHash = PatchWatcher.generationFenceContentHash(baseline),
+        )
+        assertFalse(PatchWatcher.isPatchGenerationSuperseded(patch, live))
+    }
+
+    @Test
+    fun `normalized baseline hash rejects real live queue drift`() {
+        val baseline = """
+            <!-- agent:queue -->
+            go [#old]
+            <!-- /agent:queue -->
+        """.trimIndent()
+        val live = """
+            <!-- agent:queue -->
+            go [#new]
+            <!-- /agent:queue -->
+        """.trimIndent()
+        val patch = patchWith(
+            "/tmp/plan.md",
+            cycleId = null,
+            baselineHash = PatchWatcher.contentHash(baseline),
+            baselineNormalizedHash = PatchWatcher.generationFenceContentHash(baseline),
+        )
+        assertTrue(PatchWatcher.isPatchGenerationSuperseded(patch, live))
     }
 
     @Test

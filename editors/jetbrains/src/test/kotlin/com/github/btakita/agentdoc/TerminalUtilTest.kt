@@ -55,6 +55,19 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `starting a route while one is alive keeps the first submitter`() {
+        val registry = TerminalUtil.InFlightRouteRegistry()
+        val active = FakeRouteHandle(alive = true)
+        val duplicate = FakeRouteHandle(alive = true)
+
+        assertTrue(registry.startIfIdle("doc", active))
+        assertFalse(registry.startIfIdle("doc", duplicate))
+
+        assertEquals(0, active.cancelCount)
+        assertEquals(0, duplicate.cancelCount)
+    }
+
+    @Test
     fun `clearing a stale handle does not remove the newer run`() {
         val registry = TerminalUtil.InFlightRouteRegistry()
         val stale = FakeRouteHandle(alive = true)

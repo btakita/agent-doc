@@ -125,6 +125,16 @@ object TerminalUtil {
         private val active = mutableMapOf<String, InFlightRouteHandle>()
 
         @Synchronized
+        fun startIfIdle(key: String, next: InFlightRouteHandle): Boolean {
+            val previous = active[key]
+            if (previous != null && previous.isAlive()) {
+                return false
+            }
+            active[key] = next
+            return true
+        }
+
+        @Synchronized
         fun replace(key: String, next: InFlightRouteHandle): Boolean {
             val previous = active.put(key, next)
             val replaced = previous?.takeIf { it.isAlive() }
@@ -189,6 +199,16 @@ object TerminalUtil {
     }
 
     internal val inFlightRouteRegistry = InFlightRouteRegistry()
+    internal val editorCommandRegistry = EditorCommandRegistry()
+
+    private data class PendingRunAfterClear(
+        val project: Project,
+        val file: VirtualFile,
+        val onComplete: (() -> Unit)?,
+        val attempt: RunAgentDocAttemptLedger.Attempt?,
+    )
+
+    private val pendingRunAfterClear = mutableMapOf<String, PendingRunAfterClear>()
 
     fun relativePath(project: Project, file: VirtualFile): String {
         val basePath = project.basePath ?: return file.path
@@ -243,18 +263,106 @@ object TerminalUtil {
      *    owning supervisor into the live session
      * 4. Auto-starts a new agent session if needed
      */
+    private fun rememberRunAfterClear(routeKey: String, pending: PendingRunAfterClear): PendingRunAfterClear? =
+        synchronized(pendingRunAfterClear) {
+            pendingRunAfterClear.put(routeKey, pending)
+        }
+
+    private fun takeRunAfterClear(routeKey: String): PendingRunAfterClear? =
+        synchronized(pendingRunAfterClear) {
+            pendingRunAfterClear.remove(routeKey)
+        }
+
+    private fun completeClearCommand(routeKey: String, clearSucceeded: Boolean) {
+        when (editorCommandRegistry.complete(routeKey, EditorCommandKind.CLEAR_SESSION_CONTEXT)) {
+            EditorCommandCompletion.START_QUEUED_RUN -> {
+                val pending = takeRunAfterClear(routeKey)
+                if (clearSucceeded && pending != null) {
+                    LOG.warn("[state] starting queued Run Agent Doc after Clear Session Context for ${pending.file.name}")
+                    pending.attempt?.recordIfCurrent("route_start_after_clear")
+                    sendToTerminal(
+                        pending.project,
+                        pending.file,
+                        onComplete = pending.onComplete,
+                        attempt = pending.attempt,
+                        commandPreAcquired = true,
+                    )
+                } else {
+                    if (pending != null) {
+                        pending.attempt?.finishIfCurrent(
+                            "route_clear_failed_before_dispatch",
+                            error = "Clear Session Context did not complete synchronously",
+                        )
+                        pending.onComplete?.invoke()
+                    }
+                    editorCommandRegistry.complete(routeKey, EditorCommandKind.RUN_AGENT_DOC)
+                }
+            }
+            EditorCommandCompletion.IDLE,
+            EditorCommandCompletion.IGNORED -> Unit
+        }
+    }
+
     internal fun sendToTerminal(
         project: Project,
         file: VirtualFile,
         onComplete: (() -> Unit)? = null,
         attempt: RunAgentDocAttemptLedger.Attempt? = null,
+        commandPreAcquired: Boolean = false,
     ) {
         val (cwd, relativePath) = resolveProject(project, file)
         val agentDoc = resolveAgentDoc(cwd)
-        val routeKey = "$cwd::$relativePath"
+        val routeKey = RunAgentDocAttemptLedger.routeKey(cwd, relativePath)
 
         LOG.warn("[route] sendToTerminal: cwd=$cwd rel=$relativePath binary=$agentDoc")
         attempt?.recordIfCurrent("route_prepare")
+
+        if (!commandPreAcquired) {
+            when (editorCommandRegistry.request(routeKey, EditorCommandKind.RUN_AGENT_DOC)) {
+                EditorCommandDecision.START_NOW -> Unit
+                EditorCommandDecision.DEDUPE_ACTIVE_RUN -> {
+                    LOG.warn("[state] Run Agent Doc already dispatching for $relativePath; keeping existing route alive")
+                    attempt?.finishIfCurrent(
+                        "route_already_in_flight",
+                        error = "existing Run Agent Doc route is still dispatching",
+                    )
+                    showHint(project, "Run Agent Doc is already dispatching for $relativePath")
+                    onComplete?.invoke()
+                    return
+                }
+                EditorCommandDecision.QUEUE_RUN_AFTER_CLEAR -> {
+                    val replaced = rememberRunAfterClear(
+                        routeKey,
+                        PendingRunAfterClear(project, file, onComplete, attempt),
+                    )
+                    replaced?.attempt?.finishIfCurrent(
+                        "route_queued_after_clear_superseded",
+                        error = "newer Run Agent Doc queued behind Clear Session Context",
+                    )
+                    replaced?.onComplete?.invoke()
+                    attempt?.recordIfCurrent("route_queued_after_clear")
+                    showHint(project, "Run Agent Doc will start after Clear Session Context finishes for $relativePath")
+                    return
+                }
+                EditorCommandDecision.DEDUPE_ACTIVE_CLEAR -> {
+                    attempt?.finishIfCurrent(
+                        "route_blocked_by_clear",
+                        error = "Clear Session Context is already running",
+                    )
+                    onComplete?.invoke()
+                    return
+                }
+                EditorCommandDecision.REJECT_CLEAR_DURING_RUN,
+                EditorCommandDecision.IGNORED -> {
+                    attempt?.finishIfCurrent(
+                        "route_state_rejected",
+                        error = "unexpected editor command state",
+                    )
+                    onComplete?.invoke()
+                    return
+                }
+            }
+        }
 
         // is_busy guard removed: no production code sets the status signals,
         // so the guard only produced false positives (blocked every route attempt)
@@ -288,9 +396,16 @@ object TerminalUtil {
             attempt?.recordIfCurrent("route_command_built", command = cmd)
 
             val handle = RetryingRouteHandle()
-            val replaced = inFlightRouteRegistry.replace(routeKey, handle)
-            if (replaced) {
-                LOG.warn("[route] canceled stale in-flight route before rerunning: $relativePath")
+            if (!inFlightRouteRegistry.startIfIdle(routeKey, handle)) {
+                LOG.warn("[state] route process already alive for $relativePath; suppressing duplicate Run Agent Doc")
+                attempt?.finishIfCurrent(
+                    "route_process_already_in_flight",
+                    command = cmd,
+                    error = "existing route process is still alive",
+                )
+                showHint(project, "Run Agent Doc is already dispatching for $relativePath")
+                onComplete?.invoke()
+                return
             }
 
             val startedAt = System.currentTimeMillis()
@@ -381,10 +496,12 @@ object TerminalUtil {
                     }
                     handle.markCompleted()
                     inFlightRouteRegistry.clearIfCurrent(routeKey, handle)
+                    editorCommandRegistry.complete(routeKey, EditorCommandKind.RUN_AGENT_DOC)
                     onComplete?.invoke()
                 }
             }.start()
         } catch (e: Exception) {
+            editorCommandRegistry.complete(routeKey, EditorCommandKind.RUN_AGENT_DOC)
             attempt?.finishIfCurrent("route_exception", error = e.message ?: e.javaClass.simpleName)
             onComplete?.invoke()
             notifyError(project, "Failed to run agent-doc: ${e.message}\nLooked for: $agentDoc")
@@ -672,33 +789,63 @@ object TerminalUtil {
     }
 
     fun clearSessionContext(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        val (cwd, relativePath) = resolveProject(project, file)
+        val routeKey = RunAgentDocAttemptLedger.routeKey(cwd, relativePath)
+        when (editorCommandRegistry.request(routeKey, EditorCommandKind.CLEAR_SESSION_CONTEXT)) {
+            EditorCommandDecision.START_NOW -> Unit
+            EditorCommandDecision.DEDUPE_ACTIVE_CLEAR -> {
+                LOG.warn("[state] Clear Session Context already running for $relativePath")
+                showHint(project, "Clear Session Context is already running for $relativePath")
+                onComplete?.invoke()
+                return
+            }
+            EditorCommandDecision.REJECT_CLEAR_DURING_RUN -> {
+                LOG.warn("[state] Clear Session Context blocked while Run Agent Doc is dispatching for $relativePath")
+                notifyWarning(
+                    project,
+                    "Clear Session Context is blocked while Run Agent Doc is dispatching for $relativePath.\n" +
+                        "Wait for dispatch to finish, or use Interrupt and Clear Session Context.",
+                )
+                onComplete?.invoke()
+                return
+            }
+            EditorCommandDecision.DEDUPE_ACTIVE_RUN,
+            EditorCommandDecision.QUEUE_RUN_AFTER_CLEAR,
+            EditorCommandDecision.IGNORED -> {
+                onComplete?.invoke()
+                return
+            }
+        }
+        var clearFinishedNow = false
         runSessionCommand(
             project = project,
             file = file,
             args = listOf("clear"),
             startedMessage = "Clearing session context for ${file.name}",
-            onSuccess = { relativePath, output ->
+            onSuccess = { clearRelativePath, output ->
                 // #autoloop-command-preemption Phase 2b: a non-interrupting clear
                 // against a busy auto-loop now succeeds by DEFERRING (pause the
                 // loop, deliver the clear at the next idle gap, resume) instead of
                 // hard-blocking. Surface that as a distinct "deferred" notice so
                 // the operator knows it will run shortly, not that it ran now.
-                if (isDeferredQueuePreemptClear(output)) {
+                val deferredClear = isDeferredQueuePreemptClear(output)
+                clearFinishedNow = !deferredClear
+                if (deferredClear) {
                     notifyInfo(
                         project,
-                        "Clear Session Context deferred for $relativePath.\n" +
+                        "Clear Session Context deferred for $clearRelativePath.\n" +
                             "The pane is busy under an active queue auto-loop, so the loop was paused " +
                             "and the clear will run automatically at the next idle gap, then the loop resumes. " +
                             "Use Interrupt and clear to clear immediately instead.",
                     )
                 } else {
-                    showHint(project, output.ifBlank { "Cleared session context for $relativePath" })
+                    showHint(project, output.ifBlank { "Cleared session context for $clearRelativePath" })
                 }
             },
-            onFailure = { relativePath, exitCode, output ->
+            onFailure = { clearRelativePath, exitCode, output ->
                 val busyRefusal = parseBusySessionClearRefusal(output)
                 if (busyRefusal != null) {
-                    notifyBusySessionClearBlocked(project, file, relativePath, busyRefusal, output)
+                    notifyBusySessionClearBlocked(project, file, clearRelativePath, busyRefusal, output)
                 } else {
                     notifyError(
                         project,
@@ -706,7 +853,10 @@ object TerminalUtil {
                     )
                 }
             },
-            onComplete = onComplete,
+            onComplete = {
+                completeClearCommand(routeKey, clearFinishedNow)
+                onComplete?.invoke()
+            },
         )
     }
 

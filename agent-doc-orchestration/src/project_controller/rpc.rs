@@ -2690,9 +2690,12 @@ fn dispatch_diagnostic_field<'a>(payload: &'a str, field: &str) -> Option<&'a st
 fn dispatch_blocked_proof_fields(
     project_root: &Path,
     file: &Path,
+    stage: &str,
+    reason: &str,
     diagnostic_payload: &str,
 ) -> String {
     let mut fields = Vec::new();
+    fields.push(dispatch_blocked_user_facing_outcome_fields(stage, reason));
     let file_path = if file.is_absolute() {
         file.to_path_buf()
     } else {
@@ -2717,6 +2720,41 @@ fn dispatch_blocked_proof_fields(
         ));
     }
     fields.join(" ")
+}
+
+fn dispatch_blocked_user_facing_outcome_fields(stage: &str, reason: &str) -> String {
+    use crate::flow::outcome::{UserFacingOutcome, UserFacingOutcomeKind as Kind};
+
+    let lower = reason.to_ascii_lowercase();
+    let outcome = if stage == "actor_busy_draining" {
+        UserFacingOutcome::new(Kind::QueuedBehindOwner)
+    } else if stage == "queue_paused" && pause_reason_is_stale_supervisor_churn_stop(reason) {
+        UserFacingOutcome::new(Kind::RecoveredAndRetried)
+    } else if lower.contains("file cache conflict")
+        || lower.contains("component conflict")
+        || lower.contains("typed_component_drift")
+    {
+        UserFacingOutcome::new(Kind::RealComponentConflict)
+    } else if lower.contains("zero drainable")
+        || lower.contains("no drainable")
+        || lower.contains("undrainable")
+    {
+        UserFacingOutcome::new(Kind::NoDrainableWork)
+    } else if lower.contains("operator-verify")
+        || lower.contains("operator proof")
+        || lower.contains("manual review")
+    {
+        UserFacingOutcome::new(Kind::DeferredForOperatorProof)
+    } else {
+        UserFacingOutcome::with_unblocker(
+            Kind::BlockedWithExactUnblocker,
+            "resume_or_clear_queue_control",
+        )
+    };
+
+    outcome
+        .expect("static dispatch blocked user-facing outcome fields are valid")
+        .log_fields()
 }
 
 fn append_dispatch_proof_payload(diagnostic_payload: &str, proof_fields: &str) -> String {
@@ -3151,8 +3189,13 @@ pub(crate) fn handle_dispatch(
             .as_ref()
             .and_then(|control| control.reason.as_deref())
             .unwrap_or(stage);
-        let proof_fields =
-            dispatch_blocked_proof_fields(&bootstrap.project_root, &file, &diagnostic_payload);
+        let proof_fields = dispatch_blocked_proof_fields(
+            &bootstrap.project_root,
+            &file,
+            stage,
+            reason,
+            &diagnostic_payload,
+        );
         let blocked_diagnostic_payload =
             append_dispatch_proof_payload(&diagnostic_payload, &proof_fields);
         let receipt = insert_dispatch_attempt_record(
@@ -3200,24 +3243,30 @@ pub(crate) fn handle_dispatch(
         // the route dispatch path can restart the supervisor once, lift this pause, and
         // re-dispatch instead of failing closed. A deliberate operator/spent-preset
         // pause does not classify and stays terminal.
-        let recovery_suffix =
-            if stage == "queue_paused" && pause_reason_is_stale_supervisor_churn_stop(reason) {
-                let stale_pid = stale_supervisor_pid_from_pause_reason(reason).unwrap_or(0);
-                let recovery = StaleQueuePauseRecovery::new(stale_pid);
-                crate::ops_log::log_op(
-                    &file,
-                    &format!(
-                        "dispatch_queue_paused_stale_supervisor file={} stale_pid={} marker={} {}",
-                        file.display(),
-                        stale_pid,
-                        DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER,
-                        recovery.outcome.log_fields(),
-                    ),
-                );
-                format!(" {DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER} stale_pid={stale_pid}")
-            } else {
-                String::new()
-            };
+        let recovery_suffix = if stage == "queue_paused"
+            && pause_reason_is_stale_supervisor_churn_stop(reason)
+        {
+            let stale_pid = stale_supervisor_pid_from_pause_reason(reason).unwrap_or(0);
+            let recovery = StaleQueuePauseRecovery::new(stale_pid);
+            crate::ops_log::log_op(
+                &file,
+                &format!(
+                    "dispatch_queue_paused_stale_supervisor file={} stale_pid={} marker={} {} {}",
+                    file.display(),
+                    stale_pid,
+                    DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER,
+                    recovery.outcome.log_fields(),
+                    crate::flow::outcome::UserFacingOutcome::new(
+                        crate::flow::outcome::UserFacingOutcomeKind::RecoveredAndRetried,
+                    )
+                    .expect("static recovered-and-retried outcome is valid")
+                    .log_fields(),
+                ),
+            );
+            format!(" {DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER} stale_pid={stale_pid}")
+        } else {
+            String::new()
+        };
         let proof_suffix = if proof_fields.is_empty() {
             String::new()
         } else {

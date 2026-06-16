@@ -34,10 +34,11 @@ pub(crate) fn dispatch_only_starting_pane_not_ready_error(
     detail: &str,
 ) -> String {
     format!(
-        "dispatch-only {} reopen refused to inject into pane {} for {} because the latest run is still booting and never reached a dispatch-ready prompt ({detail}); wait for the pane to become ready and reroute again",
+        "dispatch-only {} reopen refused to inject into pane {} for {} because the latest run is still booting and never reached a dispatch-ready prompt ({detail}); wait for the pane to become ready and reroute again {}",
         harness.binary,
         pane,
-        file.display()
+        file.display(),
+        blocked_with_unblocker_fields("wait_for_dispatch_ready_prompt")
     )
 }
 
@@ -166,7 +167,7 @@ pub(crate) fn dispatch_only_send_reopen(
             // active turn preempts pending auto items (head-insert).
             let queued = enqueue_route_dispatch_prompt(file, prompt_text, source, true)?;
             eprintln!(
-                "[route] dispatch-only {} reopen for {} found {} on pane {}; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger",
+                "[route] dispatch-only {} reopen for {} found {} on pane {}; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger {}",
                 harness.binary,
                 file.display(),
                 reason,
@@ -174,7 +175,8 @@ pub(crate) fn dispatch_only_send_reopen(
                 queued.prompt_text,
                 queued.appended,
                 queued.already_present,
-                queued.superseded
+                queued.superseded,
+                user_outcome_fields(crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner)
             );
             // #claude-busy-status-during-active-turn: this queued path previously
             // returned Ok silently, so the operator saw nothing and the session
@@ -769,6 +771,8 @@ mod tests {
         assert!(message.contains("latest run is still booting"));
         assert!(message.contains("never reached a dispatch-ready prompt"));
         assert!(message.contains("(active codex turn)"));
+        assert!(message.contains("ui_outcome=blocked_with_exact_unblocker"));
+        assert!(message.contains("unblocker=wait_for_dispatch_ready_prompt"));
     }
     #[test]
     fn dispatch_only_codex_with_visible_hooks_suppresses_optimistic_unproven_progress() {

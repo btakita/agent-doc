@@ -1730,10 +1730,26 @@ fn emit_busy_route_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, harness: 
 /// its own when the current turn finishes.
 fn busy_route_queued_diagnostic_message(file: &Path, harness: &HarnessConfig) -> String {
     format!(
-        "[agent-doc] turn in progress — the live {} session is busy, so Run Agent Doc for {} was queued and will run when the current turn finishes. No need to rerun.",
+        "[agent-doc] turn in progress — the live {} session is busy, so Run Agent Doc for {} was queued and will run when the current turn finishes. No need to rerun. {}",
         harness.binary,
-        file.display()
+        file.display(),
+        user_outcome_fields(crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner)
     )
+}
+
+fn user_outcome_fields(kind: crate::flow::outcome::UserFacingOutcomeKind) -> String {
+    crate::flow::outcome::UserFacingOutcome::new(kind)
+        .expect("static user-facing outcome is valid")
+        .log_fields()
+}
+
+fn blocked_with_unblocker_fields(unblocker: &str) -> String {
+    crate::flow::outcome::UserFacingOutcome::with_unblocker(
+        crate::flow::outcome::UserFacingOutcomeKind::BlockedWithExactUnblocker,
+        unblocker,
+    )
+    .expect("static user-facing unblocker is valid")
+    .log_fields()
 }
 
 fn emit_busy_route_queued_diagnostic(
@@ -2927,16 +2943,17 @@ fn dispatch_only_busy_refusal_message(
 ) -> String {
     match active_turn_busy_cue {
         Some(cue) => format!(
-            "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because the pane is busy on an active {} turn ({}), not at a dispatch-ready prompt. {}",
+            "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because the pane is busy on an active {} turn ({}), not at a dispatch-ready prompt. {} {}",
             generation,
             file.display(),
             dispatch_pane,
             harness.binary,
             cue,
-            authoritative_actor_dispatch_recovery_hint(actor_state, file)
+            authoritative_actor_dispatch_recovery_hint(actor_state, file),
+            blocked_with_unblocker_fields("wait_for_owner_turn_to_finish")
         ),
         None => format!(
-            "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {}",
+            "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {} {}",
             generation,
             file.display(),
             dispatch_pane,
@@ -2944,7 +2961,8 @@ fn dispatch_only_busy_refusal_message(
             dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(
                 Some(harness)
             )),
-            authoritative_actor_dispatch_recovery_hint(actor_state, file)
+            authoritative_actor_dispatch_recovery_hint(actor_state, file),
+            blocked_with_unblocker_fields("wait_for_dispatch_ready_prompt")
         ),
     }
 }
@@ -3205,12 +3223,15 @@ fn route_via_authoritative_actor(
                         )?,
                     };
                     eprintln!(
-                        "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={})",
+                        "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) {}",
                         file.display(),
                         queued.prompt_text,
                         queued.appended,
                         queued.already_present,
-                        queued.superseded
+                        queued.superseded,
+                        user_outcome_fields(
+                            crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                        )
                     );
                     return Ok(dispatch_pane);
                 }
@@ -3226,9 +3247,12 @@ fn route_via_authoritative_actor(
                         ),
                     );
                     eprintln!(
-                        "[route] active closeout for {} could not be drained before reroute; existing queue head {:?} remains queued behind the closeout",
+                        "[route] active closeout for {} could not be drained before reroute; existing queue head {:?} remains queued behind the closeout {}",
                         file.display(),
-                        head
+                        head,
+                        user_outcome_fields(
+                            crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                        )
                     );
                     return Ok(dispatch_pane);
                 }
@@ -3673,13 +3697,16 @@ fn route_via_authoritative_actor(
                         ),
                     );
                     eprintln!(
-                        "[route] authoritative actor generation {} for {} is busy on pane {}; activated existing agent:queue head {:?} (already_present={}, activated={}) for idle drain instead of injecting a duplicate trigger",
+                        "[route] authoritative actor generation {} for {} is busy on pane {}; activated existing agent:queue head {:?} (already_present={}, activated={}) for idle drain instead of injecting a duplicate trigger {}",
                         actor.record.generation,
                         file.display(),
                         dispatch_pane,
                         queued.prompt_text,
                         queued.already_present,
-                        queued.activated
+                        queued.activated,
+                        user_outcome_fields(
+                            crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                        )
                     );
                     return Ok(dispatch_pane);
                 }
@@ -3709,11 +3736,14 @@ fn route_via_authoritative_actor(
                         ),
                     );
                     eprintln!(
-                        "[route] authoritative actor generation {} for {} is busy on pane {}, but its agent:queue loop is already active (next head {:?}); the running loop will continue this document — reporting deferred success instead of a busy refusal",
+                        "[route] authoritative actor generation {} for {} is busy on pane {}, but its agent:queue loop is already active (next head {:?}); the running loop will continue this document — reporting deferred success instead of a busy refusal {}",
                         actor.record.generation,
                         file.display(),
                         dispatch_pane,
-                        continuation.head_prompt
+                        continuation.head_prompt,
+                        user_outcome_fields(
+                            crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                        )
                     );
                     return Ok(dispatch_pane);
                 }
@@ -3788,14 +3818,17 @@ fn route_via_authoritative_actor(
                 let queued =
                     enqueue_route_dispatch_prompt(file, &context.prompt_text, reason, true)?;
                 eprintln!(
-                    "[route] authoritative actor generation {} for {} is busy on pane {}; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger",
+                    "[route] authoritative actor generation {} for {} is busy on pane {}; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger {}",
                     actor.record.generation,
                     file.display(),
                     dispatch_pane,
                     queued.prompt_text,
                     queued.appended,
                     queued.already_present,
-                    queued.superseded
+                    queued.superseded,
+                    user_outcome_fields(
+                        crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                    )
                 );
                 Ok(dispatch_pane)
             } else if let Some(continuation) = crate::queue_continuation::detect(file)? {
@@ -3815,11 +3848,14 @@ fn route_via_authoritative_actor(
                     ),
                 );
                 eprintln!(
-                    "[route] authoritative actor generation {} for {} is busy on pane {}, but its agent:queue loop is already active (next head {:?}); the running loop will continue this document — reporting deferred success instead of a busy refusal",
+                    "[route] authoritative actor generation {} for {} is busy on pane {}, but its agent:queue loop is already active (next head {:?}); the running loop will continue this document — reporting deferred success instead of a busy refusal {}",
                     actor.record.generation,
                     file.display(),
                     dispatch_pane,
-                    continuation.head_prompt
+                    continuation.head_prompt,
+                    user_outcome_fields(
+                        crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                    )
                 );
                 Ok(dispatch_pane)
             } else {
@@ -6081,6 +6117,11 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "active-turn refusal must name the busy turn cue: {active}"
         );
         assert!(
+            active.contains("ui_outcome=blocked_with_exact_unblocker")
+                && active.contains("unblocker=wait_for_owner_turn_to_finish"),
+            "active-turn refusal must carry the typed unblocker outcome: {active}"
+        );
+        assert!(
             !active.contains("after waiting"),
             "active-turn refusal must not claim a ready-wait that was skipped: {active}"
         );
@@ -6097,6 +6138,11 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert!(
             cold.contains("after waiting") && cold.contains("dispatch-ready prompt"),
             "no-cue refusal keeps the cold-start ready-wait wording: {cold}"
+        );
+        assert!(
+            cold.contains("ui_outcome=blocked_with_exact_unblocker")
+                && cold.contains("unblocker=wait_for_dispatch_ready_prompt"),
+            "cold-wait refusal must carry the typed unblocker outcome: {cold}"
         );
     }
     #[test]
@@ -7634,6 +7680,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         assert!(msg.contains("queued"), "{msg}");
         assert!(msg.contains("plan.md"), "{msg}");
         assert!(msg.contains("claude"), "{msg}");
+        assert!(msg.contains("ui_outcome=queued_behind_owner"), "{msg}");
         assert!(msg.contains("No need to rerun"), "{msg}");
         // Must NOT carry the generic busy diagnostic's rerun instruction.
         assert!(!msg.contains("rerun `Run Agent Doc`"), "{msg}");

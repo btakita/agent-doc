@@ -137,15 +137,21 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // Codex final-gate) while such a prompt exists so the next cycle
                 // answers it instead of skipping to the queue head.
                 if let Some(unresolved) = unresolved_exchange_prompt(file)? {
+                    let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
+                        crate::flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
+                    )
+                    .expect("static deferred operator-proof outcome is valid")
+                    .log_fields();
                     println!(
-                        "queue_continuation_required=false queue_deferred_for_unresolved_exchange_prompt={:?} next_queue_prompt={:?}",
-                        unresolved, continuation.head_prompt
+                        "queue_continuation_required=false queue_deferred_for_unresolved_exchange_prompt={:?} next_queue_prompt={:?} {}",
+                        unresolved, continuation.head_prompt, outcome_fields
                     );
                     eprintln!(
-                        "[session-check] queue continuation deferred for {}: unresolved exchange prompt {:?} must run before the queue head {:?} (#prompt-preempts-auto-queue).",
+                        "[session-check] queue continuation deferred for {}: unresolved exchange prompt {:?} must run before the queue head {:?} (#prompt-preempts-auto-queue). {}",
                         file.display(),
                         unresolved,
-                        continuation.head_prompt
+                        continuation.head_prompt,
+                        outcome_fields
                     );
                     return Ok(());
                 }
@@ -201,18 +207,29 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // auto-deleted (the live IPC supervisor races on direct queue edits).
                 let noise = crate::queue_continuation::queue_stale_noise_lines(file);
                 if deferred > 0 || noise > 0 {
+                    let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
+                        crate::flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
+                    )
+                    .expect("static deferred operator-proof outcome is valid")
+                    .log_fields();
                     println!(
-                        "queue_continuation_required=false queue_deferred_heads={} queue_stale_noise_lines={}",
-                        deferred, noise
+                        "queue_continuation_required=false queue_deferred_heads={} queue_stale_noise_lines={} {}",
+                        deferred, noise, outcome_fields
                     );
                     eprintln!(
-                        "[session-check] queue idle: {} head(s) deferred (clean-session/operator-verify), {} stale noise line(s) — drain deferred heads from a clean session and clear the noise lines ({}; #goqueuestall/#goqstall2).",
+                        "[session-check] queue idle: {} head(s) deferred (clean-session/operator-verify), {} stale noise line(s) — drain deferred heads from a clean session and clear the noise lines ({}; #goqueuestall/#goqstall2). {}",
                         deferred,
                         noise,
-                        file.display()
+                        file.display(),
+                        outcome_fields
                     );
                 } else {
-                    println!("queue_continuation_required=false");
+                    let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
+                        crate::flow::outcome::UserFacingOutcomeKind::NoDrainableWork,
+                    )
+                    .expect("static no-drainable-work outcome is valid")
+                    .log_fields();
+                    println!("queue_continuation_required=false {outcome_fields}");
                 }
             }
             // #finalize-owned-pane-response-patchback: proactive final-gate

@@ -288,6 +288,16 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `typed queued route outcome is reported as queued without prose matching`() {
+        val output = """
+            [route] dispatch deferred ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
+        """.trimIndent()
+
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.QUEUED_PENDING, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
+    }
+
+    @Test
     fun `queued dispatch mixed with benign cross-project resync info is still queued not a failure`() {
         // #jb-busy-queue-ux-feedback: a queued-behind-busy route can co-emit
         // benign cross-project resync info. The benign "registered in its own

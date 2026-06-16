@@ -21,6 +21,7 @@ object TerminalUtil {
     private val LOG = Logger.getInstance(TerminalUtil::class.java)
     private const val ROUTE_ERROR_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-errors"
     private const val RESTART_TELEMETRY_OPS_LOG_MAX_LINES = 400
+    private const val UI_OUTCOME_QUEUED_BEHIND_OWNER = "queued_behind_owner"
     internal const val STARTING_ACTOR_ROUTE_MAX_ATTEMPTS = 4
     private val STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS = longArrayOf(2_000L, 4_000L, 8_000L)
     private val BUSY_CLEAR_REFUSAL_HEADER_REGEX = Regex(
@@ -1180,8 +1181,13 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
 
     private fun isRunAgentDocRouteQueued(output: String): Boolean {
         val lower = output.lowercase()
-        return lower.contains("queued pending dispatch") &&
+        return hasUserFacingOutcome(lower, UI_OUTCOME_QUEUED_BEHIND_OWNER) ||
+            lower.contains("queued pending dispatch") &&
             (lower.contains("active agent:queue") || lower.contains("agent:queue auto"))
+    }
+
+    private fun hasUserFacingOutcome(lowercaseOutput: String, outcome: String): Boolean {
+        return lowercaseOutput.contains("ui_outcome=$outcome")
     }
 
     internal fun startingActorRouteRetryDelayMillis(completedAttempts: Int): Long {
@@ -1448,8 +1454,8 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
     }
 
     internal fun buildRunAgentDocQueuedMessage(relativePath: String): String {
-        return "Agent Doc is still running for $relativePath.\n" +
-            "This Run Agent Doc request was queued behind the active turn and should run when that turn drains."
+        return "Agent Doc is queued behind the active owner for $relativePath.\n" +
+            "It should run when that turn drains."
     }
 
     private fun notifyRunAgentDocStillRunning(project: Project, relativePath: String, routeOutput: String) {

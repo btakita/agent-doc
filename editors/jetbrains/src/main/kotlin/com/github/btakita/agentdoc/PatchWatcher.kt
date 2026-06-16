@@ -731,9 +731,9 @@ class PatchWatcher(private val project: Project) : Disposable {
                     recordApplied(patch.patchId)
                     patchFile.delete()
                 } else if (lastApplyWasDeferredForConflict) {
-                    schedulePatchRetry(patchFile, "File Cache Conflict pending")
+                    schedulePatchRetry(patchFile, "$UI_OUTCOME_REAL_COMPONENT_CONFLICT File Cache Conflict pending")
                 } else if (lastApplyRejectedConflictCancel) {
-                    LOG.warn("Patch rejected after File Cache Conflict cancel, leaving file for explicit retry: ${patchFile.name}")
+                    LOG.warn("Patch rejected after File Cache Conflict cancel, leaving file for explicit retry: ${patchFile.name} $UI_OUTCOME_REAL_COMPONENT_CONFLICT")
                 } else {
                     LOG.warn("Patch not applied, leaving file for retry: ${patchFile.name}")
                 }
@@ -905,7 +905,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (hasPendingMemoryDiskConflict(targetFile)) {
             markPatchDeferredForMemoryDiskConflict(patch)
             lastApplyWasDeferredForConflict = true
-            LOG.warn("[patch-watcher] File Cache Conflict pending for ${patch.file}; deferring patch until user resolves dialog")
+            LOG.warn("[patch-watcher] File Cache Conflict pending for ${patch.file}; deferring patch until user resolves dialog $UI_OUTCOME_REAL_COMPONENT_CONFLICT")
             refreshVisualHighlightersAfterFileCacheConflict(targetFile, "pending")
             return false
         }
@@ -919,7 +919,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             )
         ) {
             lastApplyRejectedConflictCancel = true
-            LOG.warn("[patch-watcher] File Cache Conflict kept memory changes for ${patch.file}; rejecting patch without mutating document")
+            LOG.warn("[patch-watcher] File Cache Conflict kept memory changes for ${patch.file}; rejecting patch without mutating document $UI_OUTCOME_REAL_COMPONENT_CONFLICT")
             refreshVisualHighlightersAfterFileCacheConflict(targetFile, "cancel")
             return false
         }
@@ -1650,6 +1650,8 @@ class PatchWatcher(private val project: Project) : Disposable {
     companion object {
         private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(PatchWatcher::class.java)
         private val instances = mutableMapOf<Project, PatchWatcher>()
+        private const val UI_OUTCOME_REAL_COMPONENT_CONFLICT =
+            "ui_outcome_contract=ui-outcome-v1 ui_outcome=real_component_conflict ui_outcome_class=blocked next_action=resolve_component_conflict"
 
         const val APPLY_FAILED = 0
         const val APPLY_APPLIED = 1

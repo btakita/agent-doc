@@ -300,7 +300,8 @@ One.
         assertTrue(source.contains("memoryDiskConflictDeferredPatchIds"))
         assertTrue(source.contains("hasPendingMemoryDiskConflict(targetFile)"))
         assertTrue(source.contains("File Cache Conflict kept memory changes"))
-        assertTrue(source.contains("schedulePatchRetry(patchFile, \"File Cache Conflict pending\")"))
+        assertTrue(source.contains("ui_outcome=real_component_conflict"))
+        assertTrue(source.contains("schedulePatchRetry(patchFile, \"${'$'}UI_OUTCOME_REAL_COMPONENT_CONFLICT File Cache Conflict pending\")"))
     }
 
     @Test

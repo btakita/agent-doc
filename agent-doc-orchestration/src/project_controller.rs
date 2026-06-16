@@ -3914,6 +3914,14 @@ mod tests {
             error.contains("failed_stage=queue_paused"),
             "dispatch error must include queue paused stage: {error}"
         );
+        assert!(
+            error.contains("ui_outcome=blocked_with_exact_unblocker"),
+            "generic queue pause must carry a typed UI outcome: {error}"
+        );
+        assert!(
+            error.contains("unblocker=resume_or_clear_queue_control"),
+            "generic queue pause must carry an exact unblocker: {error}"
+        );
         assert!(error.contains(&format!("blocked_head_bytes={}", expected_head.len())));
         assert!(error.contains(&format!(
             "blocked_head_sha256={}",
@@ -3937,6 +3945,8 @@ mod tests {
             .unwrap();
         assert_eq!(failed_stage, "queue_paused");
         let diagnostic_payload = diagnostic_payload.unwrap_or_default();
+        assert!(diagnostic_payload.contains("ui_outcome=blocked_with_exact_unblocker"));
+        assert!(diagnostic_payload.contains("unblocker=resume_or_clear_queue_control"));
         assert!(
             diagnostic_payload.contains(&format!("blocked_head_bytes={}", expected_head.len()))
         );
@@ -4333,6 +4343,14 @@ mod tests {
         assert!(
             recoverable_ops_log.contains("binary_outcome=recoverable"),
             "recoverable stale queue pause must emit a typed outcome proof: {recoverable_ops_log}"
+        );
+        assert!(
+            recoverable.contains("ui_outcome=recovered_and_retried"),
+            "stale-supervisor pause bail must carry the user-facing recovery outcome: {recoverable}"
+        );
+        assert!(
+            recoverable_ops_log.contains("ui_outcome=recovered_and_retried"),
+            "recoverable stale queue pause must log the user-facing recovery outcome: {recoverable_ops_log}"
         );
         assert!(recoverable_ops_log.contains("invariant=stale_queue_pause"));
         assert!(recoverable_ops_log.contains("proof_marker=supervisor_restart_redirect"));

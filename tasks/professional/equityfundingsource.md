@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -95,7 +95,57 @@ Commands / verification:
 - Smoke test `https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline`: `303`, expected Cloudflare Access redirect for admin route.
 
 Confidence: high. No escalation needed. The parent repo still has unrelated pre-existing dirty files and local agent-doc commits ahead of origin; I left those untouched.
-<!-- agent:boundary:8ebd6552 -->
+
+### Re: Remove "Interested Lenders" from "Available Deal" -> "Loan Detail" tab. deploy — gpt-5
+
+> **Queue prompt:**
+>
+> Remove "Interested Lenders" from "Available Deal" -> "Loan Detail" tab. deploy
+
+
+Implemented, committed, pushed, and deployed.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev` submodule pointer in the parent repo
+
+What changed:
+- Added a default-on `show_interested_lenders` option to `AdminLoanDetail`; when disabled it skips the interested-lenders fetch and hides the inline Interested Lenders card.
+- Passed `show_interested_lenders={false}` from the Available Deal detail page's `Loan Detail` tab, leaving the dedicated `Interested Lenders` tab intact.
+- Updated PRD/test coverage for the new Available Deal Loan Detail contract.
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts tests/tmo-loan-details-density.test.ts tests/investor-portal-e2e.test.ts` passed: 165 tests.
+- `make check` passed: 750 tests, app build, and Worker build.
+- `git diff --check` passed.
+- `gh run list --workflow CI --limit 1` could not check CI because this repo has no workflow named `CI`; `gh workflow list` returned no workflows.
+
+Deploy:
+- Pre/post deploy remote D1 migration check: no migrations to apply.
+- `make deploy` passed.
+- Deployed Worker version: `bf2394b5-12a8-4c24-a668-700159f90a24`.
+- Smoke test `https://equityfundingsource.brian-takita.workers.dev/`: `200`.
+- Smoke test `https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline`: `303`, expected Cloudflare Access redirect for admin route.
+
+Commits/push:
+- Submodule pushed: `27163f2 fix(admin): hide duplicate interested lenders (#67v2)`.
+- Parent pushed: `f85e7a249 chore(efs): advance available deal loan detail (#67v2)`.
+
+Confidence: high. No escalation needed. Preflight warnings were unrelated semantic-completion candidates in review items, so I left them untouched. The EFS submodule is clean; the parent repo still has unrelated pre-existing dirty files outside this task.
+
+Suggested commit message:
+
+```txt
+fix(admin): hide duplicate interested lenders (#67v2)
+
+Suppress the inline Interested Lenders section in the Available Deal Loan Detail tab while keeping the dedicated Interested Lenders tab and reusable loan-detail section intact. Update PRD/test coverage and deploy the Worker with no D1 migrations pending.
+```
+<!-- agent:boundary:da2ad36d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,7 +153,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Remove "Interested Lenders" from "Available Deal" -> "Loan Detail" tab. deploy
 <!-- /agent:queue -->
 
 ## Backlog

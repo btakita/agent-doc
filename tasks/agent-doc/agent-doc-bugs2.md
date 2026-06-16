@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 agent_doc_pipeline:
   run_id: cycle-1781638030591
   step: write_applied
@@ -84,12 +84,13 @@ Verification passed: `cargo test -p agent-doc-orchestration route_submit --lib`,
 Remote CI: `src/agent-doc` GitHub Actions `CI` run `27651569734` is still `in_progress`; local full verification passed, so I did not wait on `gh run watch`. The parent repo has no workflow named `CI`.
 
 Escalation: none. No JetBrains plugin update is required for this fix; it is in the Rust CLI/orchestration path. Confidence: high for preventing route/supervisor input concatenation and for the new proof marker.
-<!-- agent:boundary:861d2c86 -->
+<!-- agent:boundary:bfe83332 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- JB `Clear Session Context` does not submit with Enter. Should we have more state machine logic to prevent race conditions?
 <!-- /agent:queue -->
 ###
 <!--

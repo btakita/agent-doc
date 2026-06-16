@@ -167,7 +167,34 @@ Proof:
 - Verification: all local checks listed above passed; live data query confirms the named investor now joins to the admin loan's deal interest.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:f08e9007 -->
+❯ - Escalation: none.
+❯ - Confidence: high.
+❯ - Verification: all local checks listed above passed; live data query confirms the named investor now joins to the admin loan's deal interest.
+❯ - Commands: `tsift status`, `agent-doc preflight/plan/read`, targeted `rg`/`sed` inspection, remote D1 read/write queries, focused tests, EFS `make check`, migration list checks, `make deploy`, live `curl` smokes, EFS/parent commits and pushes, parent `make check`, `gh run list`.
+❯ - Changed paths: `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/dashboard.tsx`, `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/deal_detail.tsx`, `src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md`, `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`, `src/equityfundingsource-dev/tests/lender-account-gate.test.ts`, parent submodule pointer `src/equityfundingsource-dev`, and the one production D1 interest row noted above.
+❯ - The session exchange is large, but the active queue was drainable, so I continued the queue item instead of stopping for compaction.
+❯ - Preflight semantic-completion warnings for `#dropbox-sync-adapter`, `#dzmm-writeback-replay`, and `#zwws-vestings-local` were not part of this queued item and were left unchanged.
+❯ - Parent repo has no workflow named `CI`; latest `Agent Doc` run for `fba67ec6c` was queued at closeout, so CI is pending rather than failed.
+❯ - EFS repo has no Actions runs listed and no workflow named `CI`.
+❯ - Worker version: `0c87d79e-3b4a-4bae-a5eb-ad645320aa23`.
+❯ - Worker URL: `https://equityfundingsource.brian-takita.workers.dev`.
+❯ - Ran `make deploy` from `src/equityfundingsource-dev`.
+❯ - Live smoke: `/` returned `200`; `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned `303`, matching Cloudflare Access redirect behavior.
+❯ - Remote D1 migrations before and after deploy — no migrations to apply.
+❯ - `git diff --check` — clean.
+❯ - Parent `make check` — passed.
+❯ - EFS `make check` — 750 tests passed, app build passed, Worker build passed.
+❯ - `bun test tests/investor-portal-e2e.test.ts tests/lender-account-gate.test.ts` — 50 passed.
+❯ - `bun test tests/investor-portal-e2e.test.ts` — 41 passed.
+❯ - Parent pointer: `fba67ec6c chore(efs): advance dashboard interest fix`, pushed to `btakita/agent-loop main`.
+❯ - EFS submodule: `a12c3d9 fix(investor): persist dashboard deal interest (#efs-deals-interest-admin-sync)`, pushed to `btakita/equityfundingsource-dev main`.
+❯ - Inserted the missing live production `investor_deal_interests` row for loan `45ddae53-3e7f-43b1-a627-17b79b06fa3f`, deal `7a0c1463-27bb-4d7c-82f7-2281b3c008d3`, user `btak.dev+investor@gmail.com`; verified the admin-visible join returns that email. The user still has no TMO lender account, so the row appears with `lender_account = null` until EFS assigns one.
+❯ - Updated `prds/rpzm-investor-dashboard-rework.md` and source-text guard tests for the new behavior.
+❯ - Threaded the dashboard dialog interest callback back into the dashboard preview state, including backfilling the Available Deals preview from the full fetched list after a card moves to Deals of interest.
+❯ - Added a `Deal Interest` action to the shared investor deal-detail component, so the dashboard Available Deal dialog can POST/DELETE `/api/investor/deals/:id/interested` directly instead of telling the investor to use the list page.
+❯ - Fixed the dashboard classification bug: a pending lender-account request no longer moves every browseable deal out of Available Deals before the investor can mark interest.
+❯ - Renamed the investor dashboard preview from `Pending deals` to `Deals of interest` for per-deal interest/funding-pending rows.
+<!-- agent:boundary:fd421108 -->
 <!-- /agent:exchange -->
 ###
 <!--

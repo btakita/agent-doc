@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -59,6 +59,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> Read the transcript. Look at the spoton.com website. What are some things to look out for in the interview today? How can I help them convert more signups -> installs.
+
+
+> **Queue prompt:**
+>
 > corky gpu to transcribe + diarize [2026-06-11 12-31-50.mp4](../../../../../Videos/2026-06-11%2012-31-50.mp4) if we don't already have a transcript.
 
 
@@ -67,20 +72,37 @@ The prep bullets above are the interview notes. The missing frame is:
 - Transcript status: [spoton-2026-06-11-call-transcript.md](spoton-2026-06-11-call-transcript.md) already exists, so I did not re-run the larger video through Corky/GPU transcription.
 - Website context checked: SpotOn publicly positions itself around restaurant POS, online ordering, reservations, labor/team tools, AI profit analysis, integrations, dedicated onboarding, menu setup, training, and 24/7 support ([SpotOn](https://www.spoton.com/), [Restaurant POS](https://www.spoton.com/restaurant-pos/), [New restaurant openings](https://www.spoton.com/restaurant-pos/new-restaurant-openings/), [AI menu assistant](https://www.spoton.com/solutions/ai-menu-assistant/)).
 - Main thesis: help them turn the signed-to-installed path from a manual white-glove operations workflow into a measurable activation product without losing the hospitality promise.
+- "How much freedom does the team have to change merchant-facing workflow versus internal tooling only?"
+- "What is the earliest moment where the merchant feels, 'this is real and worth finishing'?"
+- "Which install segment has the biggest conversion upside: full-service onsite, lower-GPV remote, or simple retail/unboxing?"
+- "If a merchant misses call three, what automated path exists before the deal goes cold?"
+- "What does an implementation specialist repeatedly do that should become product behavior?"
+- "Where exactly do signed merchants fall out today, and how confidently is that reason captured?"
+7. Measure the experiments: install conversion, days-to-install, stage aging, manual touches, no-show rate, reschedule rate, menu defect rate, first-payment time, install-day support load, and early churn.
+6. Create QA around menu/build readiness so AI-generated or imported menus are not just impressive in demo state, but reliable enough for install day.
+5. Preserve sales context into implementation: promised go-live date, pain points, decision makers, hours, existing POS, network/printer constraints, and any promises made during the sale.
+4. Add install-risk scoring based on time since signing, no-shows, missing menu artifacts, install complexity, underwriting status, hardware readiness, and unanswered outreach.
+3. Add self-scheduling, async upload/review, reminders, and rescheduling so a missed call does not stall a deal.
+2. Build a merchant-facing launch checklist with the next required action, due date, and why it matters.
+1. Model signed-to-installed as an activation funnel with explicit states, blockers, owners, and SLAs.
+- Human leverage: the goal is not to remove implementation people; it is to automate low-value reminders so human touches happen when intent and urgency are high.
+- Menu readiness: their AI/demo menu work is valuable, but the install risk is the final 20%: modifiers, routing, pricing, approvals, and confidence that go-live will not disrupt service.
+- Segment differences: onsite full-service installs, simpler remote installs, and retail/unboxing installs should not have one generic workflow.
+- Merchant psychology: after signing, owners get busy, lose momentum, avoid calls, or get nervous when asked for more work. The product has to keep the deal warm without feeling like homework.
+- Stuck-deal visibility: can anyone see all signed merchants at risk today, or does risk live in calls, Slack, Salesforce notes, and tribal knowledge?
+- Stage clarity: do they have precise funnel states for signed, approved, scheduled, menu-ready, hardware-ready, installed, activated, first payment, and retained?
 
 Concise live answer you can use:
 
 > I would approach this as an activation funnel from signed contract to installed POS. First I would make the state of every merchant explicit: what is missing, who owns the next action, how long it has been stuck, and what risk signals we have. Then I would look for places where product can replace low-value manual follow-up with a clear merchant checklist, self-scheduling, upload/review flows, and automated nudges. I would still keep humans in the loop, but reserve them for high-intent moments where they can actually unblock the install. The goal is not just fewer calls; it is fewer unclear steps, faster momentum after signing, and a higher install rate without losing the hospitality that SpotOn sells.
 
 Closeout proof: changed path is the session document only; no new transcript artifact was created. Commands included preflight, plan/read, transcript inspection, SpotOn web review, sidecar reset, recovery preflight, and this force-disk finalize. No code tests were run because no code changed. Confidence is medium-high; exact funnel stage weights still need confirmation from SpotOn.
-<!-- agent:boundary:245750bf -->
+<!-- agent:boundary:11315da6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~corky gpu to transcribe + diarize [2026-06-11 12-31-50.mp4](../../../../../Videos/2026-06-11%2012-31-50.mp4) if we don't already have a transcript.~~
-- Read the transcript. Look at the spoton.com website. What are some things to look out for in the interview today? How can I help them convert more signups -> installs.
 <!-- /agent:queue -->
 
 ## Backlog

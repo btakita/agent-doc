@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -71,7 +71,35 @@ Verification:
 - Top-level `make check` is not EFS-specific and failed in existing `src/agent-doc` tests: one tmux isolation failure (`duplicate session: test`) and one IPC long-path timeout. The EFS app suite and deploy proof are green.
 
 Confidence: high for the EFS fix and deploy. Escalation: none.
-<!-- agent:boundary:56a1e7bc -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deploy is complete. No additional code changes were needed in this queue pass because the prior pass already deployed the EFS Worker after removing the redundant `Published deals` lane.
+
+Deploy proof:
+- `make deploy` completed successfully.
+- Remote D1 migration `0069_final_loan_docs_signature.sql` was applied successfully.
+- Worker version deployed: `6c5106e4-63f7-4b8e-8306-8322846d9212`.
+- Production URL: `https://equityfundingsource.brian-takita.workers.dev`.
+
+Verification:
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`: no migrations to apply.
+- Live `/`: HTTP 200.
+- Live `/portal-admin/pipeline`: HTTP 303 to admin login, expected for the protected route.
+- Deployed browser asset `/index.browser-VRGDIGYI.js`: no `Published deals` column string or removed lane identifiers.
+- EFS app checks were green before deploy: focused admin pipeline test passed; full `make check` passed with 736 tests plus app and Worker builds.
+
+Commits/push:
+- EFS app `main` pushed at `5d19911`.
+- Parent repo `main` pushed through session commit `3dc937ce1`.
+
+Confidence: high for deploy completion. Escalation: none.
+<!-- agent:boundary:964136ee -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,9 +107,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~What are #next-steps to have the "Available Deals" subpipeline which includes Processing + Underwriting steps in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?~~
-- ~~Remove redundant "Published deals" in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -660,4 +660,120 @@ mod tests {
                 .all(|transition| !transition.required_proof.is_empty())
         );
     }
+
+    #[test]
+    fn architecture_primitive_transition_matrix_names_mutation_and_terminal_proofs() {
+        let cases = [
+            (
+                "stale supervisor recycle",
+                decide_stale_supervisor(StaleSupervisorEvidence {
+                    stale: true,
+                    auto_recycle: true,
+                    turn_boundary: true,
+                    queue_head_pending: true,
+                }),
+                WorkflowDecision::Supervisor(SupervisorWorkflowDecision::RecycleNow),
+                WorkflowMutation::ReexecSupervisor,
+                &[
+                    WorkflowProof::SupervisorStalenessProbe,
+                    WorkflowProof::TurnBoundary,
+                    WorkflowProof::QueueHeadIdentity,
+                ][..],
+            ),
+            (
+                "operator-only no-drainable queue",
+                decide_queue_drainability(QueueDrainabilityEvidence {
+                    queue_active: true,
+                    drainable_head_count: 0,
+                    active_head_present: true,
+                    ..QueueDrainabilityEvidence::default()
+                }),
+                WorkflowDecision::QueueDrain(QueueDrainWorkflowDecision::Noop),
+                WorkflowMutation::None,
+                &[WorkflowProof::QueueDrainabilityComputed][..],
+            ),
+            (
+                "queue edit during unresolved closeout",
+                decide_captured_response(CapturedResponseEvidence {
+                    state: CapturedResponseState::Captured,
+                    prompt_context_available: true,
+                    ..CapturedResponseEvidence::default()
+                }),
+                WorkflowDecision::CapturedResponse(
+                    CapturedResponseWorkflowDecision::QueuePromptBehindCloseout,
+                ),
+                WorkflowMutation::QueuePromptBehindCloseout,
+                &[WorkflowProof::CaptureRecord][..],
+            ),
+            (
+                "degraded/file-IPC materialized response fallback",
+                decide_captured_response(CapturedResponseEvidence {
+                    state: CapturedResponseState::WriteApplied,
+                    visible_response_matches_capture: true,
+                    ..CapturedResponseEvidence::default()
+                }),
+                WorkflowDecision::CapturedResponse(
+                    CapturedResponseWorkflowDecision::CompleteCapturedResponse,
+                ),
+                WorkflowMutation::CompleteCapturedResponse,
+                &[
+                    WorkflowProof::CaptureRecord,
+                    WorkflowProof::VisibleResponseMatch,
+                ][..],
+            ),
+            (
+                "compact/replay captured response",
+                decide_captured_response(CapturedResponseEvidence {
+                    state: CapturedResponseState::Replayed,
+                    ..CapturedResponseEvidence::default()
+                }),
+                WorkflowDecision::CapturedResponse(
+                    CapturedResponseWorkflowDecision::ReplayCapturedResponse,
+                ),
+                WorkflowMutation::ReplayCapturedResponse,
+                &[
+                    WorkflowProof::CaptureRecord,
+                    WorkflowProof::ResponseBodyHash,
+                ][..],
+            ),
+            (
+                "attributed live-buffer drift",
+                decide_live_buffer(LiveBufferEvidence {
+                    state: LiveBufferState::Diverged,
+                    drift_attributed_to_live_buffer: true,
+                    ..LiveBufferEvidence::default()
+                }),
+                WorkflowDecision::LiveBuffer(LiveBufferWorkflowDecision::RequestEditorSave),
+                WorkflowMutation::RequestEditorSave,
+                &[
+                    WorkflowProof::LiveBufferHash,
+                    WorkflowProof::LiveBufferProvenance,
+                ][..],
+            ),
+            (
+                "unattributed live-buffer drift",
+                decide_live_buffer(LiveBufferEvidence {
+                    state: LiveBufferState::Diverged,
+                    drift_attributed_to_live_buffer: false,
+                    ..LiveBufferEvidence::default()
+                }),
+                WorkflowDecision::LiveBuffer(LiveBufferWorkflowDecision::BlockUnattributedDrift),
+                WorkflowMutation::None,
+                &[WorkflowProof::LiveBufferHash][..],
+            ),
+        ];
+
+        for (name, transition, decision, mutation, proofs) in cases {
+            assert_eq!(transition.decision, decision, "{name}");
+            assert_eq!(transition.allowed_mutation, mutation, "{name}");
+            for proof in proofs {
+                assert!(transition.requires(*proof), "{name} missing {proof:?}");
+            }
+            assert_eq!(
+                transition.required_proof.len(),
+                proofs.len(),
+                "{name} must not gain or lose hidden proof obligations"
+            );
+        }
+    }
 }

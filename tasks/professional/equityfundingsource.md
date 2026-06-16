@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -55,7 +55,7 @@ Verification: `bun test tests/admin-investor-pipeline.test.ts` passed (61 tests)
 Committed and pushed: EFS submodule `6ba172b` (`feat(admin): track lender communication follow-ups (#deal-interest-communication)`) to `btakita/equityfundingsource-dev:main`; parent repo pointer `7f62390ad` (`chore(efs): advance lender communication pipeline`) to `btakita/agent-loop:main`.
 
 Escalation: none. Confidence: high. No deploy was run; this queue item used the `#spec-test-commit-push` path, and the new D1 migration will be applied by the normal deploy path. Exchange is large, but the active queue was drainable, so I did not pause for compaction.
-<!-- agent:boundary:8e1184b5 -->
+<!-- agent:boundary:e2e0d8ef -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,6 +63,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- I'm talking about the Deal Pipeline. https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f and the Available Deal dialog. The admin will communicate with lenders over email and select a lender. Would Go High Level integration be a good idea here?
 <!-- /agent:queue -->
 
 ## Backlog

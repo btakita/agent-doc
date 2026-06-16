@@ -750,17 +750,31 @@ Verification:
 Commits:
 - Submodule `btakita/agent-doc`: `ce26d32c` (`architecture: add workflow invariant autofix`), pushed to `origin/main`.
 - Parent `btakita/agent-loop`: `96b0828b7` (`agent-doc: add workflow invariant autofix`), pushed to `origin/main`.
+- parent `agent-loop`: `31b8d4352 agent-doc: update tmux submit fix`
+- `agent-doc` submodule: `d61a6a2d fix: submit managed tmux commands with hex carriage return`
+- GitHub Actions `CI` run `27647408583` passed with `make check` and `make tmux-ci`
+- `make install` rebuilt `/home/brian/.cargo/bin/agent-doc` and `libagent_doc.so`; installed version reports `agent-doc 0.34.1`
+- `make check`
+- `cargo test -p agent-doc simworld_jb_run_and_clear_share_codex_carriage_return_submit_contract -- --nocapture`
+- `cargo test -p agent-doc clear_submit_proof_lines_report_prompt_issue_and_retry_outcome -- --nocapture`
+- `cargo test -p agent-doc-orchestration opencode_submit_uses_hex_text_cr -- --ignored --nocapture`
+- `cargo test -p agent-doc-orchestration idle_queue_submit_mode_uses_carriage_return_for_codex_owner_pane -- --nocapture`
+- `cargo test -p agent-doc-orchestration context_reset_in_flight_dedupes_active_head_edits -- --nocapture`
+- `cargo test -p agent-doc-orchestration route_submit_resubmit_proof_line_is_operator_greppable_for_both_harnesses -- --nocapture`
+- `cargo test -p agent-doc-orchestration routed_trigger_submit_diagnostic_names_codex_carriage_return_key -- --nocapture`
+- `cargo test -p agent-doc-orchestration submit_profiles_keep_harness_submit_policy_in_one_place -- --nocapture`
 
 Confidence: high. The planner is isolated behind a command surface, covered by focused tests and full local `make check`, and the installed dry-run smoke verifies the live safety split without mutating the proof ledger.
 
 Escalation: none.
-<!-- agent:boundary:a615aaa9 -->
+<!-- agent:boundary:a180ceaf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- JB `Run Agent Doc` on Codex still does not submit ![img_33.png](img_33.png)
+- :pushpin: JB `Run Agent Doc` on Codex still does not submit ![img_33.png](img_33.png). Also `/clear` is added and as I type, additional `/clear` is sent. ![img_34.png](img_34.png) Why does `Enter` not work? Can we send a single tmux command instead of 2? Submit works with Claude Code.
+- Why are we still using `TmuxSubmitDelivery::LiteralTextCarriageReturn`, `tmux_literal_text_cr`, and `CR` at all? This should be rare. We mostly want Enter. Reduce distinctions if possible. Codex support may have gotten more complex than it should have been.
 <!-- /agent:queue -->
 ###
 <!--

@@ -1054,6 +1054,7 @@ struct ControllerEnvelope<T> {
 
 pub struct LaunchLock {
     _file: File,
+    waited: bool,
 }
 
 impl LaunchLock {
@@ -1077,6 +1078,10 @@ impl LaunchLock {
         Self::acquire_inner(project_root, Some(timeout))
     }
 
+    pub fn waited(&self) -> bool {
+        self.waited
+    }
+
     fn acquire_inner(project_root: &Path, timeout: Option<Duration>) -> Result<Self> {
         let path = launch_lock_path(project_root);
         if let Some(parent) = path.parent() {
@@ -1090,13 +1095,20 @@ impl LaunchLock {
             .open(&path)
             .with_context(|| format!("failed to open {}", path.display()))?;
         let deadline = timeout.map(|t| Instant::now() + t);
+        let mut waited = false;
         loop {
             match file.try_lock_exclusive() {
-                Ok(()) => return Ok(Self { _file: file }),
+                Ok(()) => {
+                    return Ok(Self {
+                        _file: file,
+                        waited,
+                    });
+                }
                 Err(err) => {
                     let contended = err.kind() == std::io::ErrorKind::WouldBlock;
                     match deadline {
                         Some(deadline) if contended && Instant::now() < deadline => {
+                            waited = true;
                             std::thread::sleep(LAUNCH_LOCK_POLL);
                             continue;
                         }

@@ -1929,6 +1929,14 @@ pub fn connect_or_launch(
     project_root: &Path,
     launch_mode: LaunchMode,
 ) -> Result<interprocess::local_socket::Stream> {
+    connect_or_launch_with_lock_wait(project_root, launch_mode, LAUNCH_LOCK_WAIT)
+}
+
+fn connect_or_launch_with_lock_wait(
+    project_root: &Path,
+    launch_mode: LaunchMode,
+    launch_lock_wait: Duration,
+) -> Result<interprocess::local_socket::Stream> {
     if let Ok(active_status) = status(project_root)
         && active_status.active
         && controller_status_matches_current_binary(&active_status).unwrap_or(false)
@@ -1947,13 +1955,14 @@ pub fn connect_or_launch(
     // double-checked `status` + `connect` below adopts whatever it publishes
     // (#suprecyclelock). Only a genuinely wedged holder returns an error — and even
     // then, adopt a live matching controller it may have published before wedging.
-    let _lock = match LaunchLock::acquire_blocking(project_root, LAUNCH_LOCK_WAIT) {
+    let launch_lock = match LaunchLock::acquire_blocking(project_root, launch_lock_wait) {
         Ok(lock) => lock,
         Err(err) => {
             if let Ok(active_status) = status(project_root)
                 && active_status.active
                 && controller_status_matches_current_binary(&active_status).unwrap_or(false)
             {
+                log_launch_lock_waiter_adopted(project_root, &active_status, "timeout");
                 reap_stale_duplicate_controllers(
                     project_root,
                     active_status.pid,
@@ -1964,6 +1973,7 @@ pub fn connect_or_launch(
             return Err(err);
         }
     };
+    let waited_on_launch_lock = launch_lock.waited();
     // Self-heal: kill any predecessor wedged in `Preparing`/`Promoted` past the
     // threshold *before* we adopt or promote, so a stuck controller cannot keep
     // re-corrupting the working tree and respawn the `1002 → 1004 → 1006`
@@ -1986,6 +1996,9 @@ pub fn connect_or_launch(
         && active_status.active
         && controller_status_matches_current_binary(&active_status).unwrap_or(false)
     {
+        if waited_on_launch_lock {
+            log_launch_lock_waiter_adopted(project_root, &active_status, "acquired");
+        }
         reap_stale_duplicate_controllers(
             project_root,
             active_status.pid,
@@ -2004,6 +2017,25 @@ pub fn connect_or_launch(
 
     launch_detached(project_root, launch_mode)?;
     wait_for_controller(project_root)
+}
+
+fn log_launch_lock_waiter_adopted(
+    project_root: &Path,
+    active_status: &ControllerStatus,
+    phase: &str,
+) {
+    crate::ops_log::log_op(
+        project_root,
+        &format!(
+            "controller_launch_lock_waiter_adopted_published_controller phase={} pid={} generation={}",
+            phase,
+            active_status
+                .pid
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            active_status.controller_generation.unwrap_or(1)
+        ),
+    );
 }
 
 pub fn ensure_controller_running(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
@@ -4159,6 +4191,57 @@ mod tests {
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
         handle.join().unwrap();
     }
+
+    #[test]
+    fn connect_or_launch_adopts_controller_published_during_launch_lock_contention() {
+        // #suprecyclelock / #1j8q: a self-recycled supervisor can re-run `start`
+        // while another project-root launcher still owns controller-launch.lock.
+        // If that holder publishes a healthy controller before the waiter gives
+        // up, the waiter must connect to it instead of surfacing os-error-11.
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let held_lock = LaunchLock::acquire(&project_root).unwrap();
+
+        let caller_root = project_root.clone();
+        let caller = std::thread::spawn(move || {
+            let stream = connect_or_launch_with_lock_wait(
+                &caller_root,
+                LaunchMode::Lazy,
+                Duration::from_millis(150),
+            )?;
+            drop(stream);
+            Ok::<(), anyhow::Error>(())
+        });
+
+        std::thread::sleep(Duration::from_millis(25));
+        let server_root = project_root.clone();
+        let server = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
+        wait_for_test_controller(&project_root);
+
+        let result = caller.join().unwrap();
+        assert!(
+            result.is_ok(),
+            "contended waiter should adopt the published controller, not fail: {:?}",
+            result.err().map(|err| err.to_string())
+        );
+        drop(held_lock);
+
+        let ops_log = std::fs::read_to_string(project_root.join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            ops_log.contains("controller_launch_lock_waiter_adopted_published_controller"),
+            "contended adoption proof marker missing:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("controller launch already in progress"),
+            "the historical launch-lock error must not be logged:\n{ops_log}"
+        );
+
+        let shutdown = request(&project_root, "shutdown").unwrap();
+        assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
+        server.join().unwrap();
+    }
+
     #[test]
     fn controller_session_operator_status_reports_history_and_command_stages() {
         let dir = tempfile::TempDir::new().unwrap();

@@ -136,6 +136,16 @@ Verification:
 - Downloaded deployed `/index.browser-GLC2TLBG.js`; it contains `AdminInlineInfoField`, `body_style: ADMIN_INLINE_INFO_STYLE`, and the inline Borrower Info entries.
 - `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
 - `src/equityfundingsource-dev` is clean after deploy.
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
+- Latest deployment after this refactor is Worker version `8733c338-1626-4b18-a3e8-0c204f4dfd4b` with asset `/index.browser-GLC2TLBG.js` containing `AdminInlineInfoField`.
+- `make check` passed: 739 tests, app build, Worker build.
+- `bun test tests/tmo-loan-details-density.test.ts` passed: 3 tests.
+- Parent repo: `0067c4ee2 chore(efs): update inline info refactor submodule` pushed to `origin/main`.
+- EFS submodule: `1a2c384 refactor(admin): generalize inline info fields` pushed to `origin/main`.
+- `src/equityfundingsource-dev` parent gitlink
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
 
 Note: the exchange is large and the queue is active, so I continued the requested drain without compacting.
 
@@ -151,25 +161,25 @@ Confidence: high. Escalation: none.
 Closed the generic-field queue head. The borrower-specific inline helper is now `AdminInlineInfoField` with `ADMIN_INLINE_INFO_*` styles, and the density test explicitly rejects the old `AdminBorrowerInfoField` name so the reusable version stays in place for other admin cards.
 
 Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
-- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
-- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
-- `src/equityfundingsource-dev` parent gitlink
+❯ - `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+❯ - `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+❯ - `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+❯ - `src/equityfundingsource-dev` parent gitlink
 
 Commits/push:
-- EFS submodule: `1a2c384 refactor(admin): generalize inline info fields` pushed to `origin/main`.
-- Parent repo: `0067c4ee2 chore(efs): update inline info refactor submodule` pushed to `origin/main`.
+❯ - EFS submodule: `1a2c384 refactor(admin): generalize inline info fields` pushed to `origin/main`.
+❯ - Parent repo: `0067c4ee2 chore(efs): update inline info refactor submodule` pushed to `origin/main`.
 
 Verification:
-- `bun test tests/tmo-loan-details-density.test.ts` passed: 3 tests.
-- `make check` passed: 739 tests, app build, Worker build.
-- Latest deployment after this refactor is Worker version `8733c338-1626-4b18-a3e8-0c204f4dfd4b` with asset `/index.browser-GLC2TLBG.js` containing `AdminInlineInfoField`.
-- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
+❯ - `bun test tests/tmo-loan-details-density.test.ts` passed: 3 tests.
+❯ - `make check` passed: 739 tests, app build, Worker build.
+❯ - Latest deployment after this refactor is Worker version `8733c338-1626-4b18-a3e8-0c204f4dfd4b` with asset `/index.browser-GLC2TLBG.js` containing `AdminInlineInfoField`.
+❯ - `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
 
 Note: the exchange is large and the queue is active, so I continued the requested drain without compacting. Preflight also warned that the live agent-doc supervisor is stale; I did not recycle it mid-drain.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:344ab839 -->
+<!-- agent:boundary:eef6cae3 -->
 <!-- /agent:exchange -->
 ###
 <!--

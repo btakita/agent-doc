@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,40 @@ committed
 Compacted content:
 - Archived 1 response topic(s): Remove "Loan Terms" from Available deal admin page & dialog. Deploy
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): inactive queued Interested Lenders ordering request
-<!-- agent:boundary:899952ed -->
+
+### Re: Uploaded Documents order — gpt-5
+
+> **Queue prompt:**
+>
+> Move "Uploaded Documents" above "Interested Lenders" in the Available Deal admin detail page and dialog.
+
+
+Implemented and pushed the Available Deal admin detail ordering update.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev/tests/document-viewer.test.ts`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev` submodule pointer in the parent repo
+
+What changed:
+- Moved the `Uploaded Documents` section above `Interested Lenders` in `AdminLoanDetail`, which covers the standalone admin loan detail page and the Available Deals dialog surface that embeds the same component.
+- Kept the document viewer wiring intact through a small `AdminLoanUploadedDocumentsSection` component.
+- Updated the PRD and tests to assert `Uploaded Documents` appears before `Interested Lenders`.
+
+Verification:
+- `bun test tests/tmo-loan-details-density.test.ts tests/document-viewer.test.ts` passed: 10 tests.
+- `make check` passed: 750 Bun tests, app build, and worker build.
+- `git diff --check` passed.
+- `gh run list --workflow CI --limit 1` could not check CI because this repo has no workflow named `CI`; `gh workflow list` returned no workflows.
+
+Commits/push:
+- Submodule pushed: `3340f6d fix(admin): reorder available deal documents (#67v2)`.
+- Parent pushed: `39840abf3 chore(efs): advance available deal admin UI (#67v2)`.
+
+Confidence: high. No escalation needed. The parent repo still has unrelated pre-existing dirty files, but the EFS submodule is clean and synced with `origin/main`.
+<!-- agent:boundary:4bd5efd4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +79,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Move "Uploaded Documents" above "Interested Lenders" in the Available Deal admin detail page and dialog.
 <!-- /agent:queue -->
 
 ## Backlog

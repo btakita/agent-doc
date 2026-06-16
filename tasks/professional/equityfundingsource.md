@@ -215,7 +215,44 @@ Parking: I would leave this in the icebox under the existing GHL items (`#z3kx` 
 Docs checked: HighLevel API overview / V1 end-of-support note (https://help.gohighlevel.com/support/solutions/articles/48001060529-highlevel-api-documentation), Conversations `POST /conversations/messages` (https://marketplace.gohighlevel.com/docs/ghl/conversations/send-a-new-message/), contact workflow enrollment (https://marketplace.gohighlevel.com/docs/ghl/contacts/add-contact-to-workflow/), opportunity creation (https://marketplace.gohighlevel.com/docs/ghl/opportunities/create-opportunity/), and workflow actions (https://help.gohighlevel.com/support/solutions/articles/155000002294-what-are-workflow-actions-complete-list-).
 
 Changed paths: session document only. Verification: agent-doc preflight/plan passed; reviewed the shipped EFS GHL adapter and borrower-message PRD notes; checked current official HighLevel docs. No code/tests were run because this was plan-only. Escalation: none. Confidence: high.
-<!-- agent:boundary:8d980d7c -->
+
+### Re: lender selection + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: What can we implement for the lender selection process in the admin Available Deals UIs? I want a workflow where the admin can see the Interested Lenders, select an Interested Lender (in the UI and bi-directional sync with TMO).
+
+
+Implemented and deployed the admin Interested Lenders selection workflow.
+
+What changed:
+- Added `PUT /api/admin/deal-interests/:id/select`, which selects exactly one interested lender per deal, clears any previous selected interest for that deal, and returns the refreshed interested-lender list.
+- Added a gated `tmo_cache_outbox` enqueue helper for `select_lender` payloads. Selection requires the loan's TMO loan number and the selected lender's TMO account; replay remains gated on #7a4d/#dzmm until the selected-lender TMO write-field map is confirmed.
+- Updated Deal Detail / Interested Lenders UI so admins can select a lender from the workflow controls, see the selected badge/card styling, and see a selected-lender summary with TMO account + queued sync state.
+- Documented the shipped cut in `prds/investor-pipeline-admin.md` as Phase 5f.
+
+Commits:
+- EFS submodule: `386aa6b feat(admin): select interested lender with TMO outbox` pushed to `btakita/equityfundingsource-dev main`.
+- Parent pointer: `8ad76cdee chore(efs): advance lender selection workflow` pushed to `btakita/agent-loop main`.
+
+Verification:
+- `bun test tests/admin-investor-pipeline.test.ts` — 66 passed.
+- EFS `make check` — 749 tests passed, app build passed, Worker build passed.
+- Parent `make check` — passed, including instruction-files, agent-doc, and corky suites.
+- `git diff --check` / staged diff checks were clean.
+
+Deploy:
+- Ran `make deploy` from `src/equityfundingsource-dev`.
+- Applied remote D1 migrations `0070`-`0073`; postdeploy migration list reports no pending migrations.
+- Deployed Worker version `e51e9088-581a-47c1-a6e8-b7a1517ce4ad`.
+- Smoke checks: public root returned `200`; `/portal-admin/deals` returned `303` as expected behind Cloudflare Access.
+
+CI note:
+- EFS repo has no workflow named `CI` and no recent Actions runs listed.
+- Parent repo has no workflow named `CI`; latest `Agent Doc` run for `8ad76cdee` failed before jobs started because GitHub reports account billing/spending-limit blockage, not a test failure: https://github.com/btakita/agent-loop/actions/runs/27647115956
+
+Agent-doc note: preflight still warns that the installed `~/.cargo/bin` agent-doc cdylib predates source commit `ce26d32c`; rebuild with `make install` in `src/agent-doc` when you want the live-session binary refreshed.
+<!-- agent:boundary:3d1c697c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -223,7 +260,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: What can we implement for the lender selection process in the admin Available Deals UIs? I want a workflow where the admin can see the Interested Lenders, select an Interested Lender (in the UI and bi-directional sync with TMO).
+- ~~:pushpin: What can we implement for the lender selection process in the admin Available Deals UIs? I want a workflow where the admin can see the Interested Lenders, select an Interested Lender (in the UI and bi-directional sync with TMO).~~
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

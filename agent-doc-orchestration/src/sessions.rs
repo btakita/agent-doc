@@ -291,23 +291,22 @@ fn submitted_text_without_trailing_line_endings(text: &str) -> &str {
     text.trim_end_matches(['\r', '\n'])
 }
 
-fn literal_text_then_enter_command_args(pane_id: &str, text: &str) -> Vec<String> {
+fn literal_text_command_args(pane_id: &str, text: &str) -> Option<Vec<String>> {
     let text = submitted_text_without_trailing_line_endings(text);
     if text.is_empty() {
-        return vec![
-            "send-keys".to_string(),
-            "-t".to_string(),
-            pane_id.to_string(),
-            "Enter".to_string(),
-        ];
+        return None;
     }
-    vec![
+    Some(vec![
         "send-keys".to_string(),
         "-t".to_string(),
         pane_id.to_string(),
         "-l".to_string(),
         text.to_string(),
-        ";".to_string(),
+    ])
+}
+
+fn enter_key_command_args(pane_id: &str) -> Vec<String> {
+    vec![
         "send-keys".to_string(),
         "-t".to_string(),
         pane_id.to_string(),
@@ -315,17 +314,27 @@ fn literal_text_then_enter_command_args(pane_id: &str, text: &str) -> Vec<String
     ]
 }
 
+/// Submit text and the named Enter key as separate tmux calls so a successful
+/// draft write cannot hide a missed Enter after supervisor restart/reexec.
 fn send_literal_text_then_enter_key(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()> {
+    if let Some(args) = literal_text_command_args(pane_id, text) {
+        let status = tmux
+            .cmd()
+            .args(args)
+            .status()
+            .context("failed to run tmux send-keys (literal text)")?;
+        if !status.success() {
+            anyhow::bail!("tmux send-keys literal text failed for pane {}", pane_id);
+        }
+    }
+
     let status = tmux
         .cmd()
-        .args(literal_text_then_enter_command_args(pane_id, text))
+        .args(enter_key_command_args(pane_id))
         .status()
-        .context("failed to run tmux send-keys (literal text + Enter)")?;
+        .context("failed to run tmux send-keys (Enter)")?;
     if !status.success() {
-        anyhow::bail!(
-            "tmux send-keys literal text + Enter failed for pane {}",
-            pane_id
-        );
+        anyhow::bail!("tmux send-keys Enter failed for pane {}", pane_id);
     }
     Ok(())
 }
@@ -1364,22 +1373,17 @@ mod tests {
             "agent-doc plan.md"
         );
         assert_eq!(
-            literal_text_then_enter_command_args("%7", "agent-doc plan.md\n"),
-            vec![
-                "send-keys",
-                "-t",
-                "%7",
-                "-l",
-                "agent-doc plan.md",
-                ";",
-                "send-keys",
-                "-t",
-                "%7",
-                "Enter",
-            ]
+            literal_text_command_args("%7", "agent-doc plan.md\n"),
+            Some(
+                ["send-keys", "-t", "%7", "-l", "agent-doc plan.md"]
+                    .into_iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            )
         );
+        assert_eq!(literal_text_command_args("%7", "\n"), None);
         assert_eq!(
-            literal_text_then_enter_command_args("%7", "\n"),
+            enter_key_command_args("%7"),
             vec!["send-keys", "-t", "%7", "Enter"]
         );
         assert_eq!(
@@ -1652,7 +1656,9 @@ mod tests {
         let pane_id = t.new_session("test", tmp.path()).unwrap();
         let output_path = tmp.path().join("input.bin");
         let done_path = tmp.path().join("done");
-        let expected = b"agent-doc plan.md\r";
+        // This shell-bootstrapped raw reader observes tmux's named Enter key as LF;
+        // the policy test above locks that the submit path uses a named Enter event.
+        let expected = b"agent-doc plan.md\n";
 
         t.send_keys(
             &pane_id,

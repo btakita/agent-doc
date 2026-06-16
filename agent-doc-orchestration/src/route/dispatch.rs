@@ -29,7 +29,7 @@ pub(crate) fn poll_direct_pane_acceptance(
     // overhead) instead of paying a full poll interval before the first check, and
     // a tighter poll shortens the acceptance floor for slower panes.
     let poll_interval = DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL;
-    let mut last_capture: Option<(bool, usize, String)> = None;
+    let mut last_capture: Option<(bool, usize, String, String)> = None;
     let mut capture_failed = false;
     while start.elapsed() < timeout {
         match sessions::capture_pane(tmux, pane) {
@@ -37,11 +37,11 @@ pub(crate) fn poll_direct_pane_acceptance(
                 let cmd_still_in_input = recent_lines_contain_trigger(&content, trigger);
                 let capture_hash = short_content_hash(&content);
                 let capture_len = content.len();
-                last_capture = Some((cmd_still_in_input, capture_len, capture_hash));
+                last_capture = Some((cmd_still_in_input, capture_len, capture_hash, content));
 
                 if !cmd_still_in_input {
                     let elapsed = start.elapsed();
-                    let capture_hash = last_capture.as_ref().map(|(_, _, hash)| hash.as_str());
+                    let capture_hash = last_capture.as_ref().map(|(_, _, hash, _)| hash.as_str());
                     log_route_submit_observation(RouteSubmitObservationFacts {
                         file,
                         pane,
@@ -70,9 +70,12 @@ pub(crate) fn poll_direct_pane_acceptance(
     let elapsed = start.elapsed();
     let trigger_visible = last_capture
         .as_ref()
-        .map(|(visible, _, _)| *visible)
+        .map(|(visible, _, _, _)| *visible)
         .unwrap_or(false);
-    if let Some((visible, capture_len, capture_hash)) = last_capture.as_ref() {
+    if let Some((visible, capture_len, capture_hash, content)) = last_capture.as_ref() {
+        if *visible {
+            preserve_route_pane_snapshot(file, pane, harness, phase, content);
+        }
         log_route_submit_observation(RouteSubmitObservationFacts {
             file,
             pane,
@@ -265,7 +268,19 @@ pub(crate) fn send_command_unchecked(
     let payload = routed_trigger_payload(&trigger);
     validate_routed_trigger_payload(harness, &trigger, &payload)?;
     let existing_draft_visible = match sessions::capture_pane(tmux, pane) {
-        Ok(content) => direct_pane_existing_draft_visible(&content, &trigger, harness),
+        Ok(content) => {
+            let visible = direct_pane_existing_draft_visible(&content, &trigger, harness);
+            if visible {
+                preserve_route_pane_snapshot(
+                    file,
+                    pane,
+                    harness,
+                    "direct_pane_existing_draft_visible",
+                    &content,
+                );
+            }
+            visible
+        }
         Err(e) => {
             eprintln!(
                 "[route] warning: failed to capture pane {} before direct submit: {}",
@@ -526,6 +541,23 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
         capture_hash: None,
         proof: None,
     });
+    match sessions::capture_pane(tmux, pane) {
+        Ok(content) => {
+            preserve_route_pane_snapshot(
+                file,
+                pane,
+                harness,
+                "supervisor_dispatch_start_unproven",
+                &content,
+            );
+        }
+        Err(err) => {
+            eprintln!(
+                "[route] warning: failed to capture pane {} after unproven supervisor dispatch: {}",
+                pane, err
+            );
+        }
+    }
     if options.print_unproven_progress {
         eprintln!(
             "[route] authoritative actor accepted the {} reopen for {} in pane {}, but no routed submission proof appeared after {}s",
@@ -931,6 +963,23 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
                 capture_hash: None,
                 proof: None,
             });
+            match sessions::capture_pane(tmux, pane) {
+                Ok(content) => {
+                    preserve_route_pane_snapshot(
+                        file,
+                        pane,
+                        harness,
+                        "direct_pane_dispatch_start_unproven",
+                        &content,
+                    );
+                }
+                Err(err) => {
+                    eprintln!(
+                        "[route] warning: failed to capture pane {} after unproven direct dispatch: {}",
+                        pane, err
+                    );
+                }
+            }
             if print_unproven_progress {
                 eprintln!(
                     "[route] bare {} reopen for {} was accepted in pane {}, but no routed submission proof appeared after {}s",

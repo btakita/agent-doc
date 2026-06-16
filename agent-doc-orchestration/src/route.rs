@@ -452,6 +452,120 @@ fn short_content_hash(content: &str) -> String {
     hash[..hash.len().min(12)].to_string()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RoutePaneSnapshot {
+    len: usize,
+    hash: String,
+    path: Option<PathBuf>,
+}
+
+fn route_snapshot_timestamp_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+}
+
+fn route_snapshot_field(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        "none".to_string()
+    } else {
+        out
+    }
+}
+
+fn preserve_route_pane_snapshot(
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    phase: &str,
+    content: &str,
+) -> RoutePaneSnapshot {
+    let redacted = crate::secret_redact::redact(content);
+    let hash = crate::ops_log::content_hash(&redacted);
+    let short_hash = &hash[..hash.len().min(12)];
+    let snapshot = RoutePaneSnapshot {
+        len: redacted.len(),
+        hash: short_hash.to_string(),
+        path: None,
+    };
+
+    let path = (|| -> Result<PathBuf> {
+        let canonical = file
+            .canonicalize()
+            .with_context(|| format!("failed to canonicalize {}", file.display()))?;
+        let root = crate::snapshot::find_project_root(&canonical)
+            .with_context(|| format!("could not find .agent-doc root for {}", file.display()))?;
+        let dir = root.join(".agent-doc/logs/route-submit");
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("failed to create {}", dir.display()))?;
+        let name = format!(
+            "{}-{}-{}-{}-{}.txt",
+            route_snapshot_timestamp_millis(),
+            route_snapshot_field(phase),
+            route_snapshot_field(&harness.binary),
+            route_snapshot_field(pane),
+            short_hash
+        );
+        let path = dir.join(name);
+        std::fs::write(&path, redacted)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        Ok(path)
+    })();
+
+    match path {
+        Ok(path) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_pane_snapshot file={} pane={} harness={} phase={} capture_len={} capture_hash={} snapshot_path={}",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    phase,
+                    snapshot.len,
+                    snapshot.hash,
+                    path.display()
+                ),
+            );
+            RoutePaneSnapshot {
+                path: Some(path),
+                ..snapshot
+            }
+        }
+        Err(err) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_pane_snapshot_failed file={} pane={} harness={} phase={} capture_len={} capture_hash={} error={}",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    phase,
+                    snapshot.len,
+                    snapshot.hash,
+                    err.to_string().replace(char::is_whitespace, "_")
+                ),
+            );
+            eprintln!(
+                "[route] warning: failed to preserve pane snapshot for {} phase {}: {}",
+                file.display(),
+                phase,
+                err
+            );
+            snapshot
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct RouteSubmitObservationFacts<'a> {
     file: &'a Path,
@@ -6212,6 +6326,43 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert!(issue.contains("route_submit_issue"), "{issue}");
         assert!(issue.contains("issue=prompt_not_submitted"), "{issue}");
         assert!(issue.contains("result=trigger_still_visible"), "{issue}");
+    }
+    #[test]
+    fn route_pane_snapshot_preserves_redacted_terminal_capture() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("session.md");
+        std::fs::write(&file, "session").unwrap();
+        let content = "\
+› agent-doc tasks/agent-doc/agent-doc-bugs2.md
+OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
+";
+
+        let snapshot = preserve_route_pane_snapshot(
+            &file,
+            "%7",
+            &HarnessConfig::codex(),
+            "direct_pane_acceptance",
+            content,
+        );
+
+        let path = snapshot.path.expect("snapshot path should be preserved");
+        assert!(path.starts_with(tmp.path().join(".agent-doc/logs/route-submit")));
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            saved.contains("OPENAI_API_KEY=[REDACTED]"),
+            "snapshot should redact named API keys: {saved}"
+        );
+        assert!(
+            !saved.contains("sk-proj-aaaaaaaa"),
+            "raw token must not be preserved in snapshot: {saved}"
+        );
+
+        let ops = std::fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("route_pane_snapshot"), "{ops}");
+        assert!(ops.contains("phase=direct_pane_acceptance"), "{ops}");
+        assert!(ops.contains("capture_hash="), "{ops}");
+        assert!(ops.contains("snapshot_path="), "{ops}");
     }
     #[test]
     fn route_submit_observation_marks_dispatch_start_proof_without_issue() {

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -273,7 +273,31 @@ Verification:
 ❯ - Deployed `/index.browser-4IEYQSU7.js` contains `ADMIN_REDUNDANT_SUBJECT_PROPERTY_FIELD_KEYS` and the `subjectpropertyaddress` filter.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:c4f98377 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Closed the deploy head. The latest EFS formatting commit is deployed.
+
+Deploy proof:
+- `make deploy` completed successfully.
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker version: `9065933c-245e-4c75-b3f3-b5adf754aa98`
+- Deployed browser asset: `/index.browser-4IEYQSU7.js`
+- Remote D1 migrations: no migrations to apply.
+
+Post-deploy verification:
+- Live `/` returned `200`.
+- Live `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned `303` to admin login, expected for the protected route.
+- Downloaded deployed `/index.browser-4IEYQSU7.js`; it contains `BorrowerDetailRecord`, `CollateralDetailRecord`, `AddressBlock`, and `ADMIN_REDUNDANT_SUBJECT_PROPERTY_FIELD_KEYS`.
+- `src/equityfundingsource-dev` is clean after deploy.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:58079ff8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -281,11 +305,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: "Borrower Info" should use inline values...not surrounded by boxes. Make the overall design elegant. Remove unnecessary noise. deploy~~
-- ~~Make AdminBorrowInfoField more generic, because I want to have this rule in other cards.~~
-- ~~Format Borrower Detail like an address. Improve formatting of Collateral. ![img_19.png](img_19.png)~~
-- ~~:pushpin: Improve formatting of Borrower Onboarding Data. Remove individual Property fields made redundant by Subject Property Address. ![img_20.png](img_20.png)~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

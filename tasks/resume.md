@@ -16,7 +16,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 
@@ -66,7 +66,35 @@ queue: start
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/98e0966f...
-<!-- agent:boundary:df674f7a -->
+
+### Re: Update my Resume.md with my latest work — sonnet-4-6
+
+> **Queue prompt:**
+>
+> Update my Resume.md with my latest work.
+
+
+Added the following to `resume/BrianTakita.md`, committed and pushed to [btakita/resume](https://github.com/btakita/resume):
+
+**tsift** (token-conscious code RAG + session digest CLI):
+- Added to Summary, Career Highlights (Open Source entry), AI Products Shipped, and as a full Open Source entry with 4 bullets
+- Published to crates.io and npm (opencode-tsift)
+
+**equityfundingsource** (loan deal management platform — 2026):
+- Added to Brian Takita — Full Stack Engineer (freelance) section
+- Cloudflare Workers + D1 + rappstack/Hono, admin portal, borrower portal, investor pipeline, 74 D1 migrations, 741+ tests
+
+**agent-doc JB plugin**:
+- Added a bullet to the agent-doc Open Source entry describing the JetBrains plugin with hot-reload cdylib, in-process supervisor hosting, and WatchService integration
+
+**python-intentions**:
+- Added to Other contributions as a JetBrains Marketplace plugin (PEP 604 type annotation conversions + `__all__` management)
+
+**Skills**:
+- Added: Bun, Hono, Convex, Cloudflare Workers
+
+Build verified: `make` produced `BrianTakita.pdf` cleanly. Pushed to origin/main (`94e7109`).
+<!-- agent:boundary:179570f3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,7 +103,6 @@ Compacted content:
 ## Queue
 
 <!-- agent:queue go -->
-- Update my Resume.md with my latest work.
 <!-- /agent:queue -->
 
 ## Backlog

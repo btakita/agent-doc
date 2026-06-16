@@ -234,7 +234,55 @@ CI / push:
 Escalation: none. The route-owned supervisor for this document is still stale (`pid 166599`); preflight kept reporting the exact unblockers `agent-doc session restart-supervisor <FILE> --force`, `agent-doc session interrupt-clear <FILE> --force`, or a session restart.
 
 Confidence: high.
-<!-- agent:boundary:8eb8d2ce -->
+
+### Re: JB Run Agent Doc tmux Enter submit - gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` on monsterrodholders.md still does not send Enter. Consolidate logic + simplify more. We should only send Enter, never CR or /n to tmux. Claude + Codex send-keys logic should be identical.
+
+
+**Queue prompt:**
+
+> :pushpin: JB Run Agent Doc on monsterrodholders.md still does not send Enter. Consolidate logic + simplify more. We should only send Enter, never CR or /n to tmux. Claude + Codex send-keys logic should be identical.
+
+Implemented the tmux Enter-submit contract consolidation.
+
+Current behavior:
+- Every tmux-bound harness submit goes through the shared `send_submitted_text_for_harness` profile path.
+- Claude, Codex, OpenCode, and the default profile now have identical submit-key behavior in coverage: normalized text plus named `Enter` in one `send-keys` call.
+- The profile trims trailing CR/LF out of the typed text, so tmux never receives literal CR, LF, or `send-keys -H` as the submit boundary.
+- Empty resubmits produce only the named `Enter` key.
+- The remaining raw `\r` behavior is explicitly documented as the direct child-PTY fallback only, not a tmux submit path.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/sessions.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start.rs`
+- `src/agent-doc/agent-doc-orchestration/src/supervisor/ipc.rs`
+- `src/agent-doc/README.md`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/specs/08-session-routing.md`
+- `src/agent-doc/specs/08a-session-actor-contract.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification:
+- `cargo test -p agent-doc-orchestration submit --lib` passed.
+- `make check` passed: clippy, 4610 nextest tests, doctests, and the medium closeout simulation.
+- `make install` succeeded and installed `agent-doc 0.34.1`; 2 controllers were marked for recycle at the next idle boundary.
+- `agent-doc --version` reports `agent-doc 0.34.1`.
+- `git diff --check` passed.
+- `rg "carriage-return byte|send-keys -H|hex-encoded text|key=CR|literal CR submit|pty_submit_cr|pty_clear_submit_cr" -n agent-doc-orchestration/src specs README.md editors/jetbrains/SPEC.md` found no active-code/spec matches.
+
+Commits and push:
+- `src/agent-doc`: `3f17551e fix: document tmux enter submit contract`, pushed to `btakita/agent-doc main`.
+- Parent repo: `b8f1f7a81 agent-doc: update tmux enter submit contract`, pushed to `btakita/agent-loop main`.
+- Latest agent-doc CI at closeout: queued run `27655543136` for `3f17551e`; local verification is complete, so I did not wait on CI.
+
+Operational note:
+- The session still has a stale route-owned supervisor warning from pid `166599` started before the current installed binary. If it blocks the next dispatch, the concrete repair commands remain `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`, `agent-doc session interrupt-clear tasks/agent-doc/agent-doc-bugs2.md --force`, or restarting the session.
+
+Confidence: high. The only intentional CR left is the direct child-PTY fallback, and the tmux contract/test/docs now all state named `Enter` as the only tmux submit key.
+<!-- agent:boundary:a1771543 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -243,7 +291,7 @@ Confidence: high.
 - ~~:pushpin: JB `Clear Session Context` does not submit with Enter. JB `Run Agent Doc` sends a `/clear` and restart. After a couple restart JB `Run Agent Doc` still does not send Enter. Should we remove Codex-specific logic with JB commands and just use the same path as with Claude Code?~~
 - ~~:pushpin: JB `Run Agent Doc` still does not send Enter. Should we have more state machine logic to prevent race conditions?~~
 - ~~[#resprectail]~~
-- :pushpin: JB `Run Agent Doc` on monsterrodholders.md still does not send Enter. Consolidate logic + simplify more. We should only send Enter, never CR or /n to tmux. Claude + Codex send-keys logic should be identical.
+- ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md still does not send Enter. Consolidate logic + simplify more. We should only send Enter, never CR or /n to tmux. Claude + Codex send-keys logic should be identical.~~
 ---
 :pushpin: JB `Run Agent Doc` on lazily-rs.md/opencode. I closed a Codex session then opened the opencode session. When closing a session in the cli, agent-doc should detect this and immediately clear the state. Heartbeats with the new session in the same supervisor should immediately replace the old session.
 ```
@@ -252,6 +300,7 @@ resync: pruned 2 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3746 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=38 trigger_sha256=573c763642d25af5610128bad867d311cdfdbc5be1bee680610d94c2fcf5250d
 ```
 ---
+- :pushpin: Continue to consolidate tmux logic.
 - :pushpin: agent-doc monsterrodholders.md interrupted a running conversation ![img_35.png](img_35.png)
 <!-- /agent:queue -->
 ###

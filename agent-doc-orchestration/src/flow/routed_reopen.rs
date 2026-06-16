@@ -1486,12 +1486,12 @@ mod tests {
         };
 
         let log = dispatch_only_sent_log_message(facts);
-        assert!(log.contains("submit_mode=tmux_hex_text_cr"));
+        assert!(log.contains("submit_mode=tmux_text_enter"));
         assert!(log.contains("proof=accepted"));
         assert!(log.contains("proof_scope=accepted_only"));
 
         let refusal = accepted_only_dispatch_start_refusal_message(facts);
-        assert!(refusal.contains("tmux_hex_text_cr"));
+        assert!(refusal.contains("tmux_text_enter"));
         assert!(refusal.contains("only pane-input acceptance proof was available"));
         assert!(refusal.contains("treating this as not dispatched"));
     }
@@ -1500,15 +1500,15 @@ mod tests {
     fn dispatch_only_direct_submit_mode_is_harness_specific() {
         assert_eq!(
             DispatchOnlyReopenDelivery::DirectPaneSubmit.submit_mode_for_harness("codex"),
-            "tmux_hex_text_cr"
+            "tmux_text_enter"
         );
         assert_eq!(
             DispatchOnlyReopenDelivery::DirectPaneSubmit.submit_mode_for_harness("opencode"),
-            "tmux_hex_text_cr"
+            "tmux_text_enter"
         );
         assert_eq!(
             DispatchOnlyReopenDelivery::DirectPaneSubmit.submit_mode_for_harness("claude"),
-            "tmux_hex_text_cr"
+            "tmux_text_enter"
         );
         assert_eq!(
             DispatchOnlyReopenDelivery::SupervisorIpcOnce.submit_mode_for_harness("codex"),

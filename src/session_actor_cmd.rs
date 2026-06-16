@@ -4327,7 +4327,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             },
         );
         assert!(retry.contains("session_clear_submit_resubmit"), "{retry}");
-        assert!(retry.contains("action=submit_key key=CR"), "{retry}");
+        assert!(retry.contains("action=submit_key key=Enter"), "{retry}");
         assert!(retry.contains("result=accepted"), "{retry}");
     }
 

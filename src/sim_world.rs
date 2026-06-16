@@ -5057,7 +5057,7 @@ fn integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_ba
 }
 
 #[test]
-fn simworld_jb_run_and_clear_share_codex_carriage_return_submit_contract() {
+fn simworld_jb_run_and_clear_share_codex_enter_submit_contract() {
     // #jbcodexsubmit: JB `Run Agent Doc` and `Clear Session Context` both route
     // through the shared live-pane submit primitive. SimWorld drives the two
     // operator-facing actions, then pins the production helper's submit contract.
@@ -5070,22 +5070,22 @@ fn simworld_jb_run_and_clear_share_codex_carriage_return_submit_contract() {
     assert_eq!(world.coverage.session_clears, 1);
     assert_eq!(
         agent_doc_orchestration::sessions::tmux_submit_mode_for_harness("codex"),
-        "tmux_hex_text_cr"
+        "tmux_text_enter"
     );
     assert_eq!(
         agent_doc_orchestration::sessions::tmux_submit_transform_for_harness("codex"),
-        "tmux_hex_text_cr"
+        "tmux_text_enter"
     );
     assert_eq!(
         agent_doc_orchestration::sessions::tmux_submit_key_for_harness("codex"),
-        "CR"
+        "Enter"
     );
     assert_eq!(
         agent_doc_orchestration::sessions::tmux_submit_mode_for_harness("claude"),
-        "tmux_hex_text_cr"
+        "tmux_text_enter"
     );
     assert_eq!(
         agent_doc_orchestration::sessions::tmux_submit_mode_for_harness("opencode"),
-        "tmux_hex_text_cr"
+        "tmux_text_enter"
     );
 }

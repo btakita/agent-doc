@@ -1078,26 +1078,26 @@ mod tests {
         );
     }
     #[test]
-    fn routed_trigger_submit_diagnostic_names_codex_carriage_return_key() {
+    fn routed_trigger_submit_diagnostic_names_codex_enter_key() {
         assert_eq!(
             routed_trigger_submit_diagnostic("codex"),
-            ("tmux_hex_text_cr", "CR")
+            ("tmux_text_enter", "Enter")
         );
         assert_eq!(
             routed_trigger_submit_diagnostic("opencode"),
-            ("tmux_hex_text_cr", "CR")
+            ("tmux_text_enter", "Enter")
         );
         assert_eq!(
             routed_trigger_submit_diagnostic("claude"),
-            ("tmux_hex_text_cr", "CR")
+            ("tmux_text_enter", "Enter")
         );
     }
     #[test]
     fn direct_pane_resubmit_only_on_timeout_with_trigger_visible() {
         // `#jbcodexsubmit` / `#jbclaudesubmit`: a direct-pane submit that times out
         // with the trigger still drafted in the composer earns exactly one blank-text
-        // CR re-submit. The operator reported the non-submit on BOTH Codex and Claude
-        // panes; both use the same hex-text+CR submit path.
+        // Enter re-submit. The operator reported the non-submit on BOTH Codex and
+        // Claude panes; both use the same text+Enter submit path.
         assert!(direct_pane_needs_enter_resubmit(
             "codex",
             CommandDispatchStatus::TimedOut,
@@ -1143,8 +1143,8 @@ mod tests {
     fn direct_pane_resubmit_is_scoped_to_timed_out_visible_enter_harnesses() {
         // #jbcodexsubmit / #jbclaudesubmit / #efscodexsubmit: a direct-pane submit
         // that timed out with the trigger STILL VISIBLE (the composer left the routed
-        // prompt drafted) warrants exactly one blank-text CR re-submit. Scoped to the
-        // harnesses that submit via the hex-text+CR path.
+        // prompt drafted) warrants exactly one blank-text Enter re-submit. Scoped to the
+        // harnesses that submit via the text+Enter path.
         for harness in ["codex", "claude", "opencode"] {
             assert!(
                 direct_pane_needs_enter_resubmit(harness, CommandDispatchStatus::TimedOut, true),
@@ -1223,9 +1223,9 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
     #[test]
     fn route_submit_resubmit_proof_line_is_operator_greppable_for_both_harnesses() {
         // #jbcodexsubmit / #jbclaudesubmit: the operator's live test greps ops.log
-        // for `route_submit_resubmit ... action=submit_key key=CR result=accepted|still_visible`.
+        // for `route_submit_resubmit ... action=submit_key key=Enter result=accepted|still_visible`.
         // Assert the exact shape the binary emits for the single bounded re-submit on
-        // BOTH harnesses that travel the hex-text+CR submit path.
+        // BOTH harnesses that travel the text+Enter submit path.
         let file = std::path::Path::new("/tmp/plan.md");
         for harness in ["codex", "claude"] {
             // First re-submit consumed the drafted trigger ⇒ result=accepted.
@@ -1239,7 +1239,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
             assert_eq!(
                 accepted,
                 format!(
-                    "route_submit_resubmit file=/tmp/plan.md pane=%42 harness={harness} action=submit_key key=CR result=accepted elapsed_ms=120"
+                    "route_submit_resubmit file=/tmp/plan.md pane=%42 harness={harness} action=submit_key key=Enter result=accepted elapsed_ms=120"
                 )
             );
             // The submit key still did not submit ⇒ result=still_visible (then we fall
@@ -1252,7 +1252,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
                 Duration::from_millis(300),
             );
             assert!(
-                still.contains("action=submit_key key=CR result=still_visible"),
+                still.contains("action=submit_key key=Enter result=still_visible"),
                 "unsubmitted re-poll must report still_visible: {still}"
             );
         }

@@ -3446,7 +3446,7 @@ Done.
         );
     }
     #[test]
-    fn idle_queue_submit_mode_uses_carriage_return_for_codex_owner_pane() {
+    fn idle_queue_submit_mode_uses_enter_for_codex_owner_pane() {
         let shared = SupervisorShared::with_actor_runtime(
             "test",
             "test-instance".to_string(),
@@ -3458,7 +3458,7 @@ Done.
 
         assert_eq!(
             idle_queue_submit_mode(&shared, &crate::harness::HarnessConfig::codex()),
-            "tmux_hex_text_cr"
+            "tmux_text_enter"
         );
     }
     #[test]

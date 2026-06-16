@@ -84,7 +84,7 @@ Verification passed: `cargo test -p agent-doc-orchestration route_submit --lib`,
 Remote CI: `src/agent-doc` GitHub Actions `CI` run `27651569734` is still `in_progress`; local full verification passed, so I did not wait on `gh run watch`. The parent repo has no workflow named `CI`.
 
 Escalation: none. No JetBrains plugin update is required for this fix; it is in the Rust CLI/orchestration path. Confidence: high for preventing route/supervisor input concatenation and for the new proof marker.
-<!-- agent:boundary:ece5bfaa -->
+<!-- agent:boundary:b4c1e0cf -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -120,6 +120,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#resprectail] Response recovery drift must not become a user prompt. Reproduce the equityfundingsource closeout where duplicated assistant/proof text gained `❯` prefixes after finalize fallback, add classifier/repair coverage so duplicate response-owned tails are dropped or restored as assistant content, fail closed for ambiguous mixed tails, and verify socket finalize failure, file-IPC fallback, `write --commit` already-applied recovery, and full `make check`. Plan: tasks/agent-doc/plan-response-recovery-prompt-tail.md
 <!-- /agent:backlog -->
 
 ## Review

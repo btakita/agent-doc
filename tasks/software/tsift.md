@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -255,12 +255,13 @@ A pragmatic rollout would be:
 This gives you local knowledge models for both projects without making every agent-doc turn depend on the GPU being idle. If the GPU is busy or the local server is down, agent-doc still runs; tsift simply reports stale/missing extraction and suggests the explicit refresh command.
 
 Local docs checked: `src/agent-doc/README.md` session memory retrieval, `src/tsift/specs/search-navigation.md` summarize extraction, `src/tsift/specs/graph.md` findings/semantic graph, and `src/tsift/specs/architecture.md` memory + MemGraphRAG crates. No code changed this cycle. Verification was document/local-doc review only: `tsift status`, `agent-doc preflight`, `agent-doc plan`, targeted `rg`, targeted `sed`, `agent-doc repair`, and `git diff`. `tsift status` still reports one missing workspace scope, so I avoided tsift graph/search evidence.
-<!-- agent:boundary:8e73c2e1 -->
+<!-- agent:boundary:0aca2c1c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Do the local models need training?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

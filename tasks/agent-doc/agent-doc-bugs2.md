@@ -288,7 +288,20 @@ I added the binary-logic implementation slice as the next architecture layer ahe
 Those should run before `#archstatekernel`, `#archproofledger`, `#archcomponentmerge`, `#archsimworldmatrix`, and `#archuistates`, because they define the binary vocabulary the architecture primitives should implement rather than leaving each primitive to invent its own classification rules. The workflow-invariant items remain useful follow-ons: they can consume these outcome ids once the contract exists.
 
 Changed paths: session document only. Commands: `agent-doc session-check`, `git status --short`, `agent-doc read --component queue`, `agent-doc read --component backlog`, `agent-doc finalize --help`, `agent-doc queue --help`, `agent-doc queue sync --help`, targeted spec/runbook reads, and this `agent-doc finalize` with ordered pending additions. Verification: no source/build/test surfaces changed; this is backlog/queue prioritization work. Confidence: high.
-<!-- agent:boundary:40ba1f0c -->
+
+### Re: do [#binoutcomes] — gpt-5
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#binoutcomes]
+
+
+Implemented `#binoutcomes` as a small shared FlowCore contract in `src/agent-doc` commit `14befac3` (`feat: add binary workflow outcome contract`). The new `flow::outcome` module defines `BinaryOutcomeClass` with the exact binary classes `ok`, `recoverable`, `blocked`, and `operator`, plus `BinaryOutcome` carrying a contract version, stable invariant id, proof marker, and one field-safe `next_action` token.
+
+The contract is intentionally pure and reusable by route, queue-continuation, closeout, editor-write, and session-check code without changing those hot paths yet. It rejects empty, whitespace-bearing, or delimiter-bearing fields, so ambiguous multi-action strings like `retry,clear` cannot pass as a single decision outcome. It also serializes classes in stable snake_case and can render parseable ops-log fields: `binary_outcome=... invariant=... proof_marker=... next_action=...`.
+
+Changed paths: `src/agent-doc/agent-doc-orchestration/src/flow/outcome.rs`, `src/agent-doc/agent-doc-orchestration/src/flow/mod.rs`, the parent `src/agent-doc` gitlink, and this session document. Verification: `tsift rewrite --run 'cargo test -p agent-doc-orchestration binary_outcome'` passed (3 tests), `make check` passed (clippy, 4568 nextest tests, doctests, and closeout SimWorld), and `gh run list --workflow CI --limit 1` shows latest CI on `main` completed successfully. Confidence: high. Escalation: none.
+<!-- agent:boundary:9a40fd8b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -302,6 +315,10 @@ Changed paths: session document only. Commands: `agent-doc session-check`, `git 
 - ~~do [#anw0verify]~~
 - ~~I have a good feel for when agent-doc behaves correctly. Can we lock down behavior invariants that the agent can use to determine if there are workflow issues...so we can automate bug detection and fixes?~~
 - ~~Please add and prioritize backlog + queue items to implement recommendations from "binary logic for stale queue pauses and conflicts" response.~~
+- ~~:round_pushpin: do [#binoutcomes]~~
+- :round_pushpin: do [#binstalepause]
+- :round_pushpin: do [#binconflictscope]
+- :round_pushpin: do [#binconflictdedupe]
 - do [#qflood2]
 - do [#qt32]
 - do [#fcc0-live-verify]
@@ -343,7 +360,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#binoutcomes] priority=1 Define the binary workflow outcome contract shared by route, queue continuation, closeout, editor-write, and session-check paths: every decision returns ok, recoverable, blocked, or operator with a stable invariant id, proof marker, and one allowed next action.
 - [ ] [#binstalepause] priority=1 Convert stale queue pauses into typed recoverable outcomes: detect stale holder/supervisor/pause state, prove the queue head is still live or non-drainable, clear or supersede only with proof, and emit durable recovery markers instead of surfacing user-visible pause/conflict errors.
 - [ ] [#binconflictscope] priority=1 Implement component-scoped conflict classification for exchange, queue, backlog, status, review, done/archive, gitlink, and editor writeback so unrelated component edits merge automatically and only same-component incompatible edits become user-visible conflicts.
 - [ ] [#binconflictdedupe] priority=1 Add conflict/symptom de-duplication keyed by invariant id, document id, component, and content hash so repeated stale-pause or drift symptoms attach evidence to the existing backlog/review item instead of creating more queue conflicts.

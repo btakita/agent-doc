@@ -61,13 +61,13 @@ Verification passed: focused submit/route/idle/clear/SimWorld tests, ignored liv
 No JetBrains plugin update is required for this change; it is Rust CLI/orchestration code. `make install` installed the updated binary and `libagent_doc.so`, and marked two controllers to recycle at the next idle boundary.
 
 Confidence: high for the code path and proof markers. Live JB confirmation should grep for `submit_mode=tmux_text_enter` and `action=submit_key key=Enter` if this recurs.
-<!-- agent:boundary:d3e46d78 -->
+<!-- agent:boundary:8c0c5dbe -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- JB `Run Agent Doc` sends a `/clear<CR>` and does not submit.
+- :pushpin: JB `Run Agent Doc` sends a `agent-doc .../agent-doc-bugs2.md<CR>/clear<CR>` and does not submit. The behavior has not changed despite over 2 days working on this. Simplify further? Consolidate logic.
 <!-- /agent:queue -->
 ###
 <!--

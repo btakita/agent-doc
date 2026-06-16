@@ -38,7 +38,23 @@ committed
 Compacted content:
 ❯ - Archived 5 response topic(s): loan detail Interested Lenders + deploy; inactive queued EFS deal-interest request; inactive queued EFS deal-interest request; 2 more
 ❯ - Prior summary/context: prior compacted content: Archived 9 response topic(s): lender selection pipeline; Deal Pipeline + GoHighLevel; Deal P...
-<!-- agent:boundary:35c82eeb -->
+
+### Re: inactive queued Interested Lenders ordering request — gpt-5
+
+I did not move the section or deploy from this cycle. Preflight found the new request inside `agent:queue`, but the document frontmatter still has `queue: stop`, and `agent-doc plan` produced no repo actions for this turn. I treated the queue line as inactive queue residue rather than executable repo work.
+
+I repaired the stale agent-doc snapshot/CRDT sidecars with `agent-doc reset --from-current` after the first finalize attempt refused to write. The requested work is preserved as actionable backlog item `#efs-interest-order`: move the admin loan detail `Interested Lenders` section above `Final Loan Documents`, update spec/tests, commit, push, and deploy.
+
+Warnings surfaced:
+- Preflight again flagged `#dropbox-sync-adapter`, `#dzmm-writeback-replay`, and `#zwws-vestings-local` as possible stale review items because related done entries may already cover them. I left them unchanged.
+
+Proof:
+- Changed paths: session document/backlog only.
+- Commands: `sed -n '1,220p' .claude/skills/agent-doc/SKILL.md`, `tsift status`, `agent-doc --version`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, attempted `agent-doc finalize`, `agent-doc reset --from-current`, `agent-doc session-check`, and repair `agent-doc write --commit`.
+- Verification: no application code changed; no tests or deploy run.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:19020586 -->
 <!-- /agent:exchange -->
 ###
 <!--

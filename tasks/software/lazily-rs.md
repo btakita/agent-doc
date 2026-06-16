@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -69,7 +69,24 @@ Verification:
 Escalation/confidence:
 - Used the stored `passage btak/CARGO_REGISTRY_TOKEN`; the token is valid now and publish succeeded.
 - Confidence is high: package dry-run, full local check, crates.io search, pushed tag, and GitHub release all line up. Remaining external watch item is the in-progress lazily-rs CI run for the release-note commit.
-<!-- agent:boundary:5b7d2f99 -->
+
+### Re: LinkedIn scheduled post — gpt-5
+
+> **Queue prompt:**
+>
+> The linked in post scheduled for today has not gone out.
+
+I found why it did not go out: Corky had no pending scheduled item, and the file referenced by `#kabc` was a plain working note under `mail/drafts/linkedin/`, not a managed `mail/social/` draft. `corky linkedin publish --dry-run` rejected that original file because it had no YAML frontmatter.
+
+I created the managed social draft at `mail/social/20260616-lazily-architecture-linkedin.md` with `status: ready` and `scheduled_at: 2026-06-16T15:00:00Z`, then committed it in `mail` as `6419127` and advanced the superproject gitlink in `cd0b1372e`.
+
+Verification:
+- `corky schedule list` now shows `mail/social/20260616-lazily-architecture-linkedin.md` as `[DUE]` for LinkedIn.
+- `corky linkedin publish --dry-run mail/social/20260616-lazily-architecture-linkedin.md` passes and validates the 1405-character public payload for `btakita`.
+- `gh run list --workflow CI --limit 1` reports that this repo has no workflow named `CI`.
+
+I did not publish the post publicly from this cycle because `#kabc` is operator-drive and LinkedIn publishing is an external public side effect. The ready command is `corky schedule run` (or direct `corky linkedin publish mail/social/20260616-lazily-architecture-linkedin.md`). After publish, the first-comment text is still in `mail/drafts/linkedin/2026-06-16-lazily-architecture.md` and should be posted with `corky linkedin comment` against the published social draft.
+<!-- agent:boundary:a09fea83 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +95,6 @@ Escalation/confidence:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- The linked in post scheduled for today has not gone out.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -90,7 +106,7 @@ Escalation/confidence:
 
 <!-- agent:review -->
 - [/] [#kb9b] #lzpypub011=[operator-drive] Publish lazily-py v0.11.0: build artifacts are ready in src/lazily-py/dist/ (lazily-0.11.0-{whl,tar.gz}). From src/lazily-py: tag v0.11.0 + push, gh release create v0.11.0 --generate-notes, then python -m twine upload dist/* (needs PyPI token + browser/passkey 2FA). Gated on the pre-publish live-test confirm per the testing-gate rule. Commit 28f23e4 + superproject gitlink 6339ab2e1 already pushed.
-- [/] [#kabc] #lipostlazilyarch=[operator-drive] DRAFT READY: mail/drafts/linkedin/2026-06-16-lazily-architecture.md (Lazily architecture). Operator: review + publish Tue 2026-06-16 via `cork_y linkedin post <file>` or `corky schedule add --platform linkedin`.
+- [/] [#kabc] #lipostlazilyarch=[operator-drive] Managed Corky draft is ready and due: mail/social/20260616-lazily-architecture-linkedin.md (created from mail/drafts/linkedin/2026-06-16-lazily-architecture.md; dry-run passes). Publish with `corky schedule run` or `corky linkedin publish mail/social/20260616-lazily-architecture-linkedin.md`; after publish, post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>`. Not agent-published in this cycle because posting to LinkedIn is a public external side effect.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet networked backend through the LIVE #yxjw signaling Worker (two real hosts / NAT, not localhost). The localhost two-socket round trip (tests/str0m_net.rs) already proves the real UDP/DTLS/SCTP/timer path in-process; this remaining slice needs two live endpoints + the deployed Worker so it cannot be agent-run headless. Wire SignalingClient offer/answer/ice to Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} and confirm a Snapshot crosses between hosts.
 - [/] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.
 - [/] [#57by] #lzasyncshuttle=[operator-gated, NO-GO for now per #shuttleeval] Exhaustive Shuttle async-resolve-loop model. Spike result: Shuttle can model async (has an executor, unlike Loom) but is randomized-not-exhaustive, needs ~140 cfg-swaps + a custom notifier (no tokio::watch equiv) in the hot path, and the two #k03k windows are already deterministically covered. Defer until the async graph grows more concurrency-critical paths. See tasks/software/plan-lazily-async-loom.md.

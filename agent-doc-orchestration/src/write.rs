@@ -1853,7 +1853,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         }
         let mut review_added_ids: Vec<String> = Vec::new();
         for value in &options.review_add {
-            review_added_ids.push(crate::pending_cmd::review_add(file, value)?);
+            if let Some(id) = crate::pending_cmd::review_add(file, value)? {
+                review_added_ids.push(id);
+            }
         }
         if !review_added_ids.is_empty() {
             // `#opsproof-samecycle-add`: a freshly added gated review item must

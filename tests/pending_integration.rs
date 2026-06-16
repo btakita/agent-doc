@@ -321,6 +321,30 @@ fn write_pending_add_creates_item_with_hash() {
 }
 
 #[test]
+fn write_pending_add_dedupes_symptom_key_into_existing_backlog_item() {
+    let key = "[symptom-key invariant=stale_queue_pause document=doc-abc component=queue content_hash=sha256:feedface]";
+    let (_tmp, doc) = setup_doc(&format!("- [ ] [#sym1] stale pause {key}\n"));
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-add",
+            &format!("stale pause observed again {key}"),
+        ])
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    let body = component_body(&content, "pending");
+    assert_eq!(body.matches("[#sym1]").count(), 1, "{body}");
+    assert!(
+        body.contains("  evidence: stale pause observed again"),
+        "{body}"
+    );
+}
+
+#[test]
 fn write_pending_add_after_and_back_position_items_explicitly() {
     // #ah0s: --pending-add-after lands directly below the anchor; --pending-add-back
     // lands at the tail. Both leave the existing head undisturbed.
@@ -969,6 +993,32 @@ fn write_review_add_and_edit_mutate_review_component() {
     let content = fs::read_to_string(&doc).unwrap();
     let review = component_body(&content, "review");
     assert!(review.contains("- [/] [#rvw1] review text updated"));
+}
+
+#[test]
+fn write_review_add_dedupes_symptom_key_into_existing_review_item() {
+    let key = "[symptom-key invariant=component_drift document=doc-abc component=exchange content_hash=sha256:cafebabe]";
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--review-add",
+            &format!("id=rvw1 first drift symptom {key}"),
+            "--review-add",
+            &format!("second drift symptom {key}"),
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    let review = component_body(&content, "review");
+    assert_eq!(review.matches("[#rvw1]").count(), 1, "{review}");
+    assert!(
+        review.contains("  evidence: second drift symptom"),
+        "{review}"
+    );
 }
 
 #[test]

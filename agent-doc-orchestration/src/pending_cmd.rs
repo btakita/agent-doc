@@ -176,6 +176,19 @@ fn canonicalize_component_content(file: &Path, content: &str) -> String {
     canonical
 }
 
+fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &pending::SymptomDedupeKey) {
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "symptom_dedupe_attached file={} surface={} id={} {}",
+            file.display(),
+            surface,
+            pending::normalize_pending_id(id),
+            key.log_fields()
+        ),
+    );
+}
+
 /// Add a new item to the pending component (assigns a stable hash id + `[ ]`
 /// or `[/]`) at the beginning of the list. Supports canonical `id=<custom> `
 /// syntax and compatibility `[#custom] ` input to preserve a custom id. Prints
@@ -206,11 +219,13 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     reject_colliding_explicit_id(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
-    let (new_content, id) = pending::op_add(existing, item, &doc_id, gated)?;
-    let canonical = canonicalize_component_content(file, &new_content);
+    let outcome = pending::op_add_with_outcome(existing, item, &doc_id, gated)?;
+    let canonical = canonicalize_component_content(file, &outcome.body);
     let new_doc = comp.replace_content(&full_content, &canonical);
     crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
-    let _ = id;
+    if let Some(key) = outcome.deduped_key.as_ref() {
+        log_symptom_dedupe(file, "backlog", &outcome.id, key);
+    }
     Ok(())
 }
 
@@ -223,11 +238,15 @@ pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String
         reject_colliding_explicit_id(&full_content, item)?;
         let existing = &full_content[comp.open_end..comp.close_start];
         let doc_id = doc_id_for(file);
-        let (new_content, id) = pending::op_add(existing, item, &doc_id, gated)?;
-        let canonical = canonicalize_component_content(file, &new_content);
+        let outcome = pending::op_add_with_outcome(existing, item, &doc_id, gated)?;
+        let canonical = canonicalize_component_content(file, &outcome.body);
         let new_doc = comp.replace_content(&full_content, &canonical);
         crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
-        ids.push(id);
+        if outcome.inserted {
+            ids.push(outcome.id.clone());
+        } else if let Some(key) = outcome.deduped_key.as_ref() {
+            log_symptom_dedupe(file, "backlog", &outcome.id, key);
+        }
     }
     ids.reverse();
     Ok(ids)
@@ -241,11 +260,14 @@ fn add_at(file: &Path, item: &str, position: pending::AddPosition<'_>) -> Result
     reject_colliding_explicit_id(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
-    let (new_content, id) = pending::op_add_at(existing, item, &doc_id, false, position)?;
-    let canonical = canonicalize_component_content(file, &new_content);
+    let outcome = pending::op_add_at_with_outcome(existing, item, &doc_id, false, position)?;
+    let canonical = canonicalize_component_content(file, &outcome.body);
     let new_doc = comp.replace_content(&full_content, &canonical);
     crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
-    Ok(id)
+    if let Some(key) = outcome.deduped_key.as_ref() {
+        log_symptom_dedupe(file, "backlog", &outcome.id, key);
+    }
+    Ok(outcome.id)
 }
 
 /// `#ah0s`: `--pending-add-after <id> "<text>"`. Repeatable; chaining
@@ -537,18 +559,22 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Add a new review item directly to `agent:review`. Returns the assigned id so
-/// the caller can record it as a same-cycle add (`#opsproof-samecycle-add`).
-pub fn review_add(file: &Path, item: &str) -> Result<String> {
+/// Add a new review item directly to `agent:review`. Returns the assigned id
+/// only when a new item was inserted so the caller can record actual same-cycle
+/// adds (`#opsproof-samecycle-add`).
+pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
     let full_content = std::fs::read_to_string(file).context("failed to read document")?;
     let (full_content, comp) = ensure_review_component(&full_content)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
-    let (new_content, id) = pending::op_add(existing, item, &doc_id, true)?;
-    let canonical = canonicalize_component_content(file, &new_content);
+    let outcome = pending::op_add_with_outcome(existing, item, &doc_id, true)?;
+    let canonical = canonicalize_component_content(file, &outcome.body);
     let new_doc = comp.replace_content(&full_content, &canonical);
     crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
-    Ok(id)
+    if let Some(key) = outcome.deduped_key.as_ref() {
+        log_symptom_dedupe(file, "review", &outcome.id, key);
+    }
+    Ok(outcome.inserted.then_some(outcome.id))
 }
 
 /// Edit a review item's text, preserving its hash id.

@@ -19,7 +19,7 @@
 //! - `reap` removes `- [x]` items. `detect_reorder` diffs id order between snapshot/current.
 //! - Mutation ops (`op_add/done/edit/clear/reorder`) return a new body string, never mutate in place.
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use std::collections::HashSet;
 
 /// Lifecycle state for a pending item, encoded by its GFM checkbox.
@@ -728,6 +728,145 @@ pub fn is_valid_pending_id(s: &str) -> bool {
 
 pub fn normalize_pending_id(id: &str) -> String {
     id.trim().trim_start_matches('#').to_ascii_lowercase()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SymptomDedupeKey {
+    pub invariant_id: String,
+    pub document_id: String,
+    pub component: String,
+    pub content_hash: String,
+}
+
+impl SymptomDedupeKey {
+    pub fn new(
+        invariant_id: impl Into<String>,
+        document_id: impl Into<String>,
+        component: impl Into<String>,
+        content_hash: impl Into<String>,
+    ) -> Result<Self> {
+        Ok(Self {
+            invariant_id: validate_symptom_token("invariant", invariant_id.into())?,
+            document_id: validate_symptom_token("document", document_id.into())?,
+            component: validate_symptom_token("component", component.into())?,
+            content_hash: validate_symptom_token("content_hash", content_hash.into())?,
+        })
+    }
+
+    pub fn marker(&self) -> String {
+        format!(
+            "[symptom-key invariant={} document={} component={} content_hash={}]",
+            self.invariant_id, self.document_id, self.component, self.content_hash
+        )
+    }
+
+    pub fn log_fields(&self) -> String {
+        format!(
+            "invariant={} document={} component={} content_hash={}",
+            self.invariant_id, self.document_id, self.component, self.content_hash
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAddOutcome {
+    pub body: String,
+    pub id: String,
+    pub inserted: bool,
+    pub deduped_key: Option<SymptomDedupeKey>,
+}
+
+pub fn symptom_dedupe_key_from_text(text: &str) -> Result<Option<SymptomDedupeKey>> {
+    let Some(marker_start) = text.find("[symptom-key ") else {
+        return Ok(None);
+    };
+    let marker_body_start = marker_start + "[symptom-key ".len();
+    let Some(marker_end_rel) = text[marker_body_start..].find(']') else {
+        bail!("symptom-key marker is missing closing `]`");
+    };
+    let marker_body = &text[marker_body_start..marker_body_start + marker_end_rel];
+
+    let mut invariant_id = None;
+    let mut document_id = None;
+    let mut component = None;
+    let mut content_hash = None;
+    for field in marker_body.split_whitespace() {
+        let Some((name, value)) = field.split_once('=') else {
+            bail!("symptom-key field must be key=value: {field}");
+        };
+        let slot = match name {
+            "invariant" => &mut invariant_id,
+            "document" => &mut document_id,
+            "component" => &mut component,
+            "content_hash" => &mut content_hash,
+            _ => bail!("unknown symptom-key field `{name}`"),
+        };
+        if slot.is_some() {
+            bail!("duplicate symptom-key field `{name}`");
+        }
+        *slot = Some(validate_symptom_token(name, value.to_string())?);
+    }
+
+    Ok(Some(SymptomDedupeKey::new(
+        invariant_id.context("symptom-key missing invariant")?,
+        document_id.context("symptom-key missing document")?,
+        component.context("symptom-key missing component")?,
+        content_hash.context("symptom-key missing content_hash")?,
+    )?))
+}
+
+fn validate_symptom_token(field: &str, value: String) -> Result<String> {
+    if value.trim().is_empty() {
+        bail!("symptom-key {field} must not be empty");
+    }
+    if value.trim() != value || !value.chars().all(is_symptom_token_char) {
+        bail!("symptom-key {field} must be a single field-safe token: {value}");
+    }
+    Ok(value)
+}
+
+fn is_symptom_token_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/')
+}
+
+fn strip_symptom_dedupe_key_marker(text: &str) -> String {
+    let Some(marker_start) = text.find("[symptom-key ") else {
+        return text.trim().to_string();
+    };
+    let marker_body_start = marker_start + "[symptom-key ".len();
+    let Some(marker_end_rel) = text[marker_body_start..].find(']') else {
+        return text.trim().to_string();
+    };
+    let marker_end = marker_body_start + marker_end_rel + 1;
+    let mut out = String::with_capacity(text.len());
+    out.push_str(&text[..marker_start]);
+    out.push_str(&text[marker_end..]);
+    collapse_inline_spaces(&out)
+}
+
+fn symptom_evidence_line(text: &str) -> String {
+    let evidence = strip_symptom_dedupe_key_marker(text);
+    if evidence.is_empty() {
+        "  evidence: repeated symptom".to_string()
+    } else {
+        format!("  evidence: {evidence}")
+    }
+}
+
+fn append_unique_continuation_line(continuation: &str, line: &str) -> String {
+    if continuation
+        .lines()
+        .any(|existing| existing.trim() == line.trim())
+    {
+        return continuation.to_string();
+    }
+    let mut out = continuation.to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(line);
+    out.push('\n');
+    out
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2027,6 +2166,15 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
     op_add_at(body, text, doc_id, gated, AddPosition::First)
 }
 
+pub fn op_add_with_outcome(
+    body: &str,
+    text: &str,
+    doc_id: &str,
+    gated: bool,
+) -> Result<PendingAddOutcome> {
+    op_add_at_with_outcome(body, text, doc_id, gated, AddPosition::First)
+}
+
 /// Position-aware variant of [`op_add`] (`#ah0s`). Assigns/validates the id and
 /// dedups exactly like `op_add`, then inserts the new item at `position`.
 /// `After`/`Before` error if the anchor id is absent.
@@ -2037,6 +2185,19 @@ pub fn op_add_at(
     gated: bool,
     position: AddPosition<'_>,
 ) -> Result<(String, String)> {
+    let outcome = op_add_at_with_outcome(body, text, doc_id, gated, position)?;
+    Ok((outcome.body, outcome.id))
+}
+
+/// Add a pending item and report whether it inserted a new item or attached
+/// evidence to an existing symptom with the same de-duplication key.
+pub fn op_add_at_with_outcome(
+    body: &str,
+    text: &str,
+    doc_id: &str,
+    gated: bool,
+    position: AddPosition<'_>,
+) -> Result<PendingAddOutcome> {
     let (custom_id, text) = parse_custom_id_prefix(text)?;
     let mut text = text.trim().to_string();
     if text.is_empty() {
@@ -2062,6 +2223,37 @@ pub fn op_add_at(
 
     let mut layout = PendingLayout::parse(body);
     let items = layout.items();
+
+    if let Some(key) = symptom_dedupe_key_from_text(&text)?
+        && let Some(existing) = items
+            .iter()
+            .find(|item| {
+                item.state != PendingState::Done
+                    && symptom_dedupe_key_from_text(&item.text)
+                        .ok()
+                        .flatten()
+                        .as_ref()
+                        == Some(&key)
+            })
+            .cloned()
+    {
+        let evidence = symptom_evidence_line(&text);
+        let rewritten = layout.replace_items(|item| {
+            if item.id == existing.id {
+                let mut next = item.clone();
+                next.continuation = append_unique_continuation_line(&next.continuation, &evidence);
+                Some(next)
+            } else {
+                Some(item.clone())
+            }
+        });
+        return Ok(PendingAddOutcome {
+            body: rewritten.render(),
+            id: existing.id,
+            inserted: false,
+            deduped_key: Some(key),
+        });
+    }
 
     // Dedup: reject if an item with identical text already exists.
     if items.iter().any(|i| i.text == text) {
@@ -2122,7 +2314,12 @@ pub fn op_add_at(
             layout.insert_item_at(idx, new_item);
         }
     }
-    Ok((layout.render(), id))
+    Ok(PendingAddOutcome {
+        body: layout.render(),
+        id,
+        inserted: true,
+        deduped_key: None,
+    })
 }
 
 /// Mark an item `[x]` by id. Phase 1: state-machine validation lives in
@@ -3383,6 +3580,30 @@ mod tests {
             msg.contains("duplicate"),
             "expected duplicate error, got: {}",
             msg
+        );
+    }
+
+    #[test]
+    fn op_add_dedupes_symptom_key_by_attaching_evidence() {
+        let key = SymptomDedupeKey::new("stale_queue_pause", "doc-abc", "queue", "sha256:feedface")
+            .unwrap();
+        let first = format!("stale queue pause {}", key.marker());
+        let first_outcome = op_add_with_outcome("", &first, DOC_ID, false).unwrap();
+        assert!(first_outcome.inserted);
+
+        let repeat = format!("stale queue pause observed again {}", key.marker());
+        let repeat_outcome =
+            op_add_with_outcome(&first_outcome.body, &repeat, DOC_ID, false).unwrap();
+
+        assert!(!repeat_outcome.inserted);
+        assert_eq!(repeat_outcome.id, first_outcome.id);
+        assert_eq!(repeat_outcome.deduped_key.as_ref(), Some(&key));
+        assert_eq!(repeat_outcome.body.matches("[#").count(), 1);
+        assert!(repeat_outcome.body.contains("stale queue pause "));
+        assert!(
+            repeat_outcome
+                .body
+                .contains("  evidence: stale queue pause observed again")
         );
     }
 

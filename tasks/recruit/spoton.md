@@ -125,7 +125,25 @@ Closeout proof: changed path is the session document only; no new transcript art
 
 
 The remaining SpotOn interview-prep queue item has been addressed above and the queue is now inactive. No code or transcript files changed; this closeout only persists the queue-drained document state.
-<!-- agent:boundary:618ebf62 -->
+
+### Re: SpotOn video clean synthesis — gpt-5
+
+Clean version of the video review takeaway: **yes, hardware financing can create cold feet even when the software plan is no-contract.** The video’s key moment is around **03:39-04:01**, where the reviewer says the no-long-term-contract pitch is weakened if the merchant is still paying off financed hardware. That is exactly the expectation mismatch to explore in the interview: the merchant hears “easy to try,” then sees a hardware commitment that feels harder to unwind.
+
+I would frame it as an activation hypothesis, not a settled diagnosis. If drop-off happens before financing, the problem is likely offer trust or total-cost clarity. If it happens during financing, it is probably commitment anxiety. If it happens after financing approval, it may be install readiness, integration concerns, staff disruption, menu migration, or lack of confidence that support will be there on go-live day.
+
+Product moves that could raise signup-to-install conversion:
+
+1. Make the commitment stack explicit: month-to-month software, processing terms, hardware purchase/financing, cancellation path, return/buyout rules, and what happens if install never completes.
+2. Offer smaller hardware entry paths for low-GPV or hesitant merchants: pay upfront, finance, rent/lease, or start with a minimal kit.
+3. Put a launch-confidence panel beside the financing step: expected install date, menu/setup work SpotOn owns, merchant tasks, support coverage, and first-transaction target.
+4. Use real restaurant-owner videos at the exact objection point, not as generic brand proof. Best clips would cover “how hardware financing worked,” “what install day was like,” “how staff training went,” and “what I wish I knew before switching POS.”
+5. Tie incentives to activation instead of signup: first-month credit after first transaction, free menu cleanup if installed by a target date, launch-day support guarantee, or an included staff-training refresh.
+
+The interview question I would ask: “Do signed merchants drop before hardware financing, during financing approval, after hardware order, or closer to install day, and do we tag the reason clearly enough to know whether this is financing anxiety versus implementation friction?”
+
+Verification note: this synthesis is based on the watched YouTube video transcript and frame contact sheet. No code changed and no test suite was applicable.
+<!-- agent:boundary:958c4bad -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -703,6 +703,9 @@ pub fn run_with_reap_policy(
         shared.ctrl_d_forwarded.store(false, Ordering::Relaxed);
         shared.ctrl_c_forwarded.store(false, Ordering::Relaxed);
         shared
+            .ctrl_z_operator_stop
+            .store(false, Ordering::Relaxed);
+        shared
             .auto_trigger_outcome
             .store(AutoTriggerOutcome::NotNeeded as u8, Ordering::Relaxed);
         shared.prompt_visible_once.store(false, Ordering::Relaxed);
@@ -948,6 +951,7 @@ pub fn run_with_reap_policy(
             shared.ctrl_c_forwarded.load(Ordering::Relaxed),
         );
         let ctrl_d_forwarded = shared.ctrl_d_forwarded.load(Ordering::Relaxed);
+        let ctrl_z_operator_stop = shared.ctrl_z_operator_stop.load(Ordering::Relaxed);
         let failed_resume =
             resume_handoff_failed(auto_trigger, ctrl_d_forwarded, auto_trigger_outcome);
         let clean_exit_before_prompt =
@@ -959,10 +963,13 @@ pub fn run_with_reap_policy(
             failed_resume_tracker.reset();
         }
 
-        // Forwarded operator Ctrl+C is an intentional shutdown request, not a
-        // supervisor crash signal, so keep the policy state on the clean-exit
-        // path and surface the same restart/quit prompt as Ctrl+D.
-        let policy_exit_code = policy_exit_code_for_supervisor(code, ctrl_c_forwarded_interrupt);
+        // Operator control keys are intentional shutdown requests, not
+        // supervisor crash signals, so keep policy on the clean-exit path and
+        // surface the restart/quit prompt.
+        let policy_exit_code = policy_exit_code_for_supervisor(
+            code,
+            ctrl_c_forwarded_interrupt || ctrl_z_operator_stop,
+        );
         let action = policy.on_exit(policy_exit_code);
         *shared.supervisor_state.lock().unwrap() = policy.state;
         let action_name = match &action {
@@ -973,13 +980,14 @@ pub fn run_with_reap_policy(
         log_event(
             &mut session_log,
             &format!(
-                "restart_eval pane={} harness={} exit_code={} {} auto_trigger_outcome={} ctrl_d={} state={} action={}",
+                "restart_eval pane={} harness={} exit_code={} {} auto_trigger_outcome={} ctrl_d={} ctrl_z={} state={} action={}",
                 pane_id,
                 harness.binary,
                 code,
                 exit_provenance,
                 auto_trigger_outcome.as_str(),
                 ctrl_d_forwarded,
+                ctrl_z_operator_stop,
                 policy.state.as_str(),
                 action_name
             ),
@@ -1041,6 +1049,7 @@ pub fn run_with_reap_policy(
                             ctrl_c_forwarded_interrupt,
                             failed_resume,
                             ctrl_d_forwarded,
+                            ctrl_z_operator_stop,
                             recent_failures,
                             clean_exit_before_prompt,
                         ) {
@@ -1095,6 +1104,39 @@ pub fn run_with_reap_policy(
                                 ) {
                                     PromptOutcome::Quit => {
                                         break "user_quit_after_ctrl_d";
+                                    }
+                                    PromptOutcome::RestartFresh => {
+                                        raw_mode.resume();
+                                        first_run = true;
+                                        restart_count += 1;
+                                        suppress_stale_ctrl_d_until_prompt = false;
+                                    }
+                                }
+                            }
+                            RestartContinueExitStrategy::CtrlZPromptUser => {
+                                shared.transition_actor_state(
+                                    crate::session_actor::ActorState::WaitingInput,
+                                    "supervisor",
+                                    "ctrl_z_prompt",
+                                );
+                                raw_mode.suspend();
+                                eprintln!(
+                                    "\n{} stopped after stdin Ctrl+Z.",
+                                    harness.binary
+                                );
+                                log_event(
+                                    &mut session_log,
+                                    &format!("ctrl_z_prompt_user restart_count={}", restart_count),
+                                );
+                                match prompt_for_restart_or_quit(
+                                    &mut session_log,
+                                    "ctrl_z",
+                                    "Press Enter to restart fresh, or 'q' to exit.",
+                                    "user_quit_after_ctrl_z",
+                                    PromptEofPolicy::Quit,
+                                ) {
+                                    PromptOutcome::Quit => {
+                                        break "user_quit_after_ctrl_z";
                                     }
                                     PromptOutcome::RestartFresh => {
                                         raw_mode.resume();

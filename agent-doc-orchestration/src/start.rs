@@ -543,6 +543,7 @@ enum RestartContinueExitStrategy {
     RestartFresh,
     CtrlCPromptUser,
     CtrlDPromptUser,
+    CtrlZPromptUser,
     PromptUser,
 }
 
@@ -692,6 +693,7 @@ fn restart_continue_exit_strategy(
     ctrl_c_forwarded_interrupt: bool,
     failed_resume: bool,
     ctrl_d_forwarded: bool,
+    ctrl_z_operator_stop: bool,
     recent_failed_resumes: usize,
     clean_exit_before_prompt: bool,
 ) -> RestartContinueExitStrategy {
@@ -700,6 +702,9 @@ fn restart_continue_exit_strategy(
     }
     if ctrl_d_forwarded {
         return RestartContinueExitStrategy::CtrlDPromptUser;
+    }
+    if ctrl_z_operator_stop {
+        return RestartContinueExitStrategy::CtrlZPromptUser;
     }
     if clean_exit_before_prompt {
         return RestartContinueExitStrategy::RestartFresh;
@@ -1010,8 +1015,8 @@ fn is_forwarded_ctrl_c_interrupt_exit(
         || status.exit_code() == 130
 }
 
-fn policy_exit_code_for_supervisor(exit_code: i32, ctrl_c_forwarded_interrupt: bool) -> i32 {
-    if ctrl_c_forwarded_interrupt {
+fn policy_exit_code_for_supervisor(exit_code: i32, operator_control_stop: bool) -> i32 {
+    if operator_control_stop {
         0
     } else {
         exit_code
@@ -2247,8 +2252,10 @@ pub(crate) struct SupervisorShared {
     restart_mode: Mutex<String>,
     /// Flag: stdin→pty writer forwarded \x04 (Ctrl+D) to the pty.
     ctrl_d_forwarded: AtomicBool,
-    /// Flag: stdin→pty writer forwarded \x03 (Ctrl+C) to the pty.
+    /// Flag: stdin→pty writer handled \x03 (Ctrl+C) for the child.
     ctrl_c_forwarded: AtomicBool,
+    /// Flag: stdin→pty writer handled \x1a (Ctrl+Z) as a managed stop.
+    ctrl_z_operator_stop: AtomicBool,
     /// Outcome of the most recent auto-trigger attempt after a restart.
     auto_trigger_outcome: AtomicU8,
     /// Whether the current child ever surfaced an idle harness prompt.
@@ -2305,6 +2312,7 @@ impl SupervisorShared {
             restart_mode: Mutex::new("continue".to_string()),
             ctrl_d_forwarded: AtomicBool::new(false),
             ctrl_c_forwarded: AtomicBool::new(false),
+            ctrl_z_operator_stop: AtomicBool::new(false),
             auto_trigger_outcome: AtomicU8::new(AutoTriggerOutcome::NotNeeded as u8),
             prompt_visible_once: AtomicBool::new(false),
             suppress_stale_ctrl_d_until_prompt: AtomicBool::new(false),
@@ -2368,19 +2376,48 @@ impl SupervisorShared {
         }
     }
 
-    /// Send SIGTERM to the child process to unblock `wait()`.
     #[cfg(unix)]
-    fn kill_child(&self) {
+    fn signal_child(&self, signal: i32) {
         let pid = self.child_pid.load(Ordering::Relaxed);
         if pid > 0 {
             unsafe {
-                libc::kill(pid as libc::pid_t, libc::SIGTERM);
+                libc::kill(pid as libc::pid_t, signal);
             }
         }
     }
 
+    /// Send SIGINT to the child process for an operator Ctrl+C.
+    #[cfg(unix)]
+    fn interrupt_child(&self) {
+        self.signal_child(libc::SIGINT);
+    }
+
+    /// Send SIGTERM to the child process to unblock `wait()`.
+    #[cfg(unix)]
+    fn kill_child(&self) {
+        self.signal_child(libc::SIGTERM);
+    }
+
+    /// Map operator Ctrl+Z to managed stop instead of shell suspend.
+    #[cfg(unix)]
+    fn stop_child_for_ctrl_z(&self) {
+        self.signal_child(libc::SIGTERM);
+    }
+
+    #[cfg(not(unix))]
+    fn interrupt_child(&self) {
+        // On non-Unix, we can't send signals. The main loop will detect
+        // the flags after the child exits naturally or via other means.
+    }
+
     #[cfg(not(unix))]
     fn kill_child(&self) {
+        // On non-Unix, we can't send signals. The main loop will detect
+        // the flags after the child exits naturally or via other means.
+    }
+
+    #[cfg(not(unix))]
+    fn stop_child_for_ctrl_z(&self) {
         // On non-Unix, we can't send signals. The main loop will detect
         // the flags after the child exits naturally or via other means.
     }
@@ -3246,7 +3283,7 @@ Done.
 #[test]
 fn restart_continue_strategy_prefers_resume_by_default() {
     assert_eq!(
-        restart_continue_exit_strategy(false, false, false, 0, false),
+        restart_continue_exit_strategy(false, false, false, false, 0, false),
         RestartContinueExitStrategy::Resume
     );
 }
@@ -3259,28 +3296,35 @@ fn forwarded_ctrl_c_uses_clean_exit_code_for_policy() {
 #[test]
 fn restart_continue_strategy_prompts_after_forwarded_ctrl_c_interrupt() {
     assert_eq!(
-        restart_continue_exit_strategy(true, false, false, 0, false),
+        restart_continue_exit_strategy(true, false, false, false, 0, false),
         RestartContinueExitStrategy::CtrlCPromptUser
     );
 }
 #[test]
 fn restart_continue_strategy_prompts_after_ctrl_d() {
     assert_eq!(
-        restart_continue_exit_strategy(false, false, true, 0, false),
+        restart_continue_exit_strategy(false, false, true, false, 0, false),
         RestartContinueExitStrategy::CtrlDPromptUser
+    );
+}
+#[test]
+fn restart_continue_strategy_prompts_after_ctrl_z_operator_stop() {
+    assert_eq!(
+        restart_continue_exit_strategy(false, false, false, true, 0, false),
+        RestartContinueExitStrategy::CtrlZPromptUser
     );
 }
 #[test]
 fn restart_continue_strategy_still_prompts_after_ctrl_d_before_prompt() {
     assert_eq!(
-        restart_continue_exit_strategy(false, false, true, 0, true),
+        restart_continue_exit_strategy(false, false, true, false, 0, true),
         RestartContinueExitStrategy::CtrlDPromptUser
     );
 }
 #[test]
 fn restart_continue_strategy_restarts_fresh_before_prompt_without_ctrl_d() {
     assert_eq!(
-        restart_continue_exit_strategy(false, false, false, 0, true),
+        restart_continue_exit_strategy(false, false, false, false, 0, true),
         RestartContinueExitStrategy::RestartFresh
     );
 }
@@ -3304,21 +3348,21 @@ fn strip_stale_ctrl_d_before_prompt_keeps_ctrl_d_once_prompt_is_visible() {
 #[test]
 fn restart_continue_strategy_restarts_fresh_after_single_failed_resume() {
     assert_eq!(
-        restart_continue_exit_strategy(false, true, false, 1, false),
+        restart_continue_exit_strategy(false, true, false, false, 1, false),
         RestartContinueExitStrategy::RestartFresh
     );
 }
 #[test]
 fn restart_continue_strategy_prompts_after_repeated_failed_resumes() {
     assert_eq!(
-        restart_continue_exit_strategy(false, true, false, FAILED_RESUME_THRESHOLD, false,),
+        restart_continue_exit_strategy(false, true, false, false, FAILED_RESUME_THRESHOLD, false,),
         RestartContinueExitStrategy::PromptUser
     );
 }
 #[test]
 fn restart_continue_strategy_restarts_fresh_when_clean_exit_happens_before_prompt() {
     assert_eq!(
-        restart_continue_exit_strategy(false, false, false, 0, true),
+        restart_continue_exit_strategy(false, false, false, false, 0, true),
         RestartContinueExitStrategy::RestartFresh
     );
 }
@@ -3359,7 +3403,7 @@ fn ctrl_d_overrides_codex_auto_restart() {
         CleanExitResolution::RestartContinue
     );
     assert_eq!(
-        restart_continue_exit_strategy(false, false, true, 0, false),
+        restart_continue_exit_strategy(false, false, true, false, 0, false),
         RestartContinueExitStrategy::CtrlDPromptUser
     );
 }
@@ -3371,21 +3415,21 @@ fn ctrl_c_interrupt_overrides_codex_auto_restart() {
         CleanExitResolution::RestartContinue
     );
     assert_eq!(
-        restart_continue_exit_strategy(true, false, false, 0, false),
+        restart_continue_exit_strategy(true, false, false, false, 0, false),
         RestartContinueExitStrategy::CtrlCPromptUser
     );
 }
 #[test]
 fn ctrl_d_with_failed_resume_still_prompts_when_run_did_not_commit() {
     assert_eq!(
-        restart_continue_exit_strategy(false, true, true, 1, false),
+        restart_continue_exit_strategy(false, true, true, false, 1, false),
         RestartContinueExitStrategy::CtrlDPromptUser
     );
 }
 #[test]
 fn ctrl_d_with_failed_resume_still_prompts_even_when_clean_exit_was_early() {
     assert_eq!(
-        restart_continue_exit_strategy(false, true, true, 1, true),
+        restart_continue_exit_strategy(false, true, true, false, 1, true),
         RestartContinueExitStrategy::CtrlDPromptUser
     );
 }

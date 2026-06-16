@@ -180,6 +180,7 @@ fn key_name(byte: u8) -> &'static str {
         0x1b => "Escape",
         0x03 => "Ctrl-C",
         0x04 => "Ctrl-D",
+        0x1a => "Ctrl-Z",
         0x7f => "Backspace",
         0x20..=0x7e => "Printable",
         _ => "Byte",

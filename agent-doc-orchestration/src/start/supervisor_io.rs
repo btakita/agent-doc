@@ -6,6 +6,81 @@ pub(crate) fn ipc_method_requires_capability_gate(method: &IpcMethod) -> bool {
     matches!(method, IpcMethod::Inject { .. })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StdinOperatorControlPlan {
+    forwarded: Vec<u8>,
+    ctrl_c_interrupt: bool,
+    ctrl_z_stop: bool,
+}
+
+fn plan_stdin_operator_control(harness_binary: &str, data: &[u8]) -> StdinOperatorControlPlan {
+    if harness_binary != "codex" {
+        return StdinOperatorControlPlan {
+            forwarded: data.to_vec(),
+            ctrl_c_interrupt: false,
+            ctrl_z_stop: false,
+        };
+    }
+
+    let mut forwarded = Vec::with_capacity(data.len());
+    let mut ctrl_c_interrupt = false;
+    let mut ctrl_z_stop = false;
+    for byte in data {
+        match *byte {
+            0x03 => ctrl_c_interrupt = true,
+            0x1a => ctrl_z_stop = true,
+            byte => forwarded.push(byte),
+        }
+    }
+
+    StdinOperatorControlPlan {
+        forwarded,
+        ctrl_c_interrupt,
+        ctrl_z_stop,
+    }
+}
+
+fn log_codex_operator_control(shared: &SupervisorShared, key: &str, detail: &str) {
+    let file = shared
+        .actor_runtime
+        .as_ref()
+        .map(|runtime| runtime.file.as_path());
+    crate::input_diag::log_key_event(
+        file,
+        "supervisor.stdin",
+        "child_process",
+        "codex_operator_control",
+        key,
+        0,
+        crate::input_diag::KeyEventMeta {
+            harness: Some(&shared.harness_binary),
+            detail: Some(detail),
+        },
+    );
+}
+
+fn apply_stdin_operator_control(
+    shared: &SupervisorShared,
+    data: &[u8],
+    ctrl_c_flag: Option<&Arc<AtomicBool>>,
+) -> Vec<u8> {
+    let plan = plan_stdin_operator_control(&shared.harness_binary, data);
+    if plan.ctrl_c_interrupt {
+        if let Some(flag) = ctrl_c_flag {
+            flag.store(true, Ordering::Relaxed);
+        }
+        shared.ctrl_c_forwarded.store(true, Ordering::Relaxed);
+        log_codex_operator_control(shared, "Ctrl-C", "policy=sigint_not_forwarded");
+        shared.interrupt_child();
+    }
+    if plan.ctrl_z_stop {
+        shared.ctrl_z_operator_stop.store(true, Ordering::Relaxed);
+        log_codex_operator_control(shared, "Ctrl-Z", "policy=sigterm_not_forwarded");
+        shared.stop_child_for_ctrl_z();
+    }
+    plan.forwarded
+}
+
 /// Shared delivery for injected text (pane submit or PTY write). Used by both
 /// the gated [`IpcMethod::Inject`] path and the gate-exempt
 /// [`IpcMethod::Clear`] path; the gate decision is made by the caller.
@@ -363,6 +438,15 @@ pub(crate) fn spawn_writer_thread(
                         );
                     }
                     let data = maybe_translated.as_deref().unwrap_or(data);
+                    let controlled =
+                        apply_stdin_operator_control(&shared, data, ctrl_c_flag.as_ref());
+                    let data = controlled.as_slice();
+                    if data.is_empty() {
+                        if debug {
+                            eprintln!("[stdin->pty] handled operator control without pty write");
+                        }
+                        continue;
+                    }
                     if crate::input_diag::verbose_enabled() {
                         crate::input_diag::log_byte_events(
                             None,
@@ -444,13 +528,22 @@ pub(crate) fn spawn_writer_thread(
                     Ok(0) => break,
                     Ok(n) => {
                         drop(lock);
+                        let controlled = apply_stdin_operator_control(
+                            &_shared,
+                            &buf[..n],
+                            ctrl_c_flag.as_ref(),
+                        );
+                        let data = controlled.as_slice();
+                        if data.is_empty() {
+                            continue;
+                        }
                         if let Some(ref flag) = ctrl_d_flag {
-                            if buf[..n].contains(&0x04) {
+                            if data.contains(&0x04) {
                                 flag.store(true, Ordering::Relaxed);
                             }
                         }
                         if let Some(ref flag) = ctrl_c_flag {
-                            if buf[..n].contains(&0x03) {
+                            if data.contains(&0x03) {
                                 flag.store(true, Ordering::Relaxed);
                             }
                         }
@@ -460,14 +553,14 @@ pub(crate) fn spawn_writer_thread(
                                 "supervisor.stdin",
                                 "child_pty",
                                 "raw_forward",
-                                &buf[..n],
+                                data,
                                 None,
                             );
                         }
                         let Some(mut w) = lock_writer_interruptibly(&writer, stop.as_ref()) else {
                             break;
                         };
-                        if w.write_all_interruptibly(&buf[..n], stop.as_ref()).is_err() {
+                        if w.write_all_interruptibly(data, stop.as_ref()).is_err() {
                             break;
                         }
                     }
@@ -489,6 +582,25 @@ use crate::project_config;
 use crate::sessions::IsolatedTmux;
 use std::collections::HashMap;
 use tempfile::TempDir;
+
+#[test]
+fn codex_operator_control_strips_ctrl_c_and_ctrl_z_from_forwarded_bytes() {
+    let plan = plan_stdin_operator_control("codex", b"a\x03b\x1ac\x04");
+
+    assert_eq!(plan.forwarded, b"abc\x04");
+    assert!(plan.ctrl_c_interrupt);
+    assert!(plan.ctrl_z_stop);
+}
+
+#[test]
+fn non_codex_operator_control_preserves_control_bytes() {
+    let plan = plan_stdin_operator_control("claude", b"a\x03b\x1ac");
+
+    assert_eq!(plan.forwarded, b"a\x03b\x1ac");
+    assert!(!plan.ctrl_c_interrupt);
+    assert!(!plan.ctrl_z_stop);
+}
+
 #[test]
 fn handle_ipc_inject_normalizes_submit_newline_before_writing() {
     let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));

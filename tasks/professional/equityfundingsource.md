@@ -19,7 +19,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -119,7 +119,7 @@ Proof:
 - Commands: `tsift status` in the parent repo, `tsift status` in the EFS submodule, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc repair --apply-recovery`.
 - Verification: no application code changed; no tests or deploy run.
 - Escalation: none.
-<!-- agent:boundary:6cc179ab -->
+<!-- agent:boundary:295f91d8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -127,6 +127,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- [#efs-deals-interest-admin-sync]
 <!-- /agent:queue -->
 
 ## Backlog

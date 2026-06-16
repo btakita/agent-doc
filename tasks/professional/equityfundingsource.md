@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -125,7 +125,7 @@ Verification:
 - `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
 
 No D1 migration was needed. Confidence: high. Escalation: none.
-<!-- agent:boundary:96173e28 -->
+<!-- agent:boundary:054c928c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,6 +133,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

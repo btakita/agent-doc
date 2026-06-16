@@ -175,6 +175,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Diagnose workflow invariant status and print exact repair/operator actions",
     ));
     cmds.push(cmd(
+        "/agent-doc autofix",
+        "<FILE> [--preflight-json PATH] [--session-check-json PATH] [--limit N] [--apply] [--dry-run] [--json]",
+        "Plan invariant-driven repairs, record de-duplication proof markers, and optionally execute whitelisted safe repairs",
+    ));
+    cmds.push(cmd(
         "/agent-doc template-info",
         "<FILE>",
         "Show template structure (components, modes)",

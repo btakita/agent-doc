@@ -131,6 +131,15 @@ Each invariant reports one typed outcome: `ok`, `recoverable`, `operator`, or
 sources are `blocked` with the command needed to gather the evidence; detected
 safe repairs are `recoverable`.
 
+`agent-doc autofix <FILE>` consumes the doctor report and catalog remediation
+classes to build an invariant-keyed repair plan. The command records
+`workflow_autofix:<invariant>:<hash>` proof rows in the append-only proof ledger
+so repeated symptoms de-duplicate by invariant id and fingerprint before they
+create more queue/backlog work. `--apply` executes only whitelisted safe repairs
+whose catalog proof is present; destructive, shell-compound, git-commit,
+generation-reroute, queue-drain, and editor-conflict actions stay gated with an
+operator/manual command instead of being auto-run.
+
 ## Document write and watch authority
 
 The store actor owns `.agent-doc/state.db` as the single durable-state writer.

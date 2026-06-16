@@ -61,6 +61,7 @@ pub mod agent;
 /// call sites keep working after the SQLite-layer extraction.
 pub use agent_doc_sqlite::archive_index;
 pub mod admin;
+pub mod autofix;
 pub mod boundary;
 pub mod callback;
 pub mod capture;

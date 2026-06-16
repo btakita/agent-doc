@@ -794,6 +794,29 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Plan and optionally apply catalog-safe workflow invariant repairs
+    Autofix {
+        /// Path to the session document
+        file: PathBuf,
+        /// Optional JSON captured from `agent-doc preflight <FILE> --probe`
+        #[arg(long)]
+        preflight_json: Option<PathBuf>,
+        /// Optional JSON captured from an external session-check wrapper
+        #[arg(long)]
+        session_check_json: Option<PathBuf>,
+        /// Number of recent ops.log lines to scan
+        #[arg(long, default_value_t = 200)]
+        limit: usize,
+        /// Execute the whitelisted safe repair commands after planning
+        #[arg(long)]
+        apply: bool,
+        /// Do not write workflow_autofix proof markers to the proof ledger
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Check end-of-cycle write invariant — nonzero exit if the cycle is open or a likely direct response patchback bypassed agent-doc
     SessionCheck {
         /// Path to the session document
@@ -2616,6 +2639,25 @@ fn main() -> anyhow::Result<()> {
                 preflight_json,
                 session_check_json,
                 ops_limit: limit,
+                json,
+            },
+        ),
+        Commands::Autofix {
+            file,
+            preflight_json,
+            session_check_json,
+            limit,
+            apply,
+            dry_run,
+            json,
+        } => agent_doc_orchestration::autofix::run(
+            &file,
+            agent_doc_orchestration::autofix::WorkflowAutofixOptions {
+                preflight_json,
+                session_check_json,
+                ops_limit: limit,
+                apply,
+                dry_run,
                 json,
             },
         ),

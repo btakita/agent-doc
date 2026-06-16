@@ -369,7 +369,33 @@ I also checked the disproof side. This document did have older `live_prompt_drif
 Resolved `#fcc0-live-verify` as a log-proof/instrumentation closeout, with no source edits in this cycle. The live log now has the proof markers needed for the operator-test loop: `plugin_watch_readonly skipped file-apply (controller-owned watcher is sole writer) #dsqa`, `write_authority action=routed ...`, `pending_write_writeback ... transport=editor_ipc`, `pending_maintenance_writeback ... transport=editor_ipc`, `queue_consume_writeback file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md ... transport=editor_ipc`, plus recent `compact_writeback file=tasks/agent-doc/agent-doc-bugs2.md ... transport=editor_ipc`. The latest queue-consume proof for this document is `1781627858` with `transport=editor_ipc`.
 
 I also scanned the conflict side. The recent `File Cache Conflict` strings in `ops.log` are stale-supervisor warning text or older user/report prose, not a structured plugin conflict-apply marker for the current proof window. There are still explicit stale-supervisor warnings for this route-owned session (`pid 552290`), so this closeout should be read as: the logging and editor-IPC proof surfaces are adequate and the recent writebacks are using editor IPC; if JetBrains visibly shows another File Cache Conflict after installing/recycling onto the current binary/cdylib, file that as a fresh runtime regression against these markers. Changed paths this cycle: session document only via `--done fcc0-live-verify`; existing dirty submodule files were left unstaged. Commands: `agent-doc plan`, targeted `rg` scans of `.agent-doc/logs/ops.log`, and `agent-doc finalize`. Verification: log proof above. Confidence: medium. Escalation: none.
-<!-- agent:boundary:9f4fb29e -->
+
+### Re: do [#archstatekernel] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#archstatekernel]
+
+
+Implemented the architecture-state boundary in the agent-doc submodule.
+
+- Invariant: route/queue/closeout/editor-write policy now has a pure mirror-mode `flow::workflow_state` kernel: evidence kind -> typed decision -> single allowed mutation -> required proof list. It covers stale supervisor, queue drainability, captured response, and live-buffer decisions without performing I/O.
+- Policy owner: `agent-doc-orchestration/src/flow/workflow_state.rs`, exported from `flow/mod.rs`.
+- Transition rows covered by tests: stale-supervisor surface/recycle-now/recycle-after-debounce; queue dispatch/defer for clear cooldown, busy pane, active turn, loop owner, already-dispatched head; captured-response append/complete/replay/retire/retry/current-generation and queued-behind-closeout; live-buffer apply/defer/request-save/block-unattributed-drift.
+- Adjacent architecture state: `start::decisions` now includes the PCP supervisor handoff state machine with tests for happy path, pre-promotion rollback, and post-promotion repair-only escalation.
+- Spec: `specs/08b-single-process-control-plane.md` documents the workflow-state kernel contract and the supervisor handoff state machine.
+- Out of scope: left the pre-existing dirty write-convergence, JetBrains plugin, `specs/07`, and `VERSIONS.md` changes unstaged for their later architecture items.
+
+Verification:
+
+- `cargo test -p agent-doc-orchestration workflow_state` passed.
+- `cargo test -p agent-doc-orchestration pcp_supervisor_handoff` passed.
+- `make check` passed: clippy, 4,579 nextest tests, doctests, and the ignored medium SimWorld corpus test.
+- Latest CI: `27607675117` completed successfully on `main`.
+- Submodule commit: `f9e2b932 architecture: add workflow state kernel`.
+
+Confidence: high. The new kernel is intentionally mirror-mode; runtime call-site replacement belongs to the later controller cutover work.
+<!-- agent:boundary:f843ebc4 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -390,7 +416,7 @@ I also scanned the conflict side. The recent `File Cache Conflict` strings in `o
 - ~~do [#qflood2]~~
 - ~~do [#qt32]~~
 - ~~do [#fcc0-live-verify]~~
-- do [#archstatekernel]
+- ~~do [#archstatekernel]~~
 - do [#archproofledger]
 - do [#archcomponentmerge]
 - do [#archsimworldmatrix]
@@ -428,7 +454,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#archstatekernel] Implement a pure typed workflow state kernel for agent-doc route/queue/closeout/editor-write decisions: input evidence -> decision enum -> allowed mutation -> required proof. Move stale-supervisor, queue-drainability, captured-response, and live-buffer decisions behind this boundary before adding more route-edge guards.
 - [ ] [#archproofledger] Add an append-only operation proof ledger for queue heads, response captures, patch writes, actor generations, and terminal proofs. Every consumed/deferred/retried/superseded head should have one durable proof row keyed by operation id and content hash.
 - [ ] [#archcomponentmerge] Define and enforce managed-component merge semantics: queue, exchange, backlog, status, review, and done archive each have separate bases and conflict rules; only same-component incompatible edits become user-visible conflicts.
 - [ ] [#archsimworldmatrix] Add SimWorld/property transition-table coverage for the architecture primitives: stale supervisor recycle, queue edit during closeout, degraded/file-IPC fallback, live buffer drift, compact/replay, and operator-only/no-drainable queue outcomes.

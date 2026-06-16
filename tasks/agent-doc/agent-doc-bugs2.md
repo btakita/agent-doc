@@ -338,6 +338,26 @@ Current state:
 - `src/agent-doc` is clean and even with `origin/main`.
 - Parent repo is even with `origin/main` for committed work, but still has unrelated dirty files and untracked work outside this queue head.
 - Latest `src/agent-doc` GitHub Actions `CI` for `cdbc1a78` is in progress: run `27593485048`, started 2026-06-16T04:08:16Z. Per the closeout rules, I recorded it as pending instead of blocking on `gh run watch`.
+- The parent repo does not have a workflow named `CI`.
+- Latest `src/agent-doc` GitHub Actions `CI` is in progress for `0d403254`: run `27594082265`, started 2026-06-16T04:25:34Z.
+- Parent repo: `9b1bfc55d` (`agent-doc: update closeout recovery`) pushed to `origin/main`.
+- `src/agent-doc`: `0d403254` (`fix: replay captured responses across queue-only drift`) pushed to `origin/main`.
+- `agent-doc --version` reports `agent-doc 0.34.1`.
+- `agent-doc lib-install`
+- `cargo install --path .`
+- `cargo build`
+- `make check` passed: clippy, 4547 tests, doctests, and the ignored medium SimWorld budget test.
+- `cargo test -p agent-doc-orchestration validate_replay`
+- `cargo test -p agent-doc-orchestration validate_replay_refreshes_baseline_for_queue_only_drift`
+- `git diff --check`
+- `cargo fmt --check`
+- `VERSIONS.md`
+- `specs/07-closeout-commands.md`
+- `agent-doc-orchestration/src/capture.rs`
+- Updated `specs/07-closeout-commands.md` and `VERSIONS.md` with the `#queueeditcap` invariant.
+- Added regression coverage: `validate_replay_refreshes_baseline_for_queue_only_drift`.
+- Non-queue drift, missing/multiple queue components, snapshot drift, and structural marker drift still fail closed.
+- `capture::validate_replay` now has a narrow queue-only drift recovery. If the captured snapshot still matches the current snapshot, the live file hash drifted, and replacing the live `agent:queue` body with the snapshot queue body restores the document byte-for-byte after managed pipeline stripping, the capture refreshes only its file hash and lets the normal replay path apply the preserved response onto the current queue-edited document.
 
 No escalation was needed.
 
@@ -358,9 +378,9 @@ I recovered the live wedge and captured the narrower bug.
 What happened here was a real closeout failure, not just a stale supervisor warning. The previous turn reached `response_captured` for `commit + push uncommitted agent-doc files`, then the visible document changed while that response was still not committed. After restart, `write --commit`, `repair`, and route dispatch all hit the same guard: the captured response baseline no longer matched the current document, so JB `Run Agent Doc` could not drain the active closeout before dispatch.
 
 Recovery proof from this cycle:
-❯ - Replayed the preserved captured response through `agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md`.
-❯ - `agent-doc session-check tasks/agent-doc/agent-doc-bugs2.md` then reported the old cycle `cycle-1781582845265` as `committed` and consumed the `commit + push uncommitted agent-doc files` queue head.
-❯ - A follow-up `agent-doc preflight` repaired the historical exchange snapshot drift, committed that repair, and opened this fresh cycle for the new queue note.
+- Replayed the preserved captured response through `agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md`.
+- `agent-doc session-check tasks/agent-doc/agent-doc-bugs2.md` then reported the old cycle `cycle-1781582845265` as `committed` and consumed the `commit + push uncommitted agent-doc files` queue head.
+- A follow-up `agent-doc preflight` repaired the historical exchange snapshot drift, committed that repair, and opened this fresh cycle for the new queue note.
 
 I added backlog item `#queueeditcap` for the root fix: captured-response closeout must preserve post-preflight queue edits while replaying or safely retiring the captured response, so JB `Run Agent Doc` can recover/drain instead of surfacing `captured response baseline no longer matches current document`.
 
@@ -371,37 +391,37 @@ No source files were changed in this response cycle. The route-owned supervisor 
 Implemented `#queueeditcap` in `src/agent-doc` and pushed it.
 
 What changed:
-- `capture::validate_replay` now has a narrow queue-only drift recovery. If the captured snapshot still matches the current snapshot, the live file hash drifted, and replacing the live `agent:queue` body with the snapshot queue body restores the document byte-for-byte after managed pipeline stripping, the capture refreshes only its file hash and lets the normal replay path apply the preserved response onto the current queue-edited document.
-- Non-queue drift, missing/multiple queue components, snapshot drift, and structural marker drift still fail closed.
-- Added regression coverage: `validate_replay_refreshes_baseline_for_queue_only_drift`.
-- Updated `specs/07-closeout-commands.md` and `VERSIONS.md` with the `#queueeditcap` invariant.
+❯ - `capture::validate_replay` now has a narrow queue-only drift recovery. If the captured snapshot still matches the current snapshot, the live file hash drifted, and replacing the live `agent:queue` body with the snapshot queue body restores the document byte-for-byte after managed pipeline stripping, the capture refreshes only its file hash and lets the normal replay path apply the preserved response onto the current queue-edited document.
+❯ - Non-queue drift, missing/multiple queue components, snapshot drift, and structural marker drift still fail closed.
+❯ - Added regression coverage: `validate_replay_refreshes_baseline_for_queue_only_drift`.
+❯ - Updated `specs/07-closeout-commands.md` and `VERSIONS.md` with the `#queueeditcap` invariant.
 
 Changed paths:
-- `agent-doc-orchestration/src/capture.rs`
-- `specs/07-closeout-commands.md`
-- `VERSIONS.md`
+❯ - `agent-doc-orchestration/src/capture.rs`
+❯ - `specs/07-closeout-commands.md`
+❯ - `VERSIONS.md`
 
 Verification:
-- `cargo fmt --check`
-- `git diff --check`
-- `cargo test -p agent-doc-orchestration validate_replay_refreshes_baseline_for_queue_only_drift`
-- `cargo test -p agent-doc-orchestration validate_replay`
-- `make check` passed: clippy, 4547 tests, doctests, and the ignored medium SimWorld budget test.
-- `cargo build`
-- `cargo install --path .`
-- `agent-doc lib-install`
-- `agent-doc --version` reports `agent-doc 0.34.1`.
+❯ - `cargo fmt --check`
+❯ - `git diff --check`
+❯ - `cargo test -p agent-doc-orchestration validate_replay_refreshes_baseline_for_queue_only_drift`
+❯ - `cargo test -p agent-doc-orchestration validate_replay`
+❯ - `make check` passed: clippy, 4547 tests, doctests, and the ignored medium SimWorld budget test.
+❯ - `cargo build`
+❯ - `cargo install --path .`
+❯ - `agent-doc lib-install`
+❯ - `agent-doc --version` reports `agent-doc 0.34.1`.
 
 Commit/push proof:
-- `src/agent-doc`: `0d403254` (`fix: replay captured responses across queue-only drift`) pushed to `origin/main`.
-- Parent repo: `9b1bfc55d` (`agent-doc: update closeout recovery`) pushed to `origin/main`.
+❯ - `src/agent-doc`: `0d403254` (`fix: replay captured responses across queue-only drift`) pushed to `origin/main`.
+❯ - Parent repo: `9b1bfc55d` (`agent-doc: update closeout recovery`) pushed to `origin/main`.
 
 CI:
-- Latest `src/agent-doc` GitHub Actions `CI` is in progress for `0d403254`: run `27594082265`, started 2026-06-16T04:25:34Z.
-- The parent repo does not have a workflow named `CI`.
+❯ - Latest `src/agent-doc` GitHub Actions `CI` is in progress for `0d403254`: run `27594082265`, started 2026-06-16T04:25:34Z.
+❯ - The parent repo does not have a workflow named `CI`.
 
 No escalation was needed.
-<!-- agent:boundary:262afad6 -->
+<!-- agent:boundary:ba42862b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -409,16 +429,16 @@ No escalation was needed.
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~JB `Run Agent Doc` on equityfundingsource.md after a fresh auto-sync did not submit the prompt.~~
 - ~~commit + push uncommitted agent-doc files~~
-~~~done
+---
 Typing into the queue during the turn cause the conversation to be interrupted. ![img_30.png](img_30.png). A pre-finalize response was uncommitted causing the response to be treated as a user prompt ![img_31.png](img_31.png). After restart, JB `Run Agent Doc` error.
 
 ```
 [route] target tmux session: 0
 Error: authoritative actor generation 438 for tasks/agent-doc/agent-doc-bugs2.md owns pane %110 but route could not drain the active closeout before dispatch: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
 ```
-~~~
+---
 - ~~Why not just shell out `tmux send-keys "Command" Enter`? Is the JB `Run Agent Doc` not-submiting an issue or is it the fact that logic is still spread all over the codebase and we are hitting the various conditions that use this spaghetti logic?~~
-- :pushpin: Only agent-doc dogfooding sessions should auto-build + install. The equityfundingsource.md session should not auto-install ![img_29.png](img_29.png)
+- ~~:pushpin: Only agent-doc dogfooding sessions should auto-build + install. The equityfundingsource.md session should not auto-install ![img_29.png](img_29.png)~~
 - :pushpin: How can I tell if the supervisor + CPC are up to date? Why is the formatting all messed up? ![2026-06-15_22-56.png](../../../../../Pictures/agent-loop/2026-06-15_22-56.png) Also I'm seeing some shells from the supervisor are 2 lines too low. See where the `agent-doc admin --help` starts in the screenshot.
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.

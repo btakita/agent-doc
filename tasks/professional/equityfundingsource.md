@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -145,7 +145,7 @@ fix(admin): hide duplicate interested lenders (#67v2)
 
 Suppress the inline Interested Lenders section in the Available Deal Loan Detail tab while keeping the dedicated Interested Lenders tab and reusable loan-detail section intact. Update PRD/test coverage and deploy the Worker with no D1 migrations pending.
 ```
-<!-- agent:boundary:da2ad36d -->
+<!-- agent:boundary:f817cac4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -153,6 +153,19 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+In "Available Deal" -> "Interested Lenders" tab
+
+"Deal interest workflow" should always be expanded.
+
+Do these steps + fields relate to TMO state?
+- Mark Call Completed
+- Start Underwriting
+- Call scheduled
+- Verbal amount
+- Contact method
+- Pre-doc conditions
+- Pre-doc instructions
+- Lender contact summary
 <!-- /agent:queue -->
 
 ## Backlog

@@ -309,6 +309,11 @@ Proof for this cycle:
 
 ### Re: Fix JB Run Agent Doc submit — gpt-5
 
+> **Queue prompt:**
+>
+> :pushpin: Fix the JB `Run Agent Doc` still does not submit issue.
+
+
 Fixed the current JB `Run Agent Doc` submit failure class in `src/agent-doc`.
 
 Root cause: the JetBrains command correctly invoked `agent-doc route --dispatch-only --plain-trigger --wait-for-ready 60`, but the dispatch-only `latest run is still booting` readiness probe ignored that explicit 60s editor budget and used the hard-coded Codex dispatch-only starting-pane default instead. That matched the live failure: the latest attempt failed after about 10s with `latest run is still booting ... (timed_out)` even though the editor command asked route to wait longer before surfacing a startup-readiness error.
@@ -330,13 +335,25 @@ Proof for this cycle:
 - Verification: focused timeout tests passed; `make check` passed; `cargo install --path .` succeeded; latest pre-push `src/agent-doc` CI was green, and the new pushed `src/agent-doc` CI run `27597293180` was in progress when checked. The parent repo has no workflow named `CI`.
 - Confidence: high for the timeout-budget regression; medium for live JB proof until the stale route-owned supervisor is recycled and the operator reruns `Run Agent Doc` from the IDE.
 - Escalation: none.
-<!-- agent:boundary:5d83bbf5 -->
+❯ - Escalation: none.
+❯ - Confidence: high for the timeout-budget regression; medium for live JB proof until the stale route-owned supervisor is recycled and the operator reruns `Run Agent Doc` from the IDE.
+❯ - Verification: focused timeout tests passed; `make check` passed; `cargo install --path .` succeeded; latest pre-push `src/agent-doc` CI was green, and the new pushed `src/agent-doc` CI run `27597293180` was in progress when checked. The parent repo has no workflow named `CI`.
+❯ - Commands: `tsift status`; `agent-doc --version`; `agent-doc preflight ...`; `agent-doc plan ...`; `agent-doc read ...`; `agent-doc admin inspect ... --json`; targeted `tsift`/`rg` source and log inspections; `cargo fmt`; `cargo test -p agent-doc-orchestration dispatch_only_starting_pane_ready_timeout -- --nocapture`; `git diff --check`; `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`; `gh run list --workflow CI --limit 1`; `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`; `git commit`; `git push origin main`.
+❯ - Code commits: `src/agent-doc` `3cc88c04` (`fix(route): honor editor wait budget for boot probe`); parent repo `8d26b15fe` (`chore: bump agent-doc route wait fix`). Both were pushed to `origin/main`.
+❯ - Changed paths: `src/agent-doc/agent-doc-orchestration/src/route.rs`, `src/agent-doc/specs/07-session-tmux-commands.md`, parent submodule pointer `src/agent-doc`, and this session document.
+❯ - Out of scope: no plugin/UI refactor; the plugin was already constructing the right command.
+❯ - Transition rows covered: default dispatch-only starting-pane timeout, explicit editor override, active-turn blocker, and prompt-ready success.
+❯ - Policy owner: route readiness policy in `agent-doc-orchestration/src/route.rs` and the dispatch-only adapter in `route/dispatch_only.rs`.
+❯ - Invariant: JB's explicit readiness budget must be the actual pre-submit wait on every dispatch-only slow-start path.
+<!-- agent:boundary:feb816d3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` still does not submit. Find all locations where this is used.~~
+- ~~:pushpin: Fix the JB `Run Agent Doc` still does not submit issue.~~
+- Please document all areas in the codebase that interact with tmux. Don't worry about the line number, as line numbers can change.
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
 ```

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -102,13 +102,54 @@ Hard guardrails:
 So the decision I would record is: use a small local model for structured semantic extraction in some cases, especially scientific/session/doc knowledge enrichment, but do not use it instead of MemGraphRAG. It is an upstream graph-enrichment worker, not the retrieval architecture.
 
 I used the YouTube captions path; no Corky GPU run was needed because captions were available. No code changed this cycle. Verification was document/research only: `tsift status`, `tsift index --workspace .`, `agent-doc preflight`, `agent-doc plan/read`, caption-only `watch.py`, targeted `tsift source-read/search`, and `git status`. Preflight also reported a stale `agent-doc` install warning: rebuild in `src/agent-doc` with `make install` when convenient so live sessions use the current cdylib.
-<!-- agent:boundary:6ae58fcf -->
+
+### Re: model support matrix — gpt-5
+
+> **Queue prompt:**
+>
+> What models will be good to support? I have a 5090. Others may want smaller models.
+
+
+As of 2026-06-16, I would support model roles first and model names second. tsift should not have one blessed local model; it should expose profiles for `extractor.fast`, `extractor.quality`, `code.quality`, `reasoner.local-high`, `embedding`, and `reranker`.
+
+Your 5090 is a strong high-local target. NVIDIA lists the RTX 5090 with 32 GB of GDDR7 memory, so 20-32B quantized models are realistic for offline graph enrichment, schema extraction, and code-context labeling, assuming context/KV/batch settings are kept sane. But the smallest useful tier still matters because tsift's model sidecar should enrich MemGraphRAG, not become a mandatory frontier-model dependency.
+
+Recommended support matrix:
+
+- **Tiny / CPU / 8 GB class:** Qwen3 0.6B/1.7B/4B, Phi-4-mini 3.8B, Gemma 4 E2B/E4B. Use for cheap tagging, JSON extraction, and smoke tests; never treat output as authoritative graph fact.
+- **Small / 8-16 GB class:** Qwen3-8B, Qwen2.5-Coder 7B, Gemma 4 12B, and gpt-oss-20b where the runtime supports its native quantization path. This is the portable default tier for users who want local enrichment without a 5090.
+- **Balanced / 16-24 GB class:** Qwen3-14B, Qwen2.5-Coder 14B, Devstral Small/Small 2 24B, and Qwen3-Coder-30B-A3B/Next where supported. This is the best target for higher-quality extraction and code-aware labeling on normal enthusiast hardware.
+- **5090 / 32 GB high-local:** Qwen3-32B, Qwen2.5-Coder-32B, Devstral 24B, gpt-oss-20b, and Qwen3-Coder-30B-A3B/Next. This should be tsift's local quality tier for semantic graph enrichment and harder code/document classification.
+- **Server/cloud only, not consumer baseline:** gpt-oss-120b, Qwen3-Coder-480B-A35B, and Llama 4 Scout/Maverick. Support them through an OpenAI-compatible endpoint or vLLM/SGLang-style deployment, but do not make them a default expectation.
+
+For retrieval-specific models, I would make embeddings/rerankers first-class instead of overloading the chat model:
+
+- **Embedding default:** Qwen3-Embedding-0.6B or BGE-M3. BGE-M3 is mature and useful for hybrid retrieval because it supports dense, sparse, and multi-vector modes, 100+ languages, and up to 8192 tokens.
+- **Embedding quality:** Qwen3-Embedding-4B/8B; optionally Jina Embeddings v4 when visually rich docs, tables, diagrams, or code/doc mixed retrieval become important.
+- **Reranker default:** Qwen3-Reranker-0.6B, with 4B/8B as quality upgrades.
+
+The implementation shape should be backend-neutral: OpenAI-compatible HTTP first, with Ollama and llama.cpp as common local adapters. Ollama documents partial OpenAI API compatibility, and llama.cpp has a local HTTP server plus JSON-schema/grammar-constrained output support. That matters more than exact model names because tsift needs schema-valid, provenance-bearing extraction records, not free-form prose.
+
+Default picks I would encode initially:
+
+- `extractor.fast`: Qwen3-4B or Phi-4-mini
+- `extractor.quality`: Qwen3-14B
+- `code.quality`: Qwen2.5-Coder-14B, with Qwen2.5-Coder-32B / Qwen3-Coder / Devstral for bigger machines
+- `reasoner.local-high`: Qwen3-32B or gpt-oss-20b on the 5090
+- `embedding.default`: Qwen3-Embedding-0.6B or BGE-M3
+- `reranker.default`: Qwen3-Reranker-0.6B
+
+Sources checked: NVIDIA RTX 5090 specs, Qwen3 model family, Qwen2.5-Coder, Qwen3-Coder, Mistral Devstral, OpenAI gpt-oss, Google Gemma, Microsoft Phi, Qwen3 Embedding/Reranker, BGE-M3, Ollama OpenAI compatibility, and llama.cpp grammar/server docs.
+
+No code changed this cycle. Verification was document/research only: `tsift status`, `agent-doc preflight`, `agent-doc plan/read`, current-source web checks for model families, and `git status`. `tsift status` still reports one missing workspace scope, so I did not rely on tsift search/graph evidence for this answer. The worktree had unrelated existing changes; I left them untouched.
+
+Source links: [NVIDIA RTX 5090](https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5090/), [Qwen3](https://qwenlm.github.io/blog/qwen3/), [Qwen2.5-Coder](https://qwenlm.github.io/blog/qwen2.5-coder-family/), [Qwen3-Coder](https://github.com/QwenLM/Qwen3-Coder), [Devstral](https://mistral.ai/news/devstral-2-vibe-cli/), [gpt-oss](https://openai.com/index/introducing-gpt-oss/), [Gemma](https://ai.google.dev/gemma/docs/core), [Phi](https://azure.microsoft.com/en-us/products/phi), [Qwen3 Embedding/Reranker](https://github.com/QwenLM/Qwen3-Embedding), [BGE-M3](https://bge-model.com/bge/bge_m3.html), [Ollama OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility), [llama.cpp grammars](https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md).
+<!-- agent:boundary:e08ab740 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- What models will be good to support? I have a 5090. Others may want smaller models.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

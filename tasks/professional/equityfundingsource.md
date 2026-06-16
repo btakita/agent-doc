@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -78,18 +78,38 @@ Verification:
 - Downloaded deployed `/index.browser-D33O2I3Y.js`; it contains `tmo-kv--unlabeled`, `display_pairs_(record, fields)`, and the hidden-label Name/Email/Phone borrower fields.
 - `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
 - `src/equityfundingsource-dev` is clean after deploy.
+- `src/equityfundingsource-dev` is clean after deploy.
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
+- Downloaded deployed `/index.browser-5XVXGJGR.js`; it contains `AdminBorrowerInfoField`, `body_style: ADMIN_BORROWER_INFO_STYLE`, and the inline Borrower Info entries.
+- Live `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned `303` to admin login, expected for the protected route.
+- Live `/` returned `200`.
+- EFS `make check` passed: 739 tests, app build, Worker build.
+- Focused test passed: `bun test tests/tmo-loan-details-density.test.ts` — 3 tests.
+- Remote D1 migrations: no migrations to apply before or after deploy.
+- Deployed browser asset: `/index.browser-5XVXGJGR.js`
+- Worker version: `cdcec9f0-fac4-4833-8d9f-13697c644263`
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- `make deploy` completed successfully.
+- Parent repo: `710ab9c1a chore(efs): update borrower info layout submodule` pushed to `origin/main`.
+- EFS submodule: `eed3296 fix(admin): inline borrower info details` pushed to `origin/main`.
+- `src/equityfundingsource-dev` parent gitlink
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
 
 Preflight warning note: the document used `go` on `agent:backlog`, which the binary ignores as a queue attribute. I treated the backlog text as the requested work for this cycle and cleared it after completion.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:73c2c3b3 -->
+<!-- agent:boundary:e6c89b96 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: "Borrower Info" should use inline values...not surrounded by boxes. Make the overall design elegant. Remove unnecessary noise. deploy
+- Make AdminBorrowInfoField more generic, because I want to have this rule in other cards.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -266,7 +266,25 @@ Then automation becomes mechanical. A doctor command evaluates facts against the
 This also reduces conflict creation. Right now repeated symptoms become repeated backlog items because the system lacks a stable invariant id. If every detector reports `invariant=supervisor_freshness` or `invariant=queue_head_progress`, we can coalesce reports, attach new evidence to the same root cause, and avoid spawning five queue entries for one stale supervisor.
 
 I added backlog items for the invariant catalog, a workflow doctor, and invariant-driven autofix planner. Changed paths: session document only. Commands: local spec/code scan plus `agent-doc finalize`. Verification: design-only response; no source change in this cycle. Confidence: high. Escalation: none.
-<!-- agent:boundary:5da9d84a -->
+
+### Re: prioritizing binary-logic implementation items — gpt-5
+
+> **Queue prompt:**
+>
+> Please add and prioritize backlog + queue items to implement recommendations from "binary logic for stale queue pauses and conflicts" response.
+
+
+I added the binary-logic implementation slice as the next architecture layer ahead of the existing state-kernel work. The new work is intentionally narrow and ordered:
+
+1. `#binoutcomes` defines the shared outcome contract first: `ok`, `recoverable`, `blocked`, or `operator`, with invariant id, proof marker, and one allowed next action.
+2. `#binstalepause` applies that contract to stale queue pauses so stale supervisor / pause / no-drainable-head cases recover or defer with proof instead of surfacing as conflicts.
+3. `#binconflictscope` makes conflict classification component-scoped across exchange, queue, backlog, status, review, done/archive, gitlink, and editor writeback.
+4. `#binconflictdedupe` coalesces repeated symptoms by invariant/document/component/content hash so one root cause does not spawn repeated queue conflicts.
+
+Those should run before `#archstatekernel`, `#archproofledger`, `#archcomponentmerge`, `#archsimworldmatrix`, and `#archuistates`, because they define the binary vocabulary the architecture primitives should implement rather than leaving each primitive to invent its own classification rules. The workflow-invariant items remain useful follow-ons: they can consume these outcome ids once the contract exists.
+
+Changed paths: session document only. Commands: `agent-doc session-check`, `git status --short`, `agent-doc read --component queue`, `agent-doc read --component backlog`, `agent-doc finalize --help`, `agent-doc queue --help`, `agent-doc queue sync --help`, targeted spec/runbook reads, and this `agent-doc finalize` with ordered pending additions. Verification: no source/build/test surfaces changed; this is backlog/queue prioritization work. Confidence: high.
+<!-- agent:boundary:05967abd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -279,7 +297,7 @@ I added backlog items for the invariant catalog, a workflow doctor, and invarian
 - ~~do [#1j8q]~~
 - ~~do [#anw0verify]~~
 - ~~I have a good feel for when agent-doc behaves correctly. Can we lock down behavior invariants that the agent can use to determine if there are workflow issues...so we can automate bug detection and fixes?~~
-- Please add and prioritize backlog + queue items to implement recommendations from "binary logic for stale queue pauses and conflicts" response.
+- ~~Please add and prioritize backlog + queue items to implement recommendations from "binary logic for stale queue pauses and conflicts" response.~~
 - do [#qflood2]
 - do [#qt32]
 - do [#fcc0-live-verify]
@@ -289,6 +307,9 @@ I added backlog items for the invariant catalog, a workflow doctor, and invarian
 - do [#archsimworldmatrix]
 - do [#archuistates]
 - do [#cwsp]
+- do [#wfinvcatalog]
+- do [#wfinvdoctor]
+- do [#wfinvautofix]
 <!-- /agent:queue -->
 ###
 <!--
@@ -318,6 +339,10 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#binoutcomes] priority=1 Define the binary workflow outcome contract shared by route, queue continuation, closeout, editor-write, and session-check paths: every decision returns ok, recoverable, blocked, or operator with a stable invariant id, proof marker, and one allowed next action.
+- [ ] [#binstalepause] priority=1 Convert stale queue pauses into typed recoverable outcomes: detect stale holder/supervisor/pause state, prove the queue head is still live or non-drainable, clear or supersede only with proof, and emit durable recovery markers instead of surfacing user-visible pause/conflict errors.
+- [ ] [#binconflictscope] priority=1 Implement component-scoped conflict classification for exchange, queue, backlog, status, review, done/archive, gitlink, and editor writeback so unrelated component edits merge automatically and only same-component incompatible edits become user-visible conflicts.
+- [ ] [#binconflictdedupe] priority=1 Add conflict/symptom de-duplication keyed by invariant id, document id, component, and content hash so repeated stale-pause or drift symptoms attach evidence to the existing backlog/review item instead of creating more queue conflicts.
 - [ ] [#archstatekernel] Implement a pure typed workflow state kernel for agent-doc route/queue/closeout/editor-write decisions: input evidence -> decision enum -> allowed mutation -> required proof. Move stale-supervisor, queue-drainability, captured-response, and live-buffer decisions behind this boundary before adding more route-edge guards.
 - [ ] [#archproofledger] Add an append-only operation proof ledger for queue heads, response captures, patch writes, actor generations, and terminal proofs. Every consumed/deferred/retried/superseded head should have one durable proof row keyed by operation id and content hash.
 - [ ] [#archcomponentmerge] Define and enforce managed-component merge semantics: queue, exchange, backlog, status, review, and done archive each have separate bases and conflict rules; only same-component incompatible edits become user-visible conflicts.

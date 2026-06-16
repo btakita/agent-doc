@@ -222,7 +222,32 @@ Proof for this cycle:
 - Verification: state inspection only; no code changed. The blocker is the stale live install plus missing post-install repro marker.
 - Confidence: high that `#cwsp` should be operator-verify gated rather than implemented now.
 - Escalation: none.
-<!-- agent:boundary:cfde3cf8 -->
+
+### Re: current state after queue-edit interruption and JB route error — gpt-5
+
+The screenshots and current controller state point to a real closeout-interruption class, but the specific pasted `Run Agent Doc` route error is stale relative to the live state now.
+
+`img_30.png` shows Codex hitting `Conversation interrupted` after a stale route-owned-supervisor / IPC-drift recovery path, then exiting with a `codex resume ...` command. `img_31.png` shows the kind of pre-finalize proof body that had been produced but not committed, which is exactly the dangerous state where the response can be mistaken for live prompt drift after restart.
+
+What changed since that generation-438 error: `src/agent-doc` is clean at `2464ba38` (`fix(route): wait active queue behind blocked closeout`), `agent-doc --version` reports `0.34.1`, and `agent-doc admin inspect` now shows the controller and route-owned supervisor both fresh against the installed binary inode. The same inspect output reports this queue head as `state: consumed`, and later dispatch attempts moved past the earlier `queue_paused`/generation-438 failure. So I would not treat the pasted `captured response baseline no longer matches current document` message as the current active blocker.
+
+What is still not proven: I found no `route_dispatch_drain_closeout_wait_existing_queue` marker in `ops.log`, and the live interruption behavior has not been re-tested on this now-fresh controller/supervisor state. That means the source-side route failure is fixed, but the broader "typing into the queue while the owner is active must not interrupt Codex or strand a pre-finalize response" invariant is still only conditionally covered by `#cwsp`.
+
+I am leaving `#cwsp` at the top as `[operator-verify]`: with the fresh installed build, the next useful proof is a live queue edit during an active Codex owner turn. If it still interrupts or strands the response, `#cwsp` becomes the implementation item for the busy-owner suppression guard; if it does not, we can close that item with log proof instead of adding another local exception.
+
+Proof for this cycle:
+- Changed paths: this session document only.
+- Commands: `tsift status`; `agent-doc --version`; `agent-doc preflight ...`; `agent-doc plan ...`; `agent-doc read ...`; `git status --short --branch`; `git -C src/agent-doc status --short --branch`; `git -C src/agent-doc log --oneline -5`; `find . -name img_30.png -o -name img_31.png`; `agent-doc admin inspect ... --json`; targeted `rg` checks in `.agent-doc/logs/ops.log`; inspected `img_30.png` and `img_31.png`.
+- Verification: document/log/screenshot diagnosis only; no source code changed, so I did not run the full build/test suite.
+- Confidence: high that the generation-438 JB route error is stale after the current fresh controller/supervisor state; medium on the queue-edit interruption until the fresh-build live repro is run.
+- Escalation: none.
+<!-- agent:boundary:7909c666 -->
+- Escalation: none.
+- Confidence: high that the generation-438 JB route error is stale after the current fresh controller/supervisor state; medium on the queue-edit interruption until the fresh-build live repro is run.
+- Verification: document/log/screenshot diagnosis only; no source code changed, so I did not run the full build/test suite.
+- Commands: `tsift status`; `agent-doc --version`; `agent-doc preflight ...`; `agent-doc plan ...`; `agent-doc read ...`; `git status --short --branch`; `git -C src/agent-doc status --short --branch`; `git -C src/agent-doc log --oneline -5`; `find . -name img_30.png -o -name img_31.png`; `agent-doc admin inspect ... --json`; targeted `rg` checks in `.agent-doc/logs/ops.log`; inspected `img_30.png` and `img_31.png`.
+- Changed paths: this session document only.
+<!-- agent:boundary:c37db0ab -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -266,7 +291,7 @@ agent-doc reentrant run on equityfundingsource.md had recovery churn.
   Let me record the specific recovery path for this failure mode, since it's a recurring dogfooding pattern
 ```
 ---
-- This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
+- ~~This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)~~
 ---
 The last run had a code fence stripped away by agent-doc.
 #spec-test-build-install-commit-push

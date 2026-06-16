@@ -84,13 +84,13 @@ Verification passed: `cargo test -p agent-doc-orchestration route_submit --lib`,
 Remote CI: `src/agent-doc` GitHub Actions `CI` run `27651569734` is still `in_progress`; local full verification passed, so I did not wait on `gh run watch`. The parent repo has no workflow named `CI`.
 
 Escalation: none. No JetBrains plugin update is required for this fix; it is in the Rust CLI/orchestration path. Confidence: high for preventing route/supervisor input concatenation and for the new proof marker.
-<!-- agent:boundary:bfe83332 -->
+<!-- agent:boundary:ece5bfaa -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- JB `Clear Session Context` does not submit with Enter. Should we have more state machine logic to prevent race conditions?
+- :pushpin: JB `Clear Session Context` does not submit with Enter. JB `Run Agent Doc` sends a `/clear` and restart. After a couple restart JB `Run Agent Doc` still does not send Enter. Should we remove Codex-specific logic with JB commands and just use the same path as with Claude Code? Should we have more state machine logic to prevent race conditions?
 <!-- /agent:queue -->
 ###
 <!--

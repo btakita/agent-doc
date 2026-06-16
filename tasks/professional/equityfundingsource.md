@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -196,7 +196,7 @@ Verification:
 I did not deploy this cycle because the session preset was `#spec-test-commit-push`, not a deploy preset; the production URLs will reflect this after the next deploy.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:38a5a6eb -->
+<!-- agent:boundary:a9f6c172 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -204,8 +204,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-The Loan Status, Application Record, Borrower Info, Borrower Detail, Collateral can be card views. It is currently too wide ![img_16.png](img_16.png)
-https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f and https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline dialogs.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

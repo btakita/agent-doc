@@ -1108,6 +1108,160 @@ pub enum MetadataDriftAuthority {
     Ambiguous,
 }
 
+/// Why the closeout recovery mutation primitive is changing durable state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseoutRecoveryMutationReason {
+    BenignReplayBaseline,
+    QueueOnlyReplayBaseline,
+    CommitQueueMetadataDrift,
+    ResetFromVisible,
+    RestoreHeadMetadata,
+    RetireWedgedWriteAppliedCapture,
+    RetireSupersededCapturedOnlyOrphan,
+    RespectManualTailRemoval,
+}
+
+impl CloseoutRecoveryMutationReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::BenignReplayBaseline => "benign_replay_baseline",
+            Self::QueueOnlyReplayBaseline => "queue_only_replay_baseline",
+            Self::CommitQueueMetadataDrift => "commit_queue_metadata_drift",
+            Self::ResetFromVisible => "reset_from_visible",
+            Self::RestoreHeadMetadata => "restore_head_metadata",
+            Self::RetireWedgedWriteAppliedCapture => "retire_wedged_write_applied_capture",
+            Self::RetireSupersededCapturedOnlyOrphan => "retire_superseded_captured_only_orphan",
+            Self::RespectManualTailRemoval => "respect_manual_tail_removal",
+        }
+    }
+
+    const fn capture_refresh_event(self) -> &'static str {
+        match self {
+            Self::QueueOnlyReplayBaseline => "capture_baseline_refreshed_for_queue_only_drift",
+            _ => "capture_baseline_refreshed_for_benign_drift",
+        }
+    }
+
+    const fn capture_refresh_message(self) -> &'static str {
+        match self {
+            Self::QueueOnlyReplayBaseline => "queue-only drift detected",
+            _ => "benign drift detected",
+        }
+    }
+}
+
+/// Durable mutation primitive for closeout recovery (`#smrecoverymutate`).
+///
+/// Policy decides *which* recovery is allowed before this point. This primitive
+/// owns the shared mutation mechanics so replay-baseline refresh, stale-capture
+/// retirement, reset-from-visible, and restore-from-HEAD cannot each rebuild
+/// snapshots / CRDT / capture state slightly differently.
+pub enum CloseoutRecoveryMutation<'a> {
+    RefreshReplayBaseline {
+        capture: &'a crate::capture::CaptureRecord,
+        current_file_hash: &'a str,
+        current_snapshot_hash: Option<&'a str>,
+        reason: CloseoutRecoveryMutationReason,
+    },
+    RebuildSidecarsFromContent {
+        content: &'a str,
+        write_visible_file: bool,
+        reason: CloseoutRecoveryMutationReason,
+    },
+    RetireStaleCapture {
+        content: Option<&'a str>,
+        clear_pending_response: bool,
+        delete_pre_response: bool,
+        mark_cycle_committed_event: Option<&'a str>,
+        reason: CloseoutRecoveryMutationReason,
+    },
+}
+
+pub fn apply_closeout_recovery_mutation(
+    file: &Path,
+    mutation: CloseoutRecoveryMutation<'_>,
+) -> Result<()> {
+    match mutation {
+        CloseoutRecoveryMutation::RefreshReplayBaseline {
+            capture,
+            current_file_hash,
+            current_snapshot_hash,
+            reason,
+        } => {
+            let changed = crate::capture::refresh_replay_baseline_for_recovery(
+                file,
+                capture,
+                current_file_hash,
+                current_snapshot_hash,
+                reason.capture_refresh_event(),
+                reason.capture_refresh_message(),
+            )?;
+            if changed {
+                log_closeout_recovery_mutation(file, "refresh_replay_baseline", reason);
+            }
+        }
+        CloseoutRecoveryMutation::RebuildSidecarsFromContent {
+            content,
+            write_visible_file,
+            reason,
+        } => {
+            if write_visible_file {
+                std::fs::write(file, content)
+                    .with_context(|| format!("restore {} from recovery content", file.display()))?;
+            }
+            rebuild_sidecars_from_content(file, content)?;
+            log_closeout_recovery_mutation(file, "rebuild_sidecars_from_content", reason);
+        }
+        CloseoutRecoveryMutation::RetireStaleCapture {
+            content,
+            clear_pending_response,
+            delete_pre_response,
+            mark_cycle_committed_event,
+            reason,
+        } => {
+            if clear_pending_response {
+                let pending_path = crate::snapshot::pending_path_for(file)?;
+                if pending_path.exists() {
+                    std::fs::remove_file(&pending_path).with_context(|| {
+                        format!(
+                            "failed to remove pending response during closeout recovery mutation {}",
+                            pending_path.display()
+                        )
+                    })?;
+                }
+            }
+            if delete_pre_response && let Err(e) = crate::snapshot::delete_pre_response(file) {
+                eprintln!("[repair] warning: failed to delete pre-response: {}", e);
+            }
+            crate::capture::mark_discarded(file)?;
+            if let Some(content) = content {
+                rebuild_sidecars_from_content(file, content)?;
+            }
+            if let Some(event) = mark_cycle_committed_event {
+                crate::cycle_state::mark_committed(file, event, content, content)?;
+            }
+            log_closeout_recovery_mutation(file, "retire_stale_capture", reason);
+        }
+    }
+    Ok(())
+}
+
+fn log_closeout_recovery_mutation(
+    file: &Path,
+    action: &str,
+    reason: CloseoutRecoveryMutationReason,
+) {
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "closeout_recovery_mutation file={} action={} reason={}",
+            file.display(),
+            action,
+            reason.as_str()
+        ),
+    );
+}
+
 /// Decide the authoritative side of a content-equal metadata-only drift between a
 /// `local` document string (the candidate to commit) and the committed `head`.
 ///
@@ -1167,7 +1321,20 @@ fn apply_metadata_drift_recovery(
             // is HEAD-equal, so rebuild the sidecars from the visible file first so
             // the selective `git::commit` stages the accepted working metadata.
             if state == CloseoutRecoveryState::SidecarVisibleDrift {
-                rebuild_sidecars_from_content(file, local)?;
+                apply_closeout_recovery_mutation(
+                    file,
+                    CloseoutRecoveryMutation::RebuildSidecarsFromContent {
+                        content: local,
+                        write_visible_file: false,
+                        reason: CloseoutRecoveryMutationReason::ResetFromVisible,
+                    },
+                )?;
+            } else {
+                log_closeout_recovery_mutation(
+                    file,
+                    "commit_metadata_drift",
+                    CloseoutRecoveryMutationReason::CommitQueueMetadataDrift,
+                );
             }
             crate::git::commit(file)?;
             Ok(RecoveryApplication::Applied {
@@ -1181,9 +1348,14 @@ fn apply_metadata_drift_recovery(
             // HEAD's live queue continuation is authoritative; discard the spurious
             // local metadata drift by restoring the visible file and sidecars from
             // HEAD. No new commit — HEAD already holds the authoritative content.
-            std::fs::write(file, head)
-                .with_context(|| format!("restore {} from HEAD", file.display()))?;
-            rebuild_sidecars_from_content(file, head)?;
+            apply_closeout_recovery_mutation(
+                file,
+                CloseoutRecoveryMutation::RebuildSidecarsFromContent {
+                    content: head,
+                    write_visible_file: true,
+                    reason: CloseoutRecoveryMutationReason::RestoreHeadMetadata,
+                },
+            )?;
             Ok(RecoveryApplication::Applied {
                 state,
                 action:
@@ -2269,7 +2441,7 @@ mod tests {
             "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
         );
         let snapshot = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
-        let (_dir, doc) = setup_git_project_with_doc(head);
+        let (dir, doc) = setup_git_project_with_doc(head);
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
         // The snapshot AND the visible file carry the drift; only HEAD is behind.
         std::fs::write(&doc, &snapshot).unwrap();
@@ -2298,6 +2470,12 @@ mod tests {
             classify_closeout_recovery_state(&doc),
             CloseoutRecoveryState::Clean
         );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("closeout_recovery_mutation")
+                && log.contains("reason=commit_queue_metadata_drift"),
+            "queue metadata commit must go through the shared recovery mutation primitive:\n{log}"
+        );
     }
 
     #[test]
@@ -2312,7 +2490,7 @@ mod tests {
             "<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n",
         );
         let snapshot = head.replace("queue_active: true", "queue_active: false");
-        let (_dir, doc) = setup_git_project_with_doc(head);
+        let (dir, doc) = setup_git_project_with_doc(head);
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
         crate::snapshot::save(&doc, &snapshot).unwrap();
         crate::cycle_state::mark_committed(
@@ -2337,6 +2515,57 @@ mod tests {
         assert_eq!(
             classify_closeout_recovery_state(&doc),
             CloseoutRecoveryState::Clean
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("closeout_recovery_mutation")
+                && log.contains("reason=restore_head_metadata"),
+            "restore-from-HEAD recovery must go through the shared recovery mutation primitive:\n{log}"
+        );
+    }
+
+    #[test]
+    fn apply_recovery_commits_sidecar_visible_drift_through_mutation() {
+        // `#smrecoverymutate`: reset-from-visible rebuilds snapshot/CRDT through
+        // the shared mutation primitive before committing accepted metadata drift.
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+        let visible = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
+        let (dir, doc) = setup_git_project_with_doc(head);
+        crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        crate::snapshot::save(&doc, head).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(head), Some(head)).unwrap();
+        std::fs::write(&doc, &visible).unwrap();
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::SidecarVisibleDrift
+        );
+
+        match apply_closeout_recovery(&doc).unwrap() {
+            RecoveryApplication::Applied { state, .. } => {
+                assert_eq!(state, CloseoutRecoveryState::SidecarVisibleDrift);
+            }
+            other => panic!("expected Applied for sidecar-visible drift, got {other:?}"),
+        }
+
+        let working = std::fs::read_to_string(&doc).unwrap();
+        assert!(working.contains("- do [#b]"), "{working}");
+        let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(snapshot.contains("- do [#b]"), "{snapshot}");
+        assert!(
+            crate::git::show_head(&doc)
+                .unwrap()
+                .unwrap()
+                .contains("- do [#b]")
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("closeout_recovery_mutation") && log.contains("reason=reset_from_visible"),
+            "reset-from-visible recovery must go through the shared recovery mutation primitive:\n{log}"
         );
     }
 

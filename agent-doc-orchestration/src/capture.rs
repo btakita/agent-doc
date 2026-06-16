@@ -507,11 +507,14 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
     //
     // Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md
     if response_body_intact_in_current(file, &capture.response_body, &current_file)? {
-        refresh_replay_baseline(
+        crate::flow::closeout::apply_closeout_recovery_mutation(
             file,
-            capture,
-            &current_file_hash,
-            current_snapshot_hash.as_deref(),
+            crate::flow::closeout::CloseoutRecoveryMutation::RefreshReplayBaseline {
+                capture,
+                current_file_hash: &current_file_hash,
+                current_snapshot_hash: current_snapshot_hash.as_deref(),
+                reason: crate::flow::closeout::CloseoutRecoveryMutationReason::BenignReplayBaseline,
+            },
         )?;
         return Ok(());
     }
@@ -526,20 +529,16 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
         && !snapshot_mismatch
         && live_drift_is_queue_only_against_snapshot(&current_file, current_snapshot.as_deref())?
     {
-        refresh_replay_baseline(
+        crate::flow::closeout::apply_closeout_recovery_mutation(
             file,
-            capture,
-            &current_file_hash,
-            current_snapshot_hash.as_deref(),
+            crate::flow::closeout::CloseoutRecoveryMutation::RefreshReplayBaseline {
+                capture,
+                current_file_hash: &current_file_hash,
+                current_snapshot_hash: current_snapshot_hash.as_deref(),
+                reason:
+                    crate::flow::closeout::CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline,
+            },
         )?;
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "capture_baseline_refreshed_for_queue_only_drift file={} capture_id={}",
-                file.display(),
-                capture.capture_id
-            ),
-        );
         return Ok(());
     }
 
@@ -618,12 +617,14 @@ pub(crate) fn live_drift_is_queue_only_against_snapshot(
 /// Refresh the capture record's `file_hash` and `snapshot_hash` to match the
 /// current state, after `response_body_intact_in_current` confirmed the
 /// drift is benign. Logged via `ops_log` so the recovery is auditable.
-fn refresh_replay_baseline(
+pub(crate) fn refresh_replay_baseline_for_recovery(
     file: &Path,
     capture: &CaptureRecord,
     current_file_hash: &str,
     current_snapshot_hash: Option<&str>,
-) -> Result<()> {
+    audit_event: &str,
+    message: &str,
+) -> Result<bool> {
     let mut record = capture.clone();
     let mut changed = false;
     if record.file_hash.as_deref() != Some(current_file_hash) {
@@ -635,24 +636,26 @@ fn refresh_replay_baseline(
         changed = true;
     }
     if !changed {
-        return Ok(());
+        return Ok(false);
     }
     record.updated_at = now_secs();
     write_record(file, &record)?;
     crate::ops_log::log_op(
         file,
         &format!(
-            "capture_baseline_refreshed_for_benign_drift file={} capture_id={}",
+            "{} file={} capture_id={}",
+            audit_event,
             file.display(),
             record.capture_id
         ),
     );
     eprintln!(
-        "[capture] benign drift detected for {} — refreshed capture baseline (capture_id={})",
+        "[capture] {} for {} — refreshed capture baseline (capture_id={})",
+        message,
         file.display(),
         record.capture_id
     );
-    Ok(())
+    Ok(true)
 }
 
 pub fn mark_write_applied(file: &Path) -> Result<()> {
@@ -1193,6 +1196,11 @@ mod tests {
             log.contains("capture_baseline_refreshed_for_queue_only_drift"),
             "queue-only refresh must be logged for audit:\n{log}"
         );
+        assert!(
+            log.contains("closeout_recovery_mutation")
+                && log.contains("reason=queue_only_replay_baseline"),
+            "queue-only replay refresh must go through the shared recovery mutation primitive:\n{log}"
+        );
     }
 
     /// Phase 2 of #adoc-baseline-drift-after-user-commit: when the captured
@@ -1236,6 +1244,11 @@ mod tests {
         assert!(
             log.contains("capture_baseline_refreshed_for_benign_drift"),
             "refresh must be logged for audit:\n{log}"
+        );
+        assert!(
+            log.contains("closeout_recovery_mutation")
+                && log.contains("reason=benign_replay_baseline"),
+            "benign replay refresh must go through the shared recovery mutation primitive:\n{log}"
         );
     }
 

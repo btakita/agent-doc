@@ -1287,25 +1287,15 @@ fn fail_closed_on_blocked_template_replay(file: &Path, response: &str, reason: &
 }
 
 fn discard_pending_capture_for_manual_repair(file: &Path, current_doc: &str) -> Result<()> {
-    let pending_path = snapshot::pending_path_for(file)?;
-    if pending_path.exists() {
-        std::fs::remove_file(&pending_path).with_context(|| {
-            format!(
-                "failed to remove pending response after manual repair {}",
-                pending_path.display()
-            )
-        })?;
-    }
-    if let Err(e) = snapshot::delete_pre_response(file) {
-        eprintln!("[repair] warning: failed to delete pre-response: {}", e);
-    }
-    crate::capture::mark_discarded(file)?;
-    snapshot::save(file, current_doc)?;
-    crate::cycle_state::mark_committed(
+    crate::flow::closeout::apply_closeout_recovery_mutation(
         file,
-        "repair_respect_manual_exchange_tail_removal",
-        Some(current_doc),
-        Some(current_doc),
+        crate::flow::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
+            content: Some(current_doc),
+            clear_pending_response: true,
+            delete_pre_response: true,
+            mark_cycle_committed_event: Some("repair_respect_manual_exchange_tail_removal"),
+            reason: crate::flow::closeout::CloseoutRecoveryMutationReason::RespectManualTailRemoval,
+        },
     )?;
     crate::ops_log::log_op(
         file,
@@ -1367,30 +1357,16 @@ fn retire_wedged_write_applied_capture_if_drifted(
         return Ok(false);
     }
 
-    // Retire the stale capture body (Discarded — preserved on disk) and rebuild
-    // snapshot + CRDT from the current document, matching the non-destructive
-    // `reset --from-current --preserve-session` recovery.
-    let pending_path = snapshot::pending_path_for(file)?;
-    if pending_path.exists() {
-        std::fs::remove_file(&pending_path).with_context(|| {
-            format!(
-                "failed to remove pending response while retiring stale capture {}",
-                pending_path.display()
-            )
-        })?;
-    }
-    if let Err(e) = snapshot::delete_pre_response(file) {
-        eprintln!("[repair] warning: failed to delete pre-response: {}", e);
-    }
-    crate::capture::mark_discarded(file)?;
-    snapshot::save(file, doc_content)?;
-    let crdt = crate::crdt::CrdtDoc::from_text(doc_content).encode_state();
-    crate::snapshot::save_document_crdt(file, &crdt, doc_content)?;
-    crate::cycle_state::mark_committed(
+    crate::flow::closeout::apply_closeout_recovery_mutation(
         file,
-        "repair_retire_wedged_write_applied_capture",
-        Some(doc_content),
-        Some(doc_content),
+        crate::flow::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
+            content: Some(doc_content),
+            clear_pending_response: true,
+            delete_pre_response: true,
+            mark_cycle_committed_event: Some("repair_retire_wedged_write_applied_capture"),
+            reason:
+                crate::flow::closeout::CloseoutRecoveryMutationReason::RetireWedgedWriteAppliedCapture,
+        },
     )?;
     crate::ops_log::log_op(
         file,
@@ -1454,19 +1430,16 @@ fn retire_superseded_captured_only_orphan_if_drifted(
         return Ok(false);
     }
 
-    let pending_path = snapshot::pending_path_for(file)?;
-    if pending_path.exists() {
-        std::fs::remove_file(&pending_path).with_context(|| {
-            format!(
-                "failed to remove pending response while retiring superseded captured orphan {}",
-                pending_path.display()
-            )
-        })?;
-    }
-    if let Err(e) = snapshot::delete_pre_response(file) {
-        eprintln!("[repair] warning: failed to delete pre-response: {}", e);
-    }
-    crate::capture::mark_discarded(file)?;
+    crate::flow::closeout::apply_closeout_recovery_mutation(
+        file,
+        crate::flow::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
+            content: None,
+            clear_pending_response: true,
+            delete_pre_response: true,
+            mark_cycle_committed_event: None,
+            reason: crate::flow::closeout::CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
+        },
+    )?;
     crate::ops_log::log_op(
         file,
         &format!(
@@ -2997,6 +2970,12 @@ mod tests {
                 panic!("session-check must accept the retired-capture recovery: {msg}")
             }
         }
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("closeout_recovery_mutation")
+                && log.contains("retire_wedged_write_applied_capture"),
+            "wedged capture retirement must go through the shared recovery mutation primitive:\n{log}"
+        );
     }
 
     // A `Captured`-only orphan (write never attempted) must STAY on the
@@ -3068,6 +3047,12 @@ mod tests {
         assert_eq!(
             capture.response_body, lost,
             "captured body must be preserved for forensics"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("closeout_recovery_mutation")
+                && log.contains("retire_superseded_captured_only_orphan"),
+            "superseded captured orphan retirement must go through the shared recovery mutation primitive:\n{log}"
         );
     }
 

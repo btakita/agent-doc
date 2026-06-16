@@ -393,26 +393,41 @@ pub const DISPATCH_STALE_GENERATION_REDIRECT_MARKER: &str = "stale_generation_re
 pub const DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER: &str = "supervisor_restart_redirect";
 
 /// `#jbrestale`: classify a failed dispatch as a recoverable stale-supervisor
-/// churn-stop and extract the stale supervisor PID named in the bail (`stale_pid=<N>`,
-/// `0` when the pause reason did not name one) for the `route_dispatch_recovery …
-/// stale_pid=<pid>` proof line. Returns `None` for every other failure so a deliberate
-/// operator pause, a spent-preset pause, or a genuinely-wedged queue stays terminal and
-/// never triggers a restart. Pure and UTF-8 safe.
+/// churn-stop and extract the stale supervisor PID named in the bail (`stale_pid=<N>`
+/// in current errors, or `stale ... pid<N>` in legacy markerless errors; `0` when
+/// the pause reason did not name one) for the `route_dispatch_recovery …
+/// stale_pid=<pid>` proof line.
+///
+/// New controllers tag recoverable bails with
+/// [`DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER`]. Older route-owned supervisors can
+/// still produce the pre-marker shape:
+/// `failed_stage=queue_paused reason=#qchurn ... stale host supervisor pid<N> ...`.
+/// Route consumes both shapes through this one classifier so stale-controller
+/// compatibility does not become a second route policy.
+///
+/// Returns `None` for every other failure so a deliberate operator pause, a
+/// spent-preset pause, or a genuinely-wedged queue stays terminal and never triggers a
+/// restart. Pure and UTF-8 safe.
 pub fn dispatch_error_supervisor_restart_redirect(message: &str) -> Option<u32> {
-    if !message.contains(DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER) {
-        return None;
+    if message.contains(DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER) {
+        let pid = message
+            .split("stale_pid=")
+            .nth(1)
+            .map(|rest| {
+                rest.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+            })
+            .and_then(|digits| digits.parse::<u32>().ok())
+            .unwrap_or(0);
+        return Some(pid);
     }
-    let pid = message
-        .split("stale_pid=")
-        .nth(1)
-        .map(|rest| {
-            rest.chars()
-                .take_while(|c| c.is_ascii_digit())
-                .collect::<String>()
-        })
-        .and_then(|digits| digits.parse::<u32>().ok())
-        .unwrap_or(0);
-    Some(pid)
+    if message.contains("failed_stage=queue_paused")
+        && pause_reason_is_stale_supervisor_churn_stop(message)
+    {
+        return Some(stale_supervisor_pid_from_pause_reason(message).unwrap_or(0));
+    }
+    None
 }
 
 /// `#anw0`: classify a failed dispatch as a stale-generation redirect and extract the
@@ -5143,6 +5158,14 @@ mod tests {
                 "dispatch blocked: failed_stage=queue_paused reason=supervisor_binary_stale receipt_id=7 supervisor_restart_redirect stale_pid=0"
             ),
             Some(0)
+        );
+        // Legacy stale supervisors predate the redirect marker. Route must still recover
+        // the stale-supervisor churn-stop instead of surfacing the JB Run Agent Doc error.
+        assert_eq!(
+            r(
+                "project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3649 blocked_head_bytes=132"
+            ),
+            Some(2715614)
         );
         // No marker → terminal (a deliberate operator/spent-preset pause never restarts).
         assert_eq!(

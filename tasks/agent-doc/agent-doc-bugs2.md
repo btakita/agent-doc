@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 agent_doc_pipeline:
   run_id: cycle-1781638030591
   step: write_applied
@@ -61,13 +61,35 @@ Verification passed: focused submit/route/idle/clear/SimWorld tests, ignored liv
 No JetBrains plugin update is required for this change; it is Rust CLI/orchestration code. `make install` installed the updated binary and `libagent_doc.so`, and marked two controllers to recycle at the next idle boundary.
 
 Confidence: high for the code path and proof markers. Live JB confirmation should grep for `submit_mode=tmux_text_enter` and `action=submit_key key=Enter` if this recurs.
-<!-- agent:boundary:8c0c5dbe -->
+
+### Re: JB Run Agent Doc route submit race — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` sends a `agent-doc .../agent-doc-bugs2.md<CR>/clear<CR>` and does not submit. The behavior has not changed despite over 2 days working on this. Simplify further? Consolidate logic.
+
+
+Implemented a narrower fix for the remaining JB `Run Agent Doc` failure. The issue is no longer the submit key shape itself; the race is that the editor route path can be submitting `agent-doc <FILE>` while the supervisor idle-queue watcher independently decides to inject `/clear` or the next drain trigger into the same Codex composer. That explains the observed `agent-doc ...agent-doc-bugs2.md<CR>/clear<CR>` draft.
+
+The route path now writes a short-lived per-document route-in-flight marker while it submits and waits for route proof. The idle watcher reads that marker and treats it as a first-class skip reason for both context reset and drain decisions, with ops-log proof `idle_queue_watch_skipped ... reason=route_submit_in_flight`. It also stops counting a visible prompt as clear-settled while route submission is active, so the pre-submit composer cannot satisfy the debounce gate.
+
+Changed paths: `src/agent-doc` submodule only, including `agent-doc-orchestration/src/route_in_flight.rs`, `route/dispatch.rs`, `start/idle_watch.rs`, `start/decisions.rs`, `start/detection.rs`, `start.rs`, `src/sim_world/engine.rs`, and `VERSIONS.md`. Parent repo change is the `src/agent-doc` gitlink update.
+
+Commits pushed:
+- `src/agent-doc`: `58e549d6 fix: fence route submit from idle queue clears`
+- parent repo: `b6ff39dcd agent-doc: fence route submit from idle queue clears`
+
+Verification passed: `cargo test -p agent-doc-orchestration route_submit --lib`, `cargo test -p agent-doc-orchestration idle_queue --lib`, full `make check` (4,603 nextest tests plus the ignored SimWorld budget test used by the check target), `make install`, and installed `agent-doc --version` reports `0.34.1`. `make install` installed the updated binary/shared library and marked one controller to recycle at the next idle boundary.
+
+Remote CI: `src/agent-doc` GitHub Actions `CI` run `27651569734` is still `in_progress`; local full verification passed, so I did not wait on `gh run watch`. The parent repo has no workflow named `CI`.
+
+Escalation: none. No JetBrains plugin update is required for this fix; it is in the Rust CLI/orchestration path. Confidence: high for preventing route/supervisor input concatenation and for the new proof marker.
+<!-- agent:boundary:861d2c86 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: JB `Run Agent Doc` sends a `agent-doc .../agent-doc-bugs2.md<CR>/clear<CR>` and does not submit. The behavior has not changed despite over 2 days working on this. Simplify further? Consolidate logic.
 <!-- /agent:queue -->
 ###
 <!--

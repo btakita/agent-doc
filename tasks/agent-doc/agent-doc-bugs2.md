@@ -37,7 +37,30 @@ queue: start
 Compacted content:
 - Archived 39 response topic(s): #compactdrift-agent; Compact Closeout Guard Follow-Up; Restored Queue Strikethroughs; 36 more
 - Prior summary/context: prior compacted content: Archived 15 response topic(s): Codex MCP Permission Prompts; Codex Finalize Transport Recove...
-<!-- agent:boundary:5af4333c -->
+
+### Re: JB Run Agent Doc Codex boot timeout — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: I switched mrh-servers.md from Claude to Codex by restarting agent-doc. Now JB `Run Agent Doc` is unresponsive. The Codex session was idle.
+> ```
+> resync: pruned 1 stale session(s)
+> [route] target tmux session: 0
+> [route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client
+> Error: dispatch-only codex reopen refused to inject into pane %103 for tasks/mrh-servers.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
+> ```
+
+
+Fixed the JetBrains-side unresponsive `Run Agent Doc` path for the reported `dispatch-only codex reopen refused ... latest run is still booting ... (timed_out)` shape. The router is still correct to refuse injection when a Codex pane only shows status/footer chrome and never proves a dispatch-ready prompt; the bug was that the JetBrains plugin treated that already-timed-out route refusal as retryable and could silently re-run the 60s ready wait several times.
+
+Changed behavior: only authoritative-actor startup guard failures remain retryable. Dispatch-only `latest run is still booting ... (timed_out)` now surfaces the persisted route diagnostic immediately. Active-turn blockers still get the existing still-running notification.
+
+Changed paths in `src/agent-doc`: `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt`, `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt`, `editors/jetbrains/SPEC.md`, `specs/07-session-tmux-commands.md`, `editors/jetbrains/gradle.properties`, `VERSIONS.md`.
+
+Commits pushed: `agent-doc` `f5844c53` (`fix(jb): surface codex boot timeouts`) and parent repo `e858a951e` (`chore: update agent-doc submodule`). I also installed the rebuilt JetBrains plugin `0.2.165` into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ IDEA to activate it.
+
+Verification: focused JetBrains `TerminalUtilTest` passed, `make check` passed in the normal checkout, the failed tmux sync test from the first run passed in isolation, `make check` passed again on the clean replayed commit under the normal sibling layout, and `./gradlew buildPlugin` succeeded from that replayed commit. GitHub Actions for `agent-doc` was still in progress (`27586552150`) when checked; the parent repo has no workflow named `CI`.
+<!-- agent:boundary:780f1b62 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -52,6 +75,12 @@ resync: pruned 1 stale session(s)
 Error: dispatch-only codex reopen refused to inject into pane %103 for tasks/mrh-servers.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
 ```
 ---
+- ~~[#lazilyqrestore]~~
+- [#c2b6]
+- [#1j8q]
+- [#anw0verify]
+- [#qflood2]
+- [#qt32]
 <!-- /agent:queue -->
 ###
 <!--

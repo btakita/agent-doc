@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -149,6 +149,11 @@ Source links: [NVIDIA RTX 5090](https://www.nvidia.com/en-us/geforce/graphics-ca
 
 > **Queue prompt:**
 >
+> How can I use a local model to support both tsift and agent-doc for local Knowledge models?
+
+
+> **Queue prompt:**
+>
 > Can I use the Qwen2.5-Coder-32B with my current available vRAM?
 
 
@@ -169,19 +174,29 @@ Practical guidance:
 - **Quality try:** `Q5_K_M` if you keep context moderate, for example 8k-16k to start.
 - **Tight / test-only:** `Q6_K` may fit only with small context and careful settings; expect failures or CPU offload if the runtime is not efficient.
 - **Avoid as default:** `Q8_0`, fp16, or very large 32k-128k contexts on one 32 GB card.
+6. Keep hot-path query behavior local and cached: no live model call merely because an agent asked for context.
+5. Have agent-doc retrieve only through tsift commands: `memory search`, `context-pack`, `finding list`, and graph/search envelopes.
+4. Let `tsift finding harvest` optionally use the local extractor for draft candidates from agent-doc archives.
+3. Add schema-constrained extraction records with provenance and confidence.
+2. Teach `tsift summarize --extract` to use `models.roles.extractor_*` instead of assuming one remote provider.
+1. Add a shared tsift model config and OpenAI-compatible adapter.
+- optionally propose backlog/review dedupe candidates, but never silently mutate them without the existing agent-doc closeout path
+- enrich `context-pack` packets with local semantic concepts and trusted findings
+- answer `agent-doc memory search` / duplicate-work checks through tsift retrieval
+- extract draft findings/decisions/notes from agent-doc archives
+- summarize committed exchange tails into `.tsift/memory.db`
 
 For tsift model support, this means Qwen2.5-Coder-32B is a reasonable `code.quality` / `5090-local` profile, not a portable default. The portable default should stay around 7B-14B or a small MoE/20B-class model, because other users may only have 8-16 GB of VRAM.
 
 I would run it through `llama.cpp`/GGUF or another runtime with explicit GPU layer/context controls. `ollama` is not installed on this machine right now (`ollama list` failed with `command not found`), so I could not inspect an existing local Ollama model tag or size.
 
 No code changed this cycle. Verification was hardware/document only: `tsift status`, `agent-doc preflight`, `agent-doc plan`, `nvidia-smi`, and `ollama list`. `tsift status` still reports one missing workspace scope, so I did not rely on tsift graph/search evidence.
-<!-- agent:boundary:b87ec8f8 -->
+<!-- agent:boundary:84914b49 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- How can I use a local model to support both tsift and agent-doc for local Knowledge models?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

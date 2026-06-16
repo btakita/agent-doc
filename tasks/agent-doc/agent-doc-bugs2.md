@@ -712,7 +712,6 @@ Commits:
 Confidence: high. The implementation is covered by focused tests, CLI smoke, full local `make check`, installed-binary verification, and current push/CI polling.
 
 Escalation: none.
-❯ <<<<<<< agent-response
 
 ### Re: do [#wfinvautofix] — gpt-5
 
@@ -755,9 +754,6 @@ Commits:
 Confidence: high. The planner is isolated behind a command surface, covered by focused tests and full local `make check`, and the installed dry-run smoke verifies the live safety split without mutating the proof ledger.
 
 Escalation: none.
-❯ ||||||| original
-❯ =======
-❯ >>>>>>> your-edits
 <!-- agent:boundary:64ad619e -->
 <!-- /agent:exchange -->
 

@@ -471,10 +471,10 @@ Verification:
 - Each row asserts the typed decision, allowed mutation, and exact proof obligations so future decision changes must update the matrix deliberately.
 - The matrix names the required architecture primitives: stale supervisor recycle, operator-only/no-drainable queue no-op, queue edit during unresolved closeout, degraded/file-IPC materialized response fallback, compact/replay captured response, attributed live-buffer drift, and unattributed live-buffer drift.
 - Added a table-driven workflow architecture matrix test for the mirror-mode state kernel.
-❯ - parent gitlink `src/agent-doc`
+- parent gitlink `src/agent-doc`
 - `src/agent-doc/agent-doc-orchestration/src/flow/workflow_state.rs`
 - `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
-❯ - `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+- `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
 
 Confidence: high. The implementation is isolated, tested for validation/document scoping/append-only behavior/required vocabulary, and the full repo check passed.
 
@@ -495,7 +495,7 @@ Changed paths:
 - `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
 - `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/PatchGenerationFenceTest.kt`
 - `src/agent-doc/specs/07-orchestration-commands.md`
-❯ - parent gitlink `src/agent-doc`
+- parent gitlink `src/agent-doc`
 
 What changed:
 - Reused the existing `turn_scope` managed-component contract for broad component-scoped conflict semantics.
@@ -510,7 +510,17 @@ Verification:
 - `cargo test -p agent-doc-core turn_scope`
 - `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
 - `/usr/bin/zsh -lc 'GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin'` from `src/agent-doc/editors/jetbrains`
-❯ - `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+- `gh run list --workflow CI --limit 1` shows latest CI run `27607675117` completed successfully.
+- `make check` (clippy, 4,588 nextest tests, doctests, medium SimWorld)
+- `cargo test -p agent-doc-orchestration preflight::semantic_diff::tests::user_intent -- --nocapture`
+- `cargo test -p agent-doc --test run_integration preflight_ -- --nocapture`
+- `cargo test -p agent-doc --test run_integration codex_owned_pane_ -- --nocapture`
+- `cargo fmt`
+- Recursive preflight preserves the active owner turn-scope sidecar instead of replacing it with the sibling queue item's derived scope.
+- Direct `agent-doc <FILE>` in the Codex owner pane now returns a no-op/defer for that independent queue edit before precommit or prompt-prefix normalization, so it does not dispatch into the busy owner pane, mutate the document, or increment the wedge counter.
+- Same-pane active-queue fallback can be suppressed when an open owner cycle plus the persisted active turn scope prove a new queue prompt is independent of the current turn.
+- Preflight now derives owner-pane unresolved-prompt detection from filtered user-intent prompt changes, not raw prompt-bearing changes.
+- `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
 
 Confidence: high. The broad component-scope classifier remains covered by `turn_scope` tests, and this commit adds focused enforcement for the risky queue-consume editor IPC path.
 
@@ -526,19 +536,19 @@ Escalation: none.
 Implemented `#archsimworldmatrix` in submodule commit `3fab370f` (`test: cover workflow architecture matrix`).
 
 Changed paths:
-❯ - `src/agent-doc/agent-doc-orchestration/src/flow/workflow_state.rs`
-❯ - parent gitlink `src/agent-doc`
+- `src/agent-doc/agent-doc-orchestration/src/flow/workflow_state.rs`
+- parent gitlink `src/agent-doc`
 
 What changed:
-❯ - Added a table-driven workflow architecture matrix test for the mirror-mode state kernel.
-❯ - The matrix names the required architecture primitives: stale supervisor recycle, operator-only/no-drainable queue no-op, queue edit during unresolved closeout, degraded/file-IPC materialized response fallback, compact/replay captured response, attributed live-buffer drift, and unattributed live-buffer drift.
-❯ - Each row asserts the typed decision, allowed mutation, and exact proof obligations so future decision changes must update the matrix deliberately.
+- Added a table-driven workflow architecture matrix test for the mirror-mode state kernel.
+- The matrix names the required architecture primitives: stale supervisor recycle, operator-only/no-drainable queue no-op, queue edit during unresolved closeout, degraded/file-IPC materialized response fallback, compact/replay captured response, attributed live-buffer drift, and unattributed live-buffer drift.
+- Each row asserts the typed decision, allowed mutation, and exact proof obligations so future decision changes must update the matrix deliberately.
 
 Verification:
 ❯ - `cargo fmt`
-❯ - `cargo test -p agent-doc-orchestration workflow_state`
-❯ - `make check` (clippy, 4,584 nextest tests, doctests, medium SimWorld corpus)
-❯ - `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+- `cargo test -p agent-doc-orchestration workflow_state`
+- `make check` (clippy, 4,584 nextest tests, doctests, medium SimWorld corpus)
+- `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
 
 Confidence: high. This is isolated deterministic coverage over the pure workflow-state kernel, and the full repo check passed.
 
@@ -567,21 +577,21 @@ Verification passed: `cargo fmt`; focused Rust outcome/route/controller/session-
 Implemented `#cwsp` in `src/agent-doc` and committed the submodule as `9870c5ef` (`fix: defer owner-pane queue sibling edits`).
 
 What changed:
-- Preflight now derives owner-pane unresolved-prompt detection from filtered user-intent prompt changes, not raw prompt-bearing changes.
-- Same-pane active-queue fallback can be suppressed when an open owner cycle plus the persisted active turn scope prove a new queue prompt is independent of the current turn.
-- Direct `agent-doc <FILE>` in the Codex owner pane now returns a no-op/defer for that independent queue edit before precommit or prompt-prefix normalization, so it does not dispatch into the busy owner pane, mutate the document, or increment the wedge counter.
-- Recursive preflight preserves the active owner turn-scope sidecar instead of replacing it with the sibling queue item's derived scope.
+❯ - Preflight now derives owner-pane unresolved-prompt detection from filtered user-intent prompt changes, not raw prompt-bearing changes.
+❯ - Same-pane active-queue fallback can be suppressed when an open owner cycle plus the persisted active turn scope prove a new queue prompt is independent of the current turn.
+❯ - Direct `agent-doc <FILE>` in the Codex owner pane now returns a no-op/defer for that independent queue edit before precommit or prompt-prefix normalization, so it does not dispatch into the busy owner pane, mutate the document, or increment the wedge counter.
+❯ - Recursive preflight preserves the active owner turn-scope sidecar instead of replacing it with the sibling queue item's derived scope.
 
 Regression coverage added in `tests/run_integration.rs` for both direct-run and preflight JSON behavior, including preserved durable turn scope.
 
 Verification passed:
-- `cargo fmt`
-- `cargo test -p agent-doc --test run_integration codex_owned_pane_ -- --nocapture`
-- `cargo test -p agent-doc --test run_integration preflight_ -- --nocapture`
-- `cargo test -p agent-doc-orchestration preflight::semantic_diff::tests::user_intent -- --nocapture`
-- `make check` (clippy, 4,588 nextest tests, doctests, medium SimWorld)
-- `gh run list --workflow CI --limit 1` shows latest CI run `27607675117` completed successfully.
-<!-- agent:boundary:200298d1 -->
+❯ - `cargo fmt`
+❯ - `cargo test -p agent-doc --test run_integration codex_owned_pane_ -- --nocapture`
+❯ - `cargo test -p agent-doc --test run_integration preflight_ -- --nocapture`
+❯ - `cargo test -p agent-doc-orchestration preflight::semantic_diff::tests::user_intent -- --nocapture`
+❯ - `make check` (clippy, 4,588 nextest tests, doctests, medium SimWorld)
+❯ - `gh run list --workflow CI --limit 1` shows latest CI run `27607675117` completed successfully.
+<!-- agent:boundary:6426ed4d -->
 <!-- /agent:exchange -->
 
 ## Queue

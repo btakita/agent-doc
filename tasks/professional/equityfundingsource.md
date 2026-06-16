@@ -19,7 +19,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -39,7 +39,59 @@ committed
 Compacted content:
 - Archived 9 response topic(s): lender selection pipeline; Deal Pipeline + GoHighLevel; Deal Pipeline GHL Adapter; 6 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): copy-button layout + deploy
-<!-- agent:boundary:c2c4deeb -->
+
+### Re: loan detail Interested Lenders + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> Add an Interested Lenders section to https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f and the Deal Pipeline Available Deal dialog. deploy
+
+
+Implemented and deployed the requested Interested Lenders section for the admin loan detail page and the Deal Pipeline dialog path.
+
+What changed:
+- Added `GET /api/admin/loans/:id/interests`, which resolves the loan's available-deal rows and returns the same admin interested-lender response shape used by the deal detail page.
+- Added `AdminLoanInterestedLendersSection` to `AdminLoanDetail`, so `/portal-admin/loans/:id` now shows interested lenders inline with selected-lender summary, TMO account, workflow stage/next action, document request count, verbal amount, and a select action.
+- Kept the Deal Pipeline dialog path covered because loan cards still embed `<AdminLoanDetail loan_id={loan_id} embedded />`; the new section appears there without a separate pipeline-only fork.
+- The select action uses the existing `PUT /api/admin/deal-interests/:id/select` endpoint, so selection remains exclusive per deal and still queues the gated TMO selected-lender outbox payload.
+
+Commits:
+- EFS submodule: `4877ee0 feat(admin): show interested lenders on loan detail`, pushed to `btakita/equityfundingsource-dev main`.
+- Parent pointer: `22cf9e4ad chore(efs): advance loan interested lenders UI`, pushed to `btakita/agent-loop main`.
+
+Verification:
+- `bun test tests/admin-investor-pipeline.test.ts` — 67 passed.
+- EFS `make check` — 750 tests passed, app build passed, Worker build passed.
+- Parent `make check` — passed.
+- `git diff --check` and staged diff checks were clean.
+
+Deploy:
+- Ran `make deploy` from `src/equityfundingsource-dev`.
+- No remote D1 migrations were pending before or after deploy.
+- Worker version: `943aa5ee-a72f-4e0f-97f1-e7f6d87c4a60`.
+- Smoke checks: public root returned `200`; `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` and `/portal-admin/pipeline` returned `303`, matching Cloudflare Access redirect behavior.
+
+CI note:
+- EFS repo has no workflow named `CI` and no recent Actions runs listed.
+- Parent repo has no workflow named `CI`; latest `Agent Doc` run for the pushed parent commit did not start jobs because GitHub reports account billing/spending-limit blockage, not a test failure: https://github.com/btakita/agent-loop/actions/runs/27649381906
+<!-- agent:boundary:55f86bc0 -->
+- Parent repo has no workflow named `CI`; latest `Agent Doc` run for the pushed parent commit did not start jobs because GitHub reports account billing/spending-limit blockage, not a test failure: https://github.com/btakita/agent-loop/actions/runs/27649381906
+- EFS repo has no workflow named `CI` and no recent Actions runs listed.
+- Smoke checks: public root returned `200`; `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` and `/portal-admin/pipeline` returned `303`, matching Cloudflare Access redirect behavior.
+- Worker version: `943aa5ee-a72f-4e0f-97f1-e7f6d87c4a60`.
+- No remote D1 migrations were pending before or after deploy.
+- Ran `make deploy` from `src/equityfundingsource-dev`.
+- `git diff --check` and staged diff checks were clean.
+- Parent `make check` — passed.
+- EFS `make check` — 750 tests passed, app build passed, Worker build passed.
+- `bun test tests/admin-investor-pipeline.test.ts` — 67 passed.
+- Parent pointer: `22cf9e4ad chore(efs): advance loan interested lenders UI`, pushed to `btakita/agent-loop main`.
+- EFS submodule: `4877ee0 feat(admin): show interested lenders on loan detail`, pushed to `btakita/equityfundingsource-dev main`.
+- The select action uses the existing `PUT /api/admin/deal-interests/:id/select` endpoint, so selection remains exclusive per deal and still queues the gated TMO selected-lender outbox payload.
+- Kept the Deal Pipeline dialog path covered because loan cards still embed `<AdminLoanDetail loan_id={loan_id} embedded />`; the new section appears there without a separate pipeline-only fork.
+- Added `AdminLoanInterestedLendersSection` to `AdminLoanDetail`, so `/portal-admin/loans/:id` now shows interested lenders inline with selected-lender summary, TMO account, workflow stage/next action, document request count, verbal amount, and a select action.
+- Added `GET /api/admin/loans/:id/interests`, which resolves the loan's available-deal rows and returns the same admin interested-lender response shape used by the deal detail page.
+<!-- agent:boundary:cedaca04 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +99,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Add an Interested Lenders section to https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f and the Deal Pipeline Available Deal dialog. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -194,14 +194,18 @@ Proof:
 ❯ - Added a `Deal Interest` action to the shared investor deal-detail component, so the dashboard Available Deal dialog can POST/DELETE `/api/investor/deals/:id/interested` directly instead of telling the investor to use the list page.
 ❯ - Fixed the dashboard classification bug: a pending lender-account request no longer moves every browseable deal out of Available Deals before the investor can mark interest.
 ❯ - Renamed the investor dashboard preview from `Pending deals` to `Deals of interest` for per-deal interest/funding-pending rows.
-<!-- agent:boundary:fd421108 -->
+
+### Re: command replay closeout — gpt-5
+
+The `/agent-doc tasks/professional/equityfundingsource.md` command replay arrived after the queue item was already completed. No additional repo work was requested in that replay; the preceding response contains the completed implementation, deployment, production backfill, and verification proof for `#efs-deals-interest-admin-sync`.
+<!-- agent:boundary:cc3e8b1d -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

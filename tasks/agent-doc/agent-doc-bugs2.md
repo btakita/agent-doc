@@ -140,14 +140,14 @@ Pushed:
 - parent instruction commit `f804b3ccf docs: clarify CI closeout check`.
 
 Confidence: high for the restart/race class. The fix keeps JB thin and moves the state machine into the shared Rust path used by both JB and CLI entrypoints.
-<!-- agent:boundary:52205c6f -->
+<!-- agent:boundary:18ef0213 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Clear Session Context` does not submit with Enter. JB `Run Agent Doc` sends a `/clear` and restart. After a couple restart JB `Run Agent Doc` still does not send Enter. Should we remove Codex-specific logic with JB commands and just use the same path as with Claude Code?~~
-- Should we have more state machine logic to prevent race conditions?
+- :pushpin: JB `Run Agent Doc` still does not send Enter. Should we have more state machine logic to prevent race conditions?
 - [#resprectail]
 <!-- /agent:queue -->
 ###

@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -91,6 +91,25 @@ The prep bullets above are the interview notes. The missing frame is:
 - Merchant psychology: after signing, owners get busy, lose momentum, avoid calls, or get nervous when asked for more work. The product has to keep the deal warm without feeling like homework.
 - Stuck-deal visibility: can anyone see all signed merchants at risk today, or does risk live in calls, Slack, Salesforce notes, and tribal knowledge?
 - Stage clarity: do they have precise funnel states for signed, approved, scheduled, menu-ready, hardware-ready, installed, activated, first payment, and retained?
+- “What is the smallest credible hardware/install path for a low-GPV merchant who wants to try SpotOn without feeling locked in?”
+- “Could we test owner-proof content at the financing step and measure financing completion, install scheduling, and install conversion?”
+- “How do we explain no-contract software versus hardware obligations today?”
+- “When a merchant does not install, do we know if the stated reason is cost, financing, integration fit, menu readiness, scheduling, or just going dark?”
+- “Do signed merchants drop before hardware financing, during financing approval, after hardware order, or closer to install day?”
+- In sales follow-up, match proof by restaurant type rather than sending one generic “happy customer” video.
+- In the launch checklist, attach proof to each anxiety point: menu build, training, hardware arrival, support, first transaction.
+- After a missed implementation call, send a short owner clip plus one clear next action.
+- On the hardware financing screen, show an owner explaining the hardware decision and actual go-live experience.
+5. Tie incentives to activation, not just signup. Examples: first-month software credit after first transaction, free menu cleanup if installed by a target date, included staff-training refresh, launch-day support guarantee, or a temporary add-on credit after go-live.
+4. Trigger objection-specific proof before the financing step: “how hardware financing worked,” “what install day was like,” “how staff training went,” “what I wish I knew before switching POS.”
+3. Put a “launch confidence” panel next to financing: expected install date, what SpotOn will configure, what the merchant must do, support coverage on go-live day, and when the first payment/transaction should happen.
+2. Offer hardware paths side by side: pay upfront, finance, rent/lease, or start with a minimal kit. Make the tradeoff visible rather than discovered during sales follow-up.
+1. Separate the commitment clearly: software month-to-month, payment processing terms, hardware purchase/financing, cancellation path, return/buyout rules, and what happens if the install never completes.
+- Around **06:01-06:53**, support is mostly positive, but delays and rep inconsistency show up as a trust risk. For restaurants, “will someone be there if go-live breaks?” matters as much as sticker price.
+- Around **04:47-05:29**, the video discusses pricing and processing rates, but I would treat exact numbers as potentially dated. The more durable point is the shape of the offer: low monthly entry, add-ons, processing, and hardware economics.
+- Around **03:39-04:01**, the reviewer says the no-long-term-contract message is weakened if the merchant finances hardware and is still paying it off after cancellation. That is the key friction point for your question.
+- Around **02:16-03:36**, the negatives are integrations, handheld reliability, reporting depth, lack of a dedicated support rep, occasional crashes, refund/tip adjustment gaps, and inability to throttle orders. These are not purely sales objections; several become install anxiety because the owner imagines service disruption.
+- Around **00:36-01:42**, the video is strongly positive on ease of use, implementation, setup, menu updates, cloud access, customization, and staff training. That supports the thesis that SpotOn can sell confidence once the merchant believes they will get live smoothly.
 
 Concise live answer you can use:
 
@@ -100,14 +119,18 @@ Closeout proof: changed path is the session document only; no new transcript art
 
 ### Re: Queue drained — gpt-5
 
+> **Queue prompt:**
+>
+> Please review https://www.youtube.com/watch?v=fuj9EIrQpWM. Getting a no-contract plan for a low cost seems like an easy entry. But could customers get cold feet when financing the equipment? Perhaps that may be a reason why some don't want to complete the install? Would real-restaurant owner Youtube videos and other incentives help?
+
+
 The remaining SpotOn interview-prep queue item has been addressed above and the queue is now inactive. No code or transcript files changed; this closeout only persists the queue-drained document state.
-<!-- agent:boundary:12e7c534 -->
+<!-- agent:boundary:618ebf62 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Please review https://www.youtube.com/watch?v=fuj9EIrQpWM. Getting a no-contract plan for a low cost seems like an easy entry. But could customers get cold feet when financing the equipment? Perhaps that may be a reason why some don't want to complete the install? Would real-restaurant owner Youtube videos and other incentives help?
 <!-- /agent:queue -->
 
 ## Backlog

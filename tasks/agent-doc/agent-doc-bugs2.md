@@ -185,14 +185,43 @@ Verification:
 ❯ - Latest GitHub Actions `CI` on `main` is green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`.
 
 Source commit/push status: not done. The `src/agent-doc` submodule already has broad unrelated dirty changes, including the same file, and a whole-file commit would include unrelated work. I left the source change in the working tree and committed this session response through `agent-doc` only.
-<!-- agent:boundary:7257603f -->
+
+### Re: do [#codexpaneformat] + do [#freshnessstatus] — gpt-5
+
+> **Queue prompt:**
+>
+> The restart stalled. As I was typing, numerous `/clear` and restarts occurred.
+
+
+Implemented both items, tested them, and installed the updated local binary.
+
+`#codexpaneformat`: route-owned `agent-doc start` now keeps its startup/status chatter out of the child pane by default. The `[start] harness resolved`, registration, network-access, starting/restarting, and similar route-owned status lines go to the session log instead of stdout/stderr unless verbose diagnostics are enabled, so the Codex TUI starts at the top of the pane without row-offset corruption. The log still records `start_console_status ... printed=false` proof for audit.
+
+`#freshnessstatus`: `agent-doc controller status` and `agent-doc admin inspect --json` now include a structured `freshness` object: installed binary identity, installed inode, running controller inode, optional route-owned supervisor inode, `matches_installed`, `stale`, and operator guidance. The CLI enriches `controller status` client-side too, so an older active controller still yields a freshness proof before it recycles. Plain `admin inspect` now prints `freshness=controller:<state>,supervisor:<state>`.
+
+Docs/version notes were updated in `specs/07-session-tmux-commands.md`, `specs/08b-single-process-control-plane.md`, and `VERSIONS.md`.
+
+Verification:
+- `cargo fmt --check`
+- focused tests: `controller_process_freshness_classifies_inode_identity`, `controller_status_reports_startup_binary_identity`, `controller_queue_control_rejects_stale_generation_and_blocks_dispatch_when_paused`, `route_owned_start_status_logs_without_printing_by_default`
+- `cargo check -p agent-doc-orchestration`
+- `make check` passed: 4544 tests, 238 skipped; doctests and medium simulation passed
+- `cargo build`
+- `cargo install --path .`
+- latest GitHub Actions CI check: `CI` completed success on `main` at 2026-06-16T01:47:40Z, run `27588543817`
+
+Live proof after install: `agent-doc controller status --project-root /home/brian/work/btakita/agent-loop --ensure` reports the controller fresh by inode. A warmed `agent-doc admin inspect tasks/agent-doc/agent-doc-bugs2.md --json` now reports the current controller fresh and the route-owned supervisor for this document stale by inode (`route_owned_supervisor.stale=true`), which is the operator-facing freshness proof this item needed.
+
+Source commit/push caveat: I did not commit or push the agent-doc source changes because `src/agent-doc` was already broadly dirty before this cycle, including files I had to touch. Staging whole files would have included unrelated pre-existing changes.
+<!-- agent:boundary:a8674b04 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Issue with restart on Codex ![img_26.png](img_26.png) ![screenshot.png](../../../../../Pictures/agent-loop/screenshot.png)~~
-- The restart stalled. As I was typing, numerous `/clear` and restarts occurred.
+- ~~The restart stalled. As I was typing, numerous `/clear` and restarts occurred.~~
+- JB `Run Agent Doc` on equityfundingsource.md after a fresh auto-sync did not submit the prompt.
 - :pushpin: How can I tell if the supervisor + CPC are up to date? Why is the formatting all messed up? ![2026-06-15_22-56.png](../../../../../Pictures/agent-loop/2026-06-15_22-56.png) Also I'm seeing some shells from the supervisor are 2 lines too low. See where the `agent-doc admin --help` starts in the screenshot.
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
@@ -204,6 +233,8 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ---
 - :pushpin: agent-doc start to codex misformatted ![img_27.png](img_27.png) ![img_28.png](img_28.png)
 - :pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.
+- ~~do [#codexpaneformat]~~
+- ~~do [#freshnessstatus]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -233,8 +264,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#codexpaneformat] Fix route-owned Codex pane formatting/row-offset corruption: reproduce the `agent-doc admin --help`/`agent-doc start` screenshots (`2026-06-15_22-56.png`, `img_27.png`), add supervisor PTY/screen-position logging or SimWorld coverage that proves what rows/bytes are emitted, and correct the scattered help output / two-line-low shell placement.
-- [ ] [#freshnessstatus] Add first-class freshness proof to `agent-doc controller status` and/or `agent-doc admin inspect`: show installed agent-doc binary identity, controller running inode match, route-owned supervisor running inode match, and explicit recycle/restart guidance so users do not need manual `/proc/<pid>/exe` stat comparisons.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

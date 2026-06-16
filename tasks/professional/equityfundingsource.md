@@ -302,14 +302,14 @@ Verification:
 - `lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx`: TMO Loan Terms, Borrower Detail, Collateral, and Encumbrance now render as peer flex cards with `flex-wrap`, bounded widths, and consolidated field columns.
 
 Preflight reported high exchange accretion and one session-drift warning; queue work was still actionable, so I completed the implementation and deploy. Confidence: high. Escalation: none.
-<!-- agent:boundary:6e67f938 -->
+<!-- agent:boundary:73a6dc26 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
 <!-- /agent:queue -->
 
 ## Backlog

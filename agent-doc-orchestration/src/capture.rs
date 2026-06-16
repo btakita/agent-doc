@@ -516,6 +516,33 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
         return Ok(());
     }
 
+    // #queueeditcap: a captured response may be interrupted after capture but
+    // before write/commit while the operator edits only `agent:queue`. In that
+    // shape the snapshot is still the captured baseline, so replaying the
+    // response onto the current file preserves the queue edit and completes the
+    // closeout instead of deadlocking route/JB Run Agent Doc behind a manual
+    // reset.
+    if file_mismatch
+        && !snapshot_mismatch
+        && live_drift_is_queue_only_against_snapshot(&current_file, current_snapshot.as_deref())?
+    {
+        refresh_replay_baseline(
+            file,
+            capture,
+            &current_file_hash,
+            current_snapshot_hash.as_deref(),
+        )?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "capture_baseline_refreshed_for_queue_only_drift file={} capture_id={}",
+                file.display(),
+                capture.capture_id
+            ),
+        );
+        return Ok(());
+    }
+
     if file_mismatch {
         anyhow::bail!(
             "captured response baseline no longer matches current document for {}. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session {}`",
@@ -553,6 +580,39 @@ fn response_body_intact_in_current(
         current_file,
         response_body,
     ))
+}
+
+fn live_drift_is_queue_only_against_snapshot(
+    current_file: &str,
+    current_snapshot: Option<&str>,
+) -> Result<bool> {
+    let Some(current_snapshot) = current_snapshot else {
+        return Ok(false);
+    };
+    let current_file = agent_doc_core::frontmatter::strip_pipeline_block_lines(current_file);
+    let current_snapshot =
+        agent_doc_core::frontmatter::strip_pipeline_block_lines(current_snapshot);
+    if current_file == current_snapshot {
+        return Ok(false);
+    }
+
+    let current_components = crate::component::parse(&current_file)?;
+    let snapshot_components = crate::component::parse(&current_snapshot)?;
+    let mut current_queues = current_components.iter().filter(|c| c.name == "queue");
+    let mut snapshot_queues = snapshot_components.iter().filter(|c| c.name == "queue");
+    let Some(current_queue) = current_queues.next() else {
+        return Ok(false);
+    };
+    let Some(snapshot_queue) = snapshot_queues.next() else {
+        return Ok(false);
+    };
+    if current_queues.next().is_some() || snapshot_queues.next().is_some() {
+        return Ok(false);
+    }
+
+    let restored =
+        current_queue.replace_content(&current_file, snapshot_queue.content(&current_snapshot));
+    Ok(restored == current_snapshot)
 }
 
 /// Refresh the capture record's `file_hash` and `snapshot_hash` to match the
@@ -1081,6 +1141,57 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("agent-doc reset --from-current --preserve-session")
+        );
+    }
+
+    #[test]
+    fn validate_replay_refreshes_baseline_for_queue_only_drift() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let original = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "user prompt\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- first head\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, original).unwrap();
+        crate::snapshot::save(&doc, original).unwrap();
+        let capture = capture_response(
+            &doc,
+            "<!-- patch:exchange -->\n### Re: first head — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
+        )
+        .unwrap();
+
+        let current = original.replace(
+            "- first head\n",
+            "- first head\n- user typed a new queue note during closeout\n",
+        );
+        std::fs::write(&doc, &current).unwrap();
+
+        validate_replay(&doc, &capture).expect("queue-only drift should allow replay");
+
+        let refreshed = load_active(&doc).unwrap().unwrap();
+        assert_eq!(
+            refreshed.file_hash.as_deref(),
+            Some(replay_file_hash(&current).as_str()),
+            "file_hash should be refreshed to the live queue-edited document"
+        );
+        assert_eq!(
+            refreshed.snapshot_hash.as_deref(),
+            capture.snapshot_hash.as_deref(),
+            "snapshot_hash should stay on the captured baseline until replay writes"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("capture_baseline_refreshed_for_queue_only_drift"),
+            "queue-only refresh must be logged for audit:\n{log}"
         );
     }
 

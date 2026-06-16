@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -95,7 +95,7 @@ Commands / verification:
 - Smoke test `https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline`: `303`, expected Cloudflare Access redirect for admin route.
 
 Confidence: high. No escalation needed. The parent repo still has unrelated pre-existing dirty files and local agent-doc commits ahead of origin; I left those untouched.
-<!-- agent:boundary:b79b1c6f -->
+<!-- agent:boundary:8ebd6552 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,6 +103,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Remove "Interested Lenders" from "Available Deal" -> "Loan Detail" tab. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -55,6 +55,22 @@ queue: start
 - Removed OpenCode as a default Kitty Return submit special case. The separate OpenCode PTY filtering for Kitty keyboard-mode permission prompts remains, because that is not the command-submit path.
 - Routed JB `Run Agent Doc`, JB `Clear Session Context`, queue dispatch, auto-trigger inject, and supervisor-owned tmux inject logging through that shared profile.
 - Added one centralized `TmuxSubmitProfile` in `agent-doc-orchestration/src/sessions.rs`; `tmux_submit_mode_for_harness`, `tmux_submit_transform_for_harness`, and `tmux_submit_key_for_harness` delegate to it.
+- Latest GitHub Actions `CI` on `main` is green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`.
+- `make check` passed locally before the install: clippy/build/full test suite through the project check target.
+- `cargo test -p agent-doc-orchestration stale_supervisor` passed after the change.
+- This document's route-owned supervisor restart correctly refused while pane `%110` is busy with this active turn, so I did not force-interrupt it. After this turn is idle, it can recycle/restart onto the new binary; no JetBrains plugin update is needed for this fix.
+- The CPC recycled onto a fresh process (`controller_generation=1263`).
+- `agent-doc lib-install` installed `/home/brian/.cargo/bin/libagent_doc-0.34.1.so` and marked controllers for recycle.
+- `cargo install --path .` replaced `/home/brian/.cargo/bin/agent-doc`.
+- `agent-doc --version` is `0.34.1`.
+- The definitive freshness check today is inode identity: `stat -Lc '%i %s %Y %n' /home/brian/.cargo/bin/agent-doc /proc/<controller_pid>/exe /proc/<supervisor_pid>/exe`. Same inode means the process is running the installed binary; different inode means recycle/restart.
+- `agent-doc admin inspect <doc> --json` confirms the document actor, supervisor pid/socket/runtime state, and whether a queue pause is active.
+- `agent-doc controller status` confirms the CPC is active, stable, and shows controller pid/generation.
+- `agent-doc --version` confirms the installed CLI version.
+- I cleared this document's stale durable queue pause with `agent-doc admin queue resume ...`; `agent-doc admin inspect tasks/agent-doc/agent-doc-bugs2.md --json` now reports `queue_control: null`.
+- Regression tests now cover the exact `#qchurn ... stale host supervisor pid 2715614 ...` wording and PID extraction.
+- `pause_reason_is_stale_supervisor_churn_stop` now recognizes `stale host supervisor` as the same recoverable stale-supervisor churn-stop class.
+- `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260616-020038.md`*
@@ -80,23 +96,23 @@ Fixed the tmux-bound submit root cause in `src/agent-doc`: the default live-pane
 Answer to the direct tmux question: yes, the submit path now uses the terminal-neutral shape you tested, but with literal text protection: `tmux send-keys -t <pane> -l <text>; tmux send-keys -t <pane> Enter`. The split `-l` text + named `Enter` avoids tmux interpreting prompt text as keys while still delivering the real Enter key event. Codex, Claude, OpenCode, and unknown/default harnesses all resolve through that same profile now.
 
 What changed:
-❯ - Added one centralized `TmuxSubmitProfile` in `agent-doc-orchestration/src/sessions.rs`; `tmux_submit_mode_for_harness`, `tmux_submit_transform_for_harness`, and `tmux_submit_key_for_harness` delegate to it.
-❯ - Routed JB `Run Agent Doc`, JB `Clear Session Context`, queue dispatch, auto-trigger inject, and supervisor-owned tmux inject logging through that shared profile.
-❯ - Removed OpenCode as a default Kitty Return submit special case. The separate OpenCode PTY filtering for Kitty keyboard-mode permission prompts remains, because that is not the command-submit path.
-❯ - Kept owned PTY injection as `pty_cr`; the change is for tmux-bound live pane submit, not the supervisor child-PTY write boundary.
-❯ - Updated visible-draft recovery to be profile-driven, so a timed-out visible draft gets exactly one bare `Enter` retry for OpenCode too.
-❯ - Updated specs/docs/tests and the static ops-report example so the only tmux live-pane submit mode is `tmux_literal_text_enter_key`.
+- Added one centralized `TmuxSubmitProfile` in `agent-doc-orchestration/src/sessions.rs`; `tmux_submit_mode_for_harness`, `tmux_submit_transform_for_harness`, and `tmux_submit_key_for_harness` delegate to it.
+- Routed JB `Run Agent Doc`, JB `Clear Session Context`, queue dispatch, auto-trigger inject, and supervisor-owned tmux inject logging through that shared profile.
+- Removed OpenCode as a default Kitty Return submit special case. The separate OpenCode PTY filtering for Kitty keyboard-mode permission prompts remains, because that is not the command-submit path.
+- Kept owned PTY injection as `pty_cr`; the change is for tmux-bound live pane submit, not the supervisor child-PTY write boundary.
+- Updated visible-draft recovery to be profile-driven, so a timed-out visible draft gets exactly one bare `Enter` retry for OpenCode too.
+- Updated specs/docs/tests and the static ops-report example so the only tmux live-pane submit mode is `tmux_literal_text_enter_key`.
 
 I did not add `lazily-rs` here. The duplication was removed at the policy boundary instead: a small Rust enum/function is enough, avoids adding another dependency, and keeps submit semantics greppable from one place. If we later need generated dispatch tables for more harness behavior, that is a separate design pass.
 
 Verification:
-❯ - `cargo test submit` passed.
-❯ - `cargo test queue_dispatch` passed.
-❯ - `cargo test -p agent-doc-orchestration submit` passed.
-❯ - `make check` passed: clippy, 4542 nextest tests, doctests, and the ignored medium sim-world budget test.
-❯ - `cargo build` passed.
-❯ - `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/agent-doc`; `agent-doc --version` reports `0.34.1`.
-❯ - Latest `CI` on `main` was green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`, completed successfully on 2026-06-16.
+- `cargo test submit` passed.
+- `cargo test queue_dispatch` passed.
+- `cargo test -p agent-doc-orchestration submit` passed.
+- `make check` passed: clippy, 4542 nextest tests, doctests, and the ignored medium sim-world budget test.
+- `cargo build` passed.
+- `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/agent-doc`; `agent-doc --version` reports `0.34.1`.
+- Latest `CI` on `main` was green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`, completed successfully on 2026-06-16.
 
 Changed source paths include `agent-doc-orchestration/src/sessions.rs`, `agent-doc-orchestration/src/route/dispatch.rs`, `agent-doc-orchestration/src/flow/routed_reopen.rs`, `agent-doc-orchestration/src/start/idle_watch.rs`, `agent-doc-orchestration/src/start.rs`, `agent-doc-orchestration/src/start/supervisor_io.rs`, `src/queue_dispatch.rs`, `src/session_actor_cmd.rs`, `src/orchestrate/dispatch.rs`, `src/sim_world.rs`, `src/ops_report.rs`, `README.md`, and the tmux/session-routing supervisor specs.
 
@@ -140,42 +156,43 @@ Using `lazily-rs` here would add indirection without reducing meaningful runtime
 I found and fixed the concrete JB `Run Agent Doc` error path from the pasted output. The existing recovery code already knew how to restart/resume on `queue_paused` when the reason said `stale supervisor pid...`, but your live reason said `stale host supervisor pid 2715614`. That wording did not match the classifier, so the controller treated the pause as terminal and JB surfaced it as an error.
 
 Changed source path:
-- `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`
+❯ - `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`
 
 What changed:
-- `pause_reason_is_stale_supervisor_churn_stop` now recognizes `stale host supervisor` as the same recoverable stale-supervisor churn-stop class.
-- Regression tests now cover the exact `#qchurn ... stale host supervisor pid 2715614 ...` wording and PID extraction.
-- I cleared this document's stale durable queue pause with `agent-doc admin queue resume ...`; `agent-doc admin inspect tasks/agent-doc/agent-doc-bugs2.md --json` now reports `queue_control: null`.
+❯ - `pause_reason_is_stale_supervisor_churn_stop` now recognizes `stale host supervisor` as the same recoverable stale-supervisor churn-stop class.
+❯ - Regression tests now cover the exact `#qchurn ... stale host supervisor pid 2715614 ...` wording and PID extraction.
+❯ - I cleared this document's stale durable queue pause with `agent-doc admin queue resume ...`; `agent-doc admin inspect tasks/agent-doc/agent-doc-bugs2.md --json` now reports `queue_control: null`.
 
 How to tell whether CPC + supervisor are up to date:
-- `agent-doc --version` confirms the installed CLI version.
-- `agent-doc controller status` confirms the CPC is active, stable, and shows controller pid/generation.
-- `agent-doc admin inspect <doc> --json` confirms the document actor, supervisor pid/socket/runtime state, and whether a queue pause is active.
-- The definitive freshness check today is inode identity: `stat -Lc '%i %s %Y %n' /home/brian/.cargo/bin/agent-doc /proc/<controller_pid>/exe /proc/<supervisor_pid>/exe`. Same inode means the process is running the installed binary; different inode means recycle/restart.
+❯ - `agent-doc --version` confirms the installed CLI version.
+❯ - `agent-doc controller status` confirms the CPC is active, stable, and shows controller pid/generation.
+❯ - `agent-doc admin inspect <doc> --json` confirms the document actor, supervisor pid/socket/runtime state, and whether a queue pause is active.
+❯ - The definitive freshness check today is inode identity: `stat -Lc '%i %s %Y %n' /home/brian/.cargo/bin/agent-doc /proc/<controller_pid>/exe /proc/<supervisor_pid>/exe`. Same inode means the process is running the installed binary; different inode means recycle/restart.
 
 Current local state:
-- `agent-doc --version` is `0.34.1`.
+❯ - `agent-doc --version` is `0.34.1`.
 - `cargo build` passed.
-- `cargo install --path .` replaced `/home/brian/.cargo/bin/agent-doc`.
-- `agent-doc lib-install` installed `/home/brian/.cargo/bin/libagent_doc-0.34.1.so` and marked controllers for recycle.
-- The CPC recycled onto a fresh process (`controller_generation=1263`).
-- This document's route-owned supervisor restart correctly refused while pane `%110` is busy with this active turn, so I did not force-interrupt it. After this turn is idle, it can recycle/restart onto the new binary; no JetBrains plugin update is needed for this fix.
+❯ - `cargo install --path .` replaced `/home/brian/.cargo/bin/agent-doc`.
+❯ - `agent-doc lib-install` installed `/home/brian/.cargo/bin/libagent_doc-0.34.1.so` and marked controllers for recycle.
+❯ - The CPC recycled onto a fresh process (`controller_generation=1263`).
+❯ - This document's route-owned supervisor restart correctly refused while pane `%110` is busy with this active turn, so I did not force-interrupt it. After this turn is idle, it can recycle/restart onto the new binary; no JetBrains plugin update is needed for this fix.
 
 On the formatting screenshot: direct `agent-doc admin --help` output is normal in a plain command run. The screenshot shows corruption in the route-owned Codex pane/supervisor display path: help/start output is scattered and the Codex shell appears offset. That is a separate PTY/screen-model bug, not the help text itself. I added a backlog item to capture it with logging and a reproduction instead of hand-waving it.
 
 Verification:
-- `cargo test -p agent-doc-orchestration stale_supervisor` passed after the change.
-- `make check` passed locally before the install: clippy/build/full test suite through the project check target.
-- Latest GitHub Actions `CI` on `main` is green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`.
+❯ - `cargo test -p agent-doc-orchestration stale_supervisor` passed after the change.
+❯ - `make check` passed locally before the install: clippy/build/full test suite through the project check target.
+❯ - Latest GitHub Actions `CI` on `main` is green: run `27588543817`, `fix(jb): add run-agent-doc proof logging`.
 
 Source commit/push status: not done. The `src/agent-doc` submodule already has broad unrelated dirty changes, including the same file, and a whole-file commit would include unrelated work. I left the source change in the working tree and committed this session response through `agent-doc` only.
-<!-- agent:boundary:b219d50d -->
+<!-- agent:boundary:7257603f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Issue with restart on Codex ![img_26.png](img_26.png) ![screenshot.png](../../../../../Pictures/agent-loop/screenshot.png)~~
+- The restart stalled. As I was typing, numerous `/clear` and restarts occurred.
 - :pushpin: How can I tell if the supervisor + CPC are up to date? Why is the formatting all messed up? ![2026-06-15_22-56.png](../../../../../Pictures/agent-loop/2026-06-15_22-56.png) Also I'm seeing some shells from the supervisor are 2 lines too low. See where the `agent-doc admin --help` starts in the screenshot.
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
@@ -185,7 +202,7 @@ resync: pruned 3 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3649 blocked_head_bytes=132 blocked_head_sha256=ae121dad65e5b00a6c504db706985aee4e8d6ed00988ba4244f51196952739d7 trigger_bytes=44 trigger_sha256=a55a6572fd4dc952bc476bd516d3a7801b1e63409715f063b4b7351ea112ade5
 ```
 ---
-- :pushpin: agent-doc start to codex misformatted ![img_27.png](img_27.png)
+- :pushpin: agent-doc start to codex misformatted ![img_27.png](img_27.png) ![img_28.png](img_28.png)
 - :pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.
 <!-- /agent:queue -->
 ###

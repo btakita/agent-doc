@@ -595,7 +595,32 @@ Verification passed:
 ### Re: do [#cwsp] closeout repair — gpt-5
 
 Closeout repair for the already-committed `#cwsp` response: the implementation summary and verification evidence above are correct, but IPC prefix normalization marked several summary lines as prompt glyph lines. This response closes that malformed prompt-looking tail. No source files changed after submodule commit `9870c5ef`, and the verification evidence remains the same.
-<!-- agent:boundary:dd5e241e -->
+
+### Re: Create a plan to orchestrate subagents — gpt-5
+
+> **Queue prompt:**
+>
+> Create a plan to orchestrate subagents to manage specific roles such as architecture, testing, implementation, refactoring. The main agent will coordinate the subagents to synthesize the solution. Ensure there is feedback between the subagents and the coordinating agent to ensure reliable, well designed outcomes, that appropriately solve the issues. Find root causes and factor the codebase to consolidate logic.
+
+
+Use a coordinator-led, invariant-driven loop for the next workflow fixes. The coordinator owns scope, root-cause synthesis, final architecture decisions, and closeout proof. Subagents should be role-scoped and short-lived, with handoffs expressed as facts, failing examples, proposed invariants, and concrete code touchpoints rather than general recommendations.
+
+1. Architecture agent. Build the workflow state model and name the durable invariants. Inputs are preflight JSON, session-check JSON, cycle state, actor/session registry state, ops log markers, editor proof sidecars, and git/submodule state. Output is an invariant catalog entry shape with fact sources, ok predicates, disproof markers, safe remediation, operator-gated remediation, and required regression class. This feeds `#wfinvcatalog`.
+
+2. Testing and SimWorld agent. Convert each invariant into deterministic tests before implementation changes where possible. It should produce minimal reproductions for queue continuation, stale supervisor routing, closeout commit convergence, editor IPC/writeback drift, generation redirect, parent gitlink proof, and independent queue edits during an active turn. Output is a test matrix with gaps and exact commands.
+
+3. Implementation agent. Implement only catalog-backed repairs. It should avoid broad route rewrites and instead add typed facts, decision helpers, and command surfaces that make the doctor/autofix path explainable. This feeds `#wfinvdoctor` and later `#wfinvautofix`.
+
+4. Refactoring agent. Identify duplicated decision logic across preflight, run, route, session-check, repair, write/finalize, and JetBrains surfaces. It should propose extractions only when at least two call sites currently disagree or can drift. The coordinator decides which extractions become part of the implementation batch.
+
+5. Coordinator feedback loop. For each invariant, the coordinator asks every role for three things: the root cause it explains, the proof that would disprove the diagnosis, and the smallest code/test change that would make the invariant enforceable. If those disagree, the coordinator records the disagreement as a catalog field or splits the invariant.
+
+6. Closeout standard. A workflow fix is complete only when the invariant catalog names the behavior, the doctor can diagnose it from durable facts, the autofix planner either performs a safe remediation or emits an exact operator-gated command, and regression coverage proves both the broken and recovered states. This avoids adding gates without a path to completion.
+
+No new backlog items are needed from this planning turn because the existing queued heads already form the implementation sequence: `#wfinvcatalog`, then `#wfinvdoctor`, then `#wfinvautofix`.
+
+Changed paths: session document only via finalize. Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc session-check`. Verification: no source changes in this planning turn; prior `#cwsp` source verification remains recorded above. Confidence: high. Escalation: none.
+<!-- agent:boundary:2613f4e5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -622,7 +647,7 @@ Closeout repair for the already-committed `#cwsp` response: the implementation s
 - ~~do [#archsimworldmatrix]~~
 - ~~do [#archuistates]~~
 - ~~do [#cwsp]~~
-- Create a plan to orchestrate subagents to manage specific roles such as architecture, testing, implementation, refactoring. The main agent will coordinate the subagents to synthesize the solution. Ensure there is feedback between the subagents and the coordinating agent to ensure reliable, well designed outcomes, that appropriately solve the issues. Find root causes and factor the codebase to consolidate logic.
+- ~~Create a plan to orchestrate subagents to manage specific roles such as architecture, testing, implementation, refactoring. The main agent will coordinate the subagents to synthesize the solution. Ensure there is feedback between the subagents and the coordinating agent to ensure reliable, well designed outcomes, that appropriately solve the issues. Find root causes and factor the codebase to consolidate logic.~~
 - do [#wfinvcatalog]
 - do [#wfinvdoctor]
 - do [#wfinvautofix]

@@ -543,7 +543,20 @@ Verification:
 Confidence: high. This is isolated deterministic coverage over the pure workflow-state kernel, and the full repo check passed.
 
 Escalation: none.
-<!-- agent:boundary:3a5ed2f8 -->
+
+### Re: do [#archuistates] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#archuistates]
+
+
+Implemented `ui-outcome-v1` in `src/agent-doc` at submodule commit `a7cc582a`.
+
+The new typed surface vocabulary covers `queued_behind_owner`, `recovered_and_retried`, `deferred_for_operator_proof`, `no_drainable_work`, `real_component_conflict`, and `blocked_with_exact_unblocker`. Controller dispatch-blocked proof payloads, route/Codex/OpenCode/JB queue/refusal messages, session-check queue-idle output, and JetBrains route/write conflict surfaces now emit `ui_outcome=...` fields while preserving legacy prose for compatibility.
+
+Verification passed: `cargo fmt`; focused Rust outcome/route/controller/session-check tests; JetBrains `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`; `make check` (4,586 nextest tests, doctests, medium SimWorld); latest CI was green (`27607675117`).
+<!-- agent:boundary:69c6a3c8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -568,7 +581,7 @@ Escalation: none.
 - ~~do [#archproofledger]~~
 - ~~do [#archcomponentmerge]~~
 - ~~do [#archsimworldmatrix]~~
-- do [#archuistates]
+- ~~do [#archuistates]~~
 - do [#cwsp]
 - do [#wfinvcatalog]
 - do [#wfinvdoctor]
@@ -602,7 +615,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#archuistates] Replace raw route/write conflict strings in JB/Codex/OpenCode surfaces with a small typed outcome vocabulary: queued behind owner, recovered and retried, deferred for operator proof, no drainable work, real component conflict, and blocked with exact unblocker.
 - [ ] [#cwsp] [operator-verify] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38 and recycling the live supervisor onto that build, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
 - [ ] [#wfinvcatalog] Create a machine-readable workflow invariant catalog: each invariant has id, fact sources, ok predicate, disproof markers, severity, safe remediation, operator-gated remediation, and SimWorld/regression coverage. Start with queue continuation, stale supervisor, closeout commit, editor convergence, generation redirect, and parent gitlink invariants.
 - [ ] [#wfinvdoctor] Add an agent-doc workflow doctor/diagnose command that evaluates the invariant catalog against preflight/session-check JSON, ops.log markers, cycle_state, actor state, git state, and editor proof sidecars; output typed ok/recoverable/blocked/operator results with exact repair commands.

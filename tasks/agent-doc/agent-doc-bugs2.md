@@ -545,10 +545,16 @@ What changed:
 - Each row asserts the typed decision, allowed mutation, and exact proof obligations so future decision changes must update the matrix deliberately.
 
 Verification:
-❯ - `cargo fmt`
+- `cargo fmt`
 - `cargo test -p agent-doc-orchestration workflow_state`
 - `make check` (clippy, 4,584 nextest tests, doctests, medium SimWorld corpus)
 - `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+6. Closeout standard. A workflow fix is complete only when the invariant catalog names the behavior, the doctor can diagnose it from durable facts, the autofix planner either performs a safe remediation or emits an exact operator-gated command, and regression coverage proves both the broken and recovered states. This avoids adding gates without a path to completion.
+5. Coordinator feedback loop. For each invariant, the coordinator asks every role for three things: the root cause it explains, the proof that would disprove the diagnosis, and the smallest code/test change that would make the invariant enforceable. If those disagree, the coordinator records the disagreement as a catalog field or splits the invariant.
+4. Refactoring agent. Identify duplicated decision logic across preflight, run, route, session-check, repair, write/finalize, and JetBrains surfaces. It should propose extractions only when at least two call sites currently disagree or can drift. The coordinator decides which extractions become part of the implementation batch.
+3. Implementation agent. Implement only catalog-backed repairs. It should avoid broad route rewrites and instead add typed facts, decision helpers, and command surfaces that make the doctor/autofix path explainable. This feeds `#wfinvdoctor` and later `#wfinvautofix`.
+2. Testing and SimWorld agent. Convert each invariant into deterministic tests before implementation changes where possible. It should produce minimal reproductions for queue continuation, stale supervisor routing, closeout commit convergence, editor IPC/writeback drift, generation redirect, parent gitlink proof, and independent queue edits during an active turn. Output is a test matrix with gaps and exact commands.
+1. Architecture agent. Build the workflow state model and name the durable invariants. Inputs are preflight JSON, session-check JSON, cycle state, actor/session registry state, ops log markers, editor proof sidecars, and git/submodule state. Output is an invariant catalog entry shape with fact sources, ok predicates, disproof markers, safe remediation, operator-gated remediation, and required regression class. This feeds `#wfinvcatalog`.
 
 Confidence: high. This is isolated deterministic coverage over the pure workflow-state kernel, and the full repo check passed.
 
@@ -577,20 +583,20 @@ Verification passed: `cargo fmt`; focused Rust outcome/route/controller/session-
 Implemented `#cwsp` in `src/agent-doc` and committed the submodule as `9870c5ef` (`fix: defer owner-pane queue sibling edits`).
 
 What changed:
-❯ - Preflight now derives owner-pane unresolved-prompt detection from filtered user-intent prompt changes, not raw prompt-bearing changes.
-❯ - Same-pane active-queue fallback can be suppressed when an open owner cycle plus the persisted active turn scope prove a new queue prompt is independent of the current turn.
-❯ - Direct `agent-doc <FILE>` in the Codex owner pane now returns a no-op/defer for that independent queue edit before precommit or prompt-prefix normalization, so it does not dispatch into the busy owner pane, mutate the document, or increment the wedge counter.
-❯ - Recursive preflight preserves the active owner turn-scope sidecar instead of replacing it with the sibling queue item's derived scope.
+- Preflight now derives owner-pane unresolved-prompt detection from filtered user-intent prompt changes, not raw prompt-bearing changes.
+- Same-pane active-queue fallback can be suppressed when an open owner cycle plus the persisted active turn scope prove a new queue prompt is independent of the current turn.
+- Direct `agent-doc <FILE>` in the Codex owner pane now returns a no-op/defer for that independent queue edit before precommit or prompt-prefix normalization, so it does not dispatch into the busy owner pane, mutate the document, or increment the wedge counter.
+- Recursive preflight preserves the active owner turn-scope sidecar instead of replacing it with the sibling queue item's derived scope.
 
 Regression coverage added in `tests/run_integration.rs` for both direct-run and preflight JSON behavior, including preserved durable turn scope.
 
 Verification passed:
-❯ - `cargo fmt`
-❯ - `cargo test -p agent-doc --test run_integration codex_owned_pane_ -- --nocapture`
-❯ - `cargo test -p agent-doc --test run_integration preflight_ -- --nocapture`
-❯ - `cargo test -p agent-doc-orchestration preflight::semantic_diff::tests::user_intent -- --nocapture`
-❯ - `make check` (clippy, 4,588 nextest tests, doctests, medium SimWorld)
-❯ - `gh run list --workflow CI --limit 1` shows latest CI run `27607675117` completed successfully.
+- `cargo fmt`
+- `cargo test -p agent-doc --test run_integration codex_owned_pane_ -- --nocapture`
+- `cargo test -p agent-doc --test run_integration preflight_ -- --nocapture`
+- `cargo test -p agent-doc-orchestration preflight::semantic_diff::tests::user_intent -- --nocapture`
+- `make check` (clippy, 4,588 nextest tests, doctests, medium SimWorld)
+- `gh run list --workflow CI --limit 1` shows latest CI run `27607675117` completed successfully.
 
 ### Re: do [#cwsp] closeout repair — gpt-5
 
@@ -605,22 +611,22 @@ Closeout repair for the already-committed `#cwsp` response: the implementation s
 
 Use a coordinator-led, invariant-driven loop for the next workflow fixes. The coordinator owns scope, root-cause synthesis, final architecture decisions, and closeout proof. Subagents should be role-scoped and short-lived, with handoffs expressed as facts, failing examples, proposed invariants, and concrete code touchpoints rather than general recommendations.
 
-1. Architecture agent. Build the workflow state model and name the durable invariants. Inputs are preflight JSON, session-check JSON, cycle state, actor/session registry state, ops log markers, editor proof sidecars, and git/submodule state. Output is an invariant catalog entry shape with fact sources, ok predicates, disproof markers, safe remediation, operator-gated remediation, and required regression class. This feeds `#wfinvcatalog`.
+❯ 1. Architecture agent. Build the workflow state model and name the durable invariants. Inputs are preflight JSON, session-check JSON, cycle state, actor/session registry state, ops log markers, editor proof sidecars, and git/submodule state. Output is an invariant catalog entry shape with fact sources, ok predicates, disproof markers, safe remediation, operator-gated remediation, and required regression class. This feeds `#wfinvcatalog`.
 
-2. Testing and SimWorld agent. Convert each invariant into deterministic tests before implementation changes where possible. It should produce minimal reproductions for queue continuation, stale supervisor routing, closeout commit convergence, editor IPC/writeback drift, generation redirect, parent gitlink proof, and independent queue edits during an active turn. Output is a test matrix with gaps and exact commands.
+❯ 2. Testing and SimWorld agent. Convert each invariant into deterministic tests before implementation changes where possible. It should produce minimal reproductions for queue continuation, stale supervisor routing, closeout commit convergence, editor IPC/writeback drift, generation redirect, parent gitlink proof, and independent queue edits during an active turn. Output is a test matrix with gaps and exact commands.
 
-3. Implementation agent. Implement only catalog-backed repairs. It should avoid broad route rewrites and instead add typed facts, decision helpers, and command surfaces that make the doctor/autofix path explainable. This feeds `#wfinvdoctor` and later `#wfinvautofix`.
+❯ 3. Implementation agent. Implement only catalog-backed repairs. It should avoid broad route rewrites and instead add typed facts, decision helpers, and command surfaces that make the doctor/autofix path explainable. This feeds `#wfinvdoctor` and later `#wfinvautofix`.
 
-4. Refactoring agent. Identify duplicated decision logic across preflight, run, route, session-check, repair, write/finalize, and JetBrains surfaces. It should propose extractions only when at least two call sites currently disagree or can drift. The coordinator decides which extractions become part of the implementation batch.
+❯ 4. Refactoring agent. Identify duplicated decision logic across preflight, run, route, session-check, repair, write/finalize, and JetBrains surfaces. It should propose extractions only when at least two call sites currently disagree or can drift. The coordinator decides which extractions become part of the implementation batch.
 
-5. Coordinator feedback loop. For each invariant, the coordinator asks every role for three things: the root cause it explains, the proof that would disprove the diagnosis, and the smallest code/test change that would make the invariant enforceable. If those disagree, the coordinator records the disagreement as a catalog field or splits the invariant.
+❯ 5. Coordinator feedback loop. For each invariant, the coordinator asks every role for three things: the root cause it explains, the proof that would disprove the diagnosis, and the smallest code/test change that would make the invariant enforceable. If those disagree, the coordinator records the disagreement as a catalog field or splits the invariant.
 
-6. Closeout standard. A workflow fix is complete only when the invariant catalog names the behavior, the doctor can diagnose it from durable facts, the autofix planner either performs a safe remediation or emits an exact operator-gated command, and regression coverage proves both the broken and recovered states. This avoids adding gates without a path to completion.
+❯ 6. Closeout standard. A workflow fix is complete only when the invariant catalog names the behavior, the doctor can diagnose it from durable facts, the autofix planner either performs a safe remediation or emits an exact operator-gated command, and regression coverage proves both the broken and recovered states. This avoids adding gates without a path to completion.
 
 No new backlog items are needed from this planning turn because the existing queued heads already form the implementation sequence: `#wfinvcatalog`, then `#wfinvdoctor`, then `#wfinvautofix`.
 
 Changed paths: session document only via finalize. Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc session-check`. Verification: no source changes in this planning turn; prior `#cwsp` source verification remains recorded above. Confidence: high. Escalation: none.
-<!-- agent:boundary:2613f4e5 -->
+<!-- agent:boundary:e0fdb388 -->
 <!-- /agent:exchange -->
 
 ## Queue

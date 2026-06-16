@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,40 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260616-223057.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260616-224937.md`*
 
 Compacted content:
-❯ - Archived 5 response topic(s): loan detail Interested Lenders + deploy; inactive queued EFS deal-interest request; inactive queued EFS deal-interest request; 2 more
-❯ - Prior summary/context: prior compacted content: Archived 9 response topic(s): lender selection pipeline; Deal Pipeline + GoHighLevel; Deal P...
-
-### Re: inactive queued Interested Lenders ordering request — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: Move "Interested Lenders" above "Final Loan Documents". deploy
-
-
-I did not move the section or deploy from this cycle. Preflight found the new request inside `agent:queue`, but the document frontmatter still has `queue: stop`, and `agent-doc plan` produced no repo actions for this turn. I treated the queue line as inactive queue residue rather than executable repo work.
-
-I repaired the stale agent-doc snapshot/CRDT sidecars with `agent-doc reset --from-current` after the first finalize attempt refused to write. The requested work is preserved as actionable backlog item `#efs-interest-order`: move the admin loan detail `Interested Lenders` section above `Final Loan Documents`, update spec/tests, commit, push, and deploy.
-
-Warnings surfaced:
-- Preflight again flagged `#dropbox-sync-adapter`, `#dzmm-writeback-replay`, and `#zwws-vestings-local` as possible stale review items because related done entries may already cover them. I left them unchanged.
-
-Proof:
-- Changed paths: session document/backlog only.
-- Commands: `sed -n '1,220p' .claude/skills/agent-doc/SKILL.md`, `tsift status`, `agent-doc --version`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, attempted `agent-doc finalize`, `agent-doc reset --from-current`, `agent-doc session-check`, and repair `agent-doc write --commit`.
-- Verification: no application code changed; no tests or deploy run.
-- Confidence: high.
-- Escalation: none.
-- Confidence: high.
-- CI review: `gh run list --workflow CI --limit 1` found no workflow named `CI`; `gh workflow list` and `gh run list --limit 5` returned no workflows/runs for this repo.
-- Commits: EFS app `0f9576b` (`fix(admin): show interested lenders before final docs (#efs-interest-order)`); superproject `b15d329d5` (`chore(efs): update deployed app pointer (#efs-interest-order)`). Both pushed to `main`.
-- Deploy: Worker version `5419a0d0-d28b-490f-bf41-14811884e177` at `https://equityfundingsource.brian-takita.workers.dev`.
-- Verification: focused test passed 3/3; `make check` passed 750 tests plus app and worker builds; remote D1 reported no migrations before or after deploy; live `/` returned `200`; live `/portal-admin` returned auth redirect `303`.
-- Commands: `bun test tests/tmo-loan-details-density.test.ts`, `make check`, `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`, `make deploy`, post-deploy migration check, and live smoke `curl` checks.
-- Changed paths: `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`, `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`, `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`, plus the `src/equityfundingsource-dev` submodule pointer in `agent-loop`.
-<!-- agent:boundary:77440bfe -->
+- Archived 1 response topic(s): inactive queued Interested Lenders ordering request
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+<!-- agent:boundary:90cb34ca -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Remove "Loan Terms" from Available deal admin page & dialog. Deploy 
 <!-- /agent:queue -->
 
 ## Backlog

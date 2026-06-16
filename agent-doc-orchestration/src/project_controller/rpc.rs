@@ -5140,6 +5140,19 @@ mod tests {
             auth.record.generation, 1,
             "the self-heal retry must land on the current (N+1) generation"
         );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("dispatch_stale_generation_redirect"),
+            "the first stale dispatch must leave redirect proof:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains("dispatch_retry_after_stale_generation"),
+            "authorize_dispatch must leave retry proof:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains(" is closed"),
+            "redirectable stale dispatch must not degrade into a terminal generation-closed proof:\n{ops_log}"
+        );
     }
     #[test]
     fn process_binary_is_stale_matches_and_differs() {

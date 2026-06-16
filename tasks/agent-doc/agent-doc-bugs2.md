@@ -970,7 +970,15 @@ Log evidence:
 I did not find any `tmux_literal_text_enter_key` or `routed_trigger_enter_key` markers in the searched parent, boost-client, qchurnfix, or session-share ops logs. Claude evidence is present in older logs as accepted-only direct-pane submits, but the current blocker is Codex: it still shows the CR path and an accepted-only/no-dispatch proof on `mrh-servers.md`.
 
 No code changed in this sweep. I am closing the proof-sweep item because it produced the exact missing-harness/pane/timestamp evidence requested; the live queue already has the concrete `mrh-servers.md` failure and SimWorld follow-up to drive the fix.
-<!-- agent:boundary:b0f9b1a2 -->
+
+### Re: do #opverify-editor-proof — gpt-5
+
+I completed the editor/IPC proof sweep. The positive markers are present: `write_authority action=routed` appears in both parent and `boost-client` ops logs; `supervisor_host_gate ... hosting=in-process` appears for the live agent-doc and boost-client documents; `plugin_watch_readonly` is logged; and both `queue_consume_writeback transport=editor_ipc` and `compact_writeback transport=editor_ipc` appear in the editor writeback logs.
+
+That is not exact zero-drift proof. The same sweep also finds disproof markers, including recurring `live_prompt_drift_after_preflight`, `crdt_merge_base_overlay_stale`, and File Cache Conflict evidence around the correlated sessions. So the editor/IPC route is exercised, but the clean-session convergence proof is still missing.
+
+No code changed for this sweep. I am marking `#opverify-editor-proof` complete only as the proof sweep: it found the exact blocker evidence instead of satisfying the underlying editor convergence proof.
+<!-- agent:boundary:224de6b4 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -988,7 +996,7 @@ Error: dispatch-only codex reopen refused to inject into pane %103 for tasks/mrh
 - :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
 - ~~do [#codexctrlz]~~
 - ~~do [#opverify-submit-proof]~~
-- do [#opverify-editor-proof]
+- ~~do [#opverify-editor-proof]~~
 - do [#opverify-recycle-proof]
 <!-- /agent:queue -->
 ###
@@ -1019,7 +1027,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#opverify-editor-proof] [clean-session] Operator-verify editor/IPC proof sweep: correlate #qt32, #fcc0-live-verify, #c2b6, and #rtwbcast-verify against ops.log markers write_authority action=routed, plugin_watch_readonly, supervisor_host_gate hosting=in-process, queue_consume_writeback transport=editor_ipc, compact_writeback transport=editor_ipc, and disproof markers live_prompt_drift_after_preflight / crdt_merge_base_overlay_stale / File Cache Conflict. Close only items with exact zero-drift proof; otherwise update each with missing marker(s).
 - [ ] [#opverify-recycle-proof] [clean-session] Operator-verify supervisor recycle proof sweep: correlate #suprehotreload, #recyclerestart-verify, #1j8q, #aazp, #4myd, #anw0verify, and #cleandrainsup-verify against ops.log markers supervisor_binary_stale_self_recycled, supervisor_reexec_failed fallback=continue_current_binary, dispatch_stale_generation_redirect, idle_queue_watch_context_reset, and subsequent drain/dispatch proof. Close duplicates with exact proof or update each item with the missing live step.
 - [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.

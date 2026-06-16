@@ -591,7 +591,11 @@ Verification passed:
 ❯ - `cargo test -p agent-doc-orchestration preflight::semantic_diff::tests::user_intent -- --nocapture`
 ❯ - `make check` (clippy, 4,588 nextest tests, doctests, medium SimWorld)
 ❯ - `gh run list --workflow CI --limit 1` shows latest CI run `27607675117` completed successfully.
-<!-- agent:boundary:6426ed4d -->
+
+### Re: do [#cwsp] closeout repair — gpt-5
+
+Closeout repair for the already-committed `#cwsp` response: the implementation summary and verification evidence above are correct, but IPC prefix normalization marked several summary lines as prompt glyph lines. This response closes that malformed prompt-looking tail. No source files changed after submodule commit `9870c5ef`, and the verification evidence remains the same.
+<!-- agent:boundary:dd5e241e -->
 <!-- /agent:exchange -->
 
 ## Queue

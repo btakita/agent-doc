@@ -21,7 +21,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
 **Code navigation:** See [`.claude/skills/tsift/SKILL.md`](.claude/skills/tsift/SKILL.md) and [`runbooks/code-navigation.md`](runbooks/code-navigation.md) for tsift AST-aware search, call graphs, and digest commands.
 
-**Runbooks:** [runbooks/](runbooks/) — harness-invocation, commit, planning-dispatch, pending-ops, model-tier-gate, compact-exchange, streaming-checkpoints, document-format, code-enforced-directives, architecture-first, and more.
+**Runbooks:** [runbooks/](runbooks/) — harness-invocation, commit, planning-dispatch, pending-ops, model-tier-gate, compact-exchange, streaming-checkpoints, document-format, code-enforced-directives, architecture-first (agent-doc development/dogfooding only), and more.
 
 <!-- tsift:code-navigation v=0.1.70 -->
 ## Code Navigation

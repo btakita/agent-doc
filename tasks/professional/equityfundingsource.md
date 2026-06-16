@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -80,7 +80,7 @@ Recommended architecture:
 Caveats: use current HighLevel API docs and private integration/OAuth rather than legacy V1 API patterns; their docs say V1 reached end-of-support on December 31, 2025. Also confirm Robert's enterprise/sub-account access includes the API/workflow features needed, because HighLevel says API access varies by plan.
 
 Changed paths: session document only. Verification: reviewed local EFS Deal Pipeline/Lender Pipeline notes and current official HighLevel API/workflow docs. Escalation: none. Confidence: medium-high.
-<!-- agent:boundary:15f26d1d -->
+<!-- agent:boundary:3851851f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,6 +88,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#deal-pipeline-ghl-adapter]
 <!-- /agent:queue -->
 
 ## Backlog

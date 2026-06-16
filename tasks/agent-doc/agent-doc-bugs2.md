@@ -418,6 +418,23 @@ Verification:
 - `make check` passed: clippy, 4,579 nextest tests, doctests, and the ignored medium SimWorld corpus test.
 - Latest CI: `27607675117` completed successfully on `main`.
 - Submodule commit: `f9e2b932 architecture: add workflow state kernel`.
+- `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+- `/usr/bin/zsh -lc 'GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin'` from `src/agent-doc/editors/jetbrains`
+- `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
+- `cargo test -p agent-doc-core turn_scope`
+- `cargo test -p agent-doc-orchestration queue_consume_editor_convergence_payload_is_node_keyed_and_fenced`
+- Documented the queue-consume editor IPC rule and added a release note.
+- Extended the JetBrains generation fence so delayed socket/file patches are dropped when the live buffer no longer matches either baseline, while `(HEAD)`, boundary comments, guard markers, and pipeline frontmatter churn remain tolerated.
+- Added raw and transient-marker-normalized baseline hashes to convergence payloads.
+- Removed the broad legacy `queue` component replacement from queue-consume editor IPC when a queue node patch is available, so sibling queue edits are not conflated with the consumed head.
+- Enforced the queue-consume editor convergence case at node scope: queue completion now travels as an exact `node_patches` strike keyed to the consumed queue node.
+- Reused the existing `turn_scope` managed-component contract for broad component-scoped conflict semantics.
+- parent gitlink `src/agent-doc`
+- `src/agent-doc/specs/07-orchestration-commands.md`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/PatchGenerationFenceTest.kt`
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
+- `src/agent-doc/agent-doc-orchestration/src/write/converge.rs`
+- `src/agent-doc/VERSIONS.md`
 
 Confidence: high. The new kernel is intentionally mirror-mode; runtime call-site replacement belongs to the later controller cutover work.
 
@@ -431,22 +448,22 @@ Confidence: high. The new kernel is intentionally mirror-mode; runtime call-site
 Implemented `#archproofledger` in submodule commit `cf43747e` (`architecture: add operation proof ledger`).
 
 Changed paths:
-❯ - `src/agent-doc/agent-doc-orchestration/src/flow/proof_ledger.rs`
-❯ - `src/agent-doc/agent-doc-orchestration/src/flow/mod.rs`
-❯ - `src/agent-doc/specs/08b-single-process-control-plane.md`
+- `src/agent-doc/agent-doc-orchestration/src/flow/proof_ledger.rs`
+- `src/agent-doc/agent-doc-orchestration/src/flow/mod.rs`
+- `src/agent-doc/specs/08b-single-process-control-plane.md`
 ❯ - parent gitlink `src/agent-doc`
 
 What changed:
-❯ - Added a typed append-only JSONL proof ledger under `flow::proof_ledger`.
-❯ - Ledger records carry `operation_id`, `content_hash`, operation kind, outcome, proof kind, proof text, optional subject id, and deterministic timestamp input.
-❯ - Covered required operation kinds: queue heads, response captures, patch writes, actor generations, and terminal proofs.
-❯ - Covered queue-head outcomes needed for consumed/deferred/retried/superseded rows.
-❯ - Added append/read helpers that create `.agent-doc/proof-ledger/<document-hash>.jsonl` and only append lines; existing rows are never rewritten.
-❯ - Documented the mirror-mode ledger in the single-process control-plane spec.
+- Added a typed append-only JSONL proof ledger under `flow::proof_ledger`.
+- Ledger records carry `operation_id`, `content_hash`, operation kind, outcome, proof kind, proof text, optional subject id, and deterministic timestamp input.
+- Covered required operation kinds: queue heads, response captures, patch writes, actor generations, and terminal proofs.
+- Covered queue-head outcomes needed for consumed/deferred/retried/superseded rows.
+- Added append/read helpers that create `.agent-doc/proof-ledger/<document-hash>.jsonl` and only append lines; existing rows are never rewritten.
+- Documented the mirror-mode ledger in the single-process control-plane spec.
 
 Verification:
-❯ - `cargo fmt`
-❯ - `cargo test -p agent-doc-orchestration proof_ledger`
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration proof_ledger`
 ❯ - `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
 ❯ - `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
 
@@ -464,32 +481,32 @@ Escalation: none.
 Implemented `#archcomponentmerge` in submodule commit `ec24c571` (`fix: fence queue consume editor convergence`).
 
 Changed paths:
-- `src/agent-doc/VERSIONS.md`
-- `src/agent-doc/agent-doc-orchestration/src/write/converge.rs`
-- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
-- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/PatchGenerationFenceTest.kt`
-- `src/agent-doc/specs/07-orchestration-commands.md`
-- parent gitlink `src/agent-doc`
+❯ - `src/agent-doc/VERSIONS.md`
+❯ - `src/agent-doc/agent-doc-orchestration/src/write/converge.rs`
+❯ - `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
+❯ - `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/PatchGenerationFenceTest.kt`
+❯ - `src/agent-doc/specs/07-orchestration-commands.md`
+❯ - parent gitlink `src/agent-doc`
 
 What changed:
-- Reused the existing `turn_scope` managed-component contract for broad component-scoped conflict semantics.
-- Enforced the queue-consume editor convergence case at node scope: queue completion now travels as an exact `node_patches` strike keyed to the consumed queue node.
-- Removed the broad legacy `queue` component replacement from queue-consume editor IPC when a queue node patch is available, so sibling queue edits are not conflated with the consumed head.
-- Added raw and transient-marker-normalized baseline hashes to convergence payloads.
-- Extended the JetBrains generation fence so delayed socket/file patches are dropped when the live buffer no longer matches either baseline, while `(HEAD)`, boundary comments, guard markers, and pipeline frontmatter churn remain tolerated.
-- Documented the queue-consume editor IPC rule and added a release note.
+❯ - Reused the existing `turn_scope` managed-component contract for broad component-scoped conflict semantics.
+❯ - Enforced the queue-consume editor convergence case at node scope: queue completion now travels as an exact `node_patches` strike keyed to the consumed queue node.
+❯ - Removed the broad legacy `queue` component replacement from queue-consume editor IPC when a queue node patch is available, so sibling queue edits are not conflated with the consumed head.
+❯ - Added raw and transient-marker-normalized baseline hashes to convergence payloads.
+❯ - Extended the JetBrains generation fence so delayed socket/file patches are dropped when the live buffer no longer matches either baseline, while `(HEAD)`, boundary comments, guard markers, and pipeline frontmatter churn remain tolerated.
+❯ - Documented the queue-consume editor IPC rule and added a release note.
 
 Verification:
-- `cargo test -p agent-doc-orchestration queue_consume_editor_convergence_payload_is_node_keyed_and_fenced`
-- `cargo test -p agent-doc-core turn_scope`
-- `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
-- `/usr/bin/zsh -lc 'GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin'` from `src/agent-doc/editors/jetbrains`
-- `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+❯ - `cargo test -p agent-doc-orchestration queue_consume_editor_convergence_payload_is_node_keyed_and_fenced`
+❯ - `cargo test -p agent-doc-core turn_scope`
+❯ - `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
+❯ - `/usr/bin/zsh -lc 'GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin'` from `src/agent-doc/editors/jetbrains`
+❯ - `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
 
 Confidence: high. The broad component-scope classifier remains covered by `turn_scope` tests, and this commit adds focused enforcement for the risky queue-consume editor IPC path.
 
 Escalation: none.
-<!-- agent:boundary:b14bb9ca -->
+<!-- agent:boundary:99d9c93c -->
 <!-- /agent:exchange -->
 
 ## Queue

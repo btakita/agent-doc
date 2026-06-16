@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -144,13 +144,43 @@ Sources checked: NVIDIA RTX 5090 specs, Qwen3 model family, Qwen2.5-Coder, Qwen3
 No code changed this cycle. Verification was document/research only: `tsift status`, `agent-doc preflight`, `agent-doc plan/read`, current-source web checks for model families, and `git status`. `tsift status` still reports one missing workspace scope, so I did not rely on tsift search/graph evidence for this answer. The worktree had unrelated existing changes; I left them untouched.
 
 Source links: [NVIDIA RTX 5090](https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5090/), [Qwen3](https://qwenlm.github.io/blog/qwen3/), [Qwen2.5-Coder](https://qwenlm.github.io/blog/qwen2.5-coder-family/), [Qwen3-Coder](https://github.com/QwenLM/Qwen3-Coder), [Devstral](https://mistral.ai/news/devstral-2-vibe-cli/), [gpt-oss](https://openai.com/index/introducing-gpt-oss/), [Gemma](https://ai.google.dev/gemma/docs/core), [Phi](https://azure.microsoft.com/en-us/products/phi), [Qwen3 Embedding/Reranker](https://github.com/QwenLM/Qwen3-Embedding), [BGE-M3](https://bge-model.com/bge/bge_m3.html), [Ollama OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility), [llama.cpp grammars](https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md).
-<!-- agent:boundary:9aca03f8 -->
+
+### Re: Qwen2.5-Coder-32B VRAM fit — gpt-5
+
+> **Queue prompt:**
+>
+> Can I use the Qwen2.5-Coder-32B with my current available vRAM?
+
+
+Yes, with a quantized build. No, not comfortably in fp16 or high-precision full weights.
+
+Live check at 2026-06-16 17:12 showed:
+
+- GPU: NVIDIA GeForce RTX 5090
+- Total VRAM: `32607 MiB`
+- Currently used: `1729 MiB`
+- Currently free: about `30878 MiB`, roughly `30.2 GiB`
+
+That is enough for Qwen2.5-Coder-32B in a 4-bit quant, and probably enough for a 5-bit quant with moderate context. It gets tight with 6-bit, large batch sizes, or long context, and 8-bit/full fp16 should be treated as outside the practical single-5090 target.
+
+Practical guidance:
+
+- **Best first try:** `Q4_K_M` / similar 4-bit GGUF. This should fit with useful context and leave room for KV cache/runtime overhead.
+- **Quality try:** `Q5_K_M` if you keep context moderate, for example 8k-16k to start.
+- **Tight / test-only:** `Q6_K` may fit only with small context and careful settings; expect failures or CPU offload if the runtime is not efficient.
+- **Avoid as default:** `Q8_0`, fp16, or very large 32k-128k contexts on one 32 GB card.
+
+For tsift model support, this means Qwen2.5-Coder-32B is a reasonable `code.quality` / `5090-local` profile, not a portable default. The portable default should stay around 7B-14B or a small MoE/20B-class model, because other users may only have 8-16 GB of VRAM.
+
+I would run it through `llama.cpp`/GGUF or another runtime with explicit GPU layer/context controls. `ollama` is not installed on this machine right now (`ollama list` failed with `command not found`), so I could not inspect an existing local Ollama model tag or size.
+
+No code changed this cycle. Verification was hardware/document only: `tsift status`, `agent-doc preflight`, `agent-doc plan`, `nvidia-smi`, and `ollama list`. `tsift status` still reports one missing workspace scope, so I did not rely on tsift graph/search evidence.
+<!-- agent:boundary:394e8b47 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Can I use the Qwen2.5-Coder-32B with my current available vRAM?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -116,7 +116,20 @@ Yes. For live tmux panes, agent-doc now submits with literal text followed by a 
 OpenCode no longer gets `tmux_literal_kitty_return` as its submit profile. The only remaining OpenCode Kitty handling is the separate PTY filter that preserves Kitty keyboard mode for permission-prompt navigation; it is not used to submit `agent-doc <FILE>` prompts.
 
 Verification is unchanged from the implementation closeout: `cargo test submit`, `cargo test queue_dispatch`, `cargo test -p agent-doc-orchestration submit`, `make check`, `cargo build`, and `cargo install --path .` all passed after the OpenCode Enter change.
-<!-- agent:boundary:2246ec97 -->
+
+### Re: lazily-rs for submit-key policy — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Can we use lazily-rs to avoid duplicate logic with the submit keys all over the codebase?
+
+
+I would not use `lazily-rs` for this submit-key fix.
+
+The duplicate logic was not a laziness or caching problem; it was a policy-boundary problem. The right fix is the one now in place: a single `TmuxSubmitProfile` owns the mode, transform, key name, and visible-draft retry eligibility. Call sites ask that profile instead of spelling `tmux_literal_cr`, `tmux_literal_text_enter_key`, or any OpenCode-specific submit mode themselves.
+
+Using `lazily-rs` here would add indirection without reducing meaningful runtime cost or behavioral branching. It may be useful later for generated or memoized harness capability tables, but command-submit semantics should stay explicit, tiny, and directly covered by tests.
+<!-- agent:boundary:54e45264 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -125,9 +138,9 @@ Verification is unchanged from the implementation closeout: `cargo test submit`,
 - ~~:pushpin: Both JB `Clear Session Context` and JB `Run Agent Doc` send a CR instead of submitting ![img_24.png](img_24.png). There is also an extra prompt that bleeds into the input ![img_25.png](img_25.png). Why is this so difficult to fix? Can we design a way to detect what is sent and how it is processed by the agent? Fix root causes. #simworld~~
 - ~~:pushpin: Why are we ever using `tmux_literal_cr` and not `tmux_literal_text_enter_key`? Why do we have so much duplicate logic with the submit keys all over the codebase? Each harness' tmux_literal should be defined in a single place. No tmux_literal values spread all over the place. Why tmux_literal_kitty_return for opencode? Is tmux_literal_text_enter_key not working? #simworld~~
 - ~~:pushpin: Does agent-doc use `tmux send-keys -t target "command" Enter` to submit a prompt? Would this work with opencode? I don't want to hardcode a kitty return b/c kitty is specific to my environment...not universal. I'm concerned that it wont work on other terminals. I tried `tmux send-keys -t .1 "Hello" Enter` on opencode and it worked.~~
-- :pushpin: Can we use lazily-rs to avoid duplicate logic with the submit keys all over the codebase?
+- ~~:pushpin: Can we use lazily-rs to avoid duplicate logic with the submit keys all over the codebase?~~
 - :pushpin: Issue with restart on Codex ![img_26.png](img_26.png) ![screenshot.png](../../../../../Pictures/agent-loop/screenshot.png)
-- agent-doc start to 
+- :pushpin: agent-doc start to codex misformatted ![img_27.png](img_27.png)
 - :pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.
 <!-- /agent:queue -->
 ###

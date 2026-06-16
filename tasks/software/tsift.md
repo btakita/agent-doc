@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -175,12 +175,13 @@ For tsift model support, this means Qwen2.5-Coder-32B is a reasonable `code.qual
 I would run it through `llama.cpp`/GGUF or another runtime with explicit GPU layer/context controls. `ollama` is not installed on this machine right now (`ollama list` failed with `command not found`), so I could not inspect an existing local Ollama model tag or size.
 
 No code changed this cycle. Verification was hardware/document only: `tsift status`, `agent-doc preflight`, `agent-doc plan`, `nvidia-smi`, and `ollama list`. `tsift status` still reports one missing workspace scope, so I did not rely on tsift graph/search evidence.
-<!-- agent:boundary:394e8b47 -->
+<!-- agent:boundary:b87ec8f8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- How can I use a local model to support both tsift and agent-doc for local Knowledge models?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

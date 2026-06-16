@@ -213,15 +213,48 @@ Verification:
 Live proof after install: `agent-doc controller status --project-root /home/brian/work/btakita/agent-loop --ensure` reports the controller fresh by inode. A warmed `agent-doc admin inspect tasks/agent-doc/agent-doc-bugs2.md --json` now reports the current controller fresh and the route-owned supervisor for this document stale by inode (`route_owned_supervisor.stale=true`), which is the operator-facing freshness proof this item needed.
 
 Source commit/push caveat: I did not commit or push the agent-doc source changes because `src/agent-doc` was already broadly dirty before this cycle, including files I had to touch. Staging whole files would have included unrelated pre-existing changes.
-<!-- agent:boundary:a8674b04 -->
+
+### Re: JB Run Agent Doc EFS auto-sync proof — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` on equityfundingsource.md after a fresh auto-sync did not submit the prompt.
+
+
+I checked the `equityfundingsource.md` route path against the live logs and the current `src/agent-doc` source. The fix for this queue head is already landed and pushed on `main` in `src/agent-doc`: `f5844c53` (`fix(jb): surface codex boot timeouts`) and `f27a388b` (`fix(jb): add run-agent-doc proof logging`). `src/agent-doc` is even with `origin/main`.
+
+The useful log evidence is that the fresh auto-sync route did not fail to submit silently. For `equityfundingsource.md`, the first fresh route sent the literal text plus Enter to pane `%101`, then recorded `route_dispatch_only_sent` with `submit_mode=tmux_literal_text_enter_key`, `proof=consumed`, and `proof_scope=dispatch_start`. Later retries were accepted by the pane but did not produce dispatch-start proof within the wait window, and those are now surfaced as `accepted_without_dispatch_start_proof` / `route_dispatch_only_submit_unproven` instead of being reported as a clean success. That is the behavioral distinction the JetBrains proof logging fix needed.
+
+Changed source already present in the pushed commits:
+
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/SubmitAction.kt`
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt`
+- `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/SubmitActionTest.kt`
+- `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt`
+- `agent-doc-orchestration/src/project_controller.rs`
+- `agent-doc-orchestration/src/project_controller/rpc.rs`
+- `editors/jetbrains/SPEC.md`
+- `specs/07-session-tmux-commands.md`
+- `specs/08b-single-process-control-plane.md`
+
+Verification:
+
+- `cargo test -p agent-doc-orchestration dispatch_only` passed: 32 passed, 0 failed, 13 ignored.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.SubmitActionTest --tests com.github.btakita.agentdoc.TerminalUtilTest` passed.
+- `gh run list --workflow CI --limit 1` shows the latest CI run for `fix(jb): add run-agent-doc proof logging` completed successfully on `main`.
+
+JetBrains plugin note: this fix does require the JetBrains plugin update. The checked-in plugin version is now `0.2.167`, and the local signed artifact exists at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.167-signed.zip`.
+
+No new source changes were made in this closeout turn; this cycle verified the already-pushed fix and closed the live EFS auto-sync queue item with proof.
+<!-- agent:boundary:6accfbfe -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: Issue with restart on Codex ![img_26.png](img_26.png) ![screenshot.png](../../../../../Pictures/agent-loop/screenshot.png)~~
-- ~~The restart stalled. As I was typing, numerous `/clear` and restarts occurred.~~
-- JB `Run Agent Doc` on equityfundingsource.md after a fresh auto-sync did not submit the prompt.
+- ~~JB `Run Agent Doc` on equityfundingsource.md after a fresh auto-sync did not submit the prompt.~~
+- Why not just shell out `tmux send-keys "Command" Enter`?
+- commit + push uncommitted agent-doc files
 - :pushpin: How can I tell if the supervisor + CPC are up to date? Why is the formatting all messed up? ![2026-06-15_22-56.png](../../../../../Pictures/agent-loop/2026-06-15_22-56.png) Also I'm seeing some shells from the supervisor are 2 lines too low. See where the `agent-doc admin --help` starts in the screenshot.
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
@@ -233,8 +266,6 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ---
 - :pushpin: agent-doc start to codex misformatted ![img_27.png](img_27.png) ![img_28.png](img_28.png)
 - :pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.
-- ~~do [#codexpaneformat]~~
-- ~~do [#freshnessstatus]~~
 <!-- /agent:queue -->
 ###
 <!--

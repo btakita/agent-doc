@@ -306,6 +306,11 @@ Changed paths: `src/agent-doc/agent-doc-orchestration/src/flow/outcome.rs`, `src
 
 > **Queue prompt:**
 >
+> :round_pushpin: do [#binconflictscope]
+
+
+> **Queue prompt:**
+>
 > :round_pushpin: do [#binstalepause]
 
 
@@ -314,7 +319,7 @@ Implemented `#binstalepause` in `src/agent-doc` commit `6e79ef03` (`feat: emit b
 The controller now builds a `StaleQueuePauseRecovery` object with `binary_outcome=recoverable`, `invariant=stale_queue_pause`, `proof_marker=supervisor_restart_redirect`, and `next_action=restart_supervisor_once_and_retry`. The dispatch bail keeps the old restart marker for compatibility, but ops.log now has a durable typed proof line. The route retry path also carries the same typed fields in `route_dispatch_recovery`, both for `result=restarted` and `result=reexec_failed`, so stale-pause recovery is distinguishable from deliberate operator/spent-preset pauses.
 
 Changed paths: `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`, `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`, `src/agent-doc/agent-doc-orchestration/src/route/authoritative_actor.rs`, the parent `src/agent-doc` gitlink, and this session document. Verification: `tsift rewrite --run 'cargo test -p agent-doc-orchestration dispatch_error_supervisor_restart_redirect_classification'` passed, `tsift rewrite --run 'cargo test -p agent-doc-orchestration dispatch_queue_paused_stale_supervisor_emits_restart_redirect_marker'` passed, `make check` passed (clippy, 4568 nextest tests, doctests, and closeout SimWorld), and latest CI on `main` was green via `gh run list --workflow CI --limit 1`. Install was not run because the submodule contains unrelated pre-existing dirty files; installing from that tree would promote unrelated work into the local binary. Confidence: high. Escalation: none.
-<!-- agent:boundary:8f009f2b -->
+<!-- agent:boundary:0e295799 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -330,7 +335,7 @@ Changed paths: `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
 - ~~Please add and prioritize backlog + queue items to implement recommendations from "binary logic for stale queue pauses and conflicts" response.~~
 - ~~:round_pushpin: do [#binoutcomes]~~
 - ~~:round_pushpin: do [#binstalepause]~~
-- :round_pushpin: do [#binconflictscope]
+- ~~:round_pushpin: do [#binconflictscope]~~
 - :round_pushpin: do [#binconflictdedupe]
 - do [#qflood2]
 - do [#qt32]
@@ -373,7 +378,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#binconflictscope] priority=1 Implement component-scoped conflict classification for exchange, queue, backlog, status, review, done/archive, gitlink, and editor writeback so unrelated component edits merge automatically and only same-component incompatible edits become user-visible conflicts.
 - [ ] [#binconflictdedupe] priority=1 Add conflict/symptom de-duplication keyed by invariant id, document id, component, and content hash so repeated stale-pause or drift symptoms attach evidence to the existing backlog/review item instead of creating more queue conflicts.
 - [ ] [#archstatekernel] Implement a pure typed workflow state kernel for agent-doc route/queue/closeout/editor-write decisions: input evidence -> decision enum -> allowed mutation -> required proof. Move stale-supervisor, queue-drainability, captured-response, and live-buffer decisions behind this boundary before adding more route-edge guards.
 - [ ] [#archproofledger] Add an append-only operation proof ledger for queue heads, response captures, patch writes, actor generations, and terminal proofs. Every consumed/deferred/retried/superseded head should have one durable proof row keyed by operation id and content hash.

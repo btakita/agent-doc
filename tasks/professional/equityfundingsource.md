@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -104,7 +104,7 @@ Verification: `bun test tests/admin-investor-pipeline.test.ts` passed (63 tests)
 Committed and pushed: EFS submodule `89b9558` (`feat(admin): add GHL deal pipeline adapter state`) to `btakita/equityfundingsource-dev:main`; parent repo pointer `a11c22952` (`chore(efs): advance GHL adapter state`) to `btakita/agent-loop:main`.
 
 Escalation: none. Confidence: high. No deploy was run; this queue item used the `#spec-test-commit-push` path, and the new D1 migration will be applied by the normal deploy path.
-<!-- agent:boundary:40938bf4 -->
+<!-- agent:boundary:2800c81d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,6 +112,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- How would GHL benefit the communication between EFS, lenders, and borrowers? Can we facilitate the Processing, Underwriting, Terms negotiation, and Closing stages of the deal pipeline?
 <!-- /agent:queue -->
 
 ## Backlog

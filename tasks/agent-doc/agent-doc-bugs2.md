@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 agent_doc_pipeline:
   run_id: cycle-1781638030591
   step: write_applied
@@ -754,13 +754,13 @@ Commits:
 Confidence: high. The planner is isolated behind a command surface, covered by focused tests and full local `make check`, and the installed dry-run smoke verifies the live safety split without mutating the proof ledger.
 
 Escalation: none.
-<!-- agent:boundary:64ad619e -->
+<!-- agent:boundary:a615aaa9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
----
+- JB `Run Agent Doc` on Codex still does not submit ![img_33.png](img_33.png)
 <!-- /agent:queue -->
 ###
 <!--

@@ -673,13 +673,16 @@ mod tests {
         // driver is read (input) and written (the strike).
         assert!(scope.read_set.contains(driver));
         assert!(scope.write_set.contains(driver));
-        assert!(
-            scope
-                .write_set
-                .contains(&agent_doc_core::turn_scope::Address::component(
-                    "backlog", 0
-                ))
-        );
+        for &component in agent_doc_core::turn_scope::MANAGED_OUTPUT_COMPONENTS {
+            assert!(
+                scope
+                    .write_set
+                    .contains(&agent_doc_core::turn_scope::Address::component(
+                        component, 0
+                    )),
+                "turn scope write set should include managed output component {component}"
+            );
+        }
     }
     #[test]
     fn derive_turn_scope_none_without_prompt_targets() {

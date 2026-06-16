@@ -12,8 +12,8 @@
 //!   will mutate. It is emitted at turn start from preflight `prompt_targets`.
 //! - `TurnScope::for_driver` builds the canonical scope: read `{driver,
 //!   exchange tail}`; write `{exchange append, driver strike, backlog, status,
-//!   review}`. The driver also appears in the write set because the turn
-//!   strikes the queue item it consumes.
+//!   review, done/archive, gitlink, editor writeback}`. The driver also appears
+//!   in the write set because the turn strikes the queue item it consumes.
 //!
 //! ## Agentic Contracts
 //! - The manifest is the substrate the phase-3 affectedness classifier reads;
@@ -22,6 +22,48 @@
 //!   the sets cover only the output components every turn touches.
 
 use serde::{Deserialize, Serialize};
+
+pub const COMPONENT_EXCHANGE: &str = "exchange";
+pub const COMPONENT_QUEUE: &str = "queue";
+pub const COMPONENT_BACKLOG: &str = "backlog";
+pub const COMPONENT_STATUS: &str = "status";
+pub const COMPONENT_REVIEW: &str = "review";
+pub const COMPONENT_DONE: &str = "done";
+pub const COMPONENT_DONE_ARCHIVE: &str = "done_archive";
+pub const COMPONENT_GITLINK: &str = "gitlink";
+pub const COMPONENT_EDITOR_WRITEBACK: &str = "editor_writeback";
+
+/// Managed output surfaces a turn may mutate.
+///
+/// Most entries are markdown `agent:*` components. `done_archive`, `gitlink`,
+/// and `editor_writeback` are runtime surfaces addressed by the same classifier
+/// so drift handling can use one component-scoped contract.
+pub const MANAGED_OUTPUT_COMPONENTS: &[&str] = &[
+    COMPONENT_EXCHANGE,
+    COMPONENT_BACKLOG,
+    COMPONENT_STATUS,
+    COMPONENT_REVIEW,
+    COMPONENT_DONE,
+    COMPONENT_DONE_ARCHIVE,
+    COMPONENT_GITLINK,
+    COMPONENT_EDITOR_WRITEBACK,
+];
+
+/// All managed surfaces that can participate in conflict classification.
+///
+/// Queue is node-scoped through the driver address: the running item conflicts,
+/// while sibling queue inserts remain independent.
+pub const MANAGED_CONFLICT_COMPONENTS: &[&str] = &[
+    COMPONENT_EXCHANGE,
+    COMPONENT_QUEUE,
+    COMPONENT_BACKLOG,
+    COMPONENT_STATUS,
+    COMPONENT_REVIEW,
+    COMPONENT_DONE,
+    COMPONENT_DONE_ARCHIVE,
+    COMPONENT_GITLINK,
+    COMPONENT_EDITOR_WRITEBACK,
+];
 
 /// An addressable location in the document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,29 +172,24 @@ impl TurnScope {
     /// Build the canonical turn scope for an optional driver queue node, narrowing
     /// the `exchange` component to its active tail at `exchange_tail_floor`.
     ///
-    /// read_set = `{driver, exchange tail}`; write_set = `{exchange append,
-    /// driver strike, backlog, status, review}`. Addresses are deduped while
-    /// preserving first-seen order so the manifest is stable. `exchange_tail_floor`
-    /// is the count of exchange nodes present at turn start: a later op at an index
-    /// at or above it is a tail append/edit (affects the turn); an op below it
-    /// edits committed history and is independent.
+    /// read_set = `{driver, exchange tail}`; write_set = the managed output
+    /// components plus the driver strike. Addresses are deduped while preserving
+    /// first-seen order so the manifest is stable. `exchange_tail_floor` is the
+    /// count of exchange nodes present at turn start: a later op at an index at
+    /// or above it is a tail append/edit (affects the turn); an op below it edits
+    /// committed history and is independent.
     pub fn for_driver_with_exchange_tail(
         driver: Option<Address>,
         exchange_tail_floor: Option<usize>,
     ) -> Self {
-        let exchange = Address::component("exchange", 0);
+        let exchange = Address::component(COMPONENT_EXCHANGE, 0);
         let mut read_set = Vec::new();
         if let Some(driver) = &driver {
             read_set.push(driver.clone());
         }
         read_set.push(exchange.clone());
 
-        let mut write_set = vec![
-            exchange,
-            Address::component("backlog", 0),
-            Address::component("status", 0),
-            Address::component("review", 0),
-        ];
+        let mut write_set = managed_output_write_set();
         if let Some(driver) = &driver {
             // The turn strikes the queue item it consumes.
             write_set.push(driver.clone());
@@ -223,7 +260,7 @@ fn scope_membership(
     op_index: Option<usize>,
     scope: &TurnScope,
 ) -> (bool, bool) {
-    if op_address.component == "exchange"
+    if op_address.component == COMPONENT_EXCHANGE
         && let Some(floor) = scope.exchange_tail_floor
     {
         let is_tail = op_index.is_some_and(|index| index >= floor);
@@ -333,45 +370,96 @@ fn dedupe_addresses(addresses: Vec<Address>) -> Vec<Address> {
     out
 }
 
+fn managed_output_write_set() -> Vec<Address> {
+    MANAGED_OUTPUT_COMPONENTS
+        .iter()
+        .map(|component| Address::component(component, 0))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn for_driver_with_queue_node_covers_input_and_output() {
-        let driver = Address::node("queue", 0, "queue:0:op-scoped-drift-2:0");
+        let driver = Address::node(COMPONENT_QUEUE, 0, "queue:0:op-scoped-drift-2:0");
         let scope = TurnScope::for_driver(Some(driver.clone()));
         assert_eq!(scope.driver.as_ref(), Some(&driver));
         // read set: driver first, then exchange tail.
         assert_eq!(scope.read_set[0], driver);
-        assert!(scope.read_set.contains(&Address::component("exchange", 0)));
-        // write set: exchange append, backlog, status, review, plus the strike.
-        assert!(scope.write_set.contains(&Address::component("exchange", 0)));
-        assert!(scope.write_set.contains(&Address::component("backlog", 0)));
-        assert!(scope.write_set.contains(&Address::component("status", 0)));
-        assert!(scope.write_set.contains(&Address::component("review", 0)));
+        assert!(
+            scope
+                .read_set
+                .contains(&Address::component(COMPONENT_EXCHANGE, 0))
+        );
+        // write set: managed outputs plus the consumed queue-item strike.
+        for &component in MANAGED_OUTPUT_COMPONENTS {
+            assert!(
+                scope.write_set.contains(&Address::component(component, 0)),
+                "write set must cover managed output component {component}"
+            );
+        }
         assert!(scope.write_set.contains(&driver));
+    }
+
+    #[test]
+    fn managed_component_contract_names_every_conflict_surface() {
+        assert_eq!(
+            MANAGED_CONFLICT_COMPONENTS,
+            &[
+                COMPONENT_EXCHANGE,
+                COMPONENT_QUEUE,
+                COMPONENT_BACKLOG,
+                COMPONENT_STATUS,
+                COMPONENT_REVIEW,
+                COMPONENT_DONE,
+                COMPONENT_DONE_ARCHIVE,
+                COMPONENT_GITLINK,
+                COMPONENT_EDITOR_WRITEBACK,
+            ]
+        );
+    }
+
+    #[test]
+    fn for_driver_write_set_orders_managed_outputs_before_driver() {
+        let driver = Address::node(COMPONENT_QUEUE, 0, "queue:0:driver:0");
+        let scope = TurnScope::for_driver(Some(driver.clone()));
+        let mut expected = managed_output_write_set();
+        expected.push(driver);
+        assert_eq!(scope.write_set, expected);
     }
 
     #[test]
     fn for_driver_without_node_only_lists_output_components() {
         let scope = TurnScope::for_driver(None);
         assert!(scope.driver.is_none());
-        assert_eq!(scope.read_set, vec![Address::component("exchange", 0)]);
-        assert!(scope.write_set.contains(&Address::component("backlog", 0)));
+        assert_eq!(
+            scope.read_set,
+            vec![Address::component(COMPONENT_EXCHANGE, 0)]
+        );
+        assert_eq!(scope.write_set, managed_output_write_set());
         // No queue node, so nothing addresses the queue component.
-        assert!(scope.write_set.iter().all(|a| a.component != "queue"));
+        assert!(
+            scope
+                .write_set
+                .iter()
+                .all(|a| a.component != COMPONENT_QUEUE)
+        );
     }
 
     #[test]
     fn addresses_are_deduped_preserving_order() {
-        let exchange = Address::component("exchange", 0);
+        let exchange = Address::component(COMPONENT_EXCHANGE, 0);
         let deduped = dedupe_addresses(vec![
             exchange.clone(),
-            Address::component("backlog", 0),
+            Address::component(COMPONENT_BACKLOG, 0),
             exchange.clone(),
         ]);
-        assert_eq!(deduped, vec![exchange, Address::component("backlog", 0)]);
+        assert_eq!(
+            deduped,
+            vec![exchange, Address::component(COMPONENT_BACKLOG, 0)]
+        );
     }
 
     #[test]
@@ -449,7 +537,7 @@ mod tests {
         use crate::op_log::OpActor;
         let scope = scope_for("queue:0:driver:0");
         // backlog is in the write set but not the read set.
-        let backlog = Address::node("backlog", 0, "backlog:0:item:0");
+        let backlog = Address::node(COMPONENT_BACKLOG, 0, "backlog:0:item:0");
         assert_eq!(
             classify_op(
                 OpActor::ForeignSupervisor,
@@ -463,11 +551,38 @@ mod tests {
     }
 
     #[test]
+    fn classify_all_managed_output_surfaces_by_component_scope() {
+        use crate::op_log::OpActor;
+
+        let scope = scope_for("queue:0:driver:0");
+        for &component in MANAGED_OUTPUT_COMPONENTS {
+            let addr = Address::node(component, 0, &format!("{component}:0:item:0"));
+            let expected = if component == COMPONENT_EXCHANGE {
+                AffectednessClass::InputAffecting
+            } else {
+                AffectednessClass::OutputContended
+            };
+            assert_eq!(
+                classify_op(OpActor::User, "replace", &addr, Some(0), &scope),
+                expected,
+                "component {component} should be classified within the managed scope"
+            );
+        }
+
+        let sibling_queue = Address::node(COMPONENT_QUEUE, 0, "queue:0:sibling:0");
+        assert_eq!(
+            classify_op(OpActor::User, "insert", &sibling_queue, Some(1), &scope),
+            AffectednessClass::Independent,
+            "queue remains node-scoped so unrelated queue work can merge"
+        );
+    }
+
+    #[test]
     fn classify_provenance_spoofed_for_live_buffer_in_scope() {
         use crate::op_log::OpActor;
         let scope = scope_for("queue:0:driver:0");
         // A live-buffer actor touching an in-scope address is spoofed, not contended.
-        let exchange = Address::component("exchange", 0);
+        let exchange = Address::component(COMPONENT_EXCHANGE, 0);
         assert_eq!(
             classify_op(OpActor::LiveBuffer, "replace", &exchange, None, &scope),
             AffectednessClass::ProvenanceSpoofed

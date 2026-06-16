@@ -132,7 +132,21 @@ Proof for this cycle:
 3. **Mutations are narrow and component-scoped.** Queue consume, exchange append, backlog/done mutation, status replacement, review resolution, and editor CRDT writeback are separate managed components with explicit merge rules. Most regressions come from treating the markdown file as one blob when the workflow already knows which component it owns.
 2. **A pure decision kernel owns policy.** It returns outcomes like `AppendResponse`, `ReplayCapturedResponse`, `RetireStaleCapture`, `RetryOnCurrentGeneration`, `DeferOperatorOnlyQueue`, `RecoverViaFileIpc`, `MergeIndependentComponents`, or `BlockRealComponentConflict`. No route edge should independently parse a captured-response error string and invent its own recovery.
 1. **Evidence is gathered once.** Current doc hash, snapshot hash, live editor hash, active cycle phase, queue head id/hash, actor generation, supervisor freshness, IPC transport state, and owner/busy state become a typed `Evidence` record.
-<!-- agent:boundary:acc27122 -->
+
+### Re: operator-verify queue boundary — gpt-5
+
+The architecture response and backlog capture are now present in the document. The current queue head is `do [#recyclerestart-verify]`, but that backlog item is explicitly `[operator-verify]`: it requires a live supervisor/JB recycle proof and cannot be completed from this agent turn without the operator driving that live step.
+
+I am leaving `#recyclerestart-verify` open in backlog and not marking it done or gated again. The remaining queue heads are live/operator proof items first; the newly added architecture backlog items are queued behind those, but they should be handled in a focused implementation cycle rather than forced through this recovery closeout.
+
+Proof for this cycle:
+
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` via finalize.
+- Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc session-check`, `agent-doc read --component queue`, `agent-doc finalize`.
+- Verification: no source/build/test surfaces changed; this closeout only resolves the open preflight cycle and records the operator-verify boundary.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:6cd71ae4 -->
 <!-- /agent:exchange -->
 
 ## Queue

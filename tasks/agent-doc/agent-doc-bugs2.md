@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 agent_doc_pipeline:
   run_id: cycle-1781638030591
   step: write_applied
@@ -61,12 +61,13 @@ Verification passed: focused submit/route/idle/clear/SimWorld tests, ignored liv
 No JetBrains plugin update is required for this change; it is Rust CLI/orchestration code. `make install` installed the updated binary and `libagent_doc.so`, and marked two controllers to recycle at the next idle boundary.
 
 Confidence: high for the code path and proof markers. Live JB confirmation should grep for `submit_mode=tmux_text_enter` and `action=submit_key key=Enter` if this recurs.
-<!-- agent:boundary:a613e4bc -->
+<!-- agent:boundary:d3e46d78 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- JB `Run Agent Doc` sends a `/clear<CR>` and does not submit.
 <!-- /agent:queue -->
 ###
 <!--

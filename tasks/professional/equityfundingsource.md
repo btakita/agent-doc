@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -104,7 +104,54 @@ Verification: `bun test tests/admin-investor-pipeline.test.ts` passed (63 tests)
 Committed and pushed: EFS submodule `89b9558` (`feat(admin): add GHL deal pipeline adapter state`) to `btakita/equityfundingsource-dev:main`; parent repo pointer `a11c22952` (`chore(efs): advance GHL adapter state`) to `btakita/agent-loop:main`.
 
 Escalation: none. Confidence: high. No deploy was run; this queue item used the `#spec-test-commit-push` path, and the new D1 migration will be applied by the normal deploy path.
-<!-- agent:boundary:2800c81d -->
+
+### Re: GHL communication pipeline — gpt-5
+
+> **Queue prompt:**
+>
+> How would GHL benefit the communication between EFS, lenders, and borrowers? Can we facilitate the Processing, Underwriting, Terms negotiation, and Closing stages of the deal pipeline?
+
+Yes. GHL can help a lot here if it is treated as the communication/workflow layer around the Deal Pipeline, not as the system of record for the Deal Pipeline.
+
+The right split is:
+
+1. **EFS/D1 stays canonical** for loan status, Available Deal visibility, interested lenders, selected lender, borrower portal messages, document requests, private document access, underwriting notes, verbal terms, allocation/funding state, audit history, TMO sync gates, and close/funded state.
+2. **GHL mirrors and orchestrates communication**: contacts, conversations, outbound package emails/SMS, follow-up tasks, calendar/booking links, internal notifications, workflow reminders, and optional opportunity-stage visibility for Robert/Judith.
+3. **Every GHL action should write back an external ID or event summary into EFS**, so the admin can still understand the deal from EFS if GHL is unavailable.
+
+This fits the current EFS implementation. The Lender Pipeline already tracks per-interest lender communication fields and GHL adapter IDs (`ghl_contact_id`, `ghl_conversation_id`, `ghl_opportunity_id`, package workflow/message IDs, sync status/error). That is the right foundation: one GHL contact/conversation/opportunity can be linked to a specific lender + deal-interest work item without letting GHL decide who is selected or funded.
+
+How I would use it by stage:
+
+1. **Processing**
+   - EFS moves the loan/deal into Processing.
+   - EFS syncs/links borrower and lender contacts in GHL.
+   - GHL sends the initial processing email, follow-up reminders, and internal notifications.
+   - EFS records the GHL contact/conversation/opportunity IDs and next follow-up state.
+
+2. **Underwriting**
+   - EFS remains the borrower document-request system because private files and portal permissions belong there.
+   - GHL sends reminders with secure EFS portal links, not sensitive attachments.
+   - Lender package updates can go through a GHL workflow or direct conversation message.
+   - Replies and no-response signals should update EFS communication history and next-action fields.
+
+3. **Terms negotiation**
+   - GHL is useful for email threads, call reminders, templates, and CRM visibility.
+   - EFS should store the actual negotiated state: selected lender, verbal amount, conditions, pre-doc instructions, term summary, and approval/funding status.
+   - A GHL opportunity stage can mirror “Terms negotiation,” but should not be the authoritative approval/selection state.
+
+4. **Closing**
+   - GHL can send closing reminders, internal notifications, calendar links, and possibly documents/contracts where the document is suitable for GHL.
+   - EFS should still own final closing state, deal close action, wire/funding records, lender allocation, borrower portal state, document archive, and TMO writeback.
+
+Current HighLevel docs support this architecture: HighLevel documents REST APIs for contacts, messaging, workflows, calendars, payments, webhooks, and related CRM functions, but says V1 API support ended on **December 31, 2025**, so new work should use current marketplace docs / V2 private integration or OAuth surfaces: https://help.gohighlevel.com/support/solutions/articles/48001060529-highlevel-api-documentation. The Conversations API exposes `POST /conversations/messages`: https://marketplace.gohighlevel.com/docs/ghl/conversations/send-a-new-message/. Contacts can be enrolled into a workflow with `POST /contacts/:contactId/workflow/:workflowId`: https://marketplace.gohighlevel.com/docs/ghl/contacts/add-contact-to-workflow/. Opportunities can be created/updated through the Opportunities API: https://marketplace.gohighlevel.com/docs/ghl/opportunities/create-opportunity/. Workflows currently include communication actions, internal notifications, appointment actions, opportunity actions, and document/contract actions: https://help.gohighlevel.com/support/solutions/articles/155000002294-what-are-workflow-actions-complete-list-.
+
+Recommendation: build the next integration as an **EFS-to-GHL stage bridge**. On each EFS stage transition or lender workflow action, enqueue an outbound sync job that upserts/links GHL contacts, optionally upserts a GHL opportunity, triggers the right GHL workflow, and stores the returned IDs/status in EFS. GHL then improves response speed and follow-up consistency across EFS, lenders, and borrowers, while EFS remains the trusted deal, document, and funding ledger.
+
+Added follow-up backlog item `#ghl-stage-bridge` for the implementation bridge.
+
+Changed paths: session document only. Verification: reviewed current EFS PRD/UI state and current official HighLevel API/workflow docs. Escalation: none. Confidence: high.
+<!-- agent:boundary:a0f866db -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,12 +159,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- How would GHL benefit the communication between EFS, lenders, and borrowers? Can we facilitate the Processing, Underwriting, Terms negotiation, and Closing stages of the deal pipeline?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#ghl-stage-bridge] [recommended] Implement an event-driven GHL stage bridge from EFS Deal Pipeline state to HighLevel contacts/opportunities/workflows for Processing, Underwriting, Terms negotiation, and Closing while keeping EFS/D1 canonical for loan, lender-selection, borrower portal, document, audit, and funding state.
 <!-- /agent:backlog -->
 
 ## Review

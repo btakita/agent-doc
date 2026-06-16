@@ -295,6 +295,20 @@ I added the binary-logic implementation slice as the next architecture layer ahe
 2. `#binstalepause` applies that contract to stale queue pauses so stale supervisor / pause / no-drainable-head cases recover or defer with proof instead of surfacing as conflicts.
 3. `#binconflictscope` makes conflict classification component-scoped across exchange, queue, backlog, status, review, done/archive, gitlink, and editor writeback.
 4. `#binconflictdedupe` coalesces repeated symptoms by invariant/document/component/content hash so one root cause does not spawn repeated queue conflicts.
+- `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+- `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
+- `cargo test -p agent-doc-orchestration proof_ledger`
+- `cargo fmt`
+- Documented the mirror-mode ledger in the single-process control-plane spec.
+- Added append/read helpers that create `.agent-doc/proof-ledger/<document-hash>.jsonl` and only append lines; existing rows are never rewritten.
+- Covered queue-head outcomes needed for consumed/deferred/retried/superseded rows.
+- Covered required operation kinds: queue heads, response captures, patch writes, actor generations, and terminal proofs.
+- Ledger records carry `operation_id`, `content_hash`, operation kind, outcome, proof kind, proof text, optional subject id, and deterministic timestamp input.
+- Added a typed append-only JSONL proof ledger under `flow::proof_ledger`.
+- parent gitlink `src/agent-doc`
+- `src/agent-doc/specs/08b-single-process-control-plane.md`
+- `src/agent-doc/agent-doc-orchestration/src/flow/mod.rs`
+- `src/agent-doc/agent-doc-orchestration/src/flow/proof_ledger.rs`
 
 Those should run before `#archstatekernel`, `#archproofledger`, `#archcomponentmerge`, `#archsimworldmatrix`, and `#archuistates`, because they define the binary vocabulary the architecture primitives should implement rather than leaving each primitive to invent its own classification rules. The workflow-invariant items remain useful follow-ons: they can consume these outcome ids once the contract exists.
 
@@ -390,20 +404,20 @@ I also scanned the conflict side. The recent `File Cache Conflict` strings in `o
 
 Implemented the architecture-state boundary in the agent-doc submodule.
 
-❯ - Invariant: route/queue/closeout/editor-write policy now has a pure mirror-mode `flow::workflow_state` kernel: evidence kind -> typed decision -> single allowed mutation -> required proof list. It covers stale supervisor, queue drainability, captured response, and live-buffer decisions without performing I/O.
-❯ - Policy owner: `agent-doc-orchestration/src/flow/workflow_state.rs`, exported from `flow/mod.rs`.
-❯ - Transition rows covered by tests: stale-supervisor surface/recycle-now/recycle-after-debounce; queue dispatch/defer for clear cooldown, busy pane, active turn, loop owner, already-dispatched head; captured-response append/complete/replay/retire/retry/current-generation and queued-behind-closeout; live-buffer apply/defer/request-save/block-unattributed-drift.
-❯ - Adjacent architecture state: `start::decisions` now includes the PCP supervisor handoff state machine with tests for happy path, pre-promotion rollback, and post-promotion repair-only escalation.
-❯ - Spec: `specs/08b-single-process-control-plane.md` documents the workflow-state kernel contract and the supervisor handoff state machine.
-❯ - Out of scope: left the pre-existing dirty write-convergence, JetBrains plugin, `specs/07`, and `VERSIONS.md` changes unstaged for their later architecture items.
+- Invariant: route/queue/closeout/editor-write policy now has a pure mirror-mode `flow::workflow_state` kernel: evidence kind -> typed decision -> single allowed mutation -> required proof list. It covers stale supervisor, queue drainability, captured response, and live-buffer decisions without performing I/O.
+- Policy owner: `agent-doc-orchestration/src/flow/workflow_state.rs`, exported from `flow/mod.rs`.
+- Transition rows covered by tests: stale-supervisor surface/recycle-now/recycle-after-debounce; queue dispatch/defer for clear cooldown, busy pane, active turn, loop owner, already-dispatched head; captured-response append/complete/replay/retire/retry/current-generation and queued-behind-closeout; live-buffer apply/defer/request-save/block-unattributed-drift.
+- Adjacent architecture state: `start::decisions` now includes the PCP supervisor handoff state machine with tests for happy path, pre-promotion rollback, and post-promotion repair-only escalation.
+- Spec: `specs/08b-single-process-control-plane.md` documents the workflow-state kernel contract and the supervisor handoff state machine.
+- Out of scope: left the pre-existing dirty write-convergence, JetBrains plugin, `specs/07`, and `VERSIONS.md` changes unstaged for their later architecture items.
 
 Verification:
 
-❯ - `cargo test -p agent-doc-orchestration workflow_state` passed.
-❯ - `cargo test -p agent-doc-orchestration pcp_supervisor_handoff` passed.
-❯ - `make check` passed: clippy, 4,579 nextest tests, doctests, and the ignored medium SimWorld corpus test.
-❯ - Latest CI: `27607675117` completed successfully on `main`.
-❯ - Submodule commit: `f9e2b932 architecture: add workflow state kernel`.
+- `cargo test -p agent-doc-orchestration workflow_state` passed.
+- `cargo test -p agent-doc-orchestration pcp_supervisor_handoff` passed.
+- `make check` passed: clippy, 4,579 nextest tests, doctests, and the ignored medium SimWorld corpus test.
+- Latest CI: `27607675117` completed successfully on `main`.
+- Submodule commit: `f9e2b932 architecture: add workflow state kernel`.
 
 Confidence: high. The new kernel is intentionally mirror-mode; runtime call-site replacement belongs to the later controller cutover work.
 
@@ -417,29 +431,29 @@ Confidence: high. The new kernel is intentionally mirror-mode; runtime call-site
 Implemented `#archproofledger` in submodule commit `cf43747e` (`architecture: add operation proof ledger`).
 
 Changed paths:
-- `src/agent-doc/agent-doc-orchestration/src/flow/proof_ledger.rs`
-- `src/agent-doc/agent-doc-orchestration/src/flow/mod.rs`
-- `src/agent-doc/specs/08b-single-process-control-plane.md`
-- parent gitlink `src/agent-doc`
+❯ - `src/agent-doc/agent-doc-orchestration/src/flow/proof_ledger.rs`
+❯ - `src/agent-doc/agent-doc-orchestration/src/flow/mod.rs`
+❯ - `src/agent-doc/specs/08b-single-process-control-plane.md`
+❯ - parent gitlink `src/agent-doc`
 
 What changed:
-- Added a typed append-only JSONL proof ledger under `flow::proof_ledger`.
-- Ledger records carry `operation_id`, `content_hash`, operation kind, outcome, proof kind, proof text, optional subject id, and deterministic timestamp input.
-- Covered required operation kinds: queue heads, response captures, patch writes, actor generations, and terminal proofs.
-- Covered queue-head outcomes needed for consumed/deferred/retried/superseded rows.
-- Added append/read helpers that create `.agent-doc/proof-ledger/<document-hash>.jsonl` and only append lines; existing rows are never rewritten.
-- Documented the mirror-mode ledger in the single-process control-plane spec.
+❯ - Added a typed append-only JSONL proof ledger under `flow::proof_ledger`.
+❯ - Ledger records carry `operation_id`, `content_hash`, operation kind, outcome, proof kind, proof text, optional subject id, and deterministic timestamp input.
+❯ - Covered required operation kinds: queue heads, response captures, patch writes, actor generations, and terminal proofs.
+❯ - Covered queue-head outcomes needed for consumed/deferred/retried/superseded rows.
+❯ - Added append/read helpers that create `.agent-doc/proof-ledger/<document-hash>.jsonl` and only append lines; existing rows are never rewritten.
+❯ - Documented the mirror-mode ledger in the single-process control-plane spec.
 
 Verification:
-- `cargo fmt`
-- `cargo test -p agent-doc-orchestration proof_ledger`
-- `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
-- `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+❯ - `cargo fmt`
+❯ - `cargo test -p agent-doc-orchestration proof_ledger`
+❯ - `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
+❯ - `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
 
 Confidence: high. The implementation is isolated, tested for validation/document scoping/append-only behavior/required vocabulary, and the full repo check passed.
 
 Escalation: none.
-<!-- agent:boundary:37097ed5 -->
+<!-- agent:boundary:6dd7e8c9 -->
 <!-- /agent:exchange -->
 
 ## Queue

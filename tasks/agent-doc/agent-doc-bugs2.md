@@ -32,106 +32,23 @@ queue: start
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260616-004105.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260616-020038.md`*
 
 Compacted content:
-- Archived 39 response topic(s): #compactdrift-agent; Compact Closeout Guard Follow-Up; Restored Queue Strikethroughs; 36 more
-- Prior summary/context: prior compacted content: Archived 15 response topic(s): Codex MCP Permission Prompts; Codex Finalize Transport Recove...
-
-### Re: JB Run Agent Doc Codex boot timeout — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: I switched mrh-servers.md from Claude to Codex by restarting agent-doc. Now JB `Run Agent Doc` is unresponsive. The Codex session was idle.
-> ```
-> resync: pruned 1 stale session(s)
-> [route] target tmux session: 0
-> [route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client
-> Error: dispatch-only codex reopen refused to inject into pane %103 for tasks/mrh-servers.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
-> ```
-
-
-Fixed the JetBrains-side unresponsive `Run Agent Doc` path for the reported `dispatch-only codex reopen refused ... latest run is still booting ... (timed_out)` shape. The router is still correct to refuse injection when a Codex pane only shows status/footer chrome and never proves a dispatch-ready prompt; the bug was that the JetBrains plugin treated that already-timed-out route refusal as retryable and could silently re-run the 60s ready wait several times.
-
-Changed behavior: only authoritative-actor startup guard failures remain retryable. Dispatch-only `latest run is still booting ... (timed_out)` now surfaces the persisted route diagnostic immediately. Active-turn blockers still get the existing still-running notification.
-
-Changed paths in `src/agent-doc`: `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt`, `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt`, `editors/jetbrains/SPEC.md`, `specs/07-session-tmux-commands.md`, `editors/jetbrains/gradle.properties`, `VERSIONS.md`.
-
-Commits pushed: `agent-doc` `f5844c53` (`fix(jb): surface codex boot timeouts`) and parent repo `e858a951e` (`chore: update agent-doc submodule`). I also installed the rebuilt JetBrains plugin `0.2.165` into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ IDEA to activate it.
-
-Verification: focused JetBrains `TerminalUtilTest` passed, `make check` passed in the normal checkout, the failed tmux sync test from the first run passed in isolation, `make check` passed again on the clean replayed commit under the normal sibling layout, and `./gradlew buildPlugin` succeeded from that replayed commit. GitHub Actions for `agent-doc` was still in progress (`27586552150`) when checked; the parent repo has no workflow named `CI`.
-
-### Re: JB Run Agent Doc Logging — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: JB `Run Agent Doc` does not submit the prompt. We have spent many turns trying to do this. All unsuccessful. Do we have adequete logging? Can the supervisor see what characters are in the prompt?
-
-
-Adequate logging? Partial, not adequate for this failure class.
-
-What we can prove right now: the current JB click did not fail after submitting characters to Codex. It was blocked earlier by the project controller: `failed_stage=queue_paused`, reason `#qchurn`, stale host supervisor pid `2715614`, `receipt_id=3630`. The durable route error file for this document contains only that final refusal. The recent ops log does prove the supervisor saw an active queue head and attempted auto-drain: `idle_queue_watch_drain ... head_bytes=195 head_sha256=8938fb6c8ed46dd53f26764675df48c5fd2db6837530866da06c3ae8319ffd4c payload_bytes=44`.
-
-Can the supervisor see the prompt characters? It can see the active queue head text in memory because it computes `head_bytes` and `head_sha256` from that string, but the durable logs intentionally do not print the raw prompt body. For JB `Run Agent Doc`, the actual injected payload is only the harness trigger, here the 44-byte `agent-doc <file>` style trigger, not the full user prompt. The prompt body stays in the markdown document/queue and is represented in ops logs by byte count and hash.
-
-The missing proof is around the manual JB route attempt: `RunAgentDocAttemptLedger` exists, but this `SubmitAction`/`TerminalUtil.sendToTerminal` path does not currently wire it in, and the `queue_paused` controller receipt does not include the prompt/head hash in its failure string. I added `#jbrunlogproof` to backlog to make this concrete: wire the JB attempt ledger into the action path and add blocked-dispatch byte/hash evidence so a future failure can answer “what exact head did the supervisor evaluate?” without exposing raw prompt text.
-
-Changed paths this cycle: session document only via `agent-doc finalize` response/backlog mutation. Source inspected but not edited: `agent-doc-orchestration/src/input_diag.rs`, `agent-doc-orchestration/src/route.rs`, `agent-doc-orchestration/src/route/dispatch.rs`, `agent-doc-orchestration/src/route/dispatch_only.rs`, `agent-doc-orchestration/src/project_controller/rpc.rs`, `agent-doc-orchestration/src/start.rs`, `agent-doc-orchestration/src/start/idle_watch.rs`, and JetBrains `SubmitAction.kt`, `TerminalUtil.kt`, `RunAgentDocAttemptLedger.kt`.
-
-Verification: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, root/submodule `tsift status`, targeted `rg`/source inspection, and live `.agent-doc/logs` / `.agent-doc/state/editor-route-errors` inspection. No tests/build were run because I did not change source code. Push: not performed; no source commit was made.
-
-### Re: Queue Repair Closeout — gpt-5
-
-Closed the recovery bookkeeping from the previous response. The earlier closeout answered the JB logging question and added `#jbrunlogproof`; session-check then caught an unintended strike of `#lazilyqrestore`, so I restored that queue head and left the new `do [#jbrunlogproof]` implementation item queued rather than marking it done in this diagnostic-only turn.
-
-Changed paths this repair: session document only. Verification: `agent-doc preflight`, `agent-doc plan`, queue/exchange reads, and session-check diagnostics during recovery. No source tests/build were run because this repair did not change source code.
-
-### Re: #jbrunlogproof — gpt-5
-
-Implemented durable proof logging for JB `Run Agent Doc` no-submit diagnostics in `agent-doc`.
-
-What changed:
-- JetBrains now opens a `RunAgentDocAttemptLedger` entry for each manual click and records `clicked`, `await_typing_idle`, `typing_idle`, `documents_saved`, `route_prepare`, `route_command_built`, `route_start`, retry/supersede stages, and the final route outcome.
-- Controller blocked-dispatch diagnostics now include non-sensitive proof fields for queue blockers: `blocked_head_bytes`, `blocked_head_sha256`, and, when the caller supplies `harness=...`, `trigger_bytes` / `trigger_sha256`. These are persisted on `dispatch_attempts`, emitted as `dispatch_blocked_proof`, and included in the route error. Raw prompt text is still not persisted for this proof path.
-- Specs/tests now cover the JetBrains ledger contract and the controller `queue_paused` proof fields.
-
-Verification:
-- `cargo test -p agent-doc-orchestration controller_queue_control_rejects_stale_generation_and_blocks_dispatch_when_paused`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.SubmitActionTest --tests com.github.btakita.agentdoc.TerminalUtilTest --tests com.github.btakita.agentdoc.RunAgentDocAttemptLedgerTest`
-- `make check`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
-- `make bump-plugin` built `agent-doc-jetbrains-0.2.166.zip` and `agent-doc-jetbrains-0.2.166-signed.zip`
-- `cargo install --path .`
-- `agent-doc plugin install --local jetbrains` installed `0.2.166` into active IntelliJIdea2026.1; IDEA restart is required to load it.
-- Latest pre-existing CI on `main` was green before push.
-
-Commits:
-- local source commit: `dae60075`
-- pushed `origin/main`: `f27a388b` (`fix(jb): add run-agent-doc proof logging`)
-
-The remaining live verification items in this document are still operator-owned; this closes the durable logging/proof implementation item.
-<!-- agent:boundary:f20ed12d -->
+❯ - Archived 4 response topic(s): JB Run Agent Doc Codex boot timeout; JB Run Agent Doc Logging; Queue Repair Closeout; 1 more
+❯ - Prior summary/context: prior compacted content: Archived 39 response topic(s): #compactdrift-agent; Compact Closeout Guard Follow-Up; Restor...
+<!-- agent:boundary:764dd574 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-~~~done
-:pushpin: JB `Run Agent Doc` does not submit the prompt. We have spent many turns trying to do this. All unsuccessful. Do we have adequete logging? Can the supervisor see what characters are in the prompt?
-~~~
-After restarting the this document's session. JB `Run Agent Doc`
-```
-resync: pruned 1 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3630
-```
----
-- [#lazilyqrestore]
-- [#c2b6]
-- [#1j8q]
-- [#anw0verify]
-- [#qflood2]
-- [#qt32]
+- :pushpin: Both JB `Clear Session Context` and JB `Run Agent Doc` send a CR instead of submitting ![img_24.png](img_24.png). There is also an extra prompt that bleeds into the input ![img_25.png](img_25.png). Why is this so difficult to fix? Can we design a way to detect what is sent and how it is processed by the agent? Fix root causes. #simworld
+- :pushpin: Why are we ever using `tmux_literal_cr` and not `tmux_literal_text_enter_key`? Why do we have so much duplicate logic with the submit keys all over the codebase? Each harness' tmux_literal should be defined in a single place. No tmux_literal values spread all over the place. Why tmux_literal_kitty_return for opencode? Is tmux_literal_text_enter_key not working? #simworld
+- :pushpin: Does agent-doc use `tmux send-keys -t target "command" Enter` to submit a prompt? Would this work with opencode? I don't want to hardcode a kitty return b/c kitty is specific to my environment...not universal. I'm concerned that it wont work on other terminals. I tried `tmux send-keys -t .1 "Hello" Enter` on opencode and it worked.
+- :pushpin: Can we use lazily-rs to avoid duplicate logic with the submit keys all over the codebase?
+- :pushpin: Issue with restart on Codex ![img_26.png](img_26.png) ![screenshot.png](../../../../../Pictures/agent-loop/screenshot.png)
+- :pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.
 <!-- /agent:queue -->
 ###
 <!--

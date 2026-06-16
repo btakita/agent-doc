@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 agent_doc_pipeline:
   run_id: cycle-1781638030591
   step: write_applied
@@ -40,13 +40,33 @@ complete
 Compacted content:
 - Archived 31 response topic(s): JB Run Agent Doc stale queue pause; binary logic for stale queue pauses and conflicts; operator-verify queue boundary; 28 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:e7f58217 -->
+
+### Re: JB Run Agent Doc Enter submit — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` still does not use Enter for Codex. Keep on simplifying.
+
+
+Implemented the simplification. The shared live-pane tmux submit profile now uses one command shape for Codex/Claude/OpenCode/default: `tmux send-keys -t <pane> <text> Enter`, and the empty-text retry path sends only `Enter`. The diagnostics now report `tmux_text_enter` and `key=Enter`; the old `tmux_hex_text_cr`/`CR` proof strings are gone from current source tests.
+
+Changed paths: `agent-doc-orchestration/src/sessions.rs`, route/dispatch and dispatch-only proof tests, idle-queue mode test, clear-session proof test, SimWorld contract, ops-report fixture, and `VERSIONS.md`.
+
+Commits pushed:
+- `src/agent-doc`: `d91d51f1 fix: submit managed tmux commands with enter`
+- parent repo: `21fad2536 agent-doc: update enter submit path`
+
+Verification passed: focused submit/route/idle/clear/SimWorld tests, ignored live tmux raw-reader test `opencode_submit_uses_named_enter_key`, full local `make check`, `make install`, and installed `agent-doc --version` reports `0.34.1`. GitHub Actions `CI` run `27649491908` passed with `make check` and `make tmux-ci`. The parent repo has no workflow named `CI`, so there was no parent CI run under that name to check.
+
+No JetBrains plugin update is required for this change; it is Rust CLI/orchestration code. `make install` installed the updated binary and `libagent_doc.so`, and marked two controllers to recycle at the next idle boundary.
+
+Confidence: high for the code path and proof markers. Live JB confirmation should grep for `submit_mode=tmux_text_enter` and `action=submit_key key=Enter` if this recurs.
+<!-- agent:boundary:a613e4bc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- JB `Run Agent Doc` still does not use Enter for Codex. Keep on simplifying.
 <!-- /agent:queue -->
 ###
 <!--

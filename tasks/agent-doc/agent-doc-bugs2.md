@@ -325,7 +325,18 @@ Changed paths: `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
 Implemented `#binconflictscope` in `src/agent-doc` commit `a447beb1` (`feat: scope binary conflicts by managed component`). The turn-scope contract now names all managed conflict surfaces: exchange, queue, backlog, status, review, done/archive, gitlink, and editor writeback. Queue remains node-scoped through the driver address, so unrelated sibling queue edits stay independent, while managed output surfaces are component-scoped and same-component incompatible edits classify as turn-affecting contention.
 
 Changed paths: `src/agent-doc/agent-doc-core/src/turn_scope.rs`, `src/agent-doc/agent-doc-orchestration/src/preflight/semantic_diff.rs`, `src/agent-doc/specs/02-document-format.md`, the parent `src/agent-doc` gitlink, and this session document. Verification: `tsift rewrite --run 'cargo test -p agent-doc-core turn_scope'` passed, `tsift rewrite --run 'cargo test -p agent-doc-orchestration derive_turn_scope_resolves_queue_driver_and_sets'` passed, `tsift rewrite --run 'cargo test -p agent-doc-orchestration scoped_drift_gate'` passed, `make check` passed (clippy, 4571 nextest tests, doctests, and closeout SimWorld), and latest CI was green via `gh run list --workflow CI --limit 1`. Install was not run because the submodule still contains unrelated pre-existing dirty files; installing from that tree would promote unrelated work into the local binary. Confidence: high. Escalation: none.
-<!-- agent:boundary:69480be9 -->
+
+### Re: do [#binconflictdedupe] — gpt-5
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#binconflictdedupe]
+
+
+Implemented `#binconflictdedupe` in `src/agent-doc` commit `5c3f7f99` (`feat: dedupe tracked workflow symptoms`). Backlog/review additions can now carry a `[symptom-key invariant=<id> document=<doc-id> component=<component> content_hash=<hash>]` marker; repeated symptoms with the same key attach an indented `evidence:` continuation to the existing open/gated item instead of inserting another tracked backlog/review row. The attachment is logged as `symptom_dedupe_attached ...` with invariant/document/component/content_hash fields, and same-cycle-added ids now record only real insertions.
+
+Changed paths: `src/agent-doc/agent-doc-core/src/pending.rs`, `src/agent-doc/agent-doc-orchestration/src/pending_cmd.rs`, `src/agent-doc/agent-doc-orchestration/src/write.rs`, `src/agent-doc/specs/02-document-format.md`, `src/agent-doc/tests/pending_integration.rs`, the parent `src/agent-doc` gitlink, and this session document. Verification: `tsift rewrite --run 'cargo test -p agent-doc-core op_add_dedupes_symptom_key_by_attaching_evidence'`, `tsift rewrite --run 'cargo test --test pending_integration write_pending_add_dedupes_symptom_key_into_existing_backlog_item'`, `tsift rewrite --run 'cargo test --test pending_integration write_review_add_dedupes_symptom_key_into_existing_review_item'`, `tsift rewrite --run 'cargo test -p agent-doc-core pending'`, `tsift rewrite --run 'cargo test --test pending_integration'`, `make check` (clippy, 4574 nextest tests, doctests, closeout SimWorld), and `gh run list --workflow CI --limit 1` all passed/green. Install was not run because the submodule still contains unrelated pre-existing dirty files; installing from that tree would promote unrelated work into the local binary. Confidence: high. Escalation: none.
+<!-- agent:boundary:979b96b3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -342,7 +353,7 @@ Changed paths: `src/agent-doc/agent-doc-core/src/turn_scope.rs`, `src/agent-doc/
 - ~~:round_pushpin: do [#binoutcomes]~~
 - ~~:round_pushpin: do [#binstalepause]~~
 - ~~:round_pushpin: do [#binconflictscope]~~
-- :round_pushpin: do [#binconflictdedupe]
+- ~~:round_pushpin: do [#binconflictdedupe]~~
 - do [#qflood2]
 - do [#qt32]
 - do [#fcc0-live-verify]
@@ -384,7 +395,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#binconflictdedupe] priority=1 Add conflict/symptom de-duplication keyed by invariant id, document id, component, and content hash so repeated stale-pause or drift symptoms attach evidence to the existing backlog/review item instead of creating more queue conflicts.
 - [ ] [#archstatekernel] Implement a pure typed workflow state kernel for agent-doc route/queue/closeout/editor-write decisions: input evidence -> decision enum -> allowed mutation -> required proof. Move stale-supervisor, queue-drainability, captured-response, and live-buffer decisions behind this boundary before adding more route-edge guards.
 - [ ] [#archproofledger] Add an append-only operation proof ledger for queue heads, response captures, patch writes, actor generations, and terminal proofs. Every consumed/deferred/retried/superseded head should have one durable proof row keyed by operation id and content hash.
 - [ ] [#archcomponentmerge] Define and enforce managed-component merge semantics: queue, exchange, backlog, status, review, and done archive each have separate bases and conflict rules; only same-component incompatible edits become user-visible conflicts.

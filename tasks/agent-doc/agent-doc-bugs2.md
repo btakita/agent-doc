@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 agent_doc_pipeline:
   run_id: cycle-1781638030591
   step: write_applied
@@ -809,14 +809,36 @@ Commits pushed:
 Note: preflight still reported the currently serving route-owned supervisor pid `136275` as stale because it was started before the install. `make install` marked one controller for recycle at the next idle boundary; I did not force-restart the busy serving supervisor during this closeout.
 
 Changed paths: `src/agent-doc` submodule plus parent gitlink and this session document via finalize. Confidence: high. Escalation: none.
-<!-- agent:boundary:06e92d2c -->
+
+### Re: submit-profile simplification — gpt-5
+
+> **Queue prompt:**
+>
+> Why are we still using `TmuxSubmitDelivery::LiteralTextCarriageReturn`, `tmux_literal_text_cr`, and `CR` at all? This should be rare. We mostly want Enter. Reduce distinctions if possible. Codex support may have gotten more complex than it should have been.
+
+Agreed, and I reduced it.
+
+The active code no longer has `TmuxSubmitDelivery::LiteralTextCarriageReturn`, `tmux_literal_text_cr`, or even the one-variant `TmuxSubmitDelivery` enum. `TmuxSubmitProfile` is now a unit struct with one policy: `tmux_hex_text_cr`. `CR` remains only as the diagnostic label for the byte sent at the terminal boundary because the live raw-reader test proved that named `Enter`/`C-m` and literal `-l "\r"` do not reliably preserve the submit byte for this Codex path.
+
+Proof:
+- `rg -n "TmuxSubmitDelivery|LiteralTextCarriageReturn|tmux_literal_text_cr" agent-doc-orchestration/src/sessions.rs agent-doc-orchestration/src/route/dispatch.rs agent-doc-orchestration/src/start/idle_watch.rs src/session_actor_cmd.rs VERSIONS.md README.md specs` returned no matches.
+- `cargo test -p agent-doc-orchestration submit_profiles_keep_harness_submit_policy_in_one_place -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration opencode_submit_uses_hex_text_cr -- --ignored --nocapture` passed.
+- `make check` passed after the simplification: 4599 nextest tests, doctests, and the ignored medium SimWorld corpus.
+- `make install` rebuilt the installed binary and shared library; `agent-doc --version` reports `agent-doc 0.34.1`.
+- GitHub Actions `CI` run `27648126039` passed with `make check` and `make tmux-ci`.
+
+Commits pushed:
+- `agent-doc` submodule: `1ad73e6f refactor: collapse tmux submit profile delivery`
+- parent `agent-loop`: `b2ac38695 agent-doc: simplify tmux submit profile`
+
+Changed paths for the simplification: `src/agent-doc/agent-doc-orchestration/src/sessions.rs`, `src/agent-doc/VERSIONS.md`, parent `src/agent-doc` gitlink, and this session document via finalize. Confidence: high. Escalation: none.
+<!-- agent:boundary:484e99f7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: JB `Run Agent Doc` on Codex still does not submit ![img_33.png](img_33.png). Also `/clear` is added and as I type, additional `/clear` is sent. ![img_34.png](img_34.png) Why does `Enter` not work? Can we send a single tmux command instead of 2? Submit works with Claude Code.~~
-- Why are we still using `TmuxSubmitDelivery::LiteralTextCarriageReturn`, `tmux_literal_text_cr`, and `CR` at all? This should be rare. We mostly want Enter. Reduce distinctions if possible. Codex support may have gotten more complex than it should have been.
 <!-- /agent:queue -->
 ###
 <!--

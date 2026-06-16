@@ -323,7 +323,28 @@ Verification:
 - `make check`
 - `make install`
 - GitHub CI `27606379910` passed with `make check` and `make tmux-ci`
-<!-- agent:boundary:ce0231f4 -->
+Completed `#smtransitiontests`.
+
+Added explicit closeout recovery transition coverage across the three requested layers:
+- Pure decision table: `CloseoutRecoveryState::ALL` now drives `recovery_decision_maps_states_to_typed_outcomes`, covering every state plus prompt-context priority and stale-capture supersession proof.
+- Property-style coverage: `tests/ipc_closeout_model.rs` now generates recovery state/input combinations and asserts decision kind, source-state preservation, command/recommendation shape, prompt-context reason priority, and proof propagation.
+- SimWorld coverage: added `closeout_recovery_transition_scenarios_cover_simworld_inputs` for queue edits during write fragmentation, stale compaction/full-content source rejection, stale/sidecar ACK proof, already-applied ACK recovery, and JB `Run Agent Doc` during open closeout with and without prompt context.
+
+Commits:
+- `31385aee` in `src/agent-doc`: `test: cover closeout recovery transition table`
+- `68805b71c` in the parent repo: `chore: update agent-doc submodule`
+
+Verification:
+- `cargo fmt`
+- `cargo test recovery_decision`
+- `cargo test -p agent-doc-orchestration recovery_decision`
+- `cargo test closeout_recovery_transition_scenarios_cover_simworld_inputs`
+- `cargo test flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
+- `git diff --check`
+- `make check`
+- `make install`
+- GitHub CI `27607675117` passed with `make check` and `make tmux-ci`
+<!-- agent:boundary:31ac3032 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -354,7 +375,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - ~~do [#smcloseoutevidence]~~
 - ~~do [#smrouteconsume]~~
 - ~~do [#smrecoverymutate]~~
-- do [#smtransitiontests]
+- ~~do [#smtransitiontests]~~
 - do [#archfirstgate]
 <!-- /agent:queue -->
 ###
@@ -395,7 +416,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#qt32] [operator-verify] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.
-- [ ] [#smtransitiontests] :inbox_tray: Add SimWorld/property/pure-decision coverage for the full closeout recovery transition table: queue edits around capture/write fragmentation, compaction, stale snapshots, stale ack-content, and JB Run Agent Doc during open closeout with and without prompt context.
 - [ ] [#archfirstgate] :inbox_tray: Apply runbooks/architecture-first.md as the closeout gate for agent-doc state-machine refactors: each implementation must state invariant, policy owner, transition rows covered by tests, edited surfaces, and explicit out-of-scope/operator-verify work.
 <!-- /agent:backlog -->
 

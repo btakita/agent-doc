@@ -245,27 +245,28 @@ Proof for this cycle:
 - Verification: document/log/screenshot diagnosis only; no source code changed, so I did not run the full build/test suite.
 - Commands: `tsift status`; `agent-doc --version`; `agent-doc preflight ...`; `agent-doc plan ...`; `agent-doc read ...`; `git status --short --branch`; `git -C src/agent-doc status --short --branch`; `git -C src/agent-doc log --oneline -5`; `find . -name img_30.png -o -name img_31.png`; `agent-doc admin inspect ... --json`; targeted `rg` checks in `.agent-doc/logs/ops.log`; inspected `img_30.png` and `img_31.png`.
 - Changed paths: this session document only.
+- Escalation: none.
+- Confidence: high that the latest JB route attempt submitted and was consumed; medium on why the operator-facing status still reads as failure until we capture the exact current JetBrains UI/status text after a `route_success` attempt.
+- Verification: log/controller/pane diagnosis only. No source code changed, so I did not run the build/test suite.
+- Commands: `tsift status`; `agent-doc --version`; `agent-doc preflight ...`; `agent-doc plan ...`; `agent-doc admin inspect ... --json`; `ls -t .agent-doc/state/editor-route-attempts`; `sed -n '82,100p' .agent-doc/state/editor-route-attempts/tasks__agent-doc__agent-doc-bugs2.md-b9c648a4.txt`; targeted `rg` checks in `.agent-doc/logs/ops.log`; `tmux capture-pane -p -t %3 -S -120`; `ls -l .agent-doc/state/editor-route-errors`; `find .agent-doc/state/editor-route-errors -maxdepth 1 -type f -print`.
+- Changed paths: this session document only.
+- Not a stale controller/supervisor: `agent-doc admin inspect` reports both controller and route-owned supervisor match the installed binary inode.
+- Not the old `queue_paused` qchurn failure.
+- Not the generation-438 `captured response baseline no longer matches current document` route failure.
+- `2026-06-16T05:38:32Z` attempt `1781588312473-2`: route started, then `route_success` after 3.884s.
+- `2026-06-16T05:34:54Z` attempt `1781588094485-1`: route started, then `route_success` after 5.176s.
 Handled the agent-doc cycle for [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md:226).
 
 The response was written and committed as `a9bb1ac84` (`agent-doc(agent-doc-bugs2): 2026-06-16 01:37:00`). `session-check` passed for the committed cycle. I did not run the full build/test suite because this cycle only added document/log/screenshot diagnosis, not source changes.
 
 Key outcome: the pasted generation-438 JB route error is stale relative to the current fresh controller/supervisor state, but the broader queue-edit interruption still needs live verification under `#cwsp`. Queue continuation is false, with only stale/noise queue lines left, so I did not auto-loop.
-<!-- agent:boundary:5f100489 -->
+<!-- agent:boundary:4d885618 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: Create a skill/runbook to apply the architecture strategy that you recommended.~~
-- ~~The architecture first runbook should only apply to agent-doc development & dogfooding...It should not be installed.~~
-~~~done
-Typing into the queue during the turn cause the conversation to be interrupted. ![img_30.png](img_30.png). A pre-finalize response was uncommitted causing the response to be treated as a user prompt ![img_31.png](img_31.png). After restart, JB `Run Agent Doc` error.
-
-```
-[route] target tmux session: 0
-Error: authoritative actor generation 438 for tasks/agent-doc/agent-doc-bugs2.md owns pane %110 but route could not drain the active closeout before dispatch: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
-```
-~~~
+- :pushpin: JB `Run Agent Doc` still does not submit. Find all locations where this is used.
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
 ```
@@ -274,8 +275,6 @@ resync: pruned 3 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3649 blocked_head_bytes=132 blocked_head_sha256=ae121dad65e5b00a6c504db706985aee4e8d6ed00988ba4244f51196952739d7 trigger_bytes=44 trigger_sha256=a55a6572fd4dc952bc476bd516d3a7801b1e63409715f063b4b7351ea112ade5
 ```
 ---
-- ~~:pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.~~
-- ~~:pushpin: do [#cwsp]~~
 <!-- /agent:queue -->
 ###
 <!--

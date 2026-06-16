@@ -146,19 +146,46 @@ Proof for this cycle:
 - Verification: no source/build/test surfaces changed; this closeout only resolves the open preflight cycle and records the operator-verify boundary.
 - Confidence: high.
 - Escalation: none.
-- Escalation: none.
 - Confidence: high.
 - Verification: session-check is expected after this commit boundary; no source/build/test surfaces changed.
 - Commands: `agent-doc read --component queue`, `agent-doc read --component backlog`, `agent-doc queue sync`, `agent-doc session-check`, `agent-doc write --commit`.
 - Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` via `agent-doc queue sync` and this `agent-doc write --commit` repair.
-<!-- agent:boundary:4f3d9cc7 -->
+
+### Re: do [#recyclerestart-verify] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recyclerestart-verify]: This is automatable. You are misattributing it to operator driven.
+
+
+You were right: I was treating `#recyclerestart-verify` as operator-only even though the current binary has enough automation and ops-log proof to verify it from this pane.
+
+I drove the automated path and closed it:
+
+- `agent-doc admin recycle --all-projects --json` completed with `{"recycled":2,"scope":"all_projects","skipped":0}`.
+- `agent-doc admin inspect tasks/agent-doc/agent-doc-bugs2.md` reports this document `state=ready` with `freshness=controller:fresh,supervisor:fresh`.
+- `agent-doc admin inspect tasks/professional/equityfundingsource.md` also reports `state=ready` with `freshness=controller:fresh,supervisor:fresh`.
+- Recent ops-log proof for this document shows `supervisor_binary_stale_self_recycled file=tasks/agent-doc/agent-doc-bugs2.md ... candidates=[resolved_fresh_binary=/home/brian/.cargo/bin/agent-doc, path_lookup_agent_doc=agent-doc]`, followed by `supervisor_host_gate file=tasks/agent-doc/agent-doc-bugs2.md hosting=in-process`.
+- The same log window shows repeated `idle_queue_watch_context_reset ... cmd="/clear" target=%2`, proving the supervisor/idle path can re-clear the Codex session instead of leaving recycle as a dead self-exit.
+- `agent-doc sync --no-autostart` completed without the stale `Sync deferred: another tmux layout sync is already running` failure. It resolved the live `%2` and `%8` panes, pruned stale sessions, and reported only latency warnings plus the existing lazily-rs stash-window issue.
+
+I did not manually kill a live pane from this active session. The automated sync did exercise pane reconciliation and stale-session pruning without the wedged sync-guard dialog, and the ops-log recycle proof covers the restart/re-clear side of the item. That is enough to resolve this verification item as agent-driven rather than operator-driven.
+
+Proof for this cycle:
+
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` via finalize and `--done recyclerestart-verify`.
+- Commands: `agent-doc preflight`, `agent-doc plan`, `sed -n '1,260p' tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md`, `agent-doc admin --help`, `agent-doc admin recycle --all-projects --json`, `agent-doc sync --no-autostart`, `agent-doc admin list`, `agent-doc admin inspect ...agent-doc-bugs2.md`, `agent-doc admin inspect ...equityfundingsource.md`, targeted `rg` ops-log proof searches.
+- Verification: no source/build/test surfaces changed. Runtime verification used controller recycle, sync execution, admin freshness inspection, and ops-log proof markers.
+- Confidence: medium-high. The automated path proves recycle freshness/re-clear and sync no-defer from CLI; it does not require a human JetBrains click.
+- Escalation: none.
+<!-- agent:boundary:059465e6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 ---
-- do [#recyclerestart-verify]: This is automatable. You are misattributing it to operator driven.
+- ~~do [#recyclerestart-verify]: This is automatable. You are misattributing it to operator driven.~~
 - do [#rtwbcast-verify]
 - do [#c2b6]
 - do [#1j8q]
@@ -207,7 +234,6 @@ What are #next-steps to fix bugs?
 - [ ] [#archsimworldmatrix] Add SimWorld/property transition-table coverage for the architecture primitives: stale supervisor recycle, queue edit during closeout, degraded/file-IPC fallback, live buffer drift, compact/replay, and operator-only/no-drainable queue outcomes.
 - [ ] [#archuistates] Replace raw route/write conflict strings in JB/Codex/OpenCode surfaces with a small typed outcome vocabulary: queued behind owner, recovered and retried, deferred for operator proof, no drainable work, real component conflict, and blocked with exact unblocker.
 - [ ] [#cwsp] [operator-verify] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38 and recycling the live supervisor onto that build, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
-- [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion remains open; requires the operator to recycle/restart the supervisor onto the current build and confirm live JB/supervisor behavior from ops.log. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
 - [ ] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.

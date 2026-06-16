@@ -167,7 +167,31 @@ Commands: inspected `deal_detail.tsx`, `repo.ts`, `investor_management/index.ts`
 Verification: code inspection only; no tests needed because no repo code changed.
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:c414214a -->
+
+### Re: Start Underwriting — gpt-5
+
+> **Queue prompt:**
+>
+> Start Underwriting
+
+
+`Start underwriting` is also EFS-local interested-lender workflow state, not direct TMO loan status.
+
+Classification: EFS D1 source of truth, TMO-related only as context for the deal/lender follow-up.
+
+Evidence:
+- The Available Deal `Interested Lenders` workflow button writes `underwriting_started_at` on the selected `investor_deal_interests` row.
+- `deal_interest_workflow_stage_` derives the local workflow stage `underwriting` from that timestamp and changes the next action to `Record verbal funding commitment`.
+- The workflow patch route updates `investor_deal_interests` directly. The explicit `tmo_cache_outbox` writeback path found in this area is for `select_lender`, not `underwriting_started_at`.
+
+Boundary: do not conflate this with the loan/deal pipeline `Underwriting` status. If EFS wants the actual loan status to move to TMO/loan underwriting, that should happen through the loan/deal status workflow and reviewed TMO mapping, not this interested-lender follow-up button.
+
+Changed paths: none.
+Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read exchange`, `git status --short`, plus targeted `rg`/`sed` inspection in `src/equityfundingsource-dev`.
+Verification: code inspection only; no tests run because no code changed.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:4d1b7d41 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -181,7 +205,7 @@ In "Available Deal" -> "Interested Lenders" tab
 
 Do these steps + fields relate to TMO state?
 - ~~Mark Call Completed~~
-- Start Underwriting
+- ~~Start Underwriting~~
 - Call scheduled
 - Verbal amount
 - Contact method

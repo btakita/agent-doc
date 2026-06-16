@@ -120,7 +120,36 @@ Proof for this cycle:
 - Verification: source/search documentation only; no source code changed, so I did not run the build/test suite.
 - Confidence: high for canonical agent-doc/tmux-router/editor surfaces; medium for every non-agent-doc submodule because some are independent app repos with incidental tmux dev helpers rather than one shared tmux subsystem.
 - Escalation: none.
-<!-- agent:boundary:94e70b9a -->
+
+### Re: restart mangles the console — gpt-5
+
+Fixed the restart console-mangling path in `src/agent-doc`.
+
+What changed:
+- `agent-doc run` now redirects routine run/diff/commit stderr to `.agent-doc/logs/run-stderr.log` when it is invoked with terminal stderr inside a tmux pane owned by a Codex/OpenCode parent harness.
+- The redirect is skipped for dry-run, non-terminal stderr, non-managed harnesses, and verbose input diagnostics (`AGENT_DOC_TMUX_INPUT_DIAG` / `AGENT_DOC_DEBUG_STDIN`), so foreground diagnostics still work when explicitly requested.
+- Stderr is restored before the CLI returns, so real terminal errors still surface normally.
+- Heartbeat/progress state still persists into cycle state while the foreground TUI stays clean.
+
+Regression coverage:
+- Added `run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress`.
+- Updated the existing visible-heartbeat test to opt into foreground diagnostics explicitly.
+- Updated README/SPEC/backend/core-command docs for the new managed-TUI stderr contract.
+
+Verification:
+- `cargo test --test run_integration run_heartbeats` passed.
+- `cargo test --test run_integration codex_` passed.
+- `cargo test --test run_integration run_auto_queue` passed.
+- `make check` passed locally.
+- `make install` completed and installed `agent-doc 0.34.1` plus `libagent_doc-0.34.1.so`.
+- GitHub CI run `27599686384` passed after push, including hosted `make check` and `make tmux-ci`.
+
+Commits pushed:
+- `src/agent-doc`: `4ba0ac2d fix: redirect run diagnostics for managed TUIs`
+- superproject: `04b461e52 chore: update agent-doc submodule`
+
+I left the pre-existing unstaged PCP/control-plane edits in `src/agent-doc` alone: `agent-doc-orchestration/src/start/decisions.rs` and `specs/08b-single-process-control-plane.md`.
+<!-- agent:boundary:68b8732d -->
 <!-- /agent:exchange -->
 
 ## Queue

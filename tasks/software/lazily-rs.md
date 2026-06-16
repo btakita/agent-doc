@@ -120,7 +120,7 @@ Escalation/confidence:
 - Confidence is high from Corky's successful edit response plus the local published metadata and full-body verification.
 
 Preflight also warned that the installed `agent-doc` binary/cdylib may be stale relative to source commit `a447beb1`; that did not block this LinkedIn repair.
-<!-- agent:boundary:3bd912fa -->
+<!-- agent:boundary:789aa8f1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,6 +142,7 @@ The core is small: three primitives
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+The post https://www.linkedin.com/feed/update/urn:li:activity:7472666757267107840/ is still truncated
 <!-- /agent:backlog -->
 
 ## Review

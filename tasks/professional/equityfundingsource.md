@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -80,7 +80,34 @@ Recommended architecture:
 Caveats: use current HighLevel API docs and private integration/OAuth rather than legacy V1 API patterns; their docs say V1 reached end-of-support on December 31, 2025. Also confirm Robert's enterprise/sub-account access includes the API/workflow features needed, because HighLevel says API access varies by plan.
 
 Changed paths: session document only. Verification: reviewed local EFS Deal Pipeline/Lender Pipeline notes and current official HighLevel API/workflow docs. Escalation: none. Confidence: medium-high.
-<!-- agent:boundary:3851851f -->
+
+### Re: Deal Pipeline GHL Adapter — gpt-5
+
+> **Queue prompt:**
+>
+> do [#deal-pipeline-ghl-adapter]
+
+
+Implemented the GoHighLevel adapter foundation for the Deal Pipeline lender-selection workflow. EFS/D1 stays the source of truth for Available Deal lender selection, documents, audit history, verbal commitment, allocations, and TMO gates; GHL is now modeled as a CRM/outreach adapter around each `investor_deal_interests` work item.
+
+What shipped:
+
+1. Added migration `0071_deal_interest_ghl_adapter.sql` with per-interest GHL contact, conversation, opportunity, package message, package workflow, sync status/error, and synced-at fields.
+2. Round-tripped those fields through the admin workflow API and workflow summaries.
+3. Added a pure strategy helper: contact + package workflow ID means trigger a GHL workflow; contact without workflow ID means direct Conversations API message; no contact means `not_configured`.
+4. Added a GoHighLevel adapter block to the Lender Pipeline modal so admins can manually link current GHL IDs now and future automation can reuse the same D1 fields.
+5. Updated `prds/investor-pipeline-admin.md` with the integration boundary and send-path decision.
+
+Current official HighLevel docs checked: API platform overview / V1 end-of-support note (`2025-12-31`) at https://help.gohighlevel.com/support/solutions/articles/48001060529-highlevel-api-documentation, Conversations `POST /conversations/messages` at https://marketplace.gohighlevel.com/docs/ghl/conversations/send-a-new-message/, Opportunities API at https://marketplace.gohighlevel.com/docs/ghl/opportunities/opportunities/, and contact workflow enrollment at https://marketplace.gohighlevel.com/docs/ghl/contacts/add-contact-to-workflow/.
+
+Changed paths: `src/equityfundingsource-dev/app/equityfundingsource/migrations/0071_deal_interest_ghl_adapter.sql`, admin investor workflow API/types, `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`, `prds/investor-pipeline-admin.md`, and `tests/admin-investor-pipeline.test.ts`.
+
+Verification: `bun test tests/admin-investor-pipeline.test.ts` passed (63 tests); `make check` passed (743 tests, app build, Worker build); `git diff --check` passed. GitHub Actions note: neither the EFS submodule nor the parent repo has a workflow named `CI`. The parent `Agent Doc` workflow run `27601831539` failed before runner startup: both jobs had zero steps/logs and GitHub annotated that recent account payments failed or the spending limit needs to be increased.
+
+Committed and pushed: EFS submodule `89b9558` (`feat(admin): add GHL deal pipeline adapter state`) to `btakita/equityfundingsource-dev:main`; parent repo pointer `a11c22952` (`chore(efs): advance GHL adapter state`) to `btakita/agent-loop:main`.
+
+Escalation: none. Confidence: high. No deploy was run; this queue item used the `#spec-test-commit-push` path, and the new D1 migration will be applied by the normal deploy path.
+<!-- agent:boundary:afdc3d89 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,13 +115,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#deal-pipeline-ghl-adapter]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#deal-pipeline-ghl-adapter] [recommended] Deal Pipeline GoHighLevel adapter spike: keep EFS/D1 as source of truth for Available Deal lender selection, document permissions, and audit; evaluate a narrow GHL integration for outbound package emails, calendar/follow-up automation, inbound reply capture, and CRM opportunity/contact visibility. Decide required GHL IDs to store on `investor_deal_interests` / deal rows and whether to trigger GHL workflows or send via Conversations API.
 <!-- /agent:backlog -->
 
 ## Review

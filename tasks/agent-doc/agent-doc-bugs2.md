@@ -184,7 +184,30 @@ Proof for this cycle:
 - Verification: `git diff --check` passed; `make check` passed again. The latest `Agent Doc` Actions run is still the unrelated empty-log failure on pushed head `227e708`, not this local commit.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:4072d7a9 -->
+
+### Re: typing into the queue during a turn interrupted closeout — gpt-5
+
+This report is two failure modes, and the logs keep them separate.
+
+The pasted after-restart `Run Agent Doc` route error is covered by the source fix in `src/agent-doc` commit `2464ba38`: route now makes a typed blocked-closeout decision and can wait behind an existing active queue head instead of surfacing the raw `captured response baseline no longer matches current document` reset message as the operator-facing failure.
+
+The live interruption while typing into the queue is not proven fixed from logs. Current admin state shows the controller and route-owned supervisor are fresh only relative to the installed binary inode, while preflight still warns the installed binary/cdylib predate source commit `2464ba38`. The ops log also has no `route_dispatch_drain_closeout_wait_existing_queue` marker yet, which is the marker I would expect only after the new route path is actually live.
+
+What the logs do prove for this report:
+- The old qchurn/stale-supervisor pause existed and was later resumed with `queue_resumed ... stale-qchurn-pause-cleared-after-controller-and-supervisor-match-installed-binary`.
+- The interrupted/IPC corruption class is real: `ipc_snapshot_adoption_blocked ... agent-doc-bugs2.md ... reason=live_prompt_drift_after_preflight` and `ipcfullprompt_corruption_suspected ... deleted=11` appeared at `1781584793`.
+- Later queue writebacks for this document used `transport=editor_ipc`, so editor IPC was participating in closeout/queue convergence.
+- Operator-verify heads are still being skipped as `reason=operator_verify session=live_ipc`; that is not completion proof.
+
+So I did not mark the queue-edit interruption fully fixed. The source-side route failure is fixed, but the live behavior still needs an installed `2464ba38` binary/cdylib and a deliberate repro/verification pass. No new backlog item is needed here because the existing `#cwsp` follow-up captures the remaining busy-owner queue-edit suppression work if the interruption still reproduces after installation.
+
+Proof for this cycle:
+- Changed paths: this session document only.
+- Commands: `agent-doc preflight ...`; `agent-doc plan ...`; `agent-doc admin inspect tasks/agent-doc/agent-doc-bugs2.md --json`; `rg --files .agent-doc | rg 'ops|log|sidecar|state'`; `rg -n "route_dispatch_drain_closeout_wait_existing_queue|ipcfullprompt_corruption_suspected|ipc_snapshot_adoption_blocked|queue_consume_writeback|go_queue_skip_undrainable|stale-qchurn|queue_resumed" .agent-doc`; `rg -n "route_dispatch_drain_closeout_wait_existing_queue" .agent-doc/logs/ops.log`; `rg -n "dispatch_stale_generation_redirect|dispatch_retry_after_stale_generation" .agent-doc/logs/ops.log`.
+- Verification: log inspection only; no repo code changed in this cycle. The relevant source fix remains `2464ba38`, but live install proof is still missing.
+- Confidence: high on the split diagnosis; medium on the live interruption until tested after installing the source fix.
+- Escalation: none.
+<!-- agent:boundary:86e25b3b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -208,7 +231,7 @@ resync: pruned 3 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3649 blocked_head_bytes=132 blocked_head_sha256=ae121dad65e5b00a6c504db706985aee4e8d6ed00988ba4244f51196952739d7 trigger_bytes=44 trigger_sha256=a55a6572fd4dc952bc476bd516d3a7801b1e63409715f063b4b7351ea112ade5
 ```
 ---
-- :pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.
+- ~~:pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.~~
 - :pushpin: do [#cwsp]
 <!-- /agent:queue -->
 ###

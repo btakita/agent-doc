@@ -626,7 +626,11 @@ Use a coordinator-led, invariant-driven loop for the next workflow fixes. The co
 No new backlog items are needed from this planning turn because the existing queued heads already form the implementation sequence: `#wfinvcatalog`, then `#wfinvdoctor`, then `#wfinvautofix`.
 
 Changed paths: session document only via finalize. Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc session-check`. Verification: no source changes in this planning turn; prior `#cwsp` source verification remains recorded above. Confidence: high. Escalation: none.
-<!-- agent:boundary:e0fdb388 -->
+
+### Re: subagent orchestration closeout repair — gpt-5
+
+Closeout repair for the already-committed subagent orchestration plan. The plan text above is the intended answer, but stale-supervisor IPC writeback left part of that numbered plan looking like a prompt-only tail. This response closes the malformed tail. No source files changed in this repair step.
+<!-- agent:boundary:d2652c22 -->
 <!-- /agent:exchange -->
 
 ## Queue

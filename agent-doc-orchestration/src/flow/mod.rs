@@ -12,6 +12,7 @@ pub mod operator_clear;
 pub mod orchestration_batch;
 pub mod outcome;
 pub mod proof;
+pub mod proof_ledger;
 pub mod routed_reopen;
 pub mod session_cycle;
 pub mod types;

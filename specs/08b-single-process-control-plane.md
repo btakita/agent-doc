@@ -45,13 +45,19 @@ projections, and tmux transcript inference.
 ## State authority
 
 - `.agent-doc/state.db` is the authoritative store for actor records,
-  generations, dispatch attempts, queue heads, queue controls, queue
-  backpressure, document cycles, pending backlog mutations, supervisor leases,
-  admin operations, and projection diagnostics.
+generations, dispatch attempts, queue heads, queue controls, queue
+backpressure, document cycles, pending backlog mutations, supervisor leases,
+admin operations, and projection diagnostics.
+- `.agent-doc/proof-ledger/<document-hash>.jsonl` is the append-only operation
+proof ledger for mirror-mode cutover rows until those proofs move behind the
+store actor. Each row is keyed by `operation_id` plus `content_hash` and covers
+queue heads, response captures, patch writes, actor generations, and terminal
+proofs. Consumed, deferred, retried, and superseded operations append new rows;
+existing rows are never rewritten.
 - `session-actors.json`, `sessions.json`, layout JSON, session logs, and
-  `ops.log` are compatibility or diagnostic projections. Normal route, start,
-  sync, clear, restart, and queue-dispatch paths must not treat them as write
-  authorities once the controller record exists.
+`ops.log` are compatibility or diagnostic projections. Normal route, start,
+sync, clear, restart, and queue-dispatch paths must not treat them as write
+authorities once the controller record exists.
 - The in-memory actor map is a write-through cache of SQLite state. A successful
   mutation updates memory and commits one SQLite transaction before reporting an
   accepted state-changing result.

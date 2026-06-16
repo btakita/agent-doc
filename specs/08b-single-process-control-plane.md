@@ -122,6 +122,15 @@ The catalog is data-only and serializable as
 `workflow-invariant-catalog-v1`; runtime diagnosis must evaluate these fields
 instead of scraping prose from session docs or specs.
 
+`agent-doc doctor <FILE>` is the diagnostic surface for that catalog.
+It gathers optional preflight/session-check JSON, live `session-check`
+inspection, cycle state, recent `ops.log` markers, best-effort controller actor
+freshness, git/snapshot state, parent gitlink state, and editor sidecar presence.
+Each invariant reports one typed outcome: `ok`, `recoverable`, `operator`, or
+`blocked`, plus exact repair commands or operator actions. Missing required fact
+sources are `blocked` with the command needed to gather the evidence; detected
+safe repairs are `recoverable`.
+
 ## Document write and watch authority
 
 The store actor owns `.agent-doc/state.db` as the single durable-state writer.

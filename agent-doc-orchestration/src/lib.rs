@@ -75,6 +75,7 @@ pub mod debounce;
 pub mod dedupe;
 pub mod diff;
 pub mod diff_io;
+pub mod doctor;
 pub mod document_watcher;
 pub mod drain_owner;
 pub mod editor_route_errors;

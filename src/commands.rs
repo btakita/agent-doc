@@ -170,6 +170,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Repair orphaned response / stale document cycle and auto-close git-backed repairs (`recover` alias kept)",
     ));
     cmds.push(cmd(
+        "/agent-doc doctor",
+        "<FILE> [--preflight-json PATH] [--session-check-json PATH] [--limit N] [--json]",
+        "Diagnose workflow invariant status and print exact repair/operator actions",
+    ));
+    cmds.push(cmd(
         "/agent-doc template-info",
         "<FILE>",
         "Show template structure (components, modes)",

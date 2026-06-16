@@ -145,7 +145,29 @@ fix(admin): hide duplicate interested lenders (#67v2)
 
 Suppress the inline Interested Lenders section in the Available Deal Loan Detail tab while keeping the dedicated Interested Lenders tab and reusable loan-detail section intact. Update PRD/test coverage and deploy the Worker with no D1 migrations pending.
 ```
-<!-- agent:boundary:f817cac4 -->
+
+### Re: Mark Call Completed — gpt-5
+
+> **Queue prompt:**
+>
+> Mark Call Completed
+
+
+`Mark call completed` should be treated as EFS-local lender follow-up state, not as TMO loan state.
+
+Why:
+- The control writes `call_completed_at` on `investor_deal_interests` through `PATCH /api/admin/deal-interests/:id/workflow`.
+- That timestamp drives the EFS-local `deal_interest_workflow_stage_` stage `call_completed` and next action `Select lender and set pre-doc conditions`.
+- It does not currently enqueue `tmo_cache_outbox`, and it should not mutate TMO loan status. TMO state should remain the loan/deal operational status, selected-lender/funding writeback, and other reviewed mappings gated by `#7a4d/#dzmm`.
+
+Classification: related to the TMO-backed deal only as admin context, but source of truth is EFS D1.
+
+Changed paths: none.
+Commands: inspected `deal_detail.tsx`, `repo.ts`, `investor_management/index.ts`, `investor-pipeline-admin.md`, and current tests with `rg`/`sed`.
+Verification: code inspection only; no tests needed because no repo code changed.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:c414214a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -158,7 +180,7 @@ In "Available Deal" -> "Interested Lenders" tab
 "Deal interest workflow" should always be expanded.
 
 Do these steps + fields relate to TMO state?
-- Mark Call Completed
+- ~~Mark Call Completed~~
 - Start Underwriting
 - Call scheduled
 - Verbal amount

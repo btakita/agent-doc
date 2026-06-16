@@ -3710,8 +3710,8 @@ fn adopt_current_response_without_duplication(
     Ok(Some(repaired))
 }
 
-/// Strip leaked harness user-prompt markers (`❯ `) from the leading response
-/// body lines of every `### Re: ...` response block inside `agent:exchange`.
+/// Strip leaked harness user-prompt markers (`❯ `) from response body lines of
+/// every `### Re: ...` response block inside `agent:exchange`.
 ///
 /// Background: when finalize falls through to the CRDT merge path while the
 /// live document had a `❯ ` user input at the same column position as the
@@ -3722,8 +3722,10 @@ fn adopt_current_response_without_duplication(
 /// closeout replays the same response.
 ///
 /// Real response bodies do not use `❯ ` as a paragraph marker. Strip a leading
-/// run of prefixed response-body lines until the first unprefixed body line; any
-/// later `❯ ` text is preserved as quoted/user-visible prose. Returns
+/// run of prefixed response-body lines until the first unprefixed body line, and
+/// also strip later prefixed proof/list lines that the response classifier
+/// recognizes as assistant-owned content. Prompt-like `❯ ` text after the
+/// response body starts is preserved as quoted/user-visible prose. Returns
 /// `Some(repaired)` when any prefix was stripped, `None` when the document is
 /// clean. See `tasks/agent-doc/plan-crdt-merge-prompt-prefix-leaks-into-response-body.md`.
 pub fn strip_prompt_prefix_from_response_body_first_lines(content: &str) -> Option<String> {
@@ -3766,12 +3768,14 @@ pub fn strip_prompt_prefix_from_response_body_first_lines(content: &str) -> Opti
                 repaired_lines.push(line.to_string());
                 continue;
             }
-            if let Some(rest) = line.strip_prefix("❯ ")
-                && !saw_unprefixed_response_body_line
-            {
-                stripped_any = true;
-                repaired_lines.push(rest.to_string());
-                continue;
+            if let Some(rest) = line.strip_prefix("❯ ") {
+                let response_shaped_tail =
+                    crate::diff::line_looks_like_plain_response_after_prompt(rest.trim_start());
+                if !saw_unprefixed_response_body_line || response_shaped_tail {
+                    stripped_any = true;
+                    repaired_lines.push(rest.to_string());
+                    continue;
+                }
             }
             if line.trim_start() == "❯" && !saw_unprefixed_response_body_line {
                 stripped_any = true;

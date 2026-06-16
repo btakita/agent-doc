@@ -3246,6 +3246,39 @@ because it is not the first body line.
     }
 
     #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_strips_late_proof_lines() {
+        // Response recovery can leak prompt markers onto proof/list lines after
+        // normal prose headings. Those lines are assistant-owned, while
+        // prompt-like quoted prose must remain visible.
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #tail. spec-test-build-install-commit-push
+### Re: #tail — gpt-5
+
+Changed behavior:
+❯ - First proof line.
+❯ - Second proof line.
+
+Verification passed:
+❯ - `make check`
+
+The user said:
+❯ this quoted line stays
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("late response proof lines must be stripped");
+
+        assert!(repaired.contains("\n- First proof line.\n- Second proof line.\n"));
+        assert!(repaired.contains("\n- `make check`\n"));
+        assert!(!repaired.contains("❯ - First proof line."));
+        assert!(!repaired.contains("❯ - Second proof line."));
+        assert!(!repaired.contains("❯ - `make check`"));
+        assert!(repaired.contains("❯ this quoted line stays"));
+        assert!(repaired.contains("❯ do #tail. spec-test-build-install-commit-push"));
+    }
+
+    #[test]
     fn strip_prompt_prefix_from_response_body_first_lines_handles_multiple_re_blocks() {
         let content = "\
 <!-- agent:exchange patch=append -->

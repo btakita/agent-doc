@@ -884,9 +884,7 @@ fn repair_template_doc_if_needed(
             &snapshot_content,
             file,
         );
-        if known_response.is_some()
-            && let Some(stripped) =
-                write::strip_prompt_prefix_from_response_body_first_lines(&repaired)
+        if let Some(stripped) = write::strip_prompt_prefix_from_response_body_first_lines(&repaired)
         {
             crate::ops_log::log_op(
                 file,
@@ -995,6 +993,45 @@ fn repair_template_doc_if_needed(
         }
     }
 
+    Ok(repaired)
+}
+
+fn repair_response_body_prompt_prefixes_if_needed(
+    file: &Path,
+    doc_content: &str,
+) -> Result<String> {
+    let (fm, _) = frontmatter::parse(doc_content)
+        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
+    if !fm.resolve_mode().is_template() {
+        return Ok(doc_content.to_string());
+    }
+
+    let Some(repaired) = write::strip_prompt_prefix_from_response_body_first_lines(doc_content)
+    else {
+        return Ok(doc_content.to_string());
+    };
+
+    let save_repaired_snapshot = match snapshot::load(file)? {
+        Some(snapshot_content) => {
+            !repair_leaves_unanswered_prompt_diff(&snapshot_content, &repaired, None)
+        }
+        None => true,
+    };
+    write::atomic_write_pub(file, &repaired)?;
+    if save_repaired_snapshot {
+        snapshot::save(file, &repaired)?;
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "repair_response_body_prompt_prefix_stripped file={}",
+            file.display()
+        ),
+    );
+    eprintln!(
+        "[repair] stripped leaked response-body prompt prefixes in {}",
+        file.display()
+    );
     Ok(repaired)
 }
 
@@ -1552,6 +1589,11 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         let scaffold_repaired_doc =
             repair_duplicate_exchange_scaffold_if_needed(file, &doc_content)?;
         if scaffold_repaired_doc != doc_content {
+            return Ok(RepairOutcome::TemplateNormalized);
+        }
+        let response_prefix_repaired_doc =
+            repair_response_body_prompt_prefixes_if_needed(file, &doc_content)?;
+        if response_prefix_repaired_doc != doc_content {
             return Ok(RepairOutcome::TemplateNormalized);
         }
         let has_live_prompt =
@@ -2813,6 +2855,52 @@ mod tests {
                 && !repaired.contains("❯ Second response paragraph.")
                 && !repaired.contains("❯ - Proof line."),
             "already-applied response body lines must not be prompt-prefixed:\n{repaired}"
+        );
+
+        let saved_snapshot = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(saved_snapshot, repaired);
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("repair_response_body_prompt_prefix_stripped"));
+    }
+
+    #[test]
+    fn repair_without_pending_strips_response_body_prompt_prefixes() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let snapshot = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Do the repair.\n",
+            "### Re: repair — gpt-5\n\n",
+            "Response intro.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let current = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Do the repair.\n",
+            "### Re: repair — gpt-5\n\n",
+            "Response intro.\n\n",
+            "Verification passed:\n",
+            "❯ - `make check`\n",
+            "❯ - `agent-doc write --commit`\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::TemplateNormalized);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(repaired.contains("\nVerification passed:\n"));
+        assert!(repaired.contains("\n- `make check`\n- `agent-doc write --commit`\n"));
+        assert!(
+            !repaired.contains("❯ - `make check`")
+                && !repaired.contains("❯ - `agent-doc write --commit`"),
+            "no-pending response tails must not remain prompt-prefixed:\n{repaired}"
         );
 
         let saved_snapshot = snapshot::load(&doc).unwrap().unwrap();

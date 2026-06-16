@@ -191,7 +191,22 @@ I did not mark this done. The code-complete side already has stronger automated 
 That is still not the acceptance proof in `#rtwbcast-verify`. The item asks for a real two-editor run: one JetBrains buffer and one VS Code buffer open on the same managed doc, edits from both sides, both buffers converge, no clobber, and no File Cache Conflict. The runtime evidence I found was JetBrains editor IDs plus `go_queue_skip_undrainable id=#rtwbcast-verify reason=operator_verify session=live_ipc`; I did not find a VS Code live convergence or ack marker.
 
 Changed paths: session document/backlog state only. Commands: `agent-doc plan`, `rg` over the plan, `VERSIONS.md`, and `ops.log`, plus `agent-doc finalize`. Verification: no source code change was needed; the item is now gated rather than resolved. Confidence: high that this should stay operator-gated until the live JB plus VS Code proof exists.
-<!-- agent:boundary:25017e98 -->
+
+### Re: do [#c2b6] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#c2b6]
+
+
+Resolved `#c2b6` as agent-verified. The old queue item asked for live JB Compact Exchange proof of the committed-historical-response drift fix; the current codebase now has the narrower agent-verifiable proof that replaces that live-only gap.
+
+Evidence: `src/agent-doc/VERSIONS.md` records `#compactdrift-agent`, and `agent-doc-orchestration/src/compact.rs` has `compact_with_commit_converges_committed_response_head_without_historical_drift_guard`. That fixture creates a git repo with finalized `### Re:` history in `HEAD`, runs `agent-doc compact --component exchange --commit` through the component patch ack listener, asserts `compact_writeback transport=editor_ipc`, verifies the compacted exchange commits, preserves non-exchange components, and asserts the log does not contain `typed_component_drift` or `refusing to auto-adopt committed historical response`.
+
+Commands run: `agent-doc --version` (`0.34.1`), source/log searches for `#c2b6` and `compactdrift`, and `tsift rewrite --run 'cargo test -p agent-doc-orchestration compact_with_commit_converges_committed_response_head_without_historical_drift_guard'`. The targeted cargo test passed: 1 passed, 0 failed.
+
+Changed paths: session document only. Source changes: none. Confidence: high. Escalation: none.
+<!-- agent:boundary:888d987b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -200,7 +215,7 @@ Changed paths: session document/backlog state only. Commands: `agent-doc plan`, 
 ---
 - ~~do [#recyclerestart-verify]: This is automatable. You are misattributing it to operator driven.~~
 - ~~do [#rtwbcast-verify]~~
-- do [#c2b6]
+- ~~do [#c2b6]~~
 - do [#1j8q]
 - do [#anw0verify]
 - do [#qflood2]
@@ -247,7 +262,6 @@ What are #next-steps to fix bugs?
 - [ ] [#archsimworldmatrix] Add SimWorld/property transition-table coverage for the architecture primitives: stale supervisor recycle, queue edit during closeout, degraded/file-IPC fallback, live buffer drift, compact/replay, and operator-only/no-drainable queue outcomes.
 - [ ] [#archuistates] Replace raw route/write conflict strings in JB/Codex/OpenCode surfaces with a small typed outcome vocabulary: queued behind owner, recovered and retried, deferred for operator proof, no drainable work, real component conflict, and blocked with exact unblocker.
 - [ ] [#cwsp] [operator-verify] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38 and recycling the live supervisor onto that build, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
-- [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
 - [ ] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.
 - [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md

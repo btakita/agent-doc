@@ -1089,12 +1089,9 @@ object TerminalUtil {
     }
 
     private fun isRetryableRunAgentDocRouteFailure(kind: RunAgentDocRouteFailureKind): Boolean {
-        // Only a still-starting/booting pane is worth a silent retry — it reaches a
-        // dispatch-ready prompt within a few short backoffs. A BUSY_RUNNING failure
-        // means the authoritative actor is mid active-turn; retrying re-waits the
-        // full ready timeout per attempt (up to ~4 minutes of silence), which is the
-        // "nothing seems to happen / no UI feedback" the operator reported
-        // (#jb-run-agent-doc-command-route-miss). Notify immediately instead.
+        // Only the actor-startup guard gets a short plugin retry. A dispatch-only
+        // latest-run timeout has already spent the route ready-wait window, so
+        // retrying it silently can leave Run Agent Doc looking unresponsive.
         return kind == RunAgentDocRouteFailureKind.RETRYABLE_STARTING
     }
 
@@ -1104,16 +1101,10 @@ object TerminalUtil {
             isDispatchOnlyActiveTurnBlocked(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isDispatchOnlyBusyActorWaitTimeout(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isLatestRunStillBootingBusy(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
-            isStartingActorRouteFailure(output) || isLatestRunStillBootingRetryable(output) ->
+            isStartingActorRouteFailure(output) ->
                 RunAgentDocRouteFailureKind.RETRYABLE_STARTING
             else -> RunAgentDocRouteFailureKind.PERSISTENT
         }
-    }
-
-    private fun isLatestRunStillBootingRetryable(output: String): Boolean {
-        val lower = output.lowercase()
-        return isLatestRunStillBootingShape(lower) &&
-            (lower.contains("(active codex turn)") || lower.contains("(timed_out)"))
     }
 
     private fun isLatestRunStillBootingBusy(output: String): Boolean {

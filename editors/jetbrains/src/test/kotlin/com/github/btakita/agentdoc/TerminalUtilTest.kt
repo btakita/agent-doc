@@ -169,7 +169,7 @@ class TerminalUtilTest {
     }
 
     @Test
-    fun `only the still-booting timed-out shape is retried while active-turn busy is notified immediately`() {
+    fun `latest-run boot timeout is reported immediately while active-turn busy is not retried`() {
         val activeTurn = """
             Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
         """.trimIndent()
@@ -181,13 +181,13 @@ class TerminalUtilTest {
         """.trimIndent()
 
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(activeTurn))
-        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.RETRYABLE_STARTING, TerminalUtil.classifyRunAgentDocRouteFailure(timedOut))
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.PERSISTENT, TerminalUtil.classifyRunAgentDocRouteFailure(timedOut))
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.PERSISTENT, TerminalUtil.classifyRunAgentDocRouteFailure(shellSearch))
-        // An active-turn busy pane is NOT silently retried (each retry re-waits the
-        // full ready timeout) — it is notified immediately. Only a still-booting
-        // timed_out pane reaches a ready prompt within a few short backoffs.
+        // These latest-run failures already spent the route ready wait. Active turns
+        // get a still-running notice; prompt-less timed_out panes get the persisted
+        // route diagnostic instead of another silent retry window.
         assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(activeTurn))
-        assertTrue(TerminalUtil.isRetryableRunAgentDocRouteFailure(timedOut))
+        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(timedOut))
         assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(shellSearch))
         assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure("[agent-doc] proof-timeout: accepted but unproven"))
     }

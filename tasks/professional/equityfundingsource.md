@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -99,7 +99,33 @@ Commits/push:
 - Parent repo `main` pushed through session commit `3dc937ce1`.
 
 Confidence: high for deploy completion. Escalation: none.
-<!-- agent:boundary:d2669310 -->
+
+### Re: Compact Available Deals / Loan TMO Details — gpt-5
+
+> **Queue prompt:**
+>
+> The https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline Available Deals dialog & https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f page should have the data more condensed. Not a full-width label + field layout.
+
+Condensed the shared TMO loan data presentation used by both the Deal Pipeline Available Deals dialog and `/portal-admin/loans/:id`. The TMO loan summary, borrower, collateral, and encumbrance sections now render as a compact inline key/value grid instead of using portal-wide `.detail-row` rows.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev` parent gitlink
+
+Commits/push:
+- EFS app: `e70a770 fix(admin): compact TMO loan detail rows (#pipeline-dialog-density)` pushed to `origin/main`.
+- Parent repo: `c7b62733c chore(efs): update compact TMO detail layout submodule` pushed to `origin/main`.
+
+Verification:
+- `bun test tests/tmo-loan-details-density.test.ts tests/boolean-checkbox-fields.test.ts` passed.
+- `make check` in `src/equityfundingsource-dev` passed: 739 tests, app build, and Worker build. The digest runner flagged a `d1 down` signature, but the expanded log shows `739 pass / 0 fail`; this was a log-filter false positive.
+- Top-level `make check` passed.
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
+
+No D1 migration was needed. Confidence: high. Escalation: none.
+<!-- agent:boundary:96173e28 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -107,7 +133,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline Available Deals dialog & https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f page should have the data more condensed. Not a full-width label + field layout.
 <!-- /agent:queue -->
 
 ## Backlog

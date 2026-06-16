@@ -32,50 +32,20 @@ queue: start
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260616-144209.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260616-152222.md`*
 
 Compacted content:
-❯ - Archived 5 response topic(s): restart mangles the console; Enter submit snapshots; Add State Machine architecture tasks; 2 more
-❯ - Prior summary/context: prior compacted content: Archived 12 response topic(s): JB Run Agent Doc still does not work; #jbruncloseoutstate; Ho...
-
-### Re: do [#archfirstgate] — gpt-5
-
-> **Queue prompt:**
->
-> If we orchestrate a team of subagents with different roles, will the output quality improve on this project?
-
-
-Applied `runbooks/architecture-first.md` as the closeout gate for the completed closeout recovery state-machine batch.
-
-Architecture-first gate proof:
-
-- Invariant: closeout recovery has one typed policy boundary; route/JB, repair, capture, write, and session-check code may gather evidence or apply returned effects, but they must not independently choose recovery by parsing low-level closeout errors.
-- Policy owner: `src/agent-doc/agent-doc-orchestration/src/flow/closeout.rs`, specifically `CloseoutRecoveryState`, `CloseoutRecoveryDecision`, `gather_closeout_recovery_evidence`, and `apply_closeout_recovery_mutation`.
-- Transition rows covered by tests: all 11 `CloseoutRecoveryState::ALL` rows: `clean`, `open_cycle`, `missing_response_body`, `direct_response_patchback`, `escaped_template_patch`, `boundary_only_drift`, `nested_parent_pointer_stale`, `open_empty_preflight`, `queue_metadata_drift`, `sidecar_visible_drift`, and `unsafe_user_content_drift`. The tests also cover prompt-context priority for every row and stale-capture supersession proof for `missing_response_body` / `unsafe_user_content_drift`.
-- Test layers: pure decision-table coverage in `recovery_decision_maps_states_to_typed_outcomes`; property-style generated coverage in `closeout_recovery_decision_table_preserves_priority_and_source_state`; SimWorld coverage in `closeout_recovery_transition_scenarios_cover_simworld_inputs` for queue edits during write fragmentation, stale compaction/full-content source rejection, stale/sidecar ACK proof, already-applied ACK recovery, and JB `Run Agent Doc` prompt-context queuing during open closeout.
-- Edited surfaces and sufficiency: the state-machine batch put policy/evidence/mutation ownership in `flow/closeout.rs`, kept route/JB consumption at the typed decision boundary, localized IPC degraded evidence behind the write adapter, routed capture/repair recovery effects through the mutation primitive, and documented the contract in `VERSIONS.md` plus `specs/07-closeout-commands.md`. No additional source edits were needed for this gate cycle.
-- Out of scope / operator-verify: live IDE and stale-supervisor proofs remain in the existing operator-verify items (`#cwsp`, `#fcc0-live-verify`, and related live proof heads). Lean/TLA formalization was not introduced; the Rust enum/table/property/SimWorld coverage is the current gate.
-
-Proof for this cycle:
-
-- Changed paths: session document only.
-- Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift status`, `tsift status --fix`, targeted `rg` searches, and targeted source/spec/test reads with `sed`.
-- Verification: no new source, test, build, or instruction-surface edits were made in this cycle. The gated state-machine batch is already backed by local `make check`, `make install`, and passing GitHub CI run `27607675117` from `#smtransitiontests`.
-- Confidence: high.
-- Escalation: none.
-
-The repeated `/clear` lines are terminal builtins, not additional repo work for this queue item. I kept draining the active queue head and closed `#archfirstgate`.
+❯ - Archived 2 response topic(s): do [#archfirstgate]; JB Run Agent Doc stale queue pause
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
 
 ### Re: JB Run Agent Doc stale queue pause — gpt-5
 
 > **Queue prompt:**
 >
-> :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
-> ```
-> resync: pruned 3 stale session(s)
-> [route] target tmux session: 0
-> Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3649 blocked_head_bytes=132 blocked_head_sha256=ae121dad65e5b00a6c504db706985aee4e8d6ed00988ba4244f51196952739d7 trigger_bytes=44 trigger_sha256=a55a6572fd4dc952bc476bd516d3a7801b1e63409715f063b4b7351ea112ade5
-> ```
+> Look at bugs from recent sessions from the JB, agent-doc, and Codex session logs. What are #next-steps to fix? How can we improve the architecture to fix these workflow issues? Are the workflows properly defined?
+
+
+Correction after the interrupted closeout: the prior finalize attempt partially merged this answer under the previous `#archfirstgate` response, so this is the actual response for the current queue prompt.
 
 This should not surface as a JetBrains `Run Agent Doc` error on the current source. The pasted failure is the legacy markerless stale-supervisor `queue_paused` shape from `#jbrestale`: `failed_stage=queue_paused reason=#qchurn ... stale host supervisor pid 2715614 ...`. Current `src/agent-doc` treats that as recoverable by restarting the stale supervisor once, lifting the pause, and retrying dispatch rather than failing closed.
 
@@ -91,19 +61,20 @@ So I am not adding a new backlog item for this specific report. If JetBrains sti
 Proof for this cycle:
 
 - Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only.
-- Commands: `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc session-check`, `agent-doc queue recover-lost`, `agent-doc queue consume`, `agent-doc queue --help`, `agent-doc write --help`, `tsift status`, `rg -n "qchurn|queue_paused|no-op churn|Run Agent Doc.*errors|restart.*Run Agent Doc" tasks src/agent-doc -S`, and targeted `sed` reads of the version/spec/implementation/test surfaces.
+- Commands: `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc session-check`, `agent-doc queue recover-lost`, `agent-doc queue --help`, `agent-doc write --help`, `tsift status`, `rg -n "qchurn|queue_paused|no-op churn|Run Agent Doc.*errors|restart.*Run Agent Doc" tasks src/agent-doc -S`, and targeted `sed` reads of the version/spec/implementation/test surfaces.
 - Verification: no source, build, or instruction-surface edits were made; this was a source/spec confirmation response. The relevant regression coverage is already present in the checked implementation tests.
 - Confidence: high that this exact pasted error is already fixed in source as `#jbrestale`; live confidence still depends on installed binary and supervisor freshness.
 - Escalation: none.
 
-The normal finalize/queue-consume path hit a live-buffer guard and then a delayed queue-consume patch mis-struck id-backed heads. I repaired the visible session document here and left the remaining operator-verify heads open.
-<!-- agent:boundary:b465b8dc -->
+Remaining queue heads are operator-verify/live-proof items, so this cycle should stop after closeout rather than auto-looping into them.
+<!-- agent:boundary:64bbb52a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~If we orchestrate a team of subagents with different roles, will the output quality improve on this project?~~
+- ~~Look at bugs from recent sessions from the JB, agent-doc, and Codex session logs. What are #next-steps to fix? How can we improve the architecture to fix these workflow issues? Are the workflows properly defined?~~
 ---
 - do [#lazilyqrestore]
 - do [#recyclerestart-verify]

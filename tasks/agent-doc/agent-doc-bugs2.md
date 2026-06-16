@@ -189,7 +189,52 @@ Pushed:
 CI: latest `src/agent-doc` CI run `27653709874` is `in_progress`; local full verification passed, so I recorded it and did not wait. The parent repo still has no workflow named `CI`.
 
 Escalation: none. Confidence: high for stopping the repeated-click cancellation and Run/Clear interleaving class. Live proof after restarting IntelliJ should show either a single route process reaching submit/proof or a visible dedupe/block notice, rather than a second click killing the process that would press `Enter`.
-<!-- agent:boundary:217354df -->
+
+### Re: #resprectail — gpt-5
+
+> **Queue prompt:**
+>
+> [#resprectail]
+
+
+Implemented the response-tail recovery fix and closed `#resprectail`.
+
+Changed paths:
+- `agent-doc-orchestration/src/write.rs`
+- `agent-doc-orchestration/src/repair.rs`
+- `agent-doc-orchestration/src/write/ipc/transport.rs`
+- `VERSIONS.md`
+
+What changed:
+- `strip_prompt_prefix_from_response_body_first_lines` now strips leaked `❯ ` markers from assistant-owned proof/list lines anywhere inside a `### Re:` response block, not only the first response-body run.
+- The stripper reuses the existing response-line classifier, so prompt-like quoted prose such as `❯ this quoted line stays` remains untouched.
+- Template repair now runs the response-tail stripper without requiring a pending response, runs it before the live-prompt guard can be tripped by the corrupted tail itself, and reruns it after stale `preflight_started` recovery before returning.
+
+Live reproduction proof:
+- This session document reproduced the bug after finalize fallback: the prior response contained `❯ - ...` proof lines.
+- After installing the follow-up build, `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` logged `[repair] stripped leaked response-body prompt prefixes` and committed the cleaned document as `c2757da74`.
+- `rg "❯ -" tasks/agent-doc/agent-doc-bugs2.md` returned no matches after the live repair.
+
+Verification passed:
+- `cargo test -p agent-doc-orchestration prompt_prefix --lib`
+- `cargo test -p agent-doc --test test_cli mcp_finalize_close_after_capture_recovers_on_next_preflight_once`
+- `cargo test -p agent-doc --test ipc_closeout_model file_ipc`
+- `cargo test -p agent-doc-orchestration already_applied_socket_missing_disk_response_repairs_visible_without_file_fallback --lib`
+- `cargo test -p agent-doc-orchestration recover_already_applied_template_keeps_response_body_unprefixed --lib`
+- `make check` (clippy, 4,610 nextest tests, doctests, medium SimWorld corpus)
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.1`
+- `git diff --check`
+
+CI / push:
+- `src/agent-doc` commits pushed: `c598d89e fix: repair response prompt tail drift` and `520f19da fix: strip response tails after stale preflight repair`.
+- Parent `agent-loop` branch pushed through `b16ef9b61`; relevant parent commits are `c2757da74` for the live session repair and `d4de8e00d` for the final `src/agent-doc` gitlink.
+- First CI run for `c598d89e` failed before clippy because crates.io download of `cpufeatures` reset the HTTP/2 connection. Latest CI for `520f19da` was `in_progress` at check time: run `27654796707`.
+
+Escalation: none. The route-owned supervisor for this document is still stale (`pid 166599`); preflight kept reporting the exact unblockers `agent-doc session restart-supervisor <FILE> --force`, `agent-doc session interrupt-clear <FILE> --force`, or a session restart.
+
+Confidence: high.
+<!-- agent:boundary:8eb8d2ce -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -197,7 +242,7 @@ Escalation: none. Confidence: high for stopping the repeated-click cancellation 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Clear Session Context` does not submit with Enter. JB `Run Agent Doc` sends a `/clear` and restart. After a couple restart JB `Run Agent Doc` still does not send Enter. Should we remove Codex-specific logic with JB commands and just use the same path as with Claude Code?~~
 - ~~:pushpin: JB `Run Agent Doc` still does not send Enter. Should we have more state machine logic to prevent race conditions?~~
-- [#resprectail]
+- ~~[#resprectail]~~
 - :pushpin: JB `Run Agent Doc` on monsterrodholders.md still does not send Enter. Consolidate logic + simplify more. We should only send Enter, never CR or /n to tmux. Claude + Codex send-keys logic should be identical.
 ---
 :pushpin: JB `Run Agent Doc` on lazily-rs.md/opencode. I closed a Codex session then opened the opencode session. When closing a session in the cli, agent-doc should detect this and immediately clear the state. Heartbeats with the new session in the same supervisor should immediately replace the old session.
@@ -237,7 +282,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#resprectail] Response recovery drift must not become a user prompt. Reproduce the equityfundingsource closeout where duplicated assistant/proof text gained `❯` prefixes after finalize fallback, add classifier/repair coverage so duplicate response-owned tails are dropped or restored as assistant content, fail closed for ambiguous mixed tails, and verify socket finalize failure, file-IPC fallback, `write --commit` already-applied recovery, and full `make check`. Plan: tasks/agent-doc/plan-response-recovery-prompt-tail.md
 <!-- /agent:backlog -->
 
 ## Review

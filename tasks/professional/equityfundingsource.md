@@ -316,7 +316,27 @@ Commands: `agent-doc preflight`, `agent-doc plan`, `git status --short`, and tar
 Verification: code inspection only; no tests run because no code changed.
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:6b92ec1f -->
+
+### Re: Lender Contact Summary — gpt-5
+
+`Lender contact summary` is EFS-local interested-lender communication state, not TMO loan state.
+
+Classification: EFS D1 source of truth; TMO-related only as lender follow-up context on a TMO-backed deal.
+
+Evidence:
+- The Available Deal `Interested Lenders` workflow stores this textarea as `lender_last_contact_summary` on `investor_deal_interests`.
+- Package-sent can default it to `Deal package sent to {email}.`, and the workflow card renders it as `Last contact` when present.
+- The admin patch route writes `lender_last_contact_summary` directly to `investor_deal_interests` after `clean_text_(body?.lender_last_contact_summary, 2000)`, alongside `lender_last_contact_at`, `lender_last_contact_method`, and `lender_next_follow_up_at`.
+- The explicit `tmo_cache_outbox` writeback path found in this workflow area remains `select_lender`, not contact summary.
+
+Boundary: treat this as local communication audit/follow-up text. It should not be treated as TMO status, TMO notes, or GHL source-of-truth state unless a separate reviewed adapter intentionally writes it outward later.
+
+Changed paths: none.
+Commands: `agent-doc preflight`, `agent-doc plan`, `git status --short`, and targeted `rg` inspection in `src/equityfundingsource-dev`.
+Verification: code inspection only; no tests run because no code changed.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:18fb8809 -->
 <!-- /agent:exchange -->
 ###
 <!--

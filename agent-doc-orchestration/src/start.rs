@@ -3430,7 +3430,15 @@ Done.
         let fresh = crate::drain_owner::fresh_drain_owner_lease(&file, now);
         assert!(fresh.is_some(), "just-claimed lease must read fresh");
         assert_eq!(
-            idle_queue_drain_decision(false, true, false, fresh.is_some(), Some("do [#a]"), None),
+            idle_queue_drain_decision(
+                false,
+                true,
+                false,
+                fresh.is_some(),
+                false,
+                Some("do [#a]"),
+                None
+            ),
             IdleQueueDrainDecision::SkipSelfDrivingLoopOwner
         );
 
@@ -3441,7 +3449,15 @@ Done.
             "an expired heartbeat must not read fresh"
         );
         assert_eq!(
-            idle_queue_drain_decision(false, true, false, expired.is_some(), Some("do [#a]"), None),
+            idle_queue_drain_decision(
+                false,
+                true,
+                false,
+                expired.is_some(),
+                false,
+                Some("do [#a]"),
+                None
+            ),
             IdleQueueDrainDecision::Dispatch
         );
     }

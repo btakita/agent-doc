@@ -218,6 +218,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // queue). Only emit when the diagnostic string actually changes so the
             // decision stays observable without the runaway.
             let mut last_clear_decision_diagnostic: Option<String> = None;
+            let mut route_submit_in_flight_logged = false;
             let mut idle_busy_ticks: u32 = 0;
             // `#clearcontresume`: consecutive idle-prompt polls observed while a
             // manual clear cooldown is active and a go-mode head is waiting.
@@ -347,13 +348,62 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 }
                 let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
                 let turn_active = turn_active_for_owned_pane(&path, &shared);
-
+                let route_submit_in_flight =
+                    match crate::route_in_flight::route_submit_in_flight(&path) {
+                        Ok(active) => active,
+                        Err(err) => {
+                            if !route_submit_in_flight_logged {
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "idle_queue_watch_skipped harness={} reason=route_submit_marker_error file={} error={:?}",
+                                        harness.binary,
+                                        path.display(),
+                                        err.to_string()
+                                    ),
+                                );
+                                eprintln!(
+                                    "[agent-doc] idle-queue watch: failed to inspect route-submit marker for {}: {err:#}",
+                                    path.display()
+                                );
+                                route_submit_in_flight_logged = true;
+                            }
+                            true
+                        }
+                    };
+                if route_submit_in_flight {
+                    if !route_submit_in_flight_logged {
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "idle_queue_watch_skipped harness={} reason=route_submit_in_flight file={}",
+                                harness.binary,
+                                path.display()
+                            ),
+                        );
+                        crate::ops_log::log_op(
+                            &path,
+                            &format!(
+                                "idle_queue_watch_skipped file={} harness={} reason=route_submit_in_flight",
+                                path.display(),
+                                harness.binary
+                            ),
+                        );
+                        route_submit_in_flight_logged = true;
+                    }
+                } else {
+                    route_submit_in_flight_logged = false;
+                }
                 // `#qflood2`: advance the post-`/clear` settle debounce. Require
                 // consecutive fresh-idle polls (reset on any busy/non-idle tick)
                 // so the next drain trigger is never injected into an in-flight
                 // `/clear`. Once the cleared pane has settled, drop the gate so
                 // the normal drain dispatches the head.
-                if awaiting_clear_settle && prompt_visible && !turn_active {
+                if awaiting_clear_settle
+                    && prompt_visible
+                    && !turn_active
+                    && !route_submit_in_flight
+                {
                     clear_settle_idle_ticks = clear_settle_idle_ticks.saturating_add(1);
                 } else {
                     clear_settle_idle_ticks = 0;
@@ -380,7 +430,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // is waiting (and no operator-deferred clear is pending — that
                 // path owns its own resume), auto-expire the cooldown so the
                 // recycle + clear is a continuation step, not a stall.
-                if clear_cooldown_active && active_head.is_some() && prompt_visible && !turn_active {
+                if clear_cooldown_active
+                    && active_head.is_some()
+                    && prompt_visible
+                    && !turn_active
+                    && !route_submit_in_flight
+                {
                     clear_cooldown_idle_ticks = clear_cooldown_idle_ticks.saturating_add(1);
                 } else {
                     clear_cooldown_idle_ticks = 0;
@@ -1035,6 +1090,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 match idle_queue_context_reset_decision(
                     prompt_visible,
                     turn_active,
+                    route_submit_in_flight,
                     active_head.as_deref(),
                     reset_already_sent_for_active_slot,
                     context_reset_reason.is_some(),
@@ -1181,6 +1237,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     IdleQueueContextResetDecision::SkipNoActiveHead
                     | IdleQueueContextResetDecision::SkipNotIdle
                     | IdleQueueContextResetDecision::SkipTurnActive
+                    | IdleQueueContextResetDecision::SkipRouteSubmitInFlight
                     | IdleQueueContextResetDecision::SkipAlreadyResetHead
                     | IdleQueueContextResetDecision::SkipNoResetNeeded => {}
                 }
@@ -1195,6 +1252,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     prompt_visible,
                     turn_active,
                     drain_owner_lease.is_some(),
+                    route_submit_in_flight,
                     active_head.as_deref(),
                     last_dispatched.as_deref(),
                 ) {
@@ -1396,6 +1454,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                     IdleQueueDrainDecision::SkipNotIdle
                     | IdleQueueDrainDecision::SkipTurnActive
+                    | IdleQueueDrainDecision::SkipRouteSubmitInFlight
                     | IdleQueueDrainDecision::SkipClearCooldown
                     | IdleQueueDrainDecision::SkipAlreadyDispatched => {}
                 }
@@ -1453,6 +1512,7 @@ mod tests {
             crate::start::decisions::idle_queue_context_reset_decision(
                 true,
                 false,
+                false,
                 edited_head,
                 context_reset_dedupe_head(edited_head, previous_head, true),
                 true,
@@ -1462,6 +1522,7 @@ mod tests {
         assert_eq!(
             crate::start::decisions::idle_queue_context_reset_decision(
                 true,
+                false,
                 false,
                 edited_head,
                 context_reset_dedupe_head(edited_head, previous_head, false),
@@ -1493,6 +1554,7 @@ mod tests {
         assert_eq!(
             crate::start::decisions::idle_queue_context_reset_decision(
                 true,
+                false,
                 false,
                 Some(head),
                 None,
@@ -1532,6 +1594,7 @@ mod tests {
             crate::start::decisions::idle_queue_drain_decision(
                 false,
                 true,
+                false,
                 false,
                 false,
                 Some(head),

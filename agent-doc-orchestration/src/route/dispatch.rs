@@ -422,6 +422,8 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
 
     let tracker =
         build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
+    let _route_submit_guard =
+        crate::route_in_flight::begin_route_submit(file, pane, &harness.binary)?;
     let method = IpcMethod::Inject {
         bytes: routed_trigger_submit_payload(&payload),
     };
@@ -866,6 +868,8 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
 ) -> Result<RoutedDispatchStartProof> {
     let tracker =
         build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
+    let _route_submit_guard =
+        crate::route_in_flight::begin_route_submit(file, pane, &harness.binary)?;
     let submit_result = send_command_checked(tmux, pane, file_path, harness)?;
     let Some(tracker) = tracker else {
         log_route_latency(

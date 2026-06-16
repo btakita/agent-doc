@@ -921,6 +921,7 @@ impl SimWorld {
             prompt_visible_now,
             turn_active_now,
             false, // self_driving_loop_active — supervisor owns this drain in the model
+            false, // route_submit_in_flight — this model does not inject editor routes
             head.as_deref(),
             self.recycle_clear.last_dispatched.as_deref(),
         );

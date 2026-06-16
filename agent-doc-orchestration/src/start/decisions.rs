@@ -46,6 +46,9 @@ pub enum IdleQueueDrainDecision {
     /// This exact head was already dispatched and has not advanced/drained yet —
     /// suppress re-firing so a stuck head cannot spin the watch into a hot loop.
     SkipAlreadyDispatched,
+    /// A manual/editor route command is already submitting into the owned pane.
+    /// Do not add a supervisor reset or drain command until that submit finishes.
+    SkipRouteSubmitInFlight,
     /// A self-driving harness loop (Claude Code `/loop`) holds a fresh
     /// drain-owner lease and owns this drain. The supervisor defers so the two
     /// owners do not both inject `agent-doc <FILE>` into the live input queue
@@ -59,6 +62,7 @@ pub(crate) enum IdleQueueContextResetDecision {
     SkipNoActiveHead,
     SkipNotIdle,
     SkipTurnActive,
+    SkipRouteSubmitInFlight,
     SkipAlreadyResetHead,
     SkipNoResetNeeded,
 }
@@ -81,6 +85,7 @@ pub(crate) fn clean_session_head_forces_context_reset(
 pub(crate) fn idle_queue_context_reset_decision(
     prompt_visible: bool,
     turn_active: bool,
+    route_submit_in_flight: bool,
     active_head: Option<&str>,
     last_context_reset_head: Option<&str>,
     reset_required: bool,
@@ -93,6 +98,9 @@ pub(crate) fn idle_queue_context_reset_decision(
     }
     if turn_active {
         return IdleQueueContextResetDecision::SkipTurnActive;
+    }
+    if route_submit_in_flight {
+        return IdleQueueContextResetDecision::SkipRouteSubmitInFlight;
     }
     if last_context_reset_head == Some(head) {
         return IdleQueueContextResetDecision::SkipAlreadyResetHead;
@@ -116,6 +124,7 @@ pub fn idle_queue_drain_decision(
     prompt_visible: bool,
     turn_active: bool,
     self_driving_loop_active: bool,
+    route_submit_in_flight: bool,
     active_head: Option<&str>,
     last_dispatched: Option<&str>,
 ) -> IdleQueueDrainDecision {
@@ -132,6 +141,9 @@ pub fn idle_queue_drain_decision(
         // The renderer can briefly show an idle-looking prompt before the
         // harness Stop/idle hook has completed the whole turn.
         Some(_) if turn_active => IdleQueueDrainDecision::SkipTurnActive,
+        // A route command already owns this pane input window. Reset/drain would
+        // otherwise concatenate after its `agent-doc <FILE>` reopen.
+        Some(_) if route_submit_in_flight => IdleQueueDrainDecision::SkipRouteSubmitInFlight,
         // A self-driving harness loop owns this drain (fresh drain-owner lease):
         // defer so the supervisor and `/loop` do not both inject the next
         // `agent-doc <FILE>` trigger and flood the live input queue.
@@ -896,7 +908,7 @@ mod tests {
     #[test]
     fn idle_queue_drain_dispatches_when_idle_with_fresh_active_head() {
         assert_eq!(
-            idle_queue_drain_decision(false, true, false, false, Some("do [#a]"), None),
+            idle_queue_drain_decision(false, true, false, false, false, Some("do [#a]"), None),
             IdleQueueDrainDecision::Dispatch
         );
     }
@@ -906,7 +918,7 @@ mod tests {
         // No-inject-into-active-turn: a busy pane (no dispatch-ready prompt)
         // never receives an injected trigger, mirroring the route busy path.
         assert_eq!(
-            idle_queue_drain_decision(false, false, false, false, Some("do [#a]"), None),
+            idle_queue_drain_decision(false, false, false, false, false, Some("do [#a]"), None),
             IdleQueueDrainDecision::SkipNotIdle
         );
     }
@@ -914,7 +926,7 @@ mod tests {
     #[test]
     fn idle_queue_drain_waits_for_turn_status_idle_even_with_visible_prompt() {
         assert_eq!(
-            idle_queue_drain_decision(false, true, true, false, Some("/clear"), None),
+            idle_queue_drain_decision(false, true, true, false, false, Some("/clear"), None),
             IdleQueueDrainDecision::SkipTurnActive
         );
     }
@@ -922,7 +934,7 @@ mod tests {
     #[test]
     fn idle_queue_drain_skips_during_clear_cooldown() {
         assert_eq!(
-            idle_queue_drain_decision(true, true, true, false, Some("do [#a]"), None),
+            idle_queue_drain_decision(true, true, true, false, false, Some("do [#a]"), None),
             IdleQueueDrainDecision::SkipClearCooldown
         );
     }
@@ -1142,15 +1154,29 @@ mod tests {
     #[test]
     fn idle_queue_context_reset_dispatches_clear_once_per_head() {
         assert_eq!(
-            idle_queue_context_reset_decision(true, false, Some("do [#a]"), None, true),
+            idle_queue_context_reset_decision(true, false, false, Some("do [#a]"), None, true),
             IdleQueueContextResetDecision::Reset
         );
         assert_eq!(
-            idle_queue_context_reset_decision(true, false, Some("do [#a]"), Some("do [#a]"), true),
+            idle_queue_context_reset_decision(
+                true,
+                false,
+                false,
+                Some("do [#a]"),
+                Some("do [#a]"),
+                true
+            ),
             IdleQueueContextResetDecision::SkipAlreadyResetHead
         );
         assert_eq!(
-            idle_queue_context_reset_decision(true, false, Some("do [#b]"), Some("do [#a]"), true),
+            idle_queue_context_reset_decision(
+                true,
+                false,
+                false,
+                Some("do [#b]"),
+                Some("do [#a]"),
+                true
+            ),
             IdleQueueContextResetDecision::Reset
         );
     }
@@ -1158,15 +1184,15 @@ mod tests {
     #[test]
     fn idle_queue_context_reset_waits_for_idle_and_active_head() {
         assert_eq!(
-            idle_queue_context_reset_decision(false, false, Some("do [#a]"), None, true),
+            idle_queue_context_reset_decision(false, false, false, Some("do [#a]"), None, true),
             IdleQueueContextResetDecision::SkipNotIdle
         );
         assert_eq!(
-            idle_queue_context_reset_decision(true, false, None, None, true),
+            idle_queue_context_reset_decision(true, false, false, None, None, true),
             IdleQueueContextResetDecision::SkipNoActiveHead
         );
         assert_eq!(
-            idle_queue_context_reset_decision(true, false, Some("do [#a]"), None, false),
+            idle_queue_context_reset_decision(true, false, false, Some("do [#a]"), None, false),
             IdleQueueContextResetDecision::SkipNoResetNeeded
         );
     }
@@ -1174,19 +1200,27 @@ mod tests {
     #[test]
     fn idle_queue_context_reset_waits_for_turn_status_idle() {
         assert_eq!(
-            idle_queue_context_reset_decision(true, true, Some("do [#a]"), None, true),
+            idle_queue_context_reset_decision(true, true, false, Some("do [#a]"), None, true),
             IdleQueueContextResetDecision::SkipTurnActive
+        );
+    }
+
+    #[test]
+    fn idle_queue_context_reset_waits_for_route_submit_to_finish() {
+        assert_eq!(
+            idle_queue_context_reset_decision(true, false, true, Some("do [#a]"), None, true),
+            IdleQueueContextResetDecision::SkipRouteSubmitInFlight
         );
     }
 
     #[test]
     fn idle_queue_drain_skips_when_no_active_head() {
         assert_eq!(
-            idle_queue_drain_decision(false, true, false, false, None, None),
+            idle_queue_drain_decision(false, true, false, false, false, None, None),
             IdleQueueDrainDecision::SkipNoActiveHead
         );
         assert_eq!(
-            idle_queue_drain_decision(false, false, true, false, None, Some("do [#a]")),
+            idle_queue_drain_decision(false, false, true, false, false, None, Some("do [#a]")),
             IdleQueueDrainDecision::SkipNoActiveHead
         );
     }
@@ -1197,7 +1231,15 @@ mod tests {
         // it yet, or the dispatch failed to drain) — suppress re-firing so a
         // stuck head cannot spin the watch every idle tick.
         assert_eq!(
-            idle_queue_drain_decision(false, true, false, false, Some("do [#a]"), Some("do [#a]")),
+            idle_queue_drain_decision(
+                false,
+                true,
+                false,
+                false,
+                false,
+                Some("do [#a]"),
+                Some("do [#a]")
+            ),
             IdleQueueDrainDecision::SkipAlreadyDispatched
         );
     }
@@ -1207,8 +1249,24 @@ mod tests {
         // A different head than the last dispatched one re-fires — the queue
         // advanced to a new prompt that still needs an idle drain.
         assert_eq!(
-            idle_queue_drain_decision(false, true, false, false, Some("do [#b]"), Some("do [#a]")),
+            idle_queue_drain_decision(
+                false,
+                true,
+                false,
+                false,
+                false,
+                Some("do [#b]"),
+                Some("do [#a]")
+            ),
             IdleQueueDrainDecision::Dispatch
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_waits_for_route_submit_to_finish() {
+        assert_eq!(
+            idle_queue_drain_decision(false, true, false, false, true, Some("do [#a]"), None),
+            IdleQueueDrainDecision::SkipRouteSubmitInFlight
         );
     }
 
@@ -1218,27 +1276,35 @@ mod tests {
         // supervisor defers even on an idle pane with a fresh, un-dispatched head
         // so the two owners do not flood the live input queue (#kp5z / #qflood).
         assert_eq!(
-            idle_queue_drain_decision(false, true, false, true, Some("do [#a]"), None),
+            idle_queue_drain_decision(false, true, false, true, false, Some("do [#a]"), None),
             IdleQueueDrainDecision::SkipSelfDrivingLoopOwner
         );
         // The loop-owner gate also wins over the already-dispatched dedup arm.
         assert_eq!(
-            idle_queue_drain_decision(false, true, false, true, Some("do [#a]"), Some("do [#a]")),
+            idle_queue_drain_decision(
+                false,
+                true,
+                false,
+                true,
+                false,
+                Some("do [#a]"),
+                Some("do [#a]")
+            ),
             IdleQueueDrainDecision::SkipSelfDrivingLoopOwner
         );
         // No/stale lease (`self_driving_loop_active=false`) ⇒ supervisor drains.
         assert_eq!(
-            idle_queue_drain_decision(false, true, false, false, Some("do [#a]"), None),
+            idle_queue_drain_decision(false, true, false, false, false, Some("do [#a]"), None),
             IdleQueueDrainDecision::Dispatch
         );
         // A busy pane still short-circuits before the loop-owner check.
         assert_eq!(
-            idle_queue_drain_decision(false, false, false, true, Some("do [#a]"), None),
+            idle_queue_drain_decision(false, false, false, true, false, Some("do [#a]"), None),
             IdleQueueDrainDecision::SkipNotIdle
         );
         // No active head still wins (nothing to defer about).
         assert_eq!(
-            idle_queue_drain_decision(false, true, false, true, None, None),
+            idle_queue_drain_decision(false, true, false, true, false, None, None),
             IdleQueueDrainDecision::SkipNoActiveHead
         );
     }

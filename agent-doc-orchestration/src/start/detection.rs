@@ -305,6 +305,7 @@ mod tests {
                 true,
                 false,
                 false,
+                false,
                 Some("do [#learn-ohio-duplicate-gate]"),
                 last_dispatched.as_deref(),
             ),

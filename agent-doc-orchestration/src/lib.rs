@@ -123,6 +123,7 @@ pub use agent_doc_core::replay_guard;
 pub mod response_toc;
 pub mod resync;
 pub mod route;
+pub mod route_in_flight;
 pub mod run;
 pub mod session_accretion;
 pub mod session_actor;

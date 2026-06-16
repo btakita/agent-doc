@@ -447,6 +447,171 @@ pub fn supervisor_restart_action(
     }
 }
 
+/// `#suphandoff` — PCP-owned red/green supervisor handoff state.
+///
+/// This models the future two-process replacement path separately from the
+/// already-live `execve` preserve-child hot reload. Until the project controller
+/// commits the lease promotion, the old supervisor remains the only authoritative
+/// owner of the child/pty/session socket; the new supervisor is a private-socket
+/// standby and must not touch live child I/O.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PcpSupervisorHandoffState {
+    /// No handoff is in progress.
+    Idle,
+    /// PCP accepted the request and should launch a replacement supervisor on a
+    /// private socket. The old supervisor remains authoritative.
+    LaunchingStandby,
+    /// Standby process exists; PCP is probing freshness/capabilities/readiness.
+    ProbingStandby,
+    /// Standby is healthy but fenced. Wait for `prompt_visible && !turn_active`.
+    AwaitTurnBoundary,
+    /// Turn boundary reached; PCP is compare-and-swap promoting the lease.
+    PromotingLease,
+    /// Lease promotion committed; the new supervisor may adopt child ownership.
+    TransferringOwnership,
+    /// Child ownership is transferred; stop the old supervisor generation.
+    StoppingOld,
+    /// New supervisor owns the lease and child; handoff is complete.
+    Complete,
+    /// Pre-promotion failure or abort: terminate the standby and keep old active.
+    RollingBack,
+    /// Failure after lease promotion. Do not silently roll back; require repair.
+    BlockedPostPromotion,
+}
+
+impl PcpSupervisorHandoffState {
+    /// Whether the old supervisor is still the authoritative child/pty owner.
+    /// This stays true through standby launch/probe/drain and only flips after
+    /// PCP commits the lease promotion.
+    pub fn old_supervisor_authoritative(self) -> bool {
+        matches!(
+            self,
+            Self::Idle
+                | Self::LaunchingStandby
+                | Self::ProbingStandby
+                | Self::AwaitTurnBoundary
+                | Self::PromotingLease
+                | Self::RollingBack
+        )
+    }
+
+    /// Whether normal code may let the standby touch live child/pty state.
+    /// A private-socket standby is intentionally no-touch before promotion; a
+    /// post-promotion block is repair-only and should not continue normal I/O.
+    pub fn standby_may_touch_child(self) -> bool {
+        matches!(
+            self,
+            Self::TransferringOwnership | Self::StoppingOld | Self::Complete
+        )
+    }
+
+    /// Whether PCP has committed the lease/generation promotion. Past this
+    /// point rollback is no longer the safe automatic response.
+    pub fn lease_promoted(self) -> bool {
+        matches!(
+            self,
+            Self::TransferringOwnership
+                | Self::StoppingOld
+                | Self::Complete
+                | Self::BlockedPostPromotion
+        )
+    }
+}
+
+/// Events consumed by the pure PCP supervisor handoff transition table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PcpSupervisorHandoffEvent {
+    RequestAccepted,
+    StandbyStarted,
+    StandbyStartFailed,
+    StandbyHealthy,
+    StandbyFailed,
+    TurnBoundaryReached,
+    PromotionCommitted,
+    PromotionFailed,
+    OwnershipTransferred,
+    OldSupervisorStopped,
+    RollbackComplete,
+    AbortRequested,
+}
+
+/// Side effect the PCP runtime must perform after a handoff transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PcpSupervisorHandoffAction {
+    None,
+    LaunchStandby,
+    ProbeStandby,
+    WaitTurnBoundary,
+    PromoteLease,
+    TransferChildOwnership,
+    StopOldSupervisor,
+    CompleteHandoff,
+    RollbackStandby,
+    EscalateRepair,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PcpSupervisorHandoffTransition {
+    pub state: PcpSupervisorHandoffState,
+    pub action: PcpSupervisorHandoffAction,
+}
+
+/// `#suphandoff` — formal PCP state machine for a future true red/green
+/// supervisor replacement.
+///
+/// The live implementation should use this only as the controller-side policy
+/// for a separate standby process. The current production restart path still uses
+/// [`supervisor_restart_action`] plus `execve` because that preserves the child
+/// without cross-process fd transfer.
+pub fn pcp_supervisor_handoff_transition(
+    state: PcpSupervisorHandoffState,
+    event: PcpSupervisorHandoffEvent,
+) -> PcpSupervisorHandoffTransition {
+    use PcpSupervisorHandoffAction::*;
+    use PcpSupervisorHandoffEvent::*;
+    use PcpSupervisorHandoffState::*;
+
+    let (state, action) = match (state, event) {
+        (Idle, RequestAccepted) => (LaunchingStandby, LaunchStandby),
+
+        (LaunchingStandby, StandbyStarted) => (ProbingStandby, ProbeStandby),
+        (LaunchingStandby, StandbyStartFailed) => (RollingBack, RollbackStandby),
+
+        (ProbingStandby, StandbyHealthy) => (AwaitTurnBoundary, WaitTurnBoundary),
+        (ProbingStandby, StandbyFailed) => (RollingBack, RollbackStandby),
+
+        (AwaitTurnBoundary, TurnBoundaryReached) => (PromotingLease, PromoteLease),
+        (AwaitTurnBoundary, StandbyFailed) => (RollingBack, RollbackStandby),
+
+        (PromotingLease, PromotionCommitted) => (TransferringOwnership, TransferChildOwnership),
+        (PromotingLease, PromotionFailed | StandbyFailed) => (RollingBack, RollbackStandby),
+
+        (TransferringOwnership, OwnershipTransferred) => (StoppingOld, StopOldSupervisor),
+        (TransferringOwnership, StandbyFailed) => (BlockedPostPromotion, EscalateRepair),
+
+        (StoppingOld, OldSupervisorStopped) => (Complete, CompleteHandoff),
+        (StoppingOld, StandbyFailed) => (BlockedPostPromotion, EscalateRepair),
+
+        (RollingBack, RollbackComplete) => (Idle, None),
+
+        (Complete, _) => (Complete, None),
+        (BlockedPostPromotion, _) => (BlockedPostPromotion, EscalateRepair),
+
+        (Idle, AbortRequested) => (Idle, None),
+        (
+            LaunchingStandby | ProbingStandby | AwaitTurnBoundary | PromotingLease,
+            AbortRequested,
+        ) => (RollingBack, RollbackStandby),
+        (TransferringOwnership | StoppingOld, AbortRequested) => {
+            (BlockedPostPromotion, EscalateRepair)
+        }
+
+        (state, _) => (state, None),
+    };
+
+    PcpSupervisorHandoffTransition { state, action }
+}
+
 pub(crate) const REEXEC_CHILD_PID_ENV: &str = "AGENT_DOC_REEXEC_CHILD_PID";
 pub(crate) const REEXEC_MASTER_FD_ENV: &str = "AGENT_DOC_REEXEC_MASTER_FD";
 
@@ -569,6 +734,116 @@ mod tests {
         assert_eq!(supervisor_restart_action(true, true, true), ReexecInPlace);
         // At the boundary with a fresh binary, the normal child relaunch serves it.
         assert_eq!(supervisor_restart_action(true, false, true), RelaunchChild);
+    }
+
+    #[test]
+    fn pcp_supervisor_handoff_happy_path_promotes_only_at_boundary() {
+        use PcpSupervisorHandoffAction::*;
+        use PcpSupervisorHandoffEvent::*;
+        use PcpSupervisorHandoffState::*;
+
+        let mut state = Idle;
+        assert!(state.old_supervisor_authoritative());
+        assert!(!state.standby_may_touch_child());
+        assert!(!state.lease_promoted());
+
+        let transition = pcp_supervisor_handoff_transition(state, RequestAccepted);
+        assert_eq!(transition.action, LaunchStandby);
+        state = transition.state;
+        assert_eq!(state, LaunchingStandby);
+        assert!(state.old_supervisor_authoritative());
+
+        let transition = pcp_supervisor_handoff_transition(state, StandbyStarted);
+        assert_eq!(transition.action, ProbeStandby);
+        state = transition.state;
+        assert_eq!(state, ProbingStandby);
+        assert!(state.old_supervisor_authoritative());
+
+        let transition = pcp_supervisor_handoff_transition(state, StandbyHealthy);
+        assert_eq!(transition.action, WaitTurnBoundary);
+        state = transition.state;
+        assert_eq!(state, AwaitTurnBoundary);
+        assert!(state.old_supervisor_authoritative());
+        assert!(!state.standby_may_touch_child());
+
+        let transition = pcp_supervisor_handoff_transition(state, TurnBoundaryReached);
+        assert_eq!(transition.action, PromoteLease);
+        state = transition.state;
+        assert_eq!(state, PromotingLease);
+        assert!(state.old_supervisor_authoritative());
+        assert!(!state.standby_may_touch_child());
+        assert!(!state.lease_promoted());
+
+        let transition = pcp_supervisor_handoff_transition(state, PromotionCommitted);
+        assert_eq!(transition.action, TransferChildOwnership);
+        state = transition.state;
+        assert_eq!(state, TransferringOwnership);
+        assert!(!state.old_supervisor_authoritative());
+        assert!(state.standby_may_touch_child());
+        assert!(state.lease_promoted());
+
+        let transition = pcp_supervisor_handoff_transition(state, OwnershipTransferred);
+        assert_eq!(transition.action, StopOldSupervisor);
+        state = transition.state;
+        assert_eq!(state, StoppingOld);
+
+        let transition = pcp_supervisor_handoff_transition(state, OldSupervisorStopped);
+        assert_eq!(transition.action, CompleteHandoff);
+        assert_eq!(transition.state, Complete);
+        assert!(transition.state.standby_may_touch_child());
+        assert!(transition.state.lease_promoted());
+    }
+
+    #[test]
+    fn pcp_supervisor_handoff_pre_promotion_failure_rolls_back_to_old_owner() {
+        use PcpSupervisorHandoffAction::*;
+        use PcpSupervisorHandoffEvent::*;
+        use PcpSupervisorHandoffState::*;
+
+        let mut state = pcp_supervisor_handoff_transition(Idle, RequestAccepted).state;
+        state = pcp_supervisor_handoff_transition(state, StandbyStarted).state;
+        state = pcp_supervisor_handoff_transition(state, StandbyHealthy).state;
+        assert_eq!(state, AwaitTurnBoundary);
+
+        let transition = pcp_supervisor_handoff_transition(state, StandbyFailed);
+        assert_eq!(transition.action, RollbackStandby);
+        state = transition.state;
+        assert_eq!(state, RollingBack);
+        assert!(state.old_supervisor_authoritative());
+        assert!(!state.standby_may_touch_child());
+        assert!(!state.lease_promoted());
+
+        let transition = pcp_supervisor_handoff_transition(state, RollbackComplete);
+        assert_eq!(transition.action, None);
+        assert_eq!(transition.state, Idle);
+        assert!(transition.state.old_supervisor_authoritative());
+    }
+
+    #[test]
+    fn pcp_supervisor_handoff_post_promotion_failure_requires_repair() {
+        use PcpSupervisorHandoffAction::*;
+        use PcpSupervisorHandoffEvent::*;
+        use PcpSupervisorHandoffState::*;
+
+        let mut state = Idle;
+        for event in [
+            RequestAccepted,
+            StandbyStarted,
+            StandbyHealthy,
+            TurnBoundaryReached,
+            PromotionCommitted,
+        ] {
+            state = pcp_supervisor_handoff_transition(state, event).state;
+        }
+        assert_eq!(state, TransferringOwnership);
+        assert!(state.lease_promoted());
+
+        let transition = pcp_supervisor_handoff_transition(state, StandbyFailed);
+        assert_eq!(transition.action, EscalateRepair);
+        assert_eq!(transition.state, BlockedPostPromotion);
+        assert!(!transition.state.old_supervisor_authoritative());
+        assert!(!transition.state.standby_may_touch_child());
+        assert!(transition.state.lease_promoted());
     }
 
     #[test]

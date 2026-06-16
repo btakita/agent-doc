@@ -74,6 +74,30 @@ projections, and tmux transcript inference.
   after strict closeout checks pass. Failed closeout must leave those controller
   rows unadvanced.
 
+## Workflow state kernel
+
+Cross-cutting route, queue, closeout, and editor-write policy is represented as
+one pure workflow-state kernel. Runtime paths gather evidence once, pass it to
+the kernel, and receive a typed transition:
+
+- evidence kind: stale supervisor, queue drainability, captured response, or
+live buffer;
+- decision enum: the policy outcome, such as recycle the stale supervisor,
+dispatch/defer a queue head, append/replay/retire a captured response, or
+apply/request-save/defer an editor-visible write;
+- allowed mutation: the only mutation the caller may perform for that decision,
+such as `ReexecSupervisor`, `InjectQueueDrainTrigger`,
+`ReplayCapturedResponse`, `RetireCapture`, or `RequestEditorSave`;
+- required proof: the proof the caller must have before performing the mutation,
+such as turn-boundary, queue-head identity, response-body hash, capture record,
+supersession proof, live-buffer hash/provenance, or editor-idle proof.
+
+The first implementation is mirror-mode in
+`flow::workflow_state`: existing route, idle-queue, closeout, and write paths
+still gather evidence and perform I/O, but the transition rows are now typed and
+unit-covered. Later controller cutover work must replace ad hoc guard branching
+with calls to this kernel before adding more route-edge guards.
+
 ## Document write and watch authority
 
 The store actor owns `.agent-doc/state.db` as the single durable-state writer.
@@ -269,6 +293,66 @@ admin-class commands such as `start`, `sync`, `session status`, `repair`,
 request records an operation kind, optional document id, typed status, and
 diagnostic payload in `admin_operations`, then returns the receipt id to the
 caller.
+
+## SupervisorHandoff State Machine
+
+A true red/green supervisor replacement must be owned by the project controller
+as a `SupervisorHandoff` state machine. The existing route-owned supervisor
+`execve` hot reload remains the default restart path because it preserves the
+live child and pty without cross-process fd transfer. The handoff state machine
+only applies when PCP starts a separate replacement supervisor process.
+
+States:
+
+- `Idle`: no handoff is active.
+- `LaunchingStandby`: PCP launches a fresh supervisor on a private socket.
+- `ProbingStandby`: PCP verifies standby freshness, capabilities, and health.
+- `AwaitTurnBoundary`: standby is healthy but fenced; old supervisor is still
+  authoritative until `prompt_visible && !turn_active`.
+- `PromotingLease`: PCP compare-and-swap promotes the supervisor lease and
+  generation at the turn boundary.
+- `TransferringOwnership`: promotion committed; the new supervisor may adopt
+  child/pty ownership.
+- `StoppingOld`: ownership transferred; PCP stops the old supervisor generation.
+- `Complete`: the new supervisor owns the lease and child.
+- `RollingBack`: pre-promotion failure or abort; terminate standby and keep the
+  old supervisor active.
+- `BlockedPostPromotion`: promotion committed but ownership transfer or stop
+  failed; require repair instead of automatic rollback.
+
+Transitions:
+
+- `Idle` + `RequestAccepted` -> `LaunchingStandby`, action `LaunchStandby`.
+- `LaunchingStandby` + `StandbyStarted` -> `ProbingStandby`, action
+  `ProbeStandby`.
+- `ProbingStandby` + `StandbyHealthy` -> `AwaitTurnBoundary`, action
+  `WaitTurnBoundary`.
+- `AwaitTurnBoundary` + `TurnBoundaryReached` -> `PromotingLease`, action
+  `PromoteLease`.
+- `PromotingLease` + `PromotionCommitted` -> `TransferringOwnership`, action
+  `TransferChildOwnership`.
+- `TransferringOwnership` + `OwnershipTransferred` -> `StoppingOld`, action
+  `StopOldSupervisor`.
+- `StoppingOld` + `OldSupervisorStopped` -> `Complete`, action
+  `CompleteHandoff`.
+- Any pre-promotion standby failure, failed promotion, or abort -> `RollingBack`,
+  action `RollbackStandby`.
+- `RollingBack` + `RollbackComplete` -> `Idle`.
+- Any post-promotion standby failure or abort -> `BlockedPostPromotion`, action
+  `EscalateRepair`.
+
+Invariants:
+
+- The old supervisor remains the only authoritative child/pty/session-socket
+  owner through `PromotingLease`.
+- A standby supervisor must not read/write the child pty, dispatch queue work,
+  heartbeat as the active lease, or write the session document before
+  `PromotionCommitted`.
+- PCP promotion is compare-and-swap guarded by document id, observed old
+  generation, standby generation, and private standby socket identity.
+- Automatic rollback is allowed only before lease promotion. After promotion,
+  ambiguous ownership is repair-only so two supervisors cannot race the same
+  child or session state.
 
 Controller queue state is stored in SQLite rather than loose marker files:
 

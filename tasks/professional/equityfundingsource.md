@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -196,7 +196,45 @@ Verification:
 I did not deploy this cycle because the session preset was `#spec-test-commit-push`, not a deploy preset; the production URLs will reflect this after the next deploy.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:a9f6c172 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployed the current EFS app from clean submodule commit `8fccb35 fix(admin): card dense loan detail sections`.
+
+Changed paths:
+- None this cycle; deploy used the already-committed EFS app state.
+
+Commands:
+- `make deploy` in `src/equityfundingsource-dev`
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
+- Live smoke checks with `curl` for `/`, `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f`, and `/portal-admin/pipeline`
+- Downloaded deployed asset `/index.browser-D5P4BPZB.js` and checked it for the dense card layout implementation
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo
+
+Deploy proof:
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker version: `d72f8040-5966-4988-a7b9-f10e61117e9d`
+- Remote D1 migrations: no migrations to apply
+- Deployed browser asset: `/index.browser-D5P4BPZB.js`
+
+Verification:
+- `/` returned HTTP 200.
+- `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned HTTP 303 to `/login?role=admin&next=%2Fportal-admin%2Floans%2F45ddae53-3e7f-43b1-a627-17b79b06fa3f`, expected for the protected admin route.
+- `/portal-admin/pipeline` returned HTTP 303 to `/login?role=admin&next=%2Fportal-admin%2Fpipeline`, expected for the protected admin route.
+- The downloaded deployed browser bundle contains `TMO_DETAIL_CARD_GRID_STYLE`, `Loan Terms`, `ADMIN_LOAN_SUMMARY_GRID_STYLE`, `Application Record`, and `Borrower Info`, confirming the card-density UI is in the live asset.
+- `src/equityfundingsource-dev` remained clean after deploy.
+- GitHub Actions check: both the EFS submodule and parent repo report no workflow named `CI`.
+
+I did not rerun the full test suite in this deploy-only pass because the previous implementation pass already ran focused tests, EFS `make check`, and top-level `make check`; `make deploy` rebuilt the app and Worker before upload.
+
+Preflight reported high exchange accretion, but the active queue was drainable, so I continued the deploy cycle.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:5cbb18e9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -204,7 +242,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

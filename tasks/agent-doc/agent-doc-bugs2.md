@@ -147,6 +147,18 @@ Verification:
 Commits pushed:
 - `src/agent-doc`: `4ba0ac2d fix: redirect run diagnostics for managed TUIs`
 - superproject: `04b461e52 chore: update agent-doc submodule`
+- Confidence: high for the snapshot/logging and split-submit behavior. If Enter still misses in the live restart path, the next `ops.log` plus the referenced snapshot file should show whether the composer kept the draft, consumed it without hook proof, or failed capture.
+- Escalation: none.
+- Commits pushed: agent-doc `dc641c25 fix: capture route submit pane snapshots`; superproject `1c47aa09a chore: update agent-doc submodule`.
+- CI: agent-doc CI run `27601595380` is in progress after push; it was not red when checked. The parent repo has no workflow named `CI`.
+- Local install completed: `make install` installed `agent-doc 0.34.1` and `libagent_doc-0.34.1.so`, and marked 2 controllers for idle recycle.
+- Full local verification passed: `make check`.
+- Targeted tests passed: `route_pane_snapshot_preserves_redacted_terminal_capture`, `submit_profiles_keep_harness_submit_policy_in_one_place`, `route_submit_observation_marks*`, and `pending_payload_enter_resubmit_is_scoped_and_one_shot`.
+- Changed paths: `VERSIONS.md`, `agent-doc-orchestration/src/sessions.rs`, `agent-doc-orchestration/src/route.rs`, `agent-doc-orchestration/src/route/dispatch.rs`, `specs/07-session-tmux-commands.md`.
+- Updated the session/tmux command spec and `VERSIONS.md` for the new forensic contract.
+- `ops.log` now gets `route_pane_snapshot ... snapshot_path=...` for those captures, so the next repro has terminal evidence tied to the route phase.
+- Route now preserves redacted pane-output snapshots under `.agent-doc/logs/route-submit/` when it sees a pre-existing drafted trigger, a still-visible trigger after submit/resubmit polling, or accepted pane delivery without required dispatch-start proof.
+- The tmux submit profile now sends literal text and a named `Enter` as two separate `tmux send-keys` calls, so a successful draft write no longer hides a missed Enter event.
 
 I left the pre-existing unstaged PCP/control-plane edits in `src/agent-doc` alone: `agent-doc-orchestration/src/start/decisions.rs` and `specs/08b-single-process-control-plane.md`.
 
@@ -160,23 +172,23 @@ I left the pre-existing unstaged PCP/control-plane edits in `src/agent-doc` alon
 Implemented this in `src/agent-doc`.
 
 What changed:
-- The tmux submit profile now sends literal text and a named `Enter` as two separate `tmux send-keys` calls, so a successful draft write no longer hides a missed Enter event.
-- Route now preserves redacted pane-output snapshots under `.agent-doc/logs/route-submit/` when it sees a pre-existing drafted trigger, a still-visible trigger after submit/resubmit polling, or accepted pane delivery without required dispatch-start proof.
-- `ops.log` now gets `route_pane_snapshot ... snapshot_path=...` for those captures, so the next repro has terminal evidence tied to the route phase.
-- Updated the session/tmux command spec and `VERSIONS.md` for the new forensic contract.
+❯ - The tmux submit profile now sends literal text and a named `Enter` as two separate `tmux send-keys` calls, so a successful draft write no longer hides a missed Enter event.
+❯ - Route now preserves redacted pane-output snapshots under `.agent-doc/logs/route-submit/` when it sees a pre-existing drafted trigger, a still-visible trigger after submit/resubmit polling, or accepted pane delivery without required dispatch-start proof.
+❯ - `ops.log` now gets `route_pane_snapshot ... snapshot_path=...` for those captures, so the next repro has terminal evidence tied to the route phase.
+❯ - Updated the session/tmux command spec and `VERSIONS.md` for the new forensic contract.
 
 Proof:
-- Changed paths: `VERSIONS.md`, `agent-doc-orchestration/src/sessions.rs`, `agent-doc-orchestration/src/route.rs`, `agent-doc-orchestration/src/route/dispatch.rs`, `specs/07-session-tmux-commands.md`.
-- Targeted tests passed: `route_pane_snapshot_preserves_redacted_terminal_capture`, `submit_profiles_keep_harness_submit_policy_in_one_place`, `route_submit_observation_marks*`, and `pending_payload_enter_resubmit_is_scoped_and_one_shot`.
-- Full local verification passed: `make check`.
-- Local install completed: `make install` installed `agent-doc 0.34.1` and `libagent_doc-0.34.1.so`, and marked 2 controllers for idle recycle.
-- CI: agent-doc CI run `27601595380` is in progress after push; it was not red when checked. The parent repo has no workflow named `CI`.
-- Commits pushed: agent-doc `dc641c25 fix: capture route submit pane snapshots`; superproject `1c47aa09a chore: update agent-doc submodule`.
-- Escalation: none.
-- Confidence: high for the snapshot/logging and split-submit behavior. If Enter still misses in the live restart path, the next `ops.log` plus the referenced snapshot file should show whether the composer kept the draft, consumed it without hook proof, or failed capture.
+❯ - Changed paths: `VERSIONS.md`, `agent-doc-orchestration/src/sessions.rs`, `agent-doc-orchestration/src/route.rs`, `agent-doc-orchestration/src/route/dispatch.rs`, `specs/07-session-tmux-commands.md`.
+❯ - Targeted tests passed: `route_pane_snapshot_preserves_redacted_terminal_capture`, `submit_profiles_keep_harness_submit_policy_in_one_place`, `route_submit_observation_marks*`, and `pending_payload_enter_resubmit_is_scoped_and_one_shot`.
+❯ - Full local verification passed: `make check`.
+❯ - Local install completed: `make install` installed `agent-doc 0.34.1` and `libagent_doc-0.34.1.so`, and marked 2 controllers for idle recycle.
+❯ - CI: agent-doc CI run `27601595380` is in progress after push; it was not red when checked. The parent repo has no workflow named `CI`.
+❯ - Commits pushed: agent-doc `dc641c25 fix: capture route submit pane snapshots`; superproject `1c47aa09a chore: update agent-doc submodule`.
+❯ - Escalation: none.
+❯ - Confidence: high for the snapshot/logging and split-submit behavior. If Enter still misses in the live restart path, the next `ops.log` plus the referenced snapshot file should show whether the composer kept the draft, consumed it without hook proof, or failed capture.
 
 I left the unrelated pre-existing PCP handoff edits in `src/agent-doc` unstaged: `agent-doc-orchestration/src/start/decisions.rs` and `specs/08b-single-process-control-plane.md`.
-<!-- agent:boundary:d049a67f -->
+<!-- agent:boundary:72c744f7 -->
 <!-- /agent:exchange -->
 
 ## Queue

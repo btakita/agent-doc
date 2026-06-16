@@ -31,27 +31,6 @@ committed
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx`
-- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
-- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
-- `src/equityfundingsource-dev` parent gitlink
-- EFS submodule: `8db0522 fix(admin): suppress redundant loan detail labels` pushed to `origin/main`.
-- Parent repo: `8b4edf820 chore(efs): update loan detail label cleanup submodule` pushed to `origin/main`.
-- `make deploy` completed successfully.
-- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
-- Worker version: `238e2ca8-17c1-45a1-897b-8a762b34ac02`
-- Deployed browser asset: `/index.browser-D33O2I3Y.js`
-- Remote D1 migrations: no migrations to apply.
-- Focused tests passed: `bun test tests/tmo-loan-details-density.test.ts tests/final-loan-docs.test.ts tests/boolean-checkbox-fields.test.ts` — 16 tests.
-- EFS `make check` passed: 739 tests, app build, Worker build.
-- Top-level `make check` passed.
-- Live `/` returned `200`.
-- Live `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned `303` to admin login, expected for the protected route.
-- Live `/portal-admin/pipeline` returned `303` to admin login, expected for the protected route.
-- Downloaded deployed `/index.browser-D33O2I3Y.js`; it contains `tmo-kv--unlabeled`, `display_pairs_(record, fields)`, and the hidden-label Name/Email/Phone borrower fields.
-- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
-- `src/equityfundingsource-dev` is clean after deploy.
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260616-025353.md`*
@@ -103,7 +82,7 @@ Verification:
 Preflight warning note: the document used `go` on `agent:backlog`, which the binary ignores as a queue attribute. I treated the backlog text as the requested work for this cycle and cleared it after completion.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:3be402b6 -->
+<!-- agent:boundary:cc1a3bdd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -115,7 +94,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 ## Backlog
 
-<!-- agent:backlog priority queue go -->
+<!-- agent:backlog priority queue -->
 If a card has a name + first name + last name...only show name with no labels.
 Emails, phone number, Street, City, State, Zip don't need a label.
 

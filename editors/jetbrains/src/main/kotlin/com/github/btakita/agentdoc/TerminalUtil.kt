@@ -242,12 +242,18 @@ object TerminalUtil {
      *    owning supervisor into the live session
      * 4. Auto-starts a new agent session if needed
      */
-    fun sendToTerminal(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+    internal fun sendToTerminal(
+        project: Project,
+        file: VirtualFile,
+        onComplete: (() -> Unit)? = null,
+        attempt: RunAgentDocAttemptLedger.Attempt? = null,
+    ) {
         val (cwd, relativePath) = resolveProject(project, file)
         val agentDoc = resolveAgentDoc(cwd)
         val routeKey = "$cwd::$relativePath"
 
         LOG.warn("[route] sendToTerminal: cwd=$cwd rel=$relativePath binary=$agentDoc")
+        attempt?.recordIfCurrent("route_prepare")
 
         // is_busy guard removed: no production code sets the status signals,
         // so the guard only produced false positives (blocked every route attempt)
@@ -278,6 +284,7 @@ object TerminalUtil {
 
             // Pass focused file
             LOG.warn("[route] executing: ${cmd.joinToString(" ")}")
+            attempt?.recordIfCurrent("route_command_built", command = cmd)
 
             val handle = RetryingRouteHandle()
             val replaced = inFlightRouteRegistry.replace(routeKey, handle)
@@ -287,9 +294,12 @@ object TerminalUtil {
 
             val startedAt = System.currentTimeMillis()
             Thread {
+                var finalStage: String? = null
+                var finalError: String? = null
                 try {
-                    var attempt = 1
-                    while (!handle.wasCanceled() && attempt <= STARTING_ACTOR_ROUTE_MAX_ATTEMPTS) {
+                    var routeAttempt = 1
+                    while (!handle.wasCanceled() && routeAttempt <= STARTING_ACTOR_ROUTE_MAX_ATTEMPTS) {
+                        attempt?.recordIfCurrent("route_start", command = cmd)
                         val process = ProcessBuilder(cmd)
                             .directory(java.io.File(cwd))
                             .redirectErrorStream(true)
@@ -301,31 +311,44 @@ object TerminalUtil {
                         val failureKind = classifyRunAgentDocRouteFailure(output)
                         if (handle.wasCanceled()) {
                             LOG.warn("[route] superseded route exited after replacement for $relativePath")
+                            finalStage = "route_superseded"
+                            finalError = "route handle was canceled"
                             break
                         } else if (
                             exitCode != 0 &&
                             isRetryableRunAgentDocRouteFailure(failureKind) &&
-                            attempt < STARTING_ACTOR_ROUTE_MAX_ATTEMPTS
+                            routeAttempt < STARTING_ACTOR_ROUTE_MAX_ATTEMPTS
                         ) {
-                            val delayMillis = startingActorRouteRetryDelayMillis(attempt)
+                            attempt?.recordIfCurrent(
+                                "route_retryable_starting",
+                                command = cmd,
+                                error = routeAttemptError(exitCode, failureKind, output),
+                            )
+                            val delayMillis = startingActorRouteRetryDelayMillis(routeAttempt)
                             LOG.warn(
-                                "[route] actor still starting for $relativePath; retrying attempt ${attempt + 1}/$STARTING_ACTOR_ROUTE_MAX_ATTEMPTS after ${delayMillis}ms"
+                                "[route] actor still starting for $relativePath; retrying attempt ${routeAttempt + 1}/$STARTING_ACTOR_ROUTE_MAX_ATTEMPTS after ${delayMillis}ms"
                             )
                             if (!sleepBeforeRetry(handle, delayMillis)) {
                                 LOG.warn("[route] superseded starting-actor retry for $relativePath")
+                                finalStage = "route_superseded"
+                                finalError = "superseded during starting-actor retry"
                                 break
                             }
-                            attempt += 1
+                            routeAttempt += 1
                             continue
                         } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.BUSY_RUNNING) {
                             LOG.warn("[route] busy/running after retry budget for $relativePath: $output")
                             clearPersistedRouteFailureOutput(cwd, relativePath)
                             notifyRunAgentDocStillRunning(project, relativePath, output)
+                            finalStage = "route_busy_running"
+                            finalError = routeAttemptError(exitCode, failureKind, output)
                             break
                         } else if (failureKind == RunAgentDocRouteFailureKind.QUEUED_PENDING) {
                             LOG.warn("[route] queued behind active turn for $relativePath: $output")
                             clearPersistedRouteFailureOutput(cwd, relativePath)
                             notifyRunAgentDocQueued(project, relativePath, output)
+                            finalStage = "route_queued_pending"
+                            finalError = routeAttemptError(exitCode, failureKind, output)
                             break
                         } else if (exitCode != 0) {
                             LOG.warn("[route] FAILED (exit $exitCode): $output")
@@ -337,23 +360,43 @@ object TerminalUtil {
                                 elapsed = elapsed,
                                 routeOutput = output,
                             )
+                            finalStage = "route_failed"
+                            finalError = routeAttemptError(exitCode, failureKind, output)
                             break
                         } else {
                             LOG.warn("[route] SUCCESS: $output")
                             clearPersistedRouteFailureOutput(cwd, relativePath)
+                            finalStage = "route_success"
                             break
                         }
                     }
+                } catch (e: Exception) {
+                    finalStage = "route_exception"
+                    finalError = e.message ?: e.javaClass.simpleName
+                    throw e
                 } finally {
+                    finalStage?.let { stage ->
+                        attempt?.finishIfCurrent(stage, command = cmd, error = finalError)
+                    }
                     handle.markCompleted()
                     inFlightRouteRegistry.clearIfCurrent(routeKey, handle)
                     onComplete?.invoke()
                 }
             }.start()
         } catch (e: Exception) {
+            attempt?.finishIfCurrent("route_exception", error = e.message ?: e.javaClass.simpleName)
             onComplete?.invoke()
             notifyError(project, "Failed to run agent-doc: ${e.message}\nLooked for: $agentDoc")
         }
+    }
+
+    private fun routeAttemptError(
+        exitCode: Int,
+        failureKind: RunAgentDocRouteFailureKind,
+        output: String,
+    ): String {
+        val compact = output.replace("\r", "\\r").replace("\n", "\\n").take(2000)
+        return "exit=$exitCode failure=$failureKind output=$compact"
     }
 
     internal fun buildRunRouteCommand(agentDoc: String, relativePath: String): MutableList<String> =

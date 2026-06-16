@@ -41,17 +41,27 @@ class SubmitAction : AnAction() {
         }
 
         LOG.warn("[run] actionPerformed: ${file.name}")
+        val attempt = RunAgentDocAttemptLedger.begin(
+            cwd = cwd,
+            relativePath = relativePath,
+            filePath = file.path,
+            focusedFile = file.path,
+        )
 
         Thread {
+            attempt.recordIfCurrent("await_typing_idle")
             val idle = TypingTracker.awaitIdle(file.path)
             if (!idle) {
                 LOG.warn("[run] typing debounce timed out; deferring route until typing settles for ${file.name}")
+                attempt.finishIfCurrent("typing_idle_timeout", error = "mtime did not settle")
                 return@Thread
             }
+            attempt.recordIfCurrent("typing_idle")
             ApplicationManager.getApplication().invokeLater {
                 FileDocumentManager.getInstance().saveAllDocuments()
+                attempt.recordIfCurrent("documents_saved")
                 LOG.warn("[run] invoking sendToTerminal after typing idle: ${file.name}")
-                TerminalUtil.sendToTerminal(project, file)
+                TerminalUtil.sendToTerminal(project, file, attempt = attempt)
                 PromptPoller.getInstance(project).addFile(file)
             }
         }.start()

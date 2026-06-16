@@ -240,6 +240,10 @@ as a `dispatch_attempts` receipt before returning: responses include
 `receipt_id`, `status`, `stage`, `accepted_stage`/`failed_stage`, `proof_scope`,
 and `dispatch_start_proven`. Rejected and blocked decisions must also commit
 their receipt before the caller sees the rejection.
+Queue-blocked dispatches also attach non-sensitive proof fields to the receipt
+diagnostic payload and route error: active queue head byte count/hash and, when
+the caller names a harness, the harness trigger byte count/hash. The controller
+must not persist raw prompt text for this proof path.
 
 ## Admin API
 

@@ -2596,6 +2596,56 @@ pub(crate) fn request_u64(value: Option<u64>, name: &str) -> Result<u64> {
     value.with_context(|| format!("controller request missing {name}"))
 }
 
+fn dispatch_diagnostic_field<'a>(payload: &'a str, field: &str) -> Option<&'a str> {
+    let prefix = format!("{field}=");
+    payload.split_whitespace().find_map(|token| {
+        token
+            .strip_prefix(&prefix)
+            .map(|value| value.trim_matches(|ch| matches!(ch, ',' | ';')))
+            .filter(|value| !value.is_empty())
+    })
+}
+
+fn dispatch_blocked_proof_fields(
+    project_root: &Path,
+    file: &Path,
+    diagnostic_payload: &str,
+) -> String {
+    let mut fields = Vec::new();
+    let file_path = if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        project_root.join(file)
+    };
+    if let Ok(content) = std::fs::read_to_string(&file_path)
+        && let Ok(Some(head)) = crate::write::active_queue_head_text(&content)
+    {
+        fields.push(format!("blocked_head_bytes={}", head.len()));
+        fields.push(format!(
+            "blocked_head_sha256={}",
+            crate::ops_log::content_hash(&head)
+        ));
+    }
+    if let Some(harness) = dispatch_diagnostic_field(diagnostic_payload, "harness") {
+        let trigger = crate::harness::HarnessConfig::from_agent_name(harness)
+            .trigger_command(&file.to_string_lossy());
+        fields.push(format!("trigger_bytes={}", trigger.len()));
+        fields.push(format!(
+            "trigger_sha256={}",
+            crate::ops_log::content_hash(&trigger)
+        ));
+    }
+    fields.join(" ")
+}
+
+fn append_dispatch_proof_payload(diagnostic_payload: &str, proof_fields: &str) -> String {
+    match (diagnostic_payload.is_empty(), proof_fields.is_empty()) {
+        (_, true) => diagnostic_payload.to_string(),
+        (true, false) => proof_fields.to_string(),
+        (false, false) => format!("{diagnostic_payload} {proof_fields}"),
+    }
+}
+
 pub(crate) fn handle_start_session(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
@@ -3036,6 +3086,10 @@ pub(crate) fn handle_dispatch(
             .as_ref()
             .and_then(|control| control.reason.as_deref())
             .unwrap_or(stage);
+        let proof_fields =
+            dispatch_blocked_proof_fields(&bootstrap.project_root, &file, &diagnostic_payload);
+        let blocked_diagnostic_payload =
+            append_dispatch_proof_payload(&diagnostic_payload, &proof_fields);
         let receipt = insert_dispatch_attempt_record(
             &bootstrap.project_root,
             ControllerDispatchReceiptInsert {
@@ -3044,12 +3098,24 @@ pub(crate) fn handle_dispatch(
                 command_kind: &command_kind,
                 accepted_stage: None,
                 failed_stage: Some(stage),
-                diagnostic_payload: &diagnostic_payload,
+                diagnostic_payload: &blocked_diagnostic_payload,
                 result_status: ControllerDispatchResultStatus::Blocked,
                 proof_scope: ControllerDispatchProofScope::AcceptedOnly,
                 dispatch_start_proven: false,
             },
         )?;
+        if !proof_fields.is_empty() {
+            crate::ops_log::log_op(
+                &file,
+                &format!(
+                    "dispatch_blocked_proof file={} failed_stage={} receipt_id={} {}",
+                    file.display(),
+                    stage,
+                    receipt.receipt_id,
+                    proof_fields
+                ),
+            );
+        }
         let conn = open_state_db(&bootstrap.project_root)?;
         let _backpressure = state_store::insert_queue_backpressure_in_db(
             &conn,
@@ -3069,30 +3135,35 @@ pub(crate) fn handle_dispatch(
         // the route dispatch path can restart the supervisor once, lift this pause, and
         // re-dispatch instead of failing closed. A deliberate operator/spent-preset
         // pause does not classify and stays terminal.
-        let recovery_suffix = if stage == "queue_paused"
-            && pause_reason_is_stale_supervisor_churn_stop(reason)
-        {
-            let stale_pid = stale_supervisor_pid_from_pause_reason(reason).unwrap_or(0);
-            crate::ops_log::log_op(
-                &file,
-                &format!(
-                    "dispatch_queue_paused_stale_supervisor file={} stale_pid={} marker={}",
-                    file.display(),
-                    stale_pid,
-                    DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER
-                ),
-            );
-            format!(" {DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER} stale_pid={stale_pid}")
-        } else {
+        let recovery_suffix =
+            if stage == "queue_paused" && pause_reason_is_stale_supervisor_churn_stop(reason) {
+                let stale_pid = stale_supervisor_pid_from_pause_reason(reason).unwrap_or(0);
+                crate::ops_log::log_op(
+                    &file,
+                    &format!(
+                        "dispatch_queue_paused_stale_supervisor file={} stale_pid={} marker={}",
+                        file.display(),
+                        stale_pid,
+                        DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER
+                    ),
+                );
+                format!(" {DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER} stale_pid={stale_pid}")
+            } else {
+                String::new()
+            };
+        let proof_suffix = if proof_fields.is_empty() {
             String::new()
+        } else {
+            format!(" {proof_fields}")
         };
         anyhow::bail!(
-            "dispatch blocked for {}: failed_stage={} reason={} receipt_id={}{}",
+            "dispatch blocked for {}: failed_stage={} reason={} receipt_id={}{}{}",
             file.display(),
             stage,
             reason,
             receipt.receipt_id,
-            recovery_suffix
+            recovery_suffix,
+            proof_suffix
         );
     }
     let mut failed_stage = None;

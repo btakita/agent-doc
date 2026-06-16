@@ -3645,7 +3645,17 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(
             &doc,
-            "---\nagent_doc_session: session-queue\nagent: codex\n---\nBody\n",
+            concat!(
+                "---\n",
+                "agent_doc_session: session-queue\n",
+                "agent: codex\n",
+                "queue: start\n",
+                "---\n\n",
+                "<!-- agent:queue -->\n",
+                "- do [#jbrunlogproof]\n",
+                "<!-- /agent:queue -->\n\n",
+                "Body\n"
+            ),
         )
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
@@ -3729,7 +3739,7 @@ mod tests {
             supervisor_pid: None,
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
-            diagnostic_payload: Some("paused dispatch test".to_string()),
+            diagnostic_payload: Some("paused dispatch test harness=codex".to_string()),
         };
         let response = handle_request(
             &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -3740,25 +3750,48 @@ mod tests {
         let envelope: ControllerEnvelope<DispatchAuthorization> =
             serde_json::from_str(&response).unwrap();
         assert!(!envelope.ok);
+        let error = envelope.error.as_deref().unwrap_or_default().to_string();
+        let expected_head = "do [#jbrunlogproof]";
+        let expected_trigger =
+            crate::harness::HarnessConfig::codex().trigger_command(&doc.to_string_lossy());
         assert!(
-            envelope
-                .error
-                .as_deref()
-                .unwrap_or_default()
-                .contains("failed_stage=queue_paused")
+            error.contains("failed_stage=queue_paused"),
+            "dispatch error must include queue paused stage: {error}"
         );
+        assert!(error.contains(&format!("blocked_head_bytes={}", expected_head.len())));
+        assert!(error.contains(&format!(
+            "blocked_head_sha256={}",
+            crate::ops_log::content_hash(expected_head)
+        )));
+        assert!(error.contains(&format!("trigger_bytes={}", expected_trigger.len())));
+        assert!(error.contains(&format!(
+            "trigger_sha256={}",
+            crate::ops_log::content_hash(&expected_trigger)
+        )));
 
         let conn = open_state_db(dir.path()).unwrap();
         let document_id =
             crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
-        let failed_stage: String = conn
+        let (failed_stage, diagnostic_payload): (String, Option<String>) = conn
             .query_row(
-                "SELECT failed_stage FROM dispatch_attempts WHERE document_id = ?1 ORDER BY id DESC LIMIT 1",
+                "SELECT failed_stage, diagnostic_payload FROM dispatch_attempts WHERE document_id = ?1 ORDER BY id DESC LIMIT 1",
                 params![&document_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         assert_eq!(failed_stage, "queue_paused");
+        let diagnostic_payload = diagnostic_payload.unwrap_or_default();
+        assert!(
+            diagnostic_payload.contains(&format!("blocked_head_bytes={}", expected_head.len()))
+        );
+        assert!(diagnostic_payload.contains(&format!(
+            "blocked_head_sha256={}",
+            crate::ops_log::content_hash(expected_head)
+        )));
+        assert!(diagnostic_payload.contains(&format!(
+            "trigger_sha256={}",
+            crate::ops_log::content_hash(&expected_trigger)
+        )));
         let backpressure: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM queue_backpressure WHERE document_id = ?1 AND capacity_class = 'queue_paused'",

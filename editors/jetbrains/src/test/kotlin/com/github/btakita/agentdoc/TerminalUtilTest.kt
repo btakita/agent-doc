@@ -1,6 +1,7 @@
 package com.github.btakita.agentdoc
 
 import java.nio.file.Files
+import java.nio.file.Paths
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -26,6 +27,19 @@ class TerminalUtilTest {
             ),
             TerminalUtil.buildRunRouteCommand("/usr/local/bin/agent-doc", "tasks/root.md"),
         )
+    }
+
+    @Test
+    fun `run route records durable attempt stages`() {
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"
+        ).toFile().readText()
+
+        assertTrue(source.contains("attempt?.recordIfCurrent(\"route_prepare\")"))
+        assertTrue(source.contains("attempt?.recordIfCurrent(\"route_command_built\", command = cmd)"))
+        assertTrue(source.contains("attempt?.recordIfCurrent(\"route_start\", command = cmd)"))
+        assertTrue(source.contains("\"route_retryable_starting\""))
+        assertTrue(source.contains("attempt?.finishIfCurrent(stage, command = cmd, error = finalError)"))
     }
 
     @Test

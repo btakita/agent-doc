@@ -241,13 +241,16 @@ Proof for this cycle:
 - Verification: document/log/screenshot diagnosis only; no source code changed, so I did not run the full build/test suite.
 - Confidence: high that the generation-438 JB route error is stale after the current fresh controller/supervisor state; medium on the queue-edit interruption until the fresh-build live repro is run.
 - Escalation: none.
-<!-- agent:boundary:7909c666 -->
-- Escalation: none.
 - Confidence: high that the generation-438 JB route error is stale after the current fresh controller/supervisor state; medium on the queue-edit interruption until the fresh-build live repro is run.
 - Verification: document/log/screenshot diagnosis only; no source code changed, so I did not run the full build/test suite.
 - Commands: `tsift status`; `agent-doc --version`; `agent-doc preflight ...`; `agent-doc plan ...`; `agent-doc read ...`; `git status --short --branch`; `git -C src/agent-doc status --short --branch`; `git -C src/agent-doc log --oneline -5`; `find . -name img_30.png -o -name img_31.png`; `agent-doc admin inspect ... --json`; targeted `rg` checks in `.agent-doc/logs/ops.log`; inspected `img_30.png` and `img_31.png`.
 - Changed paths: this session document only.
-<!-- agent:boundary:c37db0ab -->
+Handled the agent-doc cycle for [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md:226).
+
+The response was written and committed as `a9bb1ac84` (`agent-doc(agent-doc-bugs2): 2026-06-16 01:37:00`). `session-check` passed for the committed cycle. I did not run the full build/test suite because this cycle only added document/log/screenshot diagnosis, not source changes.
+
+Key outcome: the pasted generation-438 JB route error is stale relative to the current fresh controller/supervisor state, but the broader queue-edit interruption still needs live verification under `#cwsp`. Queue continuation is false, with only stale/noise queue lines left, so I did not auto-loop.
+<!-- agent:boundary:5f100489 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -255,14 +258,14 @@ Proof for this cycle:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Create a skill/runbook to apply the architecture strategy that you recommended.~~
 - ~~The architecture first runbook should only apply to agent-doc development & dogfooding...It should not be installed.~~
----
+~~~done
 Typing into the queue during the turn cause the conversation to be interrupted. ![img_30.png](img_30.png). A pre-finalize response was uncommitted causing the response to be treated as a user prompt ![img_31.png](img_31.png). After restart, JB `Run Agent Doc` error.
 
 ```
 [route] target tmux session: 0
 Error: authoritative actor generation 438 for tasks/agent-doc/agent-doc-bugs2.md owns pane %110 but route could not drain the active closeout before dispatch: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
 ```
----
+~~~
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
 ```

@@ -240,7 +240,31 @@ Proof:
 
 I left the unrelated pre-existing `src/agent-doc` PCP/control-plane edits unstaged: `agent-doc-orchestration/src/start/decisions.rs` and `specs/08b-single-process-control-plane.md`.
 
-<!-- agent:boundary:0a28c0be -->
+### Re: do [#smcloseoutdecision] — gpt-5
+
+Implemented `#smcloseoutdecision` as the first closeout recovery state-machine slice.
+
+What changed:
+- Added `flow::closeout::CloseoutRecoveryDecision` and `CloseoutRecoveryDecisionInput` with the requested outcomes: `AlreadyCommitted`, `ReplaySafe`, `RetireStaleCapture`, `ResetSidecarsFromVisible`, `QueuePromptForAfterCloseout`, and `Blocked`.
+- Added a pure mapping from the existing `CloseoutRecoveryState` classifier into those action-shaped decisions, including missing-proof text for blocked outcomes and explicit supersession proof for stale-capture retirement.
+- Routed `classify_route_closeout_block` through the new decision boundary before queuing an operator/JB prompt behind an unresolved closeout.
+- Documented the boundary in `VERSIONS.md` and `specs/07-closeout-commands.md`.
+
+Verification:
+- `cargo test -p agent-doc-orchestration recovery_decision_maps_states_to_typed_outcomes`
+- `cargo test -p agent-doc-orchestration closeout_block_decision`
+- `git diff --check`
+- `make check`
+- `make install`
+
+Commits:
+- submodule `f75086a2 fix: add closeout recovery decision boundary`
+- parent `f0f190b1e chore: update agent-doc submodule`
+
+CI: GitHub Actions CI run `27603358247` is in progress for `f75086a2`; the previous run `27602534379` for `9061e87e` completed successfully.
+
+Note: the submodule still has unrelated pre-existing dirty files, `agent-doc-orchestration/src/start/decisions.rs` and `specs/08b-single-process-control-plane.md`; I left them unstaged.
+<!-- agent:boundary:5494c5bf -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -267,7 +291,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - do [#qflood2]
 - do [#qt32]
 - do [#fcc0-live-verify]
-- do [#smcloseoutdecision]
+- ~~do [#smcloseoutdecision]~~
 - do [#smcloseoutevidence]
 - do [#smrouteconsume]
 - do [#smrecoverymutate]
@@ -312,7 +336,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#qt32] [operator-verify] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.
-- [ ] [#smcloseoutdecision] :inbox_tray: Implement the full typed CloseoutRecoveryDecision boundary for closeout recovery across route, repair, session-check, and write/commit. Include AlreadyCommitted, ReplaySafe, RetireStaleCapture, ResetSidecarsFromVisible, QueuePromptForAfterCloseout, and Blocked outcomes. Reference tasks/agent-doc/plan-run-agent-doc-closeout-recovery-state-machine.md.
 - [ ] [#smcloseoutevidence] :inbox_tray: Centralize closeout recovery evidence gathering behind one typed API: visible markdown hash, snapshot hash, active cycle phase, capture state, response-body/supersession proof, queue-only drift proof, editor IPC freshness, and controller/supervisor binary freshness.
 - [ ] [#smrouteconsume] :inbox_tray: Move route and JB Run Agent Doc recovery paths to consume CloseoutRecoveryDecision only; remove low-level string parsing/rephrasing of captured-response baseline errors at route edges.
 - [ ] [#smrecoverymutate] :inbox_tray: Unify recovery mutations through one replay/sidecar primitive so reset --from-current --preserve-session, stale-capture retirement, reset-from-visible, and safe queue-only replay cannot diverge.

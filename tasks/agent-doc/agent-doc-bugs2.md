@@ -113,7 +113,34 @@ Proof for this cycle:
 - Verification: document response only; no code changed in this cycle.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:10c3ffa3 -->
+
+### Re: typing into the queue during a turn interrupted closeout — gpt-5
+
+> **Queue prompt:**
+>
+> Typing into the queue during the turn cause the conversation to be interrupted. ![img_30.png](img_30.png). A pre-finalize response was uncommitted causing the response to be treated as a user prompt ![img_31.png](img_31.png). After restart, JB `Run Agent Doc` error.
+>
+> ```
+> [route] target tmux session: 0
+> Error: authoritative actor generation 438 for tasks/agent-doc/agent-doc-bugs2.md owns pane %110 but route could not drain the active closeout before dispatch: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+> ```
+
+
+This report has two distinct failure modes.
+
+The after-restart JB `Run Agent Doc` error is the one fixed by `src/agent-doc` commit `2464ba38`: when route cannot drain an active closeout, it now makes a typed decision. If the reroute has a prompt, it queues that prompt behind the closeout; if there is already a live queue head, it waits behind that head instead of surfacing the raw `captured response baseline no longer matches current document` reset command. That covers the error block pasted in this queue item.
+
+The screenshot that says `Conversation interrupted` is separate. That is the current owner conversation being interrupted while a queue edit happens during an active turn. The route fix prevents the later recovery failure, but it does not by itself guarantee that a queue edit cannot wake/interrupt the running Codex turn. If that still reproduces after installing `2464ba38`, it needs its own busy-owner guard: queue edits during an active cycle must remain document state only until the current closeout commits; they must not dispatch into the busy owner pane and must not turn a pre-finalize assistant response into a user prompt.
+
+Important live-state note: preflight warns the installed binary and cdylib are stale relative to `2464ba38`, so JetBrains/tmux will not show the route fix until `make install` is run in `src/agent-doc` and the live supervisor/session is restarted or recycled onto the new build.
+
+Proof for this cycle:
+- Changed paths: this session document only.
+- Commands: `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc plan tasks/agent-doc/agent-doc-bugs2.md`; inspected `img_30.png` and `img_31.png`.
+- Verification: document diagnosis only; no new code changed in this cycle. The referenced route fix remains verified by the prior `make check` run.
+- Confidence: high that the pasted route error is covered by `2464ba38`; medium on the interruption part until tested on an installed build.
+- Escalation: none.
+<!-- agent:boundary:44c40f23 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -139,7 +166,7 @@ resync: pruned 3 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all 16 heads are clean-session/operator-verify and undrainable under stale host supervisor pid 2715614; zero drainable work. Pausing to stop the flood until restart onto fresh binary. receipt_id=3649 blocked_head_bytes=132 blocked_head_sha256=ae121dad65e5b00a6c504db706985aee4e8d6ed00988ba4244f51196952739d7 trigger_bytes=44 trigger_sha256=a55a6572fd4dc952bc476bd516d3a7801b1e63409715f063b4b7351ea112ade5
 ```
 ---
-- :pushpin: agent-doc start to codex misformatted ![img_27.png](img_27.png) ![img_28.png](img_28.png)
+- ~~:pushpin: agent-doc start to codex misformatted ![img_27.png](img_27.png) ![img_28.png](img_28.png)~~
 - :pushpin: Complete the `[operator-verify]` and live verification using the logs to prove/disprove the intended behavior.
 <!-- /agent:queue -->
 ###
@@ -170,6 +197,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#cwsp] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

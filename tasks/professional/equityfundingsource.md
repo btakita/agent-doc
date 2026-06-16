@@ -151,7 +151,13 @@ Recommendation: build the next integration as an **EFS-to-GHL stage bridge**. On
 Added follow-up backlog item `#ghl-stage-bridge` for the implementation bridge.
 
 Changed paths: session document only. Verification: reviewed current EFS PRD/UI state and current official HighLevel API/workflow docs. Escalation: none. Confidence: high.
-<!-- agent:boundary:a0f866db -->
+
+### Re: GHL stage bridge queue correction — gpt-5
+
+Correction to the previous closeout: I cleared the self-created `#ghl-stage-bridge` backlog entry instead of leaving it in this priority queue. The GHL stage bridge remains the recommended implementation direction, but it is not an active queued task from this answer.
+
+Changed paths: session document only. Verification: pending `session-check` after this repair write. Escalation: none. Confidence: high.
+<!-- agent:boundary:814756bd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -164,7 +170,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ghl-stage-bridge] [recommended] Implement an event-driven GHL stage bridge from EFS Deal Pipeline state to HighLevel contacts/opportunities/workflows for Processing, Underwriting, Terms negotiation, and Closing while keeping EFS/D1 canonical for loan, lender-selection, borrower portal, document, audit, and funding state.
 <!-- /agent:backlog -->
 
 ## Review

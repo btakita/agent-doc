@@ -302,7 +302,7 @@ Verification:
 - `lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx`: TMO Loan Terms, Borrower Detail, Collateral, and Encumbrance now render as peer flex cards with `flex-wrap`, bounded widths, and consolidated field columns.
 
 Preflight reported high exchange accretion and one session-drift warning; queue work was still actionable, so I completed the implementation and deploy. Confidence: high. Escalation: none.
-<!-- agent:boundary:e0b17d97 -->
+<!-- agent:boundary:d4bfe13e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -315,6 +315,10 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+If a card has a name + first name + last name...only show name with no labels.
+Emails, phone number, Street, City, State, Zip don't need a label.
+
+deploy
 <!-- /agent:backlog -->
 
 ## Review

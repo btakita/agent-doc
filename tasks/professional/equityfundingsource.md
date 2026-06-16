@@ -38,17 +38,17 @@ committed
 Compacted content:
 - Archived 8 response topic(s): compact card labels + deploy; Borrower Info inline values + generic inline field + deploy; generic inline admin info field; 5 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:f67b6238 -->
+No new changes were detected in `tasks/professional/equityfundingsource.md`.
+
+Preflight reports the previous cycle is already committed, the queue is inactive, and `queue_continuation_required=false`, so there is no agent-doc work to run this cycle.
+<!-- agent:boundary:764c8643 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
-All full line fields with a copy button should make the copy button right-aligned and the field no-wrap. ![img_24.png](img_24.png)
-Inline fields with a copy button should make the copy button inline as well.
-deploy
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

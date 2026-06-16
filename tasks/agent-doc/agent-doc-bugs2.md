@@ -970,14 +970,14 @@ Log evidence:
 I did not find any `tmux_literal_text_enter_key` or `routed_trigger_enter_key` markers in the searched parent, boost-client, qchurnfix, or session-share ops logs. Claude evidence is present in older logs as accepted-only direct-pane submits, but the current blocker is Codex: it still shows the CR path and an accepted-only/no-dispatch proof on `mrh-servers.md`.
 
 No code changed in this sweep. I am closing the proof-sweep item because it produced the exact missing-harness/pane/timestamp evidence requested; the live queue already has the concrete `mrh-servers.md` failure and SimWorld follow-up to drive the fix.
-<!-- agent:boundary:07f3dfe2 -->
+<!-- agent:boundary:b0f9b1a2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 ---
-I switched mrh-servers.md from Claude to Codex by restarting agent-doc. Now JB `Run Agent Doc` is unresponsive. The Codex session was idle.
+:pushpin: I switched mrh-servers.md from Claude to Codex by restarting agent-doc. Now JB `Run Agent Doc` is unresponsive. The Codex session was idle.
 ```
 resync: pruned 1 stale session(s)
 [route] target tmux session: 0

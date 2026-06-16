@@ -260,13 +260,59 @@ Handled the agent-doc cycle for [agent-doc-bugs2.md](/home/brian/work/btakita/ag
 The response was written and committed as `a9bb1ac84` (`agent-doc(agent-doc-bugs2): 2026-06-16 01:37:00`). `session-check` passed for the committed cycle. I did not run the full build/test suite because this cycle only added document/log/screenshot diagnosis, not source changes.
 
 Key outcome: the pasted generation-438 JB route error is stale relative to the current fresh controller/supervisor state, but the broader queue-edit interruption still needs live verification under `#cwsp`. Queue continuation is false, with only stale/noise queue lines left, so I did not auto-loop.
-<!-- agent:boundary:4d885618 -->
+
+### Re: JB Run Agent Doc still does not submit; usage map — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` still does not submit. Find all locations where this is used.
+
+
+I searched the canonical `src/agent-doc` submodule for `Run Agent Doc`, `RunAgentDoc`, `AgentDoc.Submit`, `SubmitAction`, and the `route --dispatch-only --plain-trigger` path. I ignored the separate `src/agent-doc-verify-*` worktrees because they are verification copies and would duplicate stale history.
+
+Runtime locations:
+
+- `editors/jetbrains/src/main/resources/META-INF/plugin.xml:36` registers action id `AgentDoc.Submit`, text `Run Agent Doc`, shortcut `ctrl shift alt A`, and menu placements.
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/SubmitAction.kt:25` is the JetBrains action implementation. It resolves the project/file, coalesces rapid re-fires, starts a durable attempt ledger, waits for typing idle, saves all documents, calls `TerminalUtil.sendToTerminal(...)`, then registers the file with `PromptPoller`.
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/RunAgentDocAttemptLedger.kt:9` owns the durable per-click attempt file under `.agent-doc/state/editor-route-attempts`, including stages like `clicked`, `typing_idle`, `route_start`, `route_success`, and `route_failed`.
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt:245` is the plugin route runner. It builds the command, spawns the process, retries only startup-actor failures, classifies busy/queued/persistent failures, clears stale route errors on success, and writes the final attempt stage.
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt:402` builds the actual command: `agent-doc route --dispatch-only --plain-trigger --debounce 0 --wait-for-ready 60 <relativePath>`.
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt:1141` classifies route output into queued, busy/running, retryable-starting, or persistent failure.
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt:1445` and `:1450` build the visible still-running / queued messages.
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt:1489` persists route failures under `.agent-doc/state/editor-route-errors`; `:1510` clears that file on success.
+- `src/main.rs:486` defines the `agent-doc route` CLI and its `--dispatch-only`, `--plain-trigger`, `--debounce`, and `--wait-for-ready` flags. `src/main.rs:2181` wires those flags into `agent_doc_orchestration::route::run(...)`.
+- `agent-doc-orchestration/src/route.rs:1800` parses frontmatter/harness config and applies the plain-trigger override; `:1822` chooses managed vs dispatch-only routing; `:1855` clears editor route errors on successful route.
+- `agent-doc-orchestration/src/route.rs:1971` through `:2085` drains or classifies an open closeout before route dispatch, which is where the old baseline-mismatch class lived.
+- `agent-doc-orchestration/src/route.rs:3026` through `:3084` handles blocked closeout decisions: enqueue prompt behind the closeout or wait behind an existing queue head.
+- `agent-doc-orchestration/src/route/dispatch_only.rs:50` is the dispatch-only reopen path used by JB `Run Agent Doc`. It waits for ready panes, refuses protected/busy terminal states, queues active-turn reroutes into `agent:queue`, and then submits or checks proof.
+- `agent-doc-orchestration/src/route/dispatch.rs:821` sends the routed reopen and waits for dispatch-start proof; `:866` logs `route_submit_observation ... dispatch_start_proven`, and `:922` logs accepted-without-proof failures.
+- `agent-doc-orchestration/src/sessions.rs:333` and `:483` define the shared tmux submit helper: literal text followed by named tmux `Enter` for Codex/Claude/OpenCode/default harnesses.
+- `agent-doc-orchestration/src/project_controller/rpc.rs:332` through `:370` owns dispatch coalescing semantics, with explicit operator dispatches such as JB `Run Agent Doc` allowed through while auto re-fires can be deduped.
+
+Specs/tests that govern this behavior:
+
+- `editors/jetbrains/SPEC.md:58` through `:66` is the main JetBrains `Run Agent Doc` contract: typing-idle wait, route command, attempt ledger, retry behavior, queued/still-running UX, accepted-only proof failure, and stale error-file clearing.
+- `editors/jetbrains/AGENTS.md:45` says repeated `Run Agent Doc` should supersede stale plugin-spawned route processes.
+- `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/SubmitActionTest.kt` checks the action ordering: ledger, typing-idle wait, save, route.
+- `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/RunAgentDocAttemptLedgerTest.kt` checks attempt file naming and stale attempt suppression.
+- `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt` checks the command flags, retry classification, busy/still-running messages, queued-pending classification, and accepted-proof behavior.
+- `specs/07-session-tmux-commands.md:48` through `:57` is the tmux/session contract for dispatch-only `Run Agent Doc` delivery and proof.
+
+Live evidence still says the latest JB route submitted: the two newest attempt-ledger entries for this file ended at `route_success`, and `ops.log` has `route_submit_observation ... phase=dispatch_start_proof result=dispatch_start_proven ... proof=consumed` for the latest one. There is no current `.agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt` file. If the UI still reads as “did not submit,” the next code target is likely the plugin/status presentation around `TerminalUtil`/attempt-ledger/admin projection, not the tmux submit primitive itself.
+
+Proof for this cycle:
+- Changed paths: this session document only.
+- Commands: `agent-doc preflight ...`; `agent-doc plan ...`; `rg` searches for `Run Agent Doc`, `RunAgentDoc`, `AgentDoc.Submit`, `SubmitAction`, `dispatch-only`, and `plain-trigger`; targeted `sed`/`nl -ba` reads of `plugin.xml`, `SubmitAction.kt`, `RunAgentDocAttemptLedger.kt`, `TerminalUtil.kt`, `src/main.rs`, `route.rs`, `route/dispatch_only.rs`, `route/dispatch.rs`, `sessions.rs`, and `project_controller/rpc.rs`; `git status --short --branch`; `git log --oneline -3 -- tasks/agent-doc/agent-doc-bugs2.md`.
+- Verification: code-navigation and log diagnosis only; no source code changed, so I did not run the build/test suite.
+- Confidence: high on the location map; high that latest route submitted/was consumed; medium on the remaining operator-facing “still does not submit” symptom until the exact current JB UI/status text is captured after a `route_success` attempt.
+- Escalation: none.
+<!-- agent:boundary:add525a6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: JB `Run Agent Doc` still does not submit. Find all locations where this is used.
+- ~~:pushpin: JB `Run Agent Doc` still does not submit. Find all locations where this is used.~~
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
 ```

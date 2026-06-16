@@ -335,7 +335,72 @@ Proof for this cycle:
 - Verification: focused timeout tests passed; `make check` passed; `cargo install --path .` succeeded; latest pre-push `src/agent-doc` CI was green, and the new pushed `src/agent-doc` CI run `27597293180` was in progress when checked. The parent repo has no workflow named `CI`.
 - Confidence: high for the timeout-budget regression; medium for live JB proof until the stale route-owned supervisor is recycled and the operator reruns `Run Agent Doc` from the IDE.
 - Escalation: none.
-<!-- agent:boundary:2fe62979 -->
+
+### Re: tmux interaction surfaces — gpt-5
+
+> **Queue prompt:**
+>
+> Please document all areas in the codebase that interact with tmux. Don't worry about the line number, as line numbers can change.
+
+I mapped the tmux interaction surfaces across the repo. I treated `src/agent-doc` and `src/tmux-router` as the canonical implementation, and treated `src/agent-doc-verify-*`, `src/agent-doc-qchurnfix`, and `src/agent-doc-efsmrgmarkers` as duplicate worktree/checkpoint copies rather than separate owners.
+
+Primary tmux owner surfaces:
+
+- `src/tmux-router/src/tmux.rs`: low-level tmux process wrapper for session/window/pane queries and mutations, pane creation, `send-keys`, `capture-pane`, `display-message`, pane moves, pane/window/session cleanup, batching, and isolated test servers.
+- `src/tmux-router/src/sync.rs`: declarative editor-layout to tmux-layout reconciliation; preserves, replaces, stashes, sizes, and focuses panes.
+- `src/tmux-router/src/registry.rs`: durable file-to-pane identity registry used by routing and pruning.
+- `src/tmux-router/src/pane_policy.rs`: session-boundary guards around pane movement.
+- `src/tmux-router/src/hybrid.rs`: harness-aware tmux fallback input plus `pipe-pane` output streaming.
+- `src/tmux-router/src/control.rs`: `tmux -C` control-mode client and parser.
+- `src/tmux-router/src/main.rs`: standalone `tmux-router` CLI around the same primitives.
+
+Agent-doc tmux adapter and lifecycle surfaces:
+
+- `src/agent-doc/agent-doc-orchestration/src/sessions.rs`: agent-doc's adapter over `tmux-router`; current session/pane lookup, pane listing, capture helpers, raw key sending, registry re-exports, and harness-specific submit profiles for Claude/Codex/OpenCode.
+- `src/agent-doc/agent-doc-orchestration/src/start.rs`, `start/run.rs`, `start/idle_watch.rs`, `start/detection.rs`, and `start/decisions.rs`: managed pane startup/reuse, readiness/lifecycle watches, capability-proof status messages, and auto-trigger gating.
+- `src/agent-doc/agent-doc-orchestration/src/supervisor/*`: supervisor IPC/PTY/screen/resize boundary. These reduce direct `capture-pane` reliance but still coordinate with tmux-owned visible panes.
+- `src/agent-doc/agent-doc-orchestration/src/route.rs` plus `route/session_resolution.rs`, `pane_resolution.rs`, `authoritative_actor.rs`, `startup.rs`, `busy_pane.rs`, `dispatch.rs`, `dispatch_only.rs`, and `cycle_ack.rs`: route target resolution, prompt/readiness checks, focus, dispatch proof, startup/busy decisions, and operator diagnostics.
+- `src/agent-doc/agent-doc-orchestration/src/flow/routed_reopen.rs`: pure route decision state that feeds the tmux/supervisor effects.
+- `src/agent-doc/src/queue_dispatch.rs`: queued slash-command dispatch, with supervisor IPC preferred and canonical tmux submit as fallback.
+- `src/agent-doc/src/parallel.rs`: fan-out worktree tasks into tmux panes, stash them, and clean them up.
+
+Session, operator, sync, and repair surfaces:
+
+- `src/agent-doc/src/main.rs` and `src/agent-doc/src/commands.rs`: CLI command surface for start, route, claim, focus, layout, sync, prompt, session, terminal, and turn-status paths.
+- `src/agent-doc/src/session_cmd.rs`: configured tmux-session binding and window migration.
+- `src/agent-doc/src/session_actor_cmd.rs`: operator clear/restart/interrupt/status/attach paths; gathers live pane evidence, sends safe input, and reports recovery guidance.
+- `src/agent-doc/src/terminal.rs`: opens or attaches an external terminal to a tmux session.
+- `src/agent-doc/agent-doc-orchestration/src/prompt.rs`: captures pane content to detect permission prompts and answers them with tmux keys.
+- `src/agent-doc/agent-doc-orchestration/src/focus.rs`, `src/agent-doc/src/autoclaim.rs`, and `src/agent-doc/agent-doc-orchestration/src/turn_status.rs`: pane selection, claim/focus alignment, and pane title/status updates.
+- `src/agent-doc/agent-doc-orchestration/src/sync.rs`, `sync/layout.rs`, `sync/pane_repair.rs`, `sync/registry.rs`, and `sync/safe_passive.rs`: editor-layout sync, safe passive sync, layout repair, registry projection, and protected-closeout pane handling.
+- `src/agent-doc/src/layout.rs`: older/facade layout command path.
+- `src/agent-doc/agent-doc-orchestration/src/resync.rs`, `resync/prune.rs`, and `resync/stash.rs`: validates registry rows against live tmux, relocates wrong-session panes, prunes or preserves dead panes, manages stash windows, and closes superseded sessions.
+- `src/agent-doc/agent-doc-orchestration/src/admin.rs`, `dashboard.rs`, `preflight.rs`, `preflight/maintenance.rs`, `project_controller/rpc.rs`, `queue_cmd.rs`, `queue_continuation.rs`, and `watch.rs`: consume/project tmux-backed actor/session facts, gate dispatch, or surface stale supervisor/install/layout diagnostics.
+
+Editor and UI integration surfaces:
+
+- JetBrains: `editors/jetbrains/src/main/resources/META-INF/plugin.xml`, `SubmitAction.kt`, `TerminalUtil.kt`, `ClaimAction.kt`, `SyncLayoutAction.kt`, `LoadTmuxWindowAction.kt`, `EditorTabSyncListener.kt`, `RefreshEnvironmentAction.kt`, `PluginLifecycleListener.kt`, and `NativeLib.kt` register and launch Run/Claim/Sync/Load flows. Most tmux work goes through the agent-doc binary/FFI; startup/session discovery has a few direct `tmux` calls.
+- VS Code: `editors/vscode/src/extension.ts`, `tabSync.ts`, `popupMenu.ts`, and related tests surface claim/sync/cross-session state around the same agent-doc tmux commands.
+
+Tests, specs, CI, and helper scripts:
+
+- `src/agent-doc/Makefile`, `src/agent-doc/.github/workflows/ci.yml`, and root `.github/workflows/agent-doc.yml`: install tmux and run `make tmux-ci` for ignored live tmux tests.
+- `src/agent-doc/tests/*`, inline ignored live-tmux tests, and `src/tmux-router` tests: exercise real tmux through `IsolatedTmux`.
+- `src/agent-doc/specs/07-session-tmux-commands.md`, `specs/multiplexer-backend.md`, `specs/terminal-backend.md`, `specs/supervisor.md`, `specs/08-session-routing.md`, and `specs/12-deterministic-simulation.md`: behavior contracts for routing, submit modes, sync, supervisor migration, and real-tmux versus simulator coverage.
+- Root scripts: `bin/agent-doc-start`, `bin/agent-doc-route`, `bin/install.sh`, and `bin/tmux-setup.sh`.
+- Project-local dev helpers: `src/*/**/bin/tmux-dev.sh` and `tmux-rename-window.sh` in the app submodules, plus package scripts exposing them. These are local layout/startup conveniences, not agent-doc routing.
+- `src/ctx-core-dev/lib/rollup/bin/rollup-cmd.mjs`: generates tmux sessions/windows/panes for rollup command orchestration.
+- `src/agent-kit/src/hooks.rs` and `src/agent-kit/SPEC.md`: hook vocabulary includes tmux layout-change events; this is integration vocabulary, not a tmux command owner.
+
+The architectural boundary is: `tmux-router` owns raw tmux mechanics; `agent-doc-orchestration::sessions` owns the agent-doc adapter/submit contract; start/route/sync/resync/session commands own policy and effects; editor plugins should generally call agent-doc CLI/FFI rather than recreating tmux behavior.
+
+Proof for this cycle:
+- Changed paths: this session document only.
+- Commands: `agent-doc preflight ...`; `agent-doc plan ...`; `tsift status`; `tsift index --workspace .`; targeted `rg` searches for `tmux`, `TMUX`, `Command::new("tmux")`, `send-keys`, `capture-pane`, `display-message`, `list-panes`, `split-window`, `join-pane`, `kill-pane`, `pipe-pane`, and `attach_control_mode`; exact helper list via `rg --files src | rg '(^|/)bin/tmux[^/]*\.sh$' | sort`.
+- Verification: source/search documentation only; no source code changed, so I did not run the build/test suite.
+- Confidence: high for canonical agent-doc/tmux-router/editor surfaces; medium for every non-agent-doc submodule because some are independent app repos with incidental tmux dev helpers rather than one shared tmux subsystem.
+- Escalation: none.
+<!-- agent:boundary:3bf62f1e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -343,7 +408,7 @@ Proof for this cycle:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` still does not submit. Find all locations where this is used.~~
 - ~~:pushpin: Fix the JB `Run Agent Doc` still does not submit issue.~~
-- Please document all areas in the codebase that interact with tmux. Don't worry about the line number, as line numbers can change.
+- ~~Please document all areas in the codebase that interact with tmux. Don't worry about the line number, as line numbers can change.~~
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
 ```

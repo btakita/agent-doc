@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -63,13 +63,43 @@ Went through `agent:review`. There is exactly one item, and it is already advanc
 **Net:** nothing new to add. The review item is already paired with its actionable backlog item; the only thing left is operator-gated crates.io registration — adding another item would just duplicate #vmax. #1td4 stays gated; #vmax stays the operator handle.
 
 This empties the `#advance-review` drain; #vmax is `[operator-verify]` so go-mode defers it (queue has no remaining agent-drainable head).
-<!-- agent:boundary:6f4a7bb1 -->
+
+### Re: small model vs MemGraphRAG — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Should we use a small model such as a 4B model instead of a MemGraphRag for some cases? See https://www.youtube.com/watch?v=QuTcXMgPanw Use YT transcript or corky gpu.
+
+
+Short answer: yes, but not as a replacement for MemGraphRAG.
+
+The video transcript argues for separation of concerns, not deleting the graph layer. Around `00:31-01:31`, it says ordinary GraphRAG can build the wrong graph for scientific or long causal reasoning. Around `29:22-29:38`, it frames the engineering win as avoiding a giant LLM for every task because a 4B model can do the extraction/structuring work. Around `31:43-32:33`, that small model is specifically an RL-trained extractor over papers, figures, tables, equations, citations, entities, dependencies, relations, abstractions, and evidence. Then `32:37-33:10` still keeps graph retrieval/traversal and a stronger research/synthesis workflow in the loop.
+
+For tsift, that maps cleanly to: keep MemGraphRAG as the substrate, and consider a small model as an optional ingest/refresh sidecar. The current tsift direction already has decay-weighted memory retrieval, memory-event projection into the shared `GraphStore`, `graph-db related` semantic seeding, ranked neighborhoods, and performance gates. A 4B model should feed that graph with richer typed nodes/edges when deterministic AST/markdown extraction is too shallow; it should not own traversal, ranking, provenance, or final synthesis.
+
+Good target cases:
+
+- extract `Finding` / `Decision` / `Note` candidates from session/doc text with anchors and confidence
+- label limitations, hypotheses, failure modes, benchmark claims, table/figure semantics, and citation-style relationships
+- expand query seeds into typed semantic concepts before `graph-db related`
+- run offline or behind a feature flag during summarize/import/project refresh, where latency and correctness can be measured
+
+Hard guardrails:
+
+- deterministic code AST extraction remains authoritative for symbols, spans, call edges, and ownership
+- model output must be schema-validated JSON with provenance, model/version, confidence, source handles, and deterministic fallback
+- low-confidence or unanchored edges should enter as tentative authored/semantic nodes, not hard graph facts
+- acceptance should be gated by extraction precision/recall fixtures plus the existing MemGraphRAG latency gate; no default-on path until it improves retrieval quality without blowing the budget
+
+So the decision I would record is: use a small local model for structured semantic extraction in some cases, especially scientific/session/doc knowledge enrichment, but do not use it instead of MemGraphRAG. It is an upstream graph-enrichment worker, not the retrieval architecture.
+
+I used the YouTube captions path; no Corky GPU run was needed because captions were available. No code changed this cycle. Verification was document/research only: `tsift status`, `tsift index --workspace .`, `agent-doc preflight`, `agent-doc plan/read`, caption-only `watch.py`, targeted `tsift source-read/search`, and `git status`. Preflight also reported a stale `agent-doc` install warning: rebuild in `src/agent-doc` with `make install` when convenient so live sessions use the current cdylib.
+<!-- agent:boundary:6ae58fcf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: Should we use a small model such as a 4B model instead of a MemGraphRag for some cases? See https://www.youtube.com/watch?v=QuTcXMgPanw Use YT transcript or corky gpu.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

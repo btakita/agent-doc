@@ -681,6 +681,41 @@ impl CloseoutRecoveryDecision {
             | Self::Blocked { state, .. } => Some(*state),
         }
     }
+
+    pub fn route_terminal_reason(&self) -> String {
+        match self {
+            Self::AlreadyCommitted => "closeout recovery already_committed".to_string(),
+            Self::ReplaySafe { state, command } => format!(
+                "closeout recovery replay_safe [{}]: {}",
+                state.as_str(),
+                command
+            ),
+            Self::RetireStaleCapture { state, proof } => format!(
+                "closeout recovery retire_stale_capture [{}]: proof: {}",
+                state.as_str(),
+                proof
+            ),
+            Self::ResetSidecarsFromVisible { state, command } => format!(
+                "closeout recovery reset_sidecars_from_visible [{}]: {}",
+                state.as_str(),
+                command
+            ),
+            Self::QueuePromptForAfterCloseout { state, .. } => format!(
+                "closeout recovery queue_prompt_for_after_closeout [{}]: routed prompt queued behind unresolved closeout",
+                state.as_str()
+            ),
+            Self::Blocked {
+                state,
+                missing_proof,
+                recommended,
+            } => format!(
+                "closeout recovery blocked [{}]: missing proof: {}; recommended: {}",
+                state.as_str(),
+                missing_proof,
+                recommended
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -157,6 +157,7 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::flow::closeout::CloseoutRecoveryDecision;
 use crate::flow::routed_reopen::{
     ActorDispatchState, ActorRuntimeHealth, AuthoritativeActorDispatchAction,
     AuthoritativeActorDispatchActionFacts, AuthoritativeActorReadyFacts,
@@ -361,9 +362,16 @@ enum RouteCloseoutDrainOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RouteCloseoutBlockDecision {
-    EnqueuePromptForAfterCloseout,
-    WaitForActiveQueueHead { head: String, reason: String },
-    FailClosed { reason: String },
+    EnqueuePromptForAfterCloseout {
+        decision: CloseoutRecoveryDecision,
+    },
+    WaitForActiveQueueHead {
+        head: String,
+        decision: CloseoutRecoveryDecision,
+    },
+    FailClosed {
+        decision: CloseoutRecoveryDecision,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2216,15 +2224,22 @@ fn classify_route_closeout_block(
         recovery_decision,
         crate::flow::closeout::CloseoutRecoveryDecision::QueuePromptForAfterCloseout { .. }
     ) {
-        return RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout;
+        return RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout {
+            decision: recovery_decision,
+        };
     }
     let active_queue_head = std::fs::read_to_string(file)
         .ok()
         .and_then(|content| crate::queue_continuation::live_continuation_head(file, &content));
     if let Some(head) = active_queue_head {
-        return RouteCloseoutBlockDecision::WaitForActiveQueueHead { head, reason };
+        return RouteCloseoutBlockDecision::WaitForActiveQueueHead {
+            head,
+            decision: recovery_decision,
+        };
     }
-    RouteCloseoutBlockDecision::FailClosed { reason }
+    RouteCloseoutBlockDecision::FailClosed {
+        decision: recovery_decision,
+    }
 }
 
 fn queue_prompt_text_for_route_change(change_text: &str) -> Option<String> {
@@ -3171,7 +3186,7 @@ fn route_via_authoritative_actor(
         }
         RouteCloseoutDrainOutcome::Blocked(reason) => {
             match classify_route_closeout_block(file, reason, prompt_context.is_some()) {
-                RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout => {
+                RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout { .. } => {
                     let Some(context) = prompt_context else {
                         unreachable!("prompt-context decision requires a prompt context");
                     };
@@ -3199,14 +3214,15 @@ fn route_via_authoritative_actor(
                     );
                     return Ok(dispatch_pane);
                 }
-                RouteCloseoutBlockDecision::WaitForActiveQueueHead { head, reason } => {
+                RouteCloseoutBlockDecision::WaitForActiveQueueHead { head, decision } => {
+                    let blocker = decision.route_terminal_reason();
                     crate::ops_log::log_op(
                         file,
                         &format!(
                             "route_dispatch_drain_closeout_wait_existing_queue file={} head={} blocker={}",
                             file.display(),
                             crate::secret_redact::redact(&head),
-                            crate::secret_redact::redact(&reason)
+                            crate::secret_redact::redact(&blocker)
                         ),
                     );
                     eprintln!(
@@ -3216,7 +3232,8 @@ fn route_via_authoritative_actor(
                     );
                     return Ok(dispatch_pane);
                 }
-                RouteCloseoutBlockDecision::FailClosed { reason } => {
+                RouteCloseoutBlockDecision::FailClosed { decision } => {
+                    let reason = decision.route_terminal_reason();
                     anyhow::bail!(
                         "authoritative actor generation {} for {} owns pane {} but route could not drain the active closeout before dispatch: {}",
                         actor.record.generation,
@@ -6185,12 +6202,20 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn closeout_block_decision_queues_prompt_context_before_failing_closed() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("route-block.md");
-        let reason = "captured response baseline no longer matches current document".to_string();
+        let content = "---\nagent_doc_session: test\n---\n\n";
+        write_open_cycle_route_doc(&doc, content);
+        let low_level_reason = "captured response baseline no longer matches current document";
 
-        assert_eq!(
-            super::classify_route_closeout_block(&doc, reason, true),
-            super::RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout
-        );
+        match super::classify_route_closeout_block(&doc, low_level_reason.to_string(), true) {
+            super::RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout { decision } => {
+                assert_eq!(
+                    decision.state(),
+                    Some(crate::flow::closeout::CloseoutRecoveryState::OpenCycle)
+                );
+                assert_eq!(decision.as_str(), "queue_prompt_for_after_closeout");
+            }
+            other => panic!("prompt context should queue behind closeout: {other:?}"),
+        }
     }
 
     #[test]
@@ -6208,29 +6233,64 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "- :pushpin: [#jbruncloseoutstate]\n",
             "<!-- /agent:queue -->\n"
         );
-        std::fs::write(&doc, content).unwrap();
-        let reason = "captured response baseline no longer matches current document".to_string();
+        write_open_cycle_route_doc(&doc, content);
+        let low_level_reason = "captured response baseline no longer matches current document";
 
-        assert_eq!(
-            super::classify_route_closeout_block(&doc, reason.clone(), false),
-            super::RouteCloseoutBlockDecision::WaitForActiveQueueHead {
-                head: "jbruncloseoutstate".to_string(),
-                reason,
+        match super::classify_route_closeout_block(&doc, low_level_reason.to_string(), false) {
+            super::RouteCloseoutBlockDecision::WaitForActiveQueueHead { head, decision } => {
+                assert_eq!(head, "jbruncloseoutstate");
+                assert_eq!(
+                    decision.state(),
+                    Some(crate::flow::closeout::CloseoutRecoveryState::OpenCycle)
+                );
+                let reason = decision.route_terminal_reason();
+                assert!(
+                    reason.contains("closeout recovery blocked [open_cycle]"),
+                    "{reason}"
+                );
+                assert!(reason.contains("missing proof"), "{reason}");
+                assert!(
+                    !reason.contains(low_level_reason),
+                    "route-visible blocker leaked low-level capture text: {reason}"
+                );
             }
-        );
+            other => panic!("existing active queue head should wait behind closeout: {other:?}"),
+        }
     }
 
     #[test]
     fn closeout_block_decision_fails_closed_without_prompt_or_active_queue() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("route-block.md");
-        std::fs::write(&doc, "---\nagent_doc_session: test\n---\n\n").unwrap();
-        let reason = "open closeout has no safe recovery proof".to_string();
+        let content = "---\nagent_doc_session: test\n---\n\n";
+        write_open_cycle_route_doc(&doc, content);
+        let low_level_reason = "captured response baseline no longer matches current document";
 
-        assert_eq!(
-            super::classify_route_closeout_block(&doc, reason.clone(), false),
-            super::RouteCloseoutBlockDecision::FailClosed { reason }
-        );
+        match super::classify_route_closeout_block(&doc, low_level_reason.to_string(), false) {
+            super::RouteCloseoutBlockDecision::FailClosed { decision } => {
+                assert_eq!(
+                    decision.state(),
+                    Some(crate::flow::closeout::CloseoutRecoveryState::OpenCycle)
+                );
+                let reason = decision.route_terminal_reason();
+                assert!(
+                    reason.contains("closeout recovery blocked [open_cycle]"),
+                    "{reason}"
+                );
+                assert!(reason.contains("recommended:"), "{reason}");
+                assert!(
+                    !reason.contains(low_level_reason),
+                    "route-visible blocker leaked low-level capture text: {reason}"
+                );
+            }
+            other => panic!("missing prompt and queue should fail closed: {other:?}"),
+        }
+    }
+
+    fn write_open_cycle_route_doc(doc: &std::path::Path, content: &str) {
+        std::fs::write(doc, content).unwrap();
+        crate::cycle_state::start_preflight(doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_pending_mutations(doc).unwrap();
     }
 
     #[test]

@@ -120,7 +120,10 @@ Escalation/confidence:
 - Confidence is high from Corky's successful edit response plus the local published metadata and full-body verification.
 
 Preflight also warned that the installed `agent-doc` binary/cdylib may be stale relative to source commit `a447beb1`; that did not block this LinkedIn repair.
-<!-- agent:boundary:789aa8f1 -->
+No new agent-doc changes to handle in `tasks/software/lazily-rs.md`.
+
+CLI preflight completed and reported `no_changes: true`; the queue is drained and no continuation is required. It also surfaced the existing stale `agent-doc` install warning and tmux session drift warning, but neither created work for this document cycle.
+<!-- agent:boundary:f74309fa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,15 +131,7 @@ Preflight also warned that the installed `agent-doc` binary/cdylib may be stale 
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-You did not publish the entire linkedin post. Please edit to include the full post. https://www.linkedin.com/feed/update/urn:li:activity:7472666757267107840/
-```
-I built a reactive signals library in Rust that does zero wasted work by default — then realized it could sync its graph across the internet.
-
-This is the architecture of lazily-rs.
-
-The core is small: three primitives 
-```
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

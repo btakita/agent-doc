@@ -19,7 +19,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -252,7 +252,25 @@ CI note:
 - Parent repo has no workflow named `CI`; latest `Agent Doc` run for `8ad76cdee` failed before jobs started because GitHub reports account billing/spending-limit blockage, not a test failure: https://github.com/btakita/agent-loop/actions/runs/27647115956
 
 Agent-doc note: preflight still warns that the installed `~/.cargo/bin` agent-doc cdylib predates source commit `ce26d32c`; rebuild with `make install` in `src/agent-doc` when you want the live-session binary refreshed.
-<!-- agent:boundary:3d1c697c -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+
+Deploy is complete.
+
+- Ran `make deploy` from `src/equityfundingsource-dev`.
+- Remote D1 migrations `0070_deal_interest_lender_communication.sql` through `0073_loan_activity_logs.sql` applied successfully.
+- Postdeploy migration check reports `No migrations to apply`.
+- Worker version: `e51e9088-581a-47c1-a6e8-b7a1517ce4ad`.
+- Smoke checks: public root returned `200`; `/portal-admin/deals` returned `303`, matching the Cloudflare Access redirect expectation.
+- Latest parent Actions run for the pushed pointer commit did not run jobs because GitHub reported account billing/spending-limit blockage, not a test failure: https://github.com/btakita/agent-loop/actions/runs/27647115956
+
+Session note: exchange is large, but queue mode was active, so I continued draining instead of stopping to compact.
+<!-- agent:boundary:9d9f28cc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -260,8 +278,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: What can we implement for the lender selection process in the admin Available Deals UIs? I want a workflow where the admin can see the Interested Lenders, select an Interested Lender (in the UI and bi-directional sync with TMO).~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -66,7 +66,7 @@ Proof:
 - Verification: focused test passed 3/3; `make check` passed 750 tests plus app and worker builds; remote D1 reported no migrations before or after deploy; live `/` returned `200`; live `/portal-admin` returned auth redirect `303`.
 - Commands: `bun test tests/tmo-loan-details-density.test.ts`, `make check`, `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`, `make deploy`, post-deploy migration check, and live smoke `curl` checks.
 - Changed paths: `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`, `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`, `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`, plus the `src/equityfundingsource-dev` submodule pointer in `agent-loop`.
-<!-- agent:boundary:6d421ddd -->
+<!-- agent:boundary:77440bfe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,8 +74,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Move "Interested Lenders" above "Final Loan Documents". deploy~~
-- do [#efs-interest-order]
 <!-- /agent:queue -->
 
 ## Backlog

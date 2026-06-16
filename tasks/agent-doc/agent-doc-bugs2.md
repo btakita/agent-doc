@@ -978,7 +978,26 @@ I completed the editor/IPC proof sweep. The positive markers are present: `write
 That is not exact zero-drift proof. The same sweep also finds disproof markers, including recurring `live_prompt_drift_after_preflight`, `crdt_merge_base_overlay_stale`, and File Cache Conflict evidence around the correlated sessions. So the editor/IPC route is exercised, but the clean-session convergence proof is still missing.
 
 No code changed for this sweep. I am marking `#opverify-editor-proof` complete only as the proof sweep: it found the exact blocker evidence instead of satisfying the underlying editor convergence proof.
-<!-- agent:boundary:224de6b4 -->
+
+### Re: do #opverify-recycle-proof — gpt-5
+
+I completed the supervisor recycle proof sweep. Real top-level proof exists, not just queue prose:
+
+- `supervisor_binary_stale_self_recycled` appears for `tasks/agent-doc/agent-doc-bugs2.md` and `tasks/monsterrodholders.md`, including `boundary=next_queue_item` and `candidates=[resolved_fresh_binary=..., path_lookup_agent_doc=agent-doc]`.
+- The success path is followed by fresh supervisor/controller evidence: `controller_session_start`, `supervisor_host_gate hosting=in-process`, `controller_lifecycle ... state=ready`, and then `idle_queue_watch_drain ... submit_mode=tmux_literal_cr` on the same live documents.
+- `#cleandrainsup` has exact proof on this document: after a recycle, ops.log shows `idle_queue_watch_context_reset ... reason="... (#cleandrainsup)"` at `1781556369`, followed by `idle_queue_watch_drain ... target=%25` at `1781556372`.
+
+I marked `#aazp` and `#4myd` done because their required success-path recycle proof is present. I marked `#suprehotreload` done as the requested duplicate mapping to that stale-binary recycle proof. I marked `#cleandrainsup-verify` done because the reset-plus-drain proof is exact.
+
+Remaining open evidence gaps:
+
+- `#recyclerestart-verify`: still missing the kill-pane + JB Sync Tmux Layout / no-sync-deferred proof and restart/re-clear proof.
+- `#1j8q`: still missing a real shared `controller-launch.lock` contention proof with waiter adoption.
+- `#anw0verify`: still missing top-level `dispatch_stale_generation_redirect` and `dispatch_retry_after_stale_generation`; `rg` found no real events.
+- Failure fallback path: no top-level `supervisor_reexec_failed fallback=continue_current_binary` event appears in the searched logs; the proof observed here is the clean success path.
+
+No code changed for this sweep.
+<!-- agent:boundary:d1ac377e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -997,7 +1016,7 @@ Error: dispatch-only codex reopen refused to inject into pane %103 for tasks/mrh
 - ~~do [#codexctrlz]~~
 - ~~do [#opverify-submit-proof]~~
 - ~~do [#opverify-editor-proof]~~
-- do [#opverify-recycle-proof]
+- ~~do [#opverify-recycle-proof]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -1027,16 +1046,11 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#opverify-recycle-proof] [clean-session] Operator-verify supervisor recycle proof sweep: correlate #suprehotreload, #recyclerestart-verify, #1j8q, #aazp, #4myd, #anw0verify, and #cleandrainsup-verify against ops.log markers supervisor_binary_stale_self_recycled, supervisor_reexec_failed fallback=continue_current_binary, dispatch_stale_generation_redirect, idle_queue_watch_context_reset, and subsequent drain/dispatch proof. Close duplicates with exact proof or update each item with the missing live step.
-- [ ] [#suprehotreload] [operator-verify] Restored from deleted queue shorthand `:round_pushpin: do `: prove the supervisor hot-reload / stale-binary recycle path from a live JB Run Agent Doc cycle, or map it to existing #recyclerestart-verify/#aazp/#4myd proof and close as duplicate. Requires live supervisor/JB evidence; do not silently drop this shorthand head again.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
-- [ ] [#cleandrainsup-verify] [operator-verify] #cleandrainsup live proof: after the supervisor recycles onto the 1f8c9f63 build, confirm ops.log shows idle_queue_watch_context_reset reason=#cleandrainsup followed by a drain of a [clean-session] head (one fresh agent per item). Plan: tasks/agent-doc/plan-cleandrainsup-supervisor-drains-clean-session.md
 - [ ] [#c2b6] [operator-verify] compactdrift live JB Compact Exchange re-verify: with a freshly make-install-ed agent-doc (installed cdylib currently predates aafa6510), run JB Compact Exchange on a doc whose HEAD holds a finalized Re: response and confirm it compacts WITHOUT the "refusing to auto-adopt committed historical response patchback / out-of-band typed_component_drift" bail. Any persistent failure from a NON-wedged session files against stuckhandoff2, not here. Code complete + committed agent-doc bca26cfd; 108 commit_ tests green this cycle.
 - [ ] [#1j8q] [operator-verify] #suprecyclelock live proof: drive a real next_queue_item supervisor self-recycle (go-mode queue drain over a freshly-installed binary) while a sibling/concurrent launcher holds the shared project-root controller-launch.lock; confirm the execve'd start no longer surfaces "controller launch already in progress ... (os error 11)" on the pane and ops.log shows the contended waiter adopting the published controller instead. Fixed in agent-doc-orchestration project_controller.rs LaunchLock::acquire_blocking + connect_or_launch.
-- [ ] [#aazp] [operator-verify] suprecyclestall live-verify (agent-doc aafa6510, installed+release-built): restart a stale session via session restart-supervisor FILE --force so it runs the new binary, then drive an idle/next-queue-item recycle. Confirm ops.log shows supervisor_binary_stale_self_recycled ... candidates=[...] then EITHER a clean execve hot-reload OR supervisor_reexec_failed fallback=continue_current_binary with per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Subset of the broader recyclerestart sync-block work. Cannot be agent-done: needs a live editor + real recycle.
-- [ ] [#4myd] [operator-verify] #suprecyclestall live-verify: with the new binary installed (cargo install + cargo build --release done, pushed agent-doc aafa6510), restart a stale session and drive an idle/next-queue-item recycle. Confirm ops.log shows `supervisor_binary_stale_self_recycled ... candidates=[...]` then EITHER a clean execve hot-reload OR `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#qt32] [operator-verify] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]

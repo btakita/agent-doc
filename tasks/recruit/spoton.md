@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -101,12 +101,13 @@ Closeout proof: changed path is the session document only; no new transcript art
 ### Re: Queue drained — gpt-5
 
 The remaining SpotOn interview-prep queue item has been addressed above and the queue is now inactive. No code or transcript files changed; this closeout only persists the queue-drained document state.
-<!-- agent:boundary:2e44d4e4 -->
+<!-- agent:boundary:12e7c534 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- Please review https://www.youtube.com/watch?v=fuj9EIrQpWM. Getting a no-contract plan for a low cost seems like an easy entry. But could customers get cold feet when financing the equipment? Perhaps that may be a reason why some don't want to complete the install? Would real-restaurant owner Youtube videos and other incentives help?
 <!-- /agent:queue -->
 
 ## Backlog

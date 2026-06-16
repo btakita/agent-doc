@@ -266,7 +266,32 @@ Commands: `agent-doc preflight`, `agent-doc plan`, `git status --short`, and tar
 Verification: code inspection only; no tests run because no code changed.
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:0eeb3073 -->
+
+### Re: Pre-doc Conditions — gpt-5
+
+> **Queue prompt:**
+>
+> Pre-doc conditions
+
+
+`Pre-doc conditions` is EFS-local interested-lender workflow state, not TMO loan state.
+
+Classification: EFS D1 source of truth; TMO-related only as lender/deal follow-up context before formal docs or funding commitment.
+
+Evidence:
+- The Available Deal `Interested Lenders` workflow stores this textarea as `pre_doc_conditions` on `investor_deal_interests`.
+- The admin patch route writes `pre_doc_conditions` directly to `investor_deal_interests` after `clean_text_(body?.pre_doc_conditions, 2000)`.
+- The field is part of the deal-interest workflow summary/UI and does not derive a TMO loan status.
+- The explicit `tmo_cache_outbox` writeback path found in this workflow area remains `select_lender`, not pre-doc conditions.
+
+Boundary: treat this as an internal/admin note about conditions to satisfy before documents or a formal funding commitment. If EFS later wants those conditions mirrored into TMO, that should be a separate reviewed writeback mapping gated through `#7a4d/#dzmm`, not an implicit side effect of this field.
+
+Changed paths: none.
+Commands: `agent-doc preflight`, `agent-doc plan`, `git status --short`, and targeted `rg` inspection in `src/equityfundingsource-dev`.
+Verification: code inspection only; no tests run because no code changed.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:087fec73 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -284,7 +309,7 @@ Do these steps + fields relate to TMO state?
 - ~~Call scheduled~~
 - ~~Verbal amount~~
 - ~~Contact method~~
-- Pre-doc conditions
+- ~~Pre-doc conditions~~
 - Pre-doc instructions
 - Lender contact summary
 <!-- /agent:queue -->

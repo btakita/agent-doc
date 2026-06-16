@@ -933,21 +933,47 @@ Passive CI snapshot only, no waiting: agent-doc `CI` was `in_progress` for run `
 Closed `#snbc2` as an intentional no-op. The attached plan says the original snapshot/baseline replacement premise was already invalidated by the Slice 1 audit: the correctness bug is fixed by `resolve_current_doc(newest-of(disk, buffer))`, git HEAD must not become the prompt-bearing merge base, and the remaining Slice 2 work is optional cosmetic consolidation only.
 
 I did not implement the cosmetic consolidation in this queue drain because the plan explicitly says not to run it via `/agent-doc` on this document; doing so would touch the same closeout/merge path this session is using. No code changed for this item, and no additional backlog follow-up is needed for `#snbc2`.
-<!-- agent:boundary:0f64451f -->
+
+### Re: do #codexctrlz — gpt-5
+
+Implemented and pushed Codex operator control-key handling.
+
+Changes:
+- `agent-doc-orchestration/src/start/supervisor_io.rs` now strips Codex stdin `Ctrl+C`/`Ctrl+Z` before PTY writes, logs `codex_operator_control` proof events, maps `Ctrl+C` to child SIGINT, and maps `Ctrl+Z` to a managed SIGTERM stop.
+- `agent-doc-orchestration/src/start.rs` and `start/run.rs` now track the Ctrl+Z managed stop and route it through the restart-fresh-or-quit prompt instead of auto-resuming Codex.
+- `input_diag.rs` names `Ctrl-Z`, and `AGENTS.md`, `README.md`, `SPEC.md`, `specs/codex-support.md`, `specs/supervisor.md`, and `VERSIONS.md` document the control-key contract. `AGENTS.md` also now says CI checks are passive evidence and must not block turn closeout.
+
+Verification:
+- `cargo test -p agent-doc-orchestration operator_control -- --nocapture`
+- `cargo test -p agent-doc-orchestration restart_continue_strategy -- --nocapture`
+- `cargo check -p agent-doc`
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed, artifact `tart-951814a72d`
+- `git diff --check`
+
+Commits pushed:
+- agent-doc: `9d8bc5ee fix: handle codex operator control keys`
+- parent: `f0d7225e1 agent-doc: handle codex control keys`
+
+Passive CI snapshot, not blocking closeout:
+- agent-doc `CI`: run `27584948926`, `in_progress`
+- parent `Agent Doc`: run `27584968997`, `queued`
+<!-- agent:boundary:3ca1f84e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: [#qrefmisstrike]~~
-- ~~:pushpin: Why was there so much churn in the last queue turn? I was editing unrelated queue items. Those should be ignored. Use AST instead of byte-by-byte comparison. Be selective using CRDT merges into the document model and other areas that can cause churn.~~
-- ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md still sends a CR instead of submitting the command. Please consolidate all send command logic into a single function so we can make this behavior more reliable. Simplify, simplify, simplify...~~
-- ~~:pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item. Any item I place should have `:pushpin:` added since I made the decision to add it in a position.~~
+---
+I switched mrh-servers.md from Claude to Codex by restarting agent-doc. Now JB `Run Agent Doc` is unresponsive. The Codex session was idle.
+```
+resync: pruned 1 stale session(s)
+[route] target tmux session: 0
+[route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client
+Error: dispatch-only codex reopen refused to inject into pane %103 for tasks/mrh-servers.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
+```
+---
 - :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
-- ~~The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex?~~
-- ~~`agent:exchange` with attribute `queue` should add items into the queue while the queue is running.~~
-- ~~do [#snbc2]~~
-- do [#codexctrlz]
+- ~~do [#codexctrlz]~~
 - do [#opverify-submit-proof]
 - do [#opverify-editor-proof]
 - do [#opverify-recycle-proof]
@@ -996,7 +1022,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
 - [ ] [#qt32] [operator-verify] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.
-- [ ] [#codexctrlz] [clean-session] Codex forwarded operator Ctrl+C/Ctrl+Z input can surface as literal `^C`/`^Z` text in the child/session transcript instead of a controlled interrupt/stop path. Repro: tasks/professional/equityfundingsource.md Codex session showed `^Z^Z^C^C^C^C^C^C` while agent-doc heartbeats continued. Add SimWorld/local pty coverage for forwarded control-key bytes, define the Ctrl+Z policy, ensure Codex interrupt/clear routes do not append control glyphs into the composer/transcript, and log proof markers for forwarded Ctrl+C/Ctrl+Z handling.
 <!-- /agent:backlog -->
 
 ## Review

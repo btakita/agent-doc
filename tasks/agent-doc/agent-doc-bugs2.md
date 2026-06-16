@@ -927,7 +927,13 @@ Verification:
 - `git diff --check` passed
 
 Passive CI snapshot only, no waiting: agent-doc `CI` was `in_progress` for run `27584402991`; parent `Agent Doc` run `27584417442` had already failed with empty job steps/no failed log available, so I recorded it as CI-start evidence rather than blocking this turn.
-<!-- agent:boundary:16222c23 -->
+
+### Re: do #snbc2 — gpt-5
+
+Closed `#snbc2` as an intentional no-op. The attached plan says the original snapshot/baseline replacement premise was already invalidated by the Slice 1 audit: the correctness bug is fixed by `resolve_current_doc(newest-of(disk, buffer))`, git HEAD must not become the prompt-bearing merge base, and the remaining Slice 2 work is optional cosmetic consolidation only.
+
+I did not implement the cosmetic consolidation in this queue drain because the plan explicitly says not to run it via `/agent-doc` on this document; doing so would touch the same closeout/merge path this session is using. No code changed for this item, and no additional backlog follow-up is needed for `#snbc2`.
+<!-- agent:boundary:0f64451f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -940,7 +946,7 @@ Passive CI snapshot only, no waiting: agent-doc `CI` was `in_progress` for run `
 - :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
 - ~~The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex?~~
 - ~~`agent:exchange` with attribute `queue` should add items into the queue while the queue is running.~~
-- do [#snbc2]
+- ~~do [#snbc2]~~
 - do [#codexctrlz]
 - do [#opverify-submit-proof]
 - do [#opverify-editor-proof]
@@ -988,7 +994,6 @@ What are #next-steps to fix bugs?
 - [ ] [#4myd] [operator-verify] #suprecyclestall live-verify: with the new binary installed (cargo install + cargo build --release done, pushed agent-doc aafa6510), restart a stale session and drive an idle/next-queue-item recycle. Confirm ops.log shows `supervisor_binary_stale_self_recycled ... candidates=[...]` then EITHER a clean execve hot-reload OR `supervisor_reexec_failed fallback=continue_current_binary` with the per-candidate errno — and in the failure case the pane STAYS ALIVE (no hang) with the restart hint shown. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#anw0verify] [operator-verify] #anw0 redirect live proof: install the new agent-doc binary (cargo build --release + cargo install + lib-install) then drive a real recycle / restart-supervisor race so a dispatcher holding a superseded generation hits the new path. Confirm ops.log shows dispatch_stale_generation_redirect prior_generation=N next_generation=N+1 then dispatch_retry_after_stale_generation and a clean re-dispatch (no terminal generation-N-is-closed). Code+SimWorld landed agent-doc 21a70cdd / superproject 412355fa3. Cannot be agent-done: needs a live editor + real recycle.
 - [ ] [#qflood2] [operator-verify] qflood regression: JB Run Agent Doc on efs coalesced as exit-1 (dual-drain owner, gen 66 already in flight). Needs live multi-process verify; if it still collides, coalesce should report deduped-success not exit-1. Plan: tasks/agent-doc/plan-queue-dispatch-flood.md
-- [ ] [#snbc2] [recommended] OPTIONAL cosmetic (not a bugfix): collapse `baselines/<hash>.md` into a snapshot-store variant so there is one file instead of two, WITHOUT changing merge-base semantics (stays current-at-preflight = `resolve_current_doc(newest-of(disk,buffer))`, NOT git HEAD). #snbc Slice-1 audit proved the substantive HEAD-as-base consolidation would regress merge correctness (drops the uncommitted new prompt from the common ancestor). Moderate risk, touches the closeout path; gate behind NEW SimWorld coverage for the prompt-bearing finalize-merge class first. Must run in a CLEAN session. Plan: tasks/agent-doc/plan-snapshot-baseline-consolidation.md (Revised slice 2).
 - [ ] [#qt32] [operator-verify] #lvbremain Operator live zero-drift PROOF of the 08b supervisor-in-process cutover (cannot be agent-done — needs a live editor). Restart a session, drive one edit-during-finalize cycle, agent reads ops.log for write_authority action=routed + plugin_watch_readonly + supervisor_host_gate hosting=in-process + ZERO drift lines. [recommended]
 - [ ] [#fcc0-live-verify] [operator-verify] #fcc0 live JB 0-dialog proof: with the current agent-doc binary/cdylib installed and the route-owned supervisor recycled onto it, drive a live JetBrains queue/template/compact write path and confirm ops.log shows editor IPC convergence (for example queue_consume_writeback ... transport=editor_ipc) and zero JetBrains File Cache Conflict dialogs. Cannot be agent-done; requires live IDE observation.
 - [ ] [#codexctrlz] [clean-session] Codex forwarded operator Ctrl+C/Ctrl+Z input can surface as literal `^C`/`^Z` text in the child/session transcript instead of a controlled interrupt/stop path. Repro: tasks/professional/equityfundingsource.md Codex session showed `^Z^Z^C^C^C^C^C^C` while agent-doc heartbeats continued. Add SimWorld/local pty coverage for forwarded control-key bytes, define the Ctrl+Z policy, ensure Codex interrupt/clear routes do not append control glyphs into the composer/transcript, and log proof markers for forwarded Ctrl+C/Ctrl+Z handling.

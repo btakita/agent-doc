@@ -243,7 +243,6 @@ Verification:
 - Downloaded deployed `/index.browser-4IEYQSU7.js`; it contains `BorrowerDetailRecord`, `CollateralDetailRecord`, `AddressBlock`, and `ADMIN_REDUNDANT_SUBJECT_PROPERTY_FIELD_KEYS`.
 - `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
 - `src/equityfundingsource-dev` is clean after deploy.
-- `src/equityfundingsource-dev` is clean after deploy.
 - Downloaded deployed `/index.browser-4IEYQSU7.js`; it contains `BorrowerDetailRecord`, `CollateralDetailRecord`, `AddressBlock`, and `ADMIN_REDUNDANT_SUBJECT_PROPERTY_FIELD_KEYS`.
 - Live `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned `303` to admin login, expected for the protected route.
 - Live `/` returned `200`.
@@ -306,7 +305,31 @@ Post-deploy verification:
 ❯ - `src/equityfundingsource-dev` is clean after deploy.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:bebc380a -->
+
+### Re: queue marker cleanup — gpt-5
+
+I reconciled this as a document bookkeeping cycle. The duplicate deploy-cleanliness line was already removed, the last response is marked as the current HEAD boundary, and the queue marker no longer requests a `go` drain. Preflight reports `queue_continuation_required=false`, so there is no drainable queue work to run from this cycle.
+
+Changed paths:
+- Session document only: `tasks/professional/equityfundingsource.md`
+
+Commands:
+- `tsift status`
+- `agent-doc --version`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc repair /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md --apply-recovery`
+- `agent-doc write --template --force-disk --origin skill --commit /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+
+Verification:
+- Preflight and planning completed successfully.
+- `agent-doc repair --apply-recovery` cleared an empty preflight cycle after the stale IPC path failed to preserve the response body.
+- No code tests or deploy were run because no code or application behavior was changed.
+- Preflight still warns that the route-owned agent-doc supervisor is stale; this write bypassed it with `--force-disk`.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:52d3ef62 -->
 <!-- /agent:exchange -->
 ###
 <!--

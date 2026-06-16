@@ -191,7 +191,32 @@ Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read exchange`, `g
 Verification: code inspection only; no tests run because no code changed.
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:4d1b7d41 -->
+
+### Re: Call Scheduled — gpt-5
+
+> **Queue prompt:**
+>
+> Call scheduled
+
+
+`Call scheduled` is EFS-local interested-lender workflow state, not TMO loan state.
+
+Classification: EFS D1 source of truth; TMO-related only as contextual follow-up on a TMO-backed deal.
+
+Evidence:
+- The Available Deal `Interested Lenders` workflow stores the datetime as `call_scheduled_at` on `investor_deal_interests`.
+- `deal_interest_workflow_stage_` derives the local `call_scheduled` stage from that timestamp and sets the next action to `Complete lender call`.
+- The admin patch route writes `call_scheduled_at` directly to `investor_deal_interests`; the explicit `tmo_cache_outbox` path in this area is still `select_lender`, not call scheduling.
+- The timeline event is labeled `Lender call scheduled`, which is admin/lender follow-up history rather than a loan-status transition.
+
+Boundary: this should not mutate TMO loan status or be treated as a TMO calendar/status field unless a separate reviewed integration is added later.
+
+Changed paths: none.
+Commands: `agent-doc preflight`, `agent-doc plan`, `git status --short`, and targeted `rg` inspection in `src/equityfundingsource-dev`.
+Verification: code inspection only; no tests run because no code changed.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:ecee3a48 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -206,7 +231,7 @@ In "Available Deal" -> "Interested Lenders" tab
 Do these steps + fields relate to TMO state?
 - ~~Mark Call Completed~~
 - ~~Start Underwriting~~
-- Call scheduled
+- ~~Call scheduled~~
 - Verbal amount
 - Contact method
 - Pre-doc conditions

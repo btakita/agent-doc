@@ -767,13 +767,55 @@ Commits:
 Confidence: high. The planner is isolated behind a command surface, covered by focused tests and full local `make check`, and the installed dry-run smoke verifies the live safety split without mutating the proof ledger.
 
 Escalation: none.
-<!-- agent:boundary:a180ceaf -->
+
+### Re: JB Run Agent Doc Codex submit and submit-profile simplification — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` on Codex still does not submit ![img_33.png](img_33.png). Also `/clear` is added and as I type, additional `/clear` is sent. ![img_34.png](img_34.png) Why does `Enter` not work? Can we send a single tmux command instead of 2? Submit works with Claude Code.
+>
+> **Follow-up prompt:**
+>
+> Why are we still using `TmuxSubmitDelivery::LiteralTextCarriageReturn`, `tmux_literal_text_cr`, and `CR` at all? This should be rare. We mostly want Enter. Reduce distinctions if possible. Codex support may have gotten more complex than it should have been.
+
+Fixed and shipped.
+
+For Codex, the reliable submit boundary is now one tmux command: `tmux send-keys -t <pane> -H <text-hex> 0d`. I tested the alternatives before landing this: the split text + named `Enter` path can leave the command drafted, and even `send-keys -l "<text>\r"` is translated to LF at a raw reader. The `-H ... 0d` path preserves byte `13` at the pane boundary.
+
+The repeated `/clear` bug was separate. The idle context-reset watcher deduped on the full active queue head, so each in-place edit looked like a new head and triggered another `/clear`. It now keeps a `context_reset_in_flight` latch across active-head edits and clears it only when the clear/drain boundary resolves.
+
+I also addressed the follow-up simplification. The code no longer has `TmuxSubmitDelivery::LiteralTextCarriageReturn` or `tmux_literal_text_cr`, and the one-variant delivery enum is gone. `TmuxSubmitProfile` is now the single policy surface and always reports `tmux_hex_text_cr`. `CR` remains only as the grep-able diagnostic label for the submit byte, not as a separate behavior branch.
+
+Verification:
+- `cargo test -p agent-doc-orchestration submit_profiles_keep_harness_submit_policy_in_one_place -- --nocapture`
+- `cargo test -p agent-doc-orchestration routed_trigger_submit_diagnostic_names_codex_carriage_return_key -- --nocapture`
+- `cargo test -p agent-doc-orchestration route_submit_resubmit_proof_line_is_operator_greppable_for_both_harnesses -- --nocapture`
+- `cargo test -p agent-doc-orchestration context_reset_in_flight_dedupes_active_head_edits -- --nocapture`
+- `cargo test -p agent-doc-orchestration idle_queue_submit_mode_uses_carriage_return_for_codex_owner_pane -- --nocapture`
+- `cargo test -p agent-doc-orchestration opencode_submit_uses_hex_text_cr -- --ignored --nocapture`
+- `cargo test -p agent-doc clear_submit_proof_lines_report_prompt_issue_and_retry_outcome -- --nocapture`
+- `cargo test -p agent-doc simworld_jb_run_and_clear_share_codex_carriage_return_submit_contract -- --nocapture`
+- `make check` passed after the submit fix, and again after the profile simplification.
+- `make install` rebuilt `/home/brian/.cargo/bin/agent-doc` and `libagent_doc.so`; installed version reports `agent-doc 0.34.1`.
+- GitHub Actions `CI` run `27647408583` passed with `make check` and `make tmux-ci` for the submit fix.
+- GitHub Actions `CI` run `27648126039` passed with `make check` and `make tmux-ci` for the simplification.
+
+Commits pushed:
+- `agent-doc` submodule: `d61a6a2d fix: submit managed tmux commands with hex carriage return`
+- parent `agent-loop`: `31b8d4352 agent-doc: update tmux submit fix`
+- `agent-doc` submodule: `1ad73e6f refactor: collapse tmux submit profile delivery`
+- parent `agent-loop`: `b2ac38695 agent-doc: simplify tmux submit profile`
+
+Note: preflight still reported the currently serving route-owned supervisor pid `136275` as stale because it was started before the install. `make install` marked one controller for recycle at the next idle boundary; I did not force-restart the busy serving supervisor during this closeout.
+
+Changed paths: `src/agent-doc` submodule plus parent gitlink and this session document via finalize. Confidence: high. Escalation: none.
+<!-- agent:boundary:06e92d2c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: JB `Run Agent Doc` on Codex still does not submit ![img_33.png](img_33.png). Also `/clear` is added and as I type, additional `/clear` is sent. ![img_34.png](img_34.png) Why does `Enter` not work? Can we send a single tmux command instead of 2? Submit works with Claude Code.
+- ~~:pushpin: JB `Run Agent Doc` on Codex still does not submit ![img_33.png](img_33.png). Also `/clear` is added and as I type, additional `/clear` is sent. ![img_34.png](img_34.png) Why does `Enter` not work? Can we send a single tmux command instead of 2? Submit works with Claude Code.~~
 - Why are we still using `TmuxSubmitDelivery::LiteralTextCarriageReturn`, `tmux_literal_text_cr`, and `CR` at all? This should be rare. We mostly want Enter. Reduce distinctions if possible. Codex support may have gotten more complex than it should have been.
 <!-- /agent:queue -->
 ###

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -189,7 +189,29 @@ Changed paths: session document only. Verification: pending `session-check` afte
 Parked `#ghl-stage-bridge` in the icebox instead of the priority backlog so the recommendation is preserved without starting an implementation queue item.
 
 Changed paths: session document only. Verification: pending `session-check` after this repair write. Escalation: none. Confidence: high.
-<!-- agent:boundary:a0135102 -->
+
+### Re: GHL integration plan — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Create a plan for the GHL integration. I will park this in the icebox for now.
+
+
+Clean parked plan for the GoHighLevel integration:
+
+1. **Keep EFS canonical.** EFS/D1 owns loans, deal stages, borrower secure messages, document permissions, lender selection, funding allocation, audit history, and TMO gates. GHL is the communications/CRM adapter: contacts, conversations, templates, workflows, calendar links, tasks, and mirrored opportunity visibility.
+2. **Start with lender package send.** From the Available Deal dialog, link/upsert the lender contact, optionally create/update the GHL opportunity, then either enroll the contact in a package workflow or send a direct GHL conversation message. Persist all returned GHL IDs/status back onto the existing `investor_deal_interests` adapter fields.
+3. **Add an EFS-to-GHL stage bridge.** On Processing, Underwriting, Terms negotiation, and Closing transitions, enqueue idempotent outbound jobs that update GHL contact/opportunity/workflow state. Do not call GHL inline from the UI; keep retry/dead-letter state and admin-visible sync errors in EFS.
+4. **Bridge borrower/admin messaging carefully.** `chat_sessions` and `chat_messages` stay canonical. Borrower message notifications and admin-reply notifications can be sent through GHL, but inbound email replies should terminate at EFS through verified routing/thread tokens before appending to D1. GHL should receive a mirror/event summary, not own the chat thread.
+5. **Ingest replies only as communication history.** GHL webhooks or polling can update last-contact, next-follow-up, reply/bounce, appointment, and workflow-completion summaries. They must not select a lender, approve terms, release documents, close a deal, or mark funding complete without explicit EFS admin action.
+6. **Roll out in stages.** Dry-run/manual-link one or two deals first, then enable lender package workflow, then stage bridge, then inbound reply threading. Use secure EFS portal links rather than sensitive attachments unless EFS explicitly approves the document class for GHL.
+
+Parking: I would leave this in the icebox under the existing GHL items (`#z3kx` for GHL as messaging/notifications path of record and `#ghl-stage-bridge` for stage mirroring). I did not add an active backlog item because the requested plan is intentionally parked for later.
+
+Docs checked: HighLevel API overview / V1 end-of-support note (https://help.gohighlevel.com/support/solutions/articles/48001060529-highlevel-api-documentation), Conversations `POST /conversations/messages` (https://marketplace.gohighlevel.com/docs/ghl/conversations/send-a-new-message/), contact workflow enrollment (https://marketplace.gohighlevel.com/docs/ghl/contacts/add-contact-to-workflow/), opportunity creation (https://marketplace.gohighlevel.com/docs/ghl/opportunities/create-opportunity/), and workflow actions (https://help.gohighlevel.com/support/solutions/articles/155000002294-what-are-workflow-actions-complete-list-).
+
+Changed paths: session document only. Verification: agent-doc preflight/plan passed; reviewed the shipped EFS GHL adapter and borrower-message PRD notes; checked current official HighLevel docs. No code/tests were run because this was plan-only. Escalation: none. Confidence: high.
+<!-- agent:boundary:f2b54ff8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -197,7 +219,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Create a plan for the GHL integration. I will park this in the icebox for now.
 <!-- /agent:queue -->
 
 ## Backlog

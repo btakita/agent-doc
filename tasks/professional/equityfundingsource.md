@@ -179,7 +179,47 @@ Verification:
 Note: the exchange is large and the queue is active, so I continued the requested drain without compacting. Preflight also warned that the live agent-doc supervisor is stale; I did not recycle it mid-drain.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:eef6cae3 -->
+
+### Re: Borrower Detail, Collateral, onboarding cleanup + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> Format Borrower Detail like an address. Improve formatting of Collateral. ![img_19.png](img_19.png)
+
+
+Implemented and deployed the address-formatting pass. TMO Borrower Detail now renders as an address block: borrower name, street, then city/state/ZIP, with email/phone as metadata below. Collateral now uses the same address-first treatment instead of splitting street/city/state/ZIP into separate grid fragments. Borrower Onboarding Data now hides individual `property_street` / `property_city` / `property_state` / `property_zip` fields when `subject_property_address` already composes them.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev` parent gitlink
+
+Commits/push:
+- EFS submodule: `418a246 fix(admin): format loan address detail cards` pushed to `origin/main`.
+- Parent repo: `6e01ce598 chore(efs): update loan detail formatting submodule` pushed to `origin/main`.
+
+Deploy proof:
+- `make deploy` completed successfully.
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker version: `9065933c-245e-4c75-b3f3-b5adf754aa98`
+- Deployed browser asset: `/index.browser-4IEYQSU7.js`
+- Remote D1 migrations: no migrations to apply.
+
+Verification:
+- Focused test passed: `bun test tests/tmo-loan-details-density.test.ts` — 3 tests.
+- EFS `make check` passed: 739 tests, app build, Worker build.
+- Live `/` returned `200`.
+- Live `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned `303` to admin login, expected for the protected route.
+- Downloaded deployed `/index.browser-4IEYQSU7.js`; it contains `BorrowerDetailRecord`, `CollateralDetailRecord`, `AddressBlock`, and `ADMIN_REDUNDANT_SUBJECT_PROPERTY_FIELD_KEYS`.
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
+- `src/equityfundingsource-dev` is clean after deploy.
+
+Note: the exchange is large and the queue is active, so I continued the requested drain without compacting. Preflight warned that the route-owned agent-doc supervisor is stale; I did not restart it mid-drain.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:7b82e827 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -189,7 +229,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: "Borrower Info" should use inline values...not surrounded by boxes. Make the overall design elegant. Remove unnecessary noise. deploy~~
 - ~~Make AdminBorrowInfoField more generic, because I want to have this rule in other cards.~~
-- Format Borrower Detail like an address. Improve formatting of Collateral. ![img_19.png](img_19.png)
+- ~~Format Borrower Detail like an address. Improve formatting of Collateral. ![img_19.png](img_19.png)~~
 - :pushpin: Improve formatting of Borrower Onboarding Data. Remove individual Property fields made redundant by Subject Property Address. ![img_20.png](img_20.png)
 - deploy
 <!-- /agent:queue -->

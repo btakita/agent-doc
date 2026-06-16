@@ -33,38 +33,12 @@ committed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260616-044036.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260616-064243.md`*
 
 Compacted content:
-- Archived 8 response topic(s): compact card labels + deploy; Borrower Info inline values + generic inline field + deploy; generic inline admin info field; 5 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-No new changes were detected in `tasks/professional/equityfundingsource.md`.
-
-Preflight reports the previous cycle is already committed, the queue is inactive, and `queue_continuation_required=false`, so there is no agent-doc work to run this cycle.
-
-### Re: copy-button layout + deploy — gpt-5
-
-Implemented the copy-button layout fix and deployed it.
-
-Changed `src/equityfundingsource-dev` so copyable full-line fields keep the copy button pinned to the right edge with no-wrap/ellipsized field text, while compact inline TMO metadata keeps the copy icon inline with the value. Covered the TMO card address/name rows, shared `CopyValue`, admin borrower info copy-value overrides, and the dense pipeline PRD/test expectations.
-
-Verification:
-- `bun test tests/tmo-loan-details-density.test.ts tests/boolean-checkbox-fields.test.ts` passed.
-- `make check` passed: 739 tests, app build, and Worker build.
-- Remote D1 migrations list: no migrations to apply before and after deploy.
-- Live smoke checks: `/` returned `200`; `/portal-admin/loans/example` returned `303` behind Access.
-
-Committed and pushed:
-- EFS submodule: `42e08ff` (`fix(admin): keep copy field controls inline (#pipeline-dialog-density)`) pushed to `btakita/equityfundingsource-dev:main`.
-- Superproject pointer: `227e708fa` (`chore(efs): advance copy field layout deploy`) pushed to `btakita/agent-loop:main`.
-
-Deployed through `make deploy`; Worker version ID: `b896bea9-ef6f-42c3-993a-e6843f4efca9`.
-
-GitHub Actions note: neither the EFS submodule nor the root repo has a workflow named `CI`. The root repo's available `Agent Doc` workflow was queued for the superproject push as run `27595064029`.
-No document changes were detected in `/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`; preflight closed the cycle as already committed, so there was no response to write.
-
-Preflight did surface semantic-completion warnings for gated review items that may already be resolved: `#dropbox-sync-adapter`, `#dzmm-writeback-replay`, and `#zwws-vestings-local`.
-<!-- agent:boundary:05665289 -->
+- Archived 1 response topic(s): copy-button layout + deploy
+- Prior summary/context: prior compacted content: Archived 8 response topic(s): compact card labels + deploy; Borrower Info inline values + ge...
+<!-- agent:boundary:4de88f84 -->
 <!-- /agent:exchange -->
 ###
 <!--

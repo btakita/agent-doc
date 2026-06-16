@@ -692,7 +692,11 @@ pub(crate) fn precommit_pending_done_check(file: &Path) -> Result<()> {
     );
 }
 
-pub(crate) fn prewrite_pending_done_check(file: &Path, response_body: &str, flags: &WriteFlags) -> Result<()> {
+pub(crate) fn prewrite_pending_done_check(
+    file: &Path,
+    response_body: &str,
+    flags: &WriteFlags,
+) -> Result<()> {
     if !flags.strict_closeout {
         return Ok(());
     }

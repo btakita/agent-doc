@@ -647,7 +647,10 @@ pub(crate) fn mask_components_by_name(doc: &str, names: &[&str]) -> Option<Strin
     saw_target.then_some(masked)
 }
 
-pub(crate) fn open_cycle_message(file: &Path, state: &crate::cycle_state::CycleState) -> Result<String> {
+pub(crate) fn open_cycle_message(
+    file: &Path,
+    state: &crate::cycle_state::CycleState,
+) -> Result<String> {
     let ipc_hint = latest_ipc_proof_diagnostic_hint(file)?
         .map(|hint| format!(" {hint}"))
         .unwrap_or_default();
@@ -849,7 +852,10 @@ pub fn detect_bypassed_response_write_between(
     None
 }
 
-pub(crate) fn first_bare_prompt_prefix_target_before_marker(diff_text: &str, marker: &str) -> Option<String> {
+pub(crate) fn first_bare_prompt_prefix_target_before_marker(
+    diff_text: &str,
+    marker: &str,
+) -> Option<String> {
     let mut prefix_diff = String::new();
     for line in diff_text.lines() {
         if line

@@ -592,23 +592,23 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use std::cell::RefCell;
-use tempfile::TempDir;
-#[test]
-fn sequential_orchestration_injects_prompt_and_finalizes() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    let baseline = dir.path().join("baseline.md");
-    fs::write(&doc, template_doc()).unwrap();
-    fs::write(&baseline, template_doc()).unwrap();
+    use std::cell::RefCell;
+    use tempfile::TempDir;
+    #[test]
+    fn sequential_orchestration_injects_prompt_and_finalizes() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        fs::write(&doc, template_doc()).unwrap();
+        fs::write(&baseline, template_doc()).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: baseline.to_string_lossy().into_owned(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
         prompts: RefCell::new(Vec::new()),
         envs: RefCell::new(Vec::new()),
         fresh_calls: RefCell::new(0),
@@ -619,58 +619,58 @@ fn sequential_orchestration_injects_prompt_and_finalizes() {
         streaming_chunks: None,
     };
 
-    let tasks = vec![ExecutionTask {
-        label: "do #gkke".to_string(),
-        prompt: "do #gkke".to_string(),
-    }];
+        let tasks = vec![ExecutionTask {
+            label: "do #gkke".to_string(),
+            prompt: "do #gkke".to_string(),
+        }];
 
-    run_ordered_tasks_internal(
-        &doc,
-        &tasks,
-        OrderedTaskRunOptions {
-            exchange_source: None,
-            agent_override: None,
-            model_override: Some("gpt-5"),
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        None,
-    )
-    .unwrap();
+        run_ordered_tasks_internal(
+            &doc,
+            &tasks,
+            OrderedTaskRunOptions {
+                exchange_source: None,
+                agent_override: None,
+                model_override: Some("gpt-5"),
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            None,
+        )
+        .unwrap();
 
-    let final_doc = fs::read_to_string(&doc).unwrap();
-    assert!(final_doc.contains("❯ do #gkke"));
-    assert!(final_doc.contains("### Re: task — gpt-5"));
-    assert_eq!(*lifecycle.preflight_calls.borrow(), 1);
-    assert_eq!(lifecycle.finalize_calls.borrow().len(), 1);
-    assert_eq!(*lifecycle.session_checks.borrow(), 1);
-    assert!(
-        agent.prompts.borrow()[0].contains("<diff>"),
-        "sequential prompt should include the document diff"
-    );
-    assert!(
-        agent.prompts.borrow()[0].contains("❯ do #gkke"),
-        "fresh agent prompt should include the injected task"
-    );
-    assert_eq!(*agent.fresh_calls.borrow(), 1);
-    assert_eq!(*agent.streaming_calls.borrow(), 0);
-}
-#[test]
-fn sequential_orchestration_attaches_tsift_graph_context_to_agent_prompt() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    let baseline = dir.path().join("baseline.md");
-    fs::write(&doc, template_doc()).unwrap();
-    fs::write(&baseline, template_doc()).unwrap();
+        let final_doc = fs::read_to_string(&doc).unwrap();
+        assert!(final_doc.contains("❯ do #gkke"));
+        assert!(final_doc.contains("### Re: task — gpt-5"));
+        assert_eq!(*lifecycle.preflight_calls.borrow(), 1);
+        assert_eq!(lifecycle.finalize_calls.borrow().len(), 1);
+        assert_eq!(*lifecycle.session_checks.borrow(), 1);
+        assert!(
+            agent.prompts.borrow()[0].contains("<diff>"),
+            "sequential prompt should include the document diff"
+        );
+        assert!(
+            agent.prompts.borrow()[0].contains("❯ do #gkke"),
+            "fresh agent prompt should include the injected task"
+        );
+        assert_eq!(*agent.fresh_calls.borrow(), 1);
+        assert_eq!(*agent.streaming_calls.borrow(), 0);
+    }
+    #[test]
+    fn sequential_orchestration_attaches_tsift_graph_context_to_agent_prompt() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        fs::write(&doc, template_doc()).unwrap();
+        fs::write(&baseline, template_doc()).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: baseline.to_string_lossy().into_owned(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
         prompts: RefCell::new(Vec::new()),
         envs: RefCell::new(Vec::new()),
         fresh_calls: RefCell::new(0),
@@ -680,69 +680,69 @@ fn sequential_orchestration_attaches_tsift_graph_context_to_agent_prompt() {
                 .to_string(),
         streaming_chunks: None,
     };
-    let tasks = vec![ExecutionTask {
-        label: "do #gkke".to_string(),
-        prompt: "do #gkke".to_string(),
-    }];
-    let graph_evidence = test_graph_evidence_plan();
+        let tasks = vec![ExecutionTask {
+            label: "do #gkke".to_string(),
+            prompt: "do #gkke".to_string(),
+        }];
+        let graph_evidence = test_graph_evidence_plan();
 
-    run_ordered_tasks_internal(
-        &doc,
-        &tasks,
-        OrderedTaskRunOptions {
-            exchange_source: None,
-            agent_override: None,
-            model_override: Some("gpt-5"),
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        Some(&graph_evidence),
-    )
-    .unwrap();
+        run_ordered_tasks_internal(
+            &doc,
+            &tasks,
+            OrderedTaskRunOptions {
+                exchange_source: None,
+                agent_override: None,
+                model_override: Some("gpt-5"),
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            Some(&graph_evidence),
+        )
+        .unwrap();
 
-    let prompt = &agent.prompts.borrow()[0];
-    assert!(prompt.contains("<tsift_graph_evidence>"));
-    assert!(prompt.contains("\"evidence_packet_id\": \"gevd-gkke\""));
-    assert!(prompt.contains("Worker 1 owns gkke (#gkke)"));
-    assert!(prompt.contains("\"context_pack\""));
-    assert!(prompt.contains("\"candidates\""));
-    assert!(prompt.contains("Fail closed if the task requires a forbidden/shared file"));
-    assert!(prompt.contains("\"token_budget\""));
-    assert!(prompt.contains("\"lower_agent_job_packet\""));
-    assert!(prompt.contains("\"owned_files\": ["));
-    assert!(prompt.contains("\"read_only_context\": ["));
-    assert!(prompt.contains("\"forbidden_files\": []"));
-    assert!(prompt.contains("\"expected_tests\": ["));
-    assert!(prompt.contains("\"expansion_commands\": ["));
-    assert!(prompt.contains("\"fail_closed_prompt\""));
-    let finalize_calls = lifecycle.finalize_calls.borrow();
-    assert_eq!(finalize_calls.len(), 1);
-    assert!(
-        finalize_calls[0].contains("worker_result: completed #gkke"),
-        "child closeout should include a tsift-projectable worker_result line:\n{}",
-        finalize_calls[0]
-    );
-    assert!(finalize_calls[0].contains("src/orchestrate.rs"));
-    assert!(finalize_calls[0].contains("`cargo test orchestrate`"));
-    let final_doc = fs::read_to_string(&doc).unwrap();
-    assert!(!final_doc.contains("<tsift_graph_evidence>"));
-}
-#[test]
-fn sequential_orchestration_always_reruns_preflight_after_injection() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    let baseline = dir.path().join("baseline.md");
-    fs::write(&doc, template_doc()).unwrap();
-    fs::write(&baseline, template_doc()).unwrap();
+        let prompt = &agent.prompts.borrow()[0];
+        assert!(prompt.contains("<tsift_graph_evidence>"));
+        assert!(prompt.contains("\"evidence_packet_id\": \"gevd-gkke\""));
+        assert!(prompt.contains("Worker 1 owns gkke (#gkke)"));
+        assert!(prompt.contains("\"context_pack\""));
+        assert!(prompt.contains("\"candidates\""));
+        assert!(prompt.contains("Fail closed if the task requires a forbidden/shared file"));
+        assert!(prompt.contains("\"token_budget\""));
+        assert!(prompt.contains("\"lower_agent_job_packet\""));
+        assert!(prompt.contains("\"owned_files\": ["));
+        assert!(prompt.contains("\"read_only_context\": ["));
+        assert!(prompt.contains("\"forbidden_files\": []"));
+        assert!(prompt.contains("\"expected_tests\": ["));
+        assert!(prompt.contains("\"expansion_commands\": ["));
+        assert!(prompt.contains("\"fail_closed_prompt\""));
+        let finalize_calls = lifecycle.finalize_calls.borrow();
+        assert_eq!(finalize_calls.len(), 1);
+        assert!(
+            finalize_calls[0].contains("worker_result: completed #gkke"),
+            "child closeout should include a tsift-projectable worker_result line:\n{}",
+            finalize_calls[0]
+        );
+        assert!(finalize_calls[0].contains("src/orchestrate.rs"));
+        assert!(finalize_calls[0].contains("`cargo test orchestrate`"));
+        let final_doc = fs::read_to_string(&doc).unwrap();
+        assert!(!final_doc.contains("<tsift_graph_evidence>"));
+    }
+    #[test]
+    fn sequential_orchestration_always_reruns_preflight_after_injection() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        fs::write(&doc, template_doc()).unwrap();
+        fs::write(&baseline, template_doc()).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: baseline.to_string_lossy().into_owned(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
         prompts: RefCell::new(Vec::new()),
         envs: RefCell::new(Vec::new()),
         fresh_calls: RefCell::new(0),
@@ -753,55 +753,55 @@ fn sequential_orchestration_always_reruns_preflight_after_injection() {
         streaming_chunks: None,
     };
 
-    let tasks = vec![ExecutionTask {
-        label: "do #opcc".to_string(),
-        prompt: "do #opcc".to_string(),
-    }];
+        let tasks = vec![ExecutionTask {
+            label: "do #opcc".to_string(),
+            prompt: "do #opcc".to_string(),
+        }];
 
-    run_ordered_tasks_internal(
-        &doc,
-        &tasks,
-        OrderedTaskRunOptions {
-            exchange_source: None,
-            agent_override: None,
-            model_override: Some("gpt-5"),
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        None,
-    )
-    .unwrap();
+        run_ordered_tasks_internal(
+            &doc,
+            &tasks,
+            OrderedTaskRunOptions {
+                exchange_source: None,
+                agent_override: None,
+                model_override: Some("gpt-5"),
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            None,
+        )
+        .unwrap();
 
-    let final_doc = fs::read_to_string(&doc).unwrap();
-    assert_eq!(
-        *lifecycle.preflight_calls.borrow(),
-        1,
-        "sequential mode should always rerun preflight after prompt injection"
-    );
-    assert!(final_doc.contains("❯ do #opcc"));
-    assert!(agent.prompts.borrow()[0].contains("❯ do #opcc"));
-    assert_eq!(lifecycle.finalize_calls.borrow().len(), 1);
-    assert_eq!(*lifecycle.session_checks.borrow(), 1);
-    assert_eq!(*agent.fresh_calls.borrow(), 1);
-    assert_eq!(*agent.streaming_calls.borrow(), 0);
-}
-#[test]
-fn sequential_orchestration_expands_prompt_presets_into_task_prompt() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    let baseline = dir.path().join("baseline.md");
-    let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nprompt_presets:\n  \"#1\": |\n    Today is 2026-04-25.\n    Keep the work tree clean.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\npreset #1\n- do #prep\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n";
-    fs::write(&doc, content).unwrap();
-    fs::write(&baseline, content).unwrap();
+        let final_doc = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            *lifecycle.preflight_calls.borrow(),
+            1,
+            "sequential mode should always rerun preflight after prompt injection"
+        );
+        assert!(final_doc.contains("❯ do #opcc"));
+        assert!(agent.prompts.borrow()[0].contains("❯ do #opcc"));
+        assert_eq!(lifecycle.finalize_calls.borrow().len(), 1);
+        assert_eq!(*lifecycle.session_checks.borrow(), 1);
+        assert_eq!(*agent.fresh_calls.borrow(), 1);
+        assert_eq!(*agent.streaming_calls.borrow(), 0);
+    }
+    #[test]
+    fn sequential_orchestration_expands_prompt_presets_into_task_prompt() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nprompt_presets:\n  \"#1\": |\n    Today is 2026-04-25.\n    Keep the work tree clean.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\npreset #1\n- do #prep\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, content).unwrap();
+        fs::write(&baseline, content).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: baseline.to_string_lossy().into_owned(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
         prompts: RefCell::new(Vec::new()),
         envs: RefCell::new(Vec::new()),
         fresh_calls: RefCell::new(0),
@@ -812,112 +812,112 @@ fn sequential_orchestration_expands_prompt_presets_into_task_prompt() {
         streaming_chunks: None,
     };
 
-    run_with_dependencies(
-        &doc,
-        OrchestrateConfig {
-            mode: OrchestrateMode::Sequential,
-            tasks_explicit: Vec::new(),
-            from_file: None,
-            from_exchange: true,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: Some("gpt-5".to_string()),
-            no_git: false,
-            no_worktree: true,
-            timeout_secs: 30,
-            dry_run: false,
-            plan: false,
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        &FakeParallelRunner::default(),
-        false,
-    )
-    .unwrap();
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: Some("gpt-5".to_string()),
+                no_git: false,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: false,
+                plan: false,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &FakeParallelRunner::default(),
+            false,
+        )
+        .unwrap();
 
-    let prompt = agent.prompts.borrow()[0].clone();
-    assert!(prompt.contains("(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean."));
-    assert!(prompt.contains("❯ (preset #1)\nToday is 2026-04-25."));
-}
-#[test]
-fn sequential_orchestration_stops_when_exchange_task_list_changes() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    let baseline = dir.path().join("baseline.md");
-    let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsync orchestra\npreset #spec\n- do #first\n- do #second\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n";
-    fs::write(&doc, content).unwrap();
-    fs::write(&baseline, content).unwrap();
+        let prompt = agent.prompts.borrow()[0].clone();
+        assert!(prompt.contains("(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean."));
+        assert!(prompt.contains("❯ (preset #1)\nToday is 2026-04-25."));
+    }
+    #[test]
+    fn sequential_orchestration_stops_when_exchange_task_list_changes() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsync orchestra\npreset #spec\n- do #first\n- do #second\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, content).unwrap();
+        fs::write(&baseline, content).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: baseline.to_string_lossy().into_owned(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = MutatingAgentRunner {
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = MutatingAgentRunner {
         fresh_calls: RefCell::new(0),
         response: "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n"
             .to_string(),
     };
-    let tasks = vec![
-        ExecutionTask {
-            label: "do #first".to_string(),
-            prompt: "do #first".to_string(),
-        },
-        ExecutionTask {
-            label: "do #second".to_string(),
-            prompt: "do #second".to_string(),
-        },
-    ];
-    let source = ExchangeTaskSourceFingerprint {
-        tasks: vec!["do #first".to_string(), "do #second".to_string()],
-        requested_presets: vec!["#spec".to_string()],
-    };
+        let tasks = vec![
+            ExecutionTask {
+                label: "do #first".to_string(),
+                prompt: "do #first".to_string(),
+            },
+            ExecutionTask {
+                label: "do #second".to_string(),
+                prompt: "do #second".to_string(),
+            },
+        ];
+        let source = ExchangeTaskSourceFingerprint {
+            tasks: vec!["do #first".to_string(), "do #second".to_string()],
+            requested_presets: vec!["#spec".to_string()],
+        };
 
-    let err = run_ordered_tasks_internal(
-        &doc,
-        &tasks,
-        OrderedTaskRunOptions {
-            exchange_source: Some(&source),
-            agent_override: None,
-            model_override: Some("gpt-5"),
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        None,
-    )
-    .unwrap_err()
-    .to_string();
+        let err = run_ordered_tasks_internal(
+            &doc,
+            &tasks,
+            OrderedTaskRunOptions {
+                exchange_source: Some(&source),
+                agent_override: None,
+                model_override: Some("gpt-5"),
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            None,
+        )
+        .unwrap_err()
+        .to_string();
 
-    let final_doc = fs::read_to_string(&doc).unwrap();
-    assert!(err.contains("orchestration batch changed during run"));
-    assert!(final_doc.contains("- do #inserted"));
-    assert!(final_doc.contains("### Re: first — gpt-5"));
-    assert!(final_doc.contains("### Re: orchestration batch changed — gpt-5"));
-    assert!(!final_doc.contains("❯ do #second"));
-    assert_eq!(*agent.fresh_calls.borrow(), 1);
-    assert_eq!(lifecycle.finalize_calls.borrow().len(), 2);
-    assert_eq!(*lifecycle.session_checks.borrow(), 2);
-}
-#[test]
-fn sequential_orchestration_uses_streaming_backend_for_crdt_docs() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    let baseline = dir.path().join("baseline.md");
-    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
-    fs::write(&doc, template_doc()).unwrap();
-    fs::write(&baseline, template_doc()).unwrap();
+        let final_doc = fs::read_to_string(&doc).unwrap();
+        assert!(err.contains("orchestration batch changed during run"));
+        assert!(final_doc.contains("- do #inserted"));
+        assert!(final_doc.contains("### Re: first — gpt-5"));
+        assert!(final_doc.contains("### Re: orchestration batch changed — gpt-5"));
+        assert!(!final_doc.contains("❯ do #second"));
+        assert_eq!(*agent.fresh_calls.borrow(), 1);
+        assert_eq!(lifecycle.finalize_calls.borrow().len(), 2);
+        assert_eq!(*lifecycle.session_checks.borrow(), 2);
+    }
+    #[test]
+    fn sequential_orchestration_uses_streaming_backend_for_crdt_docs() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+        fs::write(&doc, template_doc()).unwrap();
+        fs::write(&baseline, template_doc()).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: baseline.to_string_lossy().into_owned(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
         prompts: RefCell::new(Vec::new()),
         envs: RefCell::new(Vec::new()),
         fresh_calls: RefCell::new(0),
@@ -939,183 +939,183 @@ fn sequential_orchestration_uses_streaming_backend_for_crdt_docs() {
         ]),
     };
 
-    let tasks = vec![ExecutionTask {
-        label: "do #4qja".to_string(),
-        prompt: "do #4qja".to_string(),
-    }];
+        let tasks = vec![ExecutionTask {
+            label: "do #4qja".to_string(),
+            prompt: "do #4qja".to_string(),
+        }];
 
-    run_ordered_tasks_internal(
-        &doc,
-        &tasks,
-        OrderedTaskRunOptions {
-            exchange_source: None,
-            agent_override: None,
-            model_override: Some("gpt-5"),
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        None,
-    )
-    .unwrap();
+        run_ordered_tasks_internal(
+            &doc,
+            &tasks,
+            OrderedTaskRunOptions {
+                exchange_source: None,
+                agent_override: None,
+                model_override: Some("gpt-5"),
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            None,
+        )
+        .unwrap();
 
-    let final_doc = fs::read_to_string(&doc).unwrap();
-    assert!(final_doc.contains("❯ do #4qja"));
-    assert!(final_doc.contains("### Re: streamed — gpt-5"));
-    assert_eq!(final_doc.matches("### Re: streamed — gpt-5").count(), 1);
-    assert_eq!(*agent.streaming_calls.borrow(), 1);
-    assert_eq!(*agent.fresh_calls.borrow(), 0);
-}
-#[test]
-fn dag_orchestration_runs_topological_order() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    let baseline = dir.path().join("baseline.md");
-    fs::write(&doc, template_doc()).unwrap();
-    fs::write(&baseline, template_doc()).unwrap();
+        let final_doc = fs::read_to_string(&doc).unwrap();
+        assert!(final_doc.contains("❯ do #4qja"));
+        assert!(final_doc.contains("### Re: streamed — gpt-5"));
+        assert_eq!(final_doc.matches("### Re: streamed — gpt-5").count(), 1);
+        assert_eq!(*agent.streaming_calls.borrow(), 1);
+        assert_eq!(*agent.fresh_calls.borrow(), 0);
+    }
+    #[test]
+    fn dag_orchestration_runs_topological_order() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        fs::write(&doc, template_doc()).unwrap();
+        fs::write(&baseline, template_doc()).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: baseline.to_string_lossy().into_owned(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
-        prompts: RefCell::new(Vec::new()),
-        envs: RefCell::new(Vec::new()),
-        fresh_calls: RefCell::new(0),
-        streaming_calls: RefCell::new(0),
-        response:
-            "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n"
-                .to_string(),
-        streaming_chunks: None,
-    };
-    let dag_tasks = vec![
-        DagTask {
-            id: "#prep".to_string(),
-            prompt: "do #prep".to_string(),
-            deps: Vec::new(),
-        },
-        DagTask {
-            id: "#report".to_string(),
-            prompt: "do #report".to_string(),
-            deps: vec!["#prep".to_string(), "#bench".to_string()],
-        },
-        DagTask {
-            id: "#bench".to_string(),
-            prompt: "do #bench".to_string(),
-            deps: vec!["#prep".to_string()],
-        },
-    ];
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response:
+                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n"
+                    .to_string(),
+            streaming_chunks: None,
+        };
+        let dag_tasks = vec![
+            DagTask {
+                id: "#prep".to_string(),
+                prompt: "do #prep".to_string(),
+                deps: Vec::new(),
+            },
+            DagTask {
+                id: "#report".to_string(),
+                prompt: "do #report".to_string(),
+                deps: vec!["#prep".to_string(), "#bench".to_string()],
+            },
+            DagTask {
+                id: "#bench".to_string(),
+                prompt: "do #bench".to_string(),
+                deps: vec!["#prep".to_string()],
+            },
+        ];
 
-    let execution = plan_dag_execution(&dag_tasks).unwrap();
-    assert_eq!(
-        execution
-            .iter()
-            .map(|task| task.prompt.as_str())
-            .collect::<Vec<_>>(),
-        vec!["do #prep", "do #bench", "do #report"]
-    );
+        let execution = plan_dag_execution(&dag_tasks).unwrap();
+        assert_eq!(
+            execution
+                .iter()
+                .map(|task| task.prompt.as_str())
+                .collect::<Vec<_>>(),
+            vec!["do #prep", "do #bench", "do #report"]
+        );
 
-    run_ordered_tasks_internal(
-        &doc,
-        &execution,
-        OrderedTaskRunOptions {
-            exchange_source: None,
-            agent_override: None,
-            model_override: Some("gpt-5"),
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        None,
-    )
-    .unwrap();
+        run_ordered_tasks_internal(
+            &doc,
+            &execution,
+            OrderedTaskRunOptions {
+                exchange_source: None,
+                agent_override: None,
+                model_override: Some("gpt-5"),
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            None,
+        )
+        .unwrap();
 
-    assert_eq!(lifecycle.finalize_calls.borrow().len(), 3);
-    assert_eq!(*lifecycle.session_checks.borrow(), 3);
-    let prompts = agent.prompts.borrow();
-    assert!(prompts[0].contains("❯ do #prep"));
-    assert!(prompts[1].contains("❯ do #bench"));
-    assert!(prompts[2].contains("❯ do #report"));
-}
-#[test]
-fn parallel_mode_uses_shared_parallel_runner() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    fs::write(&doc, template_doc()).unwrap();
+        assert_eq!(lifecycle.finalize_calls.borrow().len(), 3);
+        assert_eq!(*lifecycle.session_checks.borrow(), 3);
+        let prompts = agent.prompts.borrow();
+        assert!(prompts[0].contains("❯ do #prep"));
+        assert!(prompts[1].contains("❯ do #bench"));
+        assert!(prompts[2].contains("❯ do #report"));
+    }
+    #[test]
+    fn parallel_mode_uses_shared_parallel_runner() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, template_doc()).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: "unused".to_string(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
-        prompts: RefCell::new(Vec::new()),
-        envs: RefCell::new(Vec::new()),
-        fresh_calls: RefCell::new(0),
-        streaming_calls: RefCell::new(0),
-        response: "unused".to_string(),
-        streaming_chunks: None,
-    };
-    let parallel_runner = FakeParallelRunner::default();
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: "unused".to_string(),
+            streaming_chunks: None,
+        };
+        let parallel_runner = FakeParallelRunner::default();
 
-    run_with_dependencies(
-        &doc,
-        OrchestrateConfig {
-            mode: OrchestrateMode::Parallel,
-            tasks_explicit: vec!["  ❯ do #9pw9  ".to_string()],
-            from_file: None,
-            from_exchange: false,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: Some("gpt-5".to_string()),
-            no_git: true,
-            no_worktree: true,
-            timeout_secs: 45,
-            dry_run: true,
-            plan: false,
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        &parallel_runner,
-        false,
-    )
-    .unwrap();
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Parallel,
+                tasks_explicit: vec!["  ❯ do #9pw9  ".to_string()],
+                from_file: None,
+                from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: Some("gpt-5".to_string()),
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 45,
+                dry_run: true,
+                plan: false,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &parallel_runner,
+            false,
+        )
+        .unwrap();
 
-    let calls = parallel_runner.calls.borrow();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(
-        calls[0].1,
-        vec![parallel::ParallelTask {
-            description: "do #9pw9".to_string(),
-            prompt: "do #9pw9".to_string(),
-        }]
-    );
-    assert_eq!(calls[0].2.as_deref(), Some("gpt-5"));
-    assert!(calls[0].3);
-    assert!(calls[0].4);
-    assert_eq!(calls[0].5, 45);
-    assert!(calls[0].6);
-    assert!(lifecycle.finalize_calls.borrow().is_empty());
-    assert!(agent.prompts.borrow().is_empty());
-}
-#[cfg(unix)]
-#[test]
-fn parallel_mode_continues_without_graph_evidence_when_tsift_is_stale() {
-    use std::os::unix::fs::PermissionsExt;
+        let calls = parallel_runner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].1,
+            vec![parallel::ParallelTask {
+                description: "do #9pw9".to_string(),
+                prompt: "do #9pw9".to_string(),
+            }]
+        );
+        assert_eq!(calls[0].2.as_deref(), Some("gpt-5"));
+        assert!(calls[0].3);
+        assert!(calls[0].4);
+        assert_eq!(calls[0].5, 45);
+        assert!(calls[0].6);
+        assert!(lifecycle.finalize_calls.borrow().is_empty());
+        assert!(agent.prompts.borrow().is_empty());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn parallel_mode_continues_without_graph_evidence_when_tsift_is_stale() {
+        use std::os::unix::fs::PermissionsExt;
 
-    let dir = TempDir::new().unwrap();
-    std::fs::create_dir_all(dir.path().join(".tsift")).unwrap();
-    std::fs::write(dir.path().join(".tsift/graph.db"), "fake").unwrap();
-    let doc = dir.path().join("session.md");
-    fs::write(&doc, template_doc()).unwrap();
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".tsift")).unwrap();
+        std::fs::write(dir.path().join(".tsift/graph.db"), "fake").unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, template_doc()).unwrap();
 
-    let script = dir.path().join("fake-tsift-stale.sh");
-    std::fs::write(
+        let script = dir.path().join("fake-tsift-stale.sh");
+        std::fs::write(
         &script,
         r#"#!/bin/sh
 if echo "$*" | grep -q 'graph-db.*--json status'; then
@@ -1129,331 +1129,331 @@ exit 2
 "#,
     )
     .unwrap();
-    let mut perms = std::fs::metadata(&script).unwrap().permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&script, perms).unwrap();
-    let _env = EnvGuard::set("AGENT_DOC_TSIFT_BIN", script.to_str().unwrap());
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        let _env = EnvGuard::set("AGENT_DOC_TSIFT_BIN", script.to_str().unwrap());
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: "unused".to_string(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
-        prompts: RefCell::new(Vec::new()),
-        envs: RefCell::new(Vec::new()),
-        fresh_calls: RefCell::new(0),
-        streaming_calls: RefCell::new(0),
-        response: "unused".to_string(),
-        streaming_chunks: None,
-    };
-    let parallel_runner = FakeParallelRunner::default();
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: "unused".to_string(),
+            streaming_chunks: None,
+        };
+        let parallel_runner = FakeParallelRunner::default();
 
-    run_with_dependencies(
-        &doc,
-        OrchestrateConfig {
-            mode: OrchestrateMode::Parallel,
-            tasks_explicit: vec!["do #gkke".to_string()],
-            from_file: None,
-            from_exchange: false,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: true,
-            no_worktree: true,
-            timeout_secs: 30,
-            dry_run: false,
-            plan: false,
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        &parallel_runner,
-        false,
-    )
-    .unwrap();
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Parallel,
+                tasks_explicit: vec!["do #gkke".to_string()],
+                from_file: None,
+                from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: false,
+                plan: false,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &parallel_runner,
+            false,
+        )
+        .unwrap();
 
-    let calls = parallel_runner.calls.borrow();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].1[0].description, "do #gkke");
-    assert_eq!(calls[0].1[0].prompt, "do #gkke");
-    assert!(!calls[0].1[0].prompt.contains("<tsift_graph_evidence>"));
-}
-#[test]
-fn parallel_mode_expands_prompt_presets_into_task_prompt_only() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    fs::write(
+        let calls = parallel_runner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1[0].description, "do #gkke");
+        assert_eq!(calls[0].1[0].prompt, "do #gkke");
+        assert!(!calls[0].1[0].prompt.contains("<tsift_graph_evidence>"));
+    }
+    #[test]
+    fn parallel_mode_expands_prompt_presets_into_task_prompt_only() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(
         &doc,
         "---\nprompt_presets:\n  \"#1\": |\n    Keep the work tree clean.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\npreset #1\n- do #prep\n<!-- /agent:exchange -->\n",
     )
     .unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: "unused".to_string(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
-        prompts: RefCell::new(Vec::new()),
-        envs: RefCell::new(Vec::new()),
-        fresh_calls: RefCell::new(0),
-        streaming_calls: RefCell::new(0),
-        response: "unused".to_string(),
-        streaming_chunks: None,
-    };
-    let parallel_runner = FakeParallelRunner::default();
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: "unused".to_string(),
+            streaming_chunks: None,
+        };
+        let parallel_runner = FakeParallelRunner::default();
 
-    run_with_dependencies(
-        &doc,
-        OrchestrateConfig {
-            mode: OrchestrateMode::Parallel,
-            tasks_explicit: Vec::new(),
-            from_file: None,
-            from_exchange: true,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: true,
-            no_worktree: true,
-            timeout_secs: 30,
-            dry_run: true,
-            plan: false,
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        &parallel_runner,
-        false,
-    )
-    .unwrap();
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Parallel,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &parallel_runner,
+            false,
+        )
+        .unwrap();
 
-    let call = &parallel_runner.calls.borrow()[0];
-    assert_eq!(call.1[0].description, "do #prep");
-    assert_eq!(
-        call.1[0].prompt,
-        "(preset #1)\nKeep the work tree clean.\ndo #prep"
-    );
-}
-#[test]
-fn legacy_parallel_compat_allows_empty_task_list() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    fs::write(&doc, template_doc()).unwrap();
+        let call = &parallel_runner.calls.borrow()[0];
+        assert_eq!(call.1[0].description, "do #prep");
+        assert_eq!(
+            call.1[0].prompt,
+            "(preset #1)\nKeep the work tree clean.\ndo #prep"
+        );
+    }
+    #[test]
+    fn legacy_parallel_compat_allows_empty_task_list() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, template_doc()).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: "unused".to_string(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
-        prompts: RefCell::new(Vec::new()),
-        envs: RefCell::new(Vec::new()),
-        fresh_calls: RefCell::new(0),
-        streaming_calls: RefCell::new(0),
-        response: "unused".to_string(),
-        streaming_chunks: None,
-    };
-    let parallel_runner = FakeParallelRunner::default();
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: "unused".to_string(),
+            streaming_chunks: None,
+        };
+        let parallel_runner = FakeParallelRunner::default();
 
-    run_with_dependencies(
-        &doc,
-        OrchestrateConfig {
-            mode: OrchestrateMode::Parallel,
-            tasks_explicit: Vec::new(),
-            from_file: None,
-            from_exchange: false,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: false,
-            no_worktree: false,
-            timeout_secs: 600,
-            dry_run: false,
-            plan: false,
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        &parallel_runner,
-        true,
-    )
-    .unwrap();
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Parallel,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: false,
+                no_worktree: false,
+                timeout_secs: 600,
+                dry_run: false,
+                plan: false,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &parallel_runner,
+            true,
+        )
+        .unwrap();
 
-    let calls = parallel_runner.calls.borrow();
-    assert_eq!(calls.len(), 1);
-    assert!(calls[0].1.is_empty());
-}
-#[test]
-fn plan_flag_sequential_prints_expanded_prompts_without_executing() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    fs::write(&doc, template_doc()).unwrap();
+        let calls = parallel_runner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].1.is_empty());
+    }
+    #[test]
+    fn plan_flag_sequential_prints_expanded_prompts_without_executing() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, template_doc()).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: "unused".to_string(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
-        prompts: RefCell::new(Vec::new()),
-        envs: RefCell::new(Vec::new()),
-        fresh_calls: RefCell::new(0),
-        streaming_calls: RefCell::new(0),
-        response: "unused".to_string(),
-        streaming_chunks: None,
-    };
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: "unused".to_string(),
+            streaming_chunks: None,
+        };
 
-    run_with_dependencies(
-        &doc,
-        OrchestrateConfig {
-            mode: OrchestrateMode::Sequential,
-            tasks_explicit: vec!["do #prep".to_string(), "do #report".to_string()],
-            from_file: None,
-            from_exchange: false,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: false,
-            no_worktree: false,
-            timeout_secs: 30,
-            dry_run: false,
-            plan: true,
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        &FakeParallelRunner::default(),
-        false,
-    )
-    .unwrap();
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: vec!["do #prep".to_string(), "do #report".to_string()],
+                from_file: None,
+                from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: false,
+                no_worktree: false,
+                timeout_secs: 30,
+                dry_run: false,
+                plan: true,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &FakeParallelRunner::default(),
+            false,
+        )
+        .unwrap();
 
-    assert!(lifecycle.finalize_calls.borrow().is_empty());
-    assert!(agent.prompts.borrow().is_empty());
-}
-#[test]
-fn plan_flag_sequential_expands_preset_in_output() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    let preset_doc = "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: claude\nprompt_presets:\n  \"#1\": \"Today is 2026-04-25.\\nKeep the work tree clean.\"\n---\n<!-- agent:exchange -->\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
-    fs::write(&doc, preset_doc).unwrap();
+        assert!(lifecycle.finalize_calls.borrow().is_empty());
+        assert!(agent.prompts.borrow().is_empty());
+    }
+    #[test]
+    fn plan_flag_sequential_expands_preset_in_output() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let preset_doc = "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: claude\nprompt_presets:\n  \"#1\": \"Today is 2026-04-25.\\nKeep the work tree clean.\"\n---\n<!-- agent:exchange -->\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
+        fs::write(&doc, preset_doc).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: "unused".to_string(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
-        prompts: RefCell::new(Vec::new()),
-        envs: RefCell::new(Vec::new()),
-        fresh_calls: RefCell::new(0),
-        streaming_calls: RefCell::new(0),
-        response: "unused".to_string(),
-        streaming_chunks: None,
-    };
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: "unused".to_string(),
+            streaming_chunks: None,
+        };
 
-    run_with_dependencies(
-        &doc,
-        OrchestrateConfig {
-            mode: OrchestrateMode::Sequential,
-            tasks_explicit: vec!["do #prep".to_string()],
-            from_file: None,
-            from_exchange: false,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: false,
-            no_worktree: false,
-            timeout_secs: 30,
-            dry_run: false,
-            plan: true,
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        &FakeParallelRunner::default(),
-        false,
-    )
-    .unwrap();
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: vec!["do #prep".to_string()],
+                from_file: None,
+                from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: false,
+                no_worktree: false,
+                timeout_secs: 30,
+                dry_run: false,
+                plan: true,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &FakeParallelRunner::default(),
+            false,
+        )
+        .unwrap();
 
-    assert!(lifecycle.finalize_calls.borrow().is_empty());
-    assert!(agent.prompts.borrow().is_empty());
-}
-#[test]
-fn plan_flag_parallel_exits_without_calling_runner() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    fs::write(&doc, template_doc()).unwrap();
+        assert!(lifecycle.finalize_calls.borrow().is_empty());
+        assert!(agent.prompts.borrow().is_empty());
+    }
+    #[test]
+    fn plan_flag_parallel_exits_without_calling_runner() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, template_doc()).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: "unused".to_string(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
-        prompts: RefCell::new(Vec::new()),
-        envs: RefCell::new(Vec::new()),
-        fresh_calls: RefCell::new(0),
-        streaming_calls: RefCell::new(0),
-        response: "unused".to_string(),
-        streaming_chunks: None,
-    };
-    let parallel_runner = FakeParallelRunner::default();
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: "unused".to_string(),
+            streaming_chunks: None,
+        };
+        let parallel_runner = FakeParallelRunner::default();
 
-    run_with_dependencies(
-        &doc,
-        OrchestrateConfig {
-            mode: OrchestrateMode::Parallel,
-            tasks_explicit: vec!["do #a".to_string(), "do #b".to_string()],
-            from_file: None,
-            from_exchange: false,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: false,
-            no_worktree: false,
-            timeout_secs: 30,
-            dry_run: false,
-            plan: true,
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        &parallel_runner,
-        false,
-    )
-    .unwrap();
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Parallel,
+                tasks_explicit: vec!["do #a".to_string(), "do #b".to_string()],
+                from_file: None,
+                from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: false,
+                no_worktree: false,
+                timeout_secs: 30,
+                dry_run: false,
+                plan: true,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &parallel_runner,
+            false,
+        )
+        .unwrap();
 
-    assert!(parallel_runner.calls.borrow().is_empty());
-}
-#[test]
-fn sequential_orchestration_adds_codex_network_override_to_child_env() {
-    let dir = tempfile::tempdir().unwrap();
-    let doc = dir.path().join("session.md");
-    let baseline = dir.path().join("baseline.md");
-    let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\ncodex_args: \"-s danger-full-access\"\ncodex_network_access: enabled\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n";
-    fs::write(&doc, content).unwrap();
-    fs::write(&baseline, content).unwrap();
+        assert!(parallel_runner.calls.borrow().is_empty());
+    }
+    #[test]
+    fn sequential_orchestration_adds_codex_network_override_to_child_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\ncodex_args: \"-s danger-full-access\"\ncodex_network_access: enabled\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, content).unwrap();
+        fs::write(&baseline, content).unwrap();
 
-    let lifecycle = FakeLifecycleOps {
-        baseline_file: baseline.to_string_lossy().into_owned(),
-        preflight_calls: RefCell::new(0),
-        finalize_calls: RefCell::new(Vec::new()),
-        session_checks: RefCell::new(0),
-    };
-    let agent = FakeAgentRunner {
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
         prompts: RefCell::new(Vec::new()),
         envs: RefCell::new(Vec::new()),
         fresh_calls: RefCell::new(0),
@@ -1464,36 +1464,36 @@ fn sequential_orchestration_adds_codex_network_override_to_child_env() {
         streaming_chunks: None,
     };
 
-    run_with_dependencies(
-        &doc,
-        OrchestrateConfig {
-            mode: OrchestrateMode::Sequential,
-            tasks_explicit: vec!["do #net".to_string()],
-            from_file: None,
-            from_exchange: false,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: false,
-            no_worktree: false,
-            timeout_secs: 30,
-            dry_run: false,
-            plan: false,
-        },
-        &Config::default(),
-        &lifecycle,
-        &agent,
-        &FakeParallelRunner::default(),
-        false,
-    )
-    .unwrap();
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: vec!["do #net".to_string()],
+                from_file: None,
+                from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: false,
+                no_worktree: false,
+                timeout_secs: 30,
+                dry_run: false,
+                plan: false,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &FakeParallelRunner::default(),
+            false,
+        )
+        .unwrap();
 
-    let envs = agent.envs.borrow();
-    assert_eq!(envs.len(), 1);
-    assert!(envs[0].iter().any(|(key, value)| {
-        key == agent_doc_orchestration::agent::CODEX_SANDBOX_NETWORK_DISABLED_ENV
-            && value.is_none()
-    }));
-}
+        let envs = agent.envs.borrow();
+        assert_eq!(envs.len(), 1);
+        assert!(envs[0].iter().any(|(key, value)| {
+            key == agent_doc_orchestration::agent::CODEX_SANDBOX_NETWORK_DISABLED_ENV
+                && value.is_none()
+        }));
+    }
 }

@@ -2,7 +2,10 @@
 
 use super::*;
 
-pub(crate) fn is_safe_out_of_band_exchange_growth(snapshot_content: &str, file_content: &str) -> bool {
+pub(crate) fn is_safe_out_of_band_exchange_growth(
+    snapshot_content: &str,
+    file_content: &str,
+) -> bool {
     if !file_content.starts_with(snapshot_content) {
         return false;
     }
@@ -10,7 +13,10 @@ pub(crate) fn is_safe_out_of_band_exchange_growth(snapshot_content: &str, file_c
     !suffix.is_empty() && suffix.starts_with("### Re:")
 }
 
-pub(crate) fn is_safe_exchange_user_prompt_insert(snapshot_exchange: &str, file_exchange: &str) -> bool {
+pub(crate) fn is_safe_exchange_user_prompt_insert(
+    snapshot_exchange: &str,
+    file_exchange: &str,
+) -> bool {
     let snap_lines: Vec<&str> = snapshot_exchange.lines().collect();
     let file_lines: Vec<&str> = file_exchange.lines().collect();
 
@@ -134,7 +140,10 @@ pub(crate) fn historical_exchange_prelude_looks_like_imperative(line: &str) -> b
         || compact.starts_with("complete ")
 }
 
-pub(crate) fn is_safe_historical_exchange_growth(snapshot_content: &str, file_content: &str) -> bool {
+pub(crate) fn is_safe_historical_exchange_growth(
+    snapshot_content: &str,
+    file_content: &str,
+) -> bool {
     let diff = similar::TextDiff::from_lines(snapshot_content, file_content);
     let mut insert_block = String::new();
     let mut saw_insert = false;
@@ -157,7 +166,10 @@ pub(crate) fn is_safe_historical_exchange_growth(snapshot_content: &str, file_co
     saw_insert && flush_exchange_insert_block(&mut insert_block)
 }
 
-pub(crate) fn is_safe_user_follow_up_exchange_growth(head_content: &str, current_content: &str) -> bool {
+pub(crate) fn is_safe_user_follow_up_exchange_growth(
+    head_content: &str,
+    current_content: &str,
+) -> bool {
     if head_content == current_content || !current_content.starts_with(head_content) {
         return false;
     }
@@ -169,7 +181,10 @@ pub(crate) fn is_safe_user_follow_up_exchange_growth(head_content: &str, current
         && !suffix.starts_with("#### Re:")
 }
 
-pub(crate) fn is_safe_out_of_band_pending_mutation(snapshot_content: &str, file_content: &str) -> bool {
+pub(crate) fn is_safe_out_of_band_pending_mutation(
+    snapshot_content: &str,
+    file_content: &str,
+) -> bool {
     let (snap_prelude, snap_items, snap_postlude) = crate::pending::parse_items(snapshot_content);
     let (file_prelude, file_items, file_postlude) = crate::pending::parse_items(file_content);
 
@@ -271,7 +286,10 @@ pub(crate) fn starts_with_prompt_preset_reference(line: &str) -> bool {
             .is_some_and(|ch| ch.is_whitespace())
 }
 
-pub(crate) fn status_mutation_introduces_prompt_work(snapshot_content: &str, file_content: &str) -> bool {
+pub(crate) fn status_mutation_introduces_prompt_work(
+    snapshot_content: &str,
+    file_content: &str,
+) -> bool {
     let diff = similar::TextDiff::from_lines(snapshot_content, file_content);
     let mut added = String::new();
 
@@ -297,7 +315,10 @@ pub(crate) fn status_mutation_introduces_prompt_work(snapshot_content: &str, fil
     })
 }
 
-pub(crate) fn is_safe_out_of_band_status_mutation(snapshot_content: &str, file_content: &str) -> bool {
+pub(crate) fn is_safe_out_of_band_status_mutation(
+    snapshot_content: &str,
+    file_content: &str,
+) -> bool {
     snapshot_content.trim() != file_content.trim()
         && !status_mutation_introduces_prompt_work(snapshot_content, file_content)
 }
@@ -431,9 +452,9 @@ pub(crate) fn classify_committed_historical_agent_doc_mutation(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-#[test]
-fn classify_safe_out_of_band_agent_doc_mutation_exchange_and_pending() {
-    let snapshot = "---\nagent_doc_session: test\n---\n\n\
+    #[test]
+    fn classify_safe_out_of_band_agent_doc_mutation_exchange_and_pending() {
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: older\n\
             old body\n\
@@ -442,7 +463,7 @@ fn classify_safe_out_of_band_agent_doc_mutation_exchange_and_pending() {
             <!-- agent:pending -->\n\
             - [ ] [#a1b2] existing\n\
             <!-- /agent:pending -->\n";
-    let file = "---\nagent: codex\nagent_doc_session: test\n---\n\n\
+        let file = "---\nagent: codex\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: older\n\
             old body\n\
@@ -455,20 +476,20 @@ fn classify_safe_out_of_band_agent_doc_mutation_exchange_and_pending() {
             - [ ] [#a1b2] existing\n\
             <!-- /agent:pending -->\n";
 
-    assert_eq!(
-        classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
-        Some("exchange+pending")
-    );
-}
-#[test]
-fn classify_safe_out_of_band_agent_doc_mutation_rejects_user_prompt_append() {
-    let snapshot = "---\nagent_doc_session: test\n---\n\n\
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            Some("exchange+pending")
+        );
+    }
+    #[test]
+    fn classify_safe_out_of_band_agent_doc_mutation_rejects_user_prompt_append() {
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: older\n\
             old body\n\
             <!-- agent:boundary:oldid -->\n\
             <!-- /agent:exchange -->\n";
-    let file = "---\nagent_doc_session: test\n---\n\n\
+        let file = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: older\n\
             old body\n\
@@ -476,14 +497,14 @@ fn classify_safe_out_of_band_agent_doc_mutation_rejects_user_prompt_append() {
             <!-- agent:boundary:newid -->\n\
             <!-- /agent:exchange -->\n";
 
-    assert_eq!(
-        classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
-        None
-    );
-}
-#[test]
-fn classify_safe_out_of_band_agent_doc_mutation_status_and_exchange() {
-    let snapshot = "---\nagent_doc_session: test\n---\n\n\
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            None
+        );
+    }
+    #[test]
+    fn classify_safe_out_of_band_agent_doc_mutation_status_and_exchange() {
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:status patch=replace -->\n\
             Older status\n\
             <!-- /agent:status -->\n\
@@ -492,7 +513,7 @@ fn classify_safe_out_of_band_agent_doc_mutation_status_and_exchange() {
             old body\n\
             <!-- agent:boundary:oldid -->\n\
             <!-- /agent:exchange -->\n";
-    let file = "---\nagent: codex\nagent_doc_session: test\n---\n\n\
+        let file = "---\nagent: codex\nagent_doc_session: test\n---\n\n\
             <!-- agent:status patch=replace -->\n\
             Newer status\n\
             <!-- /agent:status -->\n\
@@ -504,64 +525,64 @@ fn classify_safe_out_of_band_agent_doc_mutation_status_and_exchange() {
             <!-- agent:boundary:newid -->\n\
             <!-- /agent:exchange -->\n";
 
-    assert_eq!(
-        classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
-        Some("status+exchange")
-    );
-}
-#[test]
-fn classify_safe_out_of_band_agent_doc_mutation_rejects_status_prompt_preset_reference() {
-    let snapshot = "---\nagent_doc_session: test\n---\n\n\
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            Some("status+exchange")
+        );
+    }
+    #[test]
+    fn classify_safe_out_of_band_agent_doc_mutation_rejects_status_prompt_preset_reference() {
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:status patch=replace -->\n\
             Compacted.\n\
             <!-- /agent:status -->\n";
-    let file = "---\nagent_doc_session: test\n---\n\n\
+        let file = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:status patch=replace -->\n\
             #next-steps\n\
             <!-- /agent:status -->\n";
 
-    assert_eq!(
-        classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
-        None
-    );
-}
-#[test]
-fn classify_safe_out_of_band_agent_doc_mutation_rejects_status_prompt_preset_reference_with_guidance()
- {
-    let snapshot = "---\nagent_doc_session: test\n---\n\n\
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            None
+        );
+    }
+    #[test]
+    fn classify_safe_out_of_band_agent_doc_mutation_rejects_status_prompt_preset_reference_with_guidance()
+     {
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:status patch=replace -->\n\
             Compacted.\n\
             <!-- /agent:status -->\n";
-    let file = "---\nagent_doc_session: test\n---\n\n\
+        let file = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:status patch=replace -->\n\
             #next-steps for calibrating session benchmarks with expected scores\n\
             <!-- /agent:status -->\n";
 
-    assert_eq!(
-        classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
-        None
-    );
-}
-#[test]
-fn is_safe_historical_exchange_growth_allows_prompt_target_before_response() {
-    let snapshot = "### Re: older\nold body\n";
-    let head = "### Re: older\nold body\n\ndo #7mqc. spec-test-news-commit-push\n### Re: do `#7mqc` — codex\nCompleted.\n";
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            None
+        );
+    }
+    #[test]
+    fn is_safe_historical_exchange_growth_allows_prompt_target_before_response() {
+        let snapshot = "### Re: older\nold body\n";
+        let head = "### Re: older\nold body\n\ndo #7mqc. spec-test-news-commit-push\n### Re: do `#7mqc` — codex\nCompleted.\n";
 
-    assert!(is_safe_historical_exchange_insert_block(
-        "do #7mqc. spec-test-news-commit-push\n### Re: do `#7mqc` — codex\nCompleted."
-    ));
-    assert!(is_safe_historical_exchange_growth(snapshot, head));
-}
-#[test]
-fn classify_safe_committed_historical_agent_doc_mutation_exchange() {
-    let snapshot = "---\nagent_doc_session: test\n---\n\n\
+        assert!(is_safe_historical_exchange_insert_block(
+            "do #7mqc. spec-test-news-commit-push\n### Re: do `#7mqc` — codex\nCompleted."
+        ));
+        assert!(is_safe_historical_exchange_growth(snapshot, head));
+    }
+    #[test]
+    fn classify_safe_committed_historical_agent_doc_mutation_exchange() {
+        let snapshot = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: older\n\
             old body\n\
             ### Re: newer\n\
             new body\n\
             <!-- /agent:exchange -->\n";
-    let file = "---\nagent_doc_session: test\n---\n\n\
+        let file = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: older\n\
             old body\n\
@@ -573,60 +594,60 @@ fn classify_safe_committed_historical_agent_doc_mutation_exchange() {
             new body\n\
             <!-- /agent:exchange -->\n";
 
-    assert_eq!(
-        classify_safe_committed_historical_agent_doc_mutation(snapshot, file),
-        Some("exchange")
-    );
-    assert_eq!(
-        classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
-        None
-    );
-}
-#[test]
-fn safe_exchange_user_prompt_insert_basic() {
-    let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
-    let file = "### Re: prev — model\nprev response\nUSER PROMPT\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
-    assert!(is_safe_exchange_user_prompt_insert(snapshot, file));
-}
-#[test]
-fn safe_exchange_user_prompt_insert_rejects_after_response() {
-    let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
-    let file = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response\nEXTRA TEXT";
-    assert!(!is_safe_exchange_user_prompt_insert(snapshot, file));
-}
-#[test]
-fn safe_exchange_user_prompt_insert_rejects_deletions() {
-    let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
-    let file =
-        "### Re: prev — model\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
-    assert!(!is_safe_exchange_user_prompt_insert(snapshot, file));
-}
-#[test]
-fn safe_exchange_user_prompt_insert_rejects_agent_markers() {
-    let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
-    let file = "### Re: prev — model\nprev response\n### Re: injected — model\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
-    assert!(!is_safe_exchange_user_prompt_insert(snapshot, file));
-}
-#[test]
-fn safe_exchange_user_prompt_insert_no_boundary() {
-    let snapshot = "### Re: new — model\nnew response";
-    let file = "USER PROMPT\n### Re: new — model\nnew response";
-    assert!(is_safe_exchange_user_prompt_insert(snapshot, file));
-}
-#[test]
-fn safe_exchange_user_prompt_insert_identical() {
-    let snapshot = "### Re: prev — model\nprev response\n### Re: new — model\nnew response";
-    assert!(!is_safe_exchange_user_prompt_insert(snapshot, snapshot));
-}
-#[test]
-fn safe_exchange_user_prompt_insert_multiline_prompts() {
-    let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
-    let file = "### Re: prev — model\nprev response\nline one\nline two\nline three\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
-    assert!(is_safe_exchange_user_prompt_insert(snapshot, file));
-}
-#[test]
-fn safe_exchange_user_prompt_insert_classify_integration() {
-    let snapshot_doc = "---\nagent_doc_format: template\n---\n\n\
+        assert_eq!(
+            classify_safe_committed_historical_agent_doc_mutation(snapshot, file),
+            Some("exchange")
+        );
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            None
+        );
+    }
+    #[test]
+    fn safe_exchange_user_prompt_insert_basic() {
+        let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        let file = "### Re: prev — model\nprev response\nUSER PROMPT\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        assert!(is_safe_exchange_user_prompt_insert(snapshot, file));
+    }
+    #[test]
+    fn safe_exchange_user_prompt_insert_rejects_after_response() {
+        let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        let file = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response\nEXTRA TEXT";
+        assert!(!is_safe_exchange_user_prompt_insert(snapshot, file));
+    }
+    #[test]
+    fn safe_exchange_user_prompt_insert_rejects_deletions() {
+        let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        let file =
+            "### Re: prev — model\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        assert!(!is_safe_exchange_user_prompt_insert(snapshot, file));
+    }
+    #[test]
+    fn safe_exchange_user_prompt_insert_rejects_agent_markers() {
+        let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        let file = "### Re: prev — model\nprev response\n### Re: injected — model\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        assert!(!is_safe_exchange_user_prompt_insert(snapshot, file));
+    }
+    #[test]
+    fn safe_exchange_user_prompt_insert_no_boundary() {
+        let snapshot = "### Re: new — model\nnew response";
+        let file = "USER PROMPT\n### Re: new — model\nnew response";
+        assert!(is_safe_exchange_user_prompt_insert(snapshot, file));
+    }
+    #[test]
+    fn safe_exchange_user_prompt_insert_identical() {
+        let snapshot = "### Re: prev — model\nprev response\n### Re: new — model\nnew response";
+        assert!(!is_safe_exchange_user_prompt_insert(snapshot, snapshot));
+    }
+    #[test]
+    fn safe_exchange_user_prompt_insert_multiline_prompts() {
+        let snapshot = "### Re: prev — model\nprev response\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        let file = "### Re: prev — model\nprev response\nline one\nline two\nline three\n<!-- agent:boundary:abc -->\n### Re: new — model\nnew response";
+        assert!(is_safe_exchange_user_prompt_insert(snapshot, file));
+    }
+    #[test]
+    fn safe_exchange_user_prompt_insert_classify_integration() {
+        let snapshot_doc = "---\nagent_doc_format: template\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: prev — model\nprev response\n\
             <!-- agent:boundary:abc -->\n\
@@ -636,7 +657,7 @@ fn safe_exchange_user_prompt_insert_classify_integration() {
             - [ ] item\n\
             <!-- /agent:backlog -->\n";
 
-    let file_doc = "---\nagent_doc_format: template\n---\n\n\
+        let file_doc = "---\nagent_doc_format: template\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: prev — model\nprev response\n\
             USER PROMPT\n\
@@ -647,9 +668,9 @@ fn safe_exchange_user_prompt_insert_classify_integration() {
             - [ ] item\n\
             <!-- /agent:backlog -->\n";
 
-    assert_eq!(
-        classify_safe_out_of_band_agent_doc_mutation(snapshot_doc, file_doc),
-        Some("exchange")
-    );
-}
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot_doc, file_doc),
+            Some("exchange")
+        );
+    }
 }

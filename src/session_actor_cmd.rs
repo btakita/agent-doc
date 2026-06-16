@@ -5,7 +5,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use agent_doc_orchestration::flow::operator_clear::OperatorClearInputState;
 use agent_doc_orchestration::session_actor::{ActorRecord, ActorState};
-use agent_doc_orchestration::sessions::{SessionEntry, SessionRegistry, Tmux};
+use agent_doc_orchestration::sessions::{
+    SessionEntry, SessionRegistry, Tmux, tmux_submit_mode_for_harness,
+};
 use agent_doc_orchestration::startup_miss::{SessionLogStatus, StartupMiss};
 use agent_doc_orchestration::supervisor::ipc::IpcMethod;
 
@@ -697,6 +699,7 @@ fn send_clear_to_resolved_pane(
         return Ok(false);
     };
     send_clear_to_pane(tmux, &pane, &ctx.canonical_file, &ctx.harness)?;
+    let submit_mode = tmux_submit_mode_for_harness(&ctx.harness);
     let fallback_suffix = fallback_reason
         .map(|reason| format!(" fallback_reason={reason}"))
         .unwrap_or_default();
@@ -706,7 +709,7 @@ fn send_clear_to_resolved_pane(
             "session_clear_sent file={} pane={} delivery=direct_pane_submit submit_mode={} pane_source={}{}",
             ctx.canonical_file.display(),
             pane,
-            agent_doc_orchestration::sessions::tmux_submit_mode_for_harness(&ctx.harness),
+            submit_mode,
             pane_source.as_str(),
             fallback_suffix
         ),
@@ -1727,7 +1730,8 @@ fn clear_direct_submit_needs_enter_resubmit(
     harness: &str,
     observation: &ClearDirectSubmitObservation,
 ) -> bool {
-    matches!(harness, "codex" | "claude")
+    agent_doc_orchestration::sessions::tmux_submit_profile_for_harness(harness)
+        .pending_draft_enter_resubmit()
         && observation.status == ClearDirectSubmitStatus::TimedOut
         && observation.command_visible
 }
@@ -4246,7 +4250,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     }
 
     #[test]
-    fn clear_direct_submit_retry_is_scoped_to_visible_codex_or_claude_drafts() {
+    fn clear_direct_submit_retry_is_scoped_to_visible_enter_profile_drafts() {
         let visible_timeout = ClearDirectSubmitObservation {
             status: ClearDirectSubmitStatus::TimedOut,
             elapsed: Duration::from_millis(250),
@@ -4271,7 +4275,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "claude",
             &visible_timeout
         ));
-        assert!(!clear_direct_submit_needs_enter_resubmit(
+        assert!(clear_direct_submit_needs_enter_resubmit(
             "opencode",
             &visible_timeout
         ));

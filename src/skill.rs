@@ -1055,7 +1055,6 @@ pub fn check() -> Result<()> {
     check_at(None)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

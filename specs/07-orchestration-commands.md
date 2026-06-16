@@ -329,11 +329,6 @@ queue item, or marks a specific parked item with a per-item enqueue token.
   as the active-backlog `do [#id]` list, in backlog order. Any other queue
   content (manual presets, fences, struck items) is dropped; use `append` /
   `prepend` to preserve manual queue content.
-- `<!-- agent:exchange queue -->` — move newly-added exchange prompt blocks into
-  `agent:queue` using the same modes (`append` by default, plus `prepend` /
-  `sync`). Moved prompt blocks are removed from the exchange tail and suppressed
-  from the current preflight diff, so a running queue continues on its current
-  head and the added prompt waits its turn in `agent:queue`.
 - Per-item enqueue markers — an open backlog/icebox/pending item containing
   `:inbox_tray:`, `/enqueue`, or a Markdown-decorated `enqueue` token such as
   `**enqueue**` is appended to `agent:queue` as `do [#id]` even when the component

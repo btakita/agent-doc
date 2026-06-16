@@ -107,6 +107,7 @@ pub struct DispatchContext {
     pub project_root: Option<std::path::PathBuf>,
     pub session_uuid: Option<String>,
     pub pane_id: Option<String>,
+    pub harness: String,
 }
 
 impl DispatchContext {
@@ -128,6 +129,7 @@ impl DispatchContext {
             project_root,
             session_uuid: fm.session,
             pane_id,
+            harness: fm.agent.unwrap_or_else(|| "claude".to_string()),
         })
     }
 }
@@ -320,6 +322,7 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
     );
 
     let tmux = sessions::Tmux::default();
+    let profile = sessions::tmux_submit_profile_for_harness(&ctx.harness);
 
     // Send the command text through the canonical tmux submit path.
     agent_doc_orchestration::input_diag::log_text_submit(
@@ -327,11 +330,11 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
         "queue_dispatch.tmux_send_keys",
         &format!("pane:{pane_id}"),
         &item.raw,
-        None,
-        "tmux_text_cr",
-        "Enter",
+        Some(&ctx.harness),
+        profile.transform(),
+        profile.submit_key(),
     );
-    sessions::send_submitted_text(&tmux, &pane_id, &item.raw)?;
+    sessions::send_submitted_text_for_harness(&tmux, &pane_id, &item.raw, &ctx.harness)?;
 
     // Poll for completion: wait until the command text disappears from the
     // pane's last few visible lines (same approach as route.rs send_command).
@@ -415,6 +418,16 @@ mod tests {
         }
     }
 
+    fn test_dispatch_context() -> DispatchContext {
+        DispatchContext {
+            file: Path::new("test.md").to_path_buf(),
+            project_root: None,
+            session_uuid: None,
+            pane_id: None,
+            harness: "codex".to_string(),
+        }
+    }
+
     #[test]
     fn classify_prompt_item() {
         let item = classify("do #fix1");
@@ -472,12 +485,7 @@ mod tests {
     #[test]
     fn dispatch_inline_model_updates_override() {
         let item = classify("/model sonnet");
-        let ctx = DispatchContext {
-            file: Path::new("test.md").to_path_buf(),
-            project_root: None,
-            session_uuid: None,
-            pane_id: None,
-        };
+        let ctx = test_dispatch_context();
         match dispatch_inline(&item, &ctx).unwrap() {
             DispatchResult::ModelOverride(tier) => assert_eq!(tier, "sonnet"),
             _ => panic!("expected ModelOverride"),
@@ -487,24 +495,14 @@ mod tests {
     #[test]
     fn dispatch_inline_model_requires_arg() {
         let item = classify("/model");
-        let ctx = DispatchContext {
-            file: Path::new("test.md").to_path_buf(),
-            project_root: None,
-            session_uuid: None,
-            pane_id: None,
-        };
+        let ctx = test_dispatch_context();
         assert!(dispatch_inline(&item, &ctx).is_err());
     }
 
     #[test]
     fn unknown_command_without_dispatch_path_fails() {
         let item = classify("/clear");
-        let ctx = DispatchContext {
-            file: Path::new("test.md").to_path_buf(),
-            project_root: None,
-            session_uuid: None,
-            pane_id: None,
-        };
+        let ctx = test_dispatch_context();
         let result = dispatch_command(&item, &ctx);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();

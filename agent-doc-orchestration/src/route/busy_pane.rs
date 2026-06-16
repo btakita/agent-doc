@@ -40,7 +40,11 @@ pub(crate) fn format_busy_existing_pane_error(
 }
 
 #[cfg(test)]
-pub(crate) fn maybe_run_test_busy_auto_fix_hook(tmux: &Tmux, file: &Path, pane: &str) -> Result<bool> {
+pub(crate) fn maybe_run_test_busy_auto_fix_hook(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+) -> Result<bool> {
     let Some(project_root) = snapshot::find_project_root(file)
         .or_else(|| file.parent().map(|parent| parent.to_path_buf()))
     else {
@@ -61,12 +65,20 @@ pub(crate) fn maybe_run_test_busy_auto_fix_hook(tmux: &Tmux, file: &Path, pane: 
 }
 
 #[cfg(not(test))]
-pub(crate) fn maybe_run_test_busy_auto_fix_hook(_tmux: &Tmux, _file: &Path, _pane: &str) -> Result<bool> {
+pub(crate) fn maybe_run_test_busy_auto_fix_hook(
+    _tmux: &Tmux,
+    _file: &Path,
+    _pane: &str,
+) -> Result<bool> {
     Ok(false)
 }
 
 #[cfg(test)]
-pub(crate) fn maybe_run_test_busy_interrupt_hook(tmux: &Tmux, file: &Path, pane: &str) -> Result<bool> {
+pub(crate) fn maybe_run_test_busy_interrupt_hook(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+) -> Result<bool> {
     let Some(project_root) = snapshot::find_project_root(file)
         .or_else(|| file.parent().map(|parent| parent.to_path_buf()))
     else {
@@ -87,7 +99,11 @@ pub(crate) fn maybe_run_test_busy_interrupt_hook(tmux: &Tmux, file: &Path, pane:
 }
 
 #[cfg(not(test))]
-pub(crate) fn maybe_run_test_busy_interrupt_hook(_tmux: &Tmux, _file: &Path, _pane: &str) -> Result<bool> {
+pub(crate) fn maybe_run_test_busy_interrupt_hook(
+    _tmux: &Tmux,
+    _file: &Path,
+    _pane: &str,
+) -> Result<bool> {
     Ok(false)
 }
 

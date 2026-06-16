@@ -543,7 +543,6 @@ enum RestartContinueExitStrategy {
     RestartFresh,
     CtrlCPromptUser,
     CtrlDPromptUser,
-    CtrlZPromptUser,
     PromptUser,
 }
 
@@ -693,7 +692,6 @@ fn restart_continue_exit_strategy(
     ctrl_c_forwarded_interrupt: bool,
     failed_resume: bool,
     ctrl_d_forwarded: bool,
-    ctrl_z_operator_stop: bool,
     recent_failed_resumes: usize,
     clean_exit_before_prompt: bool,
 ) -> RestartContinueExitStrategy {
@@ -702,9 +700,6 @@ fn restart_continue_exit_strategy(
     }
     if ctrl_d_forwarded {
         return RestartContinueExitStrategy::CtrlDPromptUser;
-    }
-    if ctrl_z_operator_stop {
-        return RestartContinueExitStrategy::CtrlZPromptUser;
     }
     if clean_exit_before_prompt {
         return RestartContinueExitStrategy::RestartFresh;
@@ -1015,8 +1010,8 @@ fn is_forwarded_ctrl_c_interrupt_exit(
         || status.exit_code() == 130
 }
 
-fn policy_exit_code_for_supervisor(exit_code: i32, operator_control_stop: bool) -> i32 {
-    if operator_control_stop {
+fn policy_exit_code_for_supervisor(exit_code: i32, ctrl_c_forwarded_interrupt: bool) -> i32 {
+    if ctrl_c_forwarded_interrupt {
         0
     } else {
         exit_code
@@ -1228,22 +1223,15 @@ fn auto_trigger_inject_command(
     );
     let submitted_text = crate::supervisor::ipc::normalize_submit_text(trigger_cmd);
     if let Some(pane_id) = shared.inject_pane.as_deref() {
+        let profile = crate::sessions::tmux_submit_profile_for_harness(&shared.harness_binary);
         crate::input_diag::log_text_submit(
             None,
             "supervisor.auto_trigger",
             &format!("pane:{pane_id}"),
             &submitted_text,
             Some(&shared.harness_binary),
-            if shared.harness_binary == "opencode" {
-                "auto_trigger_kitty_return"
-            } else {
-                "auto_trigger_cr"
-            },
-            if shared.harness_binary == "opencode" {
-                "KittyReturn"
-            } else {
-                "Enter"
-            },
+            profile.transform(),
+            profile.submit_key(),
         );
         return match dispatch_submit_text_to_pane(pane_id, &submitted_text, &shared.harness_binary)
         {
@@ -1300,22 +1288,15 @@ fn auto_trigger_clear_command(
     );
     let submitted_text = crate::supervisor::ipc::normalize_submit_text(clear_cmd);
     if let Some(pane_id) = shared.inject_pane.as_deref() {
+        let profile = crate::sessions::tmux_submit_profile_for_harness(&shared.harness_binary);
         crate::input_diag::log_text_submit(
             None,
             "supervisor.auto_trigger_clear",
             &format!("pane:{pane_id}"),
             &submitted_text,
             Some(&shared.harness_binary),
-            if shared.harness_binary == "opencode" {
-                "auto_trigger_clear_kitty_return"
-            } else {
-                "auto_trigger_clear_enter"
-            },
-            if shared.harness_binary == "opencode" {
-                "KittyReturn"
-            } else {
-                "Enter"
-            },
+            profile.transform(),
+            profile.submit_key(),
         );
         return match dispatch_submit_text_to_pane(pane_id, &submitted_text, &shared.harness_binary)
         {
@@ -2252,10 +2233,8 @@ pub(crate) struct SupervisorShared {
     restart_mode: Mutex<String>,
     /// Flag: stdin→pty writer forwarded \x04 (Ctrl+D) to the pty.
     ctrl_d_forwarded: AtomicBool,
-    /// Flag: stdin→pty writer handled \x03 (Ctrl+C) for the child.
+    /// Flag: stdin→pty writer forwarded \x03 (Ctrl+C) to the pty.
     ctrl_c_forwarded: AtomicBool,
-    /// Flag: stdin→pty writer handled \x1a (Ctrl+Z) as a managed stop.
-    ctrl_z_operator_stop: AtomicBool,
     /// Outcome of the most recent auto-trigger attempt after a restart.
     auto_trigger_outcome: AtomicU8,
     /// Whether the current child ever surfaced an idle harness prompt.
@@ -2312,7 +2291,6 @@ impl SupervisorShared {
             restart_mode: Mutex::new("continue".to_string()),
             ctrl_d_forwarded: AtomicBool::new(false),
             ctrl_c_forwarded: AtomicBool::new(false),
-            ctrl_z_operator_stop: AtomicBool::new(false),
             auto_trigger_outcome: AtomicU8::new(AutoTriggerOutcome::NotNeeded as u8),
             prompt_visible_once: AtomicBool::new(false),
             suppress_stale_ctrl_d_until_prompt: AtomicBool::new(false),
@@ -2376,48 +2354,19 @@ impl SupervisorShared {
         }
     }
 
+    /// Send SIGTERM to the child process to unblock `wait()`.
     #[cfg(unix)]
-    fn signal_child(&self, signal: i32) {
+    fn kill_child(&self) {
         let pid = self.child_pid.load(Ordering::Relaxed);
         if pid > 0 {
             unsafe {
-                libc::kill(pid as libc::pid_t, signal);
+                libc::kill(pid as libc::pid_t, libc::SIGTERM);
             }
         }
     }
 
-    /// Send SIGINT to the child process for an operator Ctrl+C.
-    #[cfg(unix)]
-    fn interrupt_child(&self) {
-        self.signal_child(libc::SIGINT);
-    }
-
-    /// Send SIGTERM to the child process to unblock `wait()`.
-    #[cfg(unix)]
-    fn kill_child(&self) {
-        self.signal_child(libc::SIGTERM);
-    }
-
-    /// Map operator Ctrl+Z to managed stop instead of shell suspend.
-    #[cfg(unix)]
-    fn stop_child_for_ctrl_z(&self) {
-        self.signal_child(libc::SIGTERM);
-    }
-
-    #[cfg(not(unix))]
-    fn interrupt_child(&self) {
-        // On non-Unix, we can't send signals. The main loop will detect
-        // the flags after the child exits naturally or via other means.
-    }
-
     #[cfg(not(unix))]
     fn kill_child(&self) {
-        // On non-Unix, we can't send signals. The main loop will detect
-        // the flags after the child exits naturally or via other means.
-    }
-
-    #[cfg(not(unix))]
-    fn stop_child_for_ctrl_z(&self) {
         // On non-Unix, we can't send signals. The main loop will detect
         // the flags after the child exits naturally or via other means.
     }
@@ -2540,619 +2489,625 @@ fn rebind_project_tmux_session_if_expected_dead(
     }
 }
 
-
 #[cfg(test)]
 mod th {
     use super::*;
-use crate::config::Config;
-use crate::frontmatter::Frontmatter;
-use crate::hooks::fire_doc_hooks;
-use crate::project_config;
-use crate::sessions::IsolatedTmux;
-use std::collections::HashMap;
-use tempfile::TempDir;
-pub(crate) struct ScopedCurrentDir {
-    prev_cwd: std::path::PathBuf,
-    _env_guard: crate::test_support::ProcessGlobalLockGuard,
-}
-impl ScopedCurrentDir {
-    pub(crate) fn set(path: &std::path::Path) -> Self {
-        let env_guard = crate::test_support::env_lock();
-        let prev_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(path).unwrap();
-        Self {
-            prev_cwd,
-            _env_guard: env_guard,
+    use crate::config::Config;
+    use crate::frontmatter::Frontmatter;
+    use crate::hooks::fire_doc_hooks;
+    use crate::project_config;
+    use crate::sessions::IsolatedTmux;
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+    pub(crate) struct ScopedCurrentDir {
+        prev_cwd: std::path::PathBuf,
+        _env_guard: crate::test_support::ProcessGlobalLockGuard,
+    }
+    impl ScopedCurrentDir {
+        pub(crate) fn set(path: &std::path::Path) -> Self {
+            let env_guard = crate::test_support::env_lock();
+            let prev_cwd = std::env::current_dir().unwrap();
+            std::env::set_current_dir(path).unwrap();
+            Self {
+                prev_cwd,
+                _env_guard: env_guard,
+            }
         }
     }
-}
-impl Drop for ScopedCurrentDir {
-    fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.prev_cwd);
-    }
-}
-pub(crate) struct ScopedEnvVar {
-    key: &'static str,
-    previous: Option<String>,
-    _env_guard: crate::test_support::ProcessGlobalLockGuard,
-}
-impl ScopedEnvVar {
-    pub(crate) fn set(key: &'static str, value: String) -> Self {
-        let env_guard = crate::test_support::env_lock();
-        let previous = std::env::var(key).ok();
-        unsafe { std::env::set_var(key, &value) };
-        Self {
-            key,
-            previous,
-            _env_guard: env_guard,
+    impl Drop for ScopedCurrentDir {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prev_cwd);
         }
     }
-}
-impl Drop for ScopedEnvVar {
-    fn drop(&mut self) {
-        if let Some(value) = self.previous.as_deref() {
-            unsafe { std::env::set_var(self.key, value) };
-        } else {
-            unsafe { std::env::remove_var(self.key) };
+    pub(crate) struct ScopedEnvVar {
+        key: &'static str,
+        previous: Option<String>,
+        _env_guard: crate::test_support::ProcessGlobalLockGuard,
+    }
+    impl ScopedEnvVar {
+        pub(crate) fn set(key: &'static str, value: String) -> Self {
+            let env_guard = crate::test_support::env_lock();
+            let previous = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, &value) };
+            Self {
+                key,
+                previous,
+                _env_guard: env_guard,
+            }
         }
     }
-}
-pub(crate) fn tmux_env_for_server(iso: &IsolatedTmux) -> String {
-    let output = iso
-        .cmd()
-        .args(["display-message", "-p", "#{socket_path}"])
-        .output()
-        .expect("tmux should report its socket path");
-    assert!(
-        output.status.success(),
-        "failed to query tmux socket path: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let socket_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    format!("{socket_path},0,0")
-}
-// --- model injection from frontmatter tests ---
-/// Helper: simulates the base_args construction logic from run() for testing
-/// model injection without spawning a real process.
-pub(crate) fn build_base_args_for_test(
-    fm: &Frontmatter,
-    harness: &crate::harness::HarnessConfig,
-) -> Vec<String> {
-    let cfg = Config::default();
-    let resolved_agent_args = resolve_agent_args(fm, &cfg, harness);
-    let mut base_args: Vec<String> = Vec::new();
-    if let Some(ref args) = resolved_agent_args {
-        base_args.extend(args.split_whitespace().map(String::from));
-    }
-    if !base_args.iter().any(|a| a == "--model") {
-        let harness_key =
-            agent_doc_core::model_tier::harness_key_for_agent_name(&harness.binary);
-        if let Some(model) = fm.resolve_harness_model(&harness_key) {
-            base_args.push("--model".into());
-            base_args.push(agent_doc_core::model_tier::canonical_model_name(
-                model,
-                &harness_key,
-                &cfg.model,
-            ));
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            if let Some(value) = self.previous.as_deref() {
+                unsafe { std::env::set_var(self.key, value) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
         }
     }
-    base_args
-}
-// --- relocate_if_wrong_session tests ---
-pub(crate) fn test_cycle(
-    id: &str,
-    phase: crate::cycle_state::CyclePhase,
-    updated_at: u64,
-) -> crate::cycle_state::CycleState {
-    crate::cycle_state::CycleState {
-        cycle_id: id.to_string(),
-        file: "doc.md".to_string(),
-        phase,
-        last_event: format!("{:?}", phase),
-        started_at: 1,
-        updated_at,
-        snapshot_hash: None,
-        file_hash: None,
-        normalized_snapshot_hash: None,
-        normalized_file_hash: None,
-        capture_id: None,
-        response_sha256: None,
-        had_pending_mutations: false,
-        requires_backlog_capture: false,
-        required_backlog_targets: Vec::new(),
-        required_explicit_backlog_item_count: 0,
-        required_plan_reference_count: 0,
-        queue_task_id: None,
-        turn_id: None,
-        pending_done_ids: Vec::new(),
-        pending_kept_open_ids: Vec::new(),
-        reaped_pending_ids: Vec::new(),
-        expect_done_or_gate_ids: Vec::new(),
-        pending_gated_ids: Vec::new(),
-        pending_added_this_cycle: false,
-        pending_added_ids: Vec::new(),
-        ipc_snapshot_adoption_blocked: false,
-        dropped_exchange_prompts: Vec::new(),
-        dropped_queue_prompts: Vec::new(),
-        active_queue_heads: Vec::new(),
-        active_free_text_queue_heads: Vec::new(),
+    pub(crate) fn tmux_env_for_server(iso: &IsolatedTmux) -> String {
+        let output = iso
+            .cmd()
+            .args(["display-message", "-p", "#{socket_path}"])
+            .output()
+            .expect("tmux should report its socket path");
+        assert!(
+            output.status.success(),
+            "failed to query tmux socket path: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let socket_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        format!("{socket_path},0,0")
     }
-}
-pub(crate) fn committed_state_for_doc(path: &Path, content: &str) -> crate::cycle_state::CycleState {
-    let mut state = test_cycle("cycle-2", crate::cycle_state::CyclePhase::Committed, 20);
-    state.file = path.display().to_string();
-    state.file_hash = Some(crate::ops_log::content_hash(content));
-    state
-}
-// #jb-run-agent-doc-busy-queue-dispatch-deadlock: the supervisor idle-queue
-// watch must drain a live active-queue head on the busy→idle transition,
-// never inject mid-turn, and never hot-loop on a stuck head.
-#[derive(Clone)]
-pub(crate) struct RecordingWriter(pub(crate) Arc<Mutex<Vec<u8>>>);
+    // --- model injection from frontmatter tests ---
+    /// Helper: simulates the base_args construction logic from run() for testing
+    /// model injection without spawning a real process.
+    pub(crate) fn build_base_args_for_test(
+        fm: &Frontmatter,
+        harness: &crate::harness::HarnessConfig,
+    ) -> Vec<String> {
+        let cfg = Config::default();
+        let resolved_agent_args = resolve_agent_args(fm, &cfg, harness);
+        let mut base_args: Vec<String> = Vec::new();
+        if let Some(ref args) = resolved_agent_args {
+            base_args.extend(args.split_whitespace().map(String::from));
+        }
+        if !base_args.iter().any(|a| a == "--model") {
+            let harness_key =
+                agent_doc_core::model_tier::harness_key_for_agent_name(&harness.binary);
+            if let Some(model) = fm.resolve_harness_model(&harness_key) {
+                base_args.push("--model".into());
+                base_args.push(agent_doc_core::model_tier::canonical_model_name(
+                    model,
+                    &harness_key,
+                    &cfg.model,
+                ));
+            }
+        }
+        base_args
+    }
+    // --- relocate_if_wrong_session tests ---
+    pub(crate) fn test_cycle(
+        id: &str,
+        phase: crate::cycle_state::CyclePhase,
+        updated_at: u64,
+    ) -> crate::cycle_state::CycleState {
+        crate::cycle_state::CycleState {
+            cycle_id: id.to_string(),
+            file: "doc.md".to_string(),
+            phase,
+            last_event: format!("{:?}", phase),
+            started_at: 1,
+            updated_at,
+            snapshot_hash: None,
+            file_hash: None,
+            normalized_snapshot_hash: None,
+            normalized_file_hash: None,
+            capture_id: None,
+            response_sha256: None,
+            had_pending_mutations: false,
+            requires_backlog_capture: false,
+            required_backlog_targets: Vec::new(),
+            required_explicit_backlog_item_count: 0,
+            required_plan_reference_count: 0,
+            queue_task_id: None,
+            turn_id: None,
+            pending_done_ids: Vec::new(),
+            pending_kept_open_ids: Vec::new(),
+            reaped_pending_ids: Vec::new(),
+            expect_done_or_gate_ids: Vec::new(),
+            pending_gated_ids: Vec::new(),
+            pending_added_this_cycle: false,
+            pending_added_ids: Vec::new(),
+            ipc_snapshot_adoption_blocked: false,
+            dropped_exchange_prompts: Vec::new(),
+            dropped_queue_prompts: Vec::new(),
+            active_queue_heads: Vec::new(),
+            active_free_text_queue_heads: Vec::new(),
+        }
+    }
+    pub(crate) fn committed_state_for_doc(
+        path: &Path,
+        content: &str,
+    ) -> crate::cycle_state::CycleState {
+        let mut state = test_cycle("cycle-2", crate::cycle_state::CyclePhase::Committed, 20);
+        state.file = path.display().to_string();
+        state.file_hash = Some(crate::ops_log::content_hash(content));
+        state
+    }
+    // #jb-run-agent-doc-busy-queue-dispatch-deadlock: the supervisor idle-queue
+    // watch must drain a live active-queue head on the busy→idle transition,
+    // never inject mid-turn, and never hot-loop on a stuck head.
+    #[derive(Clone)]
+    pub(crate) struct RecordingWriter(pub(crate) Arc<Mutex<Vec<u8>>>);
 
-impl Write for RecordingWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
+    impl Write for RecordingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
 
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
-}
-pub(crate) struct FailingWriter;
+    pub(crate) struct FailingWriter;
 
-impl Write for FailingWriter {
-    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::BrokenPipe,
-            "writer closed",
-        ))
-    }
+    impl Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "writer closed",
+            ))
+        }
 
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
-}
-// --- StopSignal + writer thread tests ---
+    // --- StopSignal + writer thread tests ---
 }
 #[cfg(test)]
-pub(crate) use th::{FailingWriter, RecordingWriter, ScopedCurrentDir, ScopedEnvVar, build_base_args_for_test, committed_state_for_doc, test_cycle, tmux_env_for_server};
+pub(crate) use th::{
+    FailingWriter, RecordingWriter, ScopedCurrentDir, ScopedEnvVar, build_base_args_for_test,
+    committed_state_for_doc, test_cycle, tmux_env_for_server,
+};
 
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use crate::config::Config;
-use crate::frontmatter::Frontmatter;
-use crate::hooks::fire_doc_hooks;
-use crate::project_config;
-use crate::sessions::IsolatedTmux;
-use std::collections::HashMap;
-use tempfile::TempDir;
-#[cfg(unix)]
-#[test]
-fn reexec_candidates_prefer_fresh_then_current_exe_then_path() {
-    let fresh = PathBuf::from("/fresh/agent-doc");
-    let current = PathBuf::from("/proc/self/exe-current");
-    let candidates =
-        build_reexec_candidates(Some(fresh.clone()), Some(current.clone()), true);
-    let paths: Vec<_> = candidates.iter().map(|(p, _)| p.clone()).collect();
-    assert_eq!(
-        paths,
-        vec![fresh, current, PathBuf::from("agent-doc")],
-        "ordered: resolved fresh, launchable current_exe, then PATH fallback"
-    );
-}
+    use crate::config::Config;
+    use crate::frontmatter::Frontmatter;
+    use crate::hooks::fire_doc_hooks;
+    use crate::project_config;
+    use crate::sessions::IsolatedTmux;
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+    #[cfg(unix)]
+    #[test]
+    fn reexec_candidates_prefer_fresh_then_current_exe_then_path() {
+        let fresh = PathBuf::from("/fresh/agent-doc");
+        let current = PathBuf::from("/proc/self/exe-current");
+        let candidates = build_reexec_candidates(Some(fresh.clone()), Some(current.clone()), true);
+        let paths: Vec<_> = candidates.iter().map(|(p, _)| p.clone()).collect();
+        assert_eq!(
+            paths,
+            vec![fresh, current, PathBuf::from("agent-doc")],
+            "ordered: resolved fresh, launchable current_exe, then PATH fallback"
+        );
+    }
 
-#[cfg(unix)]
-#[test]
-fn reexec_candidates_drop_deleted_current_exe_but_keep_path_fallback() {
-    // The Linux post-`cargo install` shape: `current_exe()` is a `(deleted)` inode
-    // (not launchable) and the fresh resolver succeeded. The deleted path must not
-    // appear; the PATH fallback always does so the ladder is never empty.
-    let fresh = PathBuf::from("/home/u/.cargo/bin/agent-doc");
-    let deleted = PathBuf::from("/home/u/.cargo/bin/agent-doc (deleted)");
-    let candidates =
-        build_reexec_candidates(Some(fresh.clone()), Some(deleted.clone()), false);
-    let notes: Vec<_> = candidates.iter().map(|(_, n)| *n).collect();
-    assert_eq!(notes, vec!["resolved_fresh_binary", "path_lookup_agent_doc"]);
-    assert!(
-        !candidates.iter().any(|(p, _)| p == &deleted),
-        "a non-launchable (deleted) current_exe must be excluded"
-    );
-}
+    #[cfg(unix)]
+    #[test]
+    fn reexec_candidates_drop_deleted_current_exe_but_keep_path_fallback() {
+        // The Linux post-`cargo install` shape: `current_exe()` is a `(deleted)` inode
+        // (not launchable) and the fresh resolver succeeded. The deleted path must not
+        // appear; the PATH fallback always does so the ladder is never empty.
+        let fresh = PathBuf::from("/home/u/.cargo/bin/agent-doc");
+        let deleted = PathBuf::from("/home/u/.cargo/bin/agent-doc (deleted)");
+        let candidates = build_reexec_candidates(Some(fresh.clone()), Some(deleted.clone()), false);
+        let notes: Vec<_> = candidates.iter().map(|(_, n)| *n).collect();
+        assert_eq!(
+            notes,
+            vec!["resolved_fresh_binary", "path_lookup_agent_doc"]
+        );
+        assert!(
+            !candidates.iter().any(|(p, _)| p == &deleted),
+            "a non-launchable (deleted) current_exe must be excluded"
+        );
+    }
 
-#[cfg(unix)]
-#[test]
-fn reexec_candidates_dedup_and_never_empty() {
-    // When the resolver and current_exe both point at the same path, it appears
-    // once; with neither resolvable the PATH fallback alone keeps the list usable.
-    let same = PathBuf::from("/usr/local/bin/agent-doc");
-    let deduped = build_reexec_candidates(Some(same.clone()), Some(same.clone()), true);
-    assert_eq!(
-        deduped,
-        vec![
-            (same, "resolved_fresh_binary"),
-            (PathBuf::from("agent-doc"), "path_lookup_agent_doc"),
-        ]
-    );
+    #[cfg(unix)]
+    #[test]
+    fn reexec_candidates_dedup_and_never_empty() {
+        // When the resolver and current_exe both point at the same path, it appears
+        // once; with neither resolvable the PATH fallback alone keeps the list usable.
+        let same = PathBuf::from("/usr/local/bin/agent-doc");
+        let deduped = build_reexec_candidates(Some(same.clone()), Some(same.clone()), true);
+        assert_eq!(
+            deduped,
+            vec![
+                (same, "resolved_fresh_binary"),
+                (PathBuf::from("agent-doc"), "path_lookup_agent_doc"),
+            ]
+        );
 
-    let empty = build_reexec_candidates(None, None, false);
-    assert_eq!(
-        empty,
-        vec![(PathBuf::from("agent-doc"), "path_lookup_agent_doc")],
-        "ladder always ends with a PATH fallback so reexec can still try"
-    );
-}
+        let empty = build_reexec_candidates(None, None, false);
+        assert_eq!(
+            empty,
+            vec![(PathBuf::from("agent-doc"), "path_lookup_agent_doc")],
+            "ladder always ends with a PATH fallback so reexec can still try"
+        );
+    }
 
-#[test]
-fn resolve_agent_args_claude_prefers_claude_alias_chain() {
-    let fm = Frontmatter {
-        claude_args: Some("--dangerously-skip-permissions".into()),
-        ..Default::default()
-    };
-    let cfg = Config {
-        claude_args: Some("--old-flag".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::claude();
-    let resolved = resolve_agent_args(&fm, &cfg, &harness);
-    assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
-}
-#[test]
-fn resolve_agent_args_claude_prefers_agent_args_over_claude_args() {
-    let fm = Frontmatter {
-        agent_args: Some("--model sonnet".into()),
-        claude_args: Some("--dangerously-skip-permissions".into()),
-        ..Default::default()
-    };
-    let cfg = Config::default();
-    let harness = crate::harness::HarnessConfig::claude();
-    let resolved = resolve_agent_args(&fm, &cfg, &harness);
-    assert_eq!(resolved.as_deref(), Some("--model sonnet"));
-}
-#[test]
-fn resolve_agent_args_codex_prefers_codex_alias_chain() {
-    let fm = Frontmatter {
-        codex_args: Some("-s danger-full-access".into()),
-        claude_args: Some("--dangerously-skip-permissions".into()),
-        ..Default::default()
-    };
-    let cfg = Config {
-        codex_args: Some("-s workspace-write".into()),
-        claude_args: Some("--old-flag".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::codex();
-    let resolved = resolve_agent_args(&fm, &cfg, &harness);
-    assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
-}
-#[test]
-fn resolve_agent_args_codex_ignores_claude_args_aliases() {
-    let fm = Frontmatter {
-        claude_args: Some("--dangerously-skip-permissions".into()),
-        ..Default::default()
-    };
-    let cfg = Config {
-        claude_args: Some("--old-flag".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::codex();
-    let resolved = resolve_agent_args(&fm, &cfg, &harness);
-    assert_eq!(resolved, None);
-}
-#[test]
-fn resolve_agent_args_codex_uses_agent_args_only() {
-    let fm = Frontmatter {
-        agent_args: Some("-s danger-full-access".into()),
-        codex_args: Some("-s workspace-write".into()),
-        claude_args: Some("--dangerously-skip-permissions".into()),
-        ..Default::default()
-    };
-    let cfg = Config {
-        agent_args: Some("-s workspace-write".into()),
-        codex_args: Some("-s read-only".into()),
-        claude_args: Some("--old-flag".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::codex();
-    let resolved = resolve_agent_args(&fm, &cfg, &harness);
-    assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
-}
-#[test]
-fn resolve_agent_args_codex_uses_config_codex_args_fallback() {
-    let fm = Frontmatter::default();
-    let cfg = Config {
-        codex_args: Some("-s danger-full-access".into()),
-        claude_args: Some("--old-flag".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::codex();
-    let resolved = resolve_agent_args(&fm, &cfg, &harness);
-    assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
-}
-#[test]
-fn resolve_agent_args_opencode_prefers_opencode_alias_chain() {
-    let fm = Frontmatter {
-        opencode_args: Some("--dangerously-skip-permissions".into()),
-        codex_args: Some("-s danger-full-access".into()),
-        claude_args: Some("--old-claude".into()),
-        ..Default::default()
-    };
-    let cfg = Config {
-        opencode_args: Some("--from-config".into()),
-        codex_args: Some("-s workspace-write".into()),
-        claude_args: Some("--old-flag".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::opencode();
-    let resolved = resolve_agent_args(&fm, &cfg, &harness);
-    assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
-}
-#[test]
-fn resolve_agent_args_opencode_ignores_claude_and_codex_aliases() {
-    let fm = Frontmatter {
-        claude_args: Some("--dangerously-skip-permissions".into()),
-        codex_args: Some("-s danger-full-access".into()),
-        ..Default::default()
-    };
-    let cfg = Config {
-        claude_args: Some("--old-flag".into()),
-        codex_args: Some("-s workspace-write".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::opencode();
-    let resolved = resolve_agent_args(&fm, &cfg, &harness);
-    assert_eq!(resolved, None);
-}
-#[test]
-fn resolve_agent_args_opencode_uses_config_opencode_args_fallback() {
-    let fm = Frontmatter::default();
-    let cfg = Config {
-        opencode_args: Some("--dangerously-skip-permissions".into()),
-        claude_args: Some("--old-flag".into()),
-        codex_args: Some("-s workspace-write".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::opencode();
-    let resolved = resolve_agent_args(&fm, &cfg, &harness);
-    assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
-}
-#[test]
-fn model_injected_from_claude_model_frontmatter() {
-    let fm = Frontmatter {
-        claude_args: Some("--dangerously-skip-permissions".into()),
-        claude_model: Some("opus".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::claude();
-    let args = build_base_args_for_test(&fm, &harness);
-    assert!(args.contains(&"--model".to_string()));
-    // The `opus` alias is deferred — agent-doc passes it through so Claude
-    // Code resolves its current latest opus (no pinned version).
-    assert!(args.contains(&"opus".to_string()));
-    assert!(!args.iter().any(|a| a.starts_with("claude-opus")));
-    assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
-}
-#[test]
-fn model_not_injected_when_already_in_claude_args() {
-    let fm = Frontmatter {
-        claude_args: Some("--dangerously-skip-permissions --model sonnet".into()),
-        claude_model: Some("claude-opus-4-6".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::claude();
-    let args = build_base_args_for_test(&fm, &harness);
-    // Should use the explicit --model from claude_args, not inject from claude_model
-    assert!(args.contains(&"sonnet".to_string()));
-    assert!(!args.contains(&"claude-opus-4-6".to_string()));
-    assert!(!args.iter().any(|a| a == "opus"));
-}
-#[test]
-fn model_injected_from_codex_model_frontmatter() {
-    let fm = Frontmatter {
-        codex_args: Some("-s danger-full-access".into()),
-        codex_model: Some("o3-pro".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::codex();
-    let args = build_base_args_for_test(&fm, &harness);
-    assert!(args.contains(&"--model".to_string()));
-    assert!(args.contains(&"o3-pro".to_string()));
-}
-#[test]
-fn model_injected_from_opencode_model_frontmatter() {
-    let fm = Frontmatter {
-        opencode_args: Some("--dangerously-skip-permissions".into()),
-        opencode_model: Some("zai/glm-5".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::opencode();
-    let args = build_base_args_for_test(&fm, &harness);
-    assert!(args.contains(&"--model".to_string()));
-    assert!(args.contains(&"zai/glm-5".to_string()));
-    assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
-}
-#[test]
-fn model_injected_from_generic_model_when_no_harness_specific() {
-    let fm = Frontmatter {
-        model: Some("gpt-5".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::claude();
-    let args = build_base_args_for_test(&fm, &harness);
-    assert!(args.contains(&"--model".to_string()));
-    assert!(args.contains(&"gpt-5".to_string()));
-}
-#[test]
-fn no_model_injected_when_none_in_frontmatter() {
-    let fm = Frontmatter {
-        claude_args: Some("--dangerously-skip-permissions".into()),
-        ..Default::default()
-    };
-    let harness = crate::harness::HarnessConfig::claude();
-    let args = build_base_args_for_test(&fm, &harness);
-    assert!(!args.contains(&"--model".to_string()));
-}
-#[test]
-fn fire_doc_hooks_substitutes_template_vars() {
-    let tmp =
-        std::env::temp_dir().join(format!("agent-doc-hook-test-{}.txt", std::process::id()));
-    let cmd = format!(
-        "echo '{{{{session_id}}}}:{{{{agent}}}}:{{{{model}}}}' > {}",
-        tmp.display()
-    );
-    let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
-    hooks.insert("session_start".to_string(), vec![cmd]);
-    fire_doc_hooks(
-        &hooks,
-        "session_start",
-        Path::new("/doc/test.md"),
-        "abc-123",
-        &Some("claude".to_string()),
-        &Some("opus".to_string()),
-    );
-    let output = std::fs::read_to_string(&tmp).unwrap_or_default();
-    assert!(
-        output.contains("abc-123"),
-        "session_id not substituted: {}",
-        output
-    );
-    assert!(
-        output.contains("claude"),
-        "agent not substituted: {}",
-        output
-    );
-    assert!(output.contains("opus"), "model not substituted: {}", output);
-    let _ = std::fs::remove_file(&tmp);
-}
-#[test]
-fn fire_doc_hooks_noop_for_missing_event() {
-    let hooks: HashMap<String, Vec<String>> = HashMap::new();
-    fire_doc_hooks(
-        &hooks,
-        "session_start",
-        Path::new("/doc/test.md"),
-        "id",
-        &None,
-        &None,
-    );
-}
-#[test]
-fn fire_doc_hooks_noop_for_empty_event() {
-    let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
-    hooks.insert("session_start".to_string(), vec![]);
-    fire_doc_hooks(
-        &hooks,
-        "session_start",
-        Path::new("/doc/test.md"),
-        "id",
-        &None,
-        &None,
-    );
-}
-#[test]
-fn fire_doc_hooks_handles_none_agent_model() {
-    let tmp = std::env::temp_dir().join(format!(
-        "agent-doc-hook-none-test-{}.txt",
-        std::process::id()
-    ));
-    let cmd = format!("printf '{{{{agent}}}}:{{{{model}}}}' > {}", tmp.display());
-    let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
-    hooks.insert("session_start".to_string(), vec![cmd]);
-    fire_doc_hooks(
-        &hooks,
-        "session_start",
-        Path::new("/doc/test.md"),
-        "id",
-        &None,
-        &None,
-    );
-    let output = std::fs::read_to_string(&tmp).unwrap_or_default();
-    assert_eq!(output, ":", "expected empty agent+model, got: {}", output);
-    let _ = std::fs::remove_file(&tmp);
-}
-#[test]
-fn clean_exit_resolution_prompts_for_claude() {
-    assert_eq!(
-        clean_exit_resolution(&crate::harness::HarnessConfig::claude()),
-        CleanExitResolution::PromptUser
-    );
-}
-#[test]
-fn clean_exit_resolution_auto_restarts_for_codex() {
-    assert_eq!(
-        clean_exit_resolution(&crate::harness::HarnessConfig::codex()),
-        CleanExitResolution::RestartContinue
-    );
-}
-#[test]
-fn clean_exit_resolution_auto_restarts_for_opencode() {
-    assert_eq!(
-        clean_exit_resolution(&crate::harness::HarnessConfig::opencode()),
-        CleanExitResolution::RestartContinue
-    );
-}
-#[test]
-fn route_owned_start_prompts_instead_of_auto_restarting_codex() {
-    assert_eq!(
-        clean_exit_resolution_for_start(&crate::harness::HarnessConfig::codex(), true),
-        CleanExitResolution::PromptUser,
-        "route-owned tmux autostart panes must not immediately restart a cleanly exited child"
-    );
-}
-#[test]
-fn route_owned_start_prompts_instead_of_auto_restarting_opencode() {
-    assert_eq!(
-        clean_exit_resolution_for_start(&crate::harness::HarnessConfig::opencode(), true),
-        CleanExitResolution::PromptUser,
-        "route-owned tmux autostart panes must not immediately restart a cleanly exited child"
-    );
-}
-#[test]
-fn non_route_owned_start_preserves_codex_auto_resume_policy() {
-    assert_eq!(
-        clean_exit_resolution_for_start(&crate::harness::HarnessConfig::codex(), false),
-        CleanExitResolution::RestartContinue
-    );
-}
-#[test]
-fn route_owned_cycle_completion_ignores_unchanged_committed_baseline() {
-    let baseline = test_cycle("cycle-1", crate::cycle_state::CyclePhase::Committed, 10);
-    let current = baseline.clone();
+    #[test]
+    fn resolve_agent_args_claude_prefers_claude_alias_chain() {
+        let fm = Frontmatter {
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            ..Default::default()
+        };
+        let cfg = Config {
+            claude_args: Some("--old-flag".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::claude();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
+    }
+    #[test]
+    fn resolve_agent_args_claude_prefers_agent_args_over_claude_args() {
+        let fm = Frontmatter {
+            agent_args: Some("--model sonnet".into()),
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            ..Default::default()
+        };
+        let cfg = Config::default();
+        let harness = crate::harness::HarnessConfig::claude();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved.as_deref(), Some("--model sonnet"));
+    }
+    #[test]
+    fn resolve_agent_args_codex_prefers_codex_alias_chain() {
+        let fm = Frontmatter {
+            codex_args: Some("-s danger-full-access".into()),
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            ..Default::default()
+        };
+        let cfg = Config {
+            codex_args: Some("-s workspace-write".into()),
+            claude_args: Some("--old-flag".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::codex();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
+    }
+    #[test]
+    fn resolve_agent_args_codex_ignores_claude_args_aliases() {
+        let fm = Frontmatter {
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            ..Default::default()
+        };
+        let cfg = Config {
+            claude_args: Some("--old-flag".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::codex();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved, None);
+    }
+    #[test]
+    fn resolve_agent_args_codex_uses_agent_args_only() {
+        let fm = Frontmatter {
+            agent_args: Some("-s danger-full-access".into()),
+            codex_args: Some("-s workspace-write".into()),
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            ..Default::default()
+        };
+        let cfg = Config {
+            agent_args: Some("-s workspace-write".into()),
+            codex_args: Some("-s read-only".into()),
+            claude_args: Some("--old-flag".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::codex();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
+    }
+    #[test]
+    fn resolve_agent_args_codex_uses_config_codex_args_fallback() {
+        let fm = Frontmatter::default();
+        let cfg = Config {
+            codex_args: Some("-s danger-full-access".into()),
+            claude_args: Some("--old-flag".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::codex();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
+    }
+    #[test]
+    fn resolve_agent_args_opencode_prefers_opencode_alias_chain() {
+        let fm = Frontmatter {
+            opencode_args: Some("--dangerously-skip-permissions".into()),
+            codex_args: Some("-s danger-full-access".into()),
+            claude_args: Some("--old-claude".into()),
+            ..Default::default()
+        };
+        let cfg = Config {
+            opencode_args: Some("--from-config".into()),
+            codex_args: Some("-s workspace-write".into()),
+            claude_args: Some("--old-flag".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::opencode();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
+    }
+    #[test]
+    fn resolve_agent_args_opencode_ignores_claude_and_codex_aliases() {
+        let fm = Frontmatter {
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            codex_args: Some("-s danger-full-access".into()),
+            ..Default::default()
+        };
+        let cfg = Config {
+            claude_args: Some("--old-flag".into()),
+            codex_args: Some("-s workspace-write".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::opencode();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved, None);
+    }
+    #[test]
+    fn resolve_agent_args_opencode_uses_config_opencode_args_fallback() {
+        let fm = Frontmatter::default();
+        let cfg = Config {
+            opencode_args: Some("--dangerously-skip-permissions".into()),
+            claude_args: Some("--old-flag".into()),
+            codex_args: Some("-s workspace-write".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::opencode();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
+    }
+    #[test]
+    fn model_injected_from_claude_model_frontmatter() {
+        let fm = Frontmatter {
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            claude_model: Some("opus".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::claude();
+        let args = build_base_args_for_test(&fm, &harness);
+        assert!(args.contains(&"--model".to_string()));
+        // The `opus` alias is deferred — agent-doc passes it through so Claude
+        // Code resolves its current latest opus (no pinned version).
+        assert!(args.contains(&"opus".to_string()));
+        assert!(!args.iter().any(|a| a.starts_with("claude-opus")));
+        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
+    }
+    #[test]
+    fn model_not_injected_when_already_in_claude_args() {
+        let fm = Frontmatter {
+            claude_args: Some("--dangerously-skip-permissions --model sonnet".into()),
+            claude_model: Some("claude-opus-4-6".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::claude();
+        let args = build_base_args_for_test(&fm, &harness);
+        // Should use the explicit --model from claude_args, not inject from claude_model
+        assert!(args.contains(&"sonnet".to_string()));
+        assert!(!args.contains(&"claude-opus-4-6".to_string()));
+        assert!(!args.iter().any(|a| a == "opus"));
+    }
+    #[test]
+    fn model_injected_from_codex_model_frontmatter() {
+        let fm = Frontmatter {
+            codex_args: Some("-s danger-full-access".into()),
+            codex_model: Some("o3-pro".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::codex();
+        let args = build_base_args_for_test(&fm, &harness);
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"o3-pro".to_string()));
+    }
+    #[test]
+    fn model_injected_from_opencode_model_frontmatter() {
+        let fm = Frontmatter {
+            opencode_args: Some("--dangerously-skip-permissions".into()),
+            opencode_model: Some("zai/glm-5".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::opencode();
+        let args = build_base_args_for_test(&fm, &harness);
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"zai/glm-5".to_string()));
+        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
+    }
+    #[test]
+    fn model_injected_from_generic_model_when_no_harness_specific() {
+        let fm = Frontmatter {
+            model: Some("gpt-5".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::claude();
+        let args = build_base_args_for_test(&fm, &harness);
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"gpt-5".to_string()));
+    }
+    #[test]
+    fn no_model_injected_when_none_in_frontmatter() {
+        let fm = Frontmatter {
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::claude();
+        let args = build_base_args_for_test(&fm, &harness);
+        assert!(!args.contains(&"--model".to_string()));
+    }
+    #[test]
+    fn fire_doc_hooks_substitutes_template_vars() {
+        let tmp =
+            std::env::temp_dir().join(format!("agent-doc-hook-test-{}.txt", std::process::id()));
+        let cmd = format!(
+            "echo '{{{{session_id}}}}:{{{{agent}}}}:{{{{model}}}}' > {}",
+            tmp.display()
+        );
+        let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
+        hooks.insert("session_start".to_string(), vec![cmd]);
+        fire_doc_hooks(
+            &hooks,
+            "session_start",
+            Path::new("/doc/test.md"),
+            "abc-123",
+            &Some("claude".to_string()),
+            &Some("opus".to_string()),
+        );
+        let output = std::fs::read_to_string(&tmp).unwrap_or_default();
+        assert!(
+            output.contains("abc-123"),
+            "session_id not substituted: {}",
+            output
+        );
+        assert!(
+            output.contains("claude"),
+            "agent not substituted: {}",
+            output
+        );
+        assert!(output.contains("opus"), "model not substituted: {}", output);
+        let _ = std::fs::remove_file(&tmp);
+    }
+    #[test]
+    fn fire_doc_hooks_noop_for_missing_event() {
+        let hooks: HashMap<String, Vec<String>> = HashMap::new();
+        fire_doc_hooks(
+            &hooks,
+            "session_start",
+            Path::new("/doc/test.md"),
+            "id",
+            &None,
+            &None,
+        );
+    }
+    #[test]
+    fn fire_doc_hooks_noop_for_empty_event() {
+        let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
+        hooks.insert("session_start".to_string(), vec![]);
+        fire_doc_hooks(
+            &hooks,
+            "session_start",
+            Path::new("/doc/test.md"),
+            "id",
+            &None,
+            &None,
+        );
+    }
+    #[test]
+    fn fire_doc_hooks_handles_none_agent_model() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agent-doc-hook-none-test-{}.txt",
+            std::process::id()
+        ));
+        let cmd = format!("printf '{{{{agent}}}}:{{{{model}}}}' > {}", tmp.display());
+        let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
+        hooks.insert("session_start".to_string(), vec![cmd]);
+        fire_doc_hooks(
+            &hooks,
+            "session_start",
+            Path::new("/doc/test.md"),
+            "id",
+            &None,
+            &None,
+        );
+        let output = std::fs::read_to_string(&tmp).unwrap_or_default();
+        assert_eq!(output, ":", "expected empty agent+model, got: {}", output);
+        let _ = std::fs::remove_file(&tmp);
+    }
+    #[test]
+    fn clean_exit_resolution_prompts_for_claude() {
+        assert_eq!(
+            clean_exit_resolution(&crate::harness::HarnessConfig::claude()),
+            CleanExitResolution::PromptUser
+        );
+    }
+    #[test]
+    fn clean_exit_resolution_auto_restarts_for_codex() {
+        assert_eq!(
+            clean_exit_resolution(&crate::harness::HarnessConfig::codex()),
+            CleanExitResolution::RestartContinue
+        );
+    }
+    #[test]
+    fn clean_exit_resolution_auto_restarts_for_opencode() {
+        assert_eq!(
+            clean_exit_resolution(&crate::harness::HarnessConfig::opencode()),
+            CleanExitResolution::RestartContinue
+        );
+    }
+    #[test]
+    fn route_owned_start_prompts_instead_of_auto_restarting_codex() {
+        assert_eq!(
+            clean_exit_resolution_for_start(&crate::harness::HarnessConfig::codex(), true),
+            CleanExitResolution::PromptUser,
+            "route-owned tmux autostart panes must not immediately restart a cleanly exited child"
+        );
+    }
+    #[test]
+    fn route_owned_start_prompts_instead_of_auto_restarting_opencode() {
+        assert_eq!(
+            clean_exit_resolution_for_start(&crate::harness::HarnessConfig::opencode(), true),
+            CleanExitResolution::PromptUser,
+            "route-owned tmux autostart panes must not immediately restart a cleanly exited child"
+        );
+    }
+    #[test]
+    fn non_route_owned_start_preserves_codex_auto_resume_policy() {
+        assert_eq!(
+            clean_exit_resolution_for_start(&crate::harness::HarnessConfig::codex(), false),
+            CleanExitResolution::RestartContinue
+        );
+    }
+    #[test]
+    fn route_owned_cycle_completion_ignores_unchanged_committed_baseline() {
+        let baseline = test_cycle("cycle-1", crate::cycle_state::CyclePhase::Committed, 10);
+        let current = baseline.clone();
 
-    assert!(
-        !route_owned_cycle_completed_after_start(&current, Some(&baseline)),
-        "a stale committed cycle from before route-owned start must not reap the pane"
-    );
-}
-#[test]
-fn route_owned_cycle_completion_detects_new_committed_cycle() {
-    let baseline = test_cycle("cycle-1", crate::cycle_state::CyclePhase::Committed, 10);
-    let current = test_cycle("cycle-2", crate::cycle_state::CyclePhase::Committed, 20);
+        assert!(
+            !route_owned_cycle_completed_after_start(&current, Some(&baseline)),
+            "a stale committed cycle from before route-owned start must not reap the pane"
+        );
+    }
+    #[test]
+    fn route_owned_cycle_completion_detects_new_committed_cycle() {
+        let baseline = test_cycle("cycle-1", crate::cycle_state::CyclePhase::Committed, 10);
+        let current = test_cycle("cycle-2", crate::cycle_state::CyclePhase::Committed, 20);
 
-    assert!(
-        route_owned_cycle_completed_after_start(&current, Some(&baseline)),
-        "a newer committed cycle should stop and reap a route-owned pane"
-    );
-}
-#[test]
-fn route_owned_cycle_completion_waits_while_new_cycle_open() {
-    let baseline = test_cycle("cycle-1", crate::cycle_state::CyclePhase::Committed, 10);
-    let current = test_cycle("cycle-2", crate::cycle_state::CyclePhase::WriteApplied, 20);
+        assert!(
+            route_owned_cycle_completed_after_start(&current, Some(&baseline)),
+            "a newer committed cycle should stop and reap a route-owned pane"
+        );
+    }
+    #[test]
+    fn route_owned_cycle_completion_waits_while_new_cycle_open() {
+        let baseline = test_cycle("cycle-1", crate::cycle_state::CyclePhase::Committed, 10);
+        let current = test_cycle("cycle-2", crate::cycle_state::CyclePhase::WriteApplied, 20);
 
-    assert!(
-        !route_owned_cycle_completed_after_start(&current, Some(&baseline)),
-        "route-owned panes should stay alive for debugging until the new cycle commits"
-    );
-}
-#[test]
-fn route_owned_reap_policy_auto_keeps_live_backlog_alive() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-    let file = tmp.path().join("doc.md");
-    let content = "\
+        assert!(
+            !route_owned_cycle_completed_after_start(&current, Some(&baseline)),
+            "route-owned panes should stay alive for debugging until the new cycle commits"
+        );
+    }
+    #[test]
+    fn route_owned_reap_policy_auto_keeps_live_backlog_alive() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        let content = "\
 <!-- agent:exchange -->
 ### Re: prior — gpt-5
 Done.
@@ -3162,70 +3117,70 @@ Done.
 - [ ] [#next] Continue the session
 <!-- /agent:backlog -->
 ";
-    std::fs::write(&file, content).unwrap();
-    let state = committed_state_for_doc(&file, content);
+        std::fs::write(&file, content).unwrap();
+        let state = committed_state_for_doc(&file, content);
 
-    let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
 
-    assert!(!decision.reap);
-    assert_eq!(decision.reason, "backlog_non_empty");
-}
-#[test]
-fn route_owned_reap_policy_auto_keeps_queue_alive() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-    let file = tmp.path().join("doc.md");
-    let content = "\
+        assert!(!decision.reap);
+        assert_eq!(decision.reason, "backlog_non_empty");
+    }
+    #[test]
+    fn route_owned_reap_policy_auto_keeps_queue_alive() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        let content = "\
 <!-- agent:queue -->
 - do #next
 <!-- /agent:queue -->
 ";
-    std::fs::write(&file, content).unwrap();
-    let state = committed_state_for_doc(&file, content);
+        std::fs::write(&file, content).unwrap();
+        let state = committed_state_for_doc(&file, content);
 
-    let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
 
-    assert!(!decision.reap);
-    assert_eq!(decision.reason, "queue_non_empty");
-}
-#[test]
-fn route_owned_reap_policy_auto_names_post_commit_user_follow_up() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-    let file = tmp.path().join("doc.md");
-    let committed =
-        "<!-- agent:exchange -->\n### Re: done — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
-    let edited = format!("{committed}\nnew prompt?\n");
-    std::fs::write(&file, edited).unwrap();
-    let state = committed_state_for_doc(&file, committed);
+        assert!(!decision.reap);
+        assert_eq!(decision.reason, "queue_non_empty");
+    }
+    #[test]
+    fn route_owned_reap_policy_auto_names_post_commit_user_follow_up() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        let committed =
+            "<!-- agent:exchange -->\n### Re: done — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
+        let edited = format!("{committed}\nnew prompt?\n");
+        std::fs::write(&file, edited).unwrap();
+        let state = committed_state_for_doc(&file, committed);
 
-    let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
 
-    assert!(!decision.reap);
-    assert_eq!(decision.reason, "post_commit_user_follow_up");
-}
-#[test]
-fn route_owned_reap_policy_auto_keeps_non_prompt_dirty_doc_alive() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-    let file = tmp.path().join("doc.md");
-    let committed =
-        "<!-- agent:exchange -->\n### Re: done — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
-    let edited = format!("{committed}\n<!-- local note -->\n");
-    std::fs::write(&file, edited).unwrap();
-    let state = committed_state_for_doc(&file, committed);
+        assert!(!decision.reap);
+        assert_eq!(decision.reason, "post_commit_user_follow_up");
+    }
+    #[test]
+    fn route_owned_reap_policy_auto_keeps_non_prompt_dirty_doc_alive() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        let committed =
+            "<!-- agent:exchange -->\n### Re: done — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
+        let edited = format!("{committed}\n<!-- local note -->\n");
+        std::fs::write(&file, edited).unwrap();
+        let state = committed_state_for_doc(&file, committed);
 
-    let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
 
-    assert!(!decision.reap);
-    assert_eq!(decision.reason, "document_dirty_after_commit");
-}
-#[test]
-fn route_owned_reap_policy_auto_reaps_without_liveness_signals() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-    let file = tmp.path().join("doc.md");
-    let content = "\
+        assert!(!decision.reap);
+        assert_eq!(decision.reason, "document_dirty_after_commit");
+    }
+    #[test]
+    fn route_owned_reap_policy_auto_reaps_without_liveness_signals() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        let content = "\
 <!-- agent:exchange -->
 ### Re: done — gpt-5
 Done.
@@ -3234,43 +3189,43 @@ Done.
 <!-- agent:backlog -->
 <!-- /agent:backlog -->
 ";
-    std::fs::write(&file, content).unwrap();
-    let state = committed_state_for_doc(&file, content);
+        std::fs::write(&file, content).unwrap();
+        let state = committed_state_for_doc(&file, content);
 
-    let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
 
-    assert!(decision.reap);
-    assert_eq!(decision.reason, "no_liveness_signals");
-}
-#[test]
-fn route_owned_explicit_reap_overrides_live_backlog() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-    let file = tmp.path().join("doc.md");
-    let content = "<!-- agent:backlog -->\n- [ ] [#next] Continue\n<!-- /agent:backlog -->\n";
-    std::fs::write(&file, content).unwrap();
-    let state = committed_state_for_doc(&file, content);
+        assert!(decision.reap);
+        assert_eq!(decision.reason, "no_liveness_signals");
+    }
+    #[test]
+    fn route_owned_explicit_reap_overrides_live_backlog() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        let content = "<!-- agent:backlog -->\n- [ ] [#next] Continue\n<!-- /agent:backlog -->\n";
+        std::fs::write(&file, content).unwrap();
+        let state = committed_state_for_doc(&file, content);
 
-    let decision =
-        route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::ReapAfterCommit);
+        let decision =
+            route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::ReapAfterCommit);
 
-    assert!(decision.reap);
-    assert_eq!(decision.reason, "explicit_reap_after_commit");
-}
-#[test]
-fn route_owned_exchange_tail_prompt_is_live() {
-    let body = "\
+        assert!(decision.reap);
+        assert_eq!(decision.reason, "explicit_reap_after_commit");
+    }
+    #[test]
+    fn route_owned_exchange_tail_prompt_is_live() {
+        let body = "\
 ### Re: done — gpt-5
 Done.
 
 do #next
 ";
 
-    assert!(route_owned_exchange_tail_has_unresolved_prompt(body));
-}
-#[test]
-fn route_owned_exchange_tail_ignores_prompt_text_before_latest_response() {
-    let body = "\
+        assert!(route_owned_exchange_tail_has_unresolved_prompt(body));
+    }
+    #[test]
+    fn route_owned_exchange_tail_ignores_prompt_text_before_latest_response() {
+        let body = "\
 ### Re: earlier — gpt-5
 Do #old after this.
 
@@ -3278,706 +3233,699 @@ Do #old after this.
 Done.
 ";
 
-    assert!(!route_owned_exchange_tail_has_unresolved_prompt(body));
-}
-#[test]
-fn restart_continue_strategy_prefers_resume_by_default() {
-    assert_eq!(
-        restart_continue_exit_strategy(false, false, false, false, 0, false),
-        RestartContinueExitStrategy::Resume
-    );
-}
-#[test]
-fn forwarded_ctrl_c_uses_clean_exit_code_for_policy() {
-    assert_eq!(policy_exit_code_for_supervisor(1, true), 0);
-    assert_eq!(policy_exit_code_for_supervisor(130, true), 0);
-    assert_eq!(policy_exit_code_for_supervisor(1, false), 1);
-}
-#[test]
-fn restart_continue_strategy_prompts_after_forwarded_ctrl_c_interrupt() {
-    assert_eq!(
-        restart_continue_exit_strategy(true, false, false, false, 0, false),
-        RestartContinueExitStrategy::CtrlCPromptUser
-    );
-}
-#[test]
-fn restart_continue_strategy_prompts_after_ctrl_d() {
-    assert_eq!(
-        restart_continue_exit_strategy(false, false, true, false, 0, false),
-        RestartContinueExitStrategy::CtrlDPromptUser
-    );
-}
-#[test]
-fn restart_continue_strategy_prompts_after_ctrl_z_operator_stop() {
-    assert_eq!(
-        restart_continue_exit_strategy(false, false, false, true, 0, false),
-        RestartContinueExitStrategy::CtrlZPromptUser
-    );
-}
-#[test]
-fn restart_continue_strategy_still_prompts_after_ctrl_d_before_prompt() {
-    assert_eq!(
-        restart_continue_exit_strategy(false, false, true, false, 0, true),
-        RestartContinueExitStrategy::CtrlDPromptUser
-    );
-}
-#[test]
-fn restart_continue_strategy_restarts_fresh_before_prompt_without_ctrl_d() {
-    assert_eq!(
-        restart_continue_exit_strategy(false, false, false, false, 0, true),
-        RestartContinueExitStrategy::RestartFresh
-    );
-}
-#[test]
-fn strip_stale_ctrl_d_before_prompt_drops_inherited_ctrl_d_bytes() {
-    let filtered =
-        strip_stale_ctrl_d_before_prompt(b"\x04status\x04", true, false).expect("filtered");
-    assert_eq!(filtered, b"status");
-}
-#[test]
-fn strip_stale_ctrl_d_before_prompt_keeps_ctrl_d_once_prompt_is_visible() {
-    assert!(
-        strip_stale_ctrl_d_before_prompt(b"\x04", true, true).is_none(),
-        "prompt-visible children should still receive a fresh Ctrl+D"
-    );
-    assert!(
-        strip_stale_ctrl_d_before_prompt(b"\x04", false, false).is_none(),
-        "non-keepalive runs should not rewrite forwarded Ctrl+D"
-    );
-}
-#[test]
-fn restart_continue_strategy_restarts_fresh_after_single_failed_resume() {
-    assert_eq!(
-        restart_continue_exit_strategy(false, true, false, false, 1, false),
-        RestartContinueExitStrategy::RestartFresh
-    );
-}
-#[test]
-fn restart_continue_strategy_prompts_after_repeated_failed_resumes() {
-    assert_eq!(
-        restart_continue_exit_strategy(false, true, false, false, FAILED_RESUME_THRESHOLD, false,),
-        RestartContinueExitStrategy::PromptUser
-    );
-}
-#[test]
-fn restart_continue_strategy_restarts_fresh_when_clean_exit_happens_before_prompt() {
-    assert_eq!(
-        restart_continue_exit_strategy(false, false, false, false, 0, true),
-        RestartContinueExitStrategy::RestartFresh
-    );
-}
-#[test]
-fn ctrl_d_flag_initialized_false() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    assert!(!shared.ctrl_d_forwarded.load(Ordering::Relaxed));
-}
-#[test]
-fn ctrl_c_flag_initialized_false() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    assert!(!shared.ctrl_c_forwarded.load(Ordering::Relaxed));
-}
-#[test]
-fn auto_trigger_outcome_defaults_to_not_needed() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    assert_eq!(
-        AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed)),
-        AutoTriggerOutcome::NotNeeded
-    );
-}
-#[test]
-fn failed_resume_tracker_prunes_old_events() {
-    let mut tracker = FailedResumeTracker::default();
-    let now = Instant::now();
-    tracker
-        .events
-        .push_back(now - FAILED_RESUME_WINDOW - Duration::from_secs(1));
-    tracker.events.push_back(now - Duration::from_secs(5));
-    let count = tracker.record(now);
-    assert_eq!(count, 2, "only recent failures should remain in the window");
-}
-#[test]
-fn ctrl_d_overrides_codex_auto_restart() {
-    let harness = crate::harness::HarnessConfig::codex();
-    assert_eq!(
-        clean_exit_resolution(&harness),
-        CleanExitResolution::RestartContinue
-    );
-    assert_eq!(
-        restart_continue_exit_strategy(false, false, true, false, 0, false),
-        RestartContinueExitStrategy::CtrlDPromptUser
-    );
-}
-#[test]
-fn ctrl_c_interrupt_overrides_codex_auto_restart() {
-    let harness = crate::harness::HarnessConfig::codex();
-    assert_eq!(
-        clean_exit_resolution(&harness),
-        CleanExitResolution::RestartContinue
-    );
-    assert_eq!(
-        restart_continue_exit_strategy(true, false, false, false, 0, false),
-        RestartContinueExitStrategy::CtrlCPromptUser
-    );
-}
-#[test]
-fn ctrl_d_with_failed_resume_still_prompts_when_run_did_not_commit() {
-    assert_eq!(
-        restart_continue_exit_strategy(false, true, true, false, 1, false),
-        RestartContinueExitStrategy::CtrlDPromptUser
-    );
-}
-#[test]
-fn ctrl_d_with_failed_resume_still_prompts_even_when_clean_exit_was_early() {
-    assert_eq!(
-        restart_continue_exit_strategy(false, true, true, false, 1, true),
-        RestartContinueExitStrategy::CtrlDPromptUser
-    );
-}
-#[test]
-fn clean_exit_before_prompt_seen_only_applies_to_fresh_runs() {
-    assert!(clean_exit_before_prompt_seen(false, false));
-    assert!(!clean_exit_before_prompt_seen(false, true));
-    assert!(!clean_exit_before_prompt_seen(true, false));
-}
-#[test]
-fn idle_queue_turn_active_gate_is_scoped_to_owned_pane() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("task.md");
-    std::fs::write(&doc, "doc").unwrap();
-    crate::turn_status::write_turn_active_marker(dir.path(), "%other").unwrap();
-
-    let shared = SupervisorShared::with_actor_runtime(
-        "test",
-        "test-instance".to_string(),
-        "claude",
-        None,
-        Some(crate::session_actor::ActorState::Ready),
-        Some("%owner".to_string()),
-    );
-    assert!(!turn_active_for_owned_pane(&doc, &shared));
-
-    crate::turn_status::write_turn_active_marker(dir.path(), "%owner").unwrap();
-    assert!(turn_active_for_owned_pane(&doc, &shared));
-}
-#[test]
-fn idle_queue_drain_defers_to_real_lease_file_then_resumes_on_expiry() {
-    // End-to-end over the actual lease sidecar the supervisor reads: a fresh
-    // `/loop` lease makes the supervisor defer; an expired heartbeat hands the
-    // drain back so the supervisor resumes (#kp5z / #qflood).
-    let dir = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("plan.md");
-    std::fs::write(&doc, "body").unwrap();
-    let file = doc.to_string_lossy().to_string();
-
-    crate::drain_owner::refresh_drain_owner_lease(
-        &file,
-        crate::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
-    )
-    .unwrap();
-
-    // Fresh lease: the supervisor (idle, fresh head) must defer.
-    let now = current_epoch_secs();
-    let fresh = crate::drain_owner::fresh_drain_owner_lease(&file, now);
-    assert!(fresh.is_some(), "just-claimed lease must read fresh");
-    assert_eq!(
-        idle_queue_drain_decision(false, true, false, fresh.is_some(), Some("do [#a]"), None),
-        IdleQueueDrainDecision::SkipSelfDrivingLoopOwner
-    );
-
-    // Expired heartbeat (far past the TTL): ownership returns to the supervisor.
-    let expired = crate::drain_owner::fresh_drain_owner_lease(&file, now + 100_000);
-    assert!(
-        expired.is_none(),
-        "an expired heartbeat must not read fresh"
-    );
-    assert_eq!(
-        idle_queue_drain_decision(false, true, false, expired.is_some(), Some("do [#a]"), None),
-        IdleQueueDrainDecision::Dispatch
-    );
-}
-#[test]
-fn idle_queue_submit_mode_uses_literal_text_enter_key_for_codex_owner_pane() {
-    let shared = SupervisorShared::with_actor_runtime(
-        "test",
-        "test-instance".to_string(),
-        "codex",
-        None,
-        Some(crate::session_actor::ActorState::Ready),
-        Some("%owner".to_string()),
-    );
-
-    assert_eq!(
-        idle_queue_submit_mode(&shared, &crate::harness::HarnessConfig::codex()),
-        "tmux_literal_text_enter_key"
-    );
-}
-#[test]
-fn idle_queue_submit_mode_uses_pty_cr_without_owner_pane() {
-    let shared = SupervisorShared::with_actor_runtime(
-        "test",
-        "test-instance".to_string(),
-        "codex",
-        None,
-        Some(crate::session_actor::ActorState::Ready),
-        None,
-    );
-
-    assert_eq!(
-        idle_queue_submit_mode(&shared, &crate::harness::HarnessConfig::codex()),
-        "pty_cr"
-    );
-}
-#[test]
-fn idle_queue_drain_payload_keeps_trigger_for_non_codex_harnesses() {
-    assert_eq!(
-        idle_queue_drain_payload(
-            "tasks/monsterrodholders.md",
-            &crate::harness::HarnessConfig::claude(),
-            "ignored",
-        ),
-        "/agent-doc tasks/monsterrodholders.md"
-    );
-    assert_eq!(
-        idle_queue_drain_payload(
-            "tasks/monsterrodholders.md",
-            &crate::harness::HarnessConfig::opencode(),
-            "ignored",
-        ),
-        "/agent-doc tasks/monsterrodholders.md"
-    );
-    assert_eq!(
-        idle_queue_drain_payload_kind(&crate::harness::HarnessConfig::claude(), "ignored"),
-        "trigger"
-    );
-}
-#[test]
-fn idle_queue_drain_payload_submits_literal_clear_command() {
-    for harness in [
-        crate::harness::HarnessConfig::claude(),
-        crate::harness::HarnessConfig::codex(),
-        crate::harness::HarnessConfig::opencode(),
-    ] {
+        assert!(!route_owned_exchange_tail_has_unresolved_prompt(body));
+    }
+    #[test]
+    fn restart_continue_strategy_prefers_resume_by_default() {
         assert_eq!(
-            idle_queue_drain_payload("tasks/monsterrodholders.md", &harness, "  /clear  "),
-            "/clear"
+            restart_continue_exit_strategy(false, false, false, 0, false),
+            RestartContinueExitStrategy::Resume
+        );
+    }
+    #[test]
+    fn forwarded_ctrl_c_uses_clean_exit_code_for_policy() {
+        assert_eq!(policy_exit_code_for_supervisor(1, true), 0);
+        assert_eq!(policy_exit_code_for_supervisor(130, true), 0);
+        assert_eq!(policy_exit_code_for_supervisor(1, false), 1);
+    }
+    #[test]
+    fn restart_continue_strategy_prompts_after_forwarded_ctrl_c_interrupt() {
+        assert_eq!(
+            restart_continue_exit_strategy(true, false, false, 0, false),
+            RestartContinueExitStrategy::CtrlCPromptUser
+        );
+    }
+    #[test]
+    fn restart_continue_strategy_prompts_after_ctrl_d() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, false, true, 0, false),
+            RestartContinueExitStrategy::CtrlDPromptUser
+        );
+    }
+    #[test]
+    fn restart_continue_strategy_still_prompts_after_ctrl_d_before_prompt() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, false, true, 0, true),
+            RestartContinueExitStrategy::CtrlDPromptUser
+        );
+    }
+    #[test]
+    fn restart_continue_strategy_restarts_fresh_before_prompt_without_ctrl_d() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, false, false, 0, true),
+            RestartContinueExitStrategy::RestartFresh
+        );
+    }
+    #[test]
+    fn strip_stale_ctrl_d_before_prompt_drops_inherited_ctrl_d_bytes() {
+        let filtered =
+            strip_stale_ctrl_d_before_prompt(b"\x04status\x04", true, false).expect("filtered");
+        assert_eq!(filtered, b"status");
+    }
+    #[test]
+    fn strip_stale_ctrl_d_before_prompt_keeps_ctrl_d_once_prompt_is_visible() {
+        assert!(
+            strip_stale_ctrl_d_before_prompt(b"\x04", true, true).is_none(),
+            "prompt-visible children should still receive a fresh Ctrl+D"
+        );
+        assert!(
+            strip_stale_ctrl_d_before_prompt(b"\x04", false, false).is_none(),
+            "non-keepalive runs should not rewrite forwarded Ctrl+D"
+        );
+    }
+    #[test]
+    fn restart_continue_strategy_restarts_fresh_after_single_failed_resume() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, true, false, 1, false),
+            RestartContinueExitStrategy::RestartFresh
+        );
+    }
+    #[test]
+    fn restart_continue_strategy_prompts_after_repeated_failed_resumes() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, true, false, FAILED_RESUME_THRESHOLD, false,),
+            RestartContinueExitStrategy::PromptUser
+        );
+    }
+    #[test]
+    fn restart_continue_strategy_restarts_fresh_when_clean_exit_happens_before_prompt() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, false, false, 0, true),
+            RestartContinueExitStrategy::RestartFresh
+        );
+    }
+    #[test]
+    fn ctrl_d_flag_initialized_false() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        assert!(!shared.ctrl_d_forwarded.load(Ordering::Relaxed));
+    }
+    #[test]
+    fn ctrl_c_flag_initialized_false() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        assert!(!shared.ctrl_c_forwarded.load(Ordering::Relaxed));
+    }
+    #[test]
+    fn auto_trigger_outcome_defaults_to_not_needed() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        assert_eq!(
+            AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed)),
+            AutoTriggerOutcome::NotNeeded
+        );
+    }
+    #[test]
+    fn failed_resume_tracker_prunes_old_events() {
+        let mut tracker = FailedResumeTracker::default();
+        let now = Instant::now();
+        tracker
+            .events
+            .push_back(now - FAILED_RESUME_WINDOW - Duration::from_secs(1));
+        tracker.events.push_back(now - Duration::from_secs(5));
+        let count = tracker.record(now);
+        assert_eq!(count, 2, "only recent failures should remain in the window");
+    }
+    #[test]
+    fn ctrl_d_overrides_codex_auto_restart() {
+        let harness = crate::harness::HarnessConfig::codex();
+        assert_eq!(
+            clean_exit_resolution(&harness),
+            CleanExitResolution::RestartContinue
         );
         assert_eq!(
-            idle_queue_drain_payload_kind(&harness, "/clear"),
+            restart_continue_exit_strategy(false, false, true, 0, false),
+            RestartContinueExitStrategy::CtrlDPromptUser
+        );
+    }
+    #[test]
+    fn ctrl_c_interrupt_overrides_codex_auto_restart() {
+        let harness = crate::harness::HarnessConfig::codex();
+        assert_eq!(
+            clean_exit_resolution(&harness),
+            CleanExitResolution::RestartContinue
+        );
+        assert_eq!(
+            restart_continue_exit_strategy(true, false, false, 0, false),
+            RestartContinueExitStrategy::CtrlCPromptUser
+        );
+    }
+    #[test]
+    fn ctrl_d_with_failed_resume_still_prompts_when_run_did_not_commit() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, true, true, 1, false),
+            RestartContinueExitStrategy::CtrlDPromptUser
+        );
+    }
+    #[test]
+    fn ctrl_d_with_failed_resume_still_prompts_even_when_clean_exit_was_early() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, true, true, 1, true),
+            RestartContinueExitStrategy::CtrlDPromptUser
+        );
+    }
+    #[test]
+    fn clean_exit_before_prompt_seen_only_applies_to_fresh_runs() {
+        assert!(clean_exit_before_prompt_seen(false, false));
+        assert!(!clean_exit_before_prompt_seen(false, true));
+        assert!(!clean_exit_before_prompt_seen(true, false));
+    }
+    #[test]
+    fn idle_queue_turn_active_gate_is_scoped_to_owned_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::write(&doc, "doc").unwrap();
+        crate::turn_status::write_turn_active_marker(dir.path(), "%other").unwrap();
+
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            "claude",
+            None,
+            Some(crate::session_actor::ActorState::Ready),
+            Some("%owner".to_string()),
+        );
+        assert!(!turn_active_for_owned_pane(&doc, &shared));
+
+        crate::turn_status::write_turn_active_marker(dir.path(), "%owner").unwrap();
+        assert!(turn_active_for_owned_pane(&doc, &shared));
+    }
+    #[test]
+    fn idle_queue_drain_defers_to_real_lease_file_then_resumes_on_expiry() {
+        // End-to-end over the actual lease sidecar the supervisor reads: a fresh
+        // `/loop` lease makes the supervisor defer; an expired heartbeat hands the
+        // drain back so the supervisor resumes (#kp5z / #qflood).
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "body").unwrap();
+        let file = doc.to_string_lossy().to_string();
+
+        crate::drain_owner::refresh_drain_owner_lease(
+            &file,
+            crate::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
+        )
+        .unwrap();
+
+        // Fresh lease: the supervisor (idle, fresh head) must defer.
+        let now = current_epoch_secs();
+        let fresh = crate::drain_owner::fresh_drain_owner_lease(&file, now);
+        assert!(fresh.is_some(), "just-claimed lease must read fresh");
+        assert_eq!(
+            idle_queue_drain_decision(false, true, false, fresh.is_some(), Some("do [#a]"), None),
+            IdleQueueDrainDecision::SkipSelfDrivingLoopOwner
+        );
+
+        // Expired heartbeat (far past the TTL): ownership returns to the supervisor.
+        let expired = crate::drain_owner::fresh_drain_owner_lease(&file, now + 100_000);
+        assert!(
+            expired.is_none(),
+            "an expired heartbeat must not read fresh"
+        );
+        assert_eq!(
+            idle_queue_drain_decision(false, true, false, expired.is_some(), Some("do [#a]"), None),
+            IdleQueueDrainDecision::Dispatch
+        );
+    }
+    #[test]
+    fn idle_queue_submit_mode_uses_real_enter_for_codex_owner_pane() {
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            "codex",
+            None,
+            Some(crate::session_actor::ActorState::Ready),
+            Some("%owner".to_string()),
+        );
+
+        assert_eq!(
+            idle_queue_submit_mode(&shared, &crate::harness::HarnessConfig::codex()),
+            "tmux_literal_text_enter_key"
+        );
+    }
+    #[test]
+    fn idle_queue_submit_mode_uses_pty_cr_without_owner_pane() {
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            "codex",
+            None,
+            Some(crate::session_actor::ActorState::Ready),
+            None,
+        );
+
+        assert_eq!(
+            idle_queue_submit_mode(&shared, &crate::harness::HarnessConfig::codex()),
+            "pty_cr"
+        );
+    }
+    #[test]
+    fn idle_queue_drain_payload_keeps_trigger_for_non_codex_harnesses() {
+        assert_eq!(
+            idle_queue_drain_payload(
+                "tasks/monsterrodholders.md",
+                &crate::harness::HarnessConfig::claude(),
+                "ignored",
+            ),
+            "/agent-doc tasks/monsterrodholders.md"
+        );
+        assert_eq!(
+            idle_queue_drain_payload(
+                "tasks/monsterrodholders.md",
+                &crate::harness::HarnessConfig::opencode(),
+                "ignored",
+            ),
+            "/agent-doc tasks/monsterrodholders.md"
+        );
+        assert_eq!(
+            idle_queue_drain_payload_kind(&crate::harness::HarnessConfig::claude(), "ignored"),
+            "trigger"
+        );
+    }
+    #[test]
+    fn idle_queue_drain_payload_submits_literal_clear_command() {
+        for harness in [
+            crate::harness::HarnessConfig::claude(),
+            crate::harness::HarnessConfig::codex(),
+            crate::harness::HarnessConfig::opencode(),
+        ] {
+            assert_eq!(
+                idle_queue_drain_payload("tasks/monsterrodholders.md", &harness, "  /clear  "),
+                "/clear"
+            );
+            assert_eq!(
+                idle_queue_drain_payload_kind(&harness, "/clear"),
+                "slash_command"
+            );
+        }
+    }
+    #[test]
+    fn idle_queue_drain_payload_submits_any_literal_slash_command() {
+        let harness = crate::harness::HarnessConfig::codex();
+        assert_eq!(
+            idle_queue_drain_payload("tasks/monsterrodholders.md", &harness, "/model sonnet"),
+            "/model sonnet"
+        );
+        assert_eq!(
+            idle_queue_drain_payload_kind(&harness, "/model sonnet"),
             "slash_command"
         );
     }
-}
-#[test]
-fn idle_queue_drain_payload_submits_any_literal_slash_command() {
-    let harness = crate::harness::HarnessConfig::codex();
-    assert_eq!(
-        idle_queue_drain_payload("tasks/monsterrodholders.md", &harness, "/model sonnet"),
-        "/model sonnet"
-    );
-    assert_eq!(
-        idle_queue_drain_payload_kind(&harness, "/model sonnet"),
-        "slash_command"
-    );
-}
-#[test]
-fn complete_idle_queue_slash_command_head_consumes_and_commits() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
-    let doc = dir.path().join("task.md");
-    let content = concat!(
-        "---\n",
-        "session: sid\n",
-        "agent_doc_format: template\n",
-        "queue_active: true\n",
-        "---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "## Queue\n\n",
-        "<!-- agent:queue auto -->\n",
-        "- /clear\n",
-        "- do #next\n",
-        "<!-- /agent:queue -->\n",
-    );
-    std::fs::write(&doc, content).unwrap();
-    crate::snapshot::save(&doc, content).unwrap();
-    for args in [
-        vec!["init"],
-        vec!["config", "user.email", "test@example.com"],
-        vec!["config", "user.name", "Test User"],
-        vec!["add", "task.md"],
-        vec!["commit", "-m", "initial", "--no-verify"],
-    ] {
-        let status = std::process::Command::new("git")
+    #[test]
+    fn complete_idle_queue_slash_command_head_consumes_and_commits() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("task.md");
+        let content = concat!(
+            "---\n",
+            "session: sid\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- /clear\n",
+            "- do #next\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test User"],
+            vec!["add", "task.md"],
+            vec!["commit", "-m", "initial", "--no-verify"],
+        ] {
+            let status = std::process::Command::new("git")
+                .current_dir(dir.path())
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+
+        let mut session_log = None;
+        assert!(complete_idle_queue_slash_command_head(
+            &doc,
+            "/clear",
+            "/clear",
+            &mut session_log
+        ));
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("- ~~/clear~~"), "{updated}");
+        assert!(updated.contains("- do #next"), "{updated}");
+        let output = std::process::Command::new("git")
             .current_dir(dir.path())
-            .args(args)
-            .status()
+            .args(["log", "-1", "--pretty=%s"])
+            .output()
             .unwrap();
-        assert!(status.success());
+        assert!(output.status.success());
+        let subject = String::from_utf8_lossy(&output.stdout);
+        assert!(subject.contains("agent-doc"), "{subject}");
     }
-
-    let mut session_log = None;
-    assert!(complete_idle_queue_slash_command_head(
-        &doc,
-        "/clear",
-        "/clear",
-        &mut session_log
-    ));
-
-    let updated = std::fs::read_to_string(&doc).unwrap();
-    assert!(updated.contains("- ~~/clear~~"), "{updated}");
-    assert!(updated.contains("- do #next"), "{updated}");
-    let output = std::process::Command::new("git")
-        .current_dir(dir.path())
-        .args(["log", "-1", "--pretty=%s"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let subject = String::from_utf8_lossy(&output.stdout);
-    assert!(subject.contains("agent-doc"), "{subject}");
-}
-#[test]
-fn resume_handoff_failed_treats_cancelled_resume_as_failure() {
-    assert!(resume_handoff_failed(
-        true,
-        false,
-        AutoTriggerOutcome::Cancelled
-    ));
-    assert!(resume_handoff_failed(
-        true,
-        false,
-        AutoTriggerOutcome::Pending
-    ));
-    assert!(resume_handoff_failed(
-        true,
-        false,
-        AutoTriggerOutcome::Timeout
-    ));
-    assert!(resume_handoff_failed(
-        true,
-        false,
-        AutoTriggerOutcome::SendFailed
-    ));
-    assert!(!resume_handoff_failed(
-        true,
-        false,
-        AutoTriggerOutcome::Sent
-    ));
-    assert!(!resume_handoff_failed(
-        true,
-        false,
-        AutoTriggerOutcome::NotNeeded
-    ));
-    assert!(!resume_handoff_failed(
-        true,
-        false,
-        AutoTriggerOutcome::SkippedClearCooldown
-    ));
-}
-#[test]
-fn resume_handoff_failed_ignores_ctrl_d_shutdown() {
-    assert!(!resume_handoff_failed(
-        true,
-        true,
-        AutoTriggerOutcome::Cancelled
-    ));
-    assert!(!resume_handoff_failed(
-        false,
-        false,
-        AutoTriggerOutcome::Cancelled
-    ));
-}
-#[test]
-fn classify_prompt_decision_quits_on_q() {
-    assert_eq!(classify_prompt_decision(2, "q\n"), PromptDecision::Quit);
-    assert_eq!(classify_prompt_decision(2, "Q\n"), PromptDecision::Quit);
-}
-#[test]
-fn classify_prompt_decision_restarts_on_blank_line() {
-    assert_eq!(
-        classify_prompt_decision(1, "\n"),
-        PromptDecision::RestartFresh
-    );
-}
-#[test]
-fn classify_prompt_decision_quits_on_eof() {
-    assert_eq!(classify_prompt_decision(0, ""), PromptDecision::QuitEof);
-}
-#[test]
-fn classify_prompt_decision_rejects_unrecognized_input() {
-    assert_eq!(
-        classify_prompt_decision(4, "yes\n"),
-        PromptDecision::Invalid
-    );
-}
-#[cfg(unix)]
-#[test]
-fn prompt_termios_forces_canonical_enter_friendly_prompt_mode() {
-    let mut original: libc::termios = unsafe { std::mem::zeroed() };
-    original.c_iflag = libc::IGNCR;
-    original.c_oflag = 0;
-    original.c_lflag = 0;
-    original.c_cflag = 0x1234;
-    original.c_cc[libc::VMIN] = 0;
-    original.c_cc[libc::VTIME] = 9;
-
-    let prompt = prompt_termios_from_original(&original);
-
-    assert_ne!(prompt.c_iflag & libc::ICRNL, 0);
-    assert_eq!(prompt.c_iflag & libc::IGNCR, 0);
-    assert_eq!(prompt.c_iflag & libc::INLCR, 0);
-    assert_ne!(prompt.c_oflag & libc::OPOST, 0);
-    assert_ne!(prompt.c_oflag & libc::ONLCR, 0);
-    assert_ne!(prompt.c_lflag & libc::ICANON, 0);
-    assert_ne!(prompt.c_lflag & libc::ECHO, 0);
-    assert_ne!(prompt.c_lflag & libc::ISIG, 0);
-    assert_ne!(prompt.c_lflag & libc::IEXTEN, 0);
-    assert_eq!(prompt.c_cflag, original.c_cflag);
-    assert_eq!(prompt.c_cc[libc::VMIN], 1);
-    assert_eq!(prompt.c_cc[libc::VTIME], 0);
-}
-#[test]
-fn prompt_input_summary_escapes_and_truncates() {
-    assert_eq!(prompt_input_summary("\n"), "<empty>");
-    assert_eq!(prompt_input_summary("abc\tdef\n"), "abc\\tdef");
-    assert_eq!(
-        prompt_input_summary("abcdefghijklmnopqrstuvwxyz1234567890\n"),
-        "abcdefghijklmnopqrstuvwxyz123456..."
-    );
-}
-#[test]
-fn auto_trigger_monitor_cancels_before_timeout() {
-    let monitor = AutoTriggerMonitor::new(Instant::now(), Duration::from_secs(30));
-    assert_eq!(monitor.stop_outcome(), AutoTriggerOutcome::Cancelled);
-}
-#[test]
-fn auto_trigger_monitor_preserves_timeout_after_deadline() {
-    let start = Instant::now();
-    let mut monitor = AutoTriggerMonitor::new(start, Duration::from_millis(5));
-    assert!(monitor.note_no_prompt(start + Duration::from_millis(5)));
-    assert!(!monitor.note_no_prompt(start + Duration::from_millis(10)));
-    assert_eq!(monitor.stop_outcome(), AutoTriggerOutcome::Timeout);
-}
-#[test]
-fn auto_trigger_thread_cancels_cleanly_before_prompt_poll() {
-    let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-    shared
-        .auto_trigger_outcome
-        .store(AutoTriggerOutcome::Pending as u8, Ordering::Relaxed);
-    let stop = Arc::new(AtomicBool::new(true));
-    let handle = spawn_auto_trigger_thread(
-        shared.clone(),
-        stop,
-        "tasks/software/tsift.md".to_string(),
-        crate::harness::HarnessConfig::codex(),
-        None,
-    );
-    handle.join().unwrap();
-    assert_eq!(
-        AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed)),
-        AutoTriggerOutcome::Cancelled
-    );
-}
-#[test]
-fn auto_trigger_inject_command_writes_carriage_return() {
-    let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-    let written = Arc::new(Mutex::new(Vec::new()));
-    *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-        Box::new(RecordingWriter(written.clone())),
-    ))));
-    let stop = AtomicBool::new(false);
-
-    assert_eq!(
-        auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
-        AutoTriggerOutcome::Sent
-    );
-    assert_eq!(
-        written.lock().unwrap().as_slice(),
-        b"agent-doc tasks/software/tsift.md\r"
-    );
-}
-#[test]
-fn normalize_supervisor_inject_bytes_converts_line_feeds_to_carriage_returns() {
-    assert_eq!(
-        normalize_supervisor_inject_bytes("agent-doc tasks/software/tsift.md\n"),
-        b"agent-doc tasks/software/tsift.md\r"
-    );
-    assert_eq!(
-        normalize_supervisor_inject_bytes("line one\r\nline two\nline three\r"),
-        b"line one\rline two\rline three\r"
-    );
-}
-#[test]
-fn auto_trigger_inject_command_rejects_failed_capability_proof() {
-    let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-    shared.set_capability_proof_gate(
-        CapabilityProofGate::Failed,
-        Some("network denied".to_string()),
-    );
-    let stop = AtomicBool::new(false);
-
-    assert_eq!(
-        auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
-        AutoTriggerOutcome::SendFailed
-    );
-}
-#[test]
-fn auto_trigger_clear_command_bypasses_dispatch_gate_and_submits_enter() {
-    let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-    shared.set_capability_proof_gate(
-        CapabilityProofGate::Failed,
-        Some("network denied".to_string()),
-    );
-    let written = Arc::new(Mutex::new(Vec::new()));
-    *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-        Box::new(RecordingWriter(written.clone())),
-    ))));
-    let stop = AtomicBool::new(false);
-
-    assert_eq!(
-        auto_trigger_submit_queue_command(&shared, &stop, "/clear"),
-        AutoTriggerOutcome::Sent
-    );
-    assert_eq!(written.lock().unwrap().as_slice(), b"/clear\r");
-}
-#[test]
-fn managed_capability_proof_status_message_names_harness() {
-    let message = managed_capability_proof_status_message(
-        "opencode",
-        "opencode_capability_proof status=proven network=proven",
-    );
-
-    assert_eq!(
-        message,
-        "[start] managed opencode capability proof: opencode_capability_proof status=proven network=proven"
-    );
-}
-#[test]
-fn auto_trigger_inject_command_honors_late_cancel_before_write() {
-    let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-    let written = Arc::new(Mutex::new(Vec::new()));
-    *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-        Box::new(RecordingWriter(written.clone())),
-    ))));
-    let stop = AtomicBool::new(true);
-
-    assert_eq!(
-        auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
-        AutoTriggerOutcome::Cancelled
-    );
-    assert!(written.lock().unwrap().is_empty());
-}
-#[test]
-fn auto_trigger_inject_command_cancels_while_waiting_for_busy_writer_lock() {
-    let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-    let written = Arc::new(Mutex::new(Vec::new()));
-    let writer = Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(RecordingWriter(
-        written.clone(),
-    )))));
-    let held = writer.lock().unwrap();
-    *shared.inject_writer.lock().unwrap() = Some(writer.clone());
-
-    let stop = Arc::new(AtomicBool::new(false));
-    let shared_for_thread = shared.clone();
-    let stop_for_thread = stop.clone();
-    let handle = std::thread::spawn(move || {
-        auto_trigger_inject_command(
-            &shared_for_thread,
-            stop_for_thread.as_ref(),
-            "agent-doc tasks/software/tsift.md",
-        )
-    });
-
-    std::thread::sleep(Duration::from_millis(50));
-    stop.store(true, Ordering::Relaxed);
-    drop(held);
-
-    assert_eq!(handle.join().unwrap(), AutoTriggerOutcome::Cancelled);
-    assert!(written.lock().unwrap().is_empty());
-}
-#[test]
-fn auto_trigger_inject_command_reports_closed_writer_during_trigger_window() {
-    let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-    *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-        Box::new(FailingWriter),
-    ))));
-    let stop = AtomicBool::new(false);
-
-    assert_eq!(
-        auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
-        AutoTriggerOutcome::SendFailed
-    );
-}
-#[cfg(unix)]
-#[test]
-fn stop_signal_wakes_poll() {
-    // StopSignal should create a valid pipe and signal() should not panic
-    let stop = StopSignal::new().unwrap();
-    stop.signal();
-    // Verify the read end is readable after signal
-    let mut fds = [libc::pollfd {
-        fd: stop.read_fd(),
-        events: libc::POLLIN,
-        revents: 0,
-    }];
-    let ret = unsafe { libc::poll(fds.as_mut_ptr(), 1, 100) };
-    assert_eq!(ret, 1, "poll should return 1 after signal");
-    assert_ne!(fds[0].revents & libc::POLLIN, 0, "POLLIN should be set");
-}
-#[cfg(unix)]
-#[test]
-fn tcflush_discards_pending_input() {
-    // Verify that tcflush(TCIFLUSH) discards buffered input.
-    // This test uses a socketpair to avoid interfering with the
-    // real stdin — it confirms the libc call doesn't panic.
-    // (A full stdin test would require pty allocation.)
-    unsafe {
-        // Just verify the call doesn't error on STDIN_FILENO
-        // (it may return -1 if stdin isn't a tty, which is fine in CI)
-        let ret = libc::tcflush(libc::STDIN_FILENO, libc::TCIFLUSH);
-        // In CI / non-tty contexts, ret may be -1 (ENOTTY). That's OK —
-        // the code uses tcflush as best-effort cleanup.
-        let _ = ret;
+    #[test]
+    fn resume_handoff_failed_treats_cancelled_resume_as_failure() {
+        assert!(resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::Cancelled
+        ));
+        assert!(resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::Pending
+        ));
+        assert!(resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::Timeout
+        ));
+        assert!(resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::SendFailed
+        ));
+        assert!(!resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::Sent
+        ));
+        assert!(!resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::NotNeeded
+        ));
+        assert!(!resume_handoff_failed(
+            true,
+            false,
+            AutoTriggerOutcome::SkippedClearCooldown
+        ));
     }
-}
-#[test]
-fn exit_provenance_fields_capture_signal_termination() {
-    let status = portable_pty::ExitStatus::with_signal("Hangup");
-    let rendered = exit_provenance_fields(&status);
-    assert!(rendered.contains("exit_kind=signal"), "got: {rendered}");
-    assert!(
-        rendered.contains("exit_signal=\"Hangup\""),
-        "got: {rendered}"
-    );
-    assert!(
-        rendered.contains("exit_status=\"Terminated by Hangup\""),
-        "got: {rendered}"
-    );
-}
-#[test]
-fn exit_provenance_fields_capture_nonzero_exit_code() {
-    let status = portable_pty::ExitStatus::with_exit_code(7);
-    let rendered = exit_provenance_fields(&status);
-    assert!(rendered.contains("exit_kind=exit_code"), "got: {rendered}");
-    assert!(
-        rendered.contains("exit_status=\"Exited with code 7\""),
-        "got: {rendered}"
-    );
-}
-#[test]
-fn forwarded_ctrl_c_interrupt_exit_requires_forwarded_ctrl_c_signal_exit() {
-    let interrupt = portable_pty::ExitStatus::with_signal("Interrupt");
-    assert!(is_forwarded_ctrl_c_interrupt_exit(&interrupt, true));
-    assert!(!is_forwarded_ctrl_c_interrupt_exit(&interrupt, false));
+    #[test]
+    fn resume_handoff_failed_ignores_ctrl_d_shutdown() {
+        assert!(!resume_handoff_failed(
+            true,
+            true,
+            AutoTriggerOutcome::Cancelled
+        ));
+        assert!(!resume_handoff_failed(
+            false,
+            false,
+            AutoTriggerOutcome::Cancelled
+        ));
+    }
+    #[test]
+    fn classify_prompt_decision_quits_on_q() {
+        assert_eq!(classify_prompt_decision(2, "q\n"), PromptDecision::Quit);
+        assert_eq!(classify_prompt_decision(2, "Q\n"), PromptDecision::Quit);
+    }
+    #[test]
+    fn classify_prompt_decision_restarts_on_blank_line() {
+        assert_eq!(
+            classify_prompt_decision(1, "\n"),
+            PromptDecision::RestartFresh
+        );
+    }
+    #[test]
+    fn classify_prompt_decision_quits_on_eof() {
+        assert_eq!(classify_prompt_decision(0, ""), PromptDecision::QuitEof);
+    }
+    #[test]
+    fn classify_prompt_decision_rejects_unrecognized_input() {
+        assert_eq!(
+            classify_prompt_decision(4, "yes\n"),
+            PromptDecision::Invalid
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn prompt_termios_forces_canonical_enter_friendly_prompt_mode() {
+        let mut original: libc::termios = unsafe { std::mem::zeroed() };
+        original.c_iflag = libc::IGNCR;
+        original.c_oflag = 0;
+        original.c_lflag = 0;
+        original.c_cflag = 0x1234;
+        original.c_cc[libc::VMIN] = 0;
+        original.c_cc[libc::VTIME] = 9;
 
-    let clean = portable_pty::ExitStatus::with_exit_code(0);
-    assert!(!is_forwarded_ctrl_c_interrupt_exit(&clean, true));
-}
-#[test]
-fn forwarded_ctrl_c_interrupt_exit_accepts_exit_code_130() {
-    let status = portable_pty::ExitStatus::with_exit_code(130);
-    assert!(is_forwarded_ctrl_c_interrupt_exit(&status, true));
-}
+        let prompt = prompt_termios_from_original(&original);
+
+        assert_ne!(prompt.c_iflag & libc::ICRNL, 0);
+        assert_eq!(prompt.c_iflag & libc::IGNCR, 0);
+        assert_eq!(prompt.c_iflag & libc::INLCR, 0);
+        assert_ne!(prompt.c_oflag & libc::OPOST, 0);
+        assert_ne!(prompt.c_oflag & libc::ONLCR, 0);
+        assert_ne!(prompt.c_lflag & libc::ICANON, 0);
+        assert_ne!(prompt.c_lflag & libc::ECHO, 0);
+        assert_ne!(prompt.c_lflag & libc::ISIG, 0);
+        assert_ne!(prompt.c_lflag & libc::IEXTEN, 0);
+        assert_eq!(prompt.c_cflag, original.c_cflag);
+        assert_eq!(prompt.c_cc[libc::VMIN], 1);
+        assert_eq!(prompt.c_cc[libc::VTIME], 0);
+    }
+    #[test]
+    fn prompt_input_summary_escapes_and_truncates() {
+        assert_eq!(prompt_input_summary("\n"), "<empty>");
+        assert_eq!(prompt_input_summary("abc\tdef\n"), "abc\\tdef");
+        assert_eq!(
+            prompt_input_summary("abcdefghijklmnopqrstuvwxyz1234567890\n"),
+            "abcdefghijklmnopqrstuvwxyz123456..."
+        );
+    }
+    #[test]
+    fn auto_trigger_monitor_cancels_before_timeout() {
+        let monitor = AutoTriggerMonitor::new(Instant::now(), Duration::from_secs(30));
+        assert_eq!(monitor.stop_outcome(), AutoTriggerOutcome::Cancelled);
+    }
+    #[test]
+    fn auto_trigger_monitor_preserves_timeout_after_deadline() {
+        let start = Instant::now();
+        let mut monitor = AutoTriggerMonitor::new(start, Duration::from_millis(5));
+        assert!(monitor.note_no_prompt(start + Duration::from_millis(5)));
+        assert!(!monitor.note_no_prompt(start + Duration::from_millis(10)));
+        assert_eq!(monitor.stop_outcome(), AutoTriggerOutcome::Timeout);
+    }
+    #[test]
+    fn auto_trigger_thread_cancels_cleanly_before_prompt_poll() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        shared
+            .auto_trigger_outcome
+            .store(AutoTriggerOutcome::Pending as u8, Ordering::Relaxed);
+        let stop = Arc::new(AtomicBool::new(true));
+        let handle = spawn_auto_trigger_thread(
+            shared.clone(),
+            stop,
+            "tasks/software/tsift.md".to_string(),
+            crate::harness::HarnessConfig::codex(),
+            None,
+        );
+        handle.join().unwrap();
+        assert_eq!(
+            AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed)),
+            AutoTriggerOutcome::Cancelled
+        );
+    }
+    #[test]
+    fn auto_trigger_inject_command_writes_carriage_return() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(RecordingWriter(written.clone())),
+        ))));
+        let stop = AtomicBool::new(false);
+
+        assert_eq!(
+            auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
+            AutoTriggerOutcome::Sent
+        );
+        assert_eq!(
+            written.lock().unwrap().as_slice(),
+            b"agent-doc tasks/software/tsift.md\r"
+        );
+    }
+    #[test]
+    fn normalize_supervisor_inject_bytes_converts_line_feeds_to_carriage_returns() {
+        assert_eq!(
+            normalize_supervisor_inject_bytes("agent-doc tasks/software/tsift.md\n"),
+            b"agent-doc tasks/software/tsift.md\r"
+        );
+        assert_eq!(
+            normalize_supervisor_inject_bytes("line one\r\nline two\nline three\r"),
+            b"line one\rline two\rline three\r"
+        );
+    }
+    #[test]
+    fn auto_trigger_inject_command_rejects_failed_capability_proof() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        shared.set_capability_proof_gate(
+            CapabilityProofGate::Failed,
+            Some("network denied".to_string()),
+        );
+        let stop = AtomicBool::new(false);
+
+        assert_eq!(
+            auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
+            AutoTriggerOutcome::SendFailed
+        );
+    }
+    #[test]
+    fn auto_trigger_clear_command_bypasses_dispatch_gate_and_submits_enter() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        shared.set_capability_proof_gate(
+            CapabilityProofGate::Failed,
+            Some("network denied".to_string()),
+        );
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(RecordingWriter(written.clone())),
+        ))));
+        let stop = AtomicBool::new(false);
+
+        assert_eq!(
+            auto_trigger_submit_queue_command(&shared, &stop, "/clear"),
+            AutoTriggerOutcome::Sent
+        );
+        assert_eq!(written.lock().unwrap().as_slice(), b"/clear\r");
+    }
+    #[test]
+    fn managed_capability_proof_status_message_names_harness() {
+        let message = managed_capability_proof_status_message(
+            "opencode",
+            "opencode_capability_proof status=proven network=proven",
+        );
+
+        assert_eq!(
+            message,
+            "[start] managed opencode capability proof: opencode_capability_proof status=proven network=proven"
+        );
+    }
+    #[test]
+    fn auto_trigger_inject_command_honors_late_cancel_before_write() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(RecordingWriter(written.clone())),
+        ))));
+        let stop = AtomicBool::new(true);
+
+        assert_eq!(
+            auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
+            AutoTriggerOutcome::Cancelled
+        );
+        assert!(written.lock().unwrap().is_empty());
+    }
+    #[test]
+    fn auto_trigger_inject_command_cancels_while_waiting_for_busy_writer_lock() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let writer = Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(RecordingWriter(
+            written.clone(),
+        )))));
+        let held = writer.lock().unwrap();
+        *shared.inject_writer.lock().unwrap() = Some(writer.clone());
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let shared_for_thread = shared.clone();
+        let stop_for_thread = stop.clone();
+        let handle = std::thread::spawn(move || {
+            auto_trigger_inject_command(
+                &shared_for_thread,
+                stop_for_thread.as_ref(),
+                "agent-doc tasks/software/tsift.md",
+            )
+        });
+
+        std::thread::sleep(Duration::from_millis(50));
+        stop.store(true, Ordering::Relaxed);
+        drop(held);
+
+        assert_eq!(handle.join().unwrap(), AutoTriggerOutcome::Cancelled);
+        assert!(written.lock().unwrap().is_empty());
+    }
+    #[test]
+    fn auto_trigger_inject_command_reports_closed_writer_during_trigger_window() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(FailingWriter),
+        ))));
+        let stop = AtomicBool::new(false);
+
+        assert_eq!(
+            auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
+            AutoTriggerOutcome::SendFailed
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn stop_signal_wakes_poll() {
+        // StopSignal should create a valid pipe and signal() should not panic
+        let stop = StopSignal::new().unwrap();
+        stop.signal();
+        // Verify the read end is readable after signal
+        let mut fds = [libc::pollfd {
+            fd: stop.read_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        }];
+        let ret = unsafe { libc::poll(fds.as_mut_ptr(), 1, 100) };
+        assert_eq!(ret, 1, "poll should return 1 after signal");
+        assert_ne!(fds[0].revents & libc::POLLIN, 0, "POLLIN should be set");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn tcflush_discards_pending_input() {
+        // Verify that tcflush(TCIFLUSH) discards buffered input.
+        // This test uses a socketpair to avoid interfering with the
+        // real stdin — it confirms the libc call doesn't panic.
+        // (A full stdin test would require pty allocation.)
+        unsafe {
+            // Just verify the call doesn't error on STDIN_FILENO
+            // (it may return -1 if stdin isn't a tty, which is fine in CI)
+            let ret = libc::tcflush(libc::STDIN_FILENO, libc::TCIFLUSH);
+            // In CI / non-tty contexts, ret may be -1 (ENOTTY). That's OK —
+            // the code uses tcflush as best-effort cleanup.
+            let _ = ret;
+        }
+    }
+    #[test]
+    fn exit_provenance_fields_capture_signal_termination() {
+        let status = portable_pty::ExitStatus::with_signal("Hangup");
+        let rendered = exit_provenance_fields(&status);
+        assert!(rendered.contains("exit_kind=signal"), "got: {rendered}");
+        assert!(
+            rendered.contains("exit_signal=\"Hangup\""),
+            "got: {rendered}"
+        );
+        assert!(
+            rendered.contains("exit_status=\"Terminated by Hangup\""),
+            "got: {rendered}"
+        );
+    }
+    #[test]
+    fn exit_provenance_fields_capture_nonzero_exit_code() {
+        let status = portable_pty::ExitStatus::with_exit_code(7);
+        let rendered = exit_provenance_fields(&status);
+        assert!(rendered.contains("exit_kind=exit_code"), "got: {rendered}");
+        assert!(
+            rendered.contains("exit_status=\"Exited with code 7\""),
+            "got: {rendered}"
+        );
+    }
+    #[test]
+    fn forwarded_ctrl_c_interrupt_exit_requires_forwarded_ctrl_c_signal_exit() {
+        let interrupt = portable_pty::ExitStatus::with_signal("Interrupt");
+        assert!(is_forwarded_ctrl_c_interrupt_exit(&interrupt, true));
+        assert!(!is_forwarded_ctrl_c_interrupt_exit(&interrupt, false));
+
+        let clean = portable_pty::ExitStatus::with_exit_code(0);
+        assert!(!is_forwarded_ctrl_c_interrupt_exit(&clean, true));
+    }
+    #[test]
+    fn forwarded_ctrl_c_interrupt_exit_accepts_exit_code_130() {
+        let status = portable_pty::ExitStatus::with_exit_code(130);
+        assert!(is_forwarded_ctrl_c_interrupt_exit(&status, true));
+    }
 }

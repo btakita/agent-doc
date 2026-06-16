@@ -334,47 +334,47 @@ pub(crate) fn redact_component_contents_for_absorb(body: &str) -> Option<String>
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-#[test]
-fn normalize_for_replay_hash_neutralizes_queue_churn() {
-    // #adoc-queue-ipc-buffer-divergence root cause #4: queue-maintenance
-    // churn (auto strip + activation toggle + drain) must not change the
-    // replay-hash normalization, because the response body lives in
-    // `exchange`, not `queue`.
-    let with_active_queue = concat!(
-        "---\nagent_doc_format: template\nqueue_active: true\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: topic — gpt-5\nResponse body.\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:queue auto -->\n",
-        "preset #spec-test\n- do [#a]\n",
-        "<!-- /agent:queue -->\n"
-    );
-    // Same response; queue halted/drained (the post-maintenance shape).
-    let with_drained_queue = concat!(
-        "---\nagent_doc_format: template\nqueue_active: false\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: topic — gpt-5\nResponse body.\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:queue -->\n",
-        "<!-- /agent:queue -->\n"
-    );
-    assert_eq!(
-        normalize_for_replay_hash(with_active_queue),
-        normalize_for_replay_hash(with_drained_queue),
-        "queue-only churn must not change the replay normalization"
-    );
+    #[test]
+    fn normalize_for_replay_hash_neutralizes_queue_churn() {
+        // #adoc-queue-ipc-buffer-divergence root cause #4: queue-maintenance
+        // churn (auto strip + activation toggle + drain) must not change the
+        // replay-hash normalization, because the response body lives in
+        // `exchange`, not `queue`.
+        let with_active_queue = concat!(
+            "---\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic — gpt-5\nResponse body.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "preset #spec-test\n- do [#a]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        // Same response; queue halted/drained (the post-maintenance shape).
+        let with_drained_queue = concat!(
+            "---\nagent_doc_format: template\nqueue_active: false\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic — gpt-5\nResponse body.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        assert_eq!(
+            normalize_for_replay_hash(with_active_queue),
+            normalize_for_replay_hash(with_drained_queue),
+            "queue-only churn must not change the replay normalization"
+        );
 
-    // A genuine response-body change still registers as different.
-    let with_changed_response = with_active_queue.replace("Response body.", "Different body.");
-    assert_ne!(
-        normalize_for_replay_hash(with_active_queue),
-        normalize_for_replay_hash(&with_changed_response),
-        "a real response-body change must still change the replay normalization"
-    );
-}
-#[test]
-fn canonicalize_answered_prompt_prefixes_uses_opt_in_prompt_start() {
-    let exchange = "\
+        // A genuine response-body change still registers as different.
+        let with_changed_response = with_active_queue.replace("Response body.", "Different body.");
+        assert_ne!(
+            normalize_for_replay_hash(with_active_queue),
+            normalize_for_replay_hash(&with_changed_response),
+            "a real response-body change must still change the replay normalization"
+        );
+    }
+    #[test]
+    fn canonicalize_answered_prompt_prefixes_uses_opt_in_prompt_start() {
+        let exchange = "\
 ### Re: sync latency — gpt-5
 
 The current tree has already started making this accountable.
@@ -387,29 +387,31 @@ Please rerun the deploy check.
 Done.
 ";
 
-    let normalized = canonicalize_answered_prompt_prefixes(exchange);
+        let normalized = canonicalize_answered_prompt_prefixes(exchange);
 
-    assert!(
-        normalized.contains("\nThe current tree has already started making this accountable.\n"),
-        "plain assistant prose before the next response heading must stay bare:\n{normalized}"
-    );
-    assert!(
-        !normalized.contains("\n❯ The current tree has already started making this accountable.\n"),
-        "assistant prose must not become a prompt by default:\n{normalized}"
-    );
-    assert!(
-        normalized.contains("\n❯ Please rerun the deploy check.\n"),
-        "soft prompt requests before a response heading should still be canonicalized:\n{normalized}"
-    );
-}
-#[test]
-fn canonicalize_answered_prompt_prefixes_never_prefixes_duplicate_response_body() {
-    // #finalize-retry-ipc-response-duplication: a multi-retry / late-IPC
-    // reposition can leave a stale duplicate response block whose body
-    // butts directly against the canonical `### Re: … (HEAD)` heading with
-    // no blank-line separator. Those lines are agent response body, not a
-    // user prelude, and must never receive the `❯ ` prompt prefix.
-    let exchange = "\
+        assert!(
+            normalized
+                .contains("\nThe current tree has already started making this accountable.\n"),
+            "plain assistant prose before the next response heading must stay bare:\n{normalized}"
+        );
+        assert!(
+            !normalized
+                .contains("\n❯ The current tree has already started making this accountable.\n"),
+            "assistant prose must not become a prompt by default:\n{normalized}"
+        );
+        assert!(
+            normalized.contains("\n❯ Please rerun the deploy check.\n"),
+            "soft prompt requests before a response heading should still be canonicalized:\n{normalized}"
+        );
+    }
+    #[test]
+    fn canonicalize_answered_prompt_prefixes_never_prefixes_duplicate_response_body() {
+        // #finalize-retry-ipc-response-duplication: a multi-retry / late-IPC
+        // reposition can leave a stale duplicate response block whose body
+        // butts directly against the canonical `### Re: … (HEAD)` heading with
+        // no blank-line separator. Those lines are agent response body, not a
+        // user prelude, and must never receive the `❯ ` prompt prefix.
+        let exchange = "\
 ❯ do [#fix-thing]
 ### Re: fix thing — opus-4-8
 **Scope/honesty:** narrow.
@@ -419,26 +421,26 @@ fn canonicalize_answered_prompt_prefixes_never_prefixes_duplicate_response_body(
 **Commits:** abc123.
 ";
 
-    let normalized = canonicalize_answered_prompt_prefixes(exchange);
+        let normalized = canonicalize_answered_prompt_prefixes(exchange);
 
-    assert!(
-        !normalized.contains("❯ **Scope/honesty:**"),
-        "duplicate response body must not be rewritten as a prompt:\n{normalized}"
-    );
-    assert!(
-        !normalized.contains("❯ **Commits:**"),
-        "duplicate response body must not be rewritten as a prompt:\n{normalized}"
-    );
-    // The only `❯` line is the genuine, already-marked user prompt.
-    assert_eq!(
-        normalized.matches('❯').count(),
-        1,
-        "exactly the existing user prompt keeps its marker:\n{normalized}"
-    );
-}
-#[test]
-fn canonicalize_answered_prompt_prefixes_preserves_markdown_lists() {
-    let exchange = "\
+        assert!(
+            !normalized.contains("❯ **Scope/honesty:**"),
+            "duplicate response body must not be rewritten as a prompt:\n{normalized}"
+        );
+        assert!(
+            !normalized.contains("❯ **Commits:**"),
+            "duplicate response body must not be rewritten as a prompt:\n{normalized}"
+        );
+        // The only `❯` line is the genuine, already-marked user prompt.
+        assert_eq!(
+            normalized.matches('❯').count(),
+            1,
+            "exactly the existing user prompt keeps its marker:\n{normalized}"
+        );
+    }
+    #[test]
+    fn canonicalize_answered_prompt_prefixes_preserves_markdown_lists() {
+        let exchange = "\
 Please compare these options:
 - keep this bullet bare
   - keep this nested bullet bare
@@ -448,59 +450,59 @@ Please compare these options:
 Done.
 ";
 
-    let normalized = canonicalize_answered_prompt_prefixes(exchange);
+        let normalized = canonicalize_answered_prompt_prefixes(exchange);
 
-    assert!(
+        assert!(
             normalized.starts_with(
                 "❯ Please compare these options:\n- keep this bullet bare\n  - keep this nested bullet bare\n1. keep this ordered bullet bare\n"
             ),
             "prompt prose should be prefixed without rewriting markdown list items:\n{normalized}"
         );
-    assert!(
-        !normalized.contains("\n❯ - keep this bullet bare")
-            && !normalized.contains("\n❯   - keep this nested bullet bare")
-            && !normalized.contains("\n❯ 1. keep this ordered bullet bare"),
-        "markdown list items must not receive prompt prefixes:\n{normalized}"
-    );
-}
-#[test]
-fn commit_adopts_manual_escaped_tail_cleanup_after_head_current_snapshot() {
-    use std::fs;
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path();
-    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        assert!(
+            !normalized.contains("\n❯ - keep this bullet bare")
+                && !normalized.contains("\n❯   - keep this nested bullet bare")
+                && !normalized.contains("\n❯ 1. keep this ordered bullet bare"),
+            "markdown list items must not receive prompt prefixes:\n{normalized}"
+        );
+    }
+    #[test]
+    fn commit_adopts_manual_escaped_tail_cleanup_after_head_current_snapshot() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
 
-    Command::new("git")
-        .current_dir(root)
-        .args(["init"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["config", "user.email", "test@example.com"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["config", "user.name", "Test"])
-        .output()
-        .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
 
-    let readme = root.join("README.md");
-    fs::write(&readme, "# test\n").unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["add", "README.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["commit", "-m", "initial", "--no-verify"])
-        .output()
-        .unwrap();
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
 
-    let doc = root.join("session.md");
-    let committed = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+        let doc = root.join("session.md");
+        let committed = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: older\n\
             old body\n\
@@ -512,20 +514,20 @@ fn commit_adopts_manual_escaped_tail_cleanup_after_head_current_snapshot() {
             <!-- agent:backlog -->\n\
             - [ ] keep me\n\
             <!-- /agent:backlog -->\n";
-    fs::write(&doc, committed).unwrap();
-    crate::snapshot::save(&doc, committed).unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["add", "session.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["commit", "-m", "add doc", "--no-verify"])
-        .output()
-        .unwrap();
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
 
-    let cleaned = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+        let cleaned = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: older\n\
             old body\n\
@@ -534,152 +536,152 @@ fn commit_adopts_manual_escaped_tail_cleanup_after_head_current_snapshot() {
             <!-- agent:backlog -->\n\
             - [ ] keep me\n\
             <!-- /agent:backlog -->\n";
-    fs::write(&doc, cleaned).unwrap();
-    crate::snapshot::save(&doc, committed).unwrap();
+        fs::write(&doc, cleaned).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
 
-    let did_commit = commit(&doc).expect("escaped tail cleanup should commit");
-    assert!(did_commit, "cleanup deletion should create a commit");
+        let did_commit = commit(&doc).expect("escaped tail cleanup should commit");
+        assert!(did_commit, "cleanup deletion should create a commit");
 
-    let head = show_head(&doc).unwrap().unwrap();
-    assert_eq!(
-        normalize_transient_agent_doc_markers(&head),
-        normalize_transient_agent_doc_markers(cleaned),
-        "HEAD should contain the cleanup deletion"
-    );
-    let snap = crate::snapshot::load(&doc).unwrap().unwrap();
-    assert_eq!(
-        normalize_transient_agent_doc_markers(&snap),
-        normalize_transient_agent_doc_markers(cleaned),
-        "snapshot should advance to the cleaned file"
-    );
+        let head = show_head(&doc).unwrap().unwrap();
+        assert_eq!(
+            normalize_transient_agent_doc_markers(&head),
+            normalize_transient_agent_doc_markers(cleaned),
+            "HEAD should contain the cleanup deletion"
+        );
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            normalize_transient_agent_doc_markers(&snap),
+            normalize_transient_agent_doc_markers(cleaned),
+            "snapshot should advance to the cleaned file"
+        );
 
-    let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-    assert!(
-        log.contains("post_commit_escaped_tail_cleanup file="),
-        "cleanup should get a specific ops-log marker:\n{log}"
-    );
-    assert!(
-        !log.contains("post_commit_local_drift file="),
-        "cleanup-only deletion must not be classified as local drift:\n{log}"
-    );
-}
-#[test]
-fn commit_allows_current_snapshot_to_replace_committed_historical_patchback() {
-    use std::fs;
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path();
-    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-    fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("post_commit_escaped_tail_cleanup file="),
+            "cleanup should get a specific ops-log marker:\n{log}"
+        );
+        assert!(
+            !log.contains("post_commit_local_drift file="),
+            "cleanup-only deletion must not be classified as local drift:\n{log}"
+        );
+    }
+    #[test]
+    fn commit_allows_current_snapshot_to_replace_committed_historical_patchback() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
 
-    Command::new("git")
-        .current_dir(root)
-        .args(["init"])
-        .output()
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let clean = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "clean exchange\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#tmv7] Release workflow\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        fs::write(&doc, clean).unwrap();
+        crate::snapshot::save(&doc, clean).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let historical_head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "clean exchange\n\n",
+            "#code-review\n",
+            "### Re: code review — gpt-5\n\n",
+            "Historical patchback.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#tmv7] Release workflow\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        fs::write(&doc, historical_head).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual patchback", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let compacted = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "*Compacted.*\n\n",
+            "❯ #code-review\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [x] [#tmv7] Release workflow\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        fs::write(&doc, compacted).unwrap();
+        crate::snapshot::save(&doc, compacted).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(compacted), Some(compacted)).unwrap();
+        crate::cycle_state::mark_write_applied(
+            &doc,
+            "write_template",
+            Some(compacted),
+            Some(compacted),
+        )
         .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["config", "user.email", "test@example.com"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["config", "user.name", "Test"])
-        .output()
-        .unwrap();
 
-    let doc = root.join("session.md");
-    let clean = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "clean exchange\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:icebox -->\n",
-        "- [ ] [#tmv7] Release workflow\n",
-        "<!-- /agent:icebox -->\n",
-    );
-    fs::write(&doc, clean).unwrap();
-    crate::snapshot::save(&doc, clean).unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["add", "session.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["commit", "-m", "initial", "--no-verify"])
-        .output()
-        .unwrap();
+        let did_commit =
+            commit(&doc).expect("current snapshot/file should replace the historical patchback");
+        assert!(did_commit, "replacement commit should be created");
 
-    let historical_head = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "clean exchange\n\n",
-        "#code-review\n",
-        "### Re: code review — gpt-5\n\n",
-        "Historical patchback.\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:icebox -->\n",
-        "- [ ] [#tmv7] Release workflow\n",
-        "<!-- /agent:icebox -->\n",
-    );
-    fs::write(&doc, historical_head).unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["add", "session.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["commit", "-m", "manual patchback", "--no-verify"])
-        .output()
-        .unwrap();
+        let head_doc = show_head(&doc).unwrap().unwrap();
+        assert_eq!(
+            normalize_transient_agent_doc_markers(&head_doc),
+            normalize_transient_agent_doc_markers(compacted),
+            "HEAD should advance to the compacted document:\n{head_doc}"
+        );
 
-    let compacted = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Session Summary\n\n",
-        "*Compacted.*\n\n",
-        "❯ #code-review\n",
-        "<!-- agent:boundary:test -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:icebox -->\n",
-        "- [x] [#tmv7] Release workflow\n",
-        "<!-- /agent:icebox -->\n",
-    );
-    fs::write(&doc, compacted).unwrap();
-    crate::snapshot::save(&doc, compacted).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(compacted), Some(compacted)).unwrap();
-    crate::cycle_state::mark_write_applied(
-        &doc,
-        "write_template",
-        Some(compacted),
-        Some(compacted),
-    )
-    .unwrap();
-
-    let did_commit =
-        commit(&doc).expect("current snapshot/file should replace the historical patchback");
-    assert!(did_commit, "replacement commit should be created");
-
-    let head_doc = show_head(&doc).unwrap().unwrap();
-    assert_eq!(
-        normalize_transient_agent_doc_markers(&head_doc),
-        normalize_transient_agent_doc_markers(compacted),
-        "HEAD should advance to the compacted document:\n{head_doc}"
-    );
-
-    let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-    assert!(
-        !log.contains("commit_blocked_committed_historical_patchback file="),
-        "historical patchback should not block replacement commit:\n{log}"
-    );
-}
-#[test]
-fn redact_component_contents_handles_nested_components() {
-    let body = r#"## Status
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("commit_blocked_committed_historical_patchback file="),
+            "historical patchback should not block replacement commit:\n{log}"
+        );
+    }
+    #[test]
+    fn redact_component_contents_handles_nested_components() {
+        let body = r#"## Status
 
 <!-- agent:status patch=replace -->
 Status content here.
@@ -699,24 +701,24 @@ More content.
 - [ ] task
 <!-- /agent:pending -->
 "#;
-    let result = redact_component_contents_for_absorb(body);
-    assert!(result.is_some(), "should not panic on nested components");
-    let redacted = result.unwrap();
-    assert!(
-        redacted.contains("<!-- agent:status patch=replace -->"),
-        "should contain status open marker"
-    );
-    assert!(
-        redacted.contains("<!-- /agent:status -->"),
-        "should contain status close marker"
-    );
-    assert!(
-        !redacted.contains("Status content here."),
-        "should redact status content"
-    );
-    assert!(
-        !redacted.contains("Some exchange content."),
-        "should redact exchange content (including nested markers)"
-    );
-}
+        let result = redact_component_contents_for_absorb(body);
+        assert!(result.is_some(), "should not panic on nested components");
+        let redacted = result.unwrap();
+        assert!(
+            redacted.contains("<!-- agent:status patch=replace -->"),
+            "should contain status open marker"
+        );
+        assert!(
+            redacted.contains("<!-- /agent:status -->"),
+            "should contain status close marker"
+        );
+        assert!(
+            !redacted.contains("Status content here."),
+            "should redact status content"
+        );
+        assert!(
+            !redacted.contains("Some exchange content."),
+            "should redact exchange content (including nested markers)"
+        );
+    }
 }

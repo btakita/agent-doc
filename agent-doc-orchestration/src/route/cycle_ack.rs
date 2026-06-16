@@ -2,7 +2,6 @@
 
 use super::*;
 
-
 pub(crate) fn cycle_state_advances_start_ack(
     current: &crate::cycle_state::CycleState,
     baseline: Option<&crate::cycle_state::CycleState>,
@@ -522,7 +521,10 @@ pub(crate) fn shares_trigger_prefix(fragment: &str, trigger: &str) -> bool {
     }
 }
 
-pub(crate) fn recent_lines_contain_wrapped_trigger(recent_lines_rev: &[String], trigger: &str) -> bool {
+pub(crate) fn recent_lines_contain_wrapped_trigger(
+    recent_lines_rev: &[String],
+    trigger: &str,
+) -> bool {
     let compact_trigger = compact_trigger_text(trigger);
     if compact_trigger.is_empty() {
         return false;
@@ -554,427 +556,429 @@ pub(crate) fn recent_lines_contain_wrapped_trigger(recent_lines_rev: &[String], 
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
-use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
-#[test]
-fn route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain() {
-    let dir = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("session.md");
-    let snapshot = concat!(
-        "---\n",
-        "agent_doc_format: template\n",
-        "queue_active: false\n",
-        "---\n\n",
-        "<!-- agent:exchange -->\n",
-        "### Re: prior — gpt-5\n\n",
-        "Done.\n",
-        "<!-- /agent:exchange -->\n"
-    );
-    let current = snapshot.replace(
-        "<!-- /agent:exchange -->",
-        "❯ /clear\n<!-- /agent:exchange -->",
-    );
-    std::fs::write(&doc, &current).unwrap();
-    crate::snapshot::save(&doc, snapshot).unwrap();
+    use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    #[test]
+    fn route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let current = snapshot.replace(
+            "<!-- /agent:exchange -->",
+            "❯ /clear\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
 
-    let ctx = pending_prompt_bearing_context_for_route(&doc, None)
-        .unwrap()
-        .expect("exchange slash command should be route-visible");
-    assert_eq!(ctx.prompt_text, "/clear");
-    assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
+        let ctx = pending_prompt_bearing_context_for_route(&doc, None)
+            .unwrap()
+            .expect("exchange slash command should be route-visible");
+        assert_eq!(ctx.prompt_text, "/clear");
+        assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
 
-    let outcome = enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_exchange_slash")
-        .unwrap()
-        .expect("slash command should queue for idle drain");
-    assert!(outcome.appended);
-    assert_eq!(outcome.prompt_text, "/clear");
+        let outcome =
+            enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_exchange_slash")
+                .unwrap()
+                .expect("slash command should queue for idle drain");
+        assert!(outcome.appended);
+        assert_eq!(outcome.prompt_text, "/clear");
 
-    let updated = std::fs::read_to_string(&doc).unwrap();
-    assert!(updated.contains("queue: start"));
-    assert!(updated.contains("<!-- agent:queue -->"));
-    assert!(!updated.contains("agent:queue auto"));
-    assert!(updated.contains("\n/clear\n"), "{updated}");
-    assert!(
-        !updated.contains(":pushpin: /clear"),
-        "slash command must stay literal so the idle-queue classifier sees it:\n{updated}"
-    );
-    assert_eq!(
-        crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
-        Some("/clear"),
-        "queued exchange slash command should be the active literal drain head"
-    );
-    let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
-    assert_eq!(
-        snapshot, updated,
-        "route queueing must sync the snapshot so the command head is not treated as edited drift"
-    );
-}
-#[test]
-fn route_enqueue_bare_exchange_slash_command_for_idle_drain() {
-    let dir = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("session.md");
-    let snapshot = concat!(
-        "---\n",
-        "agent_doc_format: template\n",
-        "queue_active: false\n",
-        "---\n\n",
-        "<!-- agent:exchange -->\n",
-        "### Re: prior — gpt-5\n\n",
-        "Done.\n",
-        "<!-- /agent:exchange -->\n"
-    );
-    let current = snapshot.replace(
-        "<!-- /agent:exchange -->",
-        "/clear\n<!-- /agent:exchange -->",
-    );
-    std::fs::write(&doc, &current).unwrap();
-    crate::snapshot::save(&doc, snapshot).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("queue: start"));
+        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(!updated.contains("agent:queue auto"));
+        assert!(updated.contains("\n/clear\n"), "{updated}");
+        assert!(
+            !updated.contains(":pushpin: /clear"),
+            "slash command must stay literal so the idle-queue classifier sees it:\n{updated}"
+        );
+        assert_eq!(
+            crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
+            Some("/clear"),
+            "queued exchange slash command should be the active literal drain head"
+        );
+        let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snapshot, updated,
+            "route queueing must sync the snapshot so the command head is not treated as edited drift"
+        );
+    }
+    #[test]
+    fn route_enqueue_bare_exchange_slash_command_for_idle_drain() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let current = snapshot.replace(
+            "<!-- /agent:exchange -->",
+            "/clear\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
 
-    let ctx = pending_prompt_bearing_context_for_route(&doc, None)
-        .unwrap()
-        .expect("bare exchange slash command should be route-visible");
-    assert_eq!(ctx.prompt_text, "/clear");
-    assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
+        let ctx = pending_prompt_bearing_context_for_route(&doc, None)
+            .unwrap()
+            .expect("bare exchange slash command should be route-visible");
+        assert_eq!(ctx.prompt_text, "/clear");
+        assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
 
-    let outcome = enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_bare_slash")
-        .unwrap()
-        .expect("slash command should queue for idle drain");
-    assert!(outcome.appended);
-    assert_eq!(outcome.prompt_text, "/clear");
+        let outcome = enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_bare_slash")
+            .unwrap()
+            .expect("slash command should queue for idle drain");
+        assert!(outcome.appended);
+        assert_eq!(outcome.prompt_text, "/clear");
 
-    let updated = std::fs::read_to_string(&doc).unwrap();
-    assert!(updated.contains("queue: start"));
-    assert!(updated.contains("<!-- agent:queue -->"));
-    assert!(!updated.contains("agent:queue auto"));
-    assert!(updated.contains("\n/clear\n"), "{updated}");
-    assert_eq!(
-        crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
-        Some("/clear"),
-        "bare exchange slash command should be the active literal drain head"
-    );
-}
-#[test]
-fn recent_lines_contain_trigger_matches_claude_trigger() {
-    let content = "\
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("queue: start"));
+        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(!updated.contains("agent:queue auto"));
+        assert!(updated.contains("\n/clear\n"), "{updated}");
+        assert_eq!(
+            crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
+            Some("/clear"),
+            "bare exchange slash command should be the active literal drain head"
+        );
+    }
+    #[test]
+    fn recent_lines_contain_trigger_matches_claude_trigger() {
+        let content = "\
 history line
 \x1b[32m❯\x1b[0m /agent-doc test.md
 ";
-    assert!(recent_lines_contain_trigger(content, "/agent-doc test.md"));
-    assert!(!recent_lines_contain_trigger(content, "agent-doc test.md"));
-}
-#[test]
-fn recent_lines_contain_trigger_matches_codex_trigger() {
-    let content = "\
+        assert!(recent_lines_contain_trigger(content, "/agent-doc test.md"));
+        assert!(!recent_lines_contain_trigger(content, "agent-doc test.md"));
+    }
+    #[test]
+    fn recent_lines_contain_trigger_matches_codex_trigger() {
+        let content = "\
 history line
 > agent-doc test.md
 ";
-    assert!(recent_lines_contain_trigger(content, "agent-doc test.md"));
-    assert!(!recent_lines_contain_trigger(content, "/agent-doc test.md"));
-}
-#[test]
-fn recent_lines_contain_trigger_matches_wrapped_codex_trigger() {
-    let trigger =
-        "agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md";
-    let content = "\
+        assert!(recent_lines_contain_trigger(content, "agent-doc test.md"));
+        assert!(!recent_lines_contain_trigger(content, "/agent-doc test.md"));
+    }
+    #[test]
+    fn recent_lines_contain_trigger_matches_wrapped_codex_trigger() {
+        let trigger = "agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md";
+        let content = "\
 › agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claud
 escore-3.md
 gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
 ";
-    assert!(
-        recent_lines_contain_trigger(content, trigger),
-        "wrapped Codex composer lines must still count as pending input"
-    );
-}
-#[test]
-fn line_contains_trigger_rejects_codex_substring_inside_claude_trigger() {
-    assert!(line_contains_trigger(
-        "❯ /agent-doc test.md",
-        "/agent-doc test.md"
-    ));
-    assert!(!line_contains_trigger(
-        "❯ /agent-doc test.md",
-        "agent-doc test.md"
-    ));
-}
-#[test]
-fn wait_for_start_ack_detects_new_preflight_cycle() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("route-live-child-skip.md");
-    std::fs::write(&doc, "# Session\n").unwrap();
+        assert!(
+            recent_lines_contain_trigger(content, trigger),
+            "wrapped Codex composer lines must still count as pending input"
+        );
+    }
+    #[test]
+    fn line_contains_trigger_rejects_codex_substring_inside_claude_trigger() {
+        assert!(line_contains_trigger(
+            "❯ /agent-doc test.md",
+            "/agent-doc test.md"
+        ));
+        assert!(!line_contains_trigger(
+            "❯ /agent-doc test.md",
+            "agent-doc test.md"
+        ));
+    }
+    #[test]
+    fn wait_for_start_ack_detects_new_preflight_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-live-child-skip.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
 
-    let doc_for_thread = doc.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(100));
-        crate::cycle_state::start_preflight(&doc_for_thread, None, Some("# Session\n")).unwrap();
-    });
+        let doc_for_thread = doc.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some("# Session\n"))
+                .unwrap();
+        });
 
-    let ack = wait_for_start_ack(&doc, None, Duration::from_secs(1));
-    assert!(
-        ack.is_some(),
-        "fresh start should acknowledge a new preflight cycle"
-    );
-    assert_eq!(
-        ack.unwrap().phase,
-        crate::cycle_state::CyclePhase::PreflightStarted
-    );
-}
-#[test]
-fn wait_for_start_ack_detects_new_committed_cycle_after_prior_commit() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("route-live-pane-busy.md");
-    std::fs::write(&doc, "# Session\n").unwrap();
+        let ack = wait_for_start_ack(&doc, None, Duration::from_secs(1));
+        assert!(
+            ack.is_some(),
+            "fresh start should acknowledge a new preflight cycle"
+        );
+        assert_eq!(
+            ack.unwrap().phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+    }
+    #[test]
+    fn wait_for_start_ack_detects_new_committed_cycle_after_prior_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-live-pane-busy.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
 
-    crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-    crate::cycle_state::mark_committed(
-        &doc,
-        "commit_success",
-        Some("# Session\n"),
-        Some("# Session\n"),
-    )
-    .unwrap();
-    let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
-
-    let doc_for_thread = doc.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(100));
-        crate::cycle_state::start_preflight(&doc_for_thread, None, Some("# Session\n")).unwrap();
+        crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
         crate::cycle_state::mark_committed(
-            &doc_for_thread,
+            &doc,
             "commit_success",
             Some("# Session\n"),
             Some("# Session\n"),
         )
         .unwrap();
-    });
+        let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
 
-    let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_secs(1))
-        .expect("new committed cycle should count as startup acknowledgment");
-    assert_ne!(ack.cycle_id, baseline.cycle_id);
-    assert_eq!(ack.phase, crate::cycle_state::CyclePhase::Committed);
-}
-#[test]
-fn wait_for_start_ack_times_out_without_cycle_change() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("route-live-same-cycle.md");
-    std::fs::write(&doc, "# Session\n").unwrap();
+        let doc_for_thread = doc.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some("# Session\n"))
+                .unwrap();
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_success",
+                Some("# Session\n"),
+                Some("# Session\n"),
+            )
+            .unwrap();
+        });
 
-    crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-    crate::cycle_state::mark_committed(
-        &doc,
-        "commit_success",
-        Some("# Session\n"),
-        Some("# Session\n"),
-    )
-    .unwrap();
-    let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_secs(1))
+            .expect("new committed cycle should count as startup acknowledgment");
+        assert_ne!(ack.cycle_id, baseline.cycle_id);
+        assert_eq!(ack.phase, crate::cycle_state::CyclePhase::Committed);
+    }
+    #[test]
+    fn wait_for_start_ack_times_out_without_cycle_change() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-live-same-cycle.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
 
-    let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_millis(250));
-    assert!(
-        ack.is_none(),
-        "unchanged cycle state must not count as a fresh-start ack"
-    );
-}
-#[test]
-fn wait_for_start_ack_ignores_same_committed_cycle_mutation() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("route-live-ack-ok.md");
-    std::fs::write(&doc, "# Session\n").unwrap();
-
-    crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-    crate::cycle_state::mark_committed(
-        &doc,
-        "commit_success",
-        Some("# Session\n"),
-        Some("# Session\n"),
-    )
-    .unwrap();
-    let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
-
-    let doc_for_thread = doc.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(100));
+        crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
         crate::cycle_state::mark_committed(
-            &doc_for_thread,
-            "commit_already_current",
+            &doc,
+            "commit_success",
             Some("# Session\n"),
             Some("# Session\n"),
         )
         .unwrap();
-    });
+        let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
 
-    let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_millis(350));
-    assert!(
-        ack.is_none(),
-        "same committed cycle mutations must not count as a new routed-start ack"
-    );
-}
-#[test]
-fn routed_cycle_ack_only_required_for_prompt_bearing_drift_on_closed_cycle() {
-    assert!(!should_require_routed_cycle_ack(None, None));
+        let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_millis(250));
+        assert!(
+            ack.is_none(),
+            "unchanged cycle state must not count as a fresh-start ack"
+        );
+    }
+    #[test]
+    fn wait_for_start_ack_ignores_same_committed_cycle_mutation() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-live-ack-ok.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
 
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("route-live-owner-missing.md");
-    std::fs::write(&doc, "# Session\n").unwrap();
-    crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-    let open_state = crate::cycle_state::load(&doc).unwrap().unwrap();
-    assert!(!should_require_routed_cycle_ack(
-        Some(&open_state),
-        Some("prompt_target: ❯ follow-up question"),
-    ));
+        crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some("# Session\n"),
+            Some("# Session\n"),
+        )
+        .unwrap();
+        let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
 
-    crate::cycle_state::mark_committed(
-        &doc,
-        "commit_success",
-        Some("# Session\n"),
-        Some("# Session\n"),
-    )
-    .unwrap();
-    let committed_state = crate::cycle_state::load(&doc).unwrap().unwrap();
-    assert!(should_require_routed_cycle_ack(
-        Some(&committed_state),
-        Some("prompt_target: ❯ follow-up question"),
-    ));
-}
-#[test]
-fn routed_cycle_ack_timeout_extends_for_live_children() {
-    assert_eq!(routed_cycle_ack_timeout(false), Duration::from_secs(1));
-    assert_eq!(routed_cycle_ack_timeout(true), Duration::from_secs(2));
-}
-#[test]
-fn fresh_route_start_ack_timeout_allows_restart_slack() {
-    assert_eq!(fresh_route_start_ack_timeout(), Duration::from_secs(2));
-}
-#[test]
-fn pending_prompt_bearing_context_for_route_ignores_frontmatter_only_drift() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("route-frontmatter-only-drift.md");
-    let snapshot = "---\nagent: claude\nagent_doc_session: test\n---\n\n\
+        let doc_for_thread = doc.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_already_current",
+                Some("# Session\n"),
+                Some("# Session\n"),
+            )
+            .unwrap();
+        });
+
+        let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_millis(350));
+        assert!(
+            ack.is_none(),
+            "same committed cycle mutations must not count as a new routed-start ack"
+        );
+    }
+    #[test]
+    fn routed_cycle_ack_only_required_for_prompt_bearing_drift_on_closed_cycle() {
+        assert!(!should_require_routed_cycle_ack(None, None));
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-live-owner-missing.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
+        let open_state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert!(!should_require_routed_cycle_ack(
+            Some(&open_state),
+            Some("prompt_target: ❯ follow-up question"),
+        ));
+
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some("# Session\n"),
+            Some("# Session\n"),
+        )
+        .unwrap();
+        let committed_state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert!(should_require_routed_cycle_ack(
+            Some(&committed_state),
+            Some("prompt_target: ❯ follow-up question"),
+        ));
+    }
+    #[test]
+    fn routed_cycle_ack_timeout_extends_for_live_children() {
+        assert_eq!(routed_cycle_ack_timeout(false), Duration::from_secs(1));
+        assert_eq!(routed_cycle_ack_timeout(true), Duration::from_secs(2));
+    }
+    #[test]
+    fn fresh_route_start_ack_timeout_allows_restart_slack() {
+        assert_eq!(fresh_route_start_ack_timeout(), Duration::from_secs(2));
+    }
+    #[test]
+    fn pending_prompt_bearing_context_for_route_ignores_frontmatter_only_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-frontmatter-only-drift.md");
+        let snapshot = "---\nagent: claude\nagent_doc_session: test\n---\n\n\
 <!-- agent:exchange patch=append -->\n\
 ### Re: prior — gpt-5\n\
 Body\n\
 <!-- /agent:exchange -->\n";
-    let current = snapshot.replacen("agent: claude", "agent: codex", 1);
-    std::fs::write(&doc, current).unwrap();
-    crate::snapshot::save(&doc, snapshot).unwrap();
+        let current = snapshot.replacen("agent: claude", "agent: codex", 1);
+        std::fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
 
-    let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
-    assert!(
-        ctx.is_none(),
-        "frontmatter-only drift must not force routed cycle acknowledgment"
-    );
-}
-#[test]
-fn pending_prompt_bearing_context_for_route_ignores_answered_prompt_after_stale_boundary() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("route-stale-boundary-answered-tail.md");
-    let snapshot = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: older — gpt-5\n\n",
-        "Done.\n",
-        "<!-- agent:boundary:stale -->\n",
-        "<!-- /agent:exchange -->\n",
-    );
-    let current = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: older — gpt-5\n\n",
-        "Done.\n",
-        "<!-- agent:boundary:stale -->\n",
-        "Can we run specific rubrics for fine tuning?\n",
-        "### Re: specific rubrics — gpt-5\n\n",
-        "Yes.\n",
-        "<!-- /agent:exchange -->\n",
-    );
-    std::fs::write(&doc, current).unwrap();
-    crate::snapshot::save(&doc, snapshot).unwrap();
+        let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
+        assert!(
+            ctx.is_none(),
+            "frontmatter-only drift must not force routed cycle acknowledgment"
+        );
+    }
+    #[test]
+    fn pending_prompt_bearing_context_for_route_ignores_answered_prompt_after_stale_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-stale-boundary-answered-tail.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "Can we run specific rubrics for fine tuning?\n",
+            "### Re: specific rubrics — gpt-5\n\n",
+            "Yes.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
 
-    let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
-    assert!(
-        ctx.is_none(),
-        "answered prompt after a stale boundary must not force routed cycle acknowledgment"
-    );
-}
-#[test]
-fn pending_prompt_bearing_context_for_route_ignores_raw_answered_prompt_after_stale_boundary() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("route-stale-boundary-raw-answered-tail.md");
-    let snapshot = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: older — gpt-5\n\n",
-        "Done.\n",
-        "<!-- agent:boundary:stale -->\n",
-        "<!-- /agent:exchange -->\n",
-    );
-    let current = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: older — gpt-5\n\n",
-        "Done.\n",
-        "<!-- agent:boundary:stale -->\n",
-        "I renamed the repo to ClaudeScore/buildparty-investor-demo. Please update references\n",
-        "I updated the repo-local references to the renamed GitHub repo.\n\n",
-        "- `.gitmodules` now uses `git@github.com:ClaudeScore/buildparty-investor-demo.git`\n",
-        "- The checked-out submodule at `buildparty-investor-demo/` now has `origin` set to the same URL\n",
-        "<!-- /agent:exchange -->\n",
-    );
-    std::fs::write(&doc, current).unwrap();
-    crate::snapshot::save(&doc, snapshot).unwrap();
+        let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
+        assert!(
+            ctx.is_none(),
+            "answered prompt after a stale boundary must not force routed cycle acknowledgment"
+        );
+    }
+    #[test]
+    fn pending_prompt_bearing_context_for_route_ignores_raw_answered_prompt_after_stale_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-stale-boundary-raw-answered-tail.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "I renamed the repo to ClaudeScore/buildparty-investor-demo. Please update references\n",
+            "I updated the repo-local references to the renamed GitHub repo.\n\n",
+            "- `.gitmodules` now uses `git@github.com:ClaudeScore/buildparty-investor-demo.git`\n",
+            "- The checked-out submodule at `buildparty-investor-demo/` now has `origin` set to the same URL\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
 
-    let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
-    assert!(
-        ctx.is_none(),
-        "raw assistant completion prose after a stale-boundary prompt must not force routed cycle acknowledgment"
-    );
-}
-#[test]
-fn pending_prompt_bearing_context_for_route_detects_plain_exchange_tail_prompt() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let doc = dir.path().join("route-stale-boundary-plain-tail.md");
-    let snapshot = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: older — gpt-5\n\n",
-        "Done.\n",
-        "<!-- agent:boundary:stale -->\n",
-        "<!-- /agent:exchange -->\n",
-    );
-    let current = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: older — gpt-5\n\n",
-        "Done.\n",
-        "<!-- agent:boundary:stale -->\n",
-        "When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push\n",
-        "<!-- /agent:exchange -->\n",
-    );
-    std::fs::write(&doc, current).unwrap();
-    crate::snapshot::save(&doc, snapshot).unwrap();
+        let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
+        assert!(
+            ctx.is_none(),
+            "raw assistant completion prose after a stale-boundary prompt must not force routed cycle acknowledgment"
+        );
+    }
+    #[test]
+    fn pending_prompt_bearing_context_for_route_detects_plain_exchange_tail_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-stale-boundary-plain-tail.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
 
-    let ctx = pending_prompt_bearing_context_for_route(&doc, None)
-        .unwrap()
-        .expect("plain exchange-tail prompt should force routed ack gating");
-    assert_eq!(
-        ctx.marker,
-        "prompt_target: When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push"
-    );
-}
+        let ctx = pending_prompt_bearing_context_for_route(&doc, None)
+            .unwrap()
+            .expect("plain exchange-tail prompt should force routed ack gating");
+        assert_eq!(
+            ctx.marker,
+            "prompt_target: When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push"
+        );
+    }
 }

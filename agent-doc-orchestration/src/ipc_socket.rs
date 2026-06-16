@@ -343,7 +343,6 @@ pub fn send_queue_convergence(
     queue_auto: bool,
     frontmatter_yaml: Option<&str>,
     queue_body: Option<&str>,
-    node_patches: Vec<serde_json::Value>,
 ) -> Result<bool> {
     let patches = queue_body
         .map(|content| {
@@ -357,7 +356,6 @@ pub fn send_queue_convergence(
         "type": "patch",
         "file": file,
         "patches": patches,
-        "node_patches": node_patches,
         "unmatched": "",
         "frontmatter": frontmatter_yaml,
         "queue_auto": queue_auto,
@@ -610,7 +608,11 @@ mod tests {
         let ok = send_save_document(&root, "/tmp/plan.md", "save-pid-123").unwrap();
         assert!(ok, "save_document should succeed on an ok ack");
 
-        let msg = captured.lock().unwrap().clone().expect("listener saw a message");
+        let msg = captured
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("listener saw a message");
         assert_eq!(msg["type"], "save_document");
         assert_eq!(msg["file"], "/tmp/plan.md");
         assert_eq!(msg["patch_id"], "save-pid-123");

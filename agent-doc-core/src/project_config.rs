@@ -252,8 +252,9 @@ pub struct ProjectConfig {
     /// `AGENT_DOC_SUPERVISOR_AUTO_INSTALL` (truthy enables, `0`/`false`/`off`
     /// force-disables), then the per-document frontmatter
     /// `agent_doc_supervisor_auto_install`, then this project value, then the
-    /// built-in default of ON. Never fires for a non-dogfooding document, so the
-    /// default is safe for ordinary users.
+    /// built-in default of ON. Never fires for a non-agent-doc dogfood session
+    /// document, so the default is safe for ordinary users and ordinary project
+    /// docs cannot force it on.
     #[serde(default, alias = "supervisor_auto_install")]
     pub agent_doc_supervisor_auto_install: Option<bool>,
     /// Guard behavior overrides (for example pending-capture enforcement).

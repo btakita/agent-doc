@@ -1749,7 +1749,6 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
     crate::write::atomic_write_pub(path, content)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

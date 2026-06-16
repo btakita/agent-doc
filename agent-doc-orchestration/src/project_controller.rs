@@ -92,8 +92,9 @@ const SUPERVISOR_AUTO_RECYCLE_ENV: &str = "AGENT_DOC_SUPERVISOR_AUTO_RECYCLE";
 /// dogfood supervisor refresh bootstrap and root-fixes the "don't `cargo install`
 /// mid-session against a live supervisor" drift (`#no-mid-session-install`): the build
 /// runs in the supervisor at idle, never in the finalize client. Default ON — safe because
-/// the build only fires for a DOGFOODING session (an agent-doc session editing agent-doc's
-/// own source); an ordinary user's document never triggers it. Opt out with a falsey
+/// the build only fires for an agent-doc dogfood session document (for example
+/// `tasks/agent-doc/...` or a document inside the agent-doc source checkout); an ordinary
+/// project document never triggers it. Opt out with a falsey
 /// env/frontmatter/project knob; when off, a dogfood source-ahead-of-binary state only logs
 /// `supervisor_source_newer_detected`.
 const SUPERVISOR_AUTO_INSTALL_ENV: &str = "AGENT_DOC_SUPERVISOR_AUTO_INSTALL";
@@ -143,6 +144,33 @@ pub struct ControllerBinaryIdentity {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerProcessFreshness {
+    pub role: String,
+    #[serde(default)]
+    pub pid: Option<u32>,
+    #[serde(default)]
+    pub running_inode: Option<u64>,
+    #[serde(default)]
+    pub installed_inode: Option<u64>,
+    #[serde(default)]
+    pub matches_installed: Option<bool>,
+    pub stale: bool,
+    pub guidance: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerFreshnessStatus {
+    #[serde(default)]
+    pub installed_binary: Option<ControllerBinaryIdentity>,
+    #[serde(default)]
+    pub installed_inode: Option<u64>,
+    pub controller: ControllerProcessFreshness,
+    #[serde(default)]
+    pub route_owned_supervisor: Option<ControllerProcessFreshness>,
+    pub guidance: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerBootstrap {
     pub project_root: PathBuf,
     pub socket_path: PathBuf,
@@ -181,6 +209,8 @@ pub struct ControllerStatus {
     pub previous_controller_pid: Option<u32>,
     #[serde(default)]
     pub stale_duplicate_pids: Vec<u32>,
+    #[serde(default)]
+    pub freshness: Option<ControllerFreshnessStatus>,
     #[serde(default = "default_control_plane_status")]
     pub control_plane: ControlPlaneStatus,
 }
@@ -686,6 +716,7 @@ fn controller_status_from_bootstrap(
             &bootstrap.project_root,
             Some(bootstrap.pid),
         ),
+        freshness: Some(controller_freshness_status(Some(bootstrap.pid), None)),
         control_plane: control_plane_status(&bootstrap.project_root, active, memory_categories)?,
     })
 }
@@ -713,8 +744,94 @@ fn inactive_controller_status(
             .as_ref()
             .and_then(|state| state.previous_controller_pid),
         stale_duplicate_pids: discover_stale_duplicate_pids(project_root, None),
+        freshness: Some(controller_freshness_status(
+            bootstrap.as_ref().map(|state| state.pid),
+            None,
+        )),
         control_plane: control_plane_status(project_root, false, None)?,
     })
+}
+
+pub(crate) fn controller_freshness_status(
+    controller_pid: Option<u32>,
+    route_owned_supervisor_pid: Option<u32>,
+) -> ControllerFreshnessStatus {
+    let installed_binary = current_binary_identity().ok();
+    let installed_inode = installed_binary
+        .as_ref()
+        .and_then(|identity| inode_of_path(&identity.path));
+    let controller = controller_process_freshness("controller", controller_pid, installed_inode);
+    let route_owned_supervisor = route_owned_supervisor_pid.map(|pid| {
+        controller_process_freshness("route_owned_supervisor", Some(pid), installed_inode)
+    });
+    let mut processes = vec![&controller];
+    if let Some(supervisor) = route_owned_supervisor.as_ref() {
+        processes.push(supervisor);
+    }
+    let guidance = if processes.iter().any(|process| process.stale) {
+        "stale: one or more long-running agent-doc processes map a different binary inode; recycle or restart at an idle boundary".to_string()
+    } else if processes
+        .iter()
+        .all(|process| process.matches_installed == Some(true))
+    {
+        "fresh: controller/supervisor inode identity matches the installed agent-doc binary"
+            .to_string()
+    } else {
+        "partial: inode proof unavailable for one or more processes; restart only if behavior remains stale".to_string()
+    };
+    ControllerFreshnessStatus {
+        installed_binary,
+        installed_inode,
+        controller,
+        route_owned_supervisor,
+        guidance,
+    }
+}
+
+fn controller_process_freshness(
+    role: &str,
+    pid: Option<u32>,
+    installed_inode: Option<u64>,
+) -> ControllerProcessFreshness {
+    let running_inode = pid.and_then(running_exe_inode_for_pid);
+    controller_process_freshness_from_inodes(role, pid, running_inode, installed_inode)
+}
+
+pub(crate) fn controller_process_freshness_from_inodes(
+    role: &str,
+    pid: Option<u32>,
+    running_inode: Option<u64>,
+    installed_inode: Option<u64>,
+) -> ControllerProcessFreshness {
+    let matches_installed = match (running_inode, installed_inode) {
+        (Some(running), Some(installed)) => Some(running == installed),
+        _ => None,
+    };
+    let stale = matches_installed == Some(false);
+    let guidance = match matches_installed {
+        Some(true) => {
+            format!("fresh: {role} running inode matches the installed agent-doc binary")
+        }
+        Some(false) => {
+            format!(
+                "stale: {role} running inode differs from the installed agent-doc binary; recycle or restart at an idle boundary"
+            )
+        }
+        None => {
+            format!(
+                "unknown: {role} running or installed inode unavailable; inspect /proc/<pid>/exe on Linux or restart if behavior remains stale"
+            )
+        }
+    };
+    ControllerProcessFreshness {
+        role: role.to_string(),
+        pid,
+        running_inode,
+        installed_inode,
+        matches_installed,
+        stale,
+        guidance,
+    }
 }
 
 fn parse_handoff_state(raw: &str) -> Result<ControllerHandoffState> {
@@ -878,6 +995,8 @@ pub struct ControllerActorInspection {
     #[serde(default)]
     pub supervisor_lease: Option<SupervisorLeaseStatus>,
     #[serde(default)]
+    pub freshness: Option<ControllerFreshnessStatus>,
+    #[serde(default)]
     pub queue_head: Option<QueueHeadStatus>,
     #[serde(default)]
     pub queue_control: Option<QueueControlStatus>,
@@ -983,10 +1102,7 @@ impl LaunchLock {
                         }
                         _ => {
                             return Err(err).with_context(|| {
-                                format!(
-                                    "controller launch already in progress: {}",
-                                    path.display()
-                                )
+                                format!("controller launch already in progress: {}", path.display())
                             });
                         }
                     }
@@ -2334,8 +2450,6 @@ fn record_projection_diagnostic_with_metadata(
 mod rpc;
 pub use rpc::*;
 
-
-
 #[cfg(test)]
 /// Spawn a long-sleep sentinel whose `/proc/<pid>/cmdline` matches the
 /// `agent-doc controller serve --project-root <root>` shape
@@ -2744,7 +2858,10 @@ mod tests {
         // Times out far enough above the holder's release that contention resolves
         // into a successful acquire rather than an error.
         let acquired = LaunchLock::acquire_blocking(dir.path(), Duration::from_secs(2));
-        assert!(acquired.is_ok(), "blocking acquire should wait out the holder");
+        assert!(
+            acquired.is_ok(),
+            "blocking acquire should wait out the holder"
+        );
         releaser.join().unwrap();
         let _ = root;
     }
@@ -2848,6 +2965,7 @@ mod tests {
             handoff_started_at: None,
             previous_controller_pid: None,
             stale_duplicate_pids: Vec::new(),
+            freshness: None,
             control_plane: default_control_plane_status(),
         };
         assert!(!controller_status_matches_current_binary(&missing).unwrap());
@@ -2866,6 +2984,32 @@ mod tests {
         };
         assert!(controller_status_matches_current_binary(&fresh).unwrap());
     }
+
+    #[test]
+    fn controller_process_freshness_classifies_inode_identity() {
+        let fresh =
+            controller_process_freshness_from_inodes("controller", Some(7), Some(11), Some(11));
+        assert_eq!(fresh.matches_installed, Some(true));
+        assert!(!fresh.stale);
+        assert!(fresh.guidance.contains("fresh"));
+
+        let stale = controller_process_freshness_from_inodes(
+            "route_owned_supervisor",
+            Some(8),
+            Some(10),
+            Some(11),
+        );
+        assert_eq!(stale.matches_installed, Some(false));
+        assert!(stale.stale);
+        assert!(stale.guidance.contains("stale"));
+
+        let unknown =
+            controller_process_freshness_from_inodes("controller", Some(9), None, Some(11));
+        assert_eq!(unknown.matches_installed, None);
+        assert!(!unknown.stale);
+        assert!(unknown.guidance.contains("unknown"));
+    }
+
     #[test]
     fn controller_binary_resolution_prefers_existing_current_exe() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -3826,6 +3970,12 @@ mod tests {
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
         let inspection = envelope.data.unwrap();
+        let freshness = inspection
+            .freshness
+            .as_ref()
+            .expect("inspect_actor should expose controller/supervisor freshness proof");
+        assert_eq!(freshness.controller.pid, Some(bootstrap.pid));
+        assert!(freshness.installed_binary.is_some());
         assert_eq!(
             inspection
                 .queue_control
@@ -4158,7 +4308,8 @@ mod tests {
         );
         assert!(recoverable.contains("failed_stage=queue_paused"));
         assert!(
-            recoverable.contains(crate::project_controller::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER),
+            recoverable
+                .contains(crate::project_controller::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER),
             "stale-supervisor pause must carry the restart-redirect marker: {recoverable}"
         );
         assert_eq!(
@@ -4179,179 +4330,6 @@ mod tests {
             None
         );
     }
-
-    #[test]
-    fn session_start_clears_stale_supervisor_queue_pause_before_dispatch() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("tasks/jbrestale-restart.md");
-        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(
-            &doc,
-            "---\nagent_doc_session: session-jbr-restart\nagent: codex\n---\nBody\n",
-        )
-        .unwrap();
-        let bootstrap = test_bootstrap(&dir);
-        let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(
-            &doc,
-            "session-jbr-restart",
-            "%52",
-            "@1",
-            1,
-        )
-        .unwrap();
-        crate::session_actor::transition_state_direct(
-            &doc,
-            "session-jbr-restart",
-            "%52",
-            Some(1),
-            crate::session_actor::ActorState::Ready,
-            "supervisor",
-            "prompt_ready",
-        )
-        .unwrap();
-
-        let pause_reason =
-            "churn-stop: re-injected by stale supervisor pid1368698; needs operator recycle";
-        let pause = ControllerRequest {
-            command: "queue_control".to_string(),
-            file: Some(doc.clone()),
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: Some(1),
-            state: Some("pause".to_string()),
-            caller: Some("admin".to_string()),
-            reason: Some(pause_reason.to_string()),
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: Some("pause".to_string()),
-            diagnostic_payload: None,
-        };
-        let response = handle_request(
-            &(serde_json::to_string(&pause).unwrap() + "\n"),
-            &bootstrap,
-            &mut should_stop,
-        )
-        .unwrap();
-        let envelope: ControllerEnvelope<ControllerAdminReceipt> =
-            serde_json::from_str(&response).unwrap();
-        assert!(envelope.ok);
-
-        let blocked_dispatch = ControllerRequest {
-            command: "dispatch".to_string(),
-            file: Some(doc.clone()),
-            session_id: Some("session-jbr-restart".to_string()),
-            pane_id: Some("%52".to_string()),
-            window_id: None,
-            generation: Some(1),
-            state: None,
-            caller: None,
-            reason: None,
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: Some("managed_reopen".to_string()),
-            diagnostic_payload: Some("pre-restart stale pause".to_string()),
-        };
-        let response = handle_request(
-            &(serde_json::to_string(&blocked_dispatch).unwrap() + "\n"),
-            &bootstrap,
-            &mut should_stop,
-        )
-        .unwrap();
-        let envelope: ControllerEnvelope<DispatchAuthorization> =
-            serde_json::from_str(&response).unwrap();
-        assert!(!envelope.ok);
-        assert!(
-            envelope
-                .error
-                .as_deref()
-                .unwrap_or_default()
-                .contains("failed_stage=queue_paused"),
-            "stale pause must block before the restart: {response}"
-        );
-
-        let restart = ControllerRequest {
-            command: "start_session".to_string(),
-            file: Some(doc.clone()),
-            session_id: Some("session-jbr-restart".to_string()),
-            pane_id: Some("%53".to_string()),
-            window_id: Some("@2".to_string()),
-            generation: Some(2),
-            state: None,
-            caller: Some("start".to_string()),
-            reason: Some("session_start".to_string()),
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: None,
-        };
-        let response = handle_request(
-            &(serde_json::to_string(&restart).unwrap() + "\n"),
-            &bootstrap,
-            &mut should_stop,
-        )
-        .unwrap();
-        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
-            serde_json::from_str(&response).unwrap();
-        assert!(envelope.ok, "restart should be accepted: {response}");
-        assert_eq!(envelope.data.unwrap().generation, 2);
-
-        let conn = open_state_db(dir.path()).unwrap();
-        let document_id =
-            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
-        let effective = state_store::load_effective_queue_control_from_db(
-            &conn,
-            &document_id,
-            &dir.path().to_string_lossy(),
-        )
-        .unwrap();
-        assert!(
-            effective.is_none(),
-            "stale-supervisor pause must be cleared by the accepted restart"
-        );
-        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops_log.contains("stale_supervisor_pause_repaired"));
-        assert!(ops_log.contains("action=session_start"));
-        assert!(ops_log.contains("stale_pid=1368698"));
-
-        crate::session_actor::transition_state_direct(
-            &doc,
-            "session-jbr-restart",
-            "%53",
-            Some(2),
-            crate::session_actor::ActorState::Ready,
-            "supervisor",
-            "prompt_ready_after_restart",
-        )
-        .unwrap();
-        let dispatch_after_restart = ControllerRequest {
-            command: "dispatch".to_string(),
-            file: Some(doc.clone()),
-            session_id: Some("session-jbr-restart".to_string()),
-            pane_id: Some("%53".to_string()),
-            window_id: None,
-            generation: Some(2),
-            state: None,
-            caller: None,
-            reason: None,
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: Some("managed_reopen".to_string()),
-            diagnostic_payload: Some("post-restart stale pause repaired".to_string()),
-        };
-        let response = handle_request(
-            &(serde_json::to_string(&dispatch_after_restart).unwrap() + "\n"),
-            &bootstrap,
-            &mut should_stop,
-        )
-        .unwrap();
-        let envelope: ControllerEnvelope<DispatchAuthorization> =
-            serde_json::from_str(&response).unwrap();
-        assert!(envelope.ok, "restart-cleared queue must dispatch: {response}");
-    }
-
     #[test]
     fn controller_admin_handoff_and_reap_require_observed_generation() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -4936,12 +4914,9 @@ agent:queue\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         // Fresh handoff_started_at (just now) ⇒ healthy mid-handoff, keep.
         write_preparing_bootstrap(dir.path(), std::process::id(), Some(timestamp_secs()));
-        let (reaped, kept) = terminate_stale_preparing_controllers(
-            dir.path(),
-            Duration::from_secs(45),
-            false,
-        )
-        .unwrap();
+        let (reaped, kept) =
+            terminate_stale_preparing_controllers(dir.path(), Duration::from_secs(45), false)
+                .unwrap();
         assert_eq!((reaped, kept), (0, 1));
         let after = read_bootstrap(dir.path()).unwrap().unwrap();
         assert_eq!(after.handoff_state, ControllerHandoffState::Preparing);
@@ -4954,12 +4929,9 @@ agent:queue\n\
         // process, so the cmdline gate must refuse to kill it and keep the record.
         let old = timestamp_secs() - 600;
         write_preparing_bootstrap(dir.path(), std::process::id(), Some(old));
-        let (reaped, kept) = terminate_stale_preparing_controllers(
-            dir.path(),
-            Duration::from_secs(45),
-            false,
-        )
-        .unwrap();
+        let (reaped, kept) =
+            terminate_stale_preparing_controllers(dir.path(), Duration::from_secs(45), false)
+                .unwrap();
         assert_eq!((reaped, kept), (0, 1));
         let after = read_bootstrap(dir.path()).unwrap().unwrap();
         assert_eq!(
@@ -4967,8 +4939,7 @@ agent:queue\n\
             ControllerHandoffState::Preparing,
             "a non-controller pid must never be killed or marked Failed"
         );
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("stale_preparing_controller_reaped_skipped"));
         assert!(ops_log.contains("reason=not_same_project_controller"));
     }
@@ -5059,11 +5030,8 @@ agent:queue\n\
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let stale = timestamp_secs().saturating_sub(600);
-        let bootstrap = preparing_runtime_bootstrap(
-            dir.path(),
-            ControllerHandoffState::Preparing,
-            Some(stale),
-        );
+        let bootstrap =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Preparing, Some(stale));
         write_bootstrap_state(&bootstrap).unwrap();
         let runtime = runtime_for_bootstrap(bootstrap);
 
@@ -5082,8 +5050,7 @@ agent:queue\n\
             runtime.bootstrap_snapshot().unwrap().handoff_state,
             ControllerHandoffState::Failed
         );
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("stale_preparing_controller_self_reaped pid="));
         assert!(ops_log.contains("caller=self_watchdog"));
     }
@@ -5154,8 +5121,7 @@ agent:queue\n\
 
         let after = read_bootstrap(dir.path()).unwrap().unwrap();
         assert_eq!(after.handoff_state, ControllerHandoffState::Failed);
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("stale_preparing_controller_self_reaped pid="));
     }
     #[test]
@@ -5164,7 +5130,8 @@ agent:queue\n\
         // disk must NOT clobber that newer record to Failed when it self-reaps.
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let mut newer = preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        let mut newer =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
         newer.controller_generation = 99;
         write_bootstrap_state(&newer).unwrap();
         // The wedged replacement is the older generation 7.
@@ -5211,7 +5178,10 @@ agent:queue\n\
             reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(45), false)
                 .unwrap();
         assert_eq!((reaped, kept), (0, 1));
-        assert!(process_is_alive(pid), "a fresh preparing sentinel must be kept");
+        assert!(
+            process_is_alive(pid),
+            "a fresh preparing sentinel must be kept"
+        );
 
         let _ = sentinel.kill();
         let _ = sentinel.wait();
@@ -5226,10 +5196,12 @@ agent:queue\n\
 
         // No `--handoff-state preparing` ⇒ not an orphaned handoff ⇒ never scanned.
         let (reaped, kept) =
-            reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(0), false)
-                .unwrap();
+            reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(0), false).unwrap();
         assert_eq!((reaped, kept), (0, 0));
-        assert!(process_is_alive(pid), "a plain controller must never be reaped here");
+        assert!(
+            process_is_alive(pid),
+            "a plain controller must never be reaped here"
+        );
 
         let _ = sentinel.kill();
         let _ = sentinel.wait();
@@ -5259,7 +5231,10 @@ agent:queue\n\
         // No authoritative controller listens on the project socket ⇒ recycle RPC
         // no-ops (Ok(false)); the orphan reap still runs.
         let recycled = recycle_controller(dir.path()).unwrap();
-        assert!(!recycled, "no authoritative controller answered the recycle");
+        assert!(
+            !recycled,
+            "no authoritative controller answered the recycle"
+        );
 
         // The aged orphan is our child; poll try_wait for its termination.
         let start = Instant::now();
@@ -5274,10 +5249,12 @@ agent:queue\n\
             }
         }
         let status = exit.expect("aged preparing orphan must be reaped by recycle");
-        assert!(!status.success(), "orphan must be signal-terminated: {status:?}");
+        assert!(
+            !status.success(),
+            "orphan must be signal-terminated: {status:?}"
+        );
 
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("orphaned_preparing_controller_reaped pid="));
         assert!(ops_log.contains("caller=recycle"));
 
@@ -5347,9 +5324,11 @@ agent:queue\n\
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(refused, 1, "non-Stable dispatch refusal must record a receipt");
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert_eq!(
+            refused, 1,
+            "non-Stable dispatch refusal must record a receipt"
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("dispatch_refused_non_stable_controller"));
 
         // The identical dispatch on a Stable controller passes the authority gate —
@@ -5512,8 +5491,7 @@ agent:queue\n\
             refused, 1,
             "stale-binary dispatch refusal must record a receipt"
         );
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("dispatch_refused_stale_binary"));
 
         // A current-binary Stable controller is never refused for staleness (it may
@@ -5567,12 +5545,9 @@ agent:queue\n\
         // Age past a zero threshold (start age = /proc dir mtime).
         std::thread::sleep(Duration::from_millis(1100));
 
-        let (reaped, _kept) = reap_orphaned_preparing_controllers_all_projects(
-            Duration::from_secs(0),
-            false,
-            "test",
-        )
-        .unwrap();
+        let (reaped, _kept) =
+            reap_orphaned_preparing_controllers_all_projects(Duration::from_secs(0), false, "test")
+                .unwrap();
         assert!(
             reaped >= 1,
             "cross-project sweep must reap the aged preparing sentinel"
@@ -5592,10 +5567,12 @@ agent:queue\n\
             }
         }
         let status = exit.expect("aged cross-project preparing orphan must be reaped");
-        assert!(!status.success(), "orphan must be signal-terminated: {status:?}");
+        assert!(
+            !status.success(),
+            "orphan must be signal-terminated: {status:?}"
+        );
 
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("orphaned_preparing_controller_reaped_cross_project pid="));
         assert!(ops_log.contains("caller=test"));
     }

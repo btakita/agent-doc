@@ -653,7 +653,9 @@ pub fn response_target_disjoint_from_user_edit(
     let candidate_ex = exchange_component_text(candidate);
     let ours_ex = exchange_component_text(content_ours);
     let response_ex_added: std::collections::HashSet<String> =
-        added_nonblank_lines(&baseline_ex, &ours_ex).into_iter().collect();
+        added_nonblank_lines(&baseline_ex, &ours_ex)
+            .into_iter()
+            .collect();
     let user_ex_added = added_nonblank_lines(&baseline_ex, &candidate_ex)
         .into_iter()
         .any(|line| !response_ex_added.contains(&line));
@@ -665,7 +667,9 @@ pub fn response_target_disjoint_from_user_edit(
     // them is a next-cycle instruction that must be carried forward, not folded
     // into the commit, so it disqualifies the forward-merge.
     let response_added_set: std::collections::HashSet<String> =
-        added_nonblank_lines(baseline, content_ours).into_iter().collect();
+        added_nonblank_lines(baseline, content_ours)
+            .into_iter()
+            .collect();
     let user_carries_directive = user_added
         .iter()
         .filter(|line| !response_added_set.contains(*line))
@@ -2036,7 +2040,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // stream IPC-timeout `exit(75)` path, uses an identical decision
     // (#queue-consume-on-stream-ipc-timeout).
     if write_result.is_ok() {
-        let response_body = active_response_body_for_queue_consumption(file)?.unwrap_or_default();
+        let response_body = crate::capture::load_active(file)?
+            .map(|capture| capture.response_body)
+            .unwrap_or_default();
         let queue_consumption_allowed = queue_consumption_allowed_for_response(
             file,
             baseline.as_deref(),
@@ -2749,17 +2755,7 @@ pub fn normalize_template_structure_or_fail_preserving(
     file: &Path,
     preserve_doc: Option<&str>,
 ) -> Result<String> {
-    let mut lifted = lift_pending_from_exchange_safe(content, file);
-    if let Some(repaired) = crate::template::repair_agent_response_conflict_scaffold(&lifted)? {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "raw_conflict_marker_scaffold_repaired file={} source=structure before_commit=true",
-                file.display()
-            ),
-        );
-        lifted = repaired;
-    }
+    let lifted = lift_pending_from_exchange_safe(content, file);
     // Defense-in-depth: merge any duplicate exchange openers that may have
     // survived the patch application phase (e.g., via CRDT/git merge).
     let deduped_openers = {
@@ -2776,12 +2772,7 @@ pub fn normalize_template_structure_or_fail_preserving(
         DuplicatePromptRepairOptions::new("structure").preserving(preserve_doc),
     )?;
     match crate::template::guard_no_conversation_tail_outside_exchange(&normalized) {
-        Ok(()) => {
-            crate::template::guard_no_raw_conflict_marker_blocks(&normalized).with_context(
-                || format!("raw conflict marker guard failed for {}", file.display()),
-            )?;
-            Ok(normalized)
-        }
+        Ok(()) => Ok(normalized),
         Err(err)
             if err.chain().any(|cause| {
                 cause
@@ -2808,9 +2799,6 @@ pub fn normalize_template_structure_or_fail_preserving(
                         "template structure guard failed for {} after duplicate-scaffold repair",
                         file.display()
                     ),
-                )?;
-                crate::template::guard_no_raw_conflict_marker_blocks(&repaired).with_context(
-                    || format!("raw conflict marker guard failed for {}", file.display()),
                 )?;
                 return Ok(repaired);
             }
@@ -2846,9 +2834,6 @@ pub fn normalize_template_structure_or_fail_preserving(
                         "template structure guard failed for {} after duplicate-close repair",
                         file.display()
                     ),
-                )?;
-                crate::template::guard_no_raw_conflict_marker_blocks(&repaired).with_context(
-                    || format!("raw conflict marker guard failed for {}", file.display()),
                 )?;
                 return Ok(repaired);
             }
@@ -4321,7 +4306,6 @@ pub(crate) fn record_document_write_provenance(path: &Path, content: &str) {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -4331,60 +4315,6 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
-
-    #[test]
-    fn normalize_template_structure_repairs_efs_conflict_scaffold() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("efs.md");
-        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
-        let content = concat!(
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ <<<<<<< agent-response\n",
-            "\n",
-            "### Re: EFS compact summary replay — gpt-5\n\n",
-            "Fixed the compact summary replay.\n",
-            "❯ ||||||| original\n",
-            "❯ =======\n",
-            ">>>>>>> your-edits\n",
-            "<!-- agent:boundary:6627bbc1 -->\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, content).unwrap();
-
-        let repaired = normalize_template_structure_or_fail(content, &doc).unwrap();
-
-        assert!(repaired.contains("### Re: EFS compact summary replay — gpt-5"));
-        assert!(!repaired.contains("<<<<<<<"));
-        assert!(!repaired.contains(">>>>>>>"));
-        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(log.contains("raw_conflict_marker_scaffold_repaired"));
-        assert!(log.contains("source=structure"));
-    }
-
-    #[test]
-    fn normalize_template_structure_rejects_ambiguous_conflict_scaffold() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("efs.md");
-        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
-        let content = concat!(
-            "<!-- agent:exchange patch=append -->\n",
-            "<<<<<<< agent-response\n",
-            "assistant response\n",
-            "||||||| original\n",
-            "original text\n",
-            "=======\n",
-            "user edit\n",
-            ">>>>>>> your-edits\n",
-            "<!-- /agent:exchange -->\n"
-        );
-
-        let err = normalize_template_structure_or_fail(content, &doc).unwrap_err();
-
-        assert!(
-            err.to_string().contains("raw conflict marker guard failed"),
-            "unexpected error: {err}"
-        );
-    }
 
     /// #pcp2: a document disk write records write-provenance, but `.agent-doc/`
     /// sidecar/snapshot writes do not (provenance is only meaningful for the

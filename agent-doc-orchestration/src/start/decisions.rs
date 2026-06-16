@@ -361,10 +361,10 @@ pub fn supervisor_recycle_action(
 /// the existing recycle path hot-reloads onto it.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SupervisorInstallAction {
-    /// Source not newer than the installed binary, not at a turn boundary, or not a
-    /// dogfooding session — do nothing.
+    /// Source not newer than the installed binary, not at a turn boundary, or not an
+    /// agent-doc dogfood session document — do nothing.
     None,
-    /// Source is newer + at a turn boundary but auto-install is opted OUT (default OFF):
+    /// Source is newer + at a turn boundary but auto-install is opted OUT:
     /// surface it once so the operator runs the manual dogfood refresh deliberately.
     Detect,
     /// Source is newer + auto-install opt-in + turn boundary: build+install at the next
@@ -378,9 +378,8 @@ pub enum SupervisorInstallAction {
 /// Mirrors [`supervisor_recycle_action`]: only acts at a `turn_boundary`
 /// (`prompt_visible && !turn_active`); when `auto_install` is opted OUT it surfaces the
 /// source-ahead state once (`Detect`) so the operator runs the manual refresh, and when
-/// opted in it requests a (caller-debounced) build+install (`Install`). Default OFF —
-/// building the binary is heavy and only applies when an agent-doc session is editing
-/// agent-doc's own source.
+/// opted in it requests a (caller-debounced) build+install (`Install`). The default is
+/// ON only after the caller proves the document is an agent-doc dogfood session.
 pub fn supervisor_install_action(
     source_newer: bool,
     auto_install: bool,
@@ -547,7 +546,7 @@ mod tests {
         assert_eq!(supervisor_install_action(false, false, true), None);
         // Source newer but mid-turn (not at a boundary) → never act, even opted in.
         assert_eq!(supervisor_install_action(true, true, false), None);
-        // Source newer at a turn boundary, auto-install OFF (default) → surface only.
+        // Source newer at a turn boundary, auto-install opted out → surface only.
         assert_eq!(supervisor_install_action(true, false, true), Detect);
         // Source newer + boundary + opt-in ON → request the (caller-debounced) install.
         assert_eq!(supervisor_install_action(true, true, true), Install);
@@ -753,15 +752,25 @@ mod tests {
     fn drain_settle_gate_blocks_until_pane_idles_after_clear() {
         const THRESHOLD: u32 = 4;
         // Not awaiting a clear → never blocked regardless of ticks.
-        assert!(!drain_blocked_awaiting_clear_settle(false, true, false, 0, THRESHOLD));
+        assert!(!drain_blocked_awaiting_clear_settle(
+            false, true, false, 0, THRESHOLD
+        ));
         // Awaiting + pane not at a fresh idle prompt → blocked regardless of count.
-        assert!(drain_blocked_awaiting_clear_settle(true, false, false, 99, THRESHOLD));
+        assert!(drain_blocked_awaiting_clear_settle(
+            true, false, false, 99, THRESHOLD
+        ));
         // Awaiting + turn still active → blocked.
-        assert!(drain_blocked_awaiting_clear_settle(true, true, true, 99, THRESHOLD));
+        assert!(drain_blocked_awaiting_clear_settle(
+            true, true, true, 99, THRESHOLD
+        ));
         // Awaiting + idle but not enough consecutive ticks → still blocked.
-        assert!(drain_blocked_awaiting_clear_settle(true, true, false, 3, THRESHOLD));
+        assert!(drain_blocked_awaiting_clear_settle(
+            true, true, false, 3, THRESHOLD
+        ));
         // Awaiting + idle + threshold reached → no longer blocked.
-        assert!(!drain_blocked_awaiting_clear_settle(true, true, false, 4, THRESHOLD));
+        assert!(!drain_blocked_awaiting_clear_settle(
+            true, true, false, 4, THRESHOLD
+        ));
     }
 
     #[test]

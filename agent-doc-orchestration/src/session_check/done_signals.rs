@@ -369,4 +369,3 @@ pub(crate) fn open_backlog_ids(file: &Path) -> Result<Vec<String>> {
         .filter(|id| !id.is_empty())
         .collect())
 }
-

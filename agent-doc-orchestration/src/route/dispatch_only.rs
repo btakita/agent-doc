@@ -264,14 +264,20 @@ pub(crate) fn dispatch_only_send_reopen(
     Ok(dispatch_pane)
 }
 
-pub(crate) fn should_print_dispatch_only_unproven_progress(file: &Path, harness: &HarnessConfig) -> bool {
+pub(crate) fn should_print_dispatch_only_unproven_progress(
+    file: &Path,
+    harness: &HarnessConfig,
+) -> bool {
     flow_should_print_dispatch_only_unproven_progress(DispatchOnlyProofPolicyFacts {
         harness_binary: harness.binary.as_str(),
         codex_dispatch_start_tracking_enabled: codex_dispatch_start_tracking_enabled(file),
     })
 }
 
-pub(crate) fn dispatch_only_dispatch_start_proof_required(file: &Path, harness: &HarnessConfig) -> bool {
+pub(crate) fn dispatch_only_dispatch_start_proof_required(
+    file: &Path,
+    harness: &HarnessConfig,
+) -> bool {
     flow_dispatch_only_dispatch_start_proof_required(DispatchOnlyProofPolicyFacts {
         harness_binary: harness.binary.as_str(),
         codex_dispatch_start_tracking_enabled: codex_dispatch_start_tracking_enabled(file),
@@ -686,7 +692,10 @@ pub(crate) fn retry_dispatch_only_after_busy_pane(
     ));
 }
 
-pub(crate) fn dispatch_only_blocker_reason(harness: &HarnessConfig, content: &str) -> Option<String> {
+pub(crate) fn dispatch_only_blocker_reason(
+    harness: &HarnessConfig,
+    content: &str,
+) -> Option<String> {
     if let Some(reason) = harness.dispatch_blocker_reason(content) {
         return Some(reason);
     }
@@ -707,7 +716,11 @@ pub(crate) fn dispatch_only_blocker_reason(harness: &HarnessConfig, content: &st
     }
 }
 
-pub(crate) fn dispatch_blocker_recovery_hint(harness: &HarnessConfig, reason: &str, file: &Path) -> String {
+pub(crate) fn dispatch_blocker_recovery_hint(
+    harness: &HarnessConfig,
+    reason: &str,
+    file: &Path,
+) -> String {
     if harness.binary == "codex" && reason == "codex hook review prompt" {
         return format!(
             "open `/hooks` in that Codex pane, approve or disable the pending hook change, wait for the idle composer, then rerun `agent-doc route --dispatch-only {}` or the editor Run Agent Doc action",
@@ -739,330 +752,336 @@ pub(crate) fn dispatch_active_turn_queue_source(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
-use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
-#[test]
-fn dispatch_only_starting_pane_not_ready_error_matches_equityfundingsource_active_turn() {
-    let file = std::path::Path::new("tasks/professional/equityfundingsource.md");
-    let message = dispatch_only_starting_pane_not_ready_error(
-        &HarnessConfig::codex(),
-        "%42",
-        file,
-        "active codex turn",
-    );
+    use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    #[test]
+    fn dispatch_only_starting_pane_not_ready_error_matches_equityfundingsource_active_turn() {
+        let file = std::path::Path::new("tasks/professional/equityfundingsource.md");
+        let message = dispatch_only_starting_pane_not_ready_error(
+            &HarnessConfig::codex(),
+            "%42",
+            file,
+            "active codex turn",
+        );
 
-    assert!(message.contains("dispatch-only codex reopen refused"));
-    assert!(message.contains("tasks/professional/equityfundingsource.md"));
-    assert!(message.contains("latest run is still booting"));
-    assert!(message.contains("never reached a dispatch-ready prompt"));
-    assert!(message.contains("(active codex turn)"));
-}
-#[test]
-fn dispatch_only_codex_with_visible_hooks_suppresses_optimistic_unproven_progress() {
-    let dir = tempfile::tempdir().unwrap();
-    let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
+        assert!(message.contains("dispatch-only codex reopen refused"));
+        assert!(message.contains("tasks/professional/equityfundingsource.md"));
+        assert!(message.contains("latest run is still booting"));
+        assert!(message.contains("never reached a dispatch-ready prompt"));
+        assert!(message.contains("(active codex turn)"));
+    }
+    #[test]
+    fn dispatch_only_codex_with_visible_hooks_suppresses_optimistic_unproven_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
 
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
-    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-    std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
-    std::fs::write(&doc, "# Session\n").unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
+        std::fs::write(&doc, "# Session\n").unwrap();
 
-    assert!(
-        !should_print_dispatch_only_unproven_progress(&doc, &HarnessConfig::codex()),
-        "dispatch-only Codex reroutes with visible hooks should let the final accepted-but-unproven error own the user-facing output"
-    );
-    assert!(
-        should_print_dispatch_only_unproven_progress(&doc, &HarnessConfig::claude()),
-        "non-Codex reroutes still may report command-accepted fallback progress"
-    );
-}
-#[test]
-fn dispatch_only_codex_with_visible_hooks_rejects_accepted_only_submit() {
-    let dir = tempfile::tempdir().unwrap();
-    let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
+        assert!(
+            !should_print_dispatch_only_unproven_progress(&doc, &HarnessConfig::codex()),
+            "dispatch-only Codex reroutes with visible hooks should let the final accepted-but-unproven error own the user-facing output"
+        );
+        assert!(
+            should_print_dispatch_only_unproven_progress(&doc, &HarnessConfig::claude()),
+            "non-Codex reroutes still may report command-accepted fallback progress"
+        );
+    }
+    #[test]
+    fn dispatch_only_codex_with_visible_hooks_rejects_accepted_only_submit() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
 
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
-    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-    std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
-    std::fs::write(&doc, "# Session\n").unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
+        std::fs::write(&doc, "# Session\n").unwrap();
 
-    let err = require_dispatch_only_dispatch_start_proof(
-        &doc,
-        "%4",
-        &HarnessConfig::codex(),
-        DispatchOnlyReopenDelivery::DirectPaneSubmit,
-        RoutedDispatchStartProof::CommandAcceptedOnly,
-    )
-    .expect_err("hook-visible Codex dispatch-only acceptance must require routed submit proof");
+        let err = require_dispatch_only_dispatch_start_proof(
+            &doc,
+            "%4",
+            &HarnessConfig::codex(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        )
+        .expect_err("hook-visible Codex dispatch-only acceptance must require routed submit proof");
 
-    assert!(
-        err.to_string()
-            .contains("only pane-input acceptance proof was available"),
-        "unexpected error: {err:#}"
-    );
-}
-#[test]
-fn dispatch_blocker_recovery_hint_names_codex_hook_review_action() {
-    let doc = PathBuf::from("tasks/agent-doc/agent-doc-bugs2.md");
-    let hint =
-        dispatch_blocker_recovery_hint(&HarnessConfig::codex(), "codex hook review prompt", &doc);
+        assert!(
+            err.to_string()
+                .contains("only pane-input acceptance proof was available"),
+            "unexpected error: {err:#}"
+        );
+    }
+    #[test]
+    fn dispatch_blocker_recovery_hint_names_codex_hook_review_action() {
+        let doc = PathBuf::from("tasks/agent-doc/agent-doc-bugs2.md");
+        let hint = dispatch_blocker_recovery_hint(
+            &HarnessConfig::codex(),
+            "codex hook review prompt",
+            &doc,
+        );
 
-    assert!(
-        hint.contains("open `/hooks`"),
-        "hook-review blockers should tell the operator where to approve hooks: {hint}"
-    );
-    assert!(
-        hint.contains("approve or disable the pending hook change"),
-        "hook-review blockers should describe the approval gate: {hint}"
-    );
-    assert!(
-        hint.contains("agent-doc route --dispatch-only tasks/agent-doc/agent-doc-bugs2.md"),
-        "hook-review blockers should include a reroute recovery command: {hint}"
-    );
+        assert!(
+            hint.contains("open `/hooks`"),
+            "hook-review blockers should tell the operator where to approve hooks: {hint}"
+        );
+        assert!(
+            hint.contains("approve or disable the pending hook change"),
+            "hook-review blockers should describe the approval gate: {hint}"
+        );
+        assert!(
+            hint.contains("agent-doc route --dispatch-only tasks/agent-doc/agent-doc-bugs2.md"),
+            "hook-review blockers should include a reroute recovery command: {hint}"
+        );
 
-    let generic =
-        dispatch_blocker_recovery_hint(&HarnessConfig::codex(), "queued draft in composer", &doc);
-    assert_eq!(generic, "restore an idle prompt and retry");
-}
-#[test]
-fn dispatch_active_turn_blockers_are_queueable_for_prompt_bearing_reroutes() {
-    assert_eq!(
-        dispatch_active_turn_queue_source(&HarnessConfig::codex(), "active codex turn"),
-        Some("dispatch_only_codex_active_turn")
-    );
-    assert_eq!(
-        dispatch_active_turn_queue_source(&HarnessConfig::opencode(), "opencode active turn"),
-        Some("dispatch_only_opencode_active_turn")
-    );
-    // #jb-run-agent-doc-busy-wait-deadlock: a busy Claude active turn is
-    // queueable just like Codex/OpenCode, so the reopen path enqueues instead of
-    // bailing.
-    assert_eq!(
-        dispatch_active_turn_queue_source(&HarnessConfig::claude(), "active claude turn"),
-        Some("dispatch_only_claude_active_turn")
-    );
-    assert_eq!(
-        dispatch_active_turn_queue_source(&HarnessConfig::codex(), "codex hook review prompt"),
-        None,
-        "hook review requires an explicit operator decision, not auto-queueing"
-    );
-    assert_eq!(
-        dispatch_active_turn_queue_source(&HarnessConfig::codex(), "queued draft in composer"),
-        None,
-        "drafted prompt input must not be overwritten by route queueing"
-    );
-}
-#[test]
-fn dispatch_only_submit_proof_gate_allows_non_codex_and_hook_proven_codex() {
-    let dir = tempfile::tempdir().unwrap();
-    let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
+        let generic = dispatch_blocker_recovery_hint(
+            &HarnessConfig::codex(),
+            "queued draft in composer",
+            &doc,
+        );
+        assert_eq!(generic, "restore an idle prompt and retry");
+    }
+    #[test]
+    fn dispatch_active_turn_blockers_are_queueable_for_prompt_bearing_reroutes() {
+        assert_eq!(
+            dispatch_active_turn_queue_source(&HarnessConfig::codex(), "active codex turn"),
+            Some("dispatch_only_codex_active_turn")
+        );
+        assert_eq!(
+            dispatch_active_turn_queue_source(&HarnessConfig::opencode(), "opencode active turn"),
+            Some("dispatch_only_opencode_active_turn")
+        );
+        // #jb-run-agent-doc-busy-wait-deadlock: a busy Claude active turn is
+        // queueable just like Codex/OpenCode, so the reopen path enqueues instead of
+        // bailing.
+        assert_eq!(
+            dispatch_active_turn_queue_source(&HarnessConfig::claude(), "active claude turn"),
+            Some("dispatch_only_claude_active_turn")
+        );
+        assert_eq!(
+            dispatch_active_turn_queue_source(&HarnessConfig::codex(), "codex hook review prompt"),
+            None,
+            "hook review requires an explicit operator decision, not auto-queueing"
+        );
+        assert_eq!(
+            dispatch_active_turn_queue_source(&HarnessConfig::codex(), "queued draft in composer"),
+            None,
+            "drafted prompt input must not be overwritten by route queueing"
+        );
+    }
+    #[test]
+    fn dispatch_only_submit_proof_gate_allows_non_codex_and_hook_proven_codex() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
 
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
-    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-    std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
-    std::fs::write(&doc, "# Session\n").unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
+        std::fs::write(&doc, "# Session\n").unwrap();
 
-    require_dispatch_only_dispatch_start_proof(
-        &doc,
-        "%4",
-        &HarnessConfig::claude(),
-        DispatchOnlyReopenDelivery::DirectPaneSubmit,
-        RoutedDispatchStartProof::CommandAcceptedOnly,
-    )
-    .expect("Claude currently has accepted-only semantics");
+        require_dispatch_only_dispatch_start_proof(
+            &doc,
+            "%4",
+            &HarnessConfig::claude(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        )
+        .expect("Claude currently has accepted-only semantics");
 
-    require_dispatch_only_dispatch_start_proof(
-        &doc,
-        "%4",
-        &HarnessConfig::codex(),
-        DispatchOnlyReopenDelivery::DirectPaneSubmit,
-        RoutedDispatchStartProof::HookPromptMatched,
-    )
-    .expect("hook-proven Codex dispatch-only submit should pass");
-}
-#[test]
-fn dispatch_only_sent_log_marks_claude_accepted_only_scope() {
-    let message = route_dispatch_only_sent_log_message(
-        Path::new("/tmp/robert-ross.md"),
-        "%7",
-        &HarnessConfig::claude(),
-        DispatchOnlyReopenDelivery::DirectPaneSubmit,
-        RoutedDispatchStartProof::CommandAcceptedOnly,
-    );
+        require_dispatch_only_dispatch_start_proof(
+            &doc,
+            "%4",
+            &HarnessConfig::codex(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::HookPromptMatched,
+        )
+        .expect("hook-proven Codex dispatch-only submit should pass");
+    }
+    #[test]
+    fn dispatch_only_sent_log_marks_claude_accepted_only_scope() {
+        let message = route_dispatch_only_sent_log_message(
+            Path::new("/tmp/robert-ross.md"),
+            "%7",
+            &HarnessConfig::claude(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        );
 
-    assert!(message.contains("harness=claude"), "{message}");
-    assert!(message.contains("proof=accepted"), "{message}");
-    assert!(message.contains("proof_scope=accepted_only"), "{message}");
-}
-#[test]
-fn dispatch_only_sent_log_marks_opencode_accepted_only_scope() {
-    let message = route_dispatch_only_sent_log_message(
-        Path::new("/tmp/monsterrodholders.md"),
-        "%13",
-        &HarnessConfig::opencode(),
-        DispatchOnlyReopenDelivery::DirectPaneSubmit,
-        RoutedDispatchStartProof::CommandAcceptedOnly,
-    );
+        assert!(message.contains("harness=claude"), "{message}");
+        assert!(message.contains("proof=accepted"), "{message}");
+        assert!(message.contains("proof_scope=accepted_only"), "{message}");
+    }
+    #[test]
+    fn dispatch_only_sent_log_marks_opencode_accepted_only_scope() {
+        let message = route_dispatch_only_sent_log_message(
+            Path::new("/tmp/monsterrodholders.md"),
+            "%13",
+            &HarnessConfig::opencode(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        );
 
-    assert!(message.contains("harness=opencode"), "{message}");
-    assert!(message.contains("proof=accepted"), "{message}");
-    assert!(message.contains("proof_scope=accepted_only"), "{message}");
-}
-#[test]
-fn dispatch_only_sent_log_marks_opencode_pane_state_dispatch_scope() {
-    let message = route_dispatch_only_sent_log_message(
-        Path::new("/tmp/monsterrodholders.md"),
-        "%13",
-        &HarnessConfig::opencode(),
-        DispatchOnlyReopenDelivery::DirectPaneSubmit,
-        RoutedDispatchStartProof::PaneStateChanged,
-    );
+        assert!(message.contains("harness=opencode"), "{message}");
+        assert!(message.contains("proof=accepted"), "{message}");
+        assert!(message.contains("proof_scope=accepted_only"), "{message}");
+    }
+    #[test]
+    fn dispatch_only_sent_log_marks_opencode_pane_state_dispatch_scope() {
+        let message = route_dispatch_only_sent_log_message(
+            Path::new("/tmp/monsterrodholders.md"),
+            "%13",
+            &HarnessConfig::opencode(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::PaneStateChanged,
+        );
 
-    assert!(message.contains("harness=opencode"), "{message}");
-    assert!(message.contains("proof=pane_state_changed"), "{message}");
-    assert!(message.contains("proof_scope=dispatch_start"), "{message}");
-}
-#[test]
-fn dispatch_only_opencode_accepted_only_proof_is_successful_delivery() {
-    require_dispatch_only_dispatch_start_proof(
-        Path::new("/tmp/monsterrodholders.md"),
-        "%13",
-        &HarnessConfig::opencode(),
-        DispatchOnlyReopenDelivery::DirectPaneSubmit,
-        RoutedDispatchStartProof::CommandAcceptedOnly,
-    )
-    .unwrap();
-}
-#[test]
-fn dispatch_only_opencode_pane_state_proof_is_successful_delivery() {
-    require_dispatch_only_dispatch_start_proof(
-        Path::new("/tmp/monsterrodholders.md"),
-        "%13",
-        &HarnessConfig::opencode(),
-        DispatchOnlyReopenDelivery::DirectPaneSubmit,
-        RoutedDispatchStartProof::PaneStateChanged,
-    )
-    .unwrap();
-}
-#[test]
-fn dispatch_only_claude_accepted_only_proof_remains_accepted_delivery() {
-    require_dispatch_only_dispatch_start_proof(
-        Path::new("/tmp/robert-ross.md"),
-        "%7",
-        &HarnessConfig::claude(),
-        DispatchOnlyReopenDelivery::DirectPaneSubmit,
-        RoutedDispatchStartProof::CommandAcceptedOnly,
-    )
-    .unwrap();
-}
-#[test]
-fn dispatch_only_sent_log_marks_codex_hook_proof_scope() {
-    let message = route_dispatch_only_sent_log_message(
-        Path::new("/tmp/agent-doc-bugs2.md"),
-        "%1",
-        &HarnessConfig::codex(),
-        DispatchOnlyReopenDelivery::DirectPaneSubmit,
-        RoutedDispatchStartProof::HookPromptMatched,
-    );
+        assert!(message.contains("harness=opencode"), "{message}");
+        assert!(message.contains("proof=pane_state_changed"), "{message}");
+        assert!(message.contains("proof_scope=dispatch_start"), "{message}");
+    }
+    #[test]
+    fn dispatch_only_opencode_accepted_only_proof_is_successful_delivery() {
+        require_dispatch_only_dispatch_start_proof(
+            Path::new("/tmp/monsterrodholders.md"),
+            "%13",
+            &HarnessConfig::opencode(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        )
+        .unwrap();
+    }
+    #[test]
+    fn dispatch_only_opencode_pane_state_proof_is_successful_delivery() {
+        require_dispatch_only_dispatch_start_proof(
+            Path::new("/tmp/monsterrodholders.md"),
+            "%13",
+            &HarnessConfig::opencode(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::PaneStateChanged,
+        )
+        .unwrap();
+    }
+    #[test]
+    fn dispatch_only_claude_accepted_only_proof_remains_accepted_delivery() {
+        require_dispatch_only_dispatch_start_proof(
+            Path::new("/tmp/robert-ross.md"),
+            "%7",
+            &HarnessConfig::claude(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        )
+        .unwrap();
+    }
+    #[test]
+    fn dispatch_only_sent_log_marks_codex_hook_proof_scope() {
+        let message = route_dispatch_only_sent_log_message(
+            Path::new("/tmp/agent-doc-bugs2.md"),
+            "%1",
+            &HarnessConfig::codex(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::HookPromptMatched,
+        );
 
-    assert!(message.contains("harness=codex"), "{message}");
-    assert!(message.contains("proof=consumed"), "{message}");
-    assert!(message.contains("proof_scope=dispatch_start"), "{message}");
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn dispatch_only_send_reopen_direct_pane_submit_avoids_extra_enter_retries() {
-    use std::sync::{Arc, Mutex};
+        assert!(message.contains("harness=codex"), "{message}");
+        assert!(message.contains("proof=consumed"), "{message}");
+        assert!(message.contains("proof_scope=dispatch_start"), "{message}");
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn dispatch_only_send_reopen_direct_pane_submit_avoids_extra_enter_retries() {
+        use std::sync::{Arc, Mutex};
 
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-dispatch-only-no-enter-retries");
-    let session = "codex";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-no-enter-retries");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
 
-    let doc = dir.path().join("route-dispatch-only-no-enter-retries.md");
-    std::fs::write(
+        let doc = dir.path().join("route-dispatch-only-no-enter-retries.md");
+        std::fs::write(
         &doc,
         "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
     )
     .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let trigger = format!("agent-doc {}", file_path);
-    let script = write_mock_registered_agent_doc_with_stale_trigger(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &pane,
-        &format!("exec {} '{}'", script.display(), trigger),
-    );
-    let content = wait_for_pane_contains(
-        &iso,
-        &pane,
-        &format!("> {}", trigger),
-        std::time::Duration::from_secs(3),
-    );
-    assert!(
-        content.contains(&format!("> {}", trigger)),
-        "mock session should keep a stale visible trigger line in pane output: {content}"
-    );
-    let injects = Arc::new(Mutex::new(Vec::<String>::new()));
-    let injects_for_ipc = injects.clone();
-    let mut ipc = SupervisorIpc::start(
-        dir.path(),
-        "route-test-dispatch-only-no-enter-retries",
-        move |method| match method {
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                injects_for_ipc.lock().unwrap().push(bytes.clone());
-                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-            }
-            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-        },
-    )
-    .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let trigger = format!("agent-doc {}", file_path);
+        let script = write_mock_registered_agent_doc_with_stale_trigger(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} '{}'", script.display(), trigger),
+        );
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            &format!("> {}", trigger),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains(&format!("> {}", trigger)),
+            "mock session should keep a stale visible trigger line in pane output: {content}"
+        );
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc = SupervisorIpc::start(
+            dir.path(),
+            "route-test-dispatch-only-no-enter-retries",
+            move |method| match method {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    injects_for_ipc.lock().unwrap().push(bytes.clone());
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
 
-    sessions::register(
-        "route-test-dispatch-only-no-enter-retries",
-        &pane,
-        &file_path,
-    )
-    .unwrap();
-    dispatch_only_send_reopen(
-        &iso,
-        &doc,
-        "route-test-dispatch-only-no-enter-retries",
-        &pane,
-        &file_path,
-        &HarnessConfig::codex(),
-        DispatchOnlySendReopenOptions {
-            delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
-            queue_prompt_text: None,
-        },
-    )
-    .expect("dispatch-only reopen should still send once when no explicit blocker is visible");
-    assert!(
-        injects.lock().unwrap().is_empty(),
-        "dispatch-only direct pane submit should not fall back to supervisor inject"
-    );
-    let after = wait_for_pane_contains(
-        &iso,
-        &pane,
-        &format!("GOT:{trigger}"),
-        std::time::Duration::from_secs(3),
-    );
-    assert!(
-        after.contains(&format!("GOT:{trigger}")),
-        "dispatch-only reopen should submit the trigger through the live pane input path: {after}"
-    );
-    assert!(
-        !after.contains("EXTRA:"),
-        "dispatch-only reopen should not send an extra newline or second Enter: {after}"
-    );
-    ipc.stop();
-}
+        sessions::register(
+            "route-test-dispatch-only-no-enter-retries",
+            &pane,
+            &file_path,
+        )
+        .unwrap();
+        dispatch_only_send_reopen(
+            &iso,
+            &doc,
+            "route-test-dispatch-only-no-enter-retries",
+            &pane,
+            &file_path,
+            &HarnessConfig::codex(),
+            DispatchOnlySendReopenOptions {
+                delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
+                queue_prompt_text: None,
+            },
+        )
+        .expect("dispatch-only reopen should still send once when no explicit blocker is visible");
+        assert!(
+            injects.lock().unwrap().is_empty(),
+            "dispatch-only direct pane submit should not fall back to supervisor inject"
+        );
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            &format!("GOT:{trigger}"),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            after.contains(&format!("GOT:{trigger}")),
+            "dispatch-only reopen should submit the trigger through the live pane input path: {after}"
+        );
+        assert!(
+            !after.contains("EXTRA:"),
+            "dispatch-only reopen should not send an extra newline or second Enter: {after}"
+        );
+        ipc.stop();
+    }
 }

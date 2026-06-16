@@ -528,11 +528,7 @@ impl MasterPty for AdoptedMaster {
 
     fn process_group_leader(&self) -> Option<libc::pid_t> {
         let pg = unsafe { libc::tcgetpgrp(self.raw()) };
-        if pg < 0 {
-            None
-        } else {
-            Some(pg)
-        }
+        if pg < 0 { None } else { Some(pg) }
     }
 
     fn as_raw_fd(&self) -> Option<std::os::unix::io::RawFd> {
@@ -1494,7 +1490,10 @@ mod tests {
         let mut adopted = RawPidChild::new(pid);
         assert_eq!(adopted.process_id(), Some(pid));
         assert!(
-            adopted.try_wait().expect("try_wait while running").is_none(),
+            adopted
+                .try_wait()
+                .expect("try_wait while running")
+                .is_none(),
             "running child should not report an exit status yet"
         );
 
@@ -1522,7 +1521,10 @@ mod tests {
         let mut reaper = RawPidChild::new(pid);
         // Reap it so the PID is gone, then a kill must still be Ok (ESRCH).
         let _ = reaper.wait().expect("wait true");
-        assert!(raw_pid_kill(pid).is_ok(), "kill of a reaped pid should be Ok");
+        assert!(
+            raw_pid_kill(pid).is_ok(),
+            "kill of a reaped pid should be Ok"
+        );
     }
 
     #[test]

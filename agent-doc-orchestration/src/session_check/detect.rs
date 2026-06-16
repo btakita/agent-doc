@@ -455,173 +455,178 @@ pub fn detect_uncommitted_closeout_drift_with_context(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use std::fs;
-use std::io::Write;
-use std::process::Command;
-#[test]
-fn enforce_clean_closeout_self_heals_late_ipc_overapplication() {
-    // #late-ipc-patch-response-uncommitted: a late-IPC stale-patch replay
-    // re-adds a duplicate `### Re:` block to the working tree after the cycle
-    // committed. enforce_clean_closeout (the finalize boundary) must self-heal
-    // by restoring committed HEAD instead of bailing — otherwise the
-    // interruption stalls the agent:queue auto-loop.
-    let tmp = tempfile::TempDir::new().unwrap();
-    let root = tmp.path();
-    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-    fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
-    for args in [
-        vec!["init"],
-        vec!["config", "user.email", "test@example.com"],
-        vec!["config", "user.name", "Test"],
-    ] {
+    use std::fs;
+    use std::io::Write;
+    use std::process::Command;
+    #[test]
+    fn enforce_clean_closeout_self_heals_late_ipc_overapplication() {
+        // #late-ipc-patch-response-uncommitted: a late-IPC stale-patch replay
+        // re-adds a duplicate `### Re:` block to the working tree after the cycle
+        // committed. enforce_clean_closeout (the finalize boundary) must self-heal
+        // by restoring committed HEAD instead of bailing — otherwise the
+        // interruption stalls the agent:queue auto-loop.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — opus-4-8\n\n",
+            "Answer A.\n",
+            "### Re: second — opus-4-8\n\n",
+            "Answer B.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
         Command::new("git")
             .current_dir(root)
-            .args(&args)
+            .args(["add", "doc.md"])
             .output()
             .unwrap();
-    }
-
-    let doc = root.join("doc.md");
-    let committed = concat!(
-        "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: first — opus-4-8\n\n",
-        "Answer A.\n",
-        "### Re: second — opus-4-8\n\n",
-        "Answer B.\n",
-        "<!-- agent:boundary:committed -->\n",
-        "<!-- /agent:exchange -->\n",
-    );
-    fs::write(&doc, committed).unwrap();
-    crate::snapshot::save(&doc, committed).unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["add", "doc.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["commit", "-m", "committed", "--no-verify"])
-        .output()
-        .unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed", "--no-verify"])
+            .output()
+            .unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
         .unwrap();
 
-    // Late stale-patch replay re-inserts an earlier committed response (A) at
-    // the tail (non-adjacent over-application), leaving the real responses in
-    // HEAD untouched.
-    let overapplied = committed.replace(
+        // Late stale-patch replay re-inserts an earlier committed response (A) at
+        // the tail (non-adjacent over-application), leaving the real responses in
+        // HEAD untouched.
+        let overapplied = committed.replace(
             "<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->",
             "### Re: first — opus-4-8\n\nAnswer A.\n<!-- agent:boundary:replayed -->\n<!-- /agent:exchange -->",
         );
-    fs::write(&doc, &overapplied).unwrap();
-    assert!(
-        detect_late_ipc_response_overapplication(&doc)
-            .unwrap()
-            .is_some(),
-        "precondition: late-IPC over-application present"
-    );
+        fs::write(&doc, &overapplied).unwrap();
+        assert!(
+            detect_late_ipc_response_overapplication(&doc)
+                .unwrap()
+                .is_some(),
+            "precondition: late-IPC over-application present"
+        );
 
-    // The finalize boundary must NOT bail — it self-heals.
-    enforce_clean_closeout(&doc).expect("enforce_clean_closeout should self-heal, not bail");
-    assert_eq!(
-        fs::read_to_string(&doc).unwrap(),
-        committed,
-        "working tree restored to committed HEAD (duplicate dropped)"
-    );
-    assert_eq!(
-        crate::snapshot::load(&doc).unwrap().unwrap(),
-        committed,
-        "snapshot restored to committed HEAD"
-    );
-}
-#[test]
-fn directive_response_source_resolves_found_and_source_for_bkx9_diagnostic() {
-    // #bkx9wire: the per-id `bkx9 directive_response_materialized id=<id>
-    // found=<bool> source=<exchange|archive>` diagnostic is driven by this
-    // resolver. Cover the three emitted shapes deterministically.
-    let archives = vec!["### Re: do #archived — opus-4-8\n\nShipped earlier.\n".to_string()];
+        // The finalize boundary must NOT bail — it self-heals.
+        enforce_clean_closeout(&doc).expect("enforce_clean_closeout should self-heal, not bail");
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            committed,
+            "working tree restored to committed HEAD (duplicate dropped)"
+        );
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap().unwrap(),
+            committed,
+            "snapshot restored to committed HEAD"
+        );
+    }
+    #[test]
+    fn directive_response_source_resolves_found_and_source_for_bkx9_diagnostic() {
+        // #bkx9wire: the per-id `bkx9 directive_response_materialized id=<id>
+        // found=<bool> source=<exchange|archive>` diagnostic is driven by this
+        // resolver. Cover the three emitted shapes deterministically.
+        let archives = vec!["### Re: do #archived — opus-4-8\n\nShipped earlier.\n".to_string()];
 
-    // found=true source=exchange: heading lives in the live committed exchange.
-    let exchange = "### Re: do #live — opus-4-8\n\nShipped the live fix.\n";
-    let src = directive_response_source(exchange, &archives, "live");
-    assert!(src.is_some());
-    assert_eq!(src.unwrap().as_str(), "exchange");
+        // found=true source=exchange: heading lives in the live committed exchange.
+        let exchange = "### Re: do #live — opus-4-8\n\nShipped the live fix.\n";
+        let src = directive_response_source(exchange, &archives, "live");
+        assert!(src.is_some());
+        assert_eq!(src.unwrap().as_str(), "exchange");
 
-    // found=true source=archive: heading is absent from the exchange but
-    // present in a HEAD compact archive.
-    let unrelated = "### Re: prior — gpt-5\n\nUnrelated live response.\n";
-    let src = directive_response_source(unrelated, &archives, "archived");
-    assert!(src.is_some());
-    assert_eq!(src.unwrap().as_str(), "archive");
+        // found=true source=archive: heading is absent from the exchange but
+        // present in a HEAD compact archive.
+        let unrelated = "### Re: prior — gpt-5\n\nUnrelated live response.\n";
+        let src = directive_response_source(unrelated, &archives, "archived");
+        assert!(src.is_some());
+        assert_eq!(src.unwrap().as_str(), "archive");
 
-    // found=false source=none: the drift-repro catch — reaped id has no
-    // `### Re:` heading anywhere.
-    assert!(directive_response_source(unrelated, &archives, "lost").is_none());
-}
-#[test]
-fn detects_prompt_prefixed_corrupted_duplicate_as_overapplication() {
-    // #finalize-retry-ipc-response-duplication: a multi-retry / late-IPC
-    // reposition left a duplicate response whose stale copy had its body
-    // wrongly prefixed with `❯ `. HEAD still holds a single clean copy, so
-    // the over-application detector must recognize the corrupted duplicate
-    // and remediate by restoring committed HEAD — no manual `git checkout`.
-    let tmp = tempfile::TempDir::new().unwrap();
-    let root = tmp.path();
-    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-    fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        // found=false source=none: the drift-repro catch — reaped id has no
+        // `### Re:` heading anywhere.
+        assert!(directive_response_source(unrelated, &archives, "lost").is_none());
+    }
+    #[test]
+    fn detects_prompt_prefixed_corrupted_duplicate_as_overapplication() {
+        // #finalize-retry-ipc-response-duplication: a multi-retry / late-IPC
+        // reposition left a duplicate response whose stale copy had its body
+        // wrongly prefixed with `❯ `. HEAD still holds a single clean copy, so
+        // the over-application detector must recognize the corrupted duplicate
+        // and remediate by restoring committed HEAD — no manual `git checkout`.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
 
-    for args in [
-        vec!["init"],
-        vec!["config", "user.email", "test@example.com"],
-        vec!["config", "user.name", "Test"],
-    ] {
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "do [#fix-thing]\n",
+            "### Re: fix thing — gpt-5\n\n",
+            "**Scope:** narrow.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
         Command::new("git")
             .current_dir(root)
-            .args(&args)
+            .args(["add", "doc.md"])
             .output()
             .unwrap();
-    }
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed response", "--no-verify"])
+            .output()
+            .unwrap();
 
-    let doc = root.join("doc.md");
-    let committed = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "do [#fix-thing]\n",
-        "### Re: fix thing — gpt-5\n\n",
-        "**Scope:** narrow.\n",
-        "<!-- agent:boundary:committed -->\n",
-        "<!-- /agent:exchange -->\n",
-    );
-    fs::write(&doc, committed).unwrap();
-    crate::snapshot::save(&doc, committed).unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["add", "doc.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["commit", "-m", "committed response", "--no-verify"])
-        .output()
-        .unwrap();
-
-    // Working tree gains a stale duplicate whose body line is `❯ `-prefixed.
-    let corrupted = committed.replace(
+        // Working tree gains a stale duplicate whose body line is `❯ `-prefixed.
+        let corrupted = committed.replace(
             "<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->",
             "### Re: fix thing — gpt-5\n\n❯ **Scope:** narrow.\n<!-- agent:boundary:replayed -->\n<!-- /agent:exchange -->",
         );
-    fs::write(&doc, corrupted).unwrap();
+        fs::write(&doc, corrupted).unwrap();
 
-    let overapplication = detect_late_ipc_response_overapplication(&doc)
-        .unwrap()
-        .expect("prompt-prefixed corrupted duplicate must be detected");
-    assert_eq!(
-        overapplication.remediated_content, committed,
-        "remediation must restore the clean committed HEAD"
-    );
-}
+        let overapplication = detect_late_ipc_response_overapplication(&doc)
+            .unwrap()
+            .expect("prompt-prefixed corrupted duplicate must be detected");
+        assert_eq!(
+            overapplication.remediated_content, committed,
+            "remediation must restore the clean committed HEAD"
+        );
+    }
 }

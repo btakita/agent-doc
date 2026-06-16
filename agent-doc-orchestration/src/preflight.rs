@@ -2304,60 +2304,19 @@ fn strike_done_queue_head_prompts(
     }
 }
 
-/// Extract the `#id` from a directive-shaped queue prompt such as `do [#abcd]`,
-/// `advance [#abcd]`, or bare `[#abcd]`. Prose that merely mentions a `#id`
-/// is deliberately ignored so natural-language follow-up prompts are not
-/// auto-struck by already-done or review-gated ids.
+/// Extract the `#id` from a queue prompt text like `do [#abcd]` or
+/// `do #abcd ...`. Returns the lower-cased id without `#` / brackets.
 fn queue_prompt_done_id(text: &str) -> Option<String> {
-    let stripped = crate::queue::strip_priority_markers(text);
-    let trimmed = stripped.trim();
-    if let Some(id) = parse_bare_queue_directive_id(trimmed) {
-        return Some(id);
-    }
-    ["do", "advance"].into_iter().find_map(|verb| {
-        strip_queue_directive_verb(trimmed, verb).and_then(parse_leading_queue_directive_id)
-    })
-}
-
-fn strip_queue_directive_verb<'a>(text: &'a str, verb: &str) -> Option<&'a str> {
-    let (idx, _) = text.char_indices().find(|(_, ch)| ch.is_whitespace())?;
-    let (head, rest) = text.split_at(idx);
-    head.eq_ignore_ascii_case(verb).then_some(rest)
-}
-
-fn parse_bare_queue_directive_id(text: &str) -> Option<String> {
-    let id = text
-        .strip_prefix("[#")
-        .and_then(|rest| rest.strip_suffix(']'))
-        .or_else(|| text.strip_prefix('#'))?;
-    normalize_queue_directive_id(id)
-}
-
-fn parse_leading_queue_directive_id(text: &str) -> Option<String> {
-    let text = text.trim_start();
-    if let Some(rest) = text.strip_prefix("[#") {
-        let (id, _) = rest.split_once(']')?;
-        return normalize_queue_directive_id(id);
-    }
-    let id = text
-        .strip_prefix('#')?
+    let marker = text.find('#')?;
+    let tail = &text[marker + 1..];
+    let id = tail
         .chars()
         .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
         .collect::<String>();
-    normalize_queue_directive_id(&id)
-}
-
-fn normalize_queue_directive_id(id: &str) -> Option<String> {
     if id.is_empty() {
-        return None;
-    }
-    if id
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-    {
-        Some(id.to_ascii_lowercase())
-    } else {
         None
+    } else {
+        Some(id.to_ascii_lowercase())
     }
 }
 
@@ -2946,218 +2905,222 @@ fn save_baseline_content(file: &Path, content: &str) -> Option<String> {
     }
 }
 
-
 #[cfg(test)]
 mod th {
     use super::*;
-use std::io::Write;
-use std::process::Command;
-use tempfile::TempDir;
-// The source-repo locator accepts the document's git root when it is the
-// `agent-doc` crate, the `src/agent-doc` dogfood submodule layout, and
-// returns `None` (silent no-op) when no `agent-doc` Cargo.toml is present.
-// #per-cycle-protocol-output-overhead: empty Vec fields must not spend
-// per-cycle context bytes. A healthy/default PreflightOutput omits the empty
-// `claims` and `layout_issues` arrays from its JSON, and still round-trips
-// back to empty Vecs (serde default) so consumers reading the struct are safe.
-pub(crate) struct EnvGuard {
-    key: &'static str,
-    prev: Option<String>,
-    _lock: std::sync::MutexGuard<'static, ()>,
-}
-impl EnvGuard {
-pub(crate) fn set(key: &'static str, value: &str) -> Self {
-        let lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
-        let prev = std::env::var(key).ok();
-        unsafe { std::env::set_var(key, value) };
-        Self {
-            key,
-            prev,
-            _lock: lock,
+    use std::io::Write;
+    use std::process::Command;
+    use tempfile::TempDir;
+    // The source-repo locator accepts the document's git root when it is the
+    // `agent-doc` crate, the `src/agent-doc` dogfood submodule layout, and
+    // returns `None` (silent no-op) when no `agent-doc` Cargo.toml is present.
+    // #per-cycle-protocol-output-overhead: empty Vec fields must not spend
+    // per-cycle context bytes. A healthy/default PreflightOutput omits the empty
+    // `claims` and `layout_issues` arrays from its JSON, and still round-trips
+    // back to empty Vecs (serde default) so consumers reading the struct are safe.
+    pub(crate) struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+    impl EnvGuard {
+        pub(crate) fn set(key: &'static str, value: &str) -> Self {
+            let lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+            let prev = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key,
+                prev,
+                _lock: lock,
+            }
         }
     }
-}
-impl Drop for EnvGuard {
-fn drop(&mut self) {
-        if let Some(value) = &self.prev {
-            unsafe { std::env::set_var(self.key, value) };
-        } else {
-            unsafe { std::env::remove_var(self.key) };
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.prev {
+                unsafe { std::env::set_var(self.key, value) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
         }
     }
-}
-/// Set up a minimal project directory with .agent-doc/ structure and a git repo.
-pub(crate) fn setup_project() -> TempDir {
-    let dir = TempDir::new().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    /// Set up a minimal project directory with .agent-doc/ structure and a git repo.
+    pub(crate) fn setup_project() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
 
-    // Initialize a bare git repo so `git commit` doesn't fail fatally.
-    Command::new("git")
-        .current_dir(dir.path())
-        .args(["init"])
-        .output()
-        .ok();
-    Command::new("git")
-        .current_dir(dir.path())
-        .args(["config", "user.email", "test@test.com"])
-        .output()
-        .ok();
-    Command::new("git")
-        .current_dir(dir.path())
-        .args(["config", "user.name", "Test"])
-        .output()
-        .ok();
+        // Initialize a bare git repo so `git commit` doesn't fail fatally.
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["init"])
+            .output()
+            .ok();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .ok();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.name", "Test"])
+            .output()
+            .ok();
 
-    dir
-}
-pub(crate) fn commit_all(root: &Path, message: &str, commit_date: Option<&str>) {
-    Command::new("git")
-        .current_dir(root)
-        .args(["add", "."])
-        .output()
-        .unwrap();
-    let mut commit = Command::new("git");
-    commit
-        .current_dir(root)
-        .args(["commit", "-m", message, "--no-verify"]);
-    if let Some(date) = commit_date {
+        dir
+    }
+    pub(crate) fn commit_all(root: &Path, message: &str, commit_date: Option<&str>) {
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        let mut commit = Command::new("git");
         commit
-            .env("GIT_COMMITTER_DATE", date)
-            .env("GIT_AUTHOR_DATE", date);
-    }
-    let output = commit.output().unwrap();
-    assert!(
-        output.status.success(),
-        "git commit {message:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-pub(crate) fn initialize_git_head(root: &Path) {
-    let readme = root.join("README.md");
-    std::fs::write(&readme, "# project\n").unwrap();
-    commit_all(root, "initial", None);
-}
-pub(crate) fn write_committed_doc(
-    root: &Path,
-    rel: &str,
-    content: &str,
-    message: &str,
-    commit_date: Option<&str>,
-) -> PathBuf {
-    let doc = root.join(rel);
-    std::fs::write(&doc, content).unwrap();
-    snapshot::save(&doc, content).unwrap();
-    commit_all(root, message, commit_date);
-    doc
-}
-pub(crate) fn write_sessions_json(root: &Path, entries: &[(&str, &str, &Path, &str, &str)]) {
-    let mut sessions = serde_json::Map::new();
-    for (session_id, pane, file, window, started) in entries {
-        sessions.insert(
-            (*session_id).to_string(),
-            serde_json::json!({
-                "pane": pane,
-                "pid": 9999,
-                "cwd": root.to_string_lossy(),
-                "started": started,
-                "file": file.strip_prefix(root).unwrap().to_string_lossy(),
-                "window": window
-            }),
+            .current_dir(root)
+            .args(["commit", "-m", message, "--no-verify"]);
+        if let Some(date) = commit_date {
+            commit
+                .env("GIT_COMMITTER_DATE", date)
+                .env("GIT_AUTHOR_DATE", date);
+        }
+        let output = commit.output().unwrap();
+        assert!(
+            output.status.success(),
+            "git commit {message:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
         );
     }
-    std::fs::write(
-        root.join(".agent-doc/sessions.json"),
-        serde_json::to_string_pretty(&serde_json::Value::Object(sessions)).unwrap(),
-    )
-    .unwrap();
-}
-pub(crate) fn age_cycle_state(file: &Path, age_secs: u64) {
-    let canonical = file.canonicalize().unwrap();
-    let root = crate::snapshot::find_project_root(&canonical).unwrap();
-    let hash = crate::snapshot::doc_hash(&canonical).unwrap();
-    let path = root
-        .join(".agent-doc/state/cycles")
-        .join(format!("{hash}.json"));
-    let mut state: crate::cycle_state::CycleState =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    state.started_at = state.started_at.saturating_sub(age_secs);
-    state.updated_at = state.updated_at.saturating_sub(age_secs);
-    std::fs::write(path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
-}
-pub(crate) fn write_cycles_log(doc: &Path, entries: &[crate::ops_log::CycleEntry]) {
-    let log_path = doc.parent().unwrap().join(".agent-doc/logs/cycles.jsonl");
-    std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
-    let mut file = std::fs::File::create(log_path).unwrap();
-    for entry in entries {
-        writeln!(file, "{}", serde_json::to_string(entry).unwrap()).unwrap();
+    pub(crate) fn initialize_git_head(root: &Path) {
+        let readme = root.join("README.md");
+        std::fs::write(&readme, "# project\n").unwrap();
+        commit_all(root, "initial", None);
     }
-}
-// #opsproof-samecycle-add: a gated review/backlog item added THIS cycle (its
-// text legitimately cites a shipped dependency commit) must NOT be ops-proof
-// auto-completed on the same cycle it first appears — even though the
-// write/finalize path already re-synced the on-disk snapshot to include it,
-// which defeats the snapshot-only same-cycle guard. cycle_state records the
-// added id; the reap must honor it.
-// #opsproof-falsepos: an open actionable backlog item whose completion
-// marker only describes already-landed *dependency* work (a cited commit
-// hash in mid-sentence prose) must NOT be auto-reaped. Only a marker that is
-// the item's own leading status verb proves the item itself is done.
-// #opsproofgate: a live-verify / operator-drive gate that cites a shipped
-// commit hash (e.g. "Code SHIPPED 1edb20d2") in its text must NOT be
-// auto-completed on evidence=commit — even when it has existed for several
-// cycles (not a same-cycle add). Only an anchored structured ops.log marker
-// driven live by the operator may close it.
-// #opsproof-falsepos: never auto-archive an item on the same cycle it is
-// added. A brand-new add is absent from the cycle-start snapshot, so even a
-// leading-status completion marker must not reap it this cycle.
-pub(crate) fn write_optverify_doc(dir: &TempDir, predicate_annotation: &str) -> std::path::PathBuf {
-    let doc = dir.path().join("session.md");
-    let file_content = format!(
-        concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "## Review\n\n",
-            "<!-- agent:review -->\n",
-            "- [/] [#saev] early-ack live verify {}\n",
-            "<!-- /agent:review -->\n"
-        ),
-        predicate_annotation
-    );
-    std::fs::write(&doc, &file_content).unwrap();
-    snapshot::save(&doc, &file_content).unwrap();
-    doc
-}
-pub(crate) fn write_ops_log(dir: &TempDir, body: &str) {
-    let logs = dir.path().join(".agent-doc/logs");
-    std::fs::create_dir_all(&logs).unwrap();
-    std::fs::write(logs.join("ops.log"), body).unwrap();
-}
-pub(crate) fn user_prompt_change(text: &str) -> crate::diff::PromptBearingChange {
-    crate::diff::PromptBearingChange {
-        kind: crate::diff::PromptBearingChangeKind::PromptTarget,
-        text: text.to_string(),
+    pub(crate) fn write_committed_doc(
+        root: &Path,
+        rel: &str,
+        content: &str,
+        message: &str,
+        commit_date: Option<&str>,
+    ) -> PathBuf {
+        let doc = root.join(rel);
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        commit_all(root, message, commit_date);
+        doc
     }
-}
-pub(crate) fn affectedness(turn_affected: bool) -> agent_doc_core::turn_scope::CycleAffectedness {
-    use agent_doc_core::turn_scope::{AffectednessClass, ClassifiedOp};
-    agent_doc_core::turn_scope::CycleAffectedness {
-        turn_affected,
-        classified: vec![ClassifiedOp {
-            component: "queue".to_string(),
-            node_key: "queue:0:other:0".to_string(),
-            op_kind: "move".to_string(),
-            actor: agent_doc_core::op_log::OpActor::User,
-            class: if turn_affected {
-                AffectednessClass::InputAffecting
-            } else {
-                AffectednessClass::Independent
-            },
-        }],
+    pub(crate) fn write_sessions_json(root: &Path, entries: &[(&str, &str, &Path, &str, &str)]) {
+        let mut sessions = serde_json::Map::new();
+        for (session_id, pane, file, window, started) in entries {
+            sessions.insert(
+                (*session_id).to_string(),
+                serde_json::json!({
+                    "pane": pane,
+                    "pid": 9999,
+                    "cwd": root.to_string_lossy(),
+                    "started": started,
+                    "file": file.strip_prefix(root).unwrap().to_string_lossy(),
+                    "window": window
+                }),
+            );
+        }
+        std::fs::write(
+            root.join(".agent-doc/sessions.json"),
+            serde_json::to_string_pretty(&serde_json::Value::Object(sessions)).unwrap(),
+        )
+        .unwrap();
     }
-}
-// --- Fix 5: cross-document sweep ---
-// --- #cce5: resolve_agent_model / short_model_name tests ---
+    pub(crate) fn age_cycle_state(file: &Path, age_secs: u64) {
+        let canonical = file.canonicalize().unwrap();
+        let root = crate::snapshot::find_project_root(&canonical).unwrap();
+        let hash = crate::snapshot::doc_hash(&canonical).unwrap();
+        let path = root
+            .join(".agent-doc/state/cycles")
+            .join(format!("{hash}.json"));
+        let mut state: crate::cycle_state::CycleState =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        state.started_at = state.started_at.saturating_sub(age_secs);
+        state.updated_at = state.updated_at.saturating_sub(age_secs);
+        std::fs::write(path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
+    }
+    pub(crate) fn write_cycles_log(doc: &Path, entries: &[crate::ops_log::CycleEntry]) {
+        let log_path = doc.parent().unwrap().join(".agent-doc/logs/cycles.jsonl");
+        std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+        let mut file = std::fs::File::create(log_path).unwrap();
+        for entry in entries {
+            writeln!(file, "{}", serde_json::to_string(entry).unwrap()).unwrap();
+        }
+    }
+    // #opsproof-samecycle-add: a gated review/backlog item added THIS cycle (its
+    // text legitimately cites a shipped dependency commit) must NOT be ops-proof
+    // auto-completed on the same cycle it first appears — even though the
+    // write/finalize path already re-synced the on-disk snapshot to include it,
+    // which defeats the snapshot-only same-cycle guard. cycle_state records the
+    // added id; the reap must honor it.
+    // #opsproof-falsepos: an open actionable backlog item whose completion
+    // marker only describes already-landed *dependency* work (a cited commit
+    // hash in mid-sentence prose) must NOT be auto-reaped. Only a marker that is
+    // the item's own leading status verb proves the item itself is done.
+    // #opsproofgate: a live-verify / operator-drive gate that cites a shipped
+    // commit hash (e.g. "Code SHIPPED 1edb20d2") in its text must NOT be
+    // auto-completed on evidence=commit — even when it has existed for several
+    // cycles (not a same-cycle add). Only an anchored structured ops.log marker
+    // driven live by the operator may close it.
+    // #opsproof-falsepos: never auto-archive an item on the same cycle it is
+    // added. A brand-new add is absent from the cycle-start snapshot, so even a
+    // leading-status completion marker must not reap it this cycle.
+    pub(crate) fn write_optverify_doc(
+        dir: &TempDir,
+        predicate_annotation: &str,
+    ) -> std::path::PathBuf {
+        let doc = dir.path().join("session.md");
+        let file_content = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Review\n\n",
+                "<!-- agent:review -->\n",
+                "- [/] [#saev] early-ack live verify {}\n",
+                "<!-- /agent:review -->\n"
+            ),
+            predicate_annotation
+        );
+        std::fs::write(&doc, &file_content).unwrap();
+        snapshot::save(&doc, &file_content).unwrap();
+        doc
+    }
+    pub(crate) fn write_ops_log(dir: &TempDir, body: &str) {
+        let logs = dir.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("ops.log"), body).unwrap();
+    }
+    pub(crate) fn user_prompt_change(text: &str) -> crate::diff::PromptBearingChange {
+        crate::diff::PromptBearingChange {
+            kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+            text: text.to_string(),
+        }
+    }
+    pub(crate) fn affectedness(
+        turn_affected: bool,
+    ) -> agent_doc_core::turn_scope::CycleAffectedness {
+        use agent_doc_core::turn_scope::{AffectednessClass, ClassifiedOp};
+        agent_doc_core::turn_scope::CycleAffectedness {
+            turn_affected,
+            classified: vec![ClassifiedOp {
+                component: "queue".to_string(),
+                node_key: "queue:0:other:0".to_string(),
+                op_kind: "move".to_string(),
+                actor: agent_doc_core::op_log::OpActor::User,
+                class: if turn_affected {
+                    AffectednessClass::InputAffecting
+                } else {
+                    AffectednessClass::Independent
+                },
+            }],
+        }
+    }
+    // --- Fix 5: cross-document sweep ---
+    // --- #cce5: resolve_agent_model / short_model_name tests ---
 }
 #[cfg(test)]
 pub(crate) use th::*;
@@ -3166,256 +3129,257 @@ pub(crate) use th::*;
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use std::io::Write;
-use std::process::Command;
-use tempfile::TempDir;
-#[test]
-fn stale_install_classifier_flags_only_artifacts_older_than_source_commit() {
-    let commit = 10_000u64;
-    let grace = 60u64;
+    use std::io::Write;
+    use std::process::Command;
+    use tempfile::TempDir;
+    #[test]
+    fn stale_install_classifier_flags_only_artifacts_older_than_source_commit() {
+        let commit = 10_000u64;
+        let grace = 60u64;
 
-    // All artifacts newer than the commit → nothing stale.
-    assert!(
-        classify_stale_install_artifacts(
-            commit,
-            &[("bin", Some(commit + 5)), ("cdylib", Some(commit + 1))],
-            grace,
-        )
-        .is_empty()
-    );
-
-    // One artifact older than the commit by more than the grace → flagged.
-    let stale = classify_stale_install_artifacts(
-        commit,
-        &[("bin", Some(commit - 600)), ("cdylib", Some(commit + 1))],
-        grace,
-    );
-    assert_eq!(stale, vec!["bin"]);
-
-    // Built just inside the grace window (install-then-commit seconds apart)
-    // → not flagged; older than grace → flagged.
-    assert!(
-        classify_stale_install_artifacts(commit, &[("bin", Some(commit - 30))], grace).is_empty()
-    );
-    assert_eq!(
-        classify_stale_install_artifacts(commit, &[("bin", Some(commit - 61))], grace),
-        vec!["bin"]
-    );
-
-    // Absent artifacts (not installed) never fire.
-    assert!(
-        classify_stale_install_artifacts(commit, &[("bin", None), ("cdylib", None)], grace)
+        // All artifacts newer than the commit → nothing stale.
+        assert!(
+            classify_stale_install_artifacts(
+                commit,
+                &[("bin", Some(commit + 5)), ("cdylib", Some(commit + 1))],
+                grace,
+            )
             .is_empty()
-    );
-}
-#[test]
-fn locate_agent_doc_source_repo_matches_root_and_dogfood_layout() {
-    let agent_doc_manifest = "[package]\nname = \"agent-doc\"\nversion = \"0.0.0\"\n";
+        );
 
-    // Standalone checkout: the git root itself is the crate.
-    let root = TempDir::new().unwrap();
-    std::fs::write(root.path().join("Cargo.toml"), agent_doc_manifest).unwrap();
-    assert_eq!(
-        locate_agent_doc_source_repo(root.path()).as_deref(),
-        Some(root.path())
-    );
+        // One artifact older than the commit by more than the grace → flagged.
+        let stale = classify_stale_install_artifacts(
+            commit,
+            &[("bin", Some(commit - 600)), ("cdylib", Some(commit + 1))],
+            grace,
+        );
+        assert_eq!(stale, vec!["bin"]);
 
-    // Dogfood superproject: source lives under src/agent-doc.
-    let superproject = TempDir::new().unwrap();
-    let src = superproject.path().join("src/agent-doc");
-    std::fs::create_dir_all(&src).unwrap();
-    std::fs::write(src.join("Cargo.toml"), agent_doc_manifest).unwrap();
-    assert_eq!(locate_agent_doc_source_repo(superproject.path()), Some(src));
+        // Built just inside the grace window (install-then-commit seconds apart)
+        // → not flagged; older than grace → flagged.
+        assert!(
+            classify_stale_install_artifacts(commit, &[("bin", Some(commit - 30))], grace)
+                .is_empty()
+        );
+        assert_eq!(
+            classify_stale_install_artifacts(commit, &[("bin", Some(commit - 61))], grace),
+            vec!["bin"]
+        );
 
-    // Unrelated repo (no agent-doc crate) → no warning source.
-    let other = TempDir::new().unwrap();
-    std::fs::write(
-        other.path().join("Cargo.toml"),
-        "[package]\nname = \"something-else\"\n",
-    )
-    .unwrap();
-    assert!(locate_agent_doc_source_repo(other.path()).is_none());
-}
-#[test]
-fn preflight_output_omits_empty_claims_and_layout_issues() {
-    let output = PreflightOutput::default();
-    let json = serde_json::to_string(&output).unwrap();
-    assert!(
-        !json.contains("\"claims\""),
-        "empty claims must be omitted from per-cycle output: {json}"
-    );
-    assert!(
-        !json.contains("\"layout_issues\""),
-        "empty layout_issues must be omitted from per-cycle output: {json}"
-    );
-    let round_trip: PreflightOutput = serde_json::from_str(&json).unwrap();
-    assert!(round_trip.claims.is_empty());
-    assert!(round_trip.layout_issues.is_empty());
-
-    // Non-empty values are still emitted and round-trip intact.
-    let populated = PreflightOutput {
-        claims: vec!["claimed pane %1".to_string()],
-        layout_issues: vec!["stash overflow".to_string()],
-        ..PreflightOutput::default()
-    };
-    let json = serde_json::to_string(&populated).unwrap();
-    assert!(json.contains("\"claims\""), "{json}");
-    assert!(json.contains("\"layout_issues\""), "{json}");
-    let round_trip: PreflightOutput = serde_json::from_str(&json).unwrap();
-    assert_eq!(round_trip.claims, vec!["claimed pane %1".to_string()]);
-    assert_eq!(round_trip.layout_issues, vec!["stash overflow".to_string()]);
-}
-#[test]
-fn detect_identity_collisions_flags_preset_vs_backlog_id() {
-    // #preset-item-id-collision: monsterrodholders.md repro — a #next-steps
-    // prompt preset AND an active #next-steps backlog item collide.
-    let content = concat!(
-        "---\n",
-        "prompt_presets:\n",
-        "  '#next-steps': Any follow-up items?\n",
-        "  '#commit-push': commit + push\n",
-        "---\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] [#next-steps] do the next steps\n",
-        "- [ ] [#other1] unrelated work\n",
-        "<!-- /agent:backlog -->\n",
-    );
-    let collisions = detect_identity_collisions(content);
-    assert_eq!(collisions.len(), 1, "{collisions:?}");
-    assert!(collisions[0].contains("#next-steps"), "{collisions:?}");
-    assert!(collisions[0].contains("prompt_presets"), "{collisions:?}");
-    assert!(collisions[0].contains("agent:backlog"), "{collisions:?}");
-}
-#[test]
-fn detect_identity_collisions_flags_duplicate_active_ids_across_components() {
-    // The same active id in backlog and review is also ambiguous.
-    let content = concat!(
-        "---\nagent_doc_session: t\n---\n\n",
-        "<!-- agent:backlog -->\n- [ ] [#dup7] in backlog\n<!-- /agent:backlog -->\n\n",
-        "<!-- agent:review -->\n- [/] [#dup7] also gated in review\n<!-- /agent:review -->\n",
-    );
-    let collisions = detect_identity_collisions(content);
-    assert_eq!(collisions.len(), 1, "{collisions:?}");
-    assert!(collisions[0].contains("#dup7"), "{collisions:?}");
-}
-#[test]
-fn detect_identity_collisions_ignores_done_ids_and_clean_docs() {
-    // A clean doc (unique ids) and done items must not flag.
-    let content = concat!(
-        "---\nprompt_presets:\n  '#next-steps': x\n---\n\n",
-        "<!-- agent:backlog -->\n- [ ] [#alpha] active\n<!-- /agent:backlog -->\n\n",
-        // A done item reusing the preset name is archived, not an active target.
-        "<!-- agent:review -->\n- [x] [#next-steps] completed long ago\n<!-- /agent:review -->\n",
-    );
-    assert!(
-        detect_identity_collisions(content).is_empty(),
-        "done ids and unique active ids must not collide"
-    );
-}
-#[test]
-fn identity_collision_for_new_id_reports_existing_sources() {
-    // #preset-item-id-collision-enforce: a candidate id matching a preset
-    // key or active item id reports the existing source(s); a free id is None.
-    let content = concat!(
-        "---\nprompt_presets:\n  '#next-steps': x\n---\n\n",
-        "<!-- agent:backlog -->\n- [ ] [#alpha] active\n<!-- /agent:backlog -->\n",
-    );
-    assert_eq!(
-        identity_collision_for_new_id(content, "next-steps"),
-        Some(vec!["prompt_presets".to_string()])
-    );
-    // Normalization: leading `#` and case are ignored.
-    assert_eq!(
-        identity_collision_for_new_id(content, "#ALPHA"),
-        Some(vec!["agent:backlog".to_string()])
-    );
-    assert_eq!(identity_collision_for_new_id(content, "fresh01"), None);
-    assert_eq!(identity_collision_for_new_id(content, ""), None);
-}
-#[test]
-fn strike_done_queue_head_prompts_marks_done_items_completed() {
-    let entries = vec![
-        crate::queue::QueueEntry::Preset("#spec-test-build-install-commit-push".to_string()),
-        crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-            text: "do [#jbrsrbusyint]".to_string(),
-            multiline: false,
-        }),
-        crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-            text: "do [#jbrsrbusysim]".to_string(),
-            multiline: false,
-        }),
-    ];
-    let done_ids: std::collections::HashSet<String> =
-        ["jbrsrbusyint".to_string()].into_iter().collect();
-
-    let (rewritten, struck) =
-        super::strike_done_queue_head_prompts(&entries, &done_ids).expect("expected strike");
-
-    assert_eq!(struck.len(), 1);
-    assert_eq!(struck[0].text, "do [#jbrsrbusyint]");
-    match &rewritten[1] {
-        crate::queue::QueueEntry::Completed(prompt) => {
-            assert_eq!(prompt.text, "do [#jbrsrbusyint]");
-        }
-        other => panic!("expected Completed for head prompt, got {:?}", other),
+        // Absent artifacts (not installed) never fire.
+        assert!(
+            classify_stale_install_artifacts(commit, &[("bin", None), ("cdylib", None)], grace)
+                .is_empty()
+        );
     }
-    // The live head (`#jbrsrbusysim`) must stay intact for the normal
-    // consumption path.
-    match &rewritten[2] {
-        crate::queue::QueueEntry::Prompt(prompt) => {
-            assert_eq!(prompt.text, "do [#jbrsrbusysim]");
-        }
-        other => panic!("expected Prompt for live head, got {:?}", other),
+    #[test]
+    fn locate_agent_doc_source_repo_matches_root_and_dogfood_layout() {
+        let agent_doc_manifest = "[package]\nname = \"agent-doc\"\nversion = \"0.0.0\"\n";
+
+        // Standalone checkout: the git root itself is the crate.
+        let root = TempDir::new().unwrap();
+        std::fs::write(root.path().join("Cargo.toml"), agent_doc_manifest).unwrap();
+        assert_eq!(
+            locate_agent_doc_source_repo(root.path()).as_deref(),
+            Some(root.path())
+        );
+
+        // Dogfood superproject: source lives under src/agent-doc.
+        let superproject = TempDir::new().unwrap();
+        let src = superproject.path().join("src/agent-doc");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("Cargo.toml"), agent_doc_manifest).unwrap();
+        assert_eq!(locate_agent_doc_source_repo(superproject.path()), Some(src));
+
+        // Unrelated repo (no agent-doc crate) → no warning source.
+        let other = TempDir::new().unwrap();
+        std::fs::write(
+            other.path().join("Cargo.toml"),
+            "[package]\nname = \"something-else\"\n",
+        )
+        .unwrap();
+        assert!(locate_agent_doc_source_repo(other.path()).is_none());
     }
-}
-#[test]
-fn strike_done_queue_head_prompts_returns_none_when_head_is_live() {
-    let entries = vec![crate::queue::QueueEntry::Prompt(
-        crate::queue::QueuePrompt {
-            text: "do [#stillopen]".to_string(),
-            multiline: false,
-        },
-    )];
-    let done_ids: std::collections::HashSet<String> =
-        ["somethingelse".to_string()].into_iter().collect();
+    #[test]
+    fn preflight_output_omits_empty_claims_and_layout_issues() {
+        let output = PreflightOutput::default();
+        let json = serde_json::to_string(&output).unwrap();
+        assert!(
+            !json.contains("\"claims\""),
+            "empty claims must be omitted from per-cycle output: {json}"
+        );
+        assert!(
+            !json.contains("\"layout_issues\""),
+            "empty layout_issues must be omitted from per-cycle output: {json}"
+        );
+        let round_trip: PreflightOutput = serde_json::from_str(&json).unwrap();
+        assert!(round_trip.claims.is_empty());
+        assert!(round_trip.layout_issues.is_empty());
 
-    assert!(super::strike_done_queue_head_prompts(&entries, &done_ids).is_none());
-}
-#[test]
-fn strike_done_queue_prompts_strikes_non_head_resolved_ref() {
-    // #ynra: a resolved (done) ref behind a live head must be struck, not
-    // left as an orphaned ref (which trips the shadow-backlog guard). The
-    // live head is preserved in place.
-    let entries = vec![
-        crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-            text: "do [#liveone]".to_string(),
-            multiline: false,
-        }),
-        crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-            text: "do [#donetail]".to_string(),
-            multiline: false,
-        }),
-    ];
-    let done_ids: std::collections::HashSet<String> =
-        ["donetail".to_string()].into_iter().collect();
+        // Non-empty values are still emitted and round-trip intact.
+        let populated = PreflightOutput {
+            claims: vec!["claimed pane %1".to_string()],
+            layout_issues: vec!["stash overflow".to_string()],
+            ..PreflightOutput::default()
+        };
+        let json = serde_json::to_string(&populated).unwrap();
+        assert!(json.contains("\"claims\""), "{json}");
+        assert!(json.contains("\"layout_issues\""), "{json}");
+        let round_trip: PreflightOutput = serde_json::from_str(&json).unwrap();
+        assert_eq!(round_trip.claims, vec!["claimed pane %1".to_string()]);
+        assert_eq!(round_trip.layout_issues, vec!["stash overflow".to_string()]);
+    }
+    #[test]
+    fn detect_identity_collisions_flags_preset_vs_backlog_id() {
+        // #preset-item-id-collision: monsterrodholders.md repro — a #next-steps
+        // prompt preset AND an active #next-steps backlog item collide.
+        let content = concat!(
+            "---\n",
+            "prompt_presets:\n",
+            "  '#next-steps': Any follow-up items?\n",
+            "  '#commit-push': commit + push\n",
+            "---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#next-steps] do the next steps\n",
+            "- [ ] [#other1] unrelated work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let collisions = detect_identity_collisions(content);
+        assert_eq!(collisions.len(), 1, "{collisions:?}");
+        assert!(collisions[0].contains("#next-steps"), "{collisions:?}");
+        assert!(collisions[0].contains("prompt_presets"), "{collisions:?}");
+        assert!(collisions[0].contains("agent:backlog"), "{collisions:?}");
+    }
+    #[test]
+    fn detect_identity_collisions_flags_duplicate_active_ids_across_components() {
+        // The same active id in backlog and review is also ambiguous.
+        let content = concat!(
+            "---\nagent_doc_session: t\n---\n\n",
+            "<!-- agent:backlog -->\n- [ ] [#dup7] in backlog\n<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n- [/] [#dup7] also gated in review\n<!-- /agent:review -->\n",
+        );
+        let collisions = detect_identity_collisions(content);
+        assert_eq!(collisions.len(), 1, "{collisions:?}");
+        assert!(collisions[0].contains("#dup7"), "{collisions:?}");
+    }
+    #[test]
+    fn detect_identity_collisions_ignores_done_ids_and_clean_docs() {
+        // A clean doc (unique ids) and done items must not flag.
+        let content = concat!(
+            "---\nprompt_presets:\n  '#next-steps': x\n---\n\n",
+            "<!-- agent:backlog -->\n- [ ] [#alpha] active\n<!-- /agent:backlog -->\n\n",
+            // A done item reusing the preset name is archived, not an active target.
+            "<!-- agent:review -->\n- [x] [#next-steps] completed long ago\n<!-- /agent:review -->\n",
+        );
+        assert!(
+            detect_identity_collisions(content).is_empty(),
+            "done ids and unique active ids must not collide"
+        );
+    }
+    #[test]
+    fn identity_collision_for_new_id_reports_existing_sources() {
+        // #preset-item-id-collision-enforce: a candidate id matching a preset
+        // key or active item id reports the existing source(s); a free id is None.
+        let content = concat!(
+            "---\nprompt_presets:\n  '#next-steps': x\n---\n\n",
+            "<!-- agent:backlog -->\n- [ ] [#alpha] active\n<!-- /agent:backlog -->\n",
+        );
+        assert_eq!(
+            identity_collision_for_new_id(content, "next-steps"),
+            Some(vec!["prompt_presets".to_string()])
+        );
+        // Normalization: leading `#` and case are ignored.
+        assert_eq!(
+            identity_collision_for_new_id(content, "#ALPHA"),
+            Some(vec!["agent:backlog".to_string()])
+        );
+        assert_eq!(identity_collision_for_new_id(content, "fresh01"), None);
+        assert_eq!(identity_collision_for_new_id(content, ""), None);
+    }
+    #[test]
+    fn strike_done_queue_head_prompts_marks_done_items_completed() {
+        let entries = vec![
+            crate::queue::QueueEntry::Preset("#spec-test-build-install-commit-push".to_string()),
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#jbrsrbusyint]".to_string(),
+                multiline: false,
+            }),
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#jbrsrbusysim]".to_string(),
+                multiline: false,
+            }),
+        ];
+        let done_ids: std::collections::HashSet<String> =
+            ["jbrsrbusyint".to_string()].into_iter().collect();
 
-    let (rewritten, struck) =
-        super::strike_done_queue_head_prompts(&entries, &done_ids).expect("expected a strike");
-    assert_eq!(struck.len(), 1);
-    assert_eq!(struck[0].text, "do [#donetail]");
-    // Live head preserved as a Prompt; the trailing resolved ref struck.
-    assert!(matches!(
-        &rewritten[0],
-        crate::queue::QueueEntry::Prompt(p) if p.text == "do [#liveone]"
-    ));
-    assert!(matches!(
-        &rewritten[1],
-        crate::queue::QueueEntry::Completed(p) if p.text == "do [#donetail]"
-    ));
-}
-#[test]
-fn collect_agent_review_gated_ids_extracts_only_gated_marker() {
-    let content = "\
+        let (rewritten, struck) =
+            super::strike_done_queue_head_prompts(&entries, &done_ids).expect("expected strike");
+
+        assert_eq!(struck.len(), 1);
+        assert_eq!(struck[0].text, "do [#jbrsrbusyint]");
+        match &rewritten[1] {
+            crate::queue::QueueEntry::Completed(prompt) => {
+                assert_eq!(prompt.text, "do [#jbrsrbusyint]");
+            }
+            other => panic!("expected Completed for head prompt, got {:?}", other),
+        }
+        // The live head (`#jbrsrbusysim`) must stay intact for the normal
+        // consumption path.
+        match &rewritten[2] {
+            crate::queue::QueueEntry::Prompt(prompt) => {
+                assert_eq!(prompt.text, "do [#jbrsrbusysim]");
+            }
+            other => panic!("expected Prompt for live head, got {:?}", other),
+        }
+    }
+    #[test]
+    fn strike_done_queue_head_prompts_returns_none_when_head_is_live() {
+        let entries = vec![crate::queue::QueueEntry::Prompt(
+            crate::queue::QueuePrompt {
+                text: "do [#stillopen]".to_string(),
+                multiline: false,
+            },
+        )];
+        let done_ids: std::collections::HashSet<String> =
+            ["somethingelse".to_string()].into_iter().collect();
+
+        assert!(super::strike_done_queue_head_prompts(&entries, &done_ids).is_none());
+    }
+    #[test]
+    fn strike_done_queue_prompts_strikes_non_head_resolved_ref() {
+        // #ynra: a resolved (done) ref behind a live head must be struck, not
+        // left as an orphaned ref (which trips the shadow-backlog guard). The
+        // live head is preserved in place.
+        let entries = vec![
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#liveone]".to_string(),
+                multiline: false,
+            }),
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#donetail]".to_string(),
+                multiline: false,
+            }),
+        ];
+        let done_ids: std::collections::HashSet<String> =
+            ["donetail".to_string()].into_iter().collect();
+
+        let (rewritten, struck) =
+            super::strike_done_queue_head_prompts(&entries, &done_ids).expect("expected a strike");
+        assert_eq!(struck.len(), 1);
+        assert_eq!(struck[0].text, "do [#donetail]");
+        // Live head preserved as a Prompt; the trailing resolved ref struck.
+        assert!(matches!(
+            &rewritten[0],
+            crate::queue::QueueEntry::Prompt(p) if p.text == "do [#liveone]"
+        ));
+        assert!(matches!(
+            &rewritten[1],
+            crate::queue::QueueEntry::Completed(p) if p.text == "do [#donetail]"
+        ));
+    }
+    #[test]
+    fn collect_agent_review_gated_ids_extracts_only_gated_marker() {
+        let content = "\
 <!-- agent:review -->
 - [/] [#alpha] First gated item with a plan reference.
 - [x] [#beta] Already-done item in review (legacy).
@@ -3424,41 +3388,42 @@ fn collect_agent_review_gated_ids_extracts_only_gated_marker() {
 - [/] no id here.
 <!-- /agent:review -->
 ";
-    let ids = super::collect_agent_review_gated_ids(content);
-    assert!(
-        ids.contains("alpha"),
-        "expected gated [/] item to be collected, got {:?}",
-        ids
-    );
-    assert!(
-        ids.contains("delta"),
-        "expected second gated [/] item to be collected, got {:?}",
-        ids
-    );
-    assert!(
-        !ids.contains("beta"),
-        "[x] marker is not gated, must not be collected"
-    );
-    assert!(
-        !ids.contains("charlie"),
-        "[ ] marker is not gated, must not be collected"
-    );
-    assert_eq!(
-        ids.len(),
-        2,
-        "only [/] items should be collected: {:?}",
-        ids
-    );
-}
-#[test]
-fn collect_agent_review_gated_ids_returns_empty_when_no_review_component() {
-    let content = "<!-- agent:backlog -->\n- [ ] [#alpha] backlog only\n<!-- /agent:backlog -->\n";
-    let ids = super::collect_agent_review_gated_ids(content);
-    assert!(ids.is_empty(), "no review component → empty: {:?}", ids);
-}
-#[test]
-fn collect_agent_review_gated_ids_ignores_backlog_open_items() {
-    let content = "\
+        let ids = super::collect_agent_review_gated_ids(content);
+        assert!(
+            ids.contains("alpha"),
+            "expected gated [/] item to be collected, got {:?}",
+            ids
+        );
+        assert!(
+            ids.contains("delta"),
+            "expected second gated [/] item to be collected, got {:?}",
+            ids
+        );
+        assert!(
+            !ids.contains("beta"),
+            "[x] marker is not gated, must not be collected"
+        );
+        assert!(
+            !ids.contains("charlie"),
+            "[ ] marker is not gated, must not be collected"
+        );
+        assert_eq!(
+            ids.len(),
+            2,
+            "only [/] items should be collected: {:?}",
+            ids
+        );
+    }
+    #[test]
+    fn collect_agent_review_gated_ids_returns_empty_when_no_review_component() {
+        let content =
+            "<!-- agent:backlog -->\n- [ ] [#alpha] backlog only\n<!-- /agent:backlog -->\n";
+        let ids = super::collect_agent_review_gated_ids(content);
+        assert!(ids.is_empty(), "no review component → empty: {:?}", ids);
+    }
+    #[test]
+    fn collect_agent_review_gated_ids_ignores_backlog_open_items() {
+        let content = "\
 <!-- agent:backlog -->
 - [ ] [#openbk] open in backlog
 <!-- /agent:backlog -->
@@ -3466,561 +3431,503 @@ fn collect_agent_review_gated_ids_ignores_backlog_open_items() {
 - [/] [#gatedrv] gated in review
 <!-- /agent:review -->
 ";
-    let ids = super::collect_agent_review_gated_ids(content);
-    assert!(ids.contains("gatedrv"));
-    assert!(
-        !ids.contains("openbk"),
-        "backlog open items must NOT be collected as gated"
-    );
-}
-#[test]
-fn strike_done_queue_head_prompts_strikes_review_gated_items() {
-    // Queue head matches a gated `[/]` item in agent:review — auto-strike
-    // must advance the queue past it just like an agent:done item.
-    let entries = vec![
-        crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-            text: "do [#gatedphase]".to_string(),
-            multiline: false,
-        }),
-        crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-            text: "do [#stillopen]".to_string(),
-            multiline: false,
-        }),
-    ];
-    let eligible_ids: std::collections::HashSet<String> =
-        ["gatedphase".to_string()].into_iter().collect();
-
-    let (rewritten, struck) = super::strike_done_queue_head_prompts(&entries, &eligible_ids)
-        .expect("expected gated head to be struck");
-    assert_eq!(struck.len(), 1);
-    assert_eq!(struck[0].text, "do [#gatedphase]");
-    match &rewritten[1] {
-        crate::queue::QueueEntry::Prompt(prompt) => {
-            assert_eq!(prompt.text, "do [#stillopen]");
-        }
-        other => panic!("expected live head to remain Prompt, got {:?}", other),
-    }
-}
-#[test]
-fn strike_done_queue_head_prompts_ignores_prose_id_mentions() {
-    // #qrefmisstrike: the auto-strike pass may skip already-done / review-gated
-    // directive refs, but a natural-language follow-up prompt that mentions ids
-    // must stay live for the agent to answer.
-    let entries = vec![crate::queue::QueueEntry::Prompt(
-        crate::queue::QueuePrompt {
-            text: "What are #next-steps to follow-up on #gq5c?".to_string(),
-            multiline: false,
-        },
-    )];
-    let eligible_ids: std::collections::HashSet<String> =
-        ["next-steps".to_string(), "gq5c".to_string()]
-            .into_iter()
-            .collect();
-
-    assert!(
-        super::strike_done_queue_head_prompts(&entries, &eligible_ids).is_none(),
-        "prose id mentions must not be treated as resolved queue directives"
-    );
-}
-#[test]
-fn strike_done_queue_head_prompts_strikes_advance_and_bare_directives() {
-    let entries = vec![
-        crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-            text: "advance [#phase1]".to_string(),
-            multiline: false,
-        }),
-        crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-            text: ":pushpin: [#phase2]".to_string(),
-            multiline: false,
-        }),
-    ];
-    let eligible_ids: std::collections::HashSet<String> =
-        ["phase1".to_string(), "phase2".to_string()]
-            .into_iter()
-            .collect();
-
-    let (_rewritten, struck) = super::strike_done_queue_head_prompts(&entries, &eligible_ids)
-        .expect("directive-shaped heads should be struck");
-    assert_eq!(
-        struck.iter().map(|prompt| prompt.text.as_str()).collect::<Vec<_>>(),
-        vec!["advance [#phase1]", ":pushpin: [#phase2]"]
-    );
-}
-#[test]
-fn collect_agent_done_ids_extracts_from_done_component() {
-    let content = "<!-- agent:done -->\n- [x] [#alpha] One thing\n- [x] [#bravo] Another\n<!-- /agent:done -->\n";
-    let ids = super::collect_agent_done_ids(content);
-    assert!(ids.contains("alpha"));
-    assert!(ids.contains("bravo"));
-    assert_eq!(ids.len(), 2);
-}
-#[test]
-fn collect_agent_done_ids_reads_archive_attr_when_present() {
-    let dir = TempDir::new().unwrap();
-    let archive_rel = "tasks/done-archive.md";
-    let archive_path = dir.path().join(archive_rel);
-    std::fs::create_dir_all(archive_path.parent().unwrap()).unwrap();
-    std::fs::write(
-        &archive_path,
-        "- [x] [#archived1] First archived item\n- [x] [#archived2] Second\n",
-    )
-    .unwrap();
-    let content = format!(
-        "<!-- agent:done archive={} -->\n<!-- /agent:done -->\n",
-        archive_rel
-    );
-    let ids = super::collect_agent_done_ids_with_root(&content, Some(dir.path()));
-    assert!(
-        ids.contains("archived1"),
-        "expected ids to include archived1 from archive file: {:?}",
-        ids
-    );
-    assert!(ids.contains("archived2"));
-    // Without the root, the archive path cannot be resolved → empty.
-    let ids_no_root = super::collect_agent_done_ids(&content);
-    assert!(ids_no_root.is_empty());
-}
-#[test]
-fn queue_prompt_done_id_parses_canonical_bracket_form() {
-    assert_eq!(
-        super::queue_prompt_done_id("do [#jbrsrbusyint]"),
-        Some("jbrsrbusyint".to_string())
-    );
-    assert_eq!(
-        super::queue_prompt_done_id("do #jbrsrbusyint more text"),
-        Some("jbrsrbusyint".to_string())
-    );
-    assert_eq!(
-        super::queue_prompt_done_id("advance [#gq5c]"),
-        Some("gq5c".to_string())
-    );
-    assert_eq!(
-        super::queue_prompt_done_id(":pushpin: [#qrefmisstrike]"),
-        Some("qrefmisstrike".to_string())
-    );
-    assert_eq!(
-        super::queue_prompt_done_id("What are #next-steps to follow-up on #gq5c?"),
-        None
-    );
-    assert_eq!(
-        super::queue_prompt_done_id("Approve [#shoptiers]. What are #next-steps?"),
-        None
-    );
-    assert_eq!(super::queue_prompt_done_id("plain prompt"), None);
-}
-#[test]
-fn preflight_detects_diff() {
-    let dir = setup_project();
-    let doc = dir.path().join("session.md");
-    let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
-    std::fs::write(&doc, original).unwrap();
-
-    // Save snapshot of original, then add new content.
-    snapshot::save(&doc, original).unwrap();
-    std::fs::write(
-        &doc,
-        "---\nsession: test\n---\n\n## User\n\nHello\n\nNew question here.\n",
-    )
-    .unwrap();
-
-    // diff::compute should detect changes → no_changes = false.
-    let diff_result = diff::compute(&doc).unwrap();
-    assert!(diff_result.is_some(), "diff should detect new content");
-}
-/// #drained-done-queue-clear: a standalone no-diff preflight that drains a
-/// fully-resolved auto-queue writes the drained shape to disk + snapshot
-/// but leaves HEAD on the active-queue commit. The next preflight commit
-/// step must self-heal that pure queue-maintenance drift via the route
-/// queue commit-boundary recovery instead of stranding it for manual
-/// `agent-doc commit`. The drained snapshot has no active prompts, so this
-/// shape recovers only because HEAD proves the prior active auto-queue and
-/// nothing but queue state differs.
-#[test]
-fn route_queue_commit_boundary_recovers_drained_queue_snapshot() {
-    let dir = setup_project();
-    let root = dir.path();
-    let doc = root.join("session.md");
-
-    let active = concat!(
-        "---\n",
-        "agent_doc_session: test\n",
-        "queue_active: true\n",
-        "---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: prior — gpt-5\n\nDone.\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:queue auto -->\n",
-        "- do [#alpha]\n",
-        "<!-- /agent:queue -->\n"
-    );
-    std::fs::write(&doc, active).unwrap();
-    snapshot::save(&doc, active).unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["add", "session.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["commit", "-m", "active queue", "--no-verify"])
-        .output()
-        .unwrap();
-
-    // Standalone maintenance drained the queue: queue_active cleared, auto
-    // stripped, body emptied — on disk and in the snapshot — but HEAD still
-    // carries the active auto-queue.
-    let drained = concat!(
-        "---\n",
-        "agent_doc_session: test\n",
-        "queue_active: false\n",
-        "---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: prior — gpt-5\n\nDone.\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:queue -->\n",
-        "<!-- /agent:queue -->\n"
-    );
-    std::fs::write(&doc, drained).unwrap();
-    snapshot::save(&doc, drained).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(active), Some(active)).unwrap();
-
-    assert!(matches!(
-        crate::git::verify_snapshot_committed(&doc).unwrap(),
-        crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
-    ));
-    let rc = crate::graph::RunContext::new(doc.clone());
-    assert!(
-        detect_route_queue_snapshot_commit_boundary_recoverable(&doc, &rc).unwrap(),
-        "drained-queue maintenance drift must be recoverable"
-    );
-
-    assert!(recover_route_queue_snapshot_commit_boundary(&doc, &rc).unwrap());
-    assert!(
-        matches!(
-            crate::git::verify_snapshot_committed(&doc).unwrap(),
-            crate::git::SnapshotCommitStatus::Committed
-        ),
-        "drained queue must be committed after recovery"
-    );
-    let show = Command::new("git")
-        .current_dir(root)
-        .args(["show", "HEAD:session.md"])
-        .output()
-        .unwrap();
-    let head = String::from_utf8_lossy(&show.stdout);
-    assert!(head.contains("queue_active: false"), "HEAD: {head}");
-    assert!(!head.contains("agent:queue auto"), "HEAD: {head}");
-}
-/// #drained-done-queue-clear guard: the route queue commit-boundary
-/// recovery must NOT fire when a real user edit rides alongside the queue
-/// drain. Only pure queue-state churn is auto-committable.
-#[test]
-fn route_queue_commit_boundary_skips_drained_queue_with_user_edit() {
-    let dir = setup_project();
-    let root = dir.path();
-    let doc = root.join("session.md");
-
-    let active = concat!(
-        "---\n",
-        "agent_doc_session: test\n",
-        "queue_active: true\n",
-        "---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: prior — gpt-5\n\nDone.\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:queue auto -->\n",
-        "- do [#alpha]\n",
-        "<!-- /agent:queue -->\n"
-    );
-    std::fs::write(&doc, active).unwrap();
-    snapshot::save(&doc, active).unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["add", "session.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["commit", "-m", "active queue", "--no-verify"])
-        .output()
-        .unwrap();
-
-    // Drained queue PLUS an unrelated exchange edit — must not auto-commit.
-    let drained_plus_edit = concat!(
-        "---\n",
-        "agent_doc_session: test\n",
-        "queue_active: false\n",
-        "---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: prior — gpt-5\n\nDone.\n\nAn extra user line.\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:queue -->\n",
-        "<!-- /agent:queue -->\n"
-    );
-    std::fs::write(&doc, drained_plus_edit).unwrap();
-    snapshot::save(&doc, drained_plus_edit).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(active), Some(active)).unwrap();
-
-    let rc = crate::graph::RunContext::new(doc.clone());
-    assert!(
-        !detect_route_queue_snapshot_commit_boundary_recoverable(&doc, &rc).unwrap(),
-        "a user edit alongside the drain must block auto-commit"
-    );
-}
-#[test]
-fn preflight_resumes_commit_when_write_landed_without_open_cycle_state() {
-    let dir = setup_project();
-    let root = dir.path();
-    let doc = root.join("session.md");
-    let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
-    std::fs::write(&doc, original).unwrap();
-    snapshot::save(&doc, original).unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["add", "session.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["commit", "-m", "add doc", "--no-verify"])
-        .output()
-        .unwrap();
-
-    let patched =
-        "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nRecovered answer\n";
-    std::fs::write(&doc, patched).unwrap();
-    snapshot::save(&doc, patched).unwrap();
-    let ops = root.join(".agent-doc/logs/ops.log");
-    std::fs::write(
-        &ops,
-        format!(
-            "[100] snapshot_saved_file_ipc file={} snap_len={}\n",
-            doc.display(),
-            patched.len()
-        ),
-    )
-    .unwrap();
-
-    let (recovered, committed) = enforce_cycle_completion(&doc).unwrap();
-    assert!(
-        !recovered,
-        "no replay should be needed when file already has the response"
-    );
-    assert!(
-        committed,
-        "commit boundary should resume and create a commit"
-    );
-
-    let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-    assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
-
-    let show = Command::new("git")
-        .current_dir(root)
-        .args(["show", "HEAD:session.md"])
-        .output()
-        .unwrap();
-    assert!(show.status.success(), "git show HEAD:session.md failed");
-    let committed_doc = String::from_utf8_lossy(&show.stdout);
-    assert!(
-        committed_doc.contains("Recovered answer"),
-        "HEAD should include the resumed response closeout:\n{committed_doc}"
-    );
-
-    let log = std::fs::read_to_string(ops).unwrap();
-    assert!(
-        log.contains("resume_commit_success file="),
-        "resume commit success should be logged:\n{log}"
-    );
-}
-#[test]
-fn archive_pending_done_inserts_canonical_done_component() {
-    let dir = setup_project();
-    let file = dir.path().join("session.md");
-    let content = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:backlog -->\n",
-        "<!-- /agent:backlog -->\n"
-    );
-    std::fs::write(&file, content).unwrap();
-    let archived = archive_pending_done(
-        &file,
-        content,
-        &[crate::pending::PendingItem {
-            marker: crate::pending::PendingListMarker::Bullet,
-            id: "done1".to_string(),
-            state: crate::pending::PendingState::Done,
-            gate_type: None,
-            text: "completed item".to_string(),
-            continuation: String::new(),
-        }],
-    )
-    .unwrap()
-    .unwrap();
-
-    assert!(archived.contains("<!-- agent:done -->"));
-    assert!(archived.contains("<!-- /agent:done -->"));
-    assert!(!archived.contains("<!-- agent:backlog-done -->"));
-    assert!(!archived.contains("<!-- agent:pending-done -->"));
-    assert!(archived.contains("[#done1] completed item"));
-}
-#[test]
-fn archive_pending_done_ignores_removed_pending_done_alias() {
-    let dir = setup_project();
-    let file = dir.path().join("session.md");
-    let content = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:backlog -->\n",
-        "<!-- /agent:backlog -->\n\n",
-        "<!-- agent:pending-done -->\n",
-        "<!-- /agent:pending-done -->\n"
-    );
-    std::fs::write(&file, content).unwrap();
-    let archived = archive_pending_done(
-        &file,
-        content,
-        &[crate::pending::PendingItem {
-            marker: crate::pending::PendingListMarker::Bullet,
-            id: "done1".to_string(),
-            state: crate::pending::PendingState::Done,
-            gate_type: None,
-            text: "completed item".to_string(),
-            continuation: String::new(),
-        }],
-    )
-    .unwrap()
-    .unwrap();
-
-    assert!(archived.contains("<!-- agent:pending-done -->"));
-    assert!(archived.contains("<!-- agent:done -->"));
-    assert!(!archived.contains("<!-- agent:backlog-done -->"));
-    assert!(archived.contains("[#done1] completed item"));
-}
-#[test]
-fn archive_pending_done_appends_to_external_done_archive() {
-    let dir = setup_project();
-    let file = dir.path().join("tasks/session.md");
-    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    let content = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:backlog -->\n",
-        "<!-- /agent:backlog -->\n\n",
-        "<!-- agent:done archive=tasks/session.done.md -->\n",
-        "<!-- /agent:done -->\n"
-    );
-    std::fs::write(&file, content).unwrap();
-
-    let archived = archive_pending_done(
-        &file,
-        content,
-        &[crate::pending::PendingItem {
-            marker: crate::pending::PendingListMarker::Bullet,
-            id: "done1".to_string(),
-            state: crate::pending::PendingState::Done,
-            gate_type: None,
-            text: "completed externally".to_string(),
-            continuation: String::new(),
-        }],
-    )
-    .unwrap()
-    .unwrap();
-
-    let external = std::fs::read_to_string(dir.path().join("tasks/session.done.md")).unwrap();
-    assert!(external.contains("[#done1] completed externally"));
-    assert!(!archived.contains("[#done1]"));
-    assert!(archived.contains("completed work archived in tasks/session.done.md"));
-
-    archive_pending_done(
-        &file,
-        &archived,
-        &[crate::pending::PendingItem {
-            marker: crate::pending::PendingListMarker::Bullet,
-            id: "done1".to_string(),
-            state: crate::pending::PendingState::Done,
-            gate_type: None,
-            text: "completed externally".to_string(),
-            continuation: String::new(),
-        }],
-    )
-    .unwrap()
-    .unwrap();
-    let external_after = std::fs::read_to_string(dir.path().join("tasks/session.done.md")).unwrap();
-    assert_eq!(external_after.matches("[#done1]").count(), 1);
-}
-#[test]
-fn archive_pending_done_rejects_invalid_external_archive_paths() {
-    let dir = setup_project();
-    let file = dir.path().join("session.md");
-    let item = crate::pending::PendingItem {
-        marker: crate::pending::PendingListMarker::Bullet,
-        id: "done1".to_string(),
-        state: crate::pending::PendingState::Done,
-        gate_type: None,
-        text: "completed item".to_string(),
-        continuation: String::new(),
-    };
-    for archive_path in [
-        "/tmp/session.done.md",
-        "../session.done.md",
-        "tasks/session.md",
-    ] {
-        let content = format!(
-            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n<!-- agent:done archive={} -->\n<!-- /agent:done -->\n",
-            archive_path
-        );
-        std::fs::write(&file, &content).unwrap();
-        let err = archive_pending_done(&file, &content, std::slice::from_ref(&item))
-            .unwrap_err()
-            .to_string();
+        let ids = super::collect_agent_review_gated_ids(content);
+        assert!(ids.contains("gatedrv"));
         assert!(
-            err.contains("agent:done archive="),
-            "unexpected error for {archive_path}: {err}"
+            !ids.contains("openbk"),
+            "backlog open items must NOT be collected as gated"
         );
     }
-}
-#[test]
-fn external_done_archive_ids_satisfy_dropped_history_guard() {
-    let dir = setup_project();
-    let file = dir.path().join("tasks/session.md");
-    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    std::fs::write(
-        dir.path().join("tasks/session.done.md"),
-        "# Agent Doc Completed Work\n\n- 2026-05-13 [#item1] Was open\n",
-    )
-    .unwrap();
-    let baseline = concat!(
-        "<!-- agent:backlog -->\n",
-        "- [ ] [#item1] Was open\n",
-        "<!-- /agent:backlog -->\n"
-    );
-    let current = concat!(
-        "<!-- agent:backlog -->\n",
-        "<!-- /agent:backlog -->\n\n",
-        "<!-- agent:done archive=tasks/session.done.md -->\n",
-        "<!-- /agent:done -->\n"
-    );
-    std::fs::write(&file, current).unwrap();
+    #[test]
+    fn strike_done_queue_head_prompts_strikes_review_gated_items() {
+        // Queue head matches a gated `[/]` item in agent:review — auto-strike
+        // must advance the queue past it just like an agent:done item.
+        let entries = vec![
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#gatedphase]".to_string(),
+                multiline: false,
+            }),
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#stillopen]".to_string(),
+                multiline: false,
+            }),
+        ];
+        let eligible_ids: std::collections::HashSet<String> =
+            ["gatedphase".to_string()].into_iter().collect();
 
-    let external_ids = external_done_archive_ids(&file, current).unwrap();
-    let report = crate::pending::detect_dropped_from_history_with_extra_current_ids(
-        current,
-        baseline,
-        &HashSet::new(),
-        &external_ids,
-    )
-    .unwrap();
+        let (rewritten, struck) = super::strike_done_queue_head_prompts(&entries, &eligible_ids)
+            .expect("expected gated head to be struck");
+        assert_eq!(struck.len(), 1);
+        assert_eq!(struck[0].text, "do [#gatedphase]");
+        match &rewritten[1] {
+            crate::queue::QueueEntry::Prompt(prompt) => {
+                assert_eq!(prompt.text, "do [#stillopen]");
+            }
+            other => panic!("expected live head to remain Prompt, got {:?}", other),
+        }
+    }
+    #[test]
+    fn collect_agent_done_ids_extracts_from_done_component() {
+        let content = "<!-- agent:done -->\n- [x] [#alpha] One thing\n- [x] [#bravo] Another\n<!-- /agent:done -->\n";
+        let ids = super::collect_agent_done_ids(content);
+        assert!(ids.contains("alpha"));
+        assert!(ids.contains("bravo"));
+        assert_eq!(ids.len(), 2);
+    }
+    #[test]
+    fn collect_agent_done_ids_reads_archive_attr_when_present() {
+        let dir = TempDir::new().unwrap();
+        let archive_rel = "tasks/done-archive.md";
+        let archive_path = dir.path().join(archive_rel);
+        std::fs::create_dir_all(archive_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &archive_path,
+            "- [x] [#archived1] First archived item\n- [x] [#archived2] Second\n",
+        )
+        .unwrap();
+        let content = format!(
+            "<!-- agent:done archive={} -->\n<!-- /agent:done -->\n",
+            archive_rel
+        );
+        let ids = super::collect_agent_done_ids_with_root(&content, Some(dir.path()));
+        assert!(
+            ids.contains("archived1"),
+            "expected ids to include archived1 from archive file: {:?}",
+            ids
+        );
+        assert!(ids.contains("archived2"));
+        // Without the root, the archive path cannot be resolved → empty.
+        let ids_no_root = super::collect_agent_done_ids(&content);
+        assert!(ids_no_root.is_empty());
+    }
+    #[test]
+    fn queue_prompt_done_id_parses_canonical_bracket_form() {
+        assert_eq!(
+            super::queue_prompt_done_id("do [#jbrsrbusyint]"),
+            Some("jbrsrbusyint".to_string())
+        );
+        assert_eq!(
+            super::queue_prompt_done_id("do #jbrsrbusyint more text"),
+            Some("jbrsrbusyint".to_string())
+        );
+        assert_eq!(super::queue_prompt_done_id("plain prompt"), None);
+    }
+    #[test]
+    fn preflight_detects_diff() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, original).unwrap();
 
-    assert!(report.dropped.is_empty());
-}
-#[test]
-fn preflight_closes_response_captured_cycle_when_snapshot_already_matches_head() {
-    let dir = setup_project();
-    let root = dir.path();
-    let doc = root.join("session.md");
-    let committed = "---\nsession: test\n---\n\n\
+        // Save snapshot of original, then add new content.
+        snapshot::save(&doc, original).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nsession: test\n---\n\n## User\n\nHello\n\nNew question here.\n",
+        )
+        .unwrap();
+
+        // diff::compute should detect changes → no_changes = false.
+        let diff_result = diff::compute(&doc).unwrap();
+        assert!(diff_result.is_some(), "diff should detect new content");
+    }
+    /// #drained-done-queue-clear: a standalone no-diff preflight that drains a
+    /// fully-resolved auto-queue writes the drained shape to disk + snapshot
+    /// but leaves HEAD on the active-queue commit. The next preflight commit
+    /// step must self-heal that pure queue-maintenance drift via the route
+    /// queue commit-boundary recovery instead of stranding it for manual
+    /// `agent-doc commit`. The drained snapshot has no active prompts, so this
+    /// shape recovers only because HEAD proves the prior active auto-queue and
+    /// nothing but queue state differs.
+    #[test]
+    fn route_queue_commit_boundary_recovers_drained_queue_snapshot() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let active = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, active).unwrap();
+        snapshot::save(&doc, active).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "active queue", "--no-verify"])
+            .output()
+            .unwrap();
+
+        // Standalone maintenance drained the queue: queue_active cleared, auto
+        // stripped, body emptied — on disk and in the snapshot — but HEAD still
+        // carries the active auto-queue.
+        let drained = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, drained).unwrap();
+        snapshot::save(&doc, drained).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(active), Some(active))
+            .unwrap();
+
+        assert!(matches!(
+            crate::git::verify_snapshot_committed(&doc).unwrap(),
+            crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+        ));
+        let rc = crate::graph::RunContext::new(doc.clone());
+        assert!(
+            detect_route_queue_snapshot_commit_boundary_recoverable(&doc, &rc).unwrap(),
+            "drained-queue maintenance drift must be recoverable"
+        );
+
+        assert!(recover_route_queue_snapshot_commit_boundary(&doc, &rc).unwrap());
+        assert!(
+            matches!(
+                crate::git::verify_snapshot_committed(&doc).unwrap(),
+                crate::git::SnapshotCommitStatus::Committed
+            ),
+            "drained queue must be committed after recovery"
+        );
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        let head = String::from_utf8_lossy(&show.stdout);
+        assert!(head.contains("queue_active: false"), "HEAD: {head}");
+        assert!(!head.contains("agent:queue auto"), "HEAD: {head}");
+    }
+    /// #drained-done-queue-clear guard: the route queue commit-boundary
+    /// recovery must NOT fire when a real user edit rides alongside the queue
+    /// drain. Only pure queue-state churn is auto-committable.
+    #[test]
+    fn route_queue_commit_boundary_skips_drained_queue_with_user_edit() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let active = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, active).unwrap();
+        snapshot::save(&doc, active).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "active queue", "--no-verify"])
+            .output()
+            .unwrap();
+
+        // Drained queue PLUS an unrelated exchange edit — must not auto-commit.
+        let drained_plus_edit = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n\nAn extra user line.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, drained_plus_edit).unwrap();
+        snapshot::save(&doc, drained_plus_edit).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(active), Some(active))
+            .unwrap();
+
+        let rc = crate::graph::RunContext::new(doc.clone());
+        assert!(
+            !detect_route_queue_snapshot_commit_boundary_recoverable(&doc, &rc).unwrap(),
+            "a user edit alongside the drain must block auto-commit"
+        );
+    }
+    #[test]
+    fn preflight_resumes_commit_when_write_landed_without_open_cycle_state() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, original).unwrap();
+        snapshot::save(&doc, original).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let patched =
+            "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nRecovered answer\n";
+        std::fs::write(&doc, patched).unwrap();
+        snapshot::save(&doc, patched).unwrap();
+        let ops = root.join(".agent-doc/logs/ops.log");
+        std::fs::write(
+            &ops,
+            format!(
+                "[100] snapshot_saved_file_ipc file={} snap_len={}\n",
+                doc.display(),
+                patched.len()
+            ),
+        )
+        .unwrap();
+
+        let (recovered, committed) = enforce_cycle_completion(&doc).unwrap();
+        assert!(
+            !recovered,
+            "no replay should be needed when file already has the response"
+        );
+        assert!(
+            committed,
+            "commit boundary should resume and create a commit"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "git show HEAD:session.md failed");
+        let committed_doc = String::from_utf8_lossy(&show.stdout);
+        assert!(
+            committed_doc.contains("Recovered answer"),
+            "HEAD should include the resumed response closeout:\n{committed_doc}"
+        );
+
+        let log = std::fs::read_to_string(ops).unwrap();
+        assert!(
+            log.contains("resume_commit_success file="),
+            "resume commit success should be logged:\n{log}"
+        );
+    }
+    #[test]
+    fn archive_pending_done_inserts_canonical_done_component() {
+        let dir = setup_project();
+        let file = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&file, content).unwrap();
+        let archived = archive_pending_done(
+            &file,
+            content,
+            &[crate::pending::PendingItem {
+                marker: crate::pending::PendingListMarker::Bullet,
+                id: "done1".to_string(),
+                state: crate::pending::PendingState::Done,
+                gate_type: None,
+                text: "completed item".to_string(),
+                continuation: String::new(),
+            }],
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(archived.contains("<!-- agent:done -->"));
+        assert!(archived.contains("<!-- /agent:done -->"));
+        assert!(!archived.contains("<!-- agent:backlog-done -->"));
+        assert!(!archived.contains("<!-- agent:pending-done -->"));
+        assert!(archived.contains("[#done1] completed item"));
+    }
+    #[test]
+    fn archive_pending_done_ignores_removed_pending_done_alias() {
+        let dir = setup_project();
+        let file = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        std::fs::write(&file, content).unwrap();
+        let archived = archive_pending_done(
+            &file,
+            content,
+            &[crate::pending::PendingItem {
+                marker: crate::pending::PendingListMarker::Bullet,
+                id: "done1".to_string(),
+                state: crate::pending::PendingState::Done,
+                gate_type: None,
+                text: "completed item".to_string(),
+                continuation: String::new(),
+            }],
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(archived.contains("<!-- agent:pending-done -->"));
+        assert!(archived.contains("<!-- agent:done -->"));
+        assert!(!archived.contains("<!-- agent:backlog-done -->"));
+        assert!(archived.contains("[#done1] completed item"));
+    }
+    #[test]
+    fn archive_pending_done_appends_to_external_done_archive() {
+        let dir = setup_project();
+        let file = dir.path().join("tasks/session.md");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks/session.done.md -->\n",
+            "<!-- /agent:done -->\n"
+        );
+        std::fs::write(&file, content).unwrap();
+
+        let archived = archive_pending_done(
+            &file,
+            content,
+            &[crate::pending::PendingItem {
+                marker: crate::pending::PendingListMarker::Bullet,
+                id: "done1".to_string(),
+                state: crate::pending::PendingState::Done,
+                gate_type: None,
+                text: "completed externally".to_string(),
+                continuation: String::new(),
+            }],
+        )
+        .unwrap()
+        .unwrap();
+
+        let external = std::fs::read_to_string(dir.path().join("tasks/session.done.md")).unwrap();
+        assert!(external.contains("[#done1] completed externally"));
+        assert!(!archived.contains("[#done1]"));
+        assert!(archived.contains("completed work archived in tasks/session.done.md"));
+
+        archive_pending_done(
+            &file,
+            &archived,
+            &[crate::pending::PendingItem {
+                marker: crate::pending::PendingListMarker::Bullet,
+                id: "done1".to_string(),
+                state: crate::pending::PendingState::Done,
+                gate_type: None,
+                text: "completed externally".to_string(),
+                continuation: String::new(),
+            }],
+        )
+        .unwrap()
+        .unwrap();
+        let external_after =
+            std::fs::read_to_string(dir.path().join("tasks/session.done.md")).unwrap();
+        assert_eq!(external_after.matches("[#done1]").count(), 1);
+    }
+    #[test]
+    fn archive_pending_done_rejects_invalid_external_archive_paths() {
+        let dir = setup_project();
+        let file = dir.path().join("session.md");
+        let item = crate::pending::PendingItem {
+            marker: crate::pending::PendingListMarker::Bullet,
+            id: "done1".to_string(),
+            state: crate::pending::PendingState::Done,
+            gate_type: None,
+            text: "completed item".to_string(),
+            continuation: String::new(),
+        };
+        for archive_path in [
+            "/tmp/session.done.md",
+            "../session.done.md",
+            "tasks/session.md",
+        ] {
+            let content = format!(
+                "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n<!-- agent:done archive={} -->\n<!-- /agent:done -->\n",
+                archive_path
+            );
+            std::fs::write(&file, &content).unwrap();
+            let err = archive_pending_done(&file, &content, std::slice::from_ref(&item))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("agent:done archive="),
+                "unexpected error for {archive_path}: {err}"
+            );
+        }
+    }
+    #[test]
+    fn external_done_archive_ids_satisfy_dropped_history_guard() {
+        let dir = setup_project();
+        let file = dir.path().join("tasks/session.md");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(
+            dir.path().join("tasks/session.done.md"),
+            "# Agent Doc Completed Work\n\n- 2026-05-13 [#item1] Was open\n",
+        )
+        .unwrap();
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#item1] Was open\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks/session.done.md -->\n",
+            "<!-- /agent:done -->\n"
+        );
+        std::fs::write(&file, current).unwrap();
+
+        let external_ids = external_done_archive_ids(&file, current).unwrap();
+        let report = crate::pending::detect_dropped_from_history_with_extra_current_ids(
+            current,
+            baseline,
+            &HashSet::new(),
+            &external_ids,
+        )
+        .unwrap();
+
+        assert!(report.dropped.is_empty());
+    }
+    #[test]
+    fn preflight_closes_response_captured_cycle_when_snapshot_already_matches_head() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let committed = "---\nsession: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: older\n\
             old body\n\
@@ -4028,20 +3935,20 @@ fn preflight_closes_response_captured_cycle_when_snapshot_already_matches_head()
             new body\n\
             <!-- agent:boundary:test-boundary -->\n\
             <!-- /agent:exchange -->\n";
-    std::fs::write(&doc, committed).unwrap();
-    snapshot::save(&doc, committed).unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["add", "session.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["commit", "-m", "add doc", "--no-verify"])
-        .output()
-        .unwrap();
+        std::fs::write(&doc, committed).unwrap();
+        snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
 
-    let visible_snapshot = "---\nsession: test\n---\n\n\
+        let visible_snapshot = "---\nsession: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: older\n\
             old body\n\
@@ -4049,1270 +3956,1271 @@ fn preflight_closes_response_captured_cycle_when_snapshot_already_matches_head()
             new body\n\
             <!-- agent:boundary:test-boundary -->\n\
             <!-- /agent:exchange -->\n";
-    snapshot::save(&doc, visible_snapshot).unwrap();
+        snapshot::save(&doc, visible_snapshot).unwrap();
 
-    let with_user_edit = format!("{visible_snapshot}\n❯ follow-up question\n");
-    std::fs::write(&doc, &with_user_edit).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(visible_snapshot), Some(&with_user_edit))
+        let with_user_edit = format!("{visible_snapshot}\n❯ follow-up question\n");
+        std::fs::write(&doc, &with_user_edit).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(visible_snapshot), Some(&with_user_edit))
+            .unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(visible_snapshot),
+            Some(&with_user_edit),
+            "sha256",
+            None,
+        )
         .unwrap();
-    crate::cycle_state::mark_response_captured(
-        &doc,
-        "response_captured",
-        Some(visible_snapshot),
-        Some(&with_user_edit),
-        "sha256",
-        None,
-    )
-    .unwrap();
 
-    let (recovered, committed) = enforce_cycle_completion(&doc).unwrap();
-    assert!(
-        recovered,
-        "the missing commit boundary should be recovered from already-committed HEAD"
-    );
-    assert!(
-        !committed,
-        "HEAD-current closeout should not create a duplicate git commit"
-    );
+        let (recovered, committed) = enforce_cycle_completion(&doc).unwrap();
+        assert!(
+            recovered,
+            "the missing commit boundary should be recovered from already-committed HEAD"
+        );
+        assert!(
+            !committed,
+            "HEAD-current closeout should not create a duplicate git commit"
+        );
 
-    let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-    assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
-    assert_eq!(state.last_event, "commit_already_current");
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "commit_already_current");
 
-    let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-    assert!(
-        log.contains("commit_already_current file="),
-        "preflight should record the no-op closeout instead of failing:\n{log}"
-    );
-    assert!(
-        !log.contains("commit_failed"),
-        "preflight should not log a false commit_failed for HEAD-current closeout:\n{log}"
-    );
-}
-#[test]
-fn preflight_warns_on_prompt_preset_text_inside_post_exchange_html_comment() {
-    let content = concat!(
-        "---\n",
-        "agent_doc_session: test\n",
-        "agent_doc_format: template\n",
-        "prompt_presets:\n",
-        "  '#spec-test-build-install-commit-push': update spec + tests\n",
-        "---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: prior — gpt-5\n\n",
-        "Done.\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!--\n",
-        "Scratch note while testing.\n",
-        "dispatch #spec-test-build-install-commit-push\n",
-        "-->\n\n",
-        "<!-- agent:backlog -->\n",
-        "<!-- /agent:backlog -->\n",
-    );
-    let (fm, _) = crate::frontmatter::parse(content).unwrap();
-    let warning = post_exchange_comment_prompt_preset_warning(
-        Path::new("session.md"),
-        content,
-        &fm.prompt_presets,
-    )
-    .expect("known prompt preset in ordinary post-exchange comment should warn");
-
-    assert_eq!(warning.code, "post_exchange_comment_prompt_preset");
-    assert!(
-        warning
-            .message
-            .contains("#spec-test-build-install-commit-push")
-    );
-    assert!(warning.message.contains("non-executable user note"));
-}
-#[test]
-fn preflight_comment_prompt_preset_warning_ignores_agent_components() {
-    let content = concat!(
-        "---\n",
-        "agent_doc_session: test\n",
-        "agent_doc_format: template\n",
-        "prompt_presets:\n",
-        "  '#spec-test-build-install-commit-push': update spec + tests\n",
-        "---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: prior — gpt-5\n\n",
-        "Done.\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:queue -->\n",
-        "dispatch #spec-test-build-install-commit-push\n",
-        "<!-- /agent:queue -->\n",
-        "<!-- agent:done -->\n",
-        "<!-- archived #spec-test-build-install-commit-push -->\n",
-        "<!-- /agent:done -->\n",
-    );
-    let (fm, _) = crate::frontmatter::parse(content).unwrap();
-
-    assert!(
-        post_exchange_comment_prompt_preset_warning(
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_already_current file="),
+            "preflight should record the no-op closeout instead of failing:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_failed"),
+            "preflight should not log a false commit_failed for HEAD-current closeout:\n{log}"
+        );
+    }
+    #[test]
+    fn preflight_warns_on_prompt_preset_text_inside_post_exchange_html_comment() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "prompt_presets:\n",
+            "  '#spec-test-build-install-commit-push': update spec + tests\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "Scratch note while testing.\n",
+            "dispatch #spec-test-build-install-commit-push\n",
+            "-->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+        let warning = post_exchange_comment_prompt_preset_warning(
             Path::new("session.md"),
             content,
             &fm.prompt_presets,
         )
-        .is_none(),
-        "agent-owned queue directives remain executable state, not ordinary scratch comments"
-    );
-}
-#[test]
-fn misplaced_component_attr_warning_flags_auto_on_backlog() {
-    // #backlog-auto-marker-misfire: `auto` is a queue-only attribute; on the
-    // backlog it must be surfaced (no longer silently tolerated).
-    let content = concat!(
-        "<!-- agent:queue -->\n",
-        "<!-- /agent:queue -->\n\n",
-        "<!-- agent:backlog auto -->\n",
-        "- [ ] [#x1] keep this\n",
-        "<!-- /agent:backlog -->\n",
-    );
-    let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
-        .expect("`auto` on agent:backlog should warn");
-    assert_eq!(warning.code, "misplaced_component_attr");
-    assert!(warning.message.contains("queue-only attribute"));
-    assert!(warning.message.contains("agent:backlog"));
-    assert!(warning.message.contains("agent:queue auto"));
-    assert!(warning.message.contains("no mutation"));
-}
-#[test]
-fn misplaced_component_attr_warning_flags_unknown_attr_typo() {
-    // The reported trigger was the typo `auot`; an unrecognized key must warn.
-    let content = concat!(
-        "<!-- agent:backlog auot -->\n",
-        "- [ ] [#x1] keep this\n",
-        "<!-- /agent:backlog -->\n",
-    );
-    let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
-        .expect("typo'd attribute on a component should warn");
-    assert_eq!(warning.code, "misplaced_component_attr");
-    assert!(
-        warning
-            .message
-            .contains("not a recognized component attribute")
-    );
-    assert!(warning.message.contains("auot"));
-}
-#[test]
-fn misplaced_component_attr_warning_allows_queue_sync_attr_on_backlog() {
-    // #backlog-queue-sync-attr: `queue`, `queue=sync|append|prepend` on the
-    // backlog are recognized sync attributes and must not warn.
-    for marker in [
-        "<!-- agent:backlog queue -->",
-        "<!-- agent:backlog queue=sync -->",
-        "<!-- agent:backlog queue=append -->",
-    ] {
-        let content = format!("{marker}\n- [ ] [#x1] keep this\n<!-- /agent:backlog -->\n");
+        .expect("known prompt preset in ordinary post-exchange comment should warn");
+
+        assert_eq!(warning.code, "post_exchange_comment_prompt_preset");
         assert!(
-            misplaced_component_attr_warning(Path::new("session.md"), &content).is_none(),
-            "recognized queue sync attr must not warn: {marker}"
+            warning
+                .message
+                .contains("#spec-test-build-install-commit-push")
+        );
+        assert!(warning.message.contains("non-executable user note"));
+    }
+    #[test]
+    fn preflight_comment_prompt_preset_warning_ignores_agent_components() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "prompt_presets:\n",
+            "  '#spec-test-build-install-commit-push': update spec + tests\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "dispatch #spec-test-build-install-commit-push\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:done -->\n",
+            "<!-- archived #spec-test-build-install-commit-push -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+
+        assert!(
+            post_exchange_comment_prompt_preset_warning(
+                Path::new("session.md"),
+                content,
+                &fm.prompt_presets,
+            )
+            .is_none(),
+            "agent-owned queue directives remain executable state, not ordinary scratch comments"
         );
     }
-}
-#[test]
-fn misplaced_component_attr_warning_flags_queue_sync_attr_on_icebox() {
-    let content = concat!(
-        "<!-- agent:queue -->\n",
-        "<!-- /agent:queue -->\n\n",
-        "<!-- agent:icebox queue=append -->\n",
-        "- [ ] [#x1] parked work\n",
-        "<!-- /agent:icebox -->\n",
-    );
-    let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
-        .expect("`queue` on agent:icebox should warn");
-    assert_eq!(warning.code, "misplaced_component_attr");
-    assert!(warning.message.contains("agent:icebox"));
-    assert!(warning.message.contains("does not auto-populate"));
-    assert!(warning.message.contains("per-item enqueue"));
-}
-#[test]
-fn misplaced_component_attr_warning_allows_priority_attr() {
-    // #backlog-priority-attribute: bare `priority` on backlog/icebox/queue
-    // is a recognized ordering attribute and must not warn.
-    for content in [
-        "<!-- agent:backlog priority -->\n- [ ] [#a] x\n<!-- /agent:backlog -->\n",
-        "<!-- agent:backlog priority queue -->\n- [ ] [#a] x\n<!-- /agent:backlog -->\n",
-        "<!-- agent:queue priority -->\n- do [#a]\n<!-- /agent:queue -->\n",
-    ] {
+    #[test]
+    fn misplaced_component_attr_warning_flags_auto_on_backlog() {
+        // #backlog-auto-marker-misfire: `auto` is a queue-only attribute; on the
+        // backlog it must be surfaced (no longer silently tolerated).
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog auto -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
+            .expect("`auto` on agent:backlog should warn");
+        assert_eq!(warning.code, "misplaced_component_attr");
+        assert!(warning.message.contains("queue-only attribute"));
+        assert!(warning.message.contains("agent:backlog"));
+        assert!(warning.message.contains("agent:queue auto"));
+        assert!(warning.message.contains("no mutation"));
+    }
+    #[test]
+    fn misplaced_component_attr_warning_flags_unknown_attr_typo() {
+        // The reported trigger was the typo `auot`; an unrecognized key must warn.
+        let content = concat!(
+            "<!-- agent:backlog auot -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
+            .expect("typo'd attribute on a component should warn");
+        assert_eq!(warning.code, "misplaced_component_attr");
+        assert!(
+            warning
+                .message
+                .contains("not a recognized component attribute")
+        );
+        assert!(warning.message.contains("auot"));
+    }
+    #[test]
+    fn misplaced_component_attr_warning_allows_queue_sync_attr_on_backlog() {
+        // #backlog-queue-sync-attr: `queue`, `queue=sync|append|prepend` on the
+        // backlog are recognized sync attributes and must not warn.
+        for marker in [
+            "<!-- agent:backlog queue -->",
+            "<!-- agent:backlog queue=sync -->",
+            "<!-- agent:backlog queue=append -->",
+        ] {
+            let content = format!("{marker}\n- [ ] [#x1] keep this\n<!-- /agent:backlog -->\n");
+            assert!(
+                misplaced_component_attr_warning(Path::new("session.md"), &content).is_none(),
+                "recognized queue sync attr must not warn: {marker}"
+            );
+        }
+    }
+    #[test]
+    fn misplaced_component_attr_warning_flags_queue_sync_attr_on_icebox() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:icebox queue=append -->\n",
+            "- [ ] [#x1] parked work\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
+            .expect("`queue` on agent:icebox should warn");
+        assert_eq!(warning.code, "misplaced_component_attr");
+        assert!(warning.message.contains("agent:icebox"));
+        assert!(warning.message.contains("does not auto-populate"));
+        assert!(warning.message.contains("per-item enqueue"));
+    }
+    #[test]
+    fn misplaced_component_attr_warning_allows_priority_attr() {
+        // #backlog-priority-attribute: bare `priority` on backlog/icebox/queue
+        // is a recognized ordering attribute and must not warn.
+        for content in [
+            "<!-- agent:backlog priority -->\n- [ ] [#a] x\n<!-- /agent:backlog -->\n",
+            "<!-- agent:backlog priority queue -->\n- [ ] [#a] x\n<!-- /agent:backlog -->\n",
+            "<!-- agent:queue priority -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        ] {
+            assert!(
+                misplaced_component_attr_warning(Path::new("session.md"), content).is_none(),
+                "priority attr must not warn: {content}"
+            );
+        }
+    }
+    #[test]
+    fn misplaced_component_attr_warning_flags_invalid_queue_mode() {
+        let content = concat!(
+            "<!-- agent:backlog queue=nope -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
+            .expect("unrecognized queue mode should warn");
+        assert_eq!(warning.code, "misplaced_component_attr");
+        assert!(warning.message.contains("not a recognized sync mode"));
+        assert!(warning.message.contains("queue=nope"));
+    }
+    #[test]
+    fn misplaced_component_attr_warning_allows_queue_auto_and_known_attrs() {
+        // `auto` on the queue and known attrs elsewhere must not warn.
+        let content = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- do #fix1\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange patch=append max_lines=50 -->\n",
+            "### Re: prior — gpt-5\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks/x.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
         assert!(
             misplaced_component_attr_warning(Path::new("session.md"), content).is_none(),
-            "priority attr must not warn: {content}"
+            "`auto` on queue plus recognized attrs elsewhere must not warn"
         );
     }
-}
-#[test]
-fn misplaced_component_attr_warning_flags_invalid_queue_mode() {
-    let content = concat!(
-        "<!-- agent:backlog queue=nope -->\n",
-        "- [ ] [#x1] keep this\n",
-        "<!-- /agent:backlog -->\n",
-    );
-    let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
-        .expect("unrecognized queue mode should warn");
-    assert_eq!(warning.code, "misplaced_component_attr");
-    assert!(warning.message.contains("not a recognized sync mode"));
-    assert!(warning.message.contains("queue=nope"));
-}
-#[test]
-fn misplaced_component_attr_warning_allows_queue_auto_and_known_attrs() {
-    // `auto` on the queue and known attrs elsewhere must not warn.
-    let content = concat!(
-        "<!-- agent:queue auto -->\n",
-        "- do #fix1\n",
-        "<!-- /agent:queue -->\n\n",
-        "<!-- agent:exchange patch=append max_lines=50 -->\n",
-        "### Re: prior — gpt-5\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] [#x1] keep this\n",
-        "<!-- /agent:backlog -->\n\n",
-        "<!-- agent:done archive=tasks/x.done.md -->\n",
-        "<!-- /agent:done -->\n",
-    );
-    assert!(
-        misplaced_component_attr_warning(Path::new("session.md"), content).is_none(),
-        "`auto` on queue plus recognized attrs elsewhere must not warn"
-    );
-}
-#[test]
-fn misplaced_component_attr_warning_allows_queue_control_markers() {
-    // `start` / `go` / `stop` are recognized queue-only control markers
-    // (#queue-state-unify) — preflight migrates them into `queue:` frontmatter.
-    for token in ["start", "go", "stop"] {
-        let content = format!(
-            "<!-- agent:queue preset=\"#p\" {token} -->\n- do #fix1\n<!-- /agent:queue -->\n",
+    #[test]
+    fn misplaced_component_attr_warning_allows_queue_control_markers() {
+        // `start` / `go` / `stop` are recognized queue-only control markers
+        // (#queue-state-unify) — preflight migrates them into `queue:` frontmatter.
+        for token in ["start", "go", "stop"] {
+            let content = format!(
+                "<!-- agent:queue preset=\"#p\" {token} -->\n- do #fix1\n<!-- /agent:queue -->\n",
+            );
+            assert!(
+                misplaced_component_attr_warning(Path::new("session.md"), &content).is_none(),
+                "`{token}` on queue must be a recognized control marker, not a typo warning"
+            );
+        }
+    }
+    #[test]
+    fn misplaced_component_attr_warning_allows_preset_on_queue() {
+        let content = concat!(
+            "<!-- agent:queue preset=\"#spec-test-build-install-commit-push\" -->\n",
+            "- do #fix1\n",
+            "<!-- /agent:queue -->\n",
         );
         assert!(
-            misplaced_component_attr_warning(Path::new("session.md"), &content).is_none(),
-            "`{token}` on queue must be a recognized control marker, not a typo warning"
+            misplaced_component_attr_warning(Path::new("session.md"), content).is_none(),
+            "`preset` on queue is a recognized queue-only attribute"
         );
     }
-}
-#[test]
-fn misplaced_component_attr_warning_allows_preset_on_queue() {
-    let content = concat!(
-        "<!-- agent:queue preset=\"#spec-test-build-install-commit-push\" -->\n",
-        "- do #fix1\n",
-        "<!-- /agent:queue -->\n",
-    );
-    assert!(
-        misplaced_component_attr_warning(Path::new("session.md"), content).is_none(),
-        "`preset` on queue is a recognized queue-only attribute"
-    );
-}
-#[test]
-fn misplaced_component_attr_warning_flags_preset_on_non_queue() {
-    let content = concat!(
-        "<!-- agent:backlog preset=\"#spec-test-build-install-commit-push\" -->\n",
-        "- [ ] [#x1] keep this\n",
-        "<!-- /agent:backlog -->\n",
-    );
-    let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
-        .expect("`preset` on backlog should warn as a queue-only attribute on wrong component");
-    assert_eq!(warning.code, "misplaced_component_attr");
-    assert!(
-        warning.message.contains("queue-only"),
-        "warning should mention queue-only: {}",
-        warning.message
-    );
-}
-#[test]
-fn auto_on_backlog_does_not_activate_queue() {
-    // #backlog-auto-marker-misfire regression: the auto-loop reads `auto`
-    // only from the queue component, never from the backlog.
-    let content = concat!(
-        "<!-- agent:queue -->\n",
-        "- do #fix1\n",
-        "<!-- /agent:queue -->\n\n",
-        "<!-- agent:backlog auto -->\n",
-        "- [ ] [#x1] keep this\n",
-        "<!-- /agent:backlog -->\n",
-    );
-    let components = crate::component::parse(content).unwrap();
-    let queue = components.iter().find(|c| c.name == "queue").unwrap();
-    assert!(
-        !crate::queue::has_auto_attr(&queue.attrs),
-        "queue has no auto attribute"
-    );
-    let backlog = components.iter().find(|c| c.name == "backlog").unwrap();
-    assert!(
-        crate::queue::has_auto_attr(&backlog.attrs),
-        "backlog carries the misplaced auto attribute"
-    );
-    let body = &content[queue.open_end..queue.close_start];
-    let entries = crate::queue::parse(body).unwrap();
-    // Activation is driven solely by the queue component's auto flag.
-    let activation = crate::queue::resolve_activation(&entries, false, false, false);
-    assert!(
-        !activation.active,
-        "backlog `auto` must never activate the auto-loop"
-    );
-}
-#[test]
-fn preflight_warns_on_dispatch_text_inside_post_exchange_html_comment_without_presets() {
-    let content = concat!(
-        "---\n",
-        "agent_doc_session: test\n",
-        "agent_doc_format: template\n",
-        "---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: prior — gpt-5\n\n",
-        "Done.\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!--\n",
-        "dispatch #manual-review\n",
-        "/clear\n",
-        "-->\n",
-    );
-    let (fm, _) = crate::frontmatter::parse(content).unwrap();
-    let warning = post_exchange_comment_prompt_preset_warning(
-        Path::new("session.md"),
-        content,
-        &fm.prompt_presets,
-    )
-    .expect("dispatch-looking text in ordinary post-exchange comment should warn");
-
-    assert_eq!(warning.code, "post_exchange_comment_prompt_preset");
-    assert!(warning.message.contains("dispatch #manual-review"));
-    assert!(warning.message.contains("/clear"));
-}
-#[test]
-fn preflight_preserves_duplicate_prompt_comment_from_snapshot() {
-    let dir = setup_project();
-    let root = dir.path();
-    let doc = root.join("session.md");
-    let prompt = "What are #next-steps to improve the sqlitedb graph performance?";
-    let snapshot = format!(
-        concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ {prompt}\n",
-            "<!-- agent:boundary:head -->\n",
-            "<!-- /agent:exchange -->\n\n",
-            "###\n\n",
-            "<!--\n",
-            "{prompt}\n",
-            "-->\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [ ] keep me\n",
-            "<!-- /agent:backlog -->\n"
-        ),
-        prompt = prompt
-    );
-    std::fs::write(&doc, &snapshot).unwrap();
-    snapshot::save(&doc, &snapshot).unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["add", "session.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(root)
-        .args(["commit", "-m", "add doc", "--no-verify"])
-        .output()
-        .unwrap();
-
-    let rc = crate::graph::RunContext::new(doc.clone());
-    let changed = remove_post_exchange_duplicate_prompt_comments_for_preflight(&doc, &rc).unwrap();
-
-    let file_after = std::fs::read_to_string(&doc).unwrap();
-    assert!(
-        !changed,
-        "preflight cleanup should not rewrite baseline-owned scratch comments"
-    );
-    assert!(
-        file_after.contains(&format!("<!--\n{prompt}\n-->")),
-        "preflight must not scrub post-exchange scratch text that already existed in HEAD:\n{file_after}"
-    );
-}
-#[test]
-fn preflight_claims_read_and_truncated() {
-    let dir = setup_project();
-    let doc = dir.path().join("session.md");
-    std::fs::write(&doc, "# Doc\n").unwrap();
-    snapshot::save(&doc, "# Doc\n").unwrap();
-
-    // Write a claims log.
-    let log_path = dir.path().join(".agent-doc/claims.log");
-    std::fs::write(&log_path, "claim A\nclaim B\n").unwrap();
-
-    let claims = read_and_truncate_claims(&doc);
-    assert_eq!(claims, vec!["claim A", "claim B"]);
-
-    // Log should be truncated.
-    let after = std::fs::read_to_string(&log_path).unwrap();
-    assert!(after.is_empty(), "claims log should be empty after read");
-}
-#[test]
-fn preflight_no_claims_log_returns_empty() {
-    let dir = setup_project();
-    let doc = dir.path().join("session.md");
-    std::fs::write(&doc, "# Doc\n").unwrap();
-
-    // No claims.log exists.
-    let claims = read_and_truncate_claims(&doc);
-    assert!(claims.is_empty());
-}
-#[test]
-fn preflight_output_serializes_correctly() {
-    let output = PreflightOutput {
-        layout_issues: vec![],
-        recovered: false,
-        committed: true,
-        claims: vec!["foo".to_string()],
-        diff: Some("+new line\n".to_string()),
-        no_changes: false,
-        linked_changes: vec![],
-        baseline_file: None,
-        diff_type: None,
-        diff_type_reason: None,
-        annotated_diff: None,
-        slash_commands: vec![],
-        builtin_commands: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(parsed["recovered"], false);
-    assert_eq!(parsed["committed"], true);
-    assert_eq!(parsed["claims"][0], "foo");
-    assert_eq!(parsed["no_changes"], false);
-    assert!(parsed["diff"].as_str().is_some());
-    assert!(
-        parsed.get("document").is_none(),
-        "document field must be absent"
-    );
-}
-#[test]
-fn preflight_output_includes_orchestration_request() {
-    let output = PreflightOutput {
-        no_changes: false,
-        orchestration_request: Some(crate::diff::OrchestrationRequest {
-            mode: crate::diff::OrchestrationRequestMode::Sequential,
-            trigger_text: "Synchronous orcestra.".to_string(),
-            task_count: 5,
-        }),
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(parsed["orchestration_request"]["mode"], "sequential");
-    assert_eq!(parsed["orchestration_request"]["task_count"], 5);
-    assert_eq!(
-        parsed["orchestration_request"]["trigger_text"],
-        "Synchronous orcestra."
-    );
-}
-#[test]
-fn preflight_output_omits_orchestration_request_when_absent() {
-    let output = PreflightOutput {
-        no_changes: false,
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(
-        parsed.get("orchestration_request").is_none(),
-        "orchestration_request should be omitted when absent"
-    );
-}
-#[test]
-fn preflight_output_includes_prompt_presets_requested() {
-    let output = PreflightOutput {
-        no_changes: false,
-        prompt_presets_requested: vec!["#1".to_string(), "release-check".to_string()],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(parsed["prompt_presets_requested"][0], "#1");
-    assert_eq!(parsed["prompt_presets_requested"][1], "release-check");
-}
-#[test]
-fn preflight_output_omits_prompt_presets_requested_when_empty() {
-    let output = PreflightOutput {
-        no_changes: false,
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(
-        parsed.get("prompt_presets_requested").is_none(),
-        "prompt_presets_requested should be omitted when empty"
-    );
-}
-#[test]
-fn harness_mismatch_warning_normalizes_aliases() {
-    assert!(
-        harness_mismatch_warning(Some("claude"), "claude-code").is_none(),
-        "claude and claude-code are the same canonical harness"
-    );
-    let warning = harness_mismatch_warning(Some("codex"), "claude-code").unwrap();
-    assert_eq!(warning.code, "harness_mismatch");
-    assert_eq!(warning.document_agent.as_deref(), Some("codex"));
-    assert_eq!(warning.active_harness.as_deref(), Some("claude-code"));
-    assert!(warning.message.contains("Document declares agent: codex"));
-}
-#[test]
-fn harness_mismatch_warning_skips_unknown_active_harness() {
-    assert!(harness_mismatch_warning(Some("codex"), "default").is_none());
-    assert!(harness_mismatch_warning(None, "claude-code").is_none());
-}
-#[test]
-fn codex_network_access_warning_for_non_codex_harness() {
-    let content = "---\nagent_doc_session: test\nagent: opencode\ncodex_network_access: enabled\n---\n\ntest\n";
-    let (fm, _) = crate::frontmatter::parse(content).unwrap();
-    assert!(
-        fm.codex_network_access.is_some(),
-        "frontmatter should have codex_network_access"
-    );
-    let active = "opencode";
-    assert_ne!(
-        canonical_harness_name(active).as_deref(),
-        Some("codex"),
-        "opencode should not be canonical codex"
-    );
-    assert!(
-        canonical_harness_name(&active).is_some(),
-        "opencode is a known harness"
-    );
-    let has_guard = canonical_harness_name("codex").as_deref() == Some("codex")
-        && canonical_harness_name(active).as_deref() != Some("codex")
-        && fm.codex_network_access.is_some();
-    assert!(
-        has_guard,
-        "guard condition should fire for opencode + codex_network_access: enabled"
-    );
-}
-#[test]
-fn preflight_output_includes_warnings() {
-    let output = PreflightOutput {
-        warnings: vec![PreflightWarning {
-            code: "harness_mismatch".to_string(),
-            message: "Document declares agent: codex but active harness is claude-code."
-                .to_string(),
-            document_agent: Some("codex".to_string()),
-            active_harness: Some("claude-code".to_string()),
-        }],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(parsed["warnings"][0]["code"], "harness_mismatch");
-    assert_eq!(parsed["warnings"][0]["document_agent"], "codex");
-    assert_eq!(parsed["warnings"][0]["active_harness"], "claude-code");
-}
-#[test]
-fn preflight_output_omits_warnings_when_empty() {
-    let output = PreflightOutput::default();
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(
-        parsed.get("warnings").is_none(),
-        "warnings should be omitted when empty"
-    );
-}
-#[test]
-fn preflight_output_null_diff_when_no_changes() {
-    let output = PreflightOutput {
-        layout_issues: vec![],
-        recovered: false,
-        committed: false,
-        claims: vec![],
-        diff: None,
-        no_changes: true,
-        linked_changes: vec![],
-        baseline_file: None,
-        diff_type: None,
-        diff_type_reason: None,
-        annotated_diff: None,
-        slash_commands: vec![],
-        builtin_commands: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(parsed["diff"].is_null());
-    assert_eq!(parsed["no_changes"], true);
-}
-#[test]
-fn check_layout_returns_empty_outside_tmux() {
-    // When TMUX env var is not set (typical in CI / test), check_layout
-    // should return an empty vec silently.
-    let _env_guard = crate::test_support::env_lock();
-    let saved = std::env::var("TMUX").ok();
-    // SAFETY: test is single-threaded; we restore the value immediately after.
-    unsafe { std::env::remove_var("TMUX") };
-    let issues = check_layout();
-    // Restore if it was set.
-    if let Some(val) = saved {
-        unsafe { std::env::set_var("TMUX", val) };
+    #[test]
+    fn misplaced_component_attr_warning_flags_preset_on_non_queue() {
+        let content = concat!(
+            "<!-- agent:backlog preset=\"#spec-test-build-install-commit-push\" -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
+            .expect("`preset` on backlog should warn as a queue-only attribute on wrong component");
+        assert_eq!(warning.code, "misplaced_component_attr");
+        assert!(
+            warning.message.contains("queue-only"),
+            "warning should mention queue-only: {}",
+            warning.message
+        );
     }
-    assert!(
-        issues.is_empty(),
-        "expected no issues outside tmux, got: {:?}",
-        issues
-    );
-}
-#[test]
-fn preflight_output_includes_layout_issues() {
-    let output = PreflightOutput {
-        layout_issues: vec!["window index 0 missing".to_string()],
-        recovered: false,
-        committed: false,
-        claims: vec![],
-        diff: None,
-        no_changes: true,
-        linked_changes: vec![],
-        baseline_file: None,
-        diff_type: None,
-        diff_type_reason: None,
-        annotated_diff: None,
-        slash_commands: vec![],
-        builtin_commands: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["layout_issues"].as_array().unwrap().len(), 1);
-    assert_eq!(parsed["layout_issues"][0], "window index 0 missing");
-}
-#[test]
-fn maybe_auto_repair_base_index_noop_without_issue() {
-    let dir = tempfile::tempdir().unwrap();
-    let agent_doc_dir = dir.path().join(".agent-doc");
-    std::fs::create_dir_all(agent_doc_dir.join("state")).unwrap();
-    let file = dir.path().join("session.md");
-    std::fs::write(&file, "---\n---\n").unwrap();
-    let issues: Vec<String> = vec![];
-    maybe_auto_repair_base_index(&file, &issues);
-    let counter_path = agent_doc_dir.join("state/base-index-repair.count");
-    assert!(
-        !counter_path.exists(),
-        "no counter file should be created when no base-index issue"
-    );
-}
-#[test]
-fn detect_duplicate_claims_empty_registry() {
-    let registry = tmux_router::Registry::new();
-    assert!(detect_duplicate_claims(&registry).is_empty());
-}
-#[test]
-fn detect_duplicate_claims_no_duplicates() {
-    let mut registry = tmux_router::Registry::new();
-    registry.insert(
-        "session-a".to_string(),
-        tmux_router::RegistryEntry {
-            pane: "%1".to_string(),
-            pid: 100,
-            cwd: "/work".to_string(),
-            started: "2026-01-01".to_string(),
-            session_id: "session-a".to_string(),
-            file: "tasks/foo.md".to_string(),
-            window: "@1".to_string(),
-            supervisor_instance_id: String::new(),
-        },
-    );
-    registry.insert(
-        "session-b".to_string(),
-        tmux_router::RegistryEntry {
-            pane: "%2".to_string(),
-            pid: 101,
-            cwd: "/work".to_string(),
-            started: "2026-01-01".to_string(),
-            session_id: "session-b".to_string(),
-            file: "tasks/bar.md".to_string(),
-            window: "@1".to_string(),
-            supervisor_instance_id: String::new(),
-        },
-    );
-    assert!(detect_duplicate_claims(&registry).is_empty());
-}
-#[test]
-fn detect_duplicate_claims_two_sessions_same_file() {
-    let mut registry = tmux_router::Registry::new();
-    registry.insert(
-        "session-a".to_string(),
-        tmux_router::RegistryEntry {
-            pane: "%1".to_string(),
-            pid: 100,
-            cwd: "/work".to_string(),
-            started: "2026-01-01".to_string(),
-            session_id: "session-a".to_string(),
-            file: "tasks/shared.md".to_string(),
-            window: "@1".to_string(),
-            supervisor_instance_id: String::new(),
-        },
-    );
-    registry.insert(
-        "session-b".to_string(),
-        tmux_router::RegistryEntry {
-            pane: "%2".to_string(),
-            pid: 101,
-            cwd: "/work".to_string(),
-            started: "2026-01-01".to_string(),
-            session_id: "session-b".to_string(),
-            file: "tasks/shared.md".to_string(),
-            window: "@1".to_string(),
-            supervisor_instance_id: String::new(),
-        },
-    );
-    let issues = detect_duplicate_claims(&registry);
-    assert_eq!(issues.len(), 1);
-    assert!(issues[0].contains("duplicate claims"));
-    assert!(issues[0].contains("tasks/shared.md"));
-    assert!(issues[0].contains("session-a"));
-    assert!(issues[0].contains("session-b"));
-}
-#[test]
-fn detect_duplicate_claims_skips_empty_file_entries() {
-    let mut registry = tmux_router::Registry::new();
-    registry.insert(
-        "session-a".to_string(),
-        tmux_router::RegistryEntry {
-            pane: "%1".to_string(),
-            pid: 100,
-            cwd: "/work".to_string(),
-            started: "2026-01-01".to_string(),
-            session_id: "session-a".to_string(),
-            file: String::new(), // legacy entry — no file
-            window: "@1".to_string(),
-            supervisor_instance_id: String::new(),
-        },
-    );
-    registry.insert(
-        "session-b".to_string(),
-        tmux_router::RegistryEntry {
-            pane: "%2".to_string(),
-            pid: 101,
-            cwd: "/work".to_string(),
-            started: "2026-01-01".to_string(),
-            session_id: "session-b".to_string(),
-            file: String::new(),
-            window: "@1".to_string(),
-            supervisor_instance_id: String::new(),
-        },
-    );
-    assert!(detect_duplicate_claims(&registry).is_empty());
-}
-#[test]
-fn is_url_detects_http() {
-    assert!(is_url("http://example.com"));
-    assert!(is_url("https://example.com/path"));
-    assert!(!is_url("../relative/path.md"));
-    assert!(!is_url("tasks/software/agent-doc.md"));
-    assert!(!is_url(""));
-}
-#[test]
-fn is_html_content_detects_html() {
-    assert!(is_html_content("text/html; charset=utf-8"));
-    assert!(is_html_content("text/html"));
-    assert!(is_html_content("application/xhtml+xml"));
-    assert!(!is_html_content("application/json"));
-    assert!(!is_html_content("text/plain"));
-}
-#[test]
-fn html_to_markdown_converts_basic_html() {
-    let html = "<h1>Title</h1><p>Hello <strong>world</strong>.</p>";
-    let md = html_to_markdown(html);
-    assert!(md.contains("Title"), "should contain heading text");
-    assert!(md.contains("**world**"), "should convert bold");
-}
-#[test]
-fn html_to_markdown_strips_script_and_style() {
-    let html =
-        "<p>Visible</p><script>alert('xss')</script><style>.foo{}</style><p>Also visible</p>";
-    let md = html_to_markdown(html);
-    assert!(md.contains("Visible"));
-    assert!(md.contains("Also visible"));
-    assert!(!md.contains("alert"), "script content should be stripped");
-    assert!(!md.contains(".foo"), "style content should be stripped");
-}
-#[test]
-fn html_to_markdown_strips_nav_and_footer() {
-    let html =
-        "<nav><a href='/'>Home</a></nav><main><p>Content</p></main><footer>Copyright</footer>";
-    let md = html_to_markdown(html);
-    assert!(md.contains("Content"));
-    assert!(!md.contains("Home"), "nav content should be stripped");
-    assert!(
-        !md.contains("Copyright"),
-        "footer content should be stripped"
-    );
-}
-#[test]
-fn url_cache_path_is_deterministic() {
-    let dir = TempDir::new().unwrap();
-    let p1 = url_cache_path(dir.path(), "https://example.com");
-    let p2 = url_cache_path(dir.path(), "https://example.com");
-    assert_eq!(p1, p2, "same URL should produce same cache path");
+    #[test]
+    fn auto_on_backlog_does_not_activate_queue() {
+        // #backlog-auto-marker-misfire regression: the auto-loop reads `auto`
+        // only from the queue component, never from the backlog.
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- do #fix1\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog auto -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let components = crate::component::parse(content).unwrap();
+        let queue = components.iter().find(|c| c.name == "queue").unwrap();
+        assert!(
+            !crate::queue::has_auto_attr(&queue.attrs),
+            "queue has no auto attribute"
+        );
+        let backlog = components.iter().find(|c| c.name == "backlog").unwrap();
+        assert!(
+            crate::queue::has_auto_attr(&backlog.attrs),
+            "backlog carries the misplaced auto attribute"
+        );
+        let body = &content[queue.open_end..queue.close_start];
+        let entries = crate::queue::parse(body).unwrap();
+        // Activation is driven solely by the queue component's auto flag.
+        let activation = crate::queue::resolve_activation(&entries, false, false, false);
+        assert!(
+            !activation.active,
+            "backlog `auto` must never activate the auto-loop"
+        );
+    }
+    #[test]
+    fn preflight_warns_on_dispatch_text_inside_post_exchange_html_comment_without_presets() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "dispatch #manual-review\n",
+            "/clear\n",
+            "-->\n",
+        );
+        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+        let warning = post_exchange_comment_prompt_preset_warning(
+            Path::new("session.md"),
+            content,
+            &fm.prompt_presets,
+        )
+        .expect("dispatch-looking text in ordinary post-exchange comment should warn");
 
-    let p3 = url_cache_path(dir.path(), "https://other.com");
-    assert_ne!(
-        p1, p3,
-        "different URLs should produce different cache paths"
-    );
-    assert!(p1.extension().unwrap() == "txt");
-}
-#[test]
-fn links_cache_dir_creates_directory() {
-    let dir = setup_project();
-    let doc = dir.path().join("session.md");
-    std::fs::write(&doc, "# Doc\n").unwrap();
+        assert_eq!(warning.code, "post_exchange_comment_prompt_preset");
+        assert!(warning.message.contains("dispatch #manual-review"));
+        assert!(warning.message.contains("/clear"));
+    }
+    #[test]
+    fn preflight_preserves_duplicate_prompt_comment_from_snapshot() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let prompt = "What are #next-steps to improve the sqlitedb graph performance?";
+        let snapshot = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!--\n",
+                "{prompt}\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+        std::fs::write(&doc, &snapshot).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
 
-    let cache = links_cache_dir(&doc);
-    assert!(cache.is_some());
-    let cache_path = cache.unwrap();
-    assert!(cache_path.exists());
-    assert!(cache_path.ends_with("links_cache"));
-}
-#[test]
-fn preflight_output_includes_baseline_file() {
-    let output = PreflightOutput {
-        layout_issues: vec![],
-        recovered: false,
-        committed: true,
-        claims: vec![],
-        diff: None,
-        no_changes: true,
-        linked_changes: vec![],
-        baseline_file: Some("/tmp/baseline.md".to_string()),
-        diff_type: None,
-        diff_type_reason: None,
-        annotated_diff: None,
-        slash_commands: vec![],
-        builtin_commands: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["baseline_file"], "/tmp/baseline.md");
-}
-#[test]
-fn preflight_output_omits_baseline_file_when_none() {
-    let output = PreflightOutput {
-        layout_issues: vec![],
-        recovered: false,
-        committed: false,
-        claims: vec![],
-        diff: None,
-        no_changes: true,
-        linked_changes: vec![],
-        baseline_file: None,
-        diff_type: None,
-        diff_type_reason: None,
-        annotated_diff: None,
-        slash_commands: vec![],
-        builtin_commands: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(
-        parsed.get("baseline_file").is_none(),
-        "baseline_file should be omitted when None"
-    );
-}
-#[test]
-fn preflight_output_includes_diff_type_when_set() {
-    let output = PreflightOutput {
-        layout_issues: vec![],
-        recovered: false,
-        committed: true,
-        claims: vec![],
-        diff: Some("+go\n".to_string()),
-        no_changes: false,
-        linked_changes: vec![],
-        baseline_file: None,
-        diff_type: Some("approval".to_string()),
-        diff_type_reason: Some("single approval word: \"go\"".to_string()),
-        annotated_diff: None,
-        slash_commands: vec![],
-        builtin_commands: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["diff_type"], "approval");
-    assert!(parsed["diff_type_reason"].as_str().unwrap().contains("go"));
-}
-#[test]
-fn preflight_output_omits_diff_type_when_none() {
-    let output = PreflightOutput {
-        layout_issues: vec![],
-        recovered: false,
-        committed: false,
-        claims: vec![],
-        diff: None,
-        no_changes: true,
-        linked_changes: vec![],
-        baseline_file: None,
-        diff_type: None,
-        diff_type_reason: None,
-        annotated_diff: None,
-        slash_commands: vec![],
-        builtin_commands: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(
-        parsed.get("diff_type").is_none(),
-        "diff_type should be omitted when None"
-    );
-    assert!(
-        parsed.get("diff_type_reason").is_none(),
-        "diff_type_reason should be omitted when None"
-    );
-}
-#[test]
-fn preflight_output_includes_annotated_diff_when_set() {
-    let output = PreflightOutput {
-        layout_issues: vec![],
-        recovered: false,
-        committed: true,
-        claims: vec![],
-        diff: Some("+line\n".to_string()),
-        no_changes: false,
-        linked_changes: vec![],
-        baseline_file: None,
-        diff_type: None,
-        diff_type_reason: None,
-        annotated_diff: Some("[user+] line".to_string()),
-        slash_commands: vec![],
-        builtin_commands: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["annotated_diff"], "[user+] line");
-}
-#[test]
-fn preflight_output_omits_annotated_diff_when_none() {
-    let output = PreflightOutput {
-        layout_issues: vec![],
-        recovered: false,
-        committed: false,
-        claims: vec![],
-        diff: None,
-        no_changes: true,
-        linked_changes: vec![],
-        baseline_file: None,
-        diff_type: None,
-        diff_type_reason: None,
-        annotated_diff: None,
-        slash_commands: vec![],
-        builtin_commands: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(
-        parsed.get("annotated_diff").is_none(),
-        "annotated_diff should be omitted when None"
-    );
-}
-#[test]
-fn preflight_output_includes_semantic_diff_when_set() {
-    let output = PreflightOutput {
-        semantic_diff: Some(SemanticDiffSummary {
-            schema_version: 1,
-            changed_components: vec!["queue".to_string()],
-            node_events: vec![SemanticNodeEvent {
-                component: "queue".to_string(),
-                node_key: "queue:0:task:0".to_string(),
-                op: "insert".to_string(),
-                item_id: "task".to_string(),
-                before_index: None,
-                after_index: Some(0),
-                previous_node_key: None,
-                next_node_key: None,
-                before_preview: None,
-                after_preview: Some("- do [#task]".to_string()),
+        let rc = crate::graph::RunContext::new(doc.clone());
+        let changed =
+            remove_post_exchange_duplicate_prompt_comments_for_preflight(&doc, &rc).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !changed,
+            "preflight cleanup should not rewrite baseline-owned scratch comments"
+        );
+        assert!(
+            file_after.contains(&format!("<!--\n{prompt}\n-->")),
+            "preflight must not scrub post-exchange scratch text that already existed in HEAD:\n{file_after}"
+        );
+    }
+    #[test]
+    fn preflight_claims_read_and_truncated() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Doc\n").unwrap();
+        snapshot::save(&doc, "# Doc\n").unwrap();
+
+        // Write a claims log.
+        let log_path = dir.path().join(".agent-doc/claims.log");
+        std::fs::write(&log_path, "claim A\nclaim B\n").unwrap();
+
+        let claims = read_and_truncate_claims(&doc);
+        assert_eq!(claims, vec!["claim A", "claim B"]);
+
+        // Log should be truncated.
+        let after = std::fs::read_to_string(&log_path).unwrap();
+        assert!(after.is_empty(), "claims log should be empty after read");
+    }
+    #[test]
+    fn preflight_no_claims_log_returns_empty() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Doc\n").unwrap();
+
+        // No claims.log exists.
+        let claims = read_and_truncate_claims(&doc);
+        assert!(claims.is_empty());
+    }
+    #[test]
+    fn preflight_output_serializes_correctly() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: true,
+            claims: vec!["foo".to_string()],
+            diff: Some("+new line\n".to_string()),
+            no_changes: false,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["recovered"], false);
+        assert_eq!(parsed["committed"], true);
+        assert_eq!(parsed["claims"][0], "foo");
+        assert_eq!(parsed["no_changes"], false);
+        assert!(parsed["diff"].as_str().is_some());
+        assert!(
+            parsed.get("document").is_none(),
+            "document field must be absent"
+        );
+    }
+    #[test]
+    fn preflight_output_includes_orchestration_request() {
+        let output = PreflightOutput {
+            no_changes: false,
+            orchestration_request: Some(crate::diff::OrchestrationRequest {
+                mode: crate::diff::OrchestrationRequestMode::Sequential,
+                trigger_text: "Synchronous orcestra.".to_string(),
+                task_count: 5,
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["orchestration_request"]["mode"], "sequential");
+        assert_eq!(parsed["orchestration_request"]["task_count"], 5);
+        assert_eq!(
+            parsed["orchestration_request"]["trigger_text"],
+            "Synchronous orcestra."
+        );
+    }
+    #[test]
+    fn preflight_output_omits_orchestration_request_when_absent() {
+        let output = PreflightOutput {
+            no_changes: false,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("orchestration_request").is_none(),
+            "orchestration_request should be omitted when absent"
+        );
+    }
+    #[test]
+    fn preflight_output_includes_prompt_presets_requested() {
+        let output = PreflightOutput {
+            no_changes: false,
+            prompt_presets_requested: vec!["#1".to_string(), "release-check".to_string()],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["prompt_presets_requested"][0], "#1");
+        assert_eq!(parsed["prompt_presets_requested"][1], "release-check");
+    }
+    #[test]
+    fn preflight_output_omits_prompt_presets_requested_when_empty() {
+        let output = PreflightOutput {
+            no_changes: false,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("prompt_presets_requested").is_none(),
+            "prompt_presets_requested should be omitted when empty"
+        );
+    }
+    #[test]
+    fn harness_mismatch_warning_normalizes_aliases() {
+        assert!(
+            harness_mismatch_warning(Some("claude"), "claude-code").is_none(),
+            "claude and claude-code are the same canonical harness"
+        );
+        let warning = harness_mismatch_warning(Some("codex"), "claude-code").unwrap();
+        assert_eq!(warning.code, "harness_mismatch");
+        assert_eq!(warning.document_agent.as_deref(), Some("codex"));
+        assert_eq!(warning.active_harness.as_deref(), Some("claude-code"));
+        assert!(warning.message.contains("Document declares agent: codex"));
+    }
+    #[test]
+    fn harness_mismatch_warning_skips_unknown_active_harness() {
+        assert!(harness_mismatch_warning(Some("codex"), "default").is_none());
+        assert!(harness_mismatch_warning(None, "claude-code").is_none());
+    }
+    #[test]
+    fn codex_network_access_warning_for_non_codex_harness() {
+        let content = "---\nagent_doc_session: test\nagent: opencode\ncodex_network_access: enabled\n---\n\ntest\n";
+        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+        assert!(
+            fm.codex_network_access.is_some(),
+            "frontmatter should have codex_network_access"
+        );
+        let active = "opencode";
+        assert_ne!(
+            canonical_harness_name(active).as_deref(),
+            Some("codex"),
+            "opencode should not be canonical codex"
+        );
+        assert!(
+            canonical_harness_name(&active).is_some(),
+            "opencode is a known harness"
+        );
+        let has_guard = canonical_harness_name("codex").as_deref() == Some("codex")
+            && canonical_harness_name(active).as_deref() != Some("codex")
+            && fm.codex_network_access.is_some();
+        assert!(
+            has_guard,
+            "guard condition should fire for opencode + codex_network_access: enabled"
+        );
+    }
+    #[test]
+    fn preflight_output_includes_warnings() {
+        let output = PreflightOutput {
+            warnings: vec![PreflightWarning {
+                code: "harness_mismatch".to_string(),
+                message: "Document declares agent: codex but active harness is claude-code."
+                    .to_string(),
+                document_agent: Some("codex".to_string()),
+                active_harness: Some("claude-code".to_string()),
             }],
             ..Default::default()
-        }),
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["semantic_diff"]["schema_version"], 1);
-    assert_eq!(parsed["semantic_diff"]["changed_components"][0], "queue");
-    assert_eq!(parsed["semantic_diff"]["node_events"][0]["op"], "insert");
-}
-#[test]
-fn preflight_output_omits_semantic_diff_when_none() {
-    let output = PreflightOutput::default();
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(
-        parsed.get("semantic_diff").is_none(),
-        "semantic_diff should be omitted when absent"
-    );
-}
-#[test]
-fn preflight_output_includes_inline_annotations() {
-    let output = PreflightOutput {
-        inline_annotations: vec![
-            "This is wrong, fix it".to_string(),
-            "Broaden the gate".to_string(),
-        ],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    let anns = parsed["inline_annotations"].as_array().unwrap();
-    assert_eq!(anns.len(), 2);
-    assert_eq!(anns[0], "This is wrong, fix it");
-    assert_eq!(anns[1], "Broaden the gate");
-}
-#[test]
-fn preflight_output_omits_inline_annotations_when_empty() {
-    let output = PreflightOutput {
-        inline_annotations: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(
-        parsed.get("inline_annotations").is_none(),
-        "inline_annotations should be omitted when empty"
-    );
-}
-#[test]
-fn preflight_output_includes_prompt_bearing_changes() {
-    let output = PreflightOutput {
-        prompt_bearing_changes: vec![
-            crate::diff::PromptBearingChange {
-                kind: crate::diff::PromptBearingChangeKind::PromptTarget,
-                text: "❯ Why was this missed?".to_string(),
-            },
-            crate::diff::PromptBearingChange {
-                kind: crate::diff::PromptBearingChangeKind::ContentEdit,
-                text: "This line should say 503, not 401.".to_string(),
-            },
-        ],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    let changes = parsed["prompt_bearing_changes"].as_array().unwrap();
-    assert_eq!(changes.len(), 2);
-    assert_eq!(changes[0]["kind"], "prompt_target");
-    assert_eq!(changes[0]["text"], "❯ Why was this missed?");
-    assert_eq!(changes[1]["kind"], "content_edit");
-}
-#[test]
-fn preflight_output_omits_prompt_bearing_changes_when_empty() {
-    let output = PreflightOutput {
-        prompt_bearing_changes: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(
-        parsed.get("prompt_bearing_changes").is_none(),
-        "prompt_bearing_changes should be omitted when empty"
-    );
-}
-#[test]
-fn preflight_output_includes_session_accretion_when_present() {
-    let output = PreflightOutput {
-        session_accretion: Some(crate::session_accretion::SessionAccretionReport {
-            level: crate::session_accretion::SessionAccretionLevel::Warn,
-            exchange_lines: 220,
-            response_sections: 9,
-            recent_committed_cycles: 7,
-            recent_noop_closeouts: 2,
-            recent_restart_count: 0,
-            recent_session_loss_count: 0,
-            startup_miss_active: false,
-            clear_threshold: 50,
-            reasons: vec!["exchange has grown".to_string()],
-            guidance: vec!["Run `agent-doc compact session.md --commit`.".to_string()],
-        }),
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["session_accretion"]["level"], "warn");
-    assert_eq!(parsed["session_accretion"]["exchange_lines"], 220);
-}
-#[test]
-fn preflight_output_omits_session_accretion_when_absent() {
-    let output = PreflightOutput::default();
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(
-        parsed.get("session_accretion").is_none(),
-        "session_accretion should be omitted when absent"
-    );
-}
-#[test]
-fn preflight_output_slash_commands_from_diff() {
-    // /clear is a built-in command — goes to builtin_commands, not slash_commands
-    let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+/clear\n";
-    let parsed_cmds = crate::diff::parse_slash_commands_classified(diff);
-    let output = PreflightOutput {
-        layout_issues: vec![],
-        recovered: false,
-        committed: false,
-        claims: vec![],
-        diff: Some(diff.to_string()),
-        no_changes: false,
-        linked_changes: vec![],
-        baseline_file: None,
-        diff_type: None,
-        diff_type_reason: None,
-        annotated_diff: None,
-        slash_commands: parsed_cmds.skill_commands,
-        builtin_commands: parsed_cmds.builtin_commands,
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    // /clear is a built-in — appears in builtin_commands, not slash_commands
-    assert_eq!(parsed["builtin_commands"][0], "/clear");
-    assert!(
-        parsed["slash_commands"].is_null()
-            || parsed["slash_commands"]
-                .as_array()
-                .is_none_or(|a| a.is_empty())
-    );
-}
-#[test]
-fn preflight_output_no_document_field() {
-    // The `document` field was removed — it must not appear in serialized JSON.
-    // Having it would send full document content to the agent every cycle,
-    // wasting tokens on every invocation.
-    let output = PreflightOutput {
-        layout_issues: vec![],
-        recovered: false,
-        committed: false,
-        claims: vec![],
-        diff: None,
-        no_changes: true,
-        linked_changes: vec![],
-        baseline_file: None,
-        diff_type: None,
-        diff_type_reason: None,
-        annotated_diff: None,
-        slash_commands: vec![],
-        builtin_commands: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(
-        parsed.get("document").is_none(),
-        "document key must be absent from preflight JSON — it would waste tokens on every cycle"
-    );
-}
-#[test]
-fn preflight_output_no_large_content() {
-    // Regression: preflight JSON must not embed document content.
-    // Any field containing the full file body would be sent to the agent
-    // on every cycle, burning tokens proportional to document size.
-    let large_content = "x".repeat(10_000);
-    let output = PreflightOutput {
-        layout_issues: vec![],
-        recovered: false,
-        committed: false,
-        claims: vec![],
-        diff: Some(format!("+{large_content}")), // diff can include content
-        no_changes: false,
-        linked_changes: vec![],
-        baseline_file: Some("/tmp/baseline.md".to_string()),
-        diff_type: None,
-        diff_type_reason: None,
-        annotated_diff: None,
-        slash_commands: vec![],
-        builtin_commands: vec![],
-        ..Default::default()
-    };
-    let json = serde_json::to_string(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    // Only `diff` may contain the large content (it's the actual user change).
-    // No OTHER field should contain it.
-    let diff_str = parsed["diff"].as_str().unwrap_or("");
-    for (key, val) in parsed.as_object().unwrap() {
-        if key == "diff" {
-            continue;
-        }
-        let val_str = val.to_string();
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["warnings"][0]["code"], "harness_mismatch");
+        assert_eq!(parsed["warnings"][0]["document_agent"], "codex");
+        assert_eq!(parsed["warnings"][0]["active_harness"], "claude-code");
+    }
+    #[test]
+    fn preflight_output_omits_warnings_when_empty() {
+        let output = PreflightOutput::default();
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(
-            !val_str.contains(&large_content),
-            "field `{key}` contains large content — this would waste tokens on every preflight cycle"
-        );
-        assert!(
-            val_str.len() < 1_000 || key == "annotated_diff",
-            "field `{key}` is suspiciously large ({} bytes) — preflight should not embed document content",
-            val_str.len()
+            parsed.get("warnings").is_none(),
+            "warnings should be omitted when empty"
         );
     }
-    // Diff itself is allowed to contain the content
-    assert!(diff_str.contains(&large_content));
-}
-#[test]
-fn short_model_name_strips_claude_prefix() {
-    assert_eq!(short_model_name("claude-sonnet-4-6"), "sonnet-4-6");
-    assert_eq!(short_model_name("claude-opus-4"), "opus-4");
-    assert_eq!(short_model_name("claude-haiku-4-5"), "haiku-4-5");
-}
-#[test]
-fn short_model_name_returns_as_is_without_prefix() {
-    assert_eq!(short_model_name("sonnet-4-6"), "sonnet-4-6");
-    assert_eq!(short_model_name("gpt-4o"), "gpt-4o");
-    assert_eq!(short_model_name("gpt-5"), "gpt-5");
-    assert_eq!(short_model_name("gpt-5.4"), "gpt-5.4");
-    assert_eq!(short_model_name("opus-4-6"), "opus-4-6");
-    assert_eq!(short_model_name(""), "");
-}
-#[test]
-fn resolve_agent_model_uses_frontmatter_only() {
-    // ANTHROPIC_MODEL env var is deliberately ignored — only frontmatter matters.
-    let cfg = agent_doc_core::model_tier::ModelConfig::default();
-    let result = resolve_agent_model(Some("claude-opus-4"), "claude-code", &cfg);
-    assert_eq!(result, Some("opus-4".to_string()));
-}
-#[test]
-fn resolve_agent_model_strips_claude_prefix_from_frontmatter() {
-    let cfg = agent_doc_core::model_tier::ModelConfig::default();
-    let result = resolve_agent_model(Some("claude-haiku-4-5"), "claude-code", &cfg);
-    assert_eq!(result, Some("haiku-4-5".to_string()));
-}
-#[test]
-fn resolve_agent_model_defers_claude_code_opus_alias() {
-    // The bare `opus` alias is deferred: agent-doc pins no version, so
-    // attribution returns None and the running skill self-stamps its real
-    // model identity (always the current opus).
-    let cfg = agent_doc_core::model_tier::ModelConfig::default();
-    let result = resolve_agent_model(Some("opus"), "claude-code", &cfg);
-    assert_eq!(result, None);
-}
-#[test]
-fn resolve_agent_model_stamps_pinned_concrete_opus() {
-    // An explicitly pinned concrete opus id still stamps its short name.
-    let cfg = agent_doc_core::model_tier::ModelConfig::default();
-    let result = resolve_agent_model(Some("claude-opus-4-8"), "claude-code", &cfg);
-    assert_eq!(result, Some("opus-4-8".to_string()));
-}
-#[test]
-fn resolve_agent_model_preserves_short_openai_style_name() {
-    let cfg = agent_doc_core::model_tier::ModelConfig::default();
-    let result = resolve_agent_model(Some("gpt-5"), "codex", &cfg);
-    assert_eq!(result, Some("gpt-5".to_string()));
-}
-#[test]
-fn resolve_agent_model_none_when_no_frontmatter() {
-    // No frontmatter → None, regardless of env var state.
-    let cfg = agent_doc_core::model_tier::ModelConfig::default();
-    let result = resolve_agent_model(None, "claude-code", &cfg);
-    assert_eq!(result, None);
-}
+    #[test]
+    fn preflight_output_null_diff_when_no_changes() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["diff"].is_null());
+        assert_eq!(parsed["no_changes"], true);
+    }
+    #[test]
+    fn check_layout_returns_empty_outside_tmux() {
+        // When TMUX env var is not set (typical in CI / test), check_layout
+        // should return an empty vec silently.
+        let _env_guard = crate::test_support::env_lock();
+        let saved = std::env::var("TMUX").ok();
+        // SAFETY: test is single-threaded; we restore the value immediately after.
+        unsafe { std::env::remove_var("TMUX") };
+        let issues = check_layout();
+        // Restore if it was set.
+        if let Some(val) = saved {
+            unsafe { std::env::set_var("TMUX", val) };
+        }
+        assert!(
+            issues.is_empty(),
+            "expected no issues outside tmux, got: {:?}",
+            issues
+        );
+    }
+    #[test]
+    fn preflight_output_includes_layout_issues() {
+        let output = PreflightOutput {
+            layout_issues: vec!["window index 0 missing".to_string()],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["layout_issues"].as_array().unwrap().len(), 1);
+        assert_eq!(parsed["layout_issues"][0], "window index 0 missing");
+    }
+    #[test]
+    fn maybe_auto_repair_base_index_noop_without_issue() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("state")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\n---\n").unwrap();
+        let issues: Vec<String> = vec![];
+        maybe_auto_repair_base_index(&file, &issues);
+        let counter_path = agent_doc_dir.join("state/base-index-repair.count");
+        assert!(
+            !counter_path.exists(),
+            "no counter file should be created when no base-index issue"
+        );
+    }
+    #[test]
+    fn detect_duplicate_claims_empty_registry() {
+        let registry = tmux_router::Registry::new();
+        assert!(detect_duplicate_claims(&registry).is_empty());
+    }
+    #[test]
+    fn detect_duplicate_claims_no_duplicates() {
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            "session-a".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%1".to_string(),
+                pid: 100,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                session_id: "session-a".to_string(),
+                file: "tasks/foo.md".to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        registry.insert(
+            "session-b".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%2".to_string(),
+                pid: 101,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                session_id: "session-b".to_string(),
+                file: "tasks/bar.md".to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        assert!(detect_duplicate_claims(&registry).is_empty());
+    }
+    #[test]
+    fn detect_duplicate_claims_two_sessions_same_file() {
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            "session-a".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%1".to_string(),
+                pid: 100,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                session_id: "session-a".to_string(),
+                file: "tasks/shared.md".to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        registry.insert(
+            "session-b".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%2".to_string(),
+                pid: 101,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                session_id: "session-b".to_string(),
+                file: "tasks/shared.md".to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        let issues = detect_duplicate_claims(&registry);
+        assert_eq!(issues.len(), 1);
+        assert!(issues[0].contains("duplicate claims"));
+        assert!(issues[0].contains("tasks/shared.md"));
+        assert!(issues[0].contains("session-a"));
+        assert!(issues[0].contains("session-b"));
+    }
+    #[test]
+    fn detect_duplicate_claims_skips_empty_file_entries() {
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            "session-a".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%1".to_string(),
+                pid: 100,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                session_id: "session-a".to_string(),
+                file: String::new(), // legacy entry — no file
+                window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        registry.insert(
+            "session-b".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%2".to_string(),
+                pid: 101,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                session_id: "session-b".to_string(),
+                file: String::new(),
+                window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        assert!(detect_duplicate_claims(&registry).is_empty());
+    }
+    #[test]
+    fn is_url_detects_http() {
+        assert!(is_url("http://example.com"));
+        assert!(is_url("https://example.com/path"));
+        assert!(!is_url("../relative/path.md"));
+        assert!(!is_url("tasks/software/agent-doc.md"));
+        assert!(!is_url(""));
+    }
+    #[test]
+    fn is_html_content_detects_html() {
+        assert!(is_html_content("text/html; charset=utf-8"));
+        assert!(is_html_content("text/html"));
+        assert!(is_html_content("application/xhtml+xml"));
+        assert!(!is_html_content("application/json"));
+        assert!(!is_html_content("text/plain"));
+    }
+    #[test]
+    fn html_to_markdown_converts_basic_html() {
+        let html = "<h1>Title</h1><p>Hello <strong>world</strong>.</p>";
+        let md = html_to_markdown(html);
+        assert!(md.contains("Title"), "should contain heading text");
+        assert!(md.contains("**world**"), "should convert bold");
+    }
+    #[test]
+    fn html_to_markdown_strips_script_and_style() {
+        let html =
+            "<p>Visible</p><script>alert('xss')</script><style>.foo{}</style><p>Also visible</p>";
+        let md = html_to_markdown(html);
+        assert!(md.contains("Visible"));
+        assert!(md.contains("Also visible"));
+        assert!(!md.contains("alert"), "script content should be stripped");
+        assert!(!md.contains(".foo"), "style content should be stripped");
+    }
+    #[test]
+    fn html_to_markdown_strips_nav_and_footer() {
+        let html =
+            "<nav><a href='/'>Home</a></nav><main><p>Content</p></main><footer>Copyright</footer>";
+        let md = html_to_markdown(html);
+        assert!(md.contains("Content"));
+        assert!(!md.contains("Home"), "nav content should be stripped");
+        assert!(
+            !md.contains("Copyright"),
+            "footer content should be stripped"
+        );
+    }
+    #[test]
+    fn url_cache_path_is_deterministic() {
+        let dir = TempDir::new().unwrap();
+        let p1 = url_cache_path(dir.path(), "https://example.com");
+        let p2 = url_cache_path(dir.path(), "https://example.com");
+        assert_eq!(p1, p2, "same URL should produce same cache path");
+
+        let p3 = url_cache_path(dir.path(), "https://other.com");
+        assert_ne!(
+            p1, p3,
+            "different URLs should produce different cache paths"
+        );
+        assert!(p1.extension().unwrap() == "txt");
+    }
+    #[test]
+    fn links_cache_dir_creates_directory() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Doc\n").unwrap();
+
+        let cache = links_cache_dir(&doc);
+        assert!(cache.is_some());
+        let cache_path = cache.unwrap();
+        assert!(cache_path.exists());
+        assert!(cache_path.ends_with("links_cache"));
+    }
+    #[test]
+    fn preflight_output_includes_baseline_file() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: true,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: Some("/tmp/baseline.md".to_string()),
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["baseline_file"], "/tmp/baseline.md");
+    }
+    #[test]
+    fn preflight_output_omits_baseline_file_when_none() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("baseline_file").is_none(),
+            "baseline_file should be omitted when None"
+        );
+    }
+    #[test]
+    fn preflight_output_includes_diff_type_when_set() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: true,
+            claims: vec![],
+            diff: Some("+go\n".to_string()),
+            no_changes: false,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: Some("approval".to_string()),
+            diff_type_reason: Some("single approval word: \"go\"".to_string()),
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["diff_type"], "approval");
+        assert!(parsed["diff_type_reason"].as_str().unwrap().contains("go"));
+    }
+    #[test]
+    fn preflight_output_omits_diff_type_when_none() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("diff_type").is_none(),
+            "diff_type should be omitted when None"
+        );
+        assert!(
+            parsed.get("diff_type_reason").is_none(),
+            "diff_type_reason should be omitted when None"
+        );
+    }
+    #[test]
+    fn preflight_output_includes_annotated_diff_when_set() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: true,
+            claims: vec![],
+            diff: Some("+line\n".to_string()),
+            no_changes: false,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: Some("[user+] line".to_string()),
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["annotated_diff"], "[user+] line");
+    }
+    #[test]
+    fn preflight_output_omits_annotated_diff_when_none() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("annotated_diff").is_none(),
+            "annotated_diff should be omitted when None"
+        );
+    }
+    #[test]
+    fn preflight_output_includes_semantic_diff_when_set() {
+        let output = PreflightOutput {
+            semantic_diff: Some(SemanticDiffSummary {
+                schema_version: 1,
+                changed_components: vec!["queue".to_string()],
+                node_events: vec![SemanticNodeEvent {
+                    component: "queue".to_string(),
+                    node_key: "queue:0:task:0".to_string(),
+                    op: "insert".to_string(),
+                    item_id: "task".to_string(),
+                    before_index: None,
+                    after_index: Some(0),
+                    previous_node_key: None,
+                    next_node_key: None,
+                    before_preview: None,
+                    after_preview: Some("- do [#task]".to_string()),
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["semantic_diff"]["schema_version"], 1);
+        assert_eq!(parsed["semantic_diff"]["changed_components"][0], "queue");
+        assert_eq!(parsed["semantic_diff"]["node_events"][0]["op"], "insert");
+    }
+    #[test]
+    fn preflight_output_omits_semantic_diff_when_none() {
+        let output = PreflightOutput::default();
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("semantic_diff").is_none(),
+            "semantic_diff should be omitted when absent"
+        );
+    }
+    #[test]
+    fn preflight_output_includes_inline_annotations() {
+        let output = PreflightOutput {
+            inline_annotations: vec![
+                "This is wrong, fix it".to_string(),
+                "Broaden the gate".to_string(),
+            ],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let anns = parsed["inline_annotations"].as_array().unwrap();
+        assert_eq!(anns.len(), 2);
+        assert_eq!(anns[0], "This is wrong, fix it");
+        assert_eq!(anns[1], "Broaden the gate");
+    }
+    #[test]
+    fn preflight_output_omits_inline_annotations_when_empty() {
+        let output = PreflightOutput {
+            inline_annotations: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("inline_annotations").is_none(),
+            "inline_annotations should be omitted when empty"
+        );
+    }
+    #[test]
+    fn preflight_output_includes_prompt_bearing_changes() {
+        let output = PreflightOutput {
+            prompt_bearing_changes: vec![
+                crate::diff::PromptBearingChange {
+                    kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+                    text: "❯ Why was this missed?".to_string(),
+                },
+                crate::diff::PromptBearingChange {
+                    kind: crate::diff::PromptBearingChangeKind::ContentEdit,
+                    text: "This line should say 503, not 401.".to_string(),
+                },
+            ],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let changes = parsed["prompt_bearing_changes"].as_array().unwrap();
+        assert_eq!(changes.len(), 2);
+        assert_eq!(changes[0]["kind"], "prompt_target");
+        assert_eq!(changes[0]["text"], "❯ Why was this missed?");
+        assert_eq!(changes[1]["kind"], "content_edit");
+    }
+    #[test]
+    fn preflight_output_omits_prompt_bearing_changes_when_empty() {
+        let output = PreflightOutput {
+            prompt_bearing_changes: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("prompt_bearing_changes").is_none(),
+            "prompt_bearing_changes should be omitted when empty"
+        );
+    }
+    #[test]
+    fn preflight_output_includes_session_accretion_when_present() {
+        let output = PreflightOutput {
+            session_accretion: Some(crate::session_accretion::SessionAccretionReport {
+                level: crate::session_accretion::SessionAccretionLevel::Warn,
+                exchange_lines: 220,
+                response_sections: 9,
+                recent_committed_cycles: 7,
+                recent_noop_closeouts: 2,
+                recent_restart_count: 0,
+                recent_session_loss_count: 0,
+                startup_miss_active: false,
+                clear_threshold: 50,
+                reasons: vec!["exchange has grown".to_string()],
+                guidance: vec!["Run `agent-doc compact session.md --commit`.".to_string()],
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["session_accretion"]["level"], "warn");
+        assert_eq!(parsed["session_accretion"]["exchange_lines"], 220);
+    }
+    #[test]
+    fn preflight_output_omits_session_accretion_when_absent() {
+        let output = PreflightOutput::default();
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("session_accretion").is_none(),
+            "session_accretion should be omitted when absent"
+        );
+    }
+    #[test]
+    fn preflight_output_slash_commands_from_diff() {
+        // /clear is a built-in command — goes to builtin_commands, not slash_commands
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+/clear\n";
+        let parsed_cmds = crate::diff::parse_slash_commands_classified(diff);
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: Some(diff.to_string()),
+            no_changes: false,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: parsed_cmds.skill_commands,
+            builtin_commands: parsed_cmds.builtin_commands,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // /clear is a built-in — appears in builtin_commands, not slash_commands
+        assert_eq!(parsed["builtin_commands"][0], "/clear");
+        assert!(
+            parsed["slash_commands"].is_null()
+                || parsed["slash_commands"]
+                    .as_array()
+                    .is_none_or(|a| a.is_empty())
+        );
+    }
+    #[test]
+    fn preflight_output_no_document_field() {
+        // The `document` field was removed — it must not appear in serialized JSON.
+        // Having it would send full document content to the agent every cycle,
+        // wasting tokens on every invocation.
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("document").is_none(),
+            "document key must be absent from preflight JSON — it would waste tokens on every cycle"
+        );
+    }
+    #[test]
+    fn preflight_output_no_large_content() {
+        // Regression: preflight JSON must not embed document content.
+        // Any field containing the full file body would be sent to the agent
+        // on every cycle, burning tokens proportional to document size.
+        let large_content = "x".repeat(10_000);
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: Some(format!("+{large_content}")), // diff can include content
+            no_changes: false,
+            linked_changes: vec![],
+            baseline_file: Some("/tmp/baseline.md".to_string()),
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // Only `diff` may contain the large content (it's the actual user change).
+        // No OTHER field should contain it.
+        let diff_str = parsed["diff"].as_str().unwrap_or("");
+        for (key, val) in parsed.as_object().unwrap() {
+            if key == "diff" {
+                continue;
+            }
+            let val_str = val.to_string();
+            assert!(
+                !val_str.contains(&large_content),
+                "field `{key}` contains large content — this would waste tokens on every preflight cycle"
+            );
+            assert!(
+                val_str.len() < 1_000 || key == "annotated_diff",
+                "field `{key}` is suspiciously large ({} bytes) — preflight should not embed document content",
+                val_str.len()
+            );
+        }
+        // Diff itself is allowed to contain the content
+        assert!(diff_str.contains(&large_content));
+    }
+    #[test]
+    fn short_model_name_strips_claude_prefix() {
+        assert_eq!(short_model_name("claude-sonnet-4-6"), "sonnet-4-6");
+        assert_eq!(short_model_name("claude-opus-4"), "opus-4");
+        assert_eq!(short_model_name("claude-haiku-4-5"), "haiku-4-5");
+    }
+    #[test]
+    fn short_model_name_returns_as_is_without_prefix() {
+        assert_eq!(short_model_name("sonnet-4-6"), "sonnet-4-6");
+        assert_eq!(short_model_name("gpt-4o"), "gpt-4o");
+        assert_eq!(short_model_name("gpt-5"), "gpt-5");
+        assert_eq!(short_model_name("gpt-5.4"), "gpt-5.4");
+        assert_eq!(short_model_name("opus-4-6"), "opus-4-6");
+        assert_eq!(short_model_name(""), "");
+    }
+    #[test]
+    fn resolve_agent_model_uses_frontmatter_only() {
+        // ANTHROPIC_MODEL env var is deliberately ignored — only frontmatter matters.
+        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let result = resolve_agent_model(Some("claude-opus-4"), "claude-code", &cfg);
+        assert_eq!(result, Some("opus-4".to_string()));
+    }
+    #[test]
+    fn resolve_agent_model_strips_claude_prefix_from_frontmatter() {
+        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let result = resolve_agent_model(Some("claude-haiku-4-5"), "claude-code", &cfg);
+        assert_eq!(result, Some("haiku-4-5".to_string()));
+    }
+    #[test]
+    fn resolve_agent_model_defers_claude_code_opus_alias() {
+        // The bare `opus` alias is deferred: agent-doc pins no version, so
+        // attribution returns None and the running skill self-stamps its real
+        // model identity (always the current opus).
+        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let result = resolve_agent_model(Some("opus"), "claude-code", &cfg);
+        assert_eq!(result, None);
+    }
+    #[test]
+    fn resolve_agent_model_stamps_pinned_concrete_opus() {
+        // An explicitly pinned concrete opus id still stamps its short name.
+        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let result = resolve_agent_model(Some("claude-opus-4-8"), "claude-code", &cfg);
+        assert_eq!(result, Some("opus-4-8".to_string()));
+    }
+    #[test]
+    fn resolve_agent_model_preserves_short_openai_style_name() {
+        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let result = resolve_agent_model(Some("gpt-5"), "codex", &cfg);
+        assert_eq!(result, Some("gpt-5".to_string()));
+    }
+    #[test]
+    fn resolve_agent_model_none_when_no_frontmatter() {
+        // No frontmatter → None, regardless of env var state.
+        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let result = resolve_agent_model(None, "claude-code", &cfg);
+        assert_eq!(result, None);
+    }
 }

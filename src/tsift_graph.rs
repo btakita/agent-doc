@@ -1722,7 +1722,6 @@ fn extract_follow_up_ids(response_text: &str, target: &str) -> Vec<String> {
     ids
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

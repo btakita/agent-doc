@@ -735,11 +735,15 @@ impl SimWorld {
         let has_active_head = self.recycle_clear.queue_active_head.is_some();
 
         // (1) Clear-cooldown idle-tick accounting — mirrors idle_watch.rs:157-161.
-        if self.recycle_clear.clear_cooldown_active && has_active_head && prompt_visible
+        if self.recycle_clear.clear_cooldown_active
+            && has_active_head
+            && prompt_visible
             && !turn_active
         {
-            self.recycle_clear.clear_cooldown_idle_ticks =
-                self.recycle_clear.clear_cooldown_idle_ticks.saturating_add(1);
+            self.recycle_clear.clear_cooldown_idle_ticks = self
+                .recycle_clear
+                .clear_cooldown_idle_ticks
+                .saturating_add(1);
         } else {
             self.recycle_clear.clear_cooldown_idle_ticks = 0;
         }
@@ -865,11 +869,7 @@ impl SimWorld {
             }
         }
 
-        // (4) Drain decision. After the cooldown clears, the normal go-mode drain
-        // dispatches the waiting head (recompute prompt visibility — a recycle this
-        // tick keeps the pane Ready).
-        let prompt_visible_now =
-            matches!(self.route.durable.lifecycle, SupervisorLifecycle::Ready);
+        let prompt_visible_now = matches!(self.route.durable.lifecycle, SupervisorLifecycle::Ready);
         let turn_active_now = matches!(
             self.route.durable.lifecycle,
             SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
@@ -877,6 +877,29 @@ impl SimWorld {
         if self.maybe_deliver_between_turn_enqueue(prompt_visible_now, turn_active_now) {
             return Ok(());
         }
+
+        // (4) Deferred operator clear delivery. This mirrors the live watch's
+        // pause -> clear -> settle -> resume path: after the clear lands, hold the
+        // next queue trigger behind the same in-memory settle gate as other
+        // supervisor-owned clears.
+        if self.recycle_clear.deferred_operator_clear_pending {
+            if !prompt_visible_now || turn_active_now {
+                return Ok(());
+            }
+            self.recycle_clear.deferred_operator_clear_pending = false;
+            self.recycle_clear.clear_cooldown_active = false;
+            self.recycle_clear.clear_cooldown_idle_ticks = 0;
+            self.recycle_clear.awaiting_clear_settle = true;
+            self.recycle_clear.clear_settle_idle_ticks = 0;
+            self.recycle_clear.last_dispatched = None;
+            self.coverage.recycle_session_reclear_proofs += 1;
+            self.record_ops_proof("recycle_session_reclear action=deferred_clear result=delivered");
+            return Ok(());
+        }
+
+        // (5) Drain decision. After the cooldown clears, the normal go-mode drain
+        // dispatches the waiting head (recompute prompt visibility — a recycle this
+        // tick keeps the pane Ready).
         // `#qflood2` (a): advance the post-`/clear` settle debounce for the
         // watch's OWN clears (mirrors idle_watch.rs's `clear_settle_idle_ticks`).
         if self.recycle_clear.awaiting_clear_settle && prompt_visible_now && !turn_active_now {
@@ -1019,7 +1042,11 @@ impl SimWorld {
         )
     }
 
-    pub(crate) fn repair_ipc_snapshot_duplicate_prompts(&mut self, before: &str, file: &Path) -> Result<()> {
+    pub(crate) fn repair_ipc_snapshot_duplicate_prompts(
+        &mut self,
+        before: &str,
+        file: &Path,
+    ) -> Result<()> {
         let (repaired, changed) = agent_doc_orchestration::write::dedupe_ipc_snapshot_content(
             file,
             Some(before),

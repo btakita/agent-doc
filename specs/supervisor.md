@@ -218,14 +218,10 @@ on claude exit with code c:
                          EXCEPT when stdin EOF (Ctrl+D) detected → prompt user
                          (Enter to restart fresh / q to exit) so the operator
                          can intentionally quit the supervisor cleanly
-                         EXCEPT when stdin operator Ctrl+C terminates the
+                         EXCEPT when stdin-forwarded Ctrl+C terminates the
                          child → prompt user with that same menu instead of
                          treating the exit like a transient crash
-                         EXCEPT when stdin operator Ctrl+Z requests a managed
-                         stop → send the child SIGTERM, prompt user with that
-                         same menu, and never forward a literal Ctrl+Z byte
-                         into the child composer/transcript
-                         AND only stdin operator Ctrl+C counts for that path;
+                         AND only stdin-forwarded Ctrl+C counts for that path;
                          route/plugin-injected interrupts that bypass the
                          stdin writer stay on the automatic recovery path
                          EXCEPT when a fresh/fresh-restart Codex child exits
@@ -478,7 +474,7 @@ distinct from the one-shot restart auto-trigger:
   payload itself. A failed inject is not recorded as dispatched, so it retries on
   the next idle tick. Successful drains log `idle_queue_watch_drain` with
   `payload_kind=trigger` and
-  `submit_mode=tmux_literal_cr|tmux_literal_kitty_return|pty_cr`; failures log
+  `submit_mode=tmux_literal_text_enter_key|pty_cr`; failures log
   `idle_queue_watch_drain_failed`.
 - **Stale-busy self-heal (`#stale-busy-after-auto-inject-no-clear`).** The
   one-shot busy→ready completion transition on the pty→stdout thread is

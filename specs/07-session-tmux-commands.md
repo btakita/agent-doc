@@ -45,7 +45,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - When route/startup acknowledgment times out, the binary records `.agent-doc/state/startup-miss/<doc-hash>.json` with pane/session provenance and shows a visible diagnostic in tmux.
 - On the next route/start/sync/session-check path, the tool must distinguish between a stale startup-miss marker and a still-stranded owner. A same-pane marker may only be cleared once newer session-log provenance proves a later open run on that same pane. If the document is now registered to a different pane/session, the old marker is stale and must clear from the current file owner's later `session_start` provenance instead of staying tied to the superseded `session_id`.
 - Successful cycle acknowledgment clears the startup-miss marker.
-- `route --dispatch-only` still uses a one-shot reopen instead of the managed acceptance/cycle-ack path, but for any existing live managed session that one-shot reopen must submit directly through the resolved pane's tmux input path instead of routing back through supervisor IPC or writing raw bytes into the child PTY. Editor callers add `--plain-trigger` and a longer `--wait-for-ready` budget, which makes the one-shot reopen the plain `agent-doc <FILE>` prompt even when the document's harness normally uses slash commands while allowing slow supervisor startup to settle. That live-pane submit must use the same single tmux byte-stream submit ending in carriage return (Claude Code / Codex) or Kitty Return (OpenCode, whose TUI can treat a bare carriage return as a newline under enhanced keyboard mode) as file-scoped `session clear`. It must reuse the same bounded repair/restart checks before injecting into an existing pane, and it must honor the authoritative actor readiness guard: prompt-bearing reroutes may not inject into `starting` or dispatch-only `busy` actors until the current generation reaches a dispatch-ready prompt (`prompt_ready=true`) and refreshes to `ready`. A tracked Codex `/clear` or missing managed capability proof may still force a fresh restart on the managed non-dispatch route, but dispatch-only editor reroutes must keep the plain reopen on the authoritative live-session boundary once that readiness guard passes.
+- `route --dispatch-only` still uses a one-shot reopen instead of the managed acceptance/cycle-ack path, but for any existing live managed session that one-shot reopen must submit directly through the resolved pane's tmux input path instead of routing back through supervisor IPC or writing raw bytes into the child PTY. Editor callers add `--plain-trigger` and a longer `--wait-for-ready` budget, which makes the one-shot reopen the plain `agent-doc <FILE>` prompt even when the document's harness normally uses slash commands while allowing slow supervisor startup to settle. That live-pane submit must use the same centralized tmux submit profile as file-scoped `session clear`: Codex, Claude, OpenCode, and default harnesses send literal text followed by a named tmux `Enter`. It must reuse the same bounded repair/restart checks before injecting into an existing pane, and it must honor the authoritative actor readiness guard: prompt-bearing reroutes may not inject into `starting` or dispatch-only `busy` actors until the current generation reaches a dispatch-ready prompt (`prompt_ready=true`) and refreshes to `ready`. A tracked Codex `/clear` or missing managed capability proof may still force a fresh restart on the managed non-dispatch route, but dispatch-only editor reroutes must keep the plain reopen on the authoritative live-session boundary once that readiness guard passes.
 - Every direct-pane submit must emit redacted `tmux_input_event` diagnostics for the payload/key transform and a `route_submit_observation` after route's capture/proof checks. The observation records pane id, harness, phase, elapsed time, whether the trigger was still visible in captured tmux content, and capture length/hash; it never logs the prompt text. If capture still shows the trigger after the acceptance window, route also logs `route_submit_issue issue=prompt_not_submitted`. If the trigger leaves the input surface but no dispatch-start proof appears where required, route logs `route_submit_issue issue=accepted_without_dispatch_start_proof`.
 - When Codex hook tracking is visible for a dispatch-only reroute, a live-pane or supervisor-backed bare reopen is not allowed to return silent success on acceptance alone. If the command leaves the input surface but Codex never records a routed submission proof within the bounded wait, route must fail once with a stage-specific "accepted but unproven" error instead of looking non-responsive, and the `route_submit_issue` line must make that condition visible to log review. This proof gate applies after any dispatch-only submit helper, including ready authoritative actor reroutes that do not enter the startup prompt gate.
 - When a prompt-bearing `route --dispatch-only` targets an authoritative actor pane whose runtime still reports `starting`, route must wait one bounded readiness window for that same actor generation to report `ready` with dispatch-ready prompt proof, then fail closed with a single wait/retry diagnostic if it remains unready. Repeated reroutes for the same pane and generation must reuse that saved timeout state and may log coalesced wait attempts, but must not emit another `route_authoritative_actor_starting_not_ready` timeout until the actor generation or pane changes, or the same generation clears through `ready`, `closed`, or `blocked`. If a route-owned `starting_actor_timeout` block later shows a dispatch-ready prompt for the same pane and generation, route must clear the saved timeout, promote the actor to `ready`, and continue through the normal prompt-gated submit path. No supervisor IPC queue, direct-pane submit, split churn, pane kill, or same-file ownership re-election may occur while the actor is still `starting`.
@@ -432,17 +432,20 @@ single-owner actor controls:
   harness clean-exit restart prompt. The refusal must point to `--force` as the
   explicit discard path, and must surface a `busy_proof` field carrying the
   concrete active-turn line (the interrupt/working-spinner cue such as
-  `Working (Xs · esc to interrupt)`) when one is present, in addition to the raw
-  pane `tail`. The raw tail alone is the ambiguous composer/permission footer
-  (e.g. `⏵⏵ bypass permissions on …`), which shows in both idle and busy states
-  and reads as a false refusal; `busy_proof` makes the busy classification
-  self-evident. A `starting` actor generation is also a restart guard:
-  bare restart may proceed only after the pane shows a dispatch-ready prompt or
-  that clean-exit restart prompt, and the document has not changed after the
-  last committed response cycle. `--force` bypasses that starting guard and may
-  interrupt a busy live pane before requesting the supervisor restart.
+`Working (Xs · esc to interrupt)`) when one is present, in addition to the raw
+pane `tail`. The raw tail alone is the ambiguous composer/permission footer
+(e.g. `⏵⏵ bypass permissions on …`), which shows in both idle and busy states
+and reads as a false refusal; `busy_proof` makes the busy classification
+self-evident. A `starting` actor generation is also a restart guard:
+bare restart may proceed only after the pane shows a dispatch-ready prompt or
+that clean-exit restart prompt, and the document has not changed after the
+last committed response cycle. `--force` bypasses that starting guard and may
+interrupt a busy live pane before requesting the supervisor restart. `--fresh`
+uses a fresh child launch instead of resume/continue args, but the replacement
+child must still re-submit the document's `agent-doc <FILE>` trigger after its
+new prompt appears.
 - `agent-doc session clear <FILE>` injects the harness-native clear-context
-  command into the authoritative session through the same canonical
+command into the authoritative session through the same canonical
   single-line submit command used by routed reopen and queued slash-command
   dispatch. Claude Code and Codex use `/clear`; OpenCode has no `/clear`
   command, so its clear-context equivalent is `/new` (`session_new`,
@@ -530,12 +533,10 @@ single-owner actor controls:
 - Any tmux-bound command submit in this surface (`route --dispatch-only`,
   file-scoped `session clear`, queued slash-command dispatch, supervisor-owned
   reopen inject) must normalize trailing line endings once and use exactly one
-  tmux byte-stream submit ending in a carriage-return submit byte. These paths
-  must not layer follow-up synthetic `Enter` retries on top of the first submit.
-- For OpenCode managed panes, the submit suffix must use the Kitty keyboard
-  protocol Return sequence in the same literal payload instead of carriage
-  return. OpenCode distinguishes `return` from `ctrl+j` in its TUI keymap, and a
-  bare carriage-return submit can be interpreted as newline input.
+  centralized tmux submit profile operation. Codex, Claude, OpenCode, and
+  default harnesses send literal text followed by a named tmux `Enter`. These
+  paths must not layer follow-up synthetic `Enter` retries on top of the first
+  submit unless the bounded visible-draft recovery predicate fires.
 - Every tmux-bound input path must produce structured `tmux_input_event`
   diagnostics naming the source, destination, transform, key, byte count, and
   harness when known. Text payloads must be hashed rather than logged raw, so
@@ -582,6 +583,11 @@ transitions, dispatch receipts, queue heads, document cycles, projection
 diagnostics, admin operations, crash-recovery markers, and layout state. Active
 controllers report the live runtime shape; inactive status reports the durable
 offline shape from SQLite without launching a process.
+Status JSON also includes a `freshness` object with the installed agent-doc
+binary identity, the installed inode when available, the controller running
+inode proof, and operator guidance. A process is marked stale only when the
+running inode and installed inode are both known and differ; unknown inode proof
+is reported as `unknown` guidance, never as a blocking failure.
 Per-document session status surfaces projection diagnostics with the projection
 name, source generation, intended projection hash, retry status, timestamp, and
 message so projection lag/failure is inspectable without treating the sidecar as

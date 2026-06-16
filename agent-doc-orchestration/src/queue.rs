@@ -422,58 +422,18 @@ fn is_reference_directive(text: &str) -> bool {
     rest.starts_with("[#") || rest.starts_with('#')
 }
 
-/// Extract the `#id` from a directive-shaped queue prompt, normalized to
-/// lowercase. This intentionally rejects prose that merely mentions a `#id`.
+/// Extract the `#id` from `do [#id]` (or `do #id`) prompt text, normalized to
+/// lowercase. Returns `None` for prompts that do not reference an id.
 fn do_prompt_id(text: &str) -> Option<String> {
-    let stripped = strip_priority_markers(text);
-    let trimmed = stripped.trim();
-    if let Some(id) = parse_bare_directive_id(trimmed) {
-        return Some(id);
-    }
-    ["do", "advance"].into_iter().find_map(|verb| {
-        strip_directive_verb(trimmed, verb).and_then(parse_leading_directive_id)
-    })
-}
-
-fn strip_directive_verb<'a>(text: &'a str, verb: &str) -> Option<&'a str> {
-    let (idx, _) = text.char_indices().find(|(_, ch)| ch.is_whitespace())?;
-    let (head, rest) = text.split_at(idx);
-    head.eq_ignore_ascii_case(verb).then_some(rest)
-}
-
-fn parse_bare_directive_id(text: &str) -> Option<String> {
-    let inner = text
-        .strip_prefix("[#")
-        .and_then(|rest| rest.strip_suffix(']'))
-        .or_else(|| text.strip_prefix('#'))?;
-    normalize_directive_id(inner)
-}
-
-fn parse_leading_directive_id(text: &str) -> Option<String> {
-    let text = text.trim_start();
-    if let Some(rest) = text.strip_prefix("[#") {
-        let (id, _) = rest.split_once(']')?;
-        return normalize_directive_id(id);
-    }
-    let id = text
-        .strip_prefix('#')?
+    let marker = text.find('#')?;
+    let id: String = text[marker + 1..]
         .chars()
         .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-        .collect::<String>();
-    normalize_directive_id(&id)
-}
-
-fn normalize_directive_id(id: &str) -> Option<String> {
+        .collect();
     if id.is_empty() {
-        return None;
-    }
-    if id
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-    {
-        Some(id.to_ascii_lowercase())
-    } else {
         None
+    } else {
+        Some(id.to_ascii_lowercase())
     }
 }
 
@@ -535,90 +495,6 @@ pub fn sync_backlog_into_queue(
                 .iter()
                 .filter(|id| !existing_ids.contains(*id))
                 .map(|id| do_prompt_entry(id))
-                .collect();
-            if missing.is_empty() {
-                entries.to_vec()
-            } else {
-                let mut rebuilt = missing;
-                rebuilt.extend(entries.iter().cloned());
-                rebuilt
-            }
-        }
-    };
-
-    if new_entries == entries {
-        None
-    } else {
-        Some(new_entries)
-    }
-}
-
-fn prompt_entry(text: &str) -> QueueEntry {
-    QueueEntry::Prompt(QueuePrompt {
-        text: text.to_string(),
-        multiline: text.contains('\n'),
-    })
-}
-
-fn prompt_identity(text: &str) -> String {
-    strip_priority_markers(text)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-        .to_ascii_lowercase()
-}
-
-/// Sync arbitrary prompt text into the queue per `mode`.
-///
-/// Unlike backlog sync, this preserves the prompt text verbatim (minus caller
-/// normalization) instead of rendering `do [#id]`. It is used by
-/// `agent:exchange queue`, where newly-typed exchange prompt blocks are moved
-/// into the running queue. Append/prepend de-duplicate against live `Prompt`
-/// entries only, so a later intentional repeat is allowed after the previous
-/// copy has been consumed.
-pub fn sync_prompts_into_queue(
-    entries: &[QueueEntry],
-    prompts: &[String],
-    mode: BacklogQueueSyncMode,
-) -> Option<Vec<QueueEntry>> {
-    let mut seen = std::collections::HashSet::new();
-    let ordered_prompts: Vec<String> = prompts
-        .iter()
-        .map(|prompt| prompt.trim())
-        .filter(|prompt| !prompt.is_empty())
-        .filter(|prompt| seen.insert(prompt_identity(prompt)))
-        .map(str::to_string)
-        .collect();
-
-    let existing_prompts: std::collections::HashSet<String> = entries
-        .iter()
-        .filter_map(|entry| match entry {
-            QueueEntry::Prompt(prompt) => Some(prompt_identity(&prompt.text)),
-            _ => None,
-        })
-        .collect();
-
-    let new_entries: Vec<QueueEntry> = match mode {
-        BacklogQueueSyncMode::Sync => ordered_prompts
-            .iter()
-            .map(|prompt| prompt_entry(prompt))
-            .collect(),
-        BacklogQueueSyncMode::Append => {
-            let mut rebuilt = entries.to_vec();
-            for prompt in &ordered_prompts {
-                if !existing_prompts.contains(&prompt_identity(prompt)) {
-                    rebuilt.push(prompt_entry(prompt));
-                }
-            }
-            rebuilt
-        }
-        BacklogQueueSyncMode::Prepend => {
-            let missing: Vec<QueueEntry> = ordered_prompts
-                .iter()
-                .filter(|prompt| !existing_prompts.contains(&prompt_identity(prompt)))
-                .map(|prompt| prompt_entry(prompt))
                 .collect();
             if missing.is_empty() {
                 entries.to_vec()
@@ -1568,7 +1444,6 @@ fn first_live_control_or_prompt(entries: &[QueueEntry]) -> Option<&QueueEntry> {
     })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1690,25 +1565,6 @@ mod tests {
         assert_eq!(
             apply_operator_pin(":pushpin: :round_pushpin: do [#x]"),
             ":pushpin: do [#x]"
-        );
-    }
-
-    #[test]
-    fn do_prompt_id_extracts_only_directive_shapes() {
-        assert_eq!(do_prompt_id("do [#fix1]"), Some("fix1".to_string()));
-        assert_eq!(do_prompt_id("do #fix1 more text"), Some("fix1".to_string()));
-        assert_eq!(do_prompt_id("advance [#phase1]"), Some("phase1".to_string()));
-        assert_eq!(
-            do_prompt_id(":pushpin: [#qrefmisstrike]"),
-            Some("qrefmisstrike".to_string())
-        );
-        assert_eq!(
-            do_prompt_id("What are #next-steps to follow-up on #gq5c?"),
-            None
-        );
-        assert_eq!(
-            do_prompt_id("Approve [#shoptiers]. What are #next-steps?"),
-            None
         );
     }
 
@@ -1843,7 +1699,8 @@ mod tests {
         rank.insert("a".to_string(), 3u8);
         rank.insert("b".to_string(), 1u8);
         rank.insert("c".to_string(), 2u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("order should change");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new())
+            .expect("order should change");
         assert_eq!(render(&sorted), "- do [#b]\n- do [#c]\n- do [#a]\n");
     }
 
@@ -1853,7 +1710,8 @@ mod tests {
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 2u8);
         rank.insert("b".to_string(), 1u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("order should change");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new())
+            .expect("order should change");
         // preset stays at index 0; prompts reorder among themselves.
         assert_eq!(render(&sorted), "preset spec\n- do [#b]\n- do [#a]\n");
     }
@@ -1864,7 +1722,9 @@ mod tests {
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 1u8);
         rank.insert("b".to_string(), 2u8);
-        assert!(sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none());
+        assert!(
+            sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none()
+        );
     }
 
     #[test]
@@ -1944,7 +1804,8 @@ mod tests {
         rank.insert("a".to_string(), 1u8); // best rank → first among unpinned
         rank.insert("b".to_string(), 9u8); // worst rank, but pinned → frozen in middle
         rank.insert("c".to_string(), 2u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("unpinned reorder");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new())
+            .expect("unpinned reorder");
         // Pin #b holds slot 1; unpinned #a (rank1) and #c (rank2) fill slots 0,2.
         assert_eq!(
             render(&sorted),
@@ -1962,20 +1823,8 @@ mod tests {
         rank.insert("b".to_string(), 9u8);
         // #a is already in rank order at slot 0 and the pin is anchored at slot 1
         // → nothing moves.
-        assert!(sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none());
-    }
-
-    #[test]
-    fn operator_pinned_bare_id_stays_in_authored_slot() {
-        // #qrefmisstrike: when the operator manually promotes a bare id head,
-        // priority sorting must not demote it behind lower-rank backlog work.
-        let entries = parse("- :pushpin: [#qrefmisstrike]\n- do [#high]\n").unwrap();
-        let mut rank = std::collections::HashMap::new();
-        rank.insert("high".to_string(), 1u8);
-        rank.insert("qrefmisstrike".to_string(), 9u8);
         assert!(
-            sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none(),
-            "operator-pinned bare id should stay exactly where authored"
+            sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none()
         );
     }
 
@@ -1989,7 +1838,8 @@ mod tests {
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 2u8);
         rank.insert("b".to_string(), 1u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("unpinned reorder");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new())
+            .expect("unpinned reorder");
         // Pins #z, #y stay at slots 1,3; unpinned #b (rank1), #a (rank2) fill 0,2.
         assert_eq!(
             render(&sorted),
@@ -2004,7 +1854,8 @@ mod tests {
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 2u8);
         rank.insert("b".to_string(), 1u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("rank reorders");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new())
+            .expect("rank reorders");
         assert_eq!(render(&sorted), "- do [#b]\n- do [#a]\n");
     }
 
@@ -2014,7 +1865,9 @@ mod tests {
         // (previously it floated to the top — that is the behavior being removed).
         let entries = parse("- do [#a]\n- __prioritized__ do [#b]\n").unwrap();
         let rank = std::collections::HashMap::new();
-        assert!(sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none());
+        assert!(
+            sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none()
+        );
     }
 
     #[test]
@@ -2040,7 +1893,8 @@ mod tests {
         rank.insert("a".to_string(), 1u8); // best rank, but unpinned
         rank.insert("b".to_string(), 5u8);
         rank.insert("c".to_string(), 9u8); // operator-pinned → stays at slot 2
-        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("agent pin floats");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new())
+            .expect("agent pin floats");
         // Operator pin #c stays at the bottom (slot 2); agent pin #b floats above
         // unpinned #a in the two movable slots.
         assert_eq!(
@@ -2113,7 +1967,8 @@ mod tests {
         .unwrap();
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 1u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("tiers reorder");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new())
+            .expect("tiers reorder");
         assert_eq!(
             render(&sorted),
             "- :round_pushpin: do [#b]\n- do [#a]\n- :pushpin: do [#c]\n"
@@ -2130,7 +1985,8 @@ mod tests {
         rank.insert("a".to_string(), 9u8);
         let mut deps = std::collections::HashMap::new();
         deps.insert("b".to_string(), vec!["a".to_string()]); // b after a
-        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new()).expect("dep reorders");
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
+            .expect("dep reorders");
         assert_eq!(render(&sorted), "- do [#a]\n- do [#b]\n");
     }
 
@@ -2141,7 +1997,8 @@ mod tests {
         let rank = std::collections::HashMap::new();
         let mut deps = std::collections::HashMap::new();
         deps.insert("b".to_string(), vec!["a".to_string()]); // pinned b after a
-        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new()).expect("blocker wins");
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
+            .expect("blocker wins");
         assert_eq!(render(&sorted), "- do [#a]\n- :pushpin: do [#b]\n");
     }
 
@@ -2154,8 +2011,8 @@ mod tests {
         let entries = parse("- do [#y] after=#x\n- :pushpin: do [#p]\n- do [#x]\n").unwrap();
         let rank = std::collections::HashMap::new();
         let deps = std::collections::HashMap::new();
-        let sorted =
-            sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new()).expect("movable edge reorders around pin");
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
+            .expect("movable edge reorders around pin");
         assert_eq!(
             render(&sorted),
             "- do [#x]\n- :pushpin: do [#p]\n- do [#y] after=#x\n"
@@ -2171,7 +2028,8 @@ mod tests {
         let rank = std::collections::HashMap::new();
         let deps = std::collections::HashMap::new();
         assert!(
-            sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new()).is_none(),
+            sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
+                .is_none(),
             "operator pin at its slot with a satisfied edge must not be reordered"
         );
     }
@@ -2181,7 +2039,10 @@ mod tests {
         let entries = parse("- do [#a]\n- do [#b]\n").unwrap();
         let rank = std::collections::HashMap::new();
         let deps = std::collections::HashMap::new();
-        assert!(sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new()).is_none());
+        assert!(
+            sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
+                .is_none()
+        );
     }
 
     #[test]
@@ -2190,7 +2051,8 @@ mod tests {
         let entries = parse("- do [#b] after=#a\n- do [#a]\n").unwrap();
         let rank = std::collections::HashMap::new();
         let deps = std::collections::HashMap::new();
-        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new()).expect("inline dep reorders");
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
+            .expect("inline dep reorders");
         assert_eq!(render(&sorted), "- do [#a]\n- do [#b] after=#a\n");
     }
 
@@ -2252,7 +2114,8 @@ mod tests {
         .unwrap();
         let mut rank = std::collections::HashMap::new();
         rank.insert("a".to_string(), 1u8);
-        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).expect("tiers reorder");
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new())
+            .expect("tiers reorder");
         assert_eq!(
             render(&sorted),
             "- *prioritized* do [#b]\n- do [#a]\n- **prioritized** do [#c]\n"

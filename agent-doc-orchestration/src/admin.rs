@@ -78,6 +78,31 @@ fn resolve_root_for_target(
     resolve_root(None)
 }
 
+fn freshness_label(
+    process: &crate::project_controller::ControllerProcessFreshness,
+) -> &'static str {
+    match process.matches_installed {
+        Some(true) => "fresh",
+        Some(false) => "stale",
+        None => "unknown",
+    }
+}
+
+fn freshness_summary(
+    freshness: Option<&crate::project_controller::ControllerFreshnessStatus>,
+) -> String {
+    let Some(freshness) = freshness else {
+        return "unknown".to_string();
+    };
+    let controller = freshness_label(&freshness.controller);
+    let supervisor = freshness
+        .route_owned_supervisor
+        .as_ref()
+        .map(freshness_label)
+        .unwrap_or("n/a");
+    format!("controller:{controller},supervisor:{supervisor}")
+}
+
 fn print_receipt(
     receipt: &crate::project_controller::ControllerAdminReceipt,
     json: bool,
@@ -285,7 +310,7 @@ pub fn inspect(
         println!("{}", serde_json::to_string_pretty(&inspection)?);
     } else if let Some(record) = inspection.record.as_ref() {
         println!(
-            "{} [{}] pane={} gen={} state={} queue_control={} projection_lag={}",
+            "{} [{}] pane={} gen={} state={} queue_control={} projection_lag={} freshness={}",
             inspection
                 .document_id
                 .as_deref()
@@ -299,7 +324,8 @@ pub fn inspect(
                 .as_ref()
                 .map(|control| control.state.as_str())
                 .unwrap_or("none"),
-            inspection.projection_lag
+            inspection.projection_lag,
+            freshness_summary(inspection.freshness.as_ref())
         );
     } else {
         println!("No actor found for {}", inspection.target);

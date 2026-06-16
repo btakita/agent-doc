@@ -88,7 +88,9 @@ fn drain_owner_lease_path(file: &str) -> PathBuf {
                 .parent()
                 .unwrap_or(Path::new("."))
                 .to_path_buf();
-            return parent.join(DRAIN_OWNER_DIR).join(format!("{hash:016x}.json"));
+            return parent
+                .join(DRAIN_OWNER_DIR)
+                .join(format!("{hash:016x}.json"));
         }
     }
 }
@@ -145,9 +147,18 @@ mod tests {
     #[test]
     fn freshness_predicate_uses_ttl_window() {
         let ttl = Duration::from_secs(90);
-        assert!(drain_owner_lease_is_fresh(1_000, 1_000, ttl), "same instant");
-        assert!(drain_owner_lease_is_fresh(1_000, 1_090, ttl), "at the ttl edge");
-        assert!(!drain_owner_lease_is_fresh(1_000, 1_091, ttl), "past the ttl");
+        assert!(
+            drain_owner_lease_is_fresh(1_000, 1_000, ttl),
+            "same instant"
+        );
+        assert!(
+            drain_owner_lease_is_fresh(1_000, 1_090, ttl),
+            "at the ttl edge"
+        );
+        assert!(
+            !drain_owner_lease_is_fresh(1_000, 1_091, ttl),
+            "past the ttl"
+        );
         // Clock skew (heartbeat in the future) saturates to fresh.
         assert!(drain_owner_lease_is_fresh(2_000, 1_000, ttl));
     }

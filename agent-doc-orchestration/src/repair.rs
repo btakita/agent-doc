@@ -1947,7 +1947,6 @@ pub fn clear_pending(file: &Path) -> Result<()> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

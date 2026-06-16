@@ -10,6 +10,7 @@ pub(crate) fn build_dispatch_context(file: &Path) -> queue_dispatch::DispatchCon
             project_root: None,
             session_uuid: None,
             pane_id: None,
+            harness: "claude".to_string(),
         }
     })
 }
@@ -373,177 +374,177 @@ pub(crate) fn stream_step_response(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use std::cell::RefCell;
-use tempfile::TempDir;
-#[test]
-fn close_open_preflight_handoff_cycle_snapshots_before_injection() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    Command::new("git")
-        .current_dir(dir.path())
-        .arg("init")
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(dir.path())
-        .args(["config", "user.email", "test@example.com"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(dir.path())
-        .args(["config", "user.name", "Test"])
-        .output()
+    use std::cell::RefCell;
+    use tempfile::TempDir;
+    #[test]
+    fn close_open_preflight_handoff_cycle_snapshots_before_injection() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        Command::new("git")
+            .current_dir(dir.path())
+            .arg("init")
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let snapshot = template_doc();
+        fs::write(&doc, &snapshot).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let handoff = snapshot.replace(
+            "<!-- agent:boundary:keep -->",
+            "synchronous orchestra\npreset #spec-test\n- do #first\n<!-- agent:boundary:keep -->",
+        );
+        fs::write(&doc, &handoff).unwrap();
+        agent_doc_orchestration::cycle_state::start_preflight(
+            &doc,
+            Some(&snapshot),
+            Some(&handoff),
+        )
         .unwrap();
 
-    let snapshot = template_doc();
-    fs::write(&doc, &snapshot).unwrap();
-    snapshot::save(&doc, &snapshot).unwrap();
-    Command::new("git")
-        .current_dir(dir.path())
-        .args(["add", "session.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .current_dir(dir.path())
-        .args(["commit", "-m", "add doc", "--no-verify"])
-        .output()
-        .unwrap();
+        close_open_preflight_handoff_cycle(&doc).unwrap();
+        inject_prompt(&doc, "do #first").unwrap();
 
-    let handoff = snapshot.replace(
-        "<!-- agent:boundary:keep -->",
-        "synchronous orchestra\npreset #spec-test\n- do #first\n<!-- agent:boundary:keep -->",
-    );
-    fs::write(&doc, &handoff).unwrap();
-    agent_doc_orchestration::cycle_state::start_preflight(
-        &doc,
-        Some(&snapshot),
-        Some(&handoff),
-    )
-    .unwrap();
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        let live = fs::read_to_string(&doc).unwrap();
+        assert!(snap.contains("synchronous orchestra"));
+        assert!(!snap.contains("❯ do #first"));
+        assert!(live.contains("❯ do #first"));
+        assert_eq!(
+            agent_doc_orchestration::cycle_state::load(&doc)
+                .unwrap()
+                .unwrap()
+                .phase,
+            agent_doc_orchestration::cycle_state::CyclePhase::Abandoned
+        );
+    }
+    #[test]
+    fn render_streamed_exchange_inserts_response_before_boundary() {
+        let seed = ExchangeStreamSeed {
+            prefix: "❯ do #4qja\n".to_string(),
+            suffix: "<!-- agent:boundary:keep -->\n".to_string(),
+        };
 
-    close_open_preflight_handoff_cycle(&doc).unwrap();
-    inject_prompt(&doc, "do #first").unwrap();
-
-    let snap = snapshot::load(&doc).unwrap().unwrap();
-    let live = fs::read_to_string(&doc).unwrap();
-    assert!(snap.contains("synchronous orchestra"));
-    assert!(!snap.contains("❯ do #first"));
-    assert!(live.contains("❯ do #first"));
-    assert_eq!(
-        agent_doc_orchestration::cycle_state::load(&doc)
-            .unwrap()
-            .unwrap()
-            .phase,
-        agent_doc_orchestration::cycle_state::CyclePhase::Abandoned
-    );
-}
-#[test]
-fn render_streamed_exchange_inserts_response_before_boundary() {
-    let seed = ExchangeStreamSeed {
-        prefix: "❯ do #4qja\n".to_string(),
-        suffix: "<!-- agent:boundary:keep -->\n".to_string(),
-    };
-
-    let rendered = render_streamed_exchange(
-        &seed,
-        "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n<!-- /patch:exchange -->\n",
-    );
-    let response_pos = rendered.find("### Re: streamed — gpt-5").unwrap();
-    let boundary_pos = rendered.find("<!-- agent:boundary:keep -->").unwrap();
-    assert!(response_pos < boundary_pos);
-}
-#[test]
-fn resolve_orchestrate_agent_args_claude_frontmatter() {
-    let fm = frontmatter::Frontmatter {
-        claude_args: Some("--dangerously-skip-permissions".into()),
-        ..Default::default()
-    };
-    let config = Config::default();
-    let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
-    assert_eq!(result.as_deref(), Some("--dangerously-skip-permissions"));
-}
-#[test]
-fn resolve_orchestrate_agent_args_codex_frontmatter() {
-    let fm = frontmatter::Frontmatter {
-        codex_args: Some("-s danger-full-access".into()),
-        ..Default::default()
-    };
-    let config = Config::default();
-    let result = resolve_orchestrate_agent_args(&fm, "codex", &config);
-    assert_eq!(result.as_deref(), Some("-s danger-full-access"));
-}
-#[test]
-fn resolve_orchestrate_agent_args_opencode_frontmatter() {
-    let fm = frontmatter::Frontmatter {
-        opencode_args: Some("--dangerously-skip-permissions".into()),
-        codex_args: Some("-s danger-full-access".into()),
-        ..Default::default()
-    };
-    let config = Config::default();
-    let result = resolve_orchestrate_agent_args(&fm, "opencode", &config);
-    assert_eq!(result.as_deref(), Some("--dangerously-skip-permissions"));
-}
-#[test]
-fn resolve_orchestrate_agent_args_agent_args_beats_harness_specific() {
-    let fm = frontmatter::Frontmatter {
-        agent_args: Some("--model sonnet".into()),
-        claude_args: Some("--dangerously-skip-permissions".into()),
-        ..Default::default()
-    };
-    let config = Config::default();
-    let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
-    assert_eq!(result.as_deref(), Some("--model sonnet"));
-}
-#[test]
-fn resolve_orchestrate_agent_args_falls_through_to_config() {
-    let fm = frontmatter::Frontmatter::default();
-    let config = Config {
-        claude_args: Some("--from-config".into()),
-        ..Default::default()
-    };
-    let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
-    assert_eq!(result.as_deref(), Some("--from-config"));
-}
-#[test]
-fn resolve_orchestrate_agent_args_none_when_no_args() {
-    let fm = frontmatter::Frontmatter::default();
-    let config = Config::default();
-    let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
-    assert!(result.is_none());
-}
-#[test]
-fn build_effective_config_claude_with_frontmatter_args() {
-    let config = Config::default();
-    let effective =
-        build_effective_agent_config("claude", Some("--dangerously-skip-permissions"), &config);
-    let effective = effective.unwrap();
-    assert_eq!(effective.command, "claude");
-    assert_eq!(
-        effective.args,
-        vec![
-            "-p",
-            "--output-format",
-            "json",
-            "--dangerously-skip-permissions"
-        ]
-    );
-}
-#[test]
-fn build_effective_config_codex_with_frontmatter_args() {
-    let config = Config::default();
-    let effective =
-        build_effective_agent_config("codex", Some("-s danger-full-access"), &config);
-    let effective = effective.unwrap();
-    assert_eq!(effective.command, "codex");
-    assert_eq!(
-        effective.args,
-        vec!["exec", "--json", "-s", "danger-full-access"]
-    );
-}
-#[test]
-fn build_effective_config_none_without_frontmatter_args() {
-    let config = Config::default();
-    let effective = build_effective_agent_config("claude", None, &config);
-    assert!(effective.is_none());
-}
+        let rendered = render_streamed_exchange(
+            &seed,
+            "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n<!-- /patch:exchange -->\n",
+        );
+        let response_pos = rendered.find("### Re: streamed — gpt-5").unwrap();
+        let boundary_pos = rendered.find("<!-- agent:boundary:keep -->").unwrap();
+        assert!(response_pos < boundary_pos);
+    }
+    #[test]
+    fn resolve_orchestrate_agent_args_claude_frontmatter() {
+        let fm = frontmatter::Frontmatter {
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            ..Default::default()
+        };
+        let config = Config::default();
+        let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
+        assert_eq!(result.as_deref(), Some("--dangerously-skip-permissions"));
+    }
+    #[test]
+    fn resolve_orchestrate_agent_args_codex_frontmatter() {
+        let fm = frontmatter::Frontmatter {
+            codex_args: Some("-s danger-full-access".into()),
+            ..Default::default()
+        };
+        let config = Config::default();
+        let result = resolve_orchestrate_agent_args(&fm, "codex", &config);
+        assert_eq!(result.as_deref(), Some("-s danger-full-access"));
+    }
+    #[test]
+    fn resolve_orchestrate_agent_args_opencode_frontmatter() {
+        let fm = frontmatter::Frontmatter {
+            opencode_args: Some("--dangerously-skip-permissions".into()),
+            codex_args: Some("-s danger-full-access".into()),
+            ..Default::default()
+        };
+        let config = Config::default();
+        let result = resolve_orchestrate_agent_args(&fm, "opencode", &config);
+        assert_eq!(result.as_deref(), Some("--dangerously-skip-permissions"));
+    }
+    #[test]
+    fn resolve_orchestrate_agent_args_agent_args_beats_harness_specific() {
+        let fm = frontmatter::Frontmatter {
+            agent_args: Some("--model sonnet".into()),
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            ..Default::default()
+        };
+        let config = Config::default();
+        let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
+        assert_eq!(result.as_deref(), Some("--model sonnet"));
+    }
+    #[test]
+    fn resolve_orchestrate_agent_args_falls_through_to_config() {
+        let fm = frontmatter::Frontmatter::default();
+        let config = Config {
+            claude_args: Some("--from-config".into()),
+            ..Default::default()
+        };
+        let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
+        assert_eq!(result.as_deref(), Some("--from-config"));
+    }
+    #[test]
+    fn resolve_orchestrate_agent_args_none_when_no_args() {
+        let fm = frontmatter::Frontmatter::default();
+        let config = Config::default();
+        let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
+        assert!(result.is_none());
+    }
+    #[test]
+    fn build_effective_config_claude_with_frontmatter_args() {
+        let config = Config::default();
+        let effective =
+            build_effective_agent_config("claude", Some("--dangerously-skip-permissions"), &config);
+        let effective = effective.unwrap();
+        assert_eq!(effective.command, "claude");
+        assert_eq!(
+            effective.args,
+            vec![
+                "-p",
+                "--output-format",
+                "json",
+                "--dangerously-skip-permissions"
+            ]
+        );
+    }
+    #[test]
+    fn build_effective_config_codex_with_frontmatter_args() {
+        let config = Config::default();
+        let effective =
+            build_effective_agent_config("codex", Some("-s danger-full-access"), &config);
+        let effective = effective.unwrap();
+        assert_eq!(effective.command, "codex");
+        assert_eq!(
+            effective.args,
+            vec!["exec", "--json", "-s", "danger-full-access"]
+        );
+    }
+    #[test]
+    fn build_effective_config_none_without_frontmatter_args() {
+        let config = Config::default();
+        let effective = build_effective_agent_config("claude", None, &config);
+        assert!(effective.is_none());
+    }
 }

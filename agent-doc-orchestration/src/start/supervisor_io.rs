@@ -6,102 +6,24 @@ pub(crate) fn ipc_method_requires_capability_gate(method: &IpcMethod) -> bool {
     matches!(method, IpcMethod::Inject { .. })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct StdinOperatorControlPlan {
-    forwarded: Vec<u8>,
-    ctrl_c_interrupt: bool,
-    ctrl_z_stop: bool,
-}
-
-fn plan_stdin_operator_control(harness_binary: &str, data: &[u8]) -> StdinOperatorControlPlan {
-    if harness_binary != "codex" {
-        return StdinOperatorControlPlan {
-            forwarded: data.to_vec(),
-            ctrl_c_interrupt: false,
-            ctrl_z_stop: false,
-        };
-    }
-
-    let mut forwarded = Vec::with_capacity(data.len());
-    let mut ctrl_c_interrupt = false;
-    let mut ctrl_z_stop = false;
-    for byte in data {
-        match *byte {
-            0x03 => ctrl_c_interrupt = true,
-            0x1a => ctrl_z_stop = true,
-            byte => forwarded.push(byte),
-        }
-    }
-
-    StdinOperatorControlPlan {
-        forwarded,
-        ctrl_c_interrupt,
-        ctrl_z_stop,
-    }
-}
-
-fn log_codex_operator_control(shared: &SupervisorShared, key: &str, detail: &str) {
-    let file = shared
-        .actor_runtime
-        .as_ref()
-        .map(|runtime| runtime.file.as_path());
-    crate::input_diag::log_key_event(
-        file,
-        "supervisor.stdin",
-        "child_process",
-        "codex_operator_control",
-        key,
-        0,
-        crate::input_diag::KeyEventMeta {
-            harness: Some(&shared.harness_binary),
-            detail: Some(detail),
-        },
-    );
-}
-
-fn apply_stdin_operator_control(
-    shared: &SupervisorShared,
-    data: &[u8],
-    ctrl_c_flag: Option<&Arc<AtomicBool>>,
-) -> Vec<u8> {
-    let plan = plan_stdin_operator_control(&shared.harness_binary, data);
-    if plan.ctrl_c_interrupt {
-        if let Some(flag) = ctrl_c_flag {
-            flag.store(true, Ordering::Relaxed);
-        }
-        shared.ctrl_c_forwarded.store(true, Ordering::Relaxed);
-        log_codex_operator_control(shared, "Ctrl-C", "policy=sigint_not_forwarded");
-        shared.interrupt_child();
-    }
-    if plan.ctrl_z_stop {
-        shared.ctrl_z_operator_stop.store(true, Ordering::Relaxed);
-        log_codex_operator_control(shared, "Ctrl-Z", "policy=sigterm_not_forwarded");
-        shared.stop_child_for_ctrl_z();
-    }
-    plan.forwarded
-}
-
 /// Shared delivery for injected text (pane submit or PTY write). Used by both
 /// the gated [`IpcMethod::Inject`] path and the gate-exempt
 /// [`IpcMethod::Clear`] path; the gate decision is made by the caller.
-pub(crate) fn deliver_ipc_inject(shared: &SupervisorShared, bytes: &str, diag_op: &str) -> Result<(), String> {
+pub(crate) fn deliver_ipc_inject(
+    shared: &SupervisorShared,
+    bytes: &str,
+    diag_op: &str,
+) -> Result<(), String> {
     if let Some(pane_id) = shared.inject_pane.as_deref() {
+        let profile = crate::sessions::tmux_submit_profile_for_harness(&shared.harness_binary);
         crate::input_diag::log_text_submit(
             None,
             &format!("supervisor.{diag_op}"),
             &format!("pane:{pane_id}"),
             bytes,
             Some(&shared.harness_binary),
-            if shared.harness_binary == "opencode" {
-                "ipc_inject_kitty_return"
-            } else {
-                "ipc_inject_enter"
-            },
-            if shared.harness_binary == "opencode" {
-                "KittyReturn"
-            } else {
-                "Enter"
-            },
+            profile.transform(),
+            profile.submit_key(),
         );
         dispatch_submit_text_to_pane(pane_id, bytes, &shared.harness_binary)
             .map_err(|e| e.to_string())
@@ -438,15 +360,6 @@ pub(crate) fn spawn_writer_thread(
                         );
                     }
                     let data = maybe_translated.as_deref().unwrap_or(data);
-                    let controlled =
-                        apply_stdin_operator_control(&shared, data, ctrl_c_flag.as_ref());
-                    let data = controlled.as_slice();
-                    if data.is_empty() {
-                        if debug {
-                            eprintln!("[stdin->pty] handled operator control without pty write");
-                        }
-                        continue;
-                    }
                     if crate::input_diag::verbose_enabled() {
                         crate::input_diag::log_byte_events(
                             None,
@@ -528,22 +441,13 @@ pub(crate) fn spawn_writer_thread(
                     Ok(0) => break,
                     Ok(n) => {
                         drop(lock);
-                        let controlled = apply_stdin_operator_control(
-                            &_shared,
-                            &buf[..n],
-                            ctrl_c_flag.as_ref(),
-                        );
-                        let data = controlled.as_slice();
-                        if data.is_empty() {
-                            continue;
-                        }
                         if let Some(ref flag) = ctrl_d_flag {
-                            if data.contains(&0x04) {
+                            if buf[..n].contains(&0x04) {
                                 flag.store(true, Ordering::Relaxed);
                             }
                         }
                         if let Some(ref flag) = ctrl_c_flag {
-                            if data.contains(&0x03) {
+                            if buf[..n].contains(&0x03) {
                                 flag.store(true, Ordering::Relaxed);
                             }
                         }
@@ -553,14 +457,14 @@ pub(crate) fn spawn_writer_thread(
                                 "supervisor.stdin",
                                 "child_pty",
                                 "raw_forward",
-                                data,
+                                &buf[..n],
                                 None,
                             );
                         }
                         let Some(mut w) = lock_writer_interruptibly(&writer, stop.as_ref()) else {
                             break;
                         };
-                        if w.write_all_interruptibly(data, stop.as_ref()).is_err() {
+                        if w.write_all_interruptibly(&buf[..n], stop.as_ref()).is_err() {
                             break;
                         }
                     }
@@ -575,297 +479,278 @@ pub(crate) fn spawn_writer_thread(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use crate::config::Config;
-use crate::frontmatter::Frontmatter;
-use crate::hooks::fire_doc_hooks;
-use crate::project_config;
-use crate::sessions::IsolatedTmux;
-use std::collections::HashMap;
-use tempfile::TempDir;
+    use crate::config::Config;
+    use crate::frontmatter::Frontmatter;
+    use crate::hooks::fire_doc_hooks;
+    use crate::project_config;
+    use crate::sessions::IsolatedTmux;
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+    #[test]
+    fn handle_ipc_inject_normalizes_submit_newline_before_writing() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(RecordingWriter(written.clone())),
+        ))));
 
-#[test]
-fn codex_operator_control_strips_ctrl_c_and_ctrl_z_from_forwarded_bytes() {
-    let plan = plan_stdin_operator_control("codex", b"a\x03b\x1ac\x04");
+        let response = handle_ipc(
+            IpcMethod::Inject {
+                bytes: "agent-doc tasks/software/tsift.md\n".to_string(),
+            },
+            &shared,
+        );
 
-    assert_eq!(plan.forwarded, b"abc\x04");
-    assert!(plan.ctrl_c_interrupt);
-    assert!(plan.ctrl_z_stop);
-}
+        assert!(response.ok);
+        assert_eq!(
+            written.lock().unwrap().as_slice(),
+            b"agent-doc tasks/software/tsift.md\r"
+        );
+    }
+    #[test]
+    fn handle_ipc_inject_rejects_pending_capability_proof() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        shared.set_capability_proof_gate(CapabilityProofGate::Pending, None);
+        let response = handle_ipc(
+            IpcMethod::Inject {
+                bytes: "agent-doc tasks/software/tsift.md\n".to_string(),
+            },
+            &shared,
+        );
 
-#[test]
-fn non_codex_operator_control_preserves_control_bytes() {
-    let plan = plan_stdin_operator_control("claude", b"a\x03b\x1ac");
-
-    assert_eq!(plan.forwarded, b"a\x03b\x1ac");
-    assert!(!plan.ctrl_c_interrupt);
-    assert!(!plan.ctrl_z_stop);
-}
-
-#[test]
-fn handle_ipc_inject_normalizes_submit_newline_before_writing() {
-    let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-    let written = Arc::new(Mutex::new(Vec::new()));
-    *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-        Box::new(RecordingWriter(written.clone())),
-    ))));
-
-    let response = handle_ipc(
-        IpcMethod::Inject {
-            bytes: "agent-doc tasks/software/tsift.md\n".to_string(),
-        },
-        &shared,
-    );
-
-    assert!(response.ok);
-    assert_eq!(
-        written.lock().unwrap().as_slice(),
-        b"agent-doc tasks/software/tsift.md\r"
-    );
-}
-#[test]
-fn handle_ipc_inject_rejects_pending_capability_proof() {
-    let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-    shared.set_capability_proof_gate(CapabilityProofGate::Pending, None);
-    let response = handle_ipc(
-        IpcMethod::Inject {
-            bytes: "agent-doc tasks/software/tsift.md\n".to_string(),
-        },
-        &shared,
-    );
-
-    assert!(!response.ok);
-    assert!(
-        response
-            .error
-            .as_deref()
-            .unwrap_or_default()
-            .contains("capability proof is still pending"),
-        "{response:?}"
-    );
-}
-#[test]
-fn ipc_method_gate_classification_only_gates_inject() {
-    // Only a real prompt dispatch is gated; operator/read-only methods are
-    // gate-exempt so a proof-failed session stays recoverable.
-    assert!(ipc_method_requires_capability_gate(&IpcMethod::Inject {
-        bytes: "x".to_string(),
-    }));
-    assert!(!ipc_method_requires_capability_gate(&IpcMethod::Clear {
-        bytes: "/clear".to_string(),
-    }));
-    assert!(!ipc_method_requires_capability_gate(&IpcMethod::Stop {
-        graceful: false,
-    }));
-    assert!(!ipc_method_requires_capability_gate(&IpcMethod::Restart {
-        mode: "continue".to_string(),
-    }));
-    assert!(!ipc_method_requires_capability_gate(&IpcMethod::State));
-    assert!(!ipc_method_requires_capability_gate(&IpcMethod::Pid));
-}
-#[test]
-fn handle_ipc_clear_bypasses_failed_capability_proof() {
-    // #codex-capability-proof-unrecoverable: with the gate `Failed`, an
-    // `Inject` is refused by the dispatch gate but `Clear` is delivered
-    // (here to a recording PTY writer) without the gate error.
-    let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-    shared.set_capability_proof_gate(
-        CapabilityProofGate::Failed,
-        Some("network denied".to_string()),
-    );
-
-    let inject = handle_ipc(
-        IpcMethod::Inject {
+        assert!(!response.ok);
+        assert!(
+            response
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("capability proof is still pending"),
+            "{response:?}"
+        );
+    }
+    #[test]
+    fn ipc_method_gate_classification_only_gates_inject() {
+        // Only a real prompt dispatch is gated; operator/read-only methods are
+        // gate-exempt so a proof-failed session stays recoverable.
+        assert!(ipc_method_requires_capability_gate(&IpcMethod::Inject {
+            bytes: "x".to_string(),
+        }));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Clear {
             bytes: "/clear".to_string(),
-        },
-        &shared,
-    );
-    assert!(!inject.ok);
-    assert!(
-        inject
-            .error
-            .as_deref()
-            .unwrap_or_default()
-            .contains("capability proof failed"),
-        "{inject:?}"
-    );
+        }));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Stop {
+            graceful: false,
+        }));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Restart {
+            mode: "continue".to_string(),
+        }));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::State));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Pid));
+    }
+    #[test]
+    fn handle_ipc_clear_bypasses_failed_capability_proof() {
+        // #codex-capability-proof-unrecoverable: with the gate `Failed`, an
+        // `Inject` is refused by the dispatch gate but `Clear` is delivered
+        // (here to a recording PTY writer) without the gate error.
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        shared.set_capability_proof_gate(
+            CapabilityProofGate::Failed,
+            Some("network denied".to_string()),
+        );
 
-    let written = Arc::new(Mutex::new(Vec::new()));
-    *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-        Box::new(RecordingWriter(written.clone())),
-    ))));
-    let clear = handle_ipc(
-        IpcMethod::Clear {
-            bytes: "/clear".to_string(),
-        },
-        &shared,
-    );
-    assert!(clear.ok, "clear must bypass the dispatch gate: {clear:?}");
-    // Delivery matches the Inject path: trailing-newline normalization only,
-    // no spurious CR added when the control text has none.
-    assert_eq!(written.lock().unwrap().as_slice(), b"/clear");
-}
-#[test]
-fn handle_ipc_stop_bypasses_failed_capability_proof() {
-    // Stopping a session is recovery, not dispatch: it must succeed even
-    // when the capability proof failed.
-    let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-    shared.set_capability_proof_gate(
-        CapabilityProofGate::Failed,
-        Some("network denied".to_string()),
-    );
-    let response = handle_ipc(IpcMethod::Stop { graceful: false }, &shared);
-    assert!(response.ok, "{response:?}");
-    assert!(shared.stop_requested.load(Ordering::Relaxed));
-}
-#[cfg(unix)]
-#[test]
-fn writer_thread_exits_on_stop_signal() {
-    // Create a pipe to act as the "pty writer" — we just need something
-    // that accepts writes without blocking
-    let mut pty_fds = [0i32; 2];
-    unsafe { libc::pipe(pty_fds.as_mut_ptr()) };
-    let pty_write_fd = pty_fds[1];
+        let inject = handle_ipc(
+            IpcMethod::Inject {
+                bytes: "/clear".to_string(),
+            },
+            &shared,
+        );
+        assert!(!inject.ok);
+        assert!(
+            inject
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("capability proof failed"),
+            "{inject:?}"
+        );
 
-    // Wrap the write end in a Box<dyn Write + Send> for spawn_writer_thread
-    struct FdWriter(i32);
-    impl Write for FdWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            let n =
-                unsafe { libc::write(self.0, buf.as_ptr() as *const libc::c_void, buf.len()) };
-            if n < 0 {
-                Err(std::io::Error::last_os_error())
-            } else {
-                Ok(n as usize)
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(RecordingWriter(written.clone())),
+        ))));
+        let clear = handle_ipc(
+            IpcMethod::Clear {
+                bytes: "/clear".to_string(),
+            },
+            &shared,
+        );
+        assert!(clear.ok, "clear must bypass the dispatch gate: {clear:?}");
+        // Delivery matches the Inject path: trailing-newline normalization only,
+        // no spurious CR added when the control text has none.
+        assert_eq!(written.lock().unwrap().as_slice(), b"/clear");
+    }
+    #[test]
+    fn handle_ipc_stop_bypasses_failed_capability_proof() {
+        // Stopping a session is recovery, not dispatch: it must succeed even
+        // when the capability proof failed.
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        shared.set_capability_proof_gate(
+            CapabilityProofGate::Failed,
+            Some("network denied".to_string()),
+        );
+        let response = handle_ipc(IpcMethod::Stop { graceful: false }, &shared);
+        assert!(response.ok, "{response:?}");
+        assert!(shared.stop_requested.load(Ordering::Relaxed));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn writer_thread_exits_on_stop_signal() {
+        // Create a pipe to act as the "pty writer" — we just need something
+        // that accepts writes without blocking
+        let mut pty_fds = [0i32; 2];
+        unsafe { libc::pipe(pty_fds.as_mut_ptr()) };
+        let pty_write_fd = pty_fds[1];
+
+        // Wrap the write end in a Box<dyn Write + Send> for spawn_writer_thread
+        struct FdWriter(i32);
+        impl Write for FdWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                let n =
+                    unsafe { libc::write(self.0, buf.as_ptr() as *const libc::c_void, buf.len()) };
+                if n < 0 {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(n as usize)
+                }
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
             }
         }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
+
+        let writer: Box<dyn Write + Send> = Box::new(FdWriter(pty_write_fd));
+        let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::new(writer)));
+
+        let stop = StopSignal::new().unwrap();
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let shared = Arc::new(SupervisorShared::new("test", "writer-stop".to_string()));
+        let handle = spawn_writer_thread(
+            shared,
+            crate::harness::HarnessConfig::codex(),
+            writer_arc,
+            stop.read_fd(),
+            stop_flag.clone(),
+            None,
+            None,
+        );
+
+        // Writer thread should be alive, blocked in poll()
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Signal stop — thread should exit promptly
+        stop_flag.store(true, Ordering::Relaxed);
+        stop.signal();
+        let result = handle.join();
+        assert!(
+            result.is_ok(),
+            "writer thread should exit cleanly on stop signal"
+        );
+
+        // Clean up pipe fds
+        unsafe {
+            libc::close(pty_fds[0]);
+            libc::close(pty_fds[1]);
         }
     }
+    #[cfg(unix)]
+    #[test]
+    fn writer_thread_exits_on_pty_write_failure() {
+        // Create a pipe as the "pty writer", then close the read end so
+        // writes fail with EPIPE — simulating Claude exit closing the PTY
+        let mut pty_fds = [0i32; 2];
+        unsafe { libc::pipe(pty_fds.as_mut_ptr()) };
+        // Close read end immediately so writes produce EPIPE
+        unsafe { libc::close(pty_fds[0]) };
 
-    let writer: Box<dyn Write + Send> = Box::new(FdWriter(pty_write_fd));
-    let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::new(writer)));
-
-    let stop = StopSignal::new().unwrap();
-    let stop_flag = Arc::new(AtomicBool::new(false));
-    let shared = Arc::new(SupervisorShared::new("test", "writer-stop".to_string()));
-    let handle = spawn_writer_thread(
-        shared,
-        crate::harness::HarnessConfig::codex(),
-        writer_arc,
-        stop.read_fd(),
-        stop_flag.clone(),
-        None,
-        None,
-    );
-
-    // Writer thread should be alive, blocked in poll()
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
-    // Signal stop — thread should exit promptly
-    stop_flag.store(true, Ordering::Relaxed);
-    stop.signal();
-    let result = handle.join();
-    assert!(
-        result.is_ok(),
-        "writer thread should exit cleanly on stop signal"
-    );
-
-    // Clean up pipe fds
-    unsafe {
-        libc::close(pty_fds[0]);
-        libc::close(pty_fds[1]);
-    }
-}
-#[cfg(unix)]
-#[test]
-fn writer_thread_exits_on_pty_write_failure() {
-    // Create a pipe as the "pty writer", then close the read end so
-    // writes fail with EPIPE — simulating Claude exit closing the PTY
-    let mut pty_fds = [0i32; 2];
-    unsafe { libc::pipe(pty_fds.as_mut_ptr()) };
-    // Close read end immediately so writes produce EPIPE
-    unsafe { libc::close(pty_fds[0]) };
-
-    struct FdWriter(i32);
-    impl Write for FdWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            let n =
-                unsafe { libc::write(self.0, buf.as_ptr() as *const libc::c_void, buf.len()) };
-            if n < 0 {
-                Err(std::io::Error::last_os_error())
-            } else {
-                Ok(n as usize)
+        struct FdWriter(i32);
+        impl Write for FdWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                let n =
+                    unsafe { libc::write(self.0, buf.as_ptr() as *const libc::c_void, buf.len()) };
+                if n < 0 {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(n as usize)
+                }
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
             }
         }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
+
+        let writer: Box<dyn Write + Send> = Box::new(FdWriter(pty_fds[1]));
+        let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::new(writer)));
+
+        let stop = StopSignal::new().unwrap();
+        let stop_fd = stop.read_fd();
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let shared = Arc::new(SupervisorShared::new("test", "writer-epipe".to_string()));
+        let handle = spawn_writer_thread(
+            shared,
+            crate::harness::HarnessConfig::codex(),
+            writer_arc,
+            stop_fd,
+            stop_flag.clone(),
+            None,
+            None,
+        );
+
+        // Inject a byte into stdin to trigger a write attempt.
+        // The write will fail (EPIPE) and the thread should exit.
+        // We use the stop signal as a fallback timeout.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        stop_flag.store(true, Ordering::Relaxed);
+        stop.signal();
+
+        let result = handle.join();
+        assert!(
+            result.is_ok(),
+            "writer thread should exit on write failure or stop"
+        );
+
+        unsafe { libc::close(pty_fds[1]) };
     }
+    #[cfg(unix)]
+    #[test]
+    fn reader_thread_exits_on_eof() {
+        // Create a pipe as mock pty reader. Closing the write end
+        // should cause the reader thread to see EOF and exit.
+        let mut fds = [0i32; 2];
+        unsafe { libc::pipe(fds.as_mut_ptr()) };
 
-    let writer: Box<dyn Write + Send> = Box::new(FdWriter(pty_fds[1]));
-    let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::new(writer)));
-
-    let stop = StopSignal::new().unwrap();
-    let stop_fd = stop.read_fd();
-    let stop_flag = Arc::new(AtomicBool::new(false));
-    let shared = Arc::new(SupervisorShared::new("test", "writer-epipe".to_string()));
-    let handle = spawn_writer_thread(
-        shared,
-        crate::harness::HarnessConfig::codex(),
-        writer_arc,
-        stop_fd,
-        stop_flag.clone(),
-        None,
-        None,
-    );
-
-    // Inject a byte into stdin to trigger a write attempt.
-    // The write will fail (EPIPE) and the thread should exit.
-    // We use the stop signal as a fallback timeout.
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    stop_flag.store(true, Ordering::Relaxed);
-    stop.signal();
-
-    let result = handle.join();
-    assert!(
-        result.is_ok(),
-        "writer thread should exit on write failure or stop"
-    );
-
-    unsafe { libc::close(pty_fds[1]) };
-}
-#[cfg(unix)]
-#[test]
-fn reader_thread_exits_on_eof() {
-    // Create a pipe as mock pty reader. Closing the write end
-    // should cause the reader thread to see EOF and exit.
-    let mut fds = [0i32; 2];
-    unsafe { libc::pipe(fds.as_mut_ptr()) };
-
-    struct FdReader(i32);
-    impl std::io::Read for FdReader {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            let n =
-                unsafe { libc::read(self.0, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-            if n < 0 {
-                Err(std::io::Error::last_os_error())
-            } else {
-                Ok(n as usize)
+        struct FdReader(i32);
+        impl std::io::Read for FdReader {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n =
+                    unsafe { libc::read(self.0, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+                if n < 0 {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(n as usize)
+                }
             }
         }
+
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        let reader: Box<dyn std::io::Read + Send> = Box::new(FdReader(fds[0]));
+        let handle = spawn_reader_thread(shared, crate::harness::HarnessConfig::codex(), reader);
+
+        // Close the write end → reader sees EOF → thread exits
+        unsafe { libc::close(fds[1]) };
+
+        let result = handle.join();
+        assert!(result.is_ok(), "reader thread should exit cleanly on EOF");
+
+        unsafe { libc::close(fds[0]) };
     }
-
-    let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-    let reader: Box<dyn std::io::Read + Send> = Box::new(FdReader(fds[0]));
-    let handle = spawn_reader_thread(shared, crate::harness::HarnessConfig::codex(), reader);
-
-    // Close the write end → reader sees EOF → thread exits
-    unsafe { libc::close(fds[1]) };
-
-    let result = handle.join();
-    assert!(result.is_ok(), "reader thread should exit cleanly on EOF");
-
-    unsafe { libc::close(fds[0]) };
-}
 }

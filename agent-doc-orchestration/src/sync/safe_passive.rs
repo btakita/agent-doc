@@ -11,7 +11,9 @@ pub(crate) fn safe_passive_lock_contention_message(elapsed: Duration, budget: Du
     )
 }
 
-pub(crate) fn safe_passive_focus_path_and_session(focus: Option<&str>) -> Option<(PathBuf, String)> {
+pub(crate) fn safe_passive_focus_path_and_session(
+    focus: Option<&str>,
+) -> Option<(PathBuf, String)> {
     let focus = focus?.trim();
     if focus.is_empty() {
         return None;
@@ -32,7 +34,10 @@ pub(crate) fn safe_passive_local_actor_record_state(
     crate::session_actor::load_record_in(&base_dir, &canonical.to_string_lossy()).ok()
 }
 
-pub(crate) fn safe_passive_registry_pane_state(focus_path: &Path, session_id: &str) -> Option<Option<String>> {
+pub(crate) fn safe_passive_registry_pane_state(
+    focus_path: &Path,
+    session_id: &str,
+) -> Option<Option<String>> {
     let canonical = focus_path
         .canonicalize()
         .ok()
@@ -329,23 +334,23 @@ pub(crate) fn safe_passive_focus_actor_after_sync_lock(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use crate::sessions::IsolatedTmux;
-use std::process::Command as ProcessCommand;
-use std::time::Duration;
-#[test]
-fn safe_passive_lock_contention_message_is_retryable_and_visible() {
-    let message = safe_passive_lock_contention_message(
-        Duration::from_millis(125),
-        SYNC_LOCK_WAIT_LATENCY_BUDGET,
-    );
+    use crate::sessions::IsolatedTmux;
+    use std::process::Command as ProcessCommand;
+    use std::time::Duration;
+    #[test]
+    fn safe_passive_lock_contention_message_is_retryable_and_visible() {
+        let message = safe_passive_lock_contention_message(
+            Duration::from_millis(125),
+            SYNC_LOCK_WAIT_LATENCY_BUDGET,
+        );
 
-    assert!(
-        message.contains(SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER),
-        "{message}"
-    );
-    assert!(message.contains("phase=sync_lock_wait"), "{message}");
-    assert!(message.contains("status=over_budget"), "{message}");
-    assert!(message.contains("coalesced=skipped_stale"), "{message}");
-    assert!(message.contains("action=retry"), "{message}");
-}
+        assert!(
+            message.contains(SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER),
+            "{message}"
+        );
+        assert!(message.contains("phase=sync_lock_wait"), "{message}");
+        assert!(message.contains("status=over_budget"), "{message}");
+        assert!(message.contains("coalesced=skipped_stale"), "{message}");
+        assert!(message.contains("action=retry"), "{message}");
+    }
 }

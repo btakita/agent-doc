@@ -109,7 +109,7 @@ fn idle_queue_pending_payload_needs_enter_resubmit(
     payload_already_pending: Option<bool>,
     already_resubmitted: bool,
 ) -> bool {
-    matches!(harness_binary, "codex" | "claude")
+    crate::sessions::tmux_submit_profile_for_harness(harness_binary).pending_draft_enter_resubmit()
         && drain_dispatch_dedup_skip(payload_already_pending)
         && !already_resubmitted
 }
@@ -236,8 +236,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // When this supervisor hosts an agent-doc session editing agent-doc's OWN
             // source and a finalize committed an edit, build+install at the idle boundary
             // so the installed binary catches up — then the recycle block below hot-reloads
-            // onto it. Resolved ONCE: the default-OFF path does zero extra work (no source
-            // walk, no crate-root probe) — only an opted-in dogfooding session pays for it.
+            // onto it. Resolved ONCE: a disabled path does zero extra work (no source
+            // walk, no crate-root probe), and only an agent-doc dogfood document may
+            // resolve a crate root.
             let auto_install_enabled =
                 crate::project_controller::supervisor_auto_install_enabled(&path);
             let install_crate_root = if auto_install_enabled {
@@ -475,8 +476,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                     std::process::exit(0);
                 }
-                // `#supautoinstall` — dogfood auto-install rung. Opt-in (default OFF) and
-                // only for a dogfooding session (`install_crate_root` resolved). When a
+                // `#supautoinstall` — dogfood auto-install rung. Default ON, but only for
+                // an agent-doc dogfood session document (`install_crate_root` resolved). When a
                 // finalize has committed a source edit (source mtime > installed binary
                 // mtime), build+install at this turn boundary so the binary catches up; the
                 // recycle block immediately below then sees the now-newer binary
@@ -1016,10 +1017,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         let head = active_head.as_deref().unwrap_or("<unknown>");
                         let clear_cmd = harness.context_clear_command();
                         // `#qflood2`: never stack a second `/clear` when one is
-                        // already pending in the composer. For Codex/Claude, a
-                        // proven pending draft can be the merged-CR non-submit
-                        // shape; press Enter once instead of declaring the
-                        // queue handled.
+                        // already pending in the composer. For Enter-key
+                        // profiles, a proven pending draft can be recovered by
+                        // pressing Enter once instead of declaring the queue
+                        // handled.
                         let clear_already_pending =
                             supervisor_pane_payload_already_pending(&shared, clear_cmd);
                         let resubmit_key = format!("context_reset:{head}");
@@ -1193,9 +1194,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         let payload_kind = idle_queue_drain_payload_kind(&harness, &head);
                         let slash_command = idle_queue_head_slash_command(&head);
                         // `#qflood2`: never stack a trigger already pending in the
-                        // composer. For Codex/Claude, a proven-pending draft may
-                        // simply be waiting for the bare Enter that the merged
-                        // text+CR path failed to deliver, so submit it once.
+                        // composer. For Enter-key profiles, a proven-pending
+                        // draft may simply be waiting for the bare Enter, so
+                        // submit it once.
                         let payload_already_pending =
                             supervisor_pane_payload_already_pending(&shared, &drain_payload);
                         let resubmit_key = format!("drain:{head}");
@@ -1388,7 +1389,7 @@ mod tests {
             Some(true),
             false
         ));
-        assert!(!idle_queue_pending_payload_needs_enter_resubmit(
+        assert!(idle_queue_pending_payload_needs_enter_resubmit(
             "opencode",
             Some(true),
             false

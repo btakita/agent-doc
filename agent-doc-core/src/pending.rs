@@ -2387,7 +2387,6 @@ pub fn op_set_gate_verify(body: &str, id: &str, spec: &str, set_at: u64) -> Resu
     Ok(rewritten.render())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2451,7 +2450,8 @@ mod tests {
         assert!(!plain.is_deferred());
 
         // Both tags combine, and they coexist with `[recommended]` / `[TOP]`.
-        let both = item_execution_context("[recommended] [TOP] [clean-session] [operator-verify] go");
+        let both =
+            item_execution_context("[recommended] [TOP] [clean-session] [operator-verify] go");
         assert!(both.clean_session_required);
         assert!(both.operator_verify_required);
 

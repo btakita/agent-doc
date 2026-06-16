@@ -306,7 +306,11 @@ pub enum SupervisorKillOutcome {
 /// call from any process; refuses to kill the caller's own ancestor. `dry_run`
 /// reports the target without writing the sentinel or signalling.
 #[cfg(unix)]
-pub fn drive_supervisor_kill(file: &Path, grace: Duration, dry_run: bool) -> Result<SupervisorKillOutcome> {
+pub fn drive_supervisor_kill(
+    file: &Path,
+    grace: Duration,
+    dry_run: bool,
+) -> Result<SupervisorKillOutcome> {
     let Some(pid) = supervisor_pid_for_doc(file) else {
         return Ok(SupervisorKillOutcome::NoSupervisor);
     };
@@ -435,7 +439,11 @@ mod tests {
         ];
         assert_eq!(start_route_owned_doc_from_args(&foreground), None);
         // Not agent-doc at all.
-        let other = vec!["vim".to_string(), "start".to_string(), "--route-owned".to_string()];
+        let other = vec![
+            "vim".to_string(),
+            "start".to_string(),
+            "--route-owned".to_string(),
+        ];
         assert_eq!(start_route_owned_doc_from_args(&other), None);
     }
 
@@ -448,6 +456,9 @@ mod tests {
         assert!(pid_is_self_or_ancestor(1));
         // force-kill refuses self outright (never signals).
         let tmp = std::env::temp_dir().join("supkill-self-guard.md");
-        assert!(!force_kill_verified_supervisor_pid(&tmp, std::process::id()));
+        assert!(!force_kill_verified_supervisor_pid(
+            &tmp,
+            std::process::id()
+        ));
     }
 }

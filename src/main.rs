@@ -2265,9 +2265,7 @@ fn main() -> anyhow::Result<()> {
                 agent_doc_orchestration::drain_owner::clear_drain_owner_lease(&file_str);
                 println!("released drain-owner lease for {}", file.display());
             } else {
-                agent_doc_orchestration::drain_owner::refresh_drain_owner_lease(
-                    &file_str, &owner,
-                )?;
+                agent_doc_orchestration::drain_owner::refresh_drain_owner_lease(&file_str, &owner)?;
                 println!(
                     "claimed drain-owner lease owner={owner} for {}",
                     file.display()
@@ -3087,7 +3085,7 @@ fn main() -> anyhow::Result<()> {
                 #[cfg(unix)]
                 {
                     use agent_doc_orchestration::supervisor_selfkill::{
-                        drive_supervisor_kill, selfkill_grace, SupervisorKillOutcome,
+                        SupervisorKillOutcome, drive_supervisor_kill, selfkill_grace,
                     };
                     let grace = grace_secs
                         .map(std::time::Duration::from_secs)

@@ -111,21 +111,17 @@ pub(crate) fn poll_direct_pane_acceptance(
 }
 
 /// `#jbcodexsubmit` / `#jbclaudesubmit`: decide whether a timed-out direct-pane
-/// submit warrants a one-shot bare `Enter` re-submit. Both the Codex AND the
-/// Claude TUI composers can leave the routed prompt drafted when the trigger
-/// text and its trailing carriage return arrive as one merged `send-keys`
-/// payload (`submit_text_for_harness` sends the non-opencode "Enter" suffix
-/// inline for both harnesses) — the operator then has to press Enter manually.
-/// OpenCode is excluded: it submits via the separate Kitty Return sequence and
-/// does not exhibit the merged-CR non-submit. Only re-send when the first
-/// attempt timed out with the trigger still visible (an empty composer must not
-/// receive a stray bare Enter).
+/// submit warrants a one-shot bare `Enter` re-submit. This is recovery for a
+/// visibly drafted trigger left by an older submit path or a missed Enter; the
+/// harness-specific eligibility lives in the shared tmux submit profile.
+/// Only re-send when the first attempt timed out with the trigger still visible
+/// (an empty composer must not receive a stray bare Enter).
 pub(crate) fn direct_pane_needs_enter_resubmit(
     harness_binary: &str,
     status: CommandDispatchStatus,
     trigger_visible: bool,
 ) -> bool {
-    matches!(harness_binary, "codex" | "claude")
+    crate::sessions::tmux_submit_profile_for_harness(harness_binary).pending_draft_enter_resubmit()
         && status == CommandDispatchStatus::TimedOut
         && trigger_visible
 }
@@ -136,7 +132,8 @@ pub(crate) fn direct_pane_can_enter_existing_draft(
     harness_binary: &str,
     trigger_visible: bool,
 ) -> bool {
-    matches!(harness_binary, "codex" | "claude") && trigger_visible
+    crate::sessions::tmux_submit_profile_for_harness(harness_binary).pending_draft_enter_resubmit()
+        && trigger_visible
 }
 
 pub(crate) fn direct_pane_existing_draft_visible(
@@ -995,11 +992,8 @@ pub(crate) fn validate_routed_trigger_payload(
 }
 
 fn routed_trigger_submit_diagnostic(harness_binary: &str) -> (&'static str, &'static str) {
-    match harness_binary {
-        "codex" => ("routed_trigger_enter_key", "Enter"),
-        "opencode" => ("routed_trigger_kitty_return", "KittyReturn"),
-        _ => ("routed_trigger_cr", "Enter"),
-    }
+    let profile = crate::sessions::tmux_submit_profile_for_harness(harness_binary);
+    (profile.transform(), profile.submit_key())
 }
 
 #[cfg(test)]
@@ -1026,6 +1020,21 @@ mod tests {
         assert!(
             hint.contains("agent-doc start /tmp/session.md"),
             "starting actor hint should name the owner restart recovery: {hint}"
+        );
+    }
+    #[test]
+    fn routed_trigger_submit_diagnostic_names_codex_real_enter_key() {
+        assert_eq!(
+            routed_trigger_submit_diagnostic("codex"),
+            ("tmux_text_enter_key", "Enter")
+        );
+        assert_eq!(
+            routed_trigger_submit_diagnostic("opencode"),
+            ("tmux_text_enter_key", "Enter")
+        );
+        assert_eq!(
+            routed_trigger_submit_diagnostic("claude"),
+            ("tmux_text_enter_key", "Enter")
         );
     }
     #[test]
@@ -1067,9 +1076,9 @@ mod tests {
             CommandDispatchStatus::Accepted,
             true
         ));
-        // OpenCode is excluded: it submits via the Kitty Return sequence (separate
-        // key event), so the merged-CR non-submit does not apply.
-        assert!(!direct_pane_needs_enter_resubmit(
+        // OpenCode shares the same literal text + named Enter path, so a visible
+        // draft after timeout earns the same one-shot Enter recovery.
+        assert!(direct_pane_needs_enter_resubmit(
             "opencode",
             CommandDispatchStatus::TimedOut,
             true
@@ -1080,8 +1089,8 @@ mod tests {
         // #jbcodexsubmit / #jbclaudesubmit / #efscodexsubmit: a direct-pane submit
         // that timed out with the trigger STILL VISIBLE (the composer left the routed
         // prompt drafted) warrants exactly one bare-Enter re-submit. Scoped to the
-        // two harnesses that submit via the merged text+CR `Enter` path.
-        for harness in ["codex", "claude"] {
+        // harnesses that submit via the literal text + named `Enter` path.
+        for harness in ["codex", "claude", "opencode"] {
             assert!(
                 direct_pane_needs_enter_resubmit(harness, CommandDispatchStatus::TimedOut, true),
                 "{harness} timed-out-with-visible-trigger must earn one Enter re-submit"
@@ -1100,27 +1109,6 @@ mod tests {
                 false
             ));
         }
-        // OpenCode submit behavior (Kitty Return) is never perturbed.
-        assert!(!direct_pane_needs_enter_resubmit(
-            "opencode",
-            CommandDispatchStatus::TimedOut,
-            true
-        ));
-    }
-    #[test]
-    fn routed_trigger_submit_diagnostic_names_codex_real_enter_key() {
-        assert_eq!(
-            routed_trigger_submit_diagnostic("codex"),
-            ("routed_trigger_enter_key", "Enter")
-        );
-        assert_eq!(
-            routed_trigger_submit_diagnostic("opencode"),
-            ("routed_trigger_kitty_return", "KittyReturn")
-        );
-        assert_eq!(
-            routed_trigger_submit_diagnostic("claude"),
-            ("routed_trigger_cr", "Enter")
-        );
     }
     #[test]
     fn direct_pane_existing_draft_detection_enters_only_current_codex_draft() {
@@ -1158,7 +1146,7 @@ preflight complete
 
         assert!(direct_pane_can_enter_existing_draft("codex", true));
         assert!(direct_pane_can_enter_existing_draft("claude", true));
-        assert!(!direct_pane_can_enter_existing_draft("opencode", true));
+        assert!(direct_pane_can_enter_existing_draft("opencode", true));
         assert!(!direct_pane_can_enter_existing_draft("codex", false));
     }
     #[test]

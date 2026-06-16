@@ -1461,619 +1461,614 @@ pub(crate) fn rescue_from_stash(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
-use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {
-    use std::sync::{Arc, Mutex};
+    use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {
+        use std::sync::{Arc, Mutex};
 
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-child-extended-ack");
-    let session = "claude";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-child-extended-ack");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
 
-    let doc = dir.path().join("route-live-child-extended-ack.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    let mock_agent = write_mock_registered_agent_doc(dir.path());
-    launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+        let doc = dir.path().join("route-live-child-extended-ack.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-child-extended-ack";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
         .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-live-child-extended-ack";
-    sessions::register(session_id, &pane, &file_path).unwrap();
-    let injects = Arc::new(Mutex::new(Vec::<String>::new()));
-    let injects_for_ipc = injects.clone();
-    let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-            injects_for_ipc.lock().unwrap().push(bytes.clone());
-            IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-        }
-        IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-        IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-        IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-    })
-    .unwrap();
 
-    let doc_for_thread = doc.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1300));
-        crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current)).unwrap();
-    });
+        let doc_for_thread = doc.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1300));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current)).unwrap();
+        });
 
-    let routed = resolve_or_create_pane(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect("route should tolerate a delayed but real live-child cycle start");
-    assert_eq!(routed, pane);
-    assert_eq!(
-        *injects.lock().unwrap(),
-        vec![routed_trigger_submit_payload(
-            &HarnessConfig::codex().trigger_command(&file_path)
-        )],
-        "route should dispatch the bare Codex reopen through supervisor IPC before waiting for the delayed live-child ack"
-    );
+        let routed = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should tolerate a delayed but real live-child cycle start");
+        assert_eq!(routed, pane);
+        assert_eq!(
+            *injects.lock().unwrap(),
+            vec![routed_trigger_submit_payload(
+                &HarnessConfig::codex().trigger_command(&file_path)
+            )],
+            "route should dispatch the bare Codex reopen through supervisor IPC before waiting for the delayed live-child ack"
+        );
 
-    let state = crate::cycle_state::load(&doc)
-        .unwrap()
-        .expect("cycle state should exist after delayed ack");
-    assert_eq!(
-        state.phase,
-        crate::cycle_state::CyclePhase::PreflightStarted
-    );
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_keeps_live_child_reroute_optimistic_when_cycle_ack_is_missing() {
-    use std::sync::{Arc, Mutex};
+        let state = crate::cycle_state::load(&doc)
+            .unwrap()
+            .expect("cycle state should exist after delayed ack");
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_keeps_live_child_reroute_optimistic_when_cycle_ack_is_missing() {
+        use std::sync::{Arc, Mutex};
 
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-child-skip-ack");
-    let session = "claude";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-child-skip-ack");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
 
-    let doc = dir.path().join("route-live-owner-reregister.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    let mock_agent = write_mock_registered_agent_doc(dir.path());
-    launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-        .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    sessions::register("route-live-child-skip", &pane, &file_path).unwrap();
-    let injects = Arc::new(Mutex::new(Vec::<String>::new()));
-    let injects_for_ipc = injects.clone();
-    let mut ipc =
-        SupervisorIpc::start(
-            dir.path(),
+        let doc = dir.path().join("route-live-owner-reregister.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-child-skip", &pane, &file_path).unwrap();
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc =
+            SupervisorIpc::start(
+                dir.path(),
+                "route-live-child-skip",
+                move |method| match method {
+                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                        injects_for_ipc.lock().unwrap().push(bytes.clone());
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                },
+            )
+            .unwrap();
+
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
             "route-live-child-skip",
-            move |method| match method {
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    injects_for_ipc.lock().unwrap().push(bytes.clone());
-                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should stay optimistic when the correct live Codex pane accepts the reopen");
+        assert_eq!(resolved, pane);
+        let injects = injects.lock().unwrap().clone();
+        assert!(
+            !injects.is_empty()
+                && injects.iter().all(|inject| {
+                    inject
+                        == &routed_trigger_submit_payload(
+                            &HarnessConfig::codex().trigger_command(&file_path),
+                        )
+                }),
+            "route should still dispatch the trigger through supervisor IPC before accepting the optimistic startup-miss path: {injects:?}"
+        );
+        let miss = crate::startup_miss::load(&doc)
+            .unwrap()
+            .expect("optimistic route should still record a startup miss");
+        assert_eq!(miss.pane_id, pane);
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_retries_fresh_restart_after_live_codex_ack_timeout() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-codex-fresh-retry");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-live-codex-fresh-retry.md");
+        let snapshot = "---\nagent: codex\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let stale_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-codex-fresh-retry";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let supervisor_instance_id = "busy-reroute-supervisor".to_string();
+        let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
+        let ipc_tmux = iso.clone();
+        let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
+        let injected_pane_for_ipc = injected_pane.clone();
+        *injected_pane.lock().unwrap() = Some(pane.clone());
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": true,
+                        "state": "healthy",
+                        "restart_count": 0,
+                        "actor_state": "ready",
+                        "supervisor_pid": 12345,
+                        "supervisor_instance_id": supervisor_instance_id_for_ipc
+                    })),
+                    IpcMethod::Restart { mode } => {
+                        if mode == "fresh" {
+                            restart_called_for_ipc.store(true, Ordering::Relaxed);
+                        }
+                        IpcResponse::ok_empty()
+                    }
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                        if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
+                            let _ = ipc_tmux.send_keys(&target, bytes.trim_end_matches('\n'));
+                        }
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
                 }
-                IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-            },
+            })
+            .unwrap();
+
+        let iso_for_thread = iso.clone();
+        let ready_agent = write_mock_registered_agent_doc(dir.path());
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        let pane_for_thread = pane.clone();
+        let restart_called_for_thread = restart_called.clone();
+        std::thread::spawn(move || {
+            let wait_start = std::time::Instant::now();
+            while !restart_called_for_thread.load(Ordering::Relaxed)
+                && wait_start.elapsed() < Duration::from_secs(2)
+            {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            iso_for_thread
+                .raw_cmd(&[
+                    "respawn-pane",
+                    "-k",
+                    "-t",
+                    &pane_for_thread,
+                    &format!(
+                        "exec {} {}",
+                        ready_agent.display(),
+                        doc_for_thread.display()
+                    ),
+                ])
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(1200));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
+
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should retry once after a fresh Codex supervisor restart");
+        assert_eq!(resolved, pane);
+        assert!(
+            restart_called.load(Ordering::Relaxed),
+            "route should request a fresh supervisor restart before the retry"
+        );
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "route should resend the reopen after the fresh restart: {content}"
+        );
+
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_restarts_fresh_before_dispatch_after_tracked_codex_clear() {
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/codex-hooks/sessions")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-codex-clear-pre-dispatch-restart");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-codex-clear-pre-dispatch-restart.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+
+        let stale_agent =
+            write_mock_registered_agent_doc_with_prefix(dir.path(), "agent-doc-stale", "STALE");
+        launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
+
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-codex-clear-pre-dispatch-restart";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+
+        let state_path = dir
+            .path()
+            .join(".agent-doc/codex-hooks/sessions/clear.json");
+        std::fs::write(
+            &state_path,
+            serde_json::json!({
+                "session_id": "codex-clear-session",
+                "doc_path": file_path,
+                "last_turn_id": "turn-clear",
+                "last_prompt": "/clear",
+                "updated_at": 42u64
+            })
+            .to_string(),
         )
         .unwrap();
 
-    let resolved = resolve_or_create_pane(
-        &iso,
-        &doc,
-        None,
-        &[],
-        "route-live-child-skip",
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect("route should stay optimistic when the correct live Codex pane accepts the reopen");
-    assert_eq!(resolved, pane);
-    let injects = injects.lock().unwrap().clone();
-    assert!(
-        !injects.is_empty()
-            && injects.iter().all(|inject| {
-                inject
-                    == &routed_trigger_submit_payload(
-                        &HarnessConfig::codex().trigger_command(&file_path),
-                    )
-            }),
-        "route should still dispatch the trigger through supervisor IPC before accepting the optimistic startup-miss path: {injects:?}"
-    );
-    let miss = crate::startup_miss::load(&doc)
-        .unwrap()
-        .expect("optimistic route should still record a startup miss");
-    assert_eq!(miss.pane_id, pane);
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_retries_fresh_restart_after_live_codex_ack_timeout() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
-
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-codex-fresh-retry");
-    let session = "codex";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("route-live-codex-fresh-retry.md");
-    let snapshot = "---\nagent: codex\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    let stale_agent = write_mock_registered_agent_doc(dir.path());
-    launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-        .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-live-codex-fresh-retry";
-    sessions::register(session_id, &pane, &file_path).unwrap();
-
-    let restart_called = Arc::new(AtomicBool::new(false));
-    let restart_called_for_ipc = restart_called.clone();
-    let supervisor_instance_id = "busy-reroute-supervisor".to_string();
-    let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
-    let ipc_tmux = iso.clone();
-    let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
-    let injected_pane_for_ipc = injected_pane.clone();
-    *injected_pane.lock().unwrap() = Some(pane.clone());
-    let mut ipc =
-        crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-            match method {
-                IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                    "running": true,
-                    "state": "healthy",
-                    "restart_count": 0,
-                    "actor_state": "ready",
-                    "supervisor_pid": 12345,
-                    "supervisor_instance_id": supervisor_instance_id_for_ipc
-                })),
-                IpcMethod::Restart { mode } => {
-                    if mode == "fresh" {
-                        restart_called_for_ipc.store(true, Ordering::Relaxed);
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let supervisor_instance_id = "busy-reroute-supervisor".to_string();
+        let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": true,
+                        "state": "healthy",
+                        "restart_count": 0,
+                        "actor_state": "ready",
+                        "supervisor_pid": 12345,
+                        "supervisor_instance_id": supervisor_instance_id_for_ipc
+                    })),
+                    IpcMethod::Restart { mode } => {
+                        if mode == "fresh" {
+                            restart_called_for_ipc.store(true, Ordering::Relaxed);
+                        }
+                        IpcResponse::ok_empty()
                     }
-                    IpcResponse::ok_empty()
-                }
-                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
-                        let _ = ipc_tmux.send_keys(&target, bytes.trim_end_matches('\n'));
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                        injects_for_ipc.lock().unwrap().push(bytes.clone());
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
-                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
                 }
-                IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            })
+            .unwrap();
+
+        let iso_for_thread = iso.clone();
+        let fresh_agent =
+            write_mock_registered_agent_doc_with_prefix(dir.path(), "agent-doc-fresh", "FRESH");
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        let pane_for_thread = pane.clone();
+        let restart_called_for_thread = restart_called.clone();
+        std::thread::spawn(move || {
+            let wait_start = std::time::Instant::now();
+            while !restart_called_for_thread.load(Ordering::Relaxed)
+                && wait_start.elapsed() < Duration::from_secs(2)
+            {
+                std::thread::sleep(Duration::from_millis(25));
             }
-        })
-        .unwrap();
+            iso_for_thread
+                .raw_cmd(&[
+                    "respawn-pane",
+                    "-k",
+                    "-t",
+                    &pane_for_thread,
+                    &format!(
+                        "exec {} {}",
+                        fresh_agent.display(),
+                        doc_for_thread.display()
+                    ),
+                ])
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(1200));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
 
-    let iso_for_thread = iso.clone();
-    let ready_agent = write_mock_registered_agent_doc(dir.path());
-    let doc_for_thread = doc.clone();
-    let current_for_thread = current.clone();
-    let pane_for_thread = pane.clone();
-    let restart_called_for_thread = restart_called.clone();
-    std::thread::spawn(move || {
-        let wait_start = std::time::Instant::now();
-        while !restart_called_for_thread.load(Ordering::Relaxed)
-            && wait_start.elapsed() < Duration::from_secs(2)
-        {
-            std::thread::sleep(Duration::from_millis(25));
-        }
-        iso_for_thread
-            .raw_cmd(&[
-                "respawn-pane",
-                "-k",
-                "-t",
-                &pane_for_thread,
-                &format!(
-                    "exec {} {}",
-                    ready_agent.display(),
-                    doc_for_thread.display()
-                ),
-            ])
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should restart fresh before rerouting after a tracked /clear");
+        assert_eq!(resolved, pane);
+        assert!(
+            restart_called.load(Ordering::Relaxed),
+            "route should request a fresh restart before dispatch"
+        );
+        let trigger = HarnessConfig::codex().trigger_command(&file_path);
+        let injects = injects.lock().unwrap().clone();
+        assert!(
+            injects == vec![routed_trigger_submit_payload(&trigger)],
+            "route should inject exactly one bare reopen through supervisor IPC after the fresh restart: {injects:?}"
+        );
+
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_refuses_busy_registered_pane_before_dispatch_when_prompt_drift_exists()
+     {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-live-owner-supervisor-pid.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let mock_agent = write_mock_busy_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", mock_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
-        std::thread::sleep(Duration::from_millis(1200));
-        crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-pane-busy", &pane, &file_path).unwrap();
+
+        let err = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-pane-busy",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect_err("route should fail closed instead of injecting into a busy live pane");
+
+        let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        assert!(
+            !after.contains("EARLY:agent-doc "),
+            "route should not inject a trigger before the pane becomes idle: {after}"
+        );
+        assert!(
+            err.to_string()
+                .contains("bounded interrupt recovery never restored a dispatch-ready prompt"),
+            "unexpected error: {err:#}"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_dispatch_only_fails_closed_on_busy_registered_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-busy-pane");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-dispatch-only-busy-pane.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
-    });
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-dispatch-only-busy-pane", &pane, &file_path).unwrap();
 
-    let resolved = resolve_or_create_pane(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect("route should retry once after a fresh Codex supervisor restart");
-    assert_eq!(resolved, pane);
-    assert!(
-        restart_called.load(Ordering::Relaxed),
-        "route should request a fresh supervisor restart before the retry"
-    );
+        let err = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-dispatch-only-busy-pane",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect_err(
+            "dispatch-only route should now fail closed instead of injecting into a busy live pane",
+        );
 
-    let content = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "GOT:agent-doc ",
-        std::time::Duration::from_secs(5),
-    );
-    assert!(
-        content.contains("GOT:agent-doc "),
-        "route should resend the reopen after the fresh restart: {content}"
-    );
+        let after =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(1));
+        assert!(
+            !after.contains("EARLY:agent-doc "),
+            "dispatch-only route must not inject a reopen into the busy authoritative pane: {after}"
+        );
+        assert!(
+            err.to_string()
+                .contains("bounded interrupt recovery never restored a dispatch-ready prompt"),
+            "unexpected error: {err:#}"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_dispatch_only_refuses_while_latest_run_is_still_starting() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-starting-pane");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
 
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_restarts_fresh_before_dispatch_after_tracked_codex_clear() {
-    use std::sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    };
-
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc/codex-hooks/sessions")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-codex-clear-pre-dispatch-restart");
-    let session = "codex";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("route-codex-clear-pre-dispatch-restart.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-        .unwrap();
-
-    let stale_agent =
-        write_mock_registered_agent_doc_with_prefix(dir.path(), "agent-doc-stale", "STALE");
-    launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
-
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-codex-clear-pre-dispatch-restart";
-    sessions::register(session_id, &pane, &file_path).unwrap();
-
-    let state_path = dir
-        .path()
-        .join(".agent-doc/codex-hooks/sessions/clear.json");
-    std::fs::write(
-        &state_path,
-        serde_json::json!({
-            "session_id": "codex-clear-session",
-            "doc_path": file_path,
-            "last_turn_id": "turn-clear",
-            "last_prompt": "/clear",
-            "updated_at": 42u64
-        })
-        .to_string(),
-    )
-    .unwrap();
-
-    let restart_called = Arc::new(AtomicBool::new(false));
-    let restart_called_for_ipc = restart_called.clone();
-    let supervisor_instance_id = "busy-reroute-supervisor".to_string();
-    let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
-    let injects = Arc::new(Mutex::new(Vec::<String>::new()));
-    let injects_for_ipc = injects.clone();
-    let mut ipc =
-        crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-            match method {
-                IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                    "running": true,
-                    "state": "healthy",
-                    "restart_count": 0,
-                    "actor_state": "ready",
-                    "supervisor_pid": 12345,
-                    "supervisor_instance_id": supervisor_instance_id_for_ipc
-                })),
-                IpcMethod::Restart { mode } => {
-                    if mode == "fresh" {
-                        restart_called_for_ipc.store(true, Ordering::Relaxed);
-                    }
-                    IpcResponse::ok_empty()
-                }
-                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    injects_for_ipc.lock().unwrap().push(bytes.clone());
-                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                }
-                IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-            }
-        })
-        .unwrap();
-
-    let iso_for_thread = iso.clone();
-    let fresh_agent =
-        write_mock_registered_agent_doc_with_prefix(dir.path(), "agent-doc-fresh", "FRESH");
-    let doc_for_thread = doc.clone();
-    let current_for_thread = current.clone();
-    let pane_for_thread = pane.clone();
-    let restart_called_for_thread = restart_called.clone();
-    std::thread::spawn(move || {
-        let wait_start = std::time::Instant::now();
-        while !restart_called_for_thread.load(Ordering::Relaxed)
-            && wait_start.elapsed() < Duration::from_secs(2)
-        {
-            std::thread::sleep(Duration::from_millis(25));
-        }
-        iso_for_thread
-            .raw_cmd(&[
-                "respawn-pane",
-                "-k",
-                "-t",
-                &pane_for_thread,
-                &format!(
-                    "exec {} {}",
-                    fresh_agent.display(),
-                    doc_for_thread.display()
-                ),
-            ])
+        let doc = dir.path().join("tasks/professional/equityfundingsource.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
-        std::thread::sleep(Duration::from_millis(1200));
-        crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
-            .unwrap();
-    });
 
-    let resolved = resolve_or_create_pane(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect("route should restart fresh before rerouting after a tracked /clear");
-    assert_eq!(resolved, pane);
-    assert!(
-        restart_called.load(Ordering::Relaxed),
-        "route should request a fresh restart before dispatch"
-    );
-    let trigger = HarnessConfig::codex().trigger_command(&file_path);
-    let injects = injects.lock().unwrap().clone();
-    assert!(
-        injects == vec![routed_trigger_submit_payload(&trigger)],
-        "route should inject exactly one bare reopen through supervisor IPC after the fresh restart: {injects:?}"
-    );
-
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_refuses_busy_registered_pane_before_dispatch_when_prompt_drift_exists() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-pane-busy");
-    let session = "claude";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("route-live-owner-supervisor-pid.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    let mock_agent = write_mock_busy_registered_agent_doc(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &pane,
-        &format!("exec {} {}", mock_agent.display(), doc.display()),
-    );
-    let content =
-        wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
-    assert!(
-        content.contains("Working..."),
-        "busy mock session should be active in pane: {content}"
-    );
-
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-dispatch-only-starting-pane";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        crate::startup_miss::append_session_log_event(
+            &doc,
+            session_id,
+            &format!(
+                "session_start file={} pane={} session={}",
+                doc.display(),
+                pane,
+                session_id
+            ),
+        )
         .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    sessions::register("route-live-pane-busy", &pane, &file_path).unwrap();
-
-    let err = resolve_or_create_pane(
-        &iso,
-        &doc,
-        None,
-        &[],
-        "route-live-pane-busy",
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect_err("route should fail closed instead of injecting into a busy live pane");
-
-    let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
-    assert!(
-        !after.contains("EARLY:agent-doc "),
-        "route should not inject a trigger before the pane becomes idle: {after}"
-    );
-    assert!(
-        err.to_string()
-            .contains("bounded interrupt recovery never restored a dispatch-ready prompt"),
-        "unexpected error: {err:#}"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_dispatch_only_fails_closed_on_busy_registered_pane() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-dispatch-only-busy-pane");
-    let session = "codex";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("route-dispatch-only-busy-pane.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    let busy_agent = write_mock_busy_registered_agent_doc(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &pane,
-        &format!("exec {} {}", busy_agent.display(), doc.display()),
-    );
-    let content =
-        wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
-    assert!(
-        content.contains("Working..."),
-        "busy mock session should be active in pane: {content}"
-    );
-
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-        .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    sessions::register("route-dispatch-only-busy-pane", &pane, &file_path).unwrap();
-
-    let err = resolve_or_create_pane_dispatch_only(
-        &iso,
-        &doc,
-        None,
-        &[],
-        "route-dispatch-only-busy-pane",
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect_err(
-        "dispatch-only route should now fail closed instead of injecting into a busy live pane",
-    );
-
-    let after =
-        wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(1));
-    assert!(
-        !after.contains("EARLY:agent-doc "),
-        "dispatch-only route must not inject a reopen into the busy authoritative pane: {after}"
-    );
-    assert!(
-        err.to_string()
-            .contains("bounded interrupt recovery never restored a dispatch-ready prompt"),
-        "unexpected error: {err:#}"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_dispatch_only_refuses_while_latest_run_is_still_starting() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-dispatch-only-starting-pane");
-    let session = "codex";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("tasks/professional/equityfundingsource.md");
-    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+        crate::startup_miss::append_session_log_event(
+            &doc,
+            session_id,
+            "codex_start mode=fresh restart_count=0",
+        )
         .unwrap();
 
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-dispatch-only-starting-pane";
-    sessions::register(session_id, &pane, &file_path).unwrap();
-    crate::startup_miss::append_session_log_event(
-        &doc,
-        session_id,
-        &format!(
-            "session_start file={} pane={} session={}",
-            doc.display(),
-            pane,
-            session_id
-        ),
-    )
-    .unwrap();
-    crate::startup_miss::append_session_log_event(
-        &doc,
-        session_id,
-        "codex_start mode=fresh restart_count=0",
-    )
-    .unwrap();
+        let busy_agent = write_mock_active_codex_turn_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "esc to interrupt",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("esc to interrupt"),
+            "busy mock session should be active in pane: {content}"
+        );
+        assert_eq!(
+            HarnessConfig::codex()
+                .dispatch_blocker_reason(&content)
+                .as_deref(),
+            Some("active codex turn"),
+            "busy mock session should expose the Codex active-turn blocker: {content}"
+        );
 
-    let busy_agent = write_mock_active_codex_turn_registered_agent_doc(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &pane,
-        &format!("exec {} {}", busy_agent.display(), doc.display()),
-    );
-    let content = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "esc to interrupt",
-        std::time::Duration::from_secs(5),
-    );
-    assert!(
-        content.contains("esc to interrupt"),
-        "busy mock session should be active in pane: {content}"
-    );
-    assert_eq!(
-        HarnessConfig::codex()
-            .dispatch_blocker_reason(&content)
-            .as_deref(),
-        Some("active codex turn"),
-        "busy mock session should expose the Codex active-turn blocker: {content}"
-    );
-
-    let err = resolve_or_create_pane_dispatch_only(
+        let err = resolve_or_create_pane_dispatch_only(
             &iso,
             &doc,
             None,
@@ -2085,252 +2080,250 @@ fn resolve_or_create_pane_dispatch_only_refuses_while_latest_run_is_still_starti
             &mut Vec::new(),
         )
         .expect_err("dispatch-only route must wait for a dispatch-ready prompt during the fresh-start boot window");
-    assert!(
-        err.to_string()
-            .contains("never reached a dispatch-ready prompt"),
-        "unexpected startup-window refusal: {err:#}"
-    );
-    assert!(
-        err.to_string()
-            .contains("tasks/professional/equityfundingsource.md"),
-        "startup-window refusal should preserve the EFS document path: {err:#}"
-    );
-    let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
-    assert!(
-        !after.contains("EARLY:agent-doc "),
-        "dispatch-only route must not submit through the live pane before the startup prompt is visible: {after}"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_dispatch_only_fails_closed_on_reverse_i_search() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-dispatch-only-reverse-i-search");
-    let session = "codex";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(
+            err.to_string()
+                .contains("never reached a dispatch-ready prompt"),
+            "unexpected startup-window refusal: {err:#}"
+        );
+        assert!(
+            err.to_string()
+                .contains("tasks/professional/equityfundingsource.md"),
+            "startup-window refusal should preserve the EFS document path: {err:#}"
+        );
+        let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        assert!(
+            !after.contains("EARLY:agent-doc "),
+            "dispatch-only route must not submit through the live pane before the startup prompt is visible: {after}"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_dispatch_only_fails_closed_on_reverse_i_search() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-reverse-i-search");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
 
-    let doc = dir.path().join("route-dispatch-only-reverse-i-search.md");
-    std::fs::write(
+        let doc = dir.path().join("route-dispatch-only-reverse-i-search.md");
+        std::fs::write(
             &doc,
             "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n❯ follow-up question\n",
         )
         .unwrap();
-    crate::snapshot::save(
+        crate::snapshot::save(
         &doc,
         "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
     )
     .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    sessions::register(
-        "route-test-dispatch-only-reverse-i-search",
-        &pane,
-        &file_path,
-    )
-    .unwrap();
-
-    let busy_agent = write_mock_busy_registered_agent_doc_recovers_on_ctrl_g(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &pane,
-        &format!("exec {} {}", busy_agent.display(), doc.display()),
-    );
-    let content = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "reverse-i-search",
-        std::time::Duration::from_secs(5),
-    );
-    assert!(
-        content.contains("reverse-i-search"),
-        "dispatch-only blocker test requires a visible reverse-i-search shell state: {content}"
-    );
-
-    let err = resolve_or_create_pane_dispatch_only(
-        &iso,
-        &doc,
-        None,
-        &[],
-        "route-test-dispatch-only-reverse-i-search",
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect_err("dispatch-only route must fail closed on reverse-i-search");
-    assert!(
-        err.to_string().contains("reverse-i-search"),
-        "unexpected error: {err:#}"
-    );
-
-    let after = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "reverse-i-search",
-        std::time::Duration::from_secs(1),
-    );
-    assert!(
-        !after.contains("GOT:agent-doc "),
-        "dispatch-only route must not inject a reopen after detecting reverse-i-search: {after}"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_retries_busy_registered_pane_once_after_interrupt_recovery() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-pane-busy-interrupt-retry");
-    let session = "codex";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("route-live-pane-busy-interrupt-retry.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    let busy_agent = write_mock_busy_registered_agent_doc_ignores_interrupt(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &pane,
-        &format!("exec {} {}", busy_agent.display(), doc.display()),
-    );
-    let content =
-        wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
-    assert!(
-        content.contains("Working..."),
-        "busy mock session should be active in pane: {content}"
-    );
-
-    let ready_agent = write_mock_registered_agent_doc(dir.path());
-    std::fs::write(
-        dir.path().join(".agent-doc/route-busy-interrupt.txt"),
-        format!("exec {} {}\n", ready_agent.display(), doc.display()),
-    )
-    .unwrap();
-
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register(
+            "route-test-dispatch-only-reverse-i-search",
+            &pane,
+            &file_path,
+        )
         .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-live-pane-busy-interrupt-retry";
-    sessions::register(session_id, &pane, &file_path).unwrap();
-    let ipc_tmux = iso.clone();
-    let pane_for_ipc = pane.clone();
-    let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-            let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
-            IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-        }
-        IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-        IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-        IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-    })
-    .unwrap();
 
-    let doc_for_thread = doc.clone();
-    let current_for_thread = current.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1300));
-        crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
-            .unwrap();
-    });
+        let busy_agent = write_mock_busy_registered_agent_doc_recovers_on_ctrl_g(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "reverse-i-search",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("reverse-i-search"),
+            "dispatch-only blocker test requires a visible reverse-i-search shell state: {content}"
+        );
 
-    let reused = resolve_or_create_pane_with_auto_fix_retry(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-        false,
-        true,
-        true,
-    )
-    .expect("route should retry once after interrupting a still-busy live Codex pane");
-    assert_eq!(reused, pane);
+        let err = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-test-dispatch-only-reverse-i-search",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect_err("dispatch-only route must fail closed on reverse-i-search");
+        assert!(
+            err.to_string().contains("reverse-i-search"),
+            "unexpected error: {err:#}"
+        );
 
-    let after = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "GOT:agent-doc ",
-        std::time::Duration::from_secs(5),
-    );
-    assert!(
-        after.contains("GOT:agent-doc "),
-        "route should dispatch the reopen after the interrupt recovery retry: {after}"
-    );
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_retries_busy_registered_pane_once_after_ctrl_g_probe() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-pane-busy-ctrl-g-retry");
-    let session = "codex";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "reverse-i-search",
+            std::time::Duration::from_secs(1),
+        );
+        assert!(
+            !after.contains("GOT:agent-doc "),
+            "dispatch-only route must not inject a reopen after detecting reverse-i-search: {after}"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_retries_busy_registered_pane_once_after_interrupt_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy-interrupt-retry");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
 
-    let doc = dir.path().join("route-live-pane-busy-ctrl-g-retry.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    let busy_agent = write_mock_busy_registered_agent_doc_recovers_on_ctrl_g(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &pane,
-        &format!("exec {} {}", busy_agent.display(), doc.display()),
-    );
-    let content = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "reverse-i-search",
-        std::time::Duration::from_secs(5),
-    );
-    assert!(
-        content.contains("reverse-i-search"),
-        "busy mock session should be in reverse-i-search: {content}"
-    );
+        let doc = dir.path().join("route-live-pane-busy-interrupt-retry.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_registered_agent_doc_ignores_interrupt(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
 
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+        let ready_agent = write_mock_registered_agent_doc(dir.path());
+        std::fs::write(
+            dir.path().join(".agent-doc/route-busy-interrupt.txt"),
+            format!("exec {} {}\n", ready_agent.display(), doc.display()),
+        )
         .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-live-pane-busy-ctrl-g-retry";
-    sessions::register(session_id, &pane, &file_path).unwrap();
-    let ipc_tmux = iso.clone();
-    let pane_for_ipc = pane.clone();
-    let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-            let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
-            IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-        }
-        IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-        IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-        IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-    })
-    .unwrap();
 
-    let doc_for_thread = doc.clone();
-    let current_for_thread = current.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1300));
-        crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
-    });
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-pane-busy-interrupt-retry";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
 
-    let reused = resolve_or_create_pane_with_auto_fix_retry(
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1300));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
+
+        let reused = resolve_or_create_pane_with_auto_fix_retry(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+            false,
+            true,
+            true,
+        )
+        .expect("route should retry once after interrupting a still-busy live Codex pane");
+        assert_eq!(reused, pane);
+
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            after.contains("GOT:agent-doc "),
+            "route should dispatch the reopen after the interrupt recovery retry: {after}"
+        );
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_retries_busy_registered_pane_once_after_ctrl_g_probe() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy-ctrl-g-retry");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-live-pane-busy-ctrl-g-retry.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_registered_agent_doc_recovers_on_ctrl_g(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "reverse-i-search",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("reverse-i-search"),
+            "busy mock session should be in reverse-i-search: {content}"
+        );
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-pane-busy-ctrl-g-retry";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1300));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
+
+        let reused = resolve_or_create_pane_with_auto_fix_retry(
         &iso,
         &doc,
         None,
@@ -2347,190 +2340,188 @@ fn resolve_or_create_pane_retries_busy_registered_pane_once_after_ctrl_g_probe()
     .expect(
         "route should retry once after ctrl-g clears reverse-i-search in a busy live Codex pane",
     );
-    assert_eq!(reused, pane);
+        assert_eq!(reused, pane);
 
-    let after = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "GOT:agent-doc ",
-        std::time::Duration::from_secs(5),
-    );
-    assert!(
-        after.contains("GOT:agent-doc "),
-        "route should dispatch the reopen after the ctrl-g interrupt recovery probe: {after}"
-    );
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_retries_busy_opencode_pane_after_escape_interrupt() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-opencode-busy-escape-retry");
-    let session = "opencode";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            after.contains("GOT:agent-doc "),
+            "route should dispatch the reopen after the ctrl-g interrupt recovery probe: {after}"
+        );
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_retries_busy_opencode_pane_after_escape_interrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-opencode-busy-escape-retry");
+        let session = "opencode";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
 
-    let doc = dir.path().join("route-opencode-busy-escape-retry.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    let busy_agent = write_mock_busy_opencode_recovers_on_escape(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &pane,
-        &format!("exec {} {}", busy_agent.display(), doc.display()),
-    );
-    let content = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "esc interrupt",
-        std::time::Duration::from_secs(5),
-    );
-    assert!(
-        content.contains("esc interrupt"),
-        "busy OpenCode mock should be active in pane: {content}"
-    );
+        let doc = dir.path().join("route-opencode-busy-escape-retry.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_opencode_recovers_on_escape(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "esc interrupt",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            content.contains("esc interrupt"),
+            "busy OpenCode mock should be active in pane: {content}"
+        );
 
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-        .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-opencode-busy-escape-retry";
-    sessions::register(session_id, &pane, &file_path).unwrap();
-    let ipc_tmux = iso.clone();
-    let pane_for_ipc = pane.clone();
-    let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-            let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
-            IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-        }
-        IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-        IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-        IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-    })
-    .unwrap();
-
-    let doc_for_thread = doc.clone();
-    let current_for_thread = current.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1300));
-        crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
-    });
-
-    let reused = resolve_or_create_pane_with_auto_fix_retry(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::opencode(),
-        &mut Vec::new(),
-        false,
-        true,
-        true,
-    )
-    .expect("route should retry after Escape interrupt recovers a busy OpenCode pane");
-    assert_eq!(reused, pane);
-
-    let after = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "GOT:/agent-doc ",
-        std::time::Duration::from_secs(5),
-    );
-    assert!(
-        after.contains("GOT:/agent-doc "),
-        "route should dispatch the reopen after the Escape interrupt recovery: {after}"
-    );
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_keeps_interrupt_timeout_busy_reroute_optimistic_for_alive_pane() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
-
-    let _tmux_guard = tmux_start_lock();
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-pane-busy-interrupt-blocked");
-    let session = "codex";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("route-live-pane-busy-interrupt-blocked.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    let busy_agent = write_mock_busy_registered_agent_doc_ignores_interrupt(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &pane,
-        &format!("exec {} {}", busy_agent.display(), doc.display()),
-    );
-    let content =
-        wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
-    assert!(
-        content.contains("Working..."),
-        "busy mock session should be active in pane: {content}"
-    );
-
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-        .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-live-pane-busy-interrupt-blocked";
-    sessions::register(session_id, &pane, &file_path).unwrap();
-
-    let restart_called = Arc::new(AtomicBool::new(false));
-    let restart_called_for_ipc = restart_called.clone();
-    let supervisor_instance_id = "busy-reroute-supervisor".to_string();
-    let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
-    let ipc_tmux = iso.clone();
-    let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
-    let injected_pane_for_ipc = injected_pane.clone();
-    let mut ipc =
-        crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-            match method {
-                IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                    "running": true,
-                    "state": "healthy",
-                    "restart_count": 0,
-                    "actor_state": "ready",
-                    "supervisor_pid": 12345,
-                    "supervisor_instance_id": supervisor_instance_id_for_ipc
-                })),
-                IpcMethod::Restart { mode } => {
-                    if mode == "fresh" {
-                        restart_called_for_ipc.store(true, Ordering::Relaxed);
-                    }
-                    IpcResponse::ok_empty()
-                }
-                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
-                        let _ = ipc_tmux.send_keys(&target, &bytes);
-                    }
-                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                }
-                IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-opencode-busy-escape-retry";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
-    let reused = resolve_or_create_pane(
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1300));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
+
+        let reused = resolve_or_create_pane_with_auto_fix_retry(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::opencode(),
+            &mut Vec::new(),
+            false,
+            true,
+            true,
+        )
+        .expect("route should retry after Escape interrupt recovers a busy OpenCode pane");
+        assert_eq!(reused, pane);
+
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:/agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            after.contains("GOT:/agent-doc "),
+            "route should dispatch the reopen after the Escape interrupt recovery: {after}"
+        );
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_keeps_interrupt_timeout_busy_reroute_optimistic_for_alive_pane() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy-interrupt-blocked");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-live-pane-busy-interrupt-blocked.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_registered_agent_doc_ignores_interrupt(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-pane-busy-interrupt-blocked";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let supervisor_instance_id = "busy-reroute-supervisor".to_string();
+        let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
+        let ipc_tmux = iso.clone();
+        let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
+        let injected_pane_for_ipc = injected_pane.clone();
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": true,
+                        "state": "healthy",
+                        "restart_count": 0,
+                        "actor_state": "ready",
+                        "supervisor_pid": 12345,
+                        "supervisor_instance_id": supervisor_instance_id_for_ipc
+                    })),
+                    IpcMethod::Restart { mode } => {
+                        if mode == "fresh" {
+                            restart_called_for_ipc.store(true, Ordering::Relaxed);
+                        }
+                        IpcResponse::ok_empty()
+                    }
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                        if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
+                            let _ = ipc_tmux.send_keys(&target, &bytes);
+                        }
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                }
+            })
+            .unwrap();
+
+        let reused = resolve_or_create_pane(
         &iso,
         &doc,
         None,
@@ -2544,1181 +2535,1186 @@ fn resolve_or_create_pane_keeps_interrupt_timeout_busy_reroute_optimistic_for_al
     .expect(
         "route should still inject into the authoritative pane after the bounded interrupt ladder",
     );
-    assert_eq!(reused, pane);
-    assert!(restart_called.load(Ordering::Relaxed));
-    let miss = crate::startup_miss::load(&doc)
-        .unwrap()
-        .expect("optimistic busy reroute should still record a startup miss");
-    assert_eq!(miss.pane_id, pane);
+        assert_eq!(reused, pane);
+        assert!(restart_called.load(Ordering::Relaxed));
+        let miss = crate::startup_miss::load(&doc)
+            .unwrap()
+            .expect("optimistic busy reroute should still record a startup miss");
+        assert_eq!(miss.pane_id, pane);
 
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_retries_busy_registered_pane_once_after_scoped_fix() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-pane-busy-auto-fix");
-    let session = "claude";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_retries_busy_registered_pane_once_after_scoped_fix() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy-auto-fix");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
 
-    let doc = dir.path().join("route-live-pane-busy-auto-fix.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    let busy_agent = write_mock_busy_registered_agent_doc(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &pane,
-        &format!("exec {} {}", busy_agent.display(), doc.display()),
-    );
-    let content =
-        wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
-    assert!(
-        content.contains("Working..."),
-        "busy mock session should be active in pane: {content}"
-    );
+        let doc = dir.path().join("route-live-pane-busy-auto-fix.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
 
-    let ready_agent = write_mock_registered_agent_doc(dir.path());
-    let hook_command = format!("exec {} {}", ready_agent.display(), doc.display());
-    std::fs::write(
-        dir.path().join(".agent-doc/route-busy-auto-fix.txt"),
-        format!("{hook_command}\n"),
-    )
-    .unwrap();
-
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+        let ready_agent = write_mock_registered_agent_doc(dir.path());
+        let hook_command = format!("exec {} {}", ready_agent.display(), doc.display());
+        std::fs::write(
+            dir.path().join(".agent-doc/route-busy-auto-fix.txt"),
+            format!("{hook_command}\n"),
+        )
         .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-live-pane-busy-auto-fix";
-    sessions::register(session_id, &pane, &file_path).unwrap();
-    let ipc_tmux = iso.clone();
-    let pane_for_ipc = pane.clone();
-    let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-            let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
-            IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-        }
-        IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-        IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-        IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-    })
-    .unwrap();
 
-    let doc_for_thread = doc.clone();
-    let current_for_thread = current.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1300));
-        crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
-    });
-
-    let reused = resolve_or_create_pane(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect("route should retry once after the scoped auto-fix recovers the busy pane");
-    assert_eq!(reused, pane);
-
-    let after = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "GOT:agent-doc ",
-        std::time::Duration::from_secs(5),
-    );
-    assert!(
-        after.contains("GOT:agent-doc "),
-        "route should inject the reopen after the scoped fix retry: {after}"
-    );
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_focuses_busy_registered_pane_without_prompt_drift() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-pane-busy-no-drift");
-    let session = "claude";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("route-live-owner-supervisor-pid.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    std::fs::write(&doc, snapshot).unwrap();
-    let mock_agent = write_mock_busy_registered_agent_doc(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &pane,
-        &format!("exec {} {}", mock_agent.display(), doc.display()),
-    );
-    let content =
-        wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
-    assert!(
-        content.contains("Working..."),
-        "busy mock session should be active in pane: {content}"
-    );
-
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-pane-busy-auto-fix";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
         .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    sessions::register("route-live-pane-busy-no-drift", &pane, &file_path).unwrap();
 
-    let reused = resolve_or_create_pane(
-        &iso,
-        &doc,
-        None,
-        &[],
-        "route-live-pane-busy-no-drift",
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect("route should focus the already-running pane when there is no new drift");
-    assert_eq!(reused, pane);
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1300));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
 
-    let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
-    assert!(
-        !after.contains("EARLY:agent-doc "),
-        "route should not inject a duplicate reopen into a busy live pane: {after}"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_rejects_same_committed_cycle_mutation_for_prompt_drift() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-ack-same-cycle");
-    let session = "claude";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("route-supervisor-restart.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    let mock_agent = write_mock_registered_agent_doc(dir.path());
-    launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-        .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-live-same-cycle";
-    sessions::register(session_id, &pane, &file_path).unwrap();
-    let ipc_tmux = iso.clone();
-    let pane_for_ipc = pane.clone();
-    let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-            let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
-            IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-        }
-        IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-        IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-        IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-    })
-    .unwrap();
-
-    let doc_for_thread = doc.clone();
-    let snapshot_for_thread = snapshot.to_string();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(250));
-        crate::cycle_state::mark_committed(
-            &doc_for_thread,
-            "commit_already_current",
-            Some(&snapshot_for_thread),
-            Some(&snapshot_for_thread),
-        )
-        .unwrap();
-    });
-
-    let resolved = resolve_or_create_pane(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect("same-cycle committed churn should not block an already-accepted optimistic reroute");
-    assert_eq!(resolved, pane);
-
-    let content = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "GOT:agent-doc ",
-        std::time::Duration::from_secs(3),
-    );
-    assert!(
-        content.contains("GOT:agent-doc "),
-        "route should still dispatch the trigger to the registered pane: {content}"
-    );
-    let miss = crate::startup_miss::load(&doc)
-        .unwrap()
-        .expect("optimistic same-cycle reroute should still record a startup miss");
-    assert_eq!(miss.pane_id, pane);
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_accepts_registered_pane_trigger_once_new_cycle_starts() {
-    let _tmux_guard = tmux_start_lock();
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-ack-ok");
-    let session = "claude";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("session.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
-    launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-        .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-live-ok";
-    sessions::register(session_id, &pane, &file_path).unwrap();
-    let ipc_tmux = iso.clone();
-    let pane_for_ipc = pane.clone();
-    let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-            let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
-            IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-        }
-        IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-        IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-        IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-    })
-    .unwrap();
-
-    let doc_for_thread = doc.clone();
-    let snapshot_for_thread = snapshot.to_string();
-    let current_for_thread = current.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(250));
-        crate::cycle_state::start_preflight(
-            &doc_for_thread,
-            Some(&snapshot_for_thread),
-            Some(&current_for_thread),
-        )
-        .unwrap();
-        crate::cycle_state::mark_committed(
-            &doc_for_thread,
-            "commit_success",
-            Some(&snapshot_for_thread),
-            Some(&current_for_thread),
-        )
-        .unwrap();
-    });
-
-    let resolved = resolve_or_create_pane(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect("route should accept the new cycle ack");
-    assert_eq!(resolved, pane);
-
-    let content = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "GOT:agent-doc ",
-        std::time::Duration::from_secs(3),
-    );
-    assert!(
-        content.contains("GOT:agent-doc "),
-        "route should dispatch the trigger before observing the ack: {content}"
-    );
-    assert!(
-        !content.contains("EXTRA:"),
-        "route should not append follow-up prompt text onto the Codex reopen payload: {content}"
-    );
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_accepts_content_edit_cycle_ack_without_extra_payload_lines() {
-    let _tmux_guard = tmux_start_lock();
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-ack-content-edit");
-    let session = "claude";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("session.md");
-    let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nThe service returned 401 from this endpoint\n<!-- /agent:exchange -->\n";
-    let current = "<!-- agent:exchange patch=append -->\n### Re: older\nThe service returned 503 from this endpoint\n<!-- /agent:exchange -->\n";
-    std::fs::write(&doc, current).unwrap();
-    let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
-    launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-        .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-live-content-edit-ok";
-    sessions::register(session_id, &pane, &file_path).unwrap();
-    let ipc_tmux = iso.clone();
-    let pane_for_ipc = pane.clone();
-    let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-            let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
-            IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-        }
-        IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-        IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-        IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-    })
-    .unwrap();
-
-    let doc_for_thread = doc.clone();
-    let snapshot_for_thread = snapshot.to_string();
-    let current_for_thread = current.to_string();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(250));
-        crate::cycle_state::start_preflight(
-            &doc_for_thread,
-            Some(&snapshot_for_thread),
-            Some(&current_for_thread),
-        )
-        .unwrap();
-        crate::cycle_state::mark_committed(
-            &doc_for_thread,
-            "commit_success",
-            Some(&snapshot_for_thread),
-            Some(&current_for_thread),
-        )
-        .unwrap();
-    });
-
-    let resolved = resolve_or_create_pane(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect("route should accept the new cycle ack for content edits");
-    assert_eq!(resolved, pane);
-
-    let content = wait_for_pane_contains(
-        &iso,
-        &pane,
-        "GOT:agent-doc ",
-        std::time::Duration::from_secs(3),
-    );
-    assert!(
-        content.contains("GOT:agent-doc "),
-        "route should dispatch the bare Codex reopen before observing the content-edit ack: {content}"
-    );
-    assert!(
-        !content.contains("EXTRA:"),
-        "route must not append content-edit text onto the Codex reopen payload: {content}"
-    );
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn alive_registered_pane_without_live_owner_deregisters_and_lazy_claims() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-live-owner-missing");
-    let session = "claude";
-    let cwd = test_cwd();
-    let stale_pane = iso.auto_start(session, &cwd).unwrap();
-    send_keys_with_retry(
-        &iso,
-        &stale_pane,
-        r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "STALE:%s\n" "$CMD"; cat'"#,
-    );
-    let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
-
-    let doc = dir.path().join("session.md");
-    std::fs::write(&doc, "# Session\n").unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let mut registry = sessions::SessionRegistry::default();
-    registry.insert(
-        file_path.clone(),
-        sessions::SessionEntry {
-            pane: stale_pane.clone(),
-            pid: 0,
-            cwd: dir.path().to_string_lossy().to_string(),
-            started: String::new(),
-            session_id: "route-live-owner-missing".to_string(),
-            file: file_path.clone(),
-            window: iso.pane_window(&stale_pane).unwrap_or_default(),
-            supervisor_instance_id: String::new(),
-        },
-    );
-    sessions::save_in(dir.path(), &registry).unwrap();
-    let mock_start = write_mock_start_agent_doc(dir.path());
-
-    let doc_for_thread = doc.clone();
-    let current_for_thread = "# Session\n❯ follow-up question\n".to_string();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(250));
-        crate::cycle_state::start_preflight(
-            &doc_for_thread,
-            Some("# Session\n"),
-            Some(&current_for_thread),
-        )
-        .unwrap();
-        crate::cycle_state::mark_committed(
-            &doc_for_thread,
-            "commit_success",
-            Some("# Session\n"),
-            Some(&current_for_thread),
-        )
-        .unwrap();
-    });
-
-    let resolved = {
-        let _route_bin_guard = route_bin_env_lock();
-        unsafe {
-            std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
-        }
-        let result = resolve_or_create_pane(
+        let reused = resolve_or_create_pane(
             &iso,
             &doc,
             None,
             &[],
-            "route-live-owner-missing",
+            session_id,
             &file_path,
             session,
             &HarnessConfig::codex(),
             &mut Vec::new(),
+        )
+        .expect("route should retry once after the scoped auto-fix recovers the busy pane");
+        assert_eq!(reused, pane);
+
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
         );
-        unsafe {
-            std::env::remove_var("AGENT_DOC_ROUTE_BIN");
-        }
-        result
+        assert!(
+            after.contains("GOT:agent-doc "),
+            "route should inject the reopen after the scoped fix retry: {after}"
+        );
+        ipc.stop();
     }
-    .expect("route should continue recovery after clearing the stale registration");
-    assert_ne!(resolved, stale_pane);
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_focuses_busy_registered_pane_without_prompt_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-pane-busy-no-drift");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
 
-    let reassigned = sessions::lookup("route-live-owner-missing").unwrap();
-    assert!(
-        reassigned.as_deref() == Some(resolved.as_str()),
-        "route should re-register to the recovered pane, got: {reassigned:?}"
-    );
+        let doc = dir.path().join("route-live-owner-supervisor-pid.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, snapshot).unwrap();
+        let mock_agent = write_mock_busy_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", mock_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
 
-    let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
-    assert!(
-        !stale_content.contains("STALE:agent-doc "),
-        "route should not dispatch into the stale registered pane: {stale_content}"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_dispatch_only_reuses_registered_authoritative_actor_pane_when_supervisor_state_is_missing()
- {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-authoritative-actor-dispatch-only-fallback");
-    let session = "claude";
-    let cwd = test_cwd();
-    let actor_pane = iso.auto_start(session, &cwd).unwrap();
-    send_keys_with_retry(
-        &iso,
-        &actor_pane,
-        r#"exec /bin/sh -c 'printf "❯ \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
-    );
-    let _ = wait_for_pane_contains(&iso, &actor_pane, "❯ ", std::time::Duration::from_secs(3));
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        sessions::register("route-live-pane-busy-no-drift", &pane, &file_path).unwrap();
 
-    let doc = dir.path().join("dispatch-only-claude-fallback.md");
-    let snapshot = "---\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+        let reused = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-live-pane-busy-no-drift",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should focus the already-running pane when there is no new drift");
+        assert_eq!(reused, pane);
+
+        let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        assert!(
+            !after.contains("EARLY:agent-doc "),
+            "route should not inject a duplicate reopen into a busy live pane: {after}"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_rejects_same_committed_cycle_mutation_for_prompt_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-ack-same-cycle");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-supervisor-restart.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-same-cycle";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
         .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-authoritative-actor-dispatch-only-fallback";
-    sessions::register(session_id, &actor_pane, &file_path).unwrap();
 
-    let actor_window = iso.pane_window(&actor_pane).unwrap();
-    crate::session_actor::project_binding_in(
-        dir.path(),
-        &file_path,
-        session_id,
-        &actor_pane,
-        &actor_window,
-        "route",
-        "dispatch_bind",
-    )
-    .unwrap();
+        let doc_for_thread = doc.clone();
+        let snapshot_for_thread = snapshot.to_string();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_already_current",
+                Some(&snapshot_for_thread),
+                Some(&snapshot_for_thread),
+            )
+            .unwrap();
+        });
 
-    let dispatch_pane = resolve_or_create_pane_dispatch_only(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::claude(),
-        &mut Vec::new(),
-    )
-    .expect(
-        "dispatch-only reroute should reuse the live authoritative pane after readiness checks",
-    );
-    assert_eq!(dispatch_pane, actor_pane);
-    let actor_after = wait_for_pane_contains(
-        &iso,
-        &actor_pane,
-        &HarnessConfig::claude().trigger_command(&file_path),
-        std::time::Duration::from_secs(3),
-    );
-    assert!(
-        actor_after.contains(&HarnessConfig::claude().trigger_command(&file_path)),
-        "degraded authoritative actor should receive the direct-pane reopen: {actor_after}"
-    );
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect(
+            "same-cycle committed churn should not block an already-accepted optimistic reroute",
+        );
+        assert_eq!(resolved, pane);
 
-    let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-        .expect("dispatch-only degraded direct submit should write an ops log entry");
-    assert!(
-        ops_log.contains("route_dispatch_only_authoritative_degraded_direct_pane"),
-        "expected authoritative degraded direct submit logging, got: {ops_log}"
-    );
-    assert!(
-        ops_log.contains("supervisor_health=no_socket"),
-        "direct-submit logging should explain the degraded supervisor state: {ops_log}"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_dispatch_only_recovers_waiting_input_actor_with_fresh_restart() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "route should still dispatch the trigger to the registered pane: {content}"
+        );
+        let miss = crate::startup_miss::load(&doc)
+            .unwrap()
+            .expect("optimistic same-cycle reroute should still record a startup miss");
+        assert_eq!(miss.pane_id, pane);
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_accepts_registered_pane_trigger_once_new_cycle_starts() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-ack-ok");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
 
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-dispatch-only-waiting-input-restart");
-    let session = "codex";
-    let cwd = test_cwd();
-    let actor_pane = iso.auto_start(session, &cwd).unwrap();
-    send_keys_with_retry(
-        &iso,
-        &actor_pane,
-        r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
-    );
-    let _ = wait_for_pane_contains(&iso, &actor_pane, "> ", std::time::Duration::from_secs(3));
-
-    let doc = dir.path().join("dispatch-only-waiting-input.md");
-    let snapshot =
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
-    let current = format!("{snapshot}❯ follow-up question\n");
-    std::fs::write(&doc, &current).unwrap();
-    crate::snapshot::save(&doc, snapshot).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+        let doc = dir.path().join("session.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-ok";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
         .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-dispatch-only-waiting-input";
-    sessions::register(session_id, &actor_pane, &file_path).unwrap();
 
-    let actor_window = iso.pane_window(&actor_pane).unwrap();
-    crate::session_actor::project_binding_in(
-        dir.path(),
-        &file_path,
-        session_id,
-        &actor_pane,
-        &actor_window,
-        "route",
-        "dispatch_bind",
-    )
-    .unwrap();
+        let doc_for_thread = doc.clone();
+        let snapshot_for_thread = snapshot.to_string();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_success",
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+        });
 
-    let restart_called = Arc::new(AtomicBool::new(false));
-    let restart_called_for_ipc = restart_called.clone();
-    let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::State => {
-            let actor_state = if restart_called_for_ipc.load(Ordering::Relaxed) {
-                "ready"
-            } else {
-                "waiting_input"
-            };
-            IpcResponse::ok(serde_json::json!({
-                "running": true,
-                "state": "healthy",
-                "actor_state": actor_state,
-                "restart_count": 0
-            }))
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should accept the new cycle ack");
+        assert_eq!(resolved, pane);
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "route should dispatch the trigger before observing the ack: {content}"
+        );
+        assert!(
+            !content.contains("EXTRA:"),
+            "route should not append follow-up prompt text onto the Codex reopen payload: {content}"
+        );
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_accepts_content_edit_cycle_ack_without_extra_payload_lines() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-ack-content-edit");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("session.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nThe service returned 401 from this endpoint\n<!-- /agent:exchange -->\n";
+        let current = "<!-- agent:exchange patch=append -->\n### Re: older\nThe service returned 503 from this endpoint\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, current).unwrap();
+        let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
+        launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-live-content-edit-ok";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let doc_for_thread = doc.clone();
+        let snapshot_for_thread = snapshot.to_string();
+        let current_for_thread = current.to_string();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_success",
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+        });
+
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should accept the new cycle ack for content edits");
+        assert_eq!(resolved, pane);
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "route should dispatch the bare Codex reopen before observing the content-edit ack: {content}"
+        );
+        assert!(
+            !content.contains("EXTRA:"),
+            "route must not append content-edit text onto the Codex reopen payload: {content}"
+        );
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn alive_registered_pane_without_live_owner_deregisters_and_lazy_claims() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-live-owner-missing");
+        let session = "claude";
+        let cwd = test_cwd();
+        let stale_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &stale_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "STALE:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
+
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let mut registry = sessions::SessionRegistry::default();
+        registry.insert(
+            file_path.clone(),
+            sessions::SessionEntry {
+                pane: stale_pane.clone(),
+                pid: 0,
+                cwd: dir.path().to_string_lossy().to_string(),
+                started: String::new(),
+                session_id: "route-live-owner-missing".to_string(),
+                file: file_path.clone(),
+                window: iso.pane_window(&stale_pane).unwrap_or_default(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        sessions::save_in(dir.path(), &registry).unwrap();
+        let mock_start = write_mock_start_agent_doc(dir.path());
+
+        let doc_for_thread = doc.clone();
+        let current_for_thread = "# Session\n❯ follow-up question\n".to_string();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some("# Session\n"),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_success",
+                Some("# Session\n"),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+        });
+
+        let resolved = {
+            let _route_bin_guard = route_bin_env_lock();
+            unsafe {
+                std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
+            }
+            let result = resolve_or_create_pane(
+                &iso,
+                &doc,
+                None,
+                &[],
+                "route-live-owner-missing",
+                &file_path,
+                session,
+                &HarnessConfig::codex(),
+                &mut Vec::new(),
+            );
+            unsafe {
+                std::env::remove_var("AGENT_DOC_ROUTE_BIN");
+            }
+            result
         }
-        IpcMethod::Restart { mode } => {
-            assert_eq!(mode, "fresh");
-            restart_called_for_ipc.store(true, Ordering::Relaxed);
-            IpcResponse::ok_empty()
-        }
-        IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => IpcResponse::ok_empty(),
-        IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-        IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-    })
-    .unwrap();
+        .expect("route should continue recovery after clearing the stale registration");
+        assert_ne!(resolved, stale_pane);
 
-    let resolved = resolve_or_create_pane_dispatch_only(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect("dispatch-only reroute should recover a waiting-input authoritative actor");
-    assert_eq!(resolved, actor_pane);
-    assert!(
-        restart_called.load(Ordering::Relaxed),
-        "dispatch-only reroute should request one fresh restart when the authoritative actor is waiting for supervisor input"
-    );
+        let reassigned = sessions::lookup("route-live-owner-missing").unwrap();
+        assert!(
+            reassigned.as_deref() == Some(resolved.as_str()),
+            "route should re-register to the recovered pane, got: {reassigned:?}"
+        );
 
-    let actor_after = wait_for_pane_contains(
-        &iso,
-        &actor_pane,
-        &HarnessConfig::codex().trigger_command(&file_path),
-        std::time::Duration::from_secs(3),
-    );
-    assert!(
-        actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
-        "dispatch-only reroute should still submit the bare reopen after recovering the waiting-input supervisor prompt: {actor_after}"
-    );
+        let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+        assert!(
+            !stale_content.contains("STALE:agent-doc "),
+            "route should not dispatch into the stale registered pane: {stale_content}"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_dispatch_only_reuses_registered_authoritative_actor_pane_when_supervisor_state_is_missing()
+     {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-authoritative-actor-dispatch-only-fallback");
+        let session = "claude";
+        let cwd = test_cwd();
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            r#"exec /bin/sh -c 'printf "❯ \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &actor_pane, "❯ ", std::time::Duration::from_secs(3));
 
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_dispatch_only_submits_to_healthy_starting_actor_without_split_churn() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-starting-actor-ready-prompt");
-    let session = "codex";
-    let actor_pane = iso.new_session(session, dir.path()).unwrap();
-    let _ = iso.raw_cmd(&["rename-window", "-t", "codex:0", "agent-doc"]);
-    let _ = iso.raw_cmd(&[
-        "resize-window",
-        "-t",
-        "codex:agent-doc",
-        "-x",
-        "120",
-        "-y",
-        "40",
-    ]);
-    let prompt_script = dir.path().join("codex-ready-loop.sh");
-    std::fs::write(
+        let doc = dir.path().join("dispatch-only-claude-fallback.md");
+        let snapshot = "---\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-authoritative-actor-dispatch-only-fallback";
+        sessions::register(session_id, &actor_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let dispatch_pane = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::claude(),
+            &mut Vec::new(),
+        )
+        .expect(
+            "dispatch-only reroute should reuse the live authoritative pane after readiness checks",
+        );
+        assert_eq!(dispatch_pane, actor_pane);
+        let actor_after = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            &HarnessConfig::claude().trigger_command(&file_path),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            actor_after.contains(&HarnessConfig::claude().trigger_command(&file_path)),
+            "degraded authoritative actor should receive the direct-pane reopen: {actor_after}"
+        );
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .expect("dispatch-only degraded direct submit should write an ops log entry");
+        assert!(
+            ops_log.contains("route_dispatch_only_authoritative_degraded_direct_pane"),
+            "expected authoritative degraded direct submit logging, got: {ops_log}"
+        );
+        assert!(
+            ops_log.contains("supervisor_health=no_socket"),
+            "direct-submit logging should explain the degraded supervisor state: {ops_log}"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_dispatch_only_recovers_waiting_input_actor_with_fresh_restart() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-waiting-input-restart");
+        let session = "codex";
+        let cwd = test_cwd();
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &actor_pane, "> ", std::time::Duration::from_secs(3));
+
+        let doc = dir.path().join("dispatch-only-waiting-input.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-dispatch-only-waiting-input";
+        sessions::register(session_id, &actor_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => {
+                let actor_state = if restart_called_for_ipc.load(Ordering::Relaxed) {
+                    "ready"
+                } else {
+                    "waiting_input"
+                };
+                IpcResponse::ok(serde_json::json!({
+                    "running": true,
+                    "state": "healthy",
+                    "actor_state": actor_state,
+                    "restart_count": 0
+                }))
+            }
+            IpcMethod::Restart { mode } => {
+                assert_eq!(mode, "fresh");
+                restart_called_for_ipc.store(true, Ordering::Relaxed);
+                IpcResponse::ok_empty()
+            }
+            IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let resolved = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("dispatch-only reroute should recover a waiting-input authoritative actor");
+        assert_eq!(resolved, actor_pane);
+        assert!(
+            restart_called.load(Ordering::Relaxed),
+            "dispatch-only reroute should request one fresh restart when the authoritative actor is waiting for supervisor input"
+        );
+
+        let actor_after = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            &HarnessConfig::codex().trigger_command(&file_path),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
+            "dispatch-only reroute should still submit the bare reopen after recovering the waiting-input supervisor prompt: {actor_after}"
+        );
+
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_dispatch_only_submits_to_healthy_starting_actor_without_split_churn()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-starting-actor-ready-prompt");
+        let session = "codex";
+        let actor_pane = iso.new_session(session, dir.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "codex:0", "agent-doc"]);
+        let _ = iso.raw_cmd(&[
+            "resize-window",
+            "-t",
+            "codex:agent-doc",
+            "-x",
+            "120",
+            "-y",
+            "40",
+        ]);
+        let prompt_script = dir.path().join("codex-ready-loop.sh");
+        std::fs::write(
             &prompt_script,
             "#!/bin/sh\nprintf '\\033[2J\\033[HREADYMARK\\ngpt-5.4 high · ~/work/btakita/agent-loop · Context 0%% used\\n› \\n'\nwhile IFS= read -r CMD; do printf '[run] Nothing changed\\n'; done\n",
         )
         .unwrap();
-    send_keys_with_retry(
-        &iso,
-        &actor_pane,
-        &format!("exec /bin/sh {}", prompt_script.display()),
-    );
-    let ready_output = wait_for_pane_contains(
-        &iso,
-        &actor_pane,
-        "READYMARK",
-        std::time::Duration::from_secs(3),
-    );
-    assert!(
-        ready_output.contains("READYMARK"),
-        "fixture command should execute before split setup: {ready_output}"
-    );
-    assert!(
-        ready_prompt_candidate(&ready_output, &HarnessConfig::codex()).is_some(),
-        "fixture should show a Codex dispatch-ready prompt before split setup: {ready_output}"
-    );
-    let sibling_one = iso.split_window(&actor_pane, dir.path(), "-dh").unwrap();
-    let sibling_two = iso.split_window(&actor_pane, dir.path(), "-dh").unwrap();
-    let sibling_three = iso.split_window(&actor_pane, dir.path(), "-dh").unwrap();
-    iso.select_pane(&actor_pane).unwrap();
-    let window = iso.pane_window(&actor_pane).unwrap();
-    let panes_before = iso.list_window_panes(&window).unwrap();
-    assert_eq!(panes_before.len(), 4);
-
-    let doc = dir.path().join("stale-starting-ready-prompt.md");
-    let current = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
-    std::fs::write(&doc, current).unwrap();
-    crate::snapshot::save(&doc, current).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(current), Some(current))
-        .unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-stale-starting-ready-prompt";
-    sessions::register(session_id, &actor_pane, &file_path).unwrap();
-
-    crate::project_controller::store_actor_record(
-        dir.path(),
-        None,
-        &crate::session_actor::ActorRecord {
-            document_id: crate::session_actor::canonical_document_id_in(dir.path(), &file_path),
-            session_id: session_id.to_string(),
-            generation: 1,
-            pane_id: actor_pane.clone(),
-            window_id: window.clone(),
-            harness: "codex".to_string(),
-            state: crate::session_actor::ActorState::Starting,
-            last_transition: crate::session_actor::ActorLastTransition {
-                caller: "start".to_string(),
-                reason: "session_start".to_string(),
-                timestamp: 1,
-                prior_generation: 0,
-                new_generation: 1,
-            },
-        },
-    )
-    .unwrap();
-
-    let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::State => IpcResponse::ok(serde_json::json!({
-            "running": true,
-            "state": "healthy",
-            "actor_state": "starting",
-            "restart_count": 0
-        })),
-        IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => {
-            panic!("ready-prompt dispatch-only reroute must use direct pane submit")
-        }
-        IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
-        IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-        IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-    })
-    .unwrap();
-
-    let resolved = resolve_or_create_pane_dispatch_only(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect("dispatch-only reroute should submit to the healthy starting actor");
-    assert_eq!(resolved, actor_pane);
-
-    let actor_after = wait_for_pane_contains(
-        &iso,
-        &actor_pane,
-        "[run] Nothing",
-        std::time::Duration::from_secs(5),
-    );
-    let actor_after_compact = actor_after.split_whitespace().collect::<String>();
-    assert!(
-        actor_after_compact.contains("[run]Nothingchanged"),
-        "healthy starting actor should execute the dispatch-only reopen: {actor_after}"
-    );
-    let panes_after = iso.list_window_panes(&window).unwrap();
-    assert_eq!(
-        panes_after.len(),
-        panes_before.len(),
-        "route must not create or remove panes while dispatching to the controller actor"
-    );
-    for pane in [&sibling_one, &sibling_two, &sibling_three] {
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            &format!("exec /bin/sh {}", prompt_script.display()),
+        );
+        let ready_output = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            "READYMARK",
+            std::time::Duration::from_secs(3),
+        );
         assert!(
-            panes_after.contains(pane),
-            "unrelated panes in the split must remain visible"
+            ready_output.contains("READYMARK"),
+            "fixture command should execute before split setup: {ready_output}"
         );
-    }
-    let record = crate::project_controller::authoritative_actor_binding(dir.path(), &doc)
-        .unwrap()
-        .unwrap();
-    assert_eq!(record.pane_id, actor_pane);
-
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn auto_start_reuses_other_file_pane_only_as_split_anchor() {
-    let _tmux_guard = tmux_start_lock();
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-cross-file-split-anchor");
-    let requested_session = "claude";
-    let cwd = test_cwd();
-
-    let anchor_pane = iso.auto_start(requested_session, &cwd).unwrap();
-    let session =
-        pane_session_name(&iso, &anchor_pane).expect("anchor pane should report its tmux session");
-    let anchor_window = iso.pane_window(&anchor_pane).unwrap();
-    send_keys_with_retry(
-        &iso,
-        &anchor_pane,
-        r#"exec /bin/sh -c 'printf "> \n"; while IFS= read -r CMD; do printf "ANCHOR:%s\n" "$CMD"; done'"#,
-    );
-    let _ = wait_for_pane_contains(&iso, &anchor_pane, "\n>", std::time::Duration::from_secs(3));
-
-    let anchor_doc = dir.path().join("other.md");
-    std::fs::write(&anchor_doc, "# Other\n").unwrap();
-    let target_doc = dir.path().join("target.md");
-    std::fs::write(&target_doc, "# Target\n").unwrap();
-
-    let anchor_path = anchor_doc
-        .canonicalize()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
-    let target_path = target_doc
-        .canonicalize()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
-
-    sessions::register_full_in(
-        dir.path(),
-        "route-cross-file-anchor",
-        &anchor_pane,
-        &anchor_path,
-        1234,
-        &anchor_window,
-    )
-    .unwrap();
-
-    let mock_start = write_mock_start_agent_doc(dir.path());
-    let target_doc_for_thread = target_doc.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(250));
-        crate::cycle_state::start_preflight(
-            &target_doc_for_thread,
-            Some("# Target\n"),
-            Some("# Target\n"),
-        )
-        .unwrap();
-    });
-
-    let mut created_panes = Vec::new();
-    let new_pane = {
-        let _route_bin_guard = route_bin_env_lock();
-        unsafe {
-            std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
-        }
-        let result = resolve_or_create_pane(
-            &iso,
-            &target_doc,
-            None,
-            &[],
-            "route-cross-file-target",
-            &target_path,
-            &session,
-            &HarnessConfig::codex(),
-            &mut created_panes,
+        assert!(
+            ready_prompt_candidate(&ready_output, &HarnessConfig::codex()).is_some(),
+            "fixture should show a Codex dispatch-ready prompt before split setup: {ready_output}"
         );
-        unsafe {
-            std::env::remove_var("AGENT_DOC_ROUTE_BIN");
-        }
-        result
-    }
-    .expect("route should provision a fresh pane without cross-file dispatch");
+        let sibling_one = iso.split_window(&actor_pane, dir.path(), "-dh").unwrap();
+        let sibling_two = iso.split_window(&actor_pane, dir.path(), "-dh").unwrap();
+        let sibling_three = iso.split_window(&actor_pane, dir.path(), "-dh").unwrap();
+        iso.select_pane(&actor_pane).unwrap();
+        let window = iso.pane_window(&actor_pane).unwrap();
+        let panes_before = iso.list_window_panes(&window).unwrap();
+        assert_eq!(panes_before.len(), 4);
 
-    assert_eq!(created_panes, vec![new_pane.clone()]);
-    assert_ne!(
-        new_pane, anchor_pane,
-        "auto-start must create a distinct pane rather than dispatching into the anchor"
-    );
-    assert_eq!(
-        iso.pane_window(&new_pane).unwrap(),
-        anchor_window,
-        "fresh pane should split alongside the existing session pane"
-    );
-
-    let target_content = wait_for_pane_contains(
-        &iso,
-        &new_pane,
-        "GOT:agent-doc ",
-        std::time::Duration::from_secs(5),
-    );
-    assert!(
-        target_content.contains("GOT:agent-doc "),
-        "fresh pane should receive the routed command: {target_content}"
-    );
-
-    let anchor_content = sessions::capture_pane(&iso, &anchor_pane).unwrap_or_default();
-    assert!(
-        !anchor_content.contains("ANCHOR:agent-doc "),
-        "existing pane for another document must stay a split anchor only: {anchor_content}"
-    );
-
-    let lookup = sessions::load_in(dir.path())
-        .unwrap()
-        .values()
-        .find(|entry| entry.session_id == "route-cross-file-target")
-        .map(|entry| entry.pane.clone());
-    assert_eq!(
-        lookup.as_deref(),
-        Some(new_pane.as_str()),
-        "target document should bind to the new pane"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_waits_longer_for_fresh_start_cycle_ack() {
-    let _tmux_guard = tmux_start_lock();
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-fresh-start-extended-ack");
-    let session = "claude";
-    let cwd = test_cwd();
-    let _anchor_pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("fresh-start-extended-ack.md");
-    std::fs::write(&doc, "# Session\n").unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let mock_start = write_mock_start_agent_doc(dir.path());
-
-    let doc_for_thread = doc.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1300));
-        crate::cycle_state::start_preflight(
-            &doc_for_thread,
-            Some("# Session\n"),
-            Some("# Session\n"),
-        )
-        .unwrap();
-    });
-
-    let mut created_panes = Vec::new();
-    let new_pane = {
-        let _route_bin_guard = route_bin_env_lock();
-        unsafe {
-            std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
-        }
-        let result = resolve_or_create_pane(
-            &iso,
-            &doc,
-            None,
-            &[],
-            "route-fresh-start-extended-ack",
-            &file_path,
-            session,
-            &HarnessConfig::codex(),
-            &mut created_panes,
-        );
-        unsafe {
-            std::env::remove_var("AGENT_DOC_ROUTE_BIN");
-        }
-        result
-    }
-    .expect("fresh auto-start should tolerate a delayed but real initial cycle start");
-
-    assert_eq!(created_panes, vec![new_pane.clone()]);
-
-    let content = wait_for_pane_contains(
-        &iso,
-        &new_pane,
-        "GOT:agent-doc ",
-        std::time::Duration::from_secs(3),
-    );
-    assert!(
-        content.contains("GOT:agent-doc "),
-        "route should still dispatch the trigger before observing the delayed ack: {content}"
-    );
-
-    let state = crate::cycle_state::load(&doc)
-        .unwrap()
-        .expect("cycle state should exist after delayed fresh-start ack");
-    assert_eq!(
-        state.phase,
-        crate::cycle_state::CyclePhase::PreflightStarted
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_rebinds_fresh_start_after_ready_wait_registry_churn() {
-    let _tmux_guard = tmux_start_lock();
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-fresh-start-reregister-before-dispatch");
-    let session = "claude";
-    let cwd = test_cwd();
-    let _anchor_pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("fresh-start-reregister-before-dispatch.md");
-    std::fs::write(&doc, "# Session\n").unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let mock_start = write_mock_delayed_start_agent_doc(dir.path(), 1);
-
-    let registry_root = dir.path().to_path_buf();
-    let clear_handle = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(200));
-        let registry_path = sessions::registry_path_in(&registry_root);
-        let _lock = sessions::RegistryLock::acquire(&registry_path).unwrap();
-        let mut registry = sessions::load_in(&registry_root).unwrap();
-        let key = registry
-            .iter()
-            .find(|(_, entry)| entry.session_id == "route-fresh-start-reregister-before-dispatch")
-            .map(|(key, _)| key.clone());
-        if let Some(key) = key {
-            registry.remove(&key);
-            sessions::save_in(&registry_root, &registry).unwrap();
-        }
-    });
-
-    let doc_for_thread = doc.clone();
-    let ack_handle = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1500));
-        crate::cycle_state::start_preflight(
-            &doc_for_thread,
-            Some("# Session\n"),
-            Some("# Session\n"),
-        )
-        .unwrap();
-    });
-
-    let mut created_panes = Vec::new();
-    let new_pane = {
-        let _route_bin_guard = route_bin_env_lock();
-        unsafe {
-            std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
-        }
-        let result = resolve_or_create_pane(
-            &iso,
-            &doc,
-            None,
-            &[],
-            "route-fresh-start-reregister-before-dispatch",
-            &file_path,
-            session,
-            &HarnessConfig::codex(),
-            &mut created_panes,
-        );
-        unsafe {
-            std::env::remove_var("AGENT_DOC_ROUTE_BIN");
-        }
-        result
-    }
-    .expect("fresh auto-start should rebind the pane before the first guarded dispatch");
-
-    clear_handle.join().unwrap();
-    ack_handle.join().unwrap();
-
-    assert_eq!(created_panes, vec![new_pane.clone()]);
-
-    let content = wait_for_pane_contains(
-        &iso,
-        &new_pane,
-        "GOT:agent-doc ",
-        std::time::Duration::from_secs(3),
-    );
-    assert!(
-        content.contains("GOT:agent-doc "),
-        "fresh auto-start should still dispatch after the initial binding is cleared during ready-wait: {content}"
-    );
-
-    let lookup = sessions::lookup("route-fresh-start-reregister-before-dispatch").unwrap();
-    assert_eq!(
-        lookup.as_deref(),
-        Some(new_pane.as_str()),
-        "fresh auto-start should restore the new pane as the registered owner"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_keeps_fresh_start_authoritative_despite_existing_owner_rebind() {
-    let _tmux_guard = tmux_start_lock();
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-fresh-start-handoff");
-    let session = "claude";
-    let cwd = test_cwd();
-    let existing_pane = iso.auto_start(session, &cwd).unwrap();
-
-    let doc = dir.path().join("fresh-start-handoff.md");
-    std::fs::write(&doc, "# Session\n").unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let mock_agent = write_mock_registered_agent_doc(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &existing_pane,
-        &format!("exec {}", mock_agent.display()),
-    );
-    let owner_ready =
-        wait_for_pane_contains(&iso, &existing_pane, ">", std::time::Duration::from_secs(5));
-    assert!(
-        owner_ready.contains(">"),
-        "existing owner pane should be idle before the handoff: {owner_ready}"
-    );
-
-    let mock_start = write_mock_delayed_start_agent_doc(dir.path(), 1);
-    let registry_root = dir.path().to_path_buf();
-    let handoff_pane = existing_pane.clone();
-    let handoff_file = file_path.clone();
-    let handoff = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(200));
-        sessions::register_full_with_cwd_in(
-            &registry_root,
-            "route-fresh-start-handoff",
-            &handoff_pane,
-            &handoff_file,
-            12345,
-            "@owner",
-            registry_root.to_string_lossy().as_ref(),
-        )
-        .unwrap();
-    });
-    let doc_for_ack = doc.clone();
-    let ack = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1500));
-        crate::cycle_state::start_preflight(&doc_for_ack, Some("# Session\n"), Some("# Session\n"))
+        let doc = dir.path().join("stale-starting-ready-prompt.md");
+        let current = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(current), Some(current))
             .unwrap();
-    });
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-stale-starting-ready-prompt";
+        sessions::register(session_id, &actor_pane, &file_path).unwrap();
 
-    let mut created_panes = Vec::new();
-    let routed_pane = {
+        crate::project_controller::store_actor_record(
+            dir.path(),
+            None,
+            &crate::session_actor::ActorRecord {
+                document_id: crate::session_actor::canonical_document_id_in(dir.path(), &file_path),
+                session_id: session_id.to_string(),
+                generation: 1,
+                pane_id: actor_pane.clone(),
+                window_id: window.clone(),
+                harness: "codex".to_string(),
+                state: crate::session_actor::ActorState::Starting,
+                last_transition: crate::session_actor::ActorLastTransition {
+                    caller: "start".to_string(),
+                    reason: "session_start".to_string(),
+                    timestamp: 1,
+                    prior_generation: 0,
+                    new_generation: 1,
+                },
+            },
+        )
+        .unwrap();
+
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "starting",
+                "restart_count": 0
+            })),
+            IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => {
+                panic!("ready-prompt dispatch-only reroute must use direct pane submit")
+            }
+            IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let resolved = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("dispatch-only reroute should submit to the healthy starting actor");
+        assert_eq!(resolved, actor_pane);
+
+        let actor_after = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            "[run] Nothing",
+            std::time::Duration::from_secs(5),
+        );
+        let actor_after_compact = actor_after.split_whitespace().collect::<String>();
+        assert!(
+            actor_after_compact.contains("[run]Nothingchanged"),
+            "healthy starting actor should execute the dispatch-only reopen: {actor_after}"
+        );
+        let panes_after = iso.list_window_panes(&window).unwrap();
+        assert_eq!(
+            panes_after.len(),
+            panes_before.len(),
+            "route must not create or remove panes while dispatching to the controller actor"
+        );
+        for pane in [&sibling_one, &sibling_two, &sibling_three] {
+            assert!(
+                panes_after.contains(pane),
+                "unrelated panes in the split must remain visible"
+            );
+        }
+        let record = crate::project_controller::authoritative_actor_binding(dir.path(), &doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.pane_id, actor_pane);
+
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn auto_start_reuses_other_file_pane_only_as_split_anchor() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-cross-file-split-anchor");
+        let requested_session = "claude";
+        let cwd = test_cwd();
+
+        let anchor_pane = iso.auto_start(requested_session, &cwd).unwrap();
+        let session = pane_session_name(&iso, &anchor_pane)
+            .expect("anchor pane should report its tmux session");
+        let anchor_window = iso.pane_window(&anchor_pane).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &anchor_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; while IFS= read -r CMD; do printf "ANCHOR:%s\n" "$CMD"; done'"#,
+        );
+        let _ =
+            wait_for_pane_contains(&iso, &anchor_pane, "\n>", std::time::Duration::from_secs(3));
+
+        let anchor_doc = dir.path().join("other.md");
+        std::fs::write(&anchor_doc, "# Other\n").unwrap();
+        let target_doc = dir.path().join("target.md");
+        std::fs::write(&target_doc, "# Target\n").unwrap();
+
+        let anchor_path = anchor_doc
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let target_path = target_doc
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        sessions::register_full_in(
+            dir.path(),
+            "route-cross-file-anchor",
+            &anchor_pane,
+            &anchor_path,
+            1234,
+            &anchor_window,
+        )
+        .unwrap();
+
+        let mock_start = write_mock_start_agent_doc(dir.path());
+        let target_doc_for_thread = target_doc.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::start_preflight(
+                &target_doc_for_thread,
+                Some("# Target\n"),
+                Some("# Target\n"),
+            )
+            .unwrap();
+        });
+
+        let mut created_panes = Vec::new();
+        let new_pane = {
+            let _route_bin_guard = route_bin_env_lock();
+            unsafe {
+                std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
+            }
+            let result = resolve_or_create_pane(
+                &iso,
+                &target_doc,
+                None,
+                &[],
+                "route-cross-file-target",
+                &target_path,
+                &session,
+                &HarnessConfig::codex(),
+                &mut created_panes,
+            );
+            unsafe {
+                std::env::remove_var("AGENT_DOC_ROUTE_BIN");
+            }
+            result
+        }
+        .expect("route should provision a fresh pane without cross-file dispatch");
+
+        assert_eq!(created_panes, vec![new_pane.clone()]);
+        assert_ne!(
+            new_pane, anchor_pane,
+            "auto-start must create a distinct pane rather than dispatching into the anchor"
+        );
+        assert_eq!(
+            iso.pane_window(&new_pane).unwrap(),
+            anchor_window,
+            "fresh pane should split alongside the existing session pane"
+        );
+
+        let target_content = wait_for_pane_contains(
+            &iso,
+            &new_pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            target_content.contains("GOT:agent-doc "),
+            "fresh pane should receive the routed command: {target_content}"
+        );
+
+        let anchor_content = sessions::capture_pane(&iso, &anchor_pane).unwrap_or_default();
+        assert!(
+            !anchor_content.contains("ANCHOR:agent-doc "),
+            "existing pane for another document must stay a split anchor only: {anchor_content}"
+        );
+
+        let lookup = sessions::load_in(dir.path())
+            .unwrap()
+            .values()
+            .find(|entry| entry.session_id == "route-cross-file-target")
+            .map(|entry| entry.pane.clone());
+        assert_eq!(
+            lookup.as_deref(),
+            Some(new_pane.as_str()),
+            "target document should bind to the new pane"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_waits_longer_for_fresh_start_cycle_ack() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-fresh-start-extended-ack");
+        let session = "claude";
+        let cwd = test_cwd();
+        let _anchor_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("fresh-start-extended-ack.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let mock_start = write_mock_start_agent_doc(dir.path());
+
+        let doc_for_thread = doc.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1300));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some("# Session\n"),
+                Some("# Session\n"),
+            )
+            .unwrap();
+        });
+
+        let mut created_panes = Vec::new();
+        let new_pane = {
+            let _route_bin_guard = route_bin_env_lock();
+            unsafe {
+                std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
+            }
+            let result = resolve_or_create_pane(
+                &iso,
+                &doc,
+                None,
+                &[],
+                "route-fresh-start-extended-ack",
+                &file_path,
+                session,
+                &HarnessConfig::codex(),
+                &mut created_panes,
+            );
+            unsafe {
+                std::env::remove_var("AGENT_DOC_ROUTE_BIN");
+            }
+            result
+        }
+        .expect("fresh auto-start should tolerate a delayed but real initial cycle start");
+
+        assert_eq!(created_panes, vec![new_pane.clone()]);
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &new_pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "route should still dispatch the trigger before observing the delayed ack: {content}"
+        );
+
+        let state = crate::cycle_state::load(&doc)
+            .unwrap()
+            .expect("cycle state should exist after delayed fresh-start ack");
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_rebinds_fresh_start_after_ready_wait_registry_churn() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-fresh-start-reregister-before-dispatch");
+        let session = "claude";
+        let cwd = test_cwd();
+        let _anchor_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("fresh-start-reregister-before-dispatch.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let mock_start = write_mock_delayed_start_agent_doc(dir.path(), 1);
+
+        let registry_root = dir.path().to_path_buf();
+        let clear_handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            let registry_path = sessions::registry_path_in(&registry_root);
+            let _lock = sessions::RegistryLock::acquire(&registry_path).unwrap();
+            let mut registry = sessions::load_in(&registry_root).unwrap();
+            let key = registry
+                .iter()
+                .find(|(_, entry)| {
+                    entry.session_id == "route-fresh-start-reregister-before-dispatch"
+                })
+                .map(|(key, _)| key.clone());
+            if let Some(key) = key {
+                registry.remove(&key);
+                sessions::save_in(&registry_root, &registry).unwrap();
+            }
+        });
+
+        let doc_for_thread = doc.clone();
+        let ack_handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some("# Session\n"),
+                Some("# Session\n"),
+            )
+            .unwrap();
+        });
+
+        let mut created_panes = Vec::new();
+        let new_pane = {
+            let _route_bin_guard = route_bin_env_lock();
+            unsafe {
+                std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
+            }
+            let result = resolve_or_create_pane(
+                &iso,
+                &doc,
+                None,
+                &[],
+                "route-fresh-start-reregister-before-dispatch",
+                &file_path,
+                session,
+                &HarnessConfig::codex(),
+                &mut created_panes,
+            );
+            unsafe {
+                std::env::remove_var("AGENT_DOC_ROUTE_BIN");
+            }
+            result
+        }
+        .expect("fresh auto-start should rebind the pane before the first guarded dispatch");
+
+        clear_handle.join().unwrap();
+        ack_handle.join().unwrap();
+
+        assert_eq!(created_panes, vec![new_pane.clone()]);
+
+        let content = wait_for_pane_contains(
+            &iso,
+            &new_pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            content.contains("GOT:agent-doc "),
+            "fresh auto-start should still dispatch after the initial binding is cleared during ready-wait: {content}"
+        );
+
+        let lookup = sessions::lookup("route-fresh-start-reregister-before-dispatch").unwrap();
+        assert_eq!(
+            lookup.as_deref(),
+            Some(new_pane.as_str()),
+            "fresh auto-start should restore the new pane as the registered owner"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_keeps_fresh_start_authoritative_despite_existing_owner_rebind() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-fresh-start-handoff");
+        let session = "claude";
+        let cwd = test_cwd();
+        let existing_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("fresh-start-handoff.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &existing_pane,
+            &format!("exec {}", mock_agent.display()),
+        );
+        let owner_ready =
+            wait_for_pane_contains(&iso, &existing_pane, ">", std::time::Duration::from_secs(5));
+        assert!(
+            owner_ready.contains(">"),
+            "existing owner pane should be idle before the handoff: {owner_ready}"
+        );
+
+        let mock_start = write_mock_delayed_start_agent_doc(dir.path(), 1);
+        let registry_root = dir.path().to_path_buf();
+        let handoff_pane = existing_pane.clone();
+        let handoff_file = file_path.clone();
+        let handoff = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            sessions::register_full_with_cwd_in(
+                &registry_root,
+                "route-fresh-start-handoff",
+                &handoff_pane,
+                &handoff_file,
+                12345,
+                "@owner",
+                registry_root.to_string_lossy().as_ref(),
+            )
+            .unwrap();
+        });
+        let doc_for_ack = doc.clone();
+        let ack = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            crate::cycle_state::start_preflight(
+                &doc_for_ack,
+                Some("# Session\n"),
+                Some("# Session\n"),
+            )
+            .unwrap();
+        });
+
+        let mut created_panes = Vec::new();
+        let routed_pane = {
             let _route_bin_guard = route_bin_env_lock();
             unsafe {
                 std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
@@ -3741,105 +3737,109 @@ fn resolve_or_create_pane_keeps_fresh_start_authoritative_despite_existing_owner
         }
         .expect("fresh auto-start should keep the fresh pane authoritative even if another path rebinds the session during boot");
 
-    handoff.join().unwrap();
-    ack.join().unwrap();
+        handoff.join().unwrap();
+        ack.join().unwrap();
 
-    let new_pane = created_panes
-        .first()
-        .cloned()
-        .expect("fresh route should still create one pane");
-    assert_eq!(routed_pane, new_pane);
-    assert_eq!(
-        created_panes.len(),
-        1,
-        "fresh auto-start should still create one pane"
-    );
+        let new_pane = created_panes
+            .first()
+            .cloned()
+            .expect("fresh route should still create one pane");
+        assert_eq!(routed_pane, new_pane);
+        assert_eq!(
+            created_panes.len(),
+            1,
+            "fresh auto-start should still create one pane"
+        );
 
-    let owner_after = sessions::capture_pane(&iso, &existing_pane).unwrap_or_default();
-    assert!(
-        !owner_after.contains("GOT:agent-doc "),
-        "route must not hand dispatch back to the older pane after a fresh start: {owner_after}"
-    );
+        let owner_after = sessions::capture_pane(&iso, &existing_pane).unwrap_or_default();
+        assert!(
+            !owner_after.contains("GOT:agent-doc "),
+            "route must not hand dispatch back to the older pane after a fresh start: {owner_after}"
+        );
 
-    let new_pane_after = sessions::capture_pane(&iso, &new_pane).unwrap_or_default();
-    assert!(
-        new_pane_after.contains("GOT:agent-doc "),
-        "route should keep dispatching into the fresh pane after a competing registry rebind: {new_pane_after}"
-    );
+        let new_pane_after = sessions::capture_pane(&iso, &new_pane).unwrap_or_default();
+        assert!(
+            new_pane_after.contains("GOT:agent-doc "),
+            "route should keep dispatching into the fresh pane after a competing registry rebind: {new_pane_after}"
+        );
 
-    let lookup = sessions::lookup("route-fresh-start-handoff").unwrap();
-    assert_eq!(
-        lookup.as_deref(),
-        Some(new_pane.as_str()),
-        "registry should restore the fresh pane as authoritative after the competing rebind"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_ignores_handoff_back_to_active_startup_miss_pane() {
-    let _tmux_guard = tmux_start_lock();
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-fresh-start-ignore-startup-miss-handoff");
-    let session = "claude";
-    let cwd = test_cwd();
-    let existing_pane = iso.auto_start(session, &cwd).unwrap();
+        let lookup = sessions::lookup("route-fresh-start-handoff").unwrap();
+        assert_eq!(
+            lookup.as_deref(),
+            Some(new_pane.as_str()),
+            "registry should restore the fresh pane as authoritative after the competing rebind"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_ignores_handoff_back_to_active_startup_miss_pane() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-fresh-start-ignore-startup-miss-handoff");
+        let session = "claude";
+        let cwd = test_cwd();
+        let existing_pane = iso.auto_start(session, &cwd).unwrap();
 
-    let doc = dir
-        .path()
-        .join("fresh-start-ignore-startup-miss-handoff.md");
-    std::fs::write(&doc, "# Session\n").unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let mock_agent = write_mock_registered_agent_doc(dir.path());
-    send_keys_with_retry(
-        &iso,
-        &existing_pane,
-        &format!("exec {}", mock_agent.display()),
-    );
-    let owner_ready =
-        wait_for_pane_contains(&iso, &existing_pane, ">", std::time::Duration::from_secs(5));
-    assert!(
-        owner_ready.contains(">"),
-        "existing owner pane should be idle before the handoff: {owner_ready}"
-    );
+        let doc = dir
+            .path()
+            .join("fresh-start-ignore-startup-miss-handoff.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let mock_agent = write_mock_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &existing_pane,
+            &format!("exec {}", mock_agent.display()),
+        );
+        let owner_ready =
+            wait_for_pane_contains(&iso, &existing_pane, ">", std::time::Duration::from_secs(5));
+        assert!(
+            owner_ready.contains(">"),
+            "existing owner pane should be idle before the handoff: {owner_ready}"
+        );
 
-    crate::startup_miss::record(
-        &doc,
-        &existing_pane,
-        "route-fresh-start-ignore-startup-miss-handoff",
-        "codex",
-        crate::startup_miss::StartupMissOrigin::RoutedTrigger,
-        Some("cycle-baseline"),
-    )
-    .unwrap();
-
-    let mock_start = write_mock_delayed_start_agent_doc(dir.path(), 1);
-    let registry_root = dir.path().to_path_buf();
-    let handoff_pane = existing_pane.clone();
-    let handoff_file = file_path.clone();
-    let handoff = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(200));
-        sessions::register_full_with_cwd_in(
-            &registry_root,
+        crate::startup_miss::record(
+            &doc,
+            &existing_pane,
             "route-fresh-start-ignore-startup-miss-handoff",
-            &handoff_pane,
-            &handoff_file,
-            12345,
-            "@owner",
-            registry_root.to_string_lossy().as_ref(),
+            "codex",
+            crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            Some("cycle-baseline"),
         )
         .unwrap();
-    });
-    let doc_for_ack = doc.clone();
-    let ack = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1500));
-        crate::cycle_state::start_preflight(&doc_for_ack, Some("# Session\n"), Some("# Session\n"))
-            .unwrap();
-    });
 
-    let mut created_panes = Vec::new();
-    let routed_pane = {
+        let mock_start = write_mock_delayed_start_agent_doc(dir.path(), 1);
+        let registry_root = dir.path().to_path_buf();
+        let handoff_pane = existing_pane.clone();
+        let handoff_file = file_path.clone();
+        let handoff = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            sessions::register_full_with_cwd_in(
+                &registry_root,
+                "route-fresh-start-ignore-startup-miss-handoff",
+                &handoff_pane,
+                &handoff_file,
+                12345,
+                "@owner",
+                registry_root.to_string_lossy().as_ref(),
+            )
+            .unwrap();
+        });
+        let doc_for_ack = doc.clone();
+        let ack = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            crate::cycle_state::start_preflight(
+                &doc_for_ack,
+                Some("# Session\n"),
+                Some("# Session\n"),
+            )
+            .unwrap();
+        });
+
+        let mut created_panes = Vec::new();
+        let routed_pane = {
             let _route_bin_guard = route_bin_env_lock();
             unsafe {
                 std::env::set_var("AGENT_DOC_ROUTE_BIN", mock_start.as_os_str());
@@ -3862,152 +3862,152 @@ fn resolve_or_create_pane_ignores_handoff_back_to_active_startup_miss_pane() {
         }
         .expect("fresh auto-start should keep dispatch in the new pane when the old owner still carries startup-miss provenance");
 
-    handoff.join().unwrap();
-    ack.join().unwrap();
+        handoff.join().unwrap();
+        ack.join().unwrap();
 
-    assert_eq!(created_panes.len(), 1, "route should still create one pane");
-    let new_pane = &created_panes[0];
-    assert_eq!(routed_pane, *new_pane);
+        assert_eq!(created_panes.len(), 1, "route should still create one pane");
+        let new_pane = &created_panes[0];
+        assert_eq!(routed_pane, *new_pane);
 
-    let new_pane_after = wait_for_pane_contains(
-        &iso,
-        new_pane,
-        "GOT:agent-doc ",
-        std::time::Duration::from_secs(3),
-    );
-    assert!(
-        new_pane_after.contains("GOT:agent-doc "),
-        "route should keep the reopen in the fresh pane when the alternate handoff target still owns startup-miss provenance: {new_pane_after}"
-    );
+        let new_pane_after = wait_for_pane_contains(
+            &iso,
+            new_pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            new_pane_after.contains("GOT:agent-doc "),
+            "route should keep the reopen in the fresh pane when the alternate handoff target still owns startup-miss provenance: {new_pane_after}"
+        );
 
-    let old_pane_after = sessions::capture_pane(&iso, &existing_pane).unwrap_or_default();
-    assert!(
-        !old_pane_after.contains("GOT:agent-doc "),
-        "route must not hand dispatch back to the startup-miss pane: {old_pane_after}"
-    );
+        let old_pane_after = sessions::capture_pane(&iso, &existing_pane).unwrap_or_default();
+        assert!(
+            !old_pane_after.contains("GOT:agent-doc "),
+            "route must not hand dispatch back to the startup-miss pane: {old_pane_after}"
+        );
 
-    let lookup = sessions::lookup("route-fresh-start-ignore-startup-miss-handoff").unwrap();
-    assert_eq!(
-        lookup.as_deref(),
-        Some(new_pane.as_str()),
-        "registry should restore the fresh pane as authoritative when the old pane is still marked startup-miss"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_fails_closed_for_halted_supervisor_when_no_live_owner() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
+        let lookup = sessions::lookup("route-fresh-start-ignore-startup-miss-handoff").unwrap();
+        assert_eq!(
+            lookup.as_deref(),
+            Some(new_pane.as_str()),
+            "registry should restore the fresh pane as authoritative when the old pane is still marked startup-miss"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_fails_closed_for_halted_supervisor_when_no_live_owner() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
 
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-supervisor-restart");
-    let session = "claude";
-    let cwd = test_cwd();
-    let pane = iso.auto_start(session, &cwd).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-supervisor-restart");
+        let session = "claude";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
 
-    let doc = dir.path().join("session.md");
-    std::fs::write(&doc, "# Session\n").unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-supervisor-restart";
-    let mut registry = sessions::SessionRegistry::default();
-    registry.insert(
-        file_path.clone(),
-        sessions::SessionEntry {
-            pane: pane.clone(),
-            pid: 0,
-            cwd: dir.path().to_string_lossy().to_string(),
-            started: String::new(),
-            session_id: session_id.to_string(),
-            file: file_path.clone(),
-            window: iso.pane_window(&pane).unwrap_or_default(),
-            supervisor_instance_id: String::new(),
-        },
-    );
-    sessions::save_in(dir.path(), &registry).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-supervisor-restart";
+        let mut registry = sessions::SessionRegistry::default();
+        registry.insert(
+            file_path.clone(),
+            sessions::SessionEntry {
+                pane: pane.clone(),
+                pid: 0,
+                cwd: dir.path().to_string_lossy().to_string(),
+                started: String::new(),
+                session_id: session_id.to_string(),
+                file: file_path.clone(),
+                window: iso.pane_window(&pane).unwrap_or_default(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        sessions::save_in(dir.path(), &registry).unwrap();
 
-    let restart_called = Arc::new(AtomicBool::new(false));
-    let restart_called_for_ipc = restart_called.clone();
-    let mut ipc =
-        crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-            match method {
-                IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                    "running": false,
-                    "state": "halted",
-                    "restart_count": 5
-                })),
-                IpcMethod::Restart { .. } => {
-                    restart_called_for_ipc.store(true, Ordering::Relaxed);
-                    IpcResponse::ok_empty()
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let mut ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
+                match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": false,
+                        "state": "halted",
+                        "restart_count": 5
+                    })),
+                    IpcMethod::Restart { .. } => {
+                        restart_called_for_ipc.store(true, Ordering::Relaxed);
+                        IpcResponse::ok_empty()
+                    }
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": null })),
+                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
                 }
-                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": null })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                }
-                IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-            }
-        })
-        .unwrap();
+            })
+            .unwrap();
 
-    let panes_before = iso
-        .list_panes_ordered(&format!("{session}:0"))
-        .unwrap_or_default();
-    let err = resolve_or_create_pane(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect_err("route should fail closed instead of reviving a halted crash loop");
-    let panes_after = iso
-        .list_panes_ordered(&format!("{session}:0"))
-        .unwrap_or_default();
+        let panes_before = iso
+            .list_panes_ordered(&format!("{session}:0"))
+            .unwrap_or_default();
+        let err = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect_err("route should fail closed instead of reviving a halted crash loop");
+        let panes_after = iso
+            .list_panes_ordered(&format!("{session}:0"))
+            .unwrap_or_default();
 
-    assert_eq!(
-        panes_after.len(),
-        panes_before.len(),
-        "route should not create a duplicate pane when the registered supervisor is halted"
-    );
-    assert!(
-        err.to_string()
-            .contains("halted supervisor after 5 restarts"),
-        "unexpected error: {err:#}"
-    );
-    assert!(
-        !restart_called.load(Ordering::Relaxed),
-        "route should not restart a halted supervisor automatically"
-    );
+        assert_eq!(
+            panes_after.len(),
+            panes_before.len(),
+            "route should not create a duplicate pane when the registered supervisor is halted"
+        );
+        assert!(
+            err.to_string()
+                .contains("halted supervisor after 5 restarts"),
+            "unexpected error: {err:#}"
+        );
+        assert!(
+            !restart_called.load(Ordering::Relaxed),
+            "route should not restart a halted supervisor automatically"
+        );
 
-    ipc.stop();
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_fails_closed_after_repeated_recent_session_losses() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    let iso = IsolatedTmux::new("route-test-recent-session-loss");
-    let session = "codex";
-    let cwd = test_cwd();
-    let anchor = iso.auto_start(session, &cwd).unwrap();
+        ipc.stop();
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_fails_closed_after_repeated_recent_session_losses() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-recent-session-loss");
+        let session = "codex";
+        let cwd = test_cwd();
+        let anchor = iso.auto_start(session, &cwd).unwrap();
 
-    let doc = dir.path().join("session.md");
-    std::fs::write(&doc, "# Session\n").unwrap();
-    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-    let session_id = "route-recent-session-loss";
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    std::fs::write(
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-recent-session-loss";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        std::fs::write(
             dir.path()
                 .join(".agent-doc/logs")
                 .join(format!("{session_id}.log")),
@@ -4019,38 +4019,38 @@ fn resolve_or_create_pane_fails_closed_after_repeated_recent_session_losses() {
         )
         .unwrap();
 
-    let panes_before = iso
-        .list_panes_ordered(&format!("{session}:0"))
-        .unwrap_or_default();
-    let err = resolve_or_create_pane(
-        &iso,
-        &doc,
-        None,
-        &[],
-        session_id,
-        &file_path,
-        session,
-        &HarnessConfig::codex(),
-        &mut Vec::new(),
-    )
-    .expect_err("route should fail closed after repeated recent pane losses");
-    let panes_after = iso
-        .list_panes_ordered(&format!("{session}:0"))
-        .unwrap_or_default();
+        let panes_before = iso
+            .list_panes_ordered(&format!("{session}:0"))
+            .unwrap_or_default();
+        let err = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect_err("route should fail closed after repeated recent pane losses");
+        let panes_after = iso
+            .list_panes_ordered(&format!("{session}:0"))
+            .unwrap_or_default();
 
-    assert_eq!(
-        panes_after.len(),
-        panes_before.len(),
-        "route should not spawn a replacement pane once the repeated-loss guard trips"
-    );
-    assert_eq!(panes_after.first(), Some(&anchor));
-    assert!(
-        err.to_string().contains("refusing to auto-start"),
-        "unexpected error: {err:#}"
-    );
-    assert!(
-        err.to_string().contains("unexpected pane-loss events"),
-        "unexpected error: {err:#}"
-    );
-}
+        assert_eq!(
+            panes_after.len(),
+            panes_before.len(),
+            "route should not spawn a replacement pane once the repeated-loss guard trips"
+        );
+        assert_eq!(panes_after.first(), Some(&anchor));
+        assert!(
+            err.to_string().contains("refusing to auto-start"),
+            "unexpected error: {err:#}"
+        );
+        assert!(
+            err.to_string().contains("unexpected pane-loss events"),
+            "unexpected error: {err:#}"
+        );
+    }
 }

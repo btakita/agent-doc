@@ -982,7 +982,9 @@ pub(crate) fn content_has_agent_components(content: &str) -> bool {
         .is_some_and(|components| !components.is_empty())
 }
 
-pub(crate) fn full_content_ipc_scope_rejection_reason(contents: &[Option<&str>]) -> Option<&'static str> {
+pub(crate) fn full_content_ipc_scope_rejection_reason(
+    contents: &[Option<&str>],
+) -> Option<&'static str> {
     for content in contents.iter().flatten() {
         if content_declares_template_frontmatter(content) {
             return Some("template_frontmatter");
@@ -1984,7 +1986,6 @@ pub(crate) fn next_existing_node_key(
         .find(|node| existing.contains_key(node.node_key.as_str()))
         .map(|node| node.node_key.clone())
 }
-
 
 #[cfg(test)]
 mod submodule_patch_routing_tests {

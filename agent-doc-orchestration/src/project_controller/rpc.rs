@@ -35,7 +35,10 @@ pub(crate) fn request_path(path: &Path, command: &str) -> Result<String> {
     Ok(response.trim().to_string())
 }
 
-pub(crate) fn read_controller_response_line<R: BufRead>(reader: &mut R, response: &mut String) -> Result<()> {
+pub(crate) fn read_controller_response_line<R: BufRead>(
+    reader: &mut R,
+    response: &mut String,
+) -> Result<()> {
     match reader.read_line(response) {
         Ok(0) => anyhow::bail!("project controller closed connection without a response"),
         Ok(_) => Ok(()),
@@ -346,7 +349,10 @@ pub fn authoritative_actor_binding(
 ///
 /// Pure decision so the deterministic SimWorld flood repro and the live dispatch
 /// path classify the coalesce condition identically.
-pub fn dispatch_should_coalesce_in_flight(in_flight_same_cycle: bool, operator_driven: bool) -> bool {
+pub fn dispatch_should_coalesce_in_flight(
+    in_flight_same_cycle: bool,
+    operator_driven: bool,
+) -> bool {
     in_flight_same_cycle && !operator_driven
 }
 
@@ -418,13 +424,10 @@ pub fn dispatch_error_stale_generation_redirect_target(message: &str) -> Option<
     if !message.contains(DISPATCH_STALE_GENERATION_REDIRECT_MARKER) {
         return None;
     }
-    message
-        .split("retry_generation=")
-        .nth(1)
-        .and_then(|rest| {
-            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-            digits.parse::<u64>().ok()
-        })
+    message.split("retry_generation=").nth(1).and_then(|rest| {
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        digits.parse::<u64>().ok()
+    })
 }
 
 pub fn authorize_dispatch(
@@ -1001,6 +1004,7 @@ pub fn status(project_root: &Path) -> Result<ControllerStatus> {
                 .context("failed to parse project controller status response")?;
             status.active = true;
             status.stale_duplicate_pids = discover_stale_duplicate_pids(project_root, status.pid);
+            status.freshness = Some(controller_freshness_status(status.pid, None));
             Ok(status)
         }
         Err(_) => {
@@ -1129,10 +1133,13 @@ pub(crate) fn host_supervisor_is_stale(
 /// read-only check can never block a live cycle.
 pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<String> {
     let project_root = crate::snapshot::find_project_root(file)?;
-    let record = authoritative_actor_binding(&project_root, file).ok().flatten()?;
+    let record = authoritative_actor_binding(&project_root, file)
+        .ok()
+        .flatten()?;
     let conn = open_state_db(&project_root).ok()?;
-    let lease =
-        load_supervisor_lease_from_db(&conn, &record.document_id, record.generation).ok().flatten()?;
+    let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)
+        .ok()
+        .flatten()?;
     let supervisor_pid = lease.supervisor_pid?;
     if !process_is_alive(supervisor_pid) {
         return None;
@@ -1228,7 +1235,8 @@ pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
             .ok()
             .and_then(|(fm, _)| fm.supervisor_auto_recycle)
     });
-    let project = crate::project_config::load_project_for_doc(doc).agent_doc_supervisor_auto_recycle;
+    let project =
+        crate::project_config::load_project_for_doc(doc).agent_doc_supervisor_auto_recycle;
     resolve_supervisor_auto_recycle(env.as_deref(), frontmatter, project)
 }
 
@@ -1281,27 +1289,59 @@ pub(crate) fn supervisor_auto_install_enabled(doc: &std::path::Path) -> bool {
             .ok()
             .and_then(|(fm, _)| fm.supervisor_auto_install)
     });
-    let project = crate::project_config::load_project_for_doc(doc).agent_doc_supervisor_auto_install;
+    let project =
+        crate::project_config::load_project_for_doc(doc).agent_doc_supervisor_auto_install;
     resolve_supervisor_auto_install(env.as_deref(), frontmatter, project)
 }
 
 /// `#supautoinstall` — resolve the agent-doc crate source root for a DOGFOODING session
-/// (an agent-doc session editing agent-doc's own source). Returns the crate root only when
-/// the served document's project tree actually contains the agent-doc crate — the project
-/// root itself, or a `src/agent-doc` submodule under it, whichever holds a `Cargo.toml`
-/// declaring `name = "agent-doc"`. This is what keeps the auto-install from EVER firing for
-/// an ordinary user's document. Fail-open `None` on any resolution error.
+/// (an agent-doc session editing agent-doc's own source). A superproject may contain
+/// `src/agent-doc` while also hosting unrelated project documents; those documents must not
+/// inherit dogfood build/install policy just because the crate is nearby.
 pub(crate) fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
-    let project_root = crate::fs_util::find_project_root(file)?;
+    let file = file.canonicalize().ok()?;
+    let project_root = crate::fs_util::find_project_root(&file)?;
     for candidate in [project_root.clone(), project_root.join("src/agent-doc")] {
         let cargo = candidate.join("Cargo.toml");
         if let Ok(content) = std::fs::read_to_string(&cargo)
             && content.contains("name = \"agent-doc\"")
+            && is_agent_doc_dogfood_session(&file, &project_root, &candidate)
         {
             return Some(candidate);
         }
     }
     None
+}
+
+fn is_agent_doc_dogfood_session(file: &Path, project_root: &Path, crate_root: &Path) -> bool {
+    if crate_root == project_root {
+        return file.starts_with(project_root);
+    }
+    if file.starts_with(crate_root) {
+        return true;
+    }
+    let Ok(relative) = file.strip_prefix(project_root) else {
+        return false;
+    };
+    let mut components = relative
+        .components()
+        .filter_map(|component| component.as_os_str().to_str());
+    let Some(first) = components.next() else {
+        return false;
+    };
+    if first != "tasks" {
+        return false;
+    }
+    let Some(second) = components.next() else {
+        return false;
+    };
+    if second == "agent-doc" {
+        return true;
+    }
+    if second.starts_with("agent-doc") && second.ends_with(".md") {
+        return true;
+    }
+    second == "software" && components.next() == Some("agent-doc.md")
 }
 
 /// `#supautoinstall` — newest mtime (unix secs) among the crate's build inputs: a bounded
@@ -1405,7 +1445,10 @@ pub(crate) fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
 /// confirmation. Wiring into the dispatch bail is the clean-session remainder of `#jbrestale`.
 pub(crate) fn pause_reason_is_stale_supervisor_churn_stop(reason: &str) -> bool {
     let r = reason.to_ascii_lowercase();
-    if r.contains("supervisor_binary_stale") || r.contains("stale supervisor") {
+    if r.contains("supervisor_binary_stale")
+        || r.contains("stale supervisor")
+        || r.contains("stale host supervisor")
+    {
         return true;
     }
     // "needs operator recycle" only counts on a churn-stop (the remedy text the churn
@@ -1483,49 +1526,6 @@ fn resume_spent_preset_pause(
     )?;
     crate::ops_log::log_op(file, reason);
     Ok(())
-}
-
-fn clear_stale_supervisor_pause_after_session_start(
-    project_root: &Path,
-    file: &Path,
-    document_id: &str,
-    generation: u64,
-) -> Result<bool> {
-    let conn = open_state_db(project_root)?;
-    let project_scope = project_root.to_string_lossy();
-    let Some(control) =
-        state_store::load_effective_queue_control_from_db(&conn, document_id, &project_scope)?
-    else {
-        return Ok(false);
-    };
-    if control.scope_kind != "document" || control.state != "paused" {
-        return Ok(false);
-    }
-    let Some(reason) = control.reason.as_deref() else {
-        return Ok(false);
-    };
-    if !pause_reason_is_stale_supervisor_churn_stop(reason) {
-        return Ok(false);
-    }
-    let stale_pid = stale_supervisor_pid_from_pause_reason(reason).unwrap_or(0);
-    let repair_reason = format!(
-        "stale_supervisor_pause_repaired file={} action=session_start generation={} stale_pid={} result=cleared",
-        file.display(),
-        generation,
-        stale_pid
-    );
-    state_store::upsert_queue_control_in_db(
-        &conn,
-        &state_store::QueueControlInsert {
-            scope_kind: "document",
-            scope_id: document_id,
-            state: "resumed",
-            reason: Some(&repair_reason),
-            operation_receipt_id: None,
-        },
-    )?;
-    crate::ops_log::log_op(file, &repair_reason);
-    Ok(true)
 }
 
 fn repair_spent_preset_pause_before_dispatch(
@@ -1607,7 +1607,10 @@ pub(crate) fn recycle_debounce_decision(
     }
 }
 
-pub(crate) fn discover_stale_duplicate_pids(project_root: &Path, authoritative_pid: Option<u32>) -> Vec<u32> {
+pub(crate) fn discover_stale_duplicate_pids(
+    project_root: &Path,
+    authoritative_pid: Option<u32>,
+) -> Vec<u32> {
     let mut pids = BTreeSet::new();
     if let Ok(Some(state)) = read_bootstrap(project_root) {
         if Some(state.pid) != authoritative_pid {
@@ -2053,7 +2056,9 @@ pub(crate) fn launch_detached_at(
     Ok(())
 }
 
-pub(crate) fn wait_for_controller(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
+pub(crate) fn wait_for_controller(
+    project_root: &Path,
+) -> Result<interprocess::local_socket::Stream> {
     wait_for_controller_path(&socket_path(project_root))
 }
 
@@ -2263,7 +2268,8 @@ pub(crate) fn controller_self_watchdog_suicide(runtime: &ControllerRuntime, thre
     let project_root = bootstrap.project_root.clone();
     let pid = bootstrap.pid;
     let generation = bootstrap.controller_generation;
-    let age = timestamp_secs().saturating_sub(bootstrap.handoff_started_at.unwrap_or_else(timestamp_secs));
+    let age = timestamp_secs()
+        .saturating_sub(bootstrap.handoff_started_at.unwrap_or_else(timestamp_secs));
     if let Ok(mut state) = runtime.bootstrap.lock() {
         state.handoff_state = ControllerHandoffState::Failed;
         state.handoff_started_at = None;
@@ -2691,22 +2697,6 @@ pub(crate) fn handle_start_session(
     })?;
     refresh_runtime_after_actor_write(runtime)?;
     let _ = project_sessions_projection_for_actor(&bootstrap.project_root, &record.document_id);
-    if let Err(err) = clear_stale_supervisor_pause_after_session_start(
-        &bootstrap.project_root,
-        &file,
-        &record.document_id,
-        record.generation,
-    ) {
-        crate::ops_log::log_op(
-            &file,
-            &format!(
-                "stale_supervisor_pause_repair_failed file={} action=session_start generation={} error={}",
-                file.display(),
-                record.generation,
-                err.to_string().replace(char::is_whitespace, "_")
-            ),
-        );
-    }
     crate::ops_log::log_op(
         &file,
         &format!(
@@ -2846,9 +2836,9 @@ pub(crate) fn handle_mark_lifecycle(
                 ),
             ),
             Ok(_) => {}
-            Err(e) => eprintln!(
-                "[controller] #qflood in-flight release on Ready failed (non-fatal): {e}"
-            ),
+            Err(e) => {
+                eprintln!("[controller] #qflood in-flight release on Ready failed (non-fatal): {e}")
+            }
         }
     }
     refresh_runtime_after_actor_write(runtime)?;
@@ -3453,11 +3443,18 @@ pub(crate) fn handle_inspect_actor(
     let projection_lag = projection_diagnostics
         .iter()
         .any(|diagnostic| diagnostic.retry_status.as_deref() != Some("completed"));
+    let supervisor_pid = supervisor_lease
+        .as_ref()
+        .and_then(|lease| lease.supervisor_pid);
     Ok(ControllerActorInspection {
         target,
         document_id,
         record,
         supervisor_lease,
+        freshness: Some(controller_freshness_status(
+            Some(bootstrap.pid),
+            supervisor_pid,
+        )),
         queue_head,
         queue_control,
         queue_backpressure,
@@ -3742,7 +3739,10 @@ pub(crate) fn repair_projection_from_controller_state(
     Ok(())
 }
 
-pub(crate) fn repair_sessions_projection(project_root: &Path, document_id: Option<&str>) -> Result<()> {
+pub(crate) fn repair_sessions_projection(
+    project_root: &Path,
+    document_id: Option<&str>,
+) -> Result<()> {
     if let Some(document_id) = document_id {
         return project_sessions_projection_for_actor(project_root, document_id);
     }
@@ -3925,8 +3925,7 @@ pub(crate) fn handle_operator_command(
     // generation and the next generation the restart drains toward so racing
     // dispatch / log forensics can see the "superseded -> retry against N+1"
     // redirect instead of the old `generation N is closed` hard reject.
-    if command_kind == "session_restart"
-        && record.state == crate::session_actor::ActorState::Closed
+    if command_kind == "session_restart" && record.state == crate::session_actor::ActorState::Closed
     {
         crate::ops_log::log_op(
             &file,
@@ -4074,6 +4073,12 @@ mod tests {
         assert!(status.active);
         assert_eq!(status.controller_binary, bootstrap.controller_binary);
         assert!(controller_status_matches_current_binary(&status).unwrap());
+        let freshness = status
+            .freshness
+            .as_ref()
+            .expect("controller status should expose binary freshness proof");
+        assert_eq!(freshness.controller.pid, Some(bootstrap.pid));
+        assert!(freshness.installed_binary.is_some());
     }
     #[test]
     fn controller_client_response_read_times_out() {
@@ -4293,7 +4298,10 @@ mod tests {
         // Supervisor maps the SAME inode as the install (fresh launch OR in-place
         // execve hot-reload) → FRESH. This is the case the start-time heuristic got
         // wrong: a re-exec'd supervisor that runs current code.
-        assert!(!host_supervisor_is_stale(Some(installed_inode), installed_inode));
+        assert!(!host_supervisor_is_stale(
+            Some(installed_inode),
+            installed_inode
+        ));
 
         // Running inode unknown (non-Linux / unreadable `/proc/<pid>/exe`) → fail-open,
         // NOT stale, so a read error can never spam the warning.
@@ -4687,12 +4695,9 @@ mod tests {
         let old = timestamp_secs() - 600;
         write_preparing_bootstrap(dir.path(), pid, Some(old));
 
-        let (reaped, kept) = terminate_stale_preparing_controllers(
-            dir.path(),
-            Duration::from_secs(45),
-            false,
-        )
-        .unwrap();
+        let (reaped, kept) =
+            terminate_stale_preparing_controllers(dir.path(), Duration::from_secs(45), false)
+                .unwrap();
         assert_eq!((reaped, kept), (1, 0));
 
         // The live wedged process must be dead (the critical difference from the
@@ -4719,8 +4724,7 @@ mod tests {
         // The record must be superseded with `Failed` so the next bind promotes fresh.
         let after = read_bootstrap(dir.path()).unwrap().unwrap();
         assert_eq!(after.handoff_state, ControllerHandoffState::Failed);
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("stale_preparing_controller_reaped pid="));
         assert!(ops_log.contains("caller=gc"));
     }
@@ -4734,8 +4738,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(1100));
 
         let (reaped, kept) =
-            reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(0), false)
-                .unwrap();
+            reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(0), false).unwrap();
         assert_eq!((reaped, kept), (1, 0));
 
         // The live orphan must actually be terminated (the whole point vs. the
@@ -4753,10 +4756,12 @@ mod tests {
             }
         }
         let status = exit.expect("aged preparing orphan must be reaped");
-        assert!(!status.success(), "orphan must be signal-terminated: {status:?}");
+        assert!(
+            !status.success(),
+            "orphan must be signal-terminated: {status:?}"
+        );
 
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("orphaned_preparing_controller_reaped pid="));
     }
     #[test]
@@ -5083,14 +5088,21 @@ mod tests {
     fn pause_reason_stale_supervisor_churn_stop_classification() {
         use super::pause_reason_is_stale_supervisor_churn_stop as c;
         // `#jbrestale` live-repro churn-stop reason → recoverable by recycle.
-        assert!(c("churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain"));
+        assert!(c(
+            "churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain"
+        ));
         // Explicit discriminators (case-insensitive).
         assert!(c("supervisor_binary_stale pane=%25"));
         assert!(c("re-injected by Stale Supervisor PID 42"));
+        assert!(c(
+            "#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all heads are undrainable under stale host supervisor pid 2715614; zero drainable work"
+        ));
         // `churn-stop` + the recycle remedy with no other signature still recovers.
         assert!(c("churn-stop: repeated injection; needs operator recycle"));
         // Deliberate spent-preset pause → NOT a stale-supervisor recovery (must fail closed).
-        assert!(!c("advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line"));
+        assert!(!c(
+            "advance-review preset head is spent (backlog added + both features shipped); pausing so the go-queue does not re-trigger advance-review. Operator can clear the '- #advance-review' line"
+        ));
         // Plain operator pause → not recoverable.
         assert!(!c("operator paused for manual review"));
         // A churn-stop with neither a stale signature nor the recycle remedy → not recoverable.
@@ -5107,6 +5119,10 @@ mod tests {
             p("stale supervisor pid 2825163; needs operator recycle"),
             Some(2825163)
         );
+        assert_eq!(
+            p("undrainable under stale host supervisor pid 2715614; zero drainable work"),
+            Some(2715614)
+        );
         assert_eq!(p("stale supervisor (no pid named)"), None);
         assert_eq!(p("supervisor_binary_stale pane=%25"), None);
     }
@@ -5116,23 +5132,34 @@ mod tests {
         // `#jbrestale`: a queue_paused bail tagged with the restart-redirect marker is
         // recoverable; the named stale pid is extracted for the proof line.
         assert_eq!(
-            r("project controller command `dispatch` failed: dispatch blocked for x.md: failed_stage=queue_paused reason=churn-stop: stale supervisor pid1368698; needs operator recycle receipt_id=42 supervisor_restart_redirect stale_pid=1368698"),
+            r(
+                "project controller command `dispatch` failed: dispatch blocked for x.md: failed_stage=queue_paused reason=churn-stop: stale supervisor pid1368698; needs operator recycle receipt_id=42 supervisor_restart_redirect stale_pid=1368698"
+            ),
             Some(1368698)
         );
         // Marker present but no pid named → recoverable with pid 0 (proof line still emits).
         assert_eq!(
-            r("dispatch blocked: failed_stage=queue_paused reason=supervisor_binary_stale receipt_id=7 supervisor_restart_redirect stale_pid=0"),
+            r(
+                "dispatch blocked: failed_stage=queue_paused reason=supervisor_binary_stale receipt_id=7 supervisor_restart_redirect stale_pid=0"
+            ),
             Some(0)
         );
         // No marker → terminal (a deliberate operator/spent-preset pause never restarts).
         assert_eq!(
-            r("dispatch blocked for x.md: failed_stage=queue_paused reason=advance-review preset head is spent receipt_id=9"),
+            r(
+                "dispatch blocked for x.md: failed_stage=queue_paused reason=advance-review preset head is spent receipt_id=9"
+            ),
             None
         );
         // A coalesce / stale-generation failure must not be misread as a restart redirect.
-        assert_eq!(r("dispatch coalesced for x.md (#qflood); receipt_id=3"), None);
         assert_eq!(
-            r("dispatch rejected: requested generation 1, current generation 2 (stale_generation_redirect retry_generation=2)"),
+            r("dispatch coalesced for x.md (#qflood); receipt_id=3"),
+            None
+        );
+        assert_eq!(
+            r(
+                "dispatch rejected: requested generation 1, current generation 2 (stale_generation_redirect retry_generation=2)"
+            ),
             None
         );
     }
@@ -5182,19 +5209,92 @@ mod tests {
     #[test]
     fn resolve_supervisor_auto_install_default_on() {
         // `#supautoinstall`: default ON (mirrors recycle); env > frontmatter > project >
-        // built-in ON. Safe to default ON because the build only fires for a dogfooding
-        // session (crate-root resolves).
+        // built-in ON. Safe to default ON because the build only fires for an agent-doc
+        // dogfood session document (crate-root resolves).
         // Env override wins both ways, regardless of frontmatter/project.
-        assert!(resolve_supervisor_auto_install(Some("1"), Some(false), Some(false)));
+        assert!(resolve_supervisor_auto_install(
+            Some("1"),
+            Some(false),
+            Some(false)
+        ));
         assert!(resolve_supervisor_auto_install(Some(" ON "), None, None));
-        assert!(!resolve_supervisor_auto_install(Some("0"), Some(true), Some(true)));
+        assert!(!resolve_supervisor_auto_install(
+            Some("0"),
+            Some(true),
+            Some(true)
+        ));
         assert!(!resolve_supervisor_auto_install(Some("off"), None, None));
         // Unrecognized env falls through to frontmatter, then project.
-        assert!(!resolve_supervisor_auto_install(Some("maybe"), Some(false), None));
-        assert!(resolve_supervisor_auto_install(None, Some(true), Some(false)));
+        assert!(!resolve_supervisor_auto_install(
+            Some("maybe"),
+            Some(false),
+            None
+        ));
+        assert!(resolve_supervisor_auto_install(
+            None,
+            Some(true),
+            Some(false)
+        ));
         assert!(!resolve_supervisor_auto_install(None, None, Some(false)));
         // Absent everywhere → built-in default ON.
         assert!(resolve_supervisor_auto_install(None, None, None));
+    }
+
+    #[test]
+    fn dogfood_crate_root_rejects_unrelated_superproject_docs() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let crate_root = root.join("src/agent-doc");
+        std::fs::create_dir_all(crate_root.join("specs")).unwrap();
+        std::fs::write(
+            crate_root.join("Cargo.toml"),
+            "[package]\nname = \"agent-doc\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+
+        let write_doc = |relative: &str| {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "---\nagent_doc_format: template\n---\n").unwrap();
+            path
+        };
+
+        let dogfood_doc = write_doc("tasks/agent-doc/agent-doc-bugs2.md");
+        assert_eq!(
+            dogfood_agent_doc_crate_root(&dogfood_doc),
+            Some(crate_root.clone())
+        );
+
+        let legacy_root_doc = write_doc("tasks/agent-doc-bugs.md");
+        assert_eq!(
+            dogfood_agent_doc_crate_root(&legacy_root_doc),
+            Some(crate_root.clone())
+        );
+
+        let software_agent_doc = write_doc("tasks/software/agent-doc.md");
+        assert_eq!(
+            dogfood_agent_doc_crate_root(&software_agent_doc),
+            Some(crate_root.clone())
+        );
+
+        let source_doc = write_doc("src/agent-doc/specs/supervisor.md");
+        assert_eq!(
+            dogfood_agent_doc_crate_root(&source_doc),
+            Some(crate_root.clone())
+        );
+
+        let efs_doc = write_doc("tasks/professional/equityfundingsource.md");
+        assert!(
+            dogfood_agent_doc_crate_root(&efs_doc).is_none(),
+            "unrelated project sessions must not inherit agent-doc auto-install"
+        );
+
+        let lazily_doc = write_doc("tasks/software/lazily-rs.md");
+        assert!(
+            dogfood_agent_doc_crate_root(&lazily_doc).is_none(),
+            "sibling software sessions must not inherit agent-doc auto-install"
+        );
     }
 
     #[test]
@@ -5203,7 +5303,10 @@ mod tests {
         // half-launched replacement on the temp socket to shut down, and record it.
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let temp_sock = dir.path().join(".agent-doc").join("controller-handoff.sock");
+        let temp_sock = dir
+            .path()
+            .join(".agent-doc")
+            .join("controller-handoff.sock");
 
         // Stand up a one-shot listener standing in for the Preparing replacement so
         // we can prove the exact `shutdown` command crosses the socket. Binding on
@@ -5237,8 +5340,7 @@ mod tests {
         );
         server.join().unwrap();
 
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("handoff_drop_guard_aborted_handoff_shutdown"));
         assert!(ops_log.contains(&format!("temp_sock={}", temp_sock.display())));
     }
@@ -5248,14 +5350,17 @@ mod tests {
         // controller must never be shut down or logged as an aborted handoff.
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let temp_sock = dir.path().join(".agent-doc").join("controller-handoff.sock");
+        let temp_sock = dir
+            .path()
+            .join(".agent-doc")
+            .join("controller-handoff.sock");
         {
             let mut guard = HandoffDropGuard::new(dir.path(), &temp_sock);
             guard.complete();
             // Dropped here after `complete()` ⇒ shutdown branch must be skipped.
         }
-        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             !ops_log.contains("handoff_drop_guard_aborted_handoff_shutdown"),
             "a completed handoff must not log an aborted shutdown"
@@ -5310,10 +5415,16 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/efs.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n").unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
         let bootstrap = test_bootstrap(&dir);
-        let doc_id =
-            crate::session_actor::canonical_document_id_in(&bootstrap.project_root, &doc.to_string_lossy());
+        let doc_id = crate::session_actor::canonical_document_id_in(
+            &bootstrap.project_root,
+            &doc.to_string_lossy(),
+        );
 
         // Seed an up-to-date controller actor at generation 83 on the OLD pane
         // %33 (mirrors the migrated-but-registry-lagging live state).
@@ -5323,7 +5434,10 @@ mod tests {
             generation: 83,
             pane_id: "%33".to_string(),
             window_id: "@9".to_string(),
-            harness: crate::session_actor::detect_document_harness_in(&bootstrap.project_root, &doc_id),
+            harness: crate::session_actor::detect_document_harness_in(
+                &bootstrap.project_root,
+                &doc_id,
+            ),
             state: crate::session_actor::ActorState::Ready,
             last_transition: crate::session_actor::ActorLastTransition {
                 caller: "supervisor".to_string(),

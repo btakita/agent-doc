@@ -638,578 +638,578 @@ pub(crate) fn append_tail_to_exchange_end(prefix: &str, tail: &str) -> Result<St
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use std::path::Path;
-use tempfile::TempDir;
-#[test]
-fn repair_conversation_tail_outside_exchange_moves_tail_back_inside_exchange() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: earlier — gpt-5\n\n",
-        "Done.\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "## Pending / Not Built\n\n",
-        "<!-- agent:pending -->\n",
-        "- [ ] keep me\n",
-        "<!-- /agent:pending -->\n\n",
-        "## Assistant\n\n",
-        "Follow-up response.\n"
-    );
+    use std::path::Path;
+    use tempfile::TempDir;
+    #[test]
+    fn repair_conversation_tail_outside_exchange_moves_tail_back_inside_exchange() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:pending -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:pending -->\n\n",
+            "## Assistant\n\n",
+            "Follow-up response.\n"
+        );
 
-    let repaired = repair_conversation_tail_outside_exchange(doc)
-        .unwrap()
-        .expect("repair should apply");
-    let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
-    let pending_open = repaired.find("<!-- agent:pending -->").unwrap();
-    let assistant = repaired.find("## Assistant").unwrap();
+        let repaired = repair_conversation_tail_outside_exchange(doc)
+            .unwrap()
+            .expect("repair should apply");
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        let pending_open = repaired.find("<!-- agent:pending -->").unwrap();
+        let assistant = repaired.find("## Assistant").unwrap();
 
-    assert!(
-        assistant < exchange_close,
-        "assistant tail should move back inside exchange:\n{repaired}"
-    );
-    assert!(
-        pending_open > exchange_close,
-        "pending should remain outside exchange:\n{repaired}"
-    );
-    assert_eq!(
-        repaired.matches("<!-- agent:boundary:").count(),
-        1,
-        "repair should leave exactly one boundary marker"
-    );
-}
-#[test]
-fn repair_conversation_tail_outside_exchange_rejects_ambiguous_suffix() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: earlier — gpt-5\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "## Assistant\n\n",
-        "Escaped answer.\n\n",
-        "## Todo / Backlog\n\n",
-        "- not conversation content\n"
-    );
+        assert!(
+            assistant < exchange_close,
+            "assistant tail should move back inside exchange:\n{repaired}"
+        );
+        assert!(
+            pending_open > exchange_close,
+            "pending should remain outside exchange:\n{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("<!-- agent:boundary:").count(),
+            1,
+            "repair should leave exactly one boundary marker"
+        );
+    }
+    #[test]
+    fn repair_conversation_tail_outside_exchange_rejects_ambiguous_suffix() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Assistant\n\n",
+            "Escaped answer.\n\n",
+            "## Todo / Backlog\n\n",
+            "- not conversation content\n"
+        );
 
-    let err = repair_conversation_tail_outside_exchange(doc).unwrap_err();
-    assert!(
-        err.to_string().contains("escaped `agent:exchange`"),
-        "unexpected error: {err}"
-    );
-}
-#[test]
-fn repair_conversation_tail_outside_exchange_moves_plain_trailing_suffix_after_todo() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "## User\n",
-        "compact exchange\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:pending -->\n",
-        "- [ ] keep me\n",
-        "<!-- /agent:pending -->\n\n",
-        "<!-- agent:todo patch=replace -->\n",
-        "- [ ] backlog\n",
-        "<!-- /agent:todo -->\n\n",
-        "Exchange compacted. No new work was run in this turn.\n\n",
-        "## Assistant\n\n",
-        "Exchange compacted. No new work was run in this turn.\n\n",
-        "## User\n"
-    );
+        let err = repair_conversation_tail_outside_exchange(doc).unwrap_err();
+        assert!(
+            err.to_string().contains("escaped `agent:exchange`"),
+            "unexpected error: {err}"
+        );
+    }
+    #[test]
+    fn repair_conversation_tail_outside_exchange_moves_plain_trailing_suffix_after_todo() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "## User\n",
+            "compact exchange\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:pending -->\n\n",
+            "<!-- agent:todo patch=replace -->\n",
+            "- [ ] backlog\n",
+            "<!-- /agent:todo -->\n\n",
+            "Exchange compacted. No new work was run in this turn.\n\n",
+            "## Assistant\n\n",
+            "Exchange compacted. No new work was run in this turn.\n\n",
+            "## User\n"
+        );
 
-    let repaired = repair_conversation_tail_outside_exchange(doc)
-        .unwrap()
-        .expect("repair should apply");
-    let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
-    let pending_open = repaired.find("<!-- agent:pending -->").unwrap();
-    let todo_open = repaired.find("<!-- agent:todo patch=replace -->").unwrap();
-    let trailing_summary = repaired
-        .rfind("Exchange compacted. No new work was run in this turn.")
-        .unwrap();
+        let repaired = repair_conversation_tail_outside_exchange(doc)
+            .unwrap()
+            .expect("repair should apply");
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        let pending_open = repaired.find("<!-- agent:pending -->").unwrap();
+        let todo_open = repaired.find("<!-- agent:todo patch=replace -->").unwrap();
+        let trailing_summary = repaired
+            .rfind("Exchange compacted. No new work was run in this turn.")
+            .unwrap();
 
-    assert!(
-        trailing_summary < exchange_close,
-        "plain trailing suffix should move back inside exchange:\n{repaired}"
-    );
-    assert!(
-        pending_open > exchange_close && todo_open > exchange_close,
-        "sibling components should stay outside exchange:\n{repaired}"
-    );
-    assert_eq!(
-        repaired.matches("<!-- agent:boundary:").count(),
-        1,
-        "repair should leave exactly one boundary marker"
-    );
-}
-#[test]
-fn repair_conversation_tail_outside_exchange_ignores_comment_only_suffix() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: earlier — gpt-5\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "[//]: # (leave this note outside exchange)\n"
-    );
+        assert!(
+            trailing_summary < exchange_close,
+            "plain trailing suffix should move back inside exchange:\n{repaired}"
+        );
+        assert!(
+            pending_open > exchange_close && todo_open > exchange_close,
+            "sibling components should stay outside exchange:\n{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("<!-- agent:boundary:").count(),
+            1,
+            "repair should leave exactly one boundary marker"
+        );
+    }
+    #[test]
+    fn repair_conversation_tail_outside_exchange_ignores_comment_only_suffix() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "[//]: # (leave this note outside exchange)\n"
+        );
 
-    let repaired = repair_conversation_tail_outside_exchange(doc).unwrap();
-    assert!(
-        repaired.is_none(),
-        "comment-only suffix should stay outside exchange"
-    );
-}
-#[test]
-fn repair_conversation_tail_outside_exchange_ignores_html_comment_body() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: earlier — gpt-5\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!--\n",
-        "do #hidden. spec-test-build-install-commit-push\n",
-        "Can this stay hidden?\n",
-        "-->\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] keep me\n",
-        "<!-- /agent:backlog -->\n"
-    );
+        let repaired = repair_conversation_tail_outside_exchange(doc).unwrap();
+        assert!(
+            repaired.is_none(),
+            "comment-only suffix should stay outside exchange"
+        );
+    }
+    #[test]
+    fn repair_conversation_tail_outside_exchange_ignores_html_comment_body() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "do #hidden. spec-test-build-install-commit-push\n",
+            "Can this stay hidden?\n",
+            "-->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
 
-    let repaired = repair_conversation_tail_outside_exchange(doc).unwrap();
-    assert!(
-        repaired.is_none(),
-        "prompt-like text inside ordinary HTML comments must not be moved into exchange"
-    );
-}
-#[test]
-fn repair_conversation_tail_outside_exchange_ignores_unterminated_html_comment_body() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: earlier — gpt-5\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!--\n",
-        "do #hidden. spec-test-build-install-commit-push\n",
-        "Still typing this scratch note.\n"
-    );
+        let repaired = repair_conversation_tail_outside_exchange(doc).unwrap();
+        assert!(
+            repaired.is_none(),
+            "prompt-like text inside ordinary HTML comments must not be moved into exchange"
+        );
+    }
+    #[test]
+    fn repair_conversation_tail_outside_exchange_ignores_unterminated_html_comment_body() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "do #hidden. spec-test-build-install-commit-push\n",
+            "Still typing this scratch note.\n"
+        );
 
-    let repaired = repair_conversation_tail_outside_exchange(doc).unwrap();
-    assert!(
-        repaired.is_none(),
-        "prompt-like text inside a transiently unclosed ordinary HTML comment must not be moved into exchange"
-    );
-    guard_no_conversation_tail_outside_exchange(doc).unwrap();
-}
-#[test]
-fn repair_conversation_tail_outside_exchange_moves_gap_before_backlog_inside_exchange() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: earlier — gpt-5\n",
-        "Done.\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "###\n\n",
-        "### Re: gap — gpt-5\n\n",
-        "Escaped answer.\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] keep me\n",
-        "<!-- /agent:backlog -->\n"
-    );
+        let repaired = repair_conversation_tail_outside_exchange(doc).unwrap();
+        assert!(
+            repaired.is_none(),
+            "prompt-like text inside a transiently unclosed ordinary HTML comment must not be moved into exchange"
+        );
+        guard_no_conversation_tail_outside_exchange(doc).unwrap();
+    }
+    #[test]
+    fn repair_conversation_tail_outside_exchange_moves_gap_before_backlog_inside_exchange() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "### Re: gap — gpt-5\n\n",
+            "Escaped answer.\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
 
-    let repaired = repair_conversation_tail_outside_exchange(doc)
-        .unwrap()
-        .expect("repair should apply");
-    let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
-    let response = repaired.find("### Re: gap — gpt-5").unwrap();
-    let gap_marker = repaired.find("\n###\n\n").unwrap();
-    let backlog = repaired.find("<!-- agent:backlog -->").unwrap();
+        let repaired = repair_conversation_tail_outside_exchange(doc)
+            .unwrap()
+            .expect("repair should apply");
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        let response = repaired.find("### Re: gap — gpt-5").unwrap();
+        let gap_marker = repaired.find("\n###\n\n").unwrap();
+        let backlog = repaired.find("<!-- agent:backlog -->").unwrap();
 
-    assert!(
-        response < exchange_close,
-        "gap response should move back inside exchange:\n{repaired}"
-    );
-    assert!(
-        gap_marker > exchange_close,
-        "plain gap marker should remain outside exchange:\n{repaired}"
-    );
-    assert!(
-        backlog > exchange_close,
-        "backlog should remain outside exchange:\n{repaired}"
-    );
-}
-#[test]
-fn repair_conversation_tail_outside_exchange_moves_prompt_before_gap_inside_exchange() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: earlier — gpt-5\n",
-        "Done.\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "do [#oobprompt]. spec-test-build-install-commit-push\n",
-        "###\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] keep me\n",
-        "<!-- /agent:backlog -->\n"
-    );
+        assert!(
+            response < exchange_close,
+            "gap response should move back inside exchange:\n{repaired}"
+        );
+        assert!(
+            gap_marker > exchange_close,
+            "plain gap marker should remain outside exchange:\n{repaired}"
+        );
+        assert!(
+            backlog > exchange_close,
+            "backlog should remain outside exchange:\n{repaired}"
+        );
+    }
+    #[test]
+    fn repair_conversation_tail_outside_exchange_moves_prompt_before_gap_inside_exchange() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "do [#oobprompt]. spec-test-build-install-commit-push\n",
+            "###\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
 
-    let repaired = repair_conversation_tail_outside_exchange(doc)
-        .unwrap()
-        .expect("repair should apply");
-    let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
-    let prompt = repaired
-        .find("do [#oobprompt]. spec-test-build-install-commit-push")
-        .unwrap();
-    let gap_marker = repaired.find("\n###\n\n").unwrap();
-    let backlog = repaired.find("<!-- agent:backlog -->").unwrap();
+        let repaired = repair_conversation_tail_outside_exchange(doc)
+            .unwrap()
+            .expect("repair should apply");
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        let prompt = repaired
+            .find("do [#oobprompt]. spec-test-build-install-commit-push")
+            .unwrap();
+        let gap_marker = repaired.find("\n###\n\n").unwrap();
+        let backlog = repaired.find("<!-- agent:backlog -->").unwrap();
 
-    assert!(
-        prompt < exchange_close,
-        "prompt should move back inside exchange:\n{repaired}"
-    );
-    assert!(
-        gap_marker > exchange_close,
-        "plain gap marker should remain outside exchange:\n{repaired}"
-    );
-    assert!(
-        backlog > exchange_close,
-        "backlog should remain outside exchange:\n{repaired}"
-    );
-}
-#[test]
-fn repair_duplicate_exchange_close_tail_moves_escaped_response_back_inside_exchange() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "❯ earlier question\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "### Re: later — gpt-5\n\n",
-        "Escaped answer.\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] keep me\n",
-        "<!-- /agent:backlog -->\n"
-    );
+        assert!(
+            prompt < exchange_close,
+            "prompt should move back inside exchange:\n{repaired}"
+        );
+        assert!(
+            gap_marker > exchange_close,
+            "plain gap marker should remain outside exchange:\n{repaired}"
+        );
+        assert!(
+            backlog > exchange_close,
+            "backlog should remain outside exchange:\n{repaired}"
+        );
+    }
+    #[test]
+    fn repair_duplicate_exchange_close_tail_moves_escaped_response_back_inside_exchange() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ earlier question\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "### Re: later — gpt-5\n\n",
+            "Escaped answer.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
 
-    let repaired = repair_duplicate_exchange_close_tail(doc)
-        .unwrap()
-        .expect("duplicate close repair should apply");
-    let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
-    let response = repaired.find("### Re: later — gpt-5").unwrap();
-    let backlog = repaired.find("<!-- agent:backlog -->").unwrap();
+        let repaired = repair_duplicate_exchange_close_tail(doc)
+            .unwrap()
+            .expect("duplicate close repair should apply");
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        let response = repaired.find("### Re: later — gpt-5").unwrap();
+        let backlog = repaired.find("<!-- agent:backlog -->").unwrap();
 
-    assert!(
-        response < exchange_close,
-        "escaped response should move back inside exchange:\n{repaired}"
-    );
-    assert!(
-        backlog > exchange_close,
-        "backlog should remain outside exchange:\n{repaired}"
-    );
-    assert_eq!(
-        repaired.matches("<!-- /agent:exchange -->").count(),
-        1,
-        "repair should leave exactly one exchange close marker"
-    );
-}
-#[test]
-fn repair_duplicate_exchange_close_scaffold_drops_inserted_template_shell() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Session Summary\n\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "JB `Run Agent Doc` failed on this document.\n",
-        "<!-- /agent:exchange -->\n",
-        "###\n",
-        "<!--\n",
-        "-->\n\n",
-        "<!-- agent:queue -->\n",
-        "<!-- /agent:queue -->\n\n",
-        "## Pending / Not Built\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] [#aaaa] keep me\n",
-        "<!-- /agent:backlog -->\n\n",
-        "## Completed / Reaped\n\n",
-        "<!-- agent:done -->\n",
-        "<!-- /agent:done -->\n",
-        "<!-- /agent:exchange -->\n",
-        "###\n",
-        "<!--\n",
-        "-->\n\n",
-        "<!-- agent:queue -->\n",
-        "<!-- /agent:queue -->\n\n",
-        "## Pending / Not Built\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] [#aaaa] keep me\n",
-        "<!-- /agent:backlog -->\n"
-    );
+        assert!(
+            response < exchange_close,
+            "escaped response should move back inside exchange:\n{repaired}"
+        );
+        assert!(
+            backlog > exchange_close,
+            "backlog should remain outside exchange:\n{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("<!-- /agent:exchange -->").count(),
+            1,
+            "repair should leave exactly one exchange close marker"
+        );
+    }
+    #[test]
+    fn repair_duplicate_exchange_close_scaffold_drops_inserted_template_shell() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "JB `Run Agent Doc` failed on this document.\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
 
-    let repaired = repair_duplicate_exchange_close_scaffold(doc)
-        .unwrap()
-        .expect("duplicate scaffold repair should apply");
+        let repaired = repair_duplicate_exchange_close_scaffold(doc)
+            .unwrap()
+            .expect("duplicate scaffold repair should apply");
 
-    assert_eq!(
-        repaired.matches("<!-- /agent:exchange -->").count(),
-        1,
-        "repair should leave one exchange close:\n{repaired}"
-    );
-    assert_eq!(
-        repaired.matches("<!-- agent:queue -->").count(),
-        1,
-        "repair should drop the duplicated queue scaffold:\n{repaired}"
-    );
-    assert!(repaired.contains("JB `Run Agent Doc` failed on this document."));
-    assert!(component::parse(&repaired).is_ok());
-}
-#[test]
-fn repair_duplicate_exchange_close_scaffold_rejects_mixed_user_text() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Session Summary\n\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "c The arrow\n",
-        "<!-- /agent:exchange -->\n",
-        "###\n",
-        "<!--\n",
-        "Use TEST_THREADS=8.\n",
-        "-->\n\n",
-        "<!-- agent:queue -->\n",
-        "<!-- /agent:queue -->\n\n",
-        "## Pending / Not Built\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] [#aaaa] keep me\n",
-        "<!-- /agent:backlog -->\n\n",
-        "## Completed / Reaped\n\n",
-        "<!-- agent:done -->\n",
-        "<!-- /agent:done -->\n",
-        "corky.md The arrow\n",
-        "<!-- /agent:exchange -->\n",
-        "###\n",
-        "<!--\n",
-        "Use TEST_THREADS=8.\n",
-        "-->\n\n",
-        "<!-- agent:queue -->\n",
-        "<!-- /agent:queue -->\n\n",
-        "## Pending / Not Built\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] [#aaaa] keep me\n",
-        "<!-- /agent:backlog -->\n"
-    );
+        assert_eq!(
+            repaired.matches("<!-- /agent:exchange -->").count(),
+            1,
+            "repair should leave one exchange close:\n{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("<!-- agent:queue -->").count(),
+            1,
+            "repair should drop the duplicated queue scaffold:\n{repaired}"
+        );
+        assert!(repaired.contains("JB `Run Agent Doc` failed on this document."));
+        assert!(component::parse(&repaired).is_ok());
+    }
+    #[test]
+    fn repair_duplicate_exchange_close_scaffold_rejects_mixed_user_text() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "c The arrow\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "corky.md The arrow\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
 
-    let repaired = repair_duplicate_exchange_close_scaffold(doc).unwrap();
+        let repaired = repair_duplicate_exchange_close_scaffold(doc).unwrap();
 
-    assert!(
-        repaired.is_none(),
-        "mixed user text must not be dropped as duplicated scaffold"
-    );
-}
-#[test]
-fn normalize_editor_visible_template_structure_repairs_duplicate_scaffold() {
-    let doc = concat!(
-        "<!-- agent:exchange patch=append -->\n",
-        "### Session Summary\n",
-        "<!-- /agent:exchange -->\n",
-        "###\n",
-        "<!--\n",
-        "Use TEST_THREADS=8.\n",
-        "-->\n\n",
-        "<!-- agent:queue -->\n",
-        "<!-- /agent:queue -->\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] [#aaaa] keep me\n",
-        "<!-- /agent:backlog -->\n\n",
-        "<!-- /agent:exchange -->\n",
-        "###\n",
-        "<!--\n",
-        "Use TEST_THREADS=8.\n",
-        "-->\n\n",
-        "<!-- agent:queue -->\n",
-        "<!-- /agent:queue -->\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] [#aaaa] keep me\n",
-        "<!-- /agent:backlog -->\n"
-    );
+        assert!(
+            repaired.is_none(),
+            "mixed user text must not be dropped as duplicated scaffold"
+        );
+    }
+    #[test]
+    fn normalize_editor_visible_template_structure_repairs_duplicate_scaffold() {
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
 
-    let repaired = normalize_editor_visible_template_structure(doc)
-        .expect("safe duplicate scaffold should repair before editor write");
+        let repaired = normalize_editor_visible_template_structure(doc)
+            .expect("safe duplicate scaffold should repair before editor write");
 
-    assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
-    assert_eq!(repaired.matches("<!-- agent:queue -->").count(), 1);
-    assert_eq!(repaired.matches("<!-- agent:backlog -->").count(), 1);
-    guard_no_conversation_tail_outside_exchange(&repaired).unwrap();
-}
-#[test]
-fn repair_duplicate_exchange_close_tail_rejects_ambiguous_suffix() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "❯ earlier question\n",
-        "<!-- /agent:exchange -->\n\n",
-        "## Todo / Backlog\n\n",
-        "- keep me outside exchange\n",
-        "<!-- /agent:exchange -->\n"
-    );
+        assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:queue -->").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:backlog -->").count(), 1);
+        guard_no_conversation_tail_outside_exchange(&repaired).unwrap();
+    }
+    #[test]
+    fn repair_duplicate_exchange_close_tail_rejects_ambiguous_suffix() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ earlier question\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Todo / Backlog\n\n",
+            "- keep me outside exchange\n",
+            "<!-- /agent:exchange -->\n"
+        );
 
-    let err = repair_duplicate_exchange_close_tail(doc).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("duplicate close repair suffix is ambiguous"),
-        "unexpected error: {err}"
-    );
-}
-#[test]
-fn guard_no_conversation_tail_outside_exchange_passes_for_normal_content() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "❯ user question\n",
-        "### Re: question — opus-4-6\n\n",
-        "Answer.\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] some task\n",
-        "<!-- /agent:backlog -->\n"
-    );
-    guard_no_conversation_tail_outside_exchange(doc).unwrap();
-}
-#[test]
-fn guard_no_conversation_tail_outside_exchange_fails_on_tail_after_session_digest() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "❯ earlier question\n",
-        "### Re: earlier — opus-4-6\n\n",
-        "Done.\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "# Session Digest\n\n",
-        "Summary of work.\n\n",
-        "❯ Why were the backlog items removed?\n",
-        "### Re: backlog — opus-4-6\n\n",
-        "Escaped answer.\n"
-    );
-    let err = guard_no_conversation_tail_outside_exchange(doc).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("outside `<!-- agent:exchange -->`"),
-        "unexpected error: {err}"
-    );
-}
-#[test]
-fn guard_no_conversation_tail_outside_exchange_fails_on_tail_after_backlog() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: earlier — gpt-5\n\n",
-        "Done.\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] keep me\n",
-        "<!-- /agent:backlog -->\n\n",
-        "## Assistant\n\n",
-        "Follow-up response.\n"
-    );
-    let err = guard_no_conversation_tail_outside_exchange(doc).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("outside `<!-- agent:exchange -->`"),
-        "unexpected error: {err}"
-    );
-}
-#[test]
-fn guard_no_conversation_tail_outside_exchange_fails_on_gap_before_backlog() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: earlier — gpt-5\n\n",
-        "Done.\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "###\n\n",
-        "### Re: gap — gpt-5\n\n",
-        "Escaped answer.\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] keep me\n",
-        "<!-- /agent:backlog -->\n"
-    );
-    let err = guard_no_conversation_tail_outside_exchange(doc).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("outside `<!-- agent:exchange -->`"),
-        "unexpected error: {err}"
-    );
-}
-#[test]
-fn guard_no_conversation_tail_outside_exchange_fails_on_prompt_before_gap_marker() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: earlier — gpt-5\n",
-        "Done.\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "do [#oobprompt]. spec-test-build-install-commit-push\n",
-        "###\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] keep me\n",
-        "<!-- /agent:backlog -->\n"
-    );
+        let err = repair_duplicate_exchange_close_tail(doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("duplicate close repair suffix is ambiguous"),
+            "unexpected error: {err}"
+        );
+    }
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_passes_for_normal_content() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ user question\n",
+            "### Re: question — opus-4-6\n\n",
+            "Answer.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] some task\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        guard_no_conversation_tail_outside_exchange(doc).unwrap();
+    }
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_fails_on_tail_after_session_digest() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ earlier question\n",
+            "### Re: earlier — opus-4-6\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "# Session Digest\n\n",
+            "Summary of work.\n\n",
+            "❯ Why were the backlog items removed?\n",
+            "### Re: backlog — opus-4-6\n\n",
+            "Escaped answer.\n"
+        );
+        let err = guard_no_conversation_tail_outside_exchange(doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("outside `<!-- agent:exchange -->`"),
+            "unexpected error: {err}"
+        );
+    }
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_fails_on_tail_after_backlog() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Assistant\n\n",
+            "Follow-up response.\n"
+        );
+        let err = guard_no_conversation_tail_outside_exchange(doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("outside `<!-- agent:exchange -->`"),
+            "unexpected error: {err}"
+        );
+    }
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_fails_on_gap_before_backlog() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "### Re: gap — gpt-5\n\n",
+            "Escaped answer.\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let err = guard_no_conversation_tail_outside_exchange(doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("outside `<!-- agent:exchange -->`"),
+            "unexpected error: {err}"
+        );
+    }
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_fails_on_prompt_before_gap_marker() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "do [#oobprompt]. spec-test-build-install-commit-push\n",
+            "###\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
 
-    let err = guard_no_conversation_tail_outside_exchange(doc).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("outside `<!-- agent:exchange -->`"),
-        "unexpected error: {err}"
-    );
-}
-#[test]
-fn guard_no_conversation_tail_outside_exchange_passes_without_exchange_block() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "## Status\n\n",
-        "<!-- agent:status -->\n",
-        "Active\n",
-        "<!-- /agent:status -->\n"
-    );
-    guard_no_conversation_tail_outside_exchange(doc).unwrap();
-}
-#[test]
-fn guard_no_conversation_tail_outside_exchange_passes_for_comment_only_tail() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: earlier — gpt-5\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "[//]: # (leave this note outside exchange)\n"
-    );
-    guard_no_conversation_tail_outside_exchange(doc).unwrap();
-}
-#[test]
-fn guard_no_conversation_tail_outside_exchange_passes_for_html_comment_body() {
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Re: earlier — gpt-5\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!--\n",
-        "do #hidden. spec-test-build-install-commit-push\n",
-        "Can this stay hidden?\n",
-        "-->\n"
-    );
-    guard_no_conversation_tail_outside_exchange(doc).unwrap();
-}
+        let err = guard_no_conversation_tail_outside_exchange(doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("outside `<!-- agent:exchange -->`"),
+            "unexpected error: {err}"
+        );
+    }
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_passes_without_exchange_block() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status -->\n",
+            "Active\n",
+            "<!-- /agent:status -->\n"
+        );
+        guard_no_conversation_tail_outside_exchange(doc).unwrap();
+    }
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_passes_for_comment_only_tail() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "[//]: # (leave this note outside exchange)\n"
+        );
+        guard_no_conversation_tail_outside_exchange(doc).unwrap();
+    }
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_passes_for_html_comment_body() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "do #hidden. spec-test-build-install-commit-push\n",
+            "Can this stay hidden?\n",
+            "-->\n"
+        );
+        guard_no_conversation_tail_outside_exchange(doc).unwrap();
+    }
 }

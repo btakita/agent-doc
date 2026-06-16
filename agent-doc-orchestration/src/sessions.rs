@@ -199,16 +199,17 @@ impl Multiplexer for Tmux {
     }
 
     fn send_submitted_text(&self, pane_id: &str, text: &str) -> Result<()> {
+        let profile = tmux_submit_profile_for_harness("");
         crate::input_diag::log_text_submit(
             None,
             "sessions.send_submitted_text",
             &format!("pane:{pane_id}"),
             text,
             None,
-            "tmux_text_cr",
-            "Enter",
+            profile.transform(),
+            profile.submit_key(),
         );
-        Tmux::send_keys(self, pane_id, text)
+        send_submitted_text_with_profile(self, pane_id, text, profile)
             .with_context(|| format!("failed to submit input to pane {}", pane_id))
     }
 
@@ -218,47 +219,72 @@ impl Multiplexer for Tmux {
         text: &str,
         harness: &str,
     ) -> Result<()> {
-        let submit_key = tmux_submit_key_for_harness(harness);
-        let transform = tmux_submit_transform_for_harness(harness);
+        let profile = tmux_submit_profile_for_harness(harness);
         crate::input_diag::log_text_submit(
             None,
             "sessions.send_submitted_text_for_harness",
             &format!("pane:{pane_id}"),
             text,
             Some(harness),
-            transform,
-            submit_key,
+            profile.transform(),
+            profile.submit_key(),
         );
-        if harness == "codex" {
-            send_literal_text_then_enter_key(self, pane_id, text)
-        } else {
-            tmux_router::submit_text_for_harness(self, pane_id, text, harness)
+        send_submitted_text_with_profile(self, pane_id, text, profile)
+            .with_context(|| format!("failed to submit input to {harness} pane {pane_id}"))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TmuxSubmitProfile {
+    delivery: TmuxSubmitDelivery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TmuxSubmitDelivery {
+    LiteralTextEnterKey,
+}
+
+impl TmuxSubmitProfile {
+    pub const fn mode(self) -> &'static str {
+        match self.delivery {
+            TmuxSubmitDelivery::LiteralTextEnterKey => "tmux_literal_text_enter_key",
         }
-        .with_context(|| format!("failed to submit input to {harness} pane {pane_id}"))
+    }
+
+    pub const fn transform(self) -> &'static str {
+        match self.delivery {
+            TmuxSubmitDelivery::LiteralTextEnterKey => "tmux_text_enter_key",
+        }
+    }
+
+    pub const fn submit_key(self) -> &'static str {
+        match self.delivery {
+            TmuxSubmitDelivery::LiteralTextEnterKey => "Enter",
+        }
+    }
+
+    pub const fn pending_draft_enter_resubmit(self) -> bool {
+        matches!(self.delivery, TmuxSubmitDelivery::LiteralTextEnterKey)
+    }
+}
+
+pub const fn tmux_submit_profile_for_harness(harness: &str) -> TmuxSubmitProfile {
+    let _ = harness;
+    TmuxSubmitProfile {
+        delivery: TmuxSubmitDelivery::LiteralTextEnterKey,
     }
 }
 
 pub const fn tmux_submit_mode_for_harness(harness: &str) -> &'static str {
-    match harness.as_bytes() {
-        b"codex" => "tmux_literal_text_enter_key",
-        b"opencode" => "tmux_literal_kitty_return",
-        _ => "tmux_literal_cr",
-    }
+    tmux_submit_profile_for_harness(harness).mode()
 }
 
 pub const fn tmux_submit_transform_for_harness(harness: &str) -> &'static str {
-    match harness.as_bytes() {
-        b"codex" => "tmux_text_enter_key",
-        b"opencode" => "tmux_text_kitty_return",
-        _ => "tmux_text_cr",
-    }
+    tmux_submit_profile_for_harness(harness).transform()
 }
 
 pub const fn tmux_submit_key_for_harness(harness: &str) -> &'static str {
-    match harness.as_bytes() {
-        b"opencode" => "KittyReturn",
-        _ => "Enter",
-    }
+    tmux_submit_profile_for_harness(harness).submit_key()
 }
 
 fn submitted_text_without_trailing_line_endings(text: &str) -> &str {
@@ -302,6 +328,19 @@ fn send_literal_text_then_enter_key(tmux: &Tmux, pane_id: &str, text: &str) -> R
         );
     }
     Ok(())
+}
+
+fn send_submitted_text_with_profile(
+    tmux: &Tmux,
+    pane_id: &str,
+    text: &str,
+    profile: TmuxSubmitProfile,
+) -> Result<()> {
+    match profile.delivery {
+        TmuxSubmitDelivery::LiteralTextEnterKey => {
+            send_literal_text_then_enter_key(tmux, pane_id, text)
+        }
+    }
 }
 
 /// Return the path to the sessions registry file (relative to CWD).
@@ -428,7 +467,7 @@ pub fn send_key(tmux: &Tmux, pane_id: &str, key: &str) -> Result<()> {
     Multiplexer::send_key(tmux, pane_id, key)
 }
 
-/// Submit a single-line command through a tmux pane's normal literal-text path.
+/// Submit a single-line command through the default tmux submit profile.
 ///
 /// This is the canonical live-pane submission helper for agent-doc-managed
 /// harness commands such as routed reopen triggers and file-scoped `/clear`.
@@ -438,9 +477,9 @@ pub fn send_submitted_text(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()>
 
 /// Submit a single-line command through a harness-aware tmux submit path.
 ///
-/// OpenCode's TUI can treat a bare carriage return as newline input when its
-/// enhanced keyboard protocol is active, so managed OpenCode panes receive the
-/// Kitty Return sequence instead of the default carriage-return suffix.
+/// The submit profile is the single place that defines harness-specific tmux
+/// key boundaries. Codex, Claude, OpenCode, and the default harness profile use
+/// literal text followed by a named tmux `Enter`.
 pub fn send_submitted_text_for_harness(
     tmux: &Tmux,
     pane_id: &str,
@@ -1310,7 +1349,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_submit_mode_uses_literal_text_plus_real_enter_key() {
+    fn submit_profiles_keep_harness_submit_policy_in_one_place() {
         assert_eq!(
             tmux_submit_mode_for_harness("codex"),
             "tmux_literal_text_enter_key"
@@ -1343,22 +1382,28 @@ mod tests {
             literal_text_then_enter_command_args("%7", "\n"),
             vec!["send-keys", "-t", "%7", "Enter"]
         );
-    }
-
-    #[test]
-    fn non_codex_submit_modes_keep_existing_backends() {
+        assert_eq!(
+            tmux_submit_mode_for_harness("claude"),
+            "tmux_literal_text_enter_key"
+        );
+        assert_eq!(
+            tmux_submit_transform_for_harness("claude"),
+            "tmux_text_enter_key"
+        );
+        assert_eq!(tmux_submit_key_for_harness("claude"), "Enter");
+        assert_eq!(
+            tmux_submit_mode_for_harness("unknown-harness"),
+            "tmux_literal_text_enter_key"
+        );
         assert_eq!(
             tmux_submit_mode_for_harness("opencode"),
-            "tmux_literal_kitty_return"
+            "tmux_literal_text_enter_key"
         );
         assert_eq!(
             tmux_submit_transform_for_harness("opencode"),
-            "tmux_text_kitty_return"
+            "tmux_text_enter_key"
         );
-        assert_eq!(tmux_submit_key_for_harness("opencode"), "KittyReturn");
-        assert_eq!(tmux_submit_mode_for_harness("claude"), "tmux_literal_cr");
-        assert_eq!(tmux_submit_transform_for_harness("claude"), "tmux_text_cr");
-        assert_eq!(tmux_submit_key_for_harness("claude"), "Enter");
+        assert_eq!(tmux_submit_key_for_harness("opencode"), "Enter");
     }
 
     #[test]
@@ -1601,13 +1646,13 @@ mod tests {
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn opencode_submit_uses_kitty_return_sequence() {
-        let t = IsolatedTmux::new("agent-doc-test-opencode-kitty-return");
+    fn opencode_submit_uses_literal_text_enter_key() {
+        let t = IsolatedTmux::new("agent-doc-test-opencode-enter-key");
         let tmp = TempDir::new().unwrap();
         let pane_id = t.new_session("test", tmp.path()).unwrap();
         let output_path = tmp.path().join("input.bin");
         let done_path = tmp.path().join("done");
-        let expected = b"agent-doc plan.md\x1b[13u";
+        let expected = b"agent-doc plan.md\r";
 
         t.send_keys(
             &pane_id,

@@ -545,7 +545,8 @@ pub struct Frontmatter {
     /// `supervisor_source_newer_detected`. Resolution: env
     /// `AGENT_DOC_SUPERVISOR_AUTO_INSTALL`, then this frontmatter value, then the
     /// project config `agent_doc_supervisor_auto_install`, then the built-in
-    /// default of ON. Never fires for a non-dogfooding document.
+    /// default of ON. Never fires for a non-agent-doc dogfood session document,
+    /// even when this field is `true`.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -1471,7 +1472,6 @@ fn render_frontmatter_excerpt(yaml: &str, line: usize, column: usize) -> Option<
 
     Some(rendered.join("\n"))
 }
-
 
 #[cfg(test)]
 mod tests {

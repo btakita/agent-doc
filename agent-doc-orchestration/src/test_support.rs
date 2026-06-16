@@ -85,7 +85,11 @@ pub(crate) fn patch_with_heading(heading: &str) -> crate::template::PatchBlock {
 }
 
 #[cfg(test)]
-pub(crate) fn init_repo_with_doc(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
+pub(crate) fn init_repo_with_doc(
+    dir: &std::path::Path,
+    name: &str,
+    body: &str,
+) -> std::path::PathBuf {
     std::process::Command::new("git")
         .current_dir(dir)
         .args(["init", "-q", "--initial-branch=main"])
@@ -255,21 +259,11 @@ pub(crate) fn queue_consume_convergence_target() -> String {
 
 #[cfg(test)]
 pub(crate) const HALT_QUEUE_DOC: &str = concat!(
-
     "---\n",
-
     "queue_active: true\n",
-
     "---\n\n",
-
     "<!-- agent:queue auto -->\n",
-
     "- do [#foo]\n",
-
     "- do [#bar]\n",
-
     "<!-- /agent:queue -->\n",
-
 );
-
-

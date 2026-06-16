@@ -76,32 +76,6 @@ pub fn consume_queue_prompt_force_disk(file: &Path) -> Result<Option<QueueConsum
     consume_queue_prompts_with_outcome(file, &[], true)
 }
 
-fn capture_state_allows_queue_response(capture: &crate::capture::CaptureRecord) -> bool {
-    matches!(
-        capture.state,
-        crate::capture::CaptureState::Captured
-            | crate::capture::CaptureState::WriteApplied
-            | crate::capture::CaptureState::Replayed
-    )
-}
-
-fn capture_response_body_for_queue_consumption(
-    capture: &crate::capture::CaptureRecord,
-) -> Option<String> {
-    capture_state_allows_queue_response(capture)
-        .then(|| capture.response_body.clone())
-        .filter(|body| !body.trim().is_empty())
-}
-
-pub(crate) fn active_response_body_for_queue_consumption(
-    file: &Path,
-) -> Result<Option<String>> {
-    let Some(capture) = crate::capture::load_active(file)? else {
-        return Ok(None);
-    };
-    Ok(capture_response_body_for_queue_consumption(&capture))
-}
-
 pub(crate) fn consume_queue_prompts_with_outcome(
     file: &Path,
     done_ids: &[String],
@@ -121,7 +95,8 @@ pub(crate) fn consume_queue_prompts_with_outcome(
     // guarded disk write otherwise. The force-disk repair path keeps its raw
     // bypass — it deliberately skips IPC/IDE and the visible-write guard.
     if skip_visible_guard {
-        atomic_write(file, &plan.new_document).context("queue consume: failed to write document")?;
+        atomic_write(file, &plan.new_document)
+            .context("queue consume: failed to write document")?;
     } else {
         converge_document_or_disk(file, &plan.new_document, &content, "queue_consume")
             .context("queue consume: failed to write document")?;
@@ -525,44 +500,6 @@ pub(crate) fn response_explicitly_targets_queue_head(response: &str, queue_head:
         .any(|topic| response_topic_matches_queue_head(topic, queue_head))
 }
 
-fn hash_ids_in_queue_head(queue_head: &str) -> Vec<String> {
-    let mut ids = Vec::new();
-    let mut rest = queue_head;
-    while let Some(start) = rest.find("[#") {
-        let after = &rest[start + 2..];
-        let Some(end) = after.find(']') else {
-            break;
-        };
-        let id = normalize_done_id(&after[..end]);
-        if !id.is_empty() && !ids.contains(&id) {
-            ids.push(id);
-        }
-        rest = &after[end + 1..];
-    }
-    for token in queue_head.split_whitespace() {
-        if let Some(raw) = token.strip_prefix('#') {
-            let id = normalize_done_id(raw.trim_end_matches(|c: char| {
-                !c.is_ascii_alphanumeric() && c != '-' && c != '_'
-            }));
-            if !id.is_empty() && !ids.contains(&id) {
-                ids.push(id);
-            }
-        }
-    }
-    ids
-}
-
-fn response_topic_targets_any_hash_id_in_queue_head(response: &str, queue_head: &str) -> bool {
-    let ids = hash_ids_in_queue_head(queue_head);
-    if ids.is_empty() {
-        return false;
-    }
-    response
-        .lines()
-        .filter_map(response_heading_topic)
-        .any(|topic| ids.iter().any(|id| topic_resolves_to_exact_id(topic, id)))
-}
-
 pub(crate) fn response_heading_topic(line: &str) -> Option<&str> {
     let trimmed = line.trim().trim_start_matches('❯').trim();
     let topic = trimmed.strip_prefix("### Re:")?.trim();
@@ -616,7 +553,10 @@ pub(crate) fn response_topic_matches_queue_head(topic: &str, queue_head: &str) -
 ///     `--done`/`--pending-gate`/`--pending-edit` close. A registered prompt
 ///     preset id (e.g. `#spec-...`) is NOT a tracked item, so it stays synthetic
 ///     and still consumes on a matching heading.
-pub(crate) fn response_targets_synthetic_queue_head_id(file: &Path, response: &str) -> Result<bool> {
+pub(crate) fn response_targets_synthetic_queue_head_id(
+    file: &Path,
+    response: &str,
+) -> Result<bool> {
     let content =
         std::fs::read_to_string(file).context("queue consume guard: failed to read document")?;
     let Some(queue_head) = active_queue_head_text(&content)? else {
@@ -687,17 +627,12 @@ pub(crate) fn head_id_names_tracked_directive_item(content: &str, head_id: &str)
         })
 }
 
-/// A queue head that is just a `do [#id]` / `do #id` / `advance [#id]`
-/// directive — the verb plus the id (with optional bracket sugar) and nothing
-/// else. These follow the strike-on-halt explicit-flag rule rather than
-/// heading-based consumption.
+/// A queue head that is just a `do [#id]` / `do #id` directive — the `do` verb
+/// plus the id (with optional bracket sugar) and nothing else. These follow the
+/// strike-on-halt explicit-flag rule rather than heading-based consumption.
 pub(crate) fn queue_head_is_bare_do_directive(queue_head: &str) -> bool {
     let norm = normalize_queue_prompt_text(queue_head);
-    let rest = if let Some(rest) = norm.strip_prefix("do ") {
-        rest
-    } else if let Some(rest) = norm.strip_prefix("advance ") {
-        rest
-    } else {
+    let Some(rest) = norm.strip_prefix("do ") else {
         return false;
     };
     matches!(
@@ -729,7 +664,24 @@ pub(crate) fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
     // still free text and completes on being answered. The old `queue_prompt_done_id(..).is_some()`
     // test matched any `#id` mention and wrongly left such heads un-strikable,
     // hanging the auto-queue (they have no single id to `--done`).
-    Ok(queue_prompt_is_free_text_for_consume(content, &queue_head))
+    let normalized_head = normalize_queue_prompt_text(&queue_head);
+    if let Some(id) = queue_prompt_done_id(&normalized_head)
+        && topic_resolves_to_exact_id(&normalized_head, &id)
+    {
+        // #qpresetstrike: a head that resolves to exactly a registered
+        // `prompt_presets` token (and is not also a tracked backlog/review id) has
+        // no `--done` reap path — it is a synthetic prompt completed by being
+        // answered, so treat it as free text (strikeable by `queue consume` and the
+        // free-text finalize heuristic) rather than wedging it as id-backed.
+        if head_id_is_registered_preset(content, &id) {
+            return Ok(true);
+        }
+        return Ok(false);
+    }
+    if crate::diff::detect_queue_trigger(&normalized_head) {
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 /// Resolve whether this cycle's committed response should consume (strike) the
@@ -772,18 +724,6 @@ pub(crate) fn queue_consumption_allowed_for_response(
         && queue_head_is_free_text_prompt(current_content)?
         && let Some(head_text) = active_queue_head_text(current_content)?
     {
-        let first_visible_head_is_drainable =
-            crate::queue_continuation::live_drainable_continuation_prompt_text(
-                file,
-                current_content,
-            )
-            .is_some_and(|drainable| queue_prompt_text_matches(&drainable, &head_text));
-        if !first_visible_head_is_drainable {
-            return Ok(response_topic_targets_any_hash_id_in_queue_head(
-                response_body,
-                &head_text,
-            ));
-        }
         return Ok(!cycle_answered_foreign_exchange_prompt(
             baseline,
             current_content,
@@ -793,14 +733,12 @@ pub(crate) fn queue_consumption_allowed_for_response(
     Ok(false)
 }
 
-/// True when `topic` resolves to exactly `#<head_id>` (optionally `do ` /
-/// `advance `-prefixed or `[#id]` bracketed) with no trailing modifiers.
-/// Case-insensitive; `head_id` is already normalized lowercase by
-/// [`queue_prompt_done_id`].
+/// True when `topic` resolves to exactly `#<head_id>` (optionally `do `-prefixed
+/// or `[#id]` bracketed) with no trailing modifiers. Case-insensitive; `head_id`
+/// is already normalized lowercase by [`queue_prompt_done_id`].
 pub(crate) fn topic_resolves_to_exact_id(topic: &str, head_id: &str) -> bool {
     let norm = topic.trim().trim_start_matches('❯').trim();
     let norm = norm.strip_prefix("do ").unwrap_or(norm).trim();
-    let norm = norm.strip_prefix("advance ").unwrap_or(norm).trim();
     let inner = norm
         .strip_prefix("[#")
         .and_then(|rest| rest.strip_suffix(']'))
@@ -809,55 +747,16 @@ pub(crate) fn topic_resolves_to_exact_id(topic: &str, head_id: &str) -> bool {
 }
 
 pub(crate) fn queue_prompt_done_id(text: &str) -> Option<String> {
-    let stripped = crate::queue::strip_priority_markers(text);
-    let trimmed = stripped.trim();
-    if let Some(id) = parse_bare_queue_directive_id(trimmed) {
-        return Some(id);
-    }
-    ["do", "advance"].into_iter().find_map(|verb| {
-        strip_queue_directive_verb(trimmed, verb).and_then(parse_leading_queue_directive_id)
-    })
-}
-
-fn strip_queue_directive_verb<'a>(text: &'a str, verb: &str) -> Option<&'a str> {
-    let (idx, _) = text.char_indices().find(|(_, ch)| ch.is_whitespace())?;
-    let (head, rest) = text.split_at(idx);
-    head.eq_ignore_ascii_case(verb).then_some(rest)
-}
-
-fn parse_bare_queue_directive_id(text: &str) -> Option<String> {
-    let id = text
-        .strip_prefix("[#")
-        .and_then(|rest| rest.strip_suffix(']'))
-        .or_else(|| text.strip_prefix('#'))?;
-    normalize_queue_directive_id(id)
-}
-
-fn parse_leading_queue_directive_id(text: &str) -> Option<String> {
-    let text = text.trim_start();
-    if let Some(rest) = text.strip_prefix("[#") {
-        let (id, _) = rest.split_once(']')?;
-        return normalize_queue_directive_id(id);
-    }
-    let id = text
-        .strip_prefix('#')?
+    let marker = text.find('#')?;
+    let tail = &text[marker + 1..];
+    let id = tail
         .chars()
         .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
         .collect::<String>();
-    normalize_queue_directive_id(&id)
-}
-
-fn normalize_queue_directive_id(id: &str) -> Option<String> {
     if id.is_empty() {
-        return None;
-    }
-    if id
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-    {
-        Some(id.to_ascii_lowercase())
-    } else {
         None
+    } else {
+        Some(id.to_ascii_lowercase())
     }
 }
 
@@ -869,7 +768,10 @@ pub(crate) fn normalize_done_id(id: &str) -> String {
         .to_ascii_lowercase()
 }
 
-pub(crate) fn first_n_queue_prompt_texts(entries: &[crate::queue::QueueEntry], count: usize) -> Vec<String> {
+pub(crate) fn first_n_queue_prompt_texts(
+    entries: &[crate::queue::QueueEntry],
+    count: usize,
+) -> Vec<String> {
     entries
         .iter()
         .filter_map(|entry| match entry {
@@ -878,97 +780,6 @@ pub(crate) fn first_n_queue_prompt_texts(entries: &[crate::queue::QueueEntry], c
         })
         .take(count)
         .collect()
-}
-
-pub(crate) fn queue_prompt_is_free_text_for_consume(content: &str, queue_prompt: &str) -> bool {
-    let normalized_head = normalize_queue_prompt_text(queue_prompt);
-    if let Some(id) = queue_prompt_done_id(&normalized_head)
-        && topic_resolves_to_exact_id(&normalized_head, &id)
-    {
-        return head_id_is_registered_preset(content, &id);
-    }
-    !crate::diff::detect_queue_trigger(&normalized_head)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct QueueTargetedPrompt {
-    ordinal: usize,
-    text: String,
-    free_text: bool,
-}
-
-pub(crate) fn response_targeted_queue_prompt(
-    content: &str,
-    entries: &[crate::queue::QueueEntry],
-    response_body: Option<&str>,
-) -> Option<QueueTargetedPrompt> {
-    let response_body = response_body?.trim();
-    if response_body.is_empty() {
-        return None;
-    }
-
-    entries
-        .iter()
-        .filter_map(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => Some(prompt),
-            _ => None,
-        })
-        .enumerate()
-        .find_map(|(ordinal, prompt)| {
-            response_explicitly_targets_queue_head(response_body, &prompt.text).then(|| {
-                QueueTargetedPrompt {
-                    ordinal,
-                    text: prompt.text.clone(),
-                    free_text: queue_prompt_is_free_text_for_consume(content, &prompt.text),
-                }
-            })
-        })
-}
-
-pub(crate) fn mark_queue_prompt_ordinal_completed(
-    entries: &[crate::queue::QueueEntry],
-    target_ordinal: usize,
-) -> (Vec<crate::queue::QueueEntry>, Vec<String>) {
-    let mut result = Vec::with_capacity(entries.len());
-    let mut prompt_ordinal = 0usize;
-    let mut marked_texts = Vec::new();
-    for entry in entries {
-        if let crate::queue::QueueEntry::Prompt(prompt) = entry {
-            if prompt_ordinal == target_ordinal {
-                result.push(crate::queue::QueueEntry::Completed(prompt.clone()));
-                marked_texts.push(prompt.text.clone());
-                prompt_ordinal += 1;
-                continue;
-            }
-            prompt_ordinal += 1;
-        }
-        result.push(entry.clone());
-    }
-    (result, marked_texts)
-}
-
-pub(crate) fn mark_queue_prompt_matching_text_completed(
-    entries: &[crate::queue::QueueEntry],
-    consumed_text: &str,
-    response_body: Option<&str>,
-) -> (Vec<crate::queue::QueueEntry>, Vec<String>) {
-    let mut result = Vec::with_capacity(entries.len());
-    let mut marked_texts = Vec::new();
-    for entry in entries {
-        if marked_texts.is_empty()
-            && let crate::queue::QueueEntry::Prompt(prompt) = entry
-        {
-            let candidate = vec![prompt.text.clone()];
-            let consumed = vec![consumed_text.to_string()];
-            if consumed_prompt_heads_match(&candidate, &consumed, response_body) {
-                result.push(crate::queue::QueueEntry::Completed(prompt.clone()));
-                marked_texts.push(prompt.text.clone());
-                continue;
-            }
-        }
-        result.push(entry.clone());
-    }
-    (result, marked_texts)
 }
 
 pub(crate) fn queue_consume_count_for_done_ids(
@@ -1098,7 +909,8 @@ pub(crate) fn mark_completed_queue_prompts_for_done_ids(
     // guarded disk write otherwise. The force-disk repair path keeps its raw
     // bypass — it deliberately skips IPC/IDE and the visible-write guard.
     if skip_visible_guard {
-        atomic_write(file, &new_document).context("queue done-id mark: failed to write document")?;
+        atomic_write(file, &new_document)
+            .context("queue done-id mark: failed to write document")?;
     } else {
         converge_document_or_disk(file, &new_document, &content, "queue_done_id_mark")
             .context("queue done-id mark: failed to write document")?;
@@ -1120,7 +932,10 @@ pub(crate) struct QueuePromptNodeKeys {
     ast_backed: bool,
 }
 
-pub(crate) fn queue_prompt_node_keys_for_count(content: &str, count: usize) -> Result<QueuePromptNodeKeys> {
+pub(crate) fn queue_prompt_node_keys_for_count(
+    content: &str,
+    count: usize,
+) -> Result<QueuePromptNodeKeys> {
     let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
         .map_err(|err| anyhow::anyhow!("queue consume: failed to derive queue node keys: {err}"))?;
     let ast_keys = nodes
@@ -1160,46 +975,6 @@ pub(crate) fn queue_prompt_node_keys_for_count(content: &str, count: usize) -> R
             let hash = crate::ops_log::content_hash(text);
             let short_hash = &hash[..hash.len().min(12)];
             format!("queue:entry:{index}:{short_hash}")
-        })
-        .collect::<Vec<_>>();
-
-    Ok(QueuePromptNodeKeys {
-        keys,
-        ast_backed: false,
-    })
-}
-
-pub(crate) fn queue_prompt_node_keys_for_ordinals(
-    content: &str,
-    ordinals: &[usize],
-    consumed_texts: &[String],
-) -> Result<QueuePromptNodeKeys> {
-    let wanted = ordinals
-        .iter()
-        .copied()
-        .collect::<std::collections::HashSet<_>>();
-    if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(content, "queue") {
-        let keys = nodes
-            .into_iter()
-            .filter(|node| !node.item.struck)
-            .enumerate()
-            .filter_map(|(ordinal, node)| wanted.contains(&ordinal).then_some(node.node_key))
-            .collect::<Vec<_>>();
-        if keys.len() == ordinals.len() {
-            return Ok(QueuePromptNodeKeys {
-                keys,
-                ast_backed: true,
-            });
-        }
-    }
-
-    let keys = consumed_texts
-        .iter()
-        .zip(ordinals.iter())
-        .map(|(text, ordinal)| {
-            let hash = crate::ops_log::content_hash(text);
-            let short_hash = &hash[..hash.len().min(12)];
-            format!("queue:entry:{ordinal}:{short_hash}")
         })
         .collect::<Vec<_>>();
 
@@ -1274,65 +1049,6 @@ pub(crate) fn display_queue_prompt_text(text: &str) -> String {
         .join("\n")
 }
 
-fn normalized_consumed_prompt_texts(texts: &[String]) -> Vec<String> {
-    texts
-        .iter()
-        .map(|t| crate::queue::strip_priority_markers(t))
-        .collect::<Vec<_>>()
-}
-
-fn prompts_have_adoptable_free_text_head_edit(
-    snapshot_consumed_texts: &[String],
-    consumed_texts: &[String],
-    response_body: Option<&str>,
-) -> bool {
-    if snapshot_consumed_texts.len() != 1 || consumed_texts.len() != 1 {
-        return false;
-    }
-    let Some(response_body) = response_body else {
-        return false;
-    };
-    let snapshot_head = crate::queue::strip_priority_markers(&snapshot_consumed_texts[0]);
-    let document_head = crate::queue::strip_priority_markers(&consumed_texts[0]);
-    if snapshot_head.is_empty()
-        || document_head.is_empty()
-        || snapshot_head == document_head
-        || queue_prompt_done_id(&snapshot_head).is_some()
-        || queue_prompt_done_id(&document_head).is_some()
-        || !response_explicitly_targets_queue_head(response_body, &document_head)
-    {
-        return false;
-    }
-    let (shorter, longer) = if snapshot_head.len() <= document_head.len() {
-        (snapshot_head.as_str(), document_head.as_str())
-    } else {
-        (document_head.as_str(), snapshot_head.as_str())
-    };
-    if shorter.chars().count() < 16 {
-        return false;
-    }
-    let Some(rest) = longer.strip_prefix(shorter) else {
-        return false;
-    };
-    rest.chars()
-        .next()
-        .is_some_and(|ch| ch.is_whitespace() || matches!(ch, '.' | ',' | ':' | ';' | '?' | '!'))
-}
-
-fn consumed_prompt_heads_match(
-    snapshot_consumed_texts: &[String],
-    consumed_texts: &[String],
-    response_body: Option<&str>,
-) -> bool {
-    normalized_consumed_prompt_texts(snapshot_consumed_texts)
-        == normalized_consumed_prompt_texts(consumed_texts)
-        || prompts_have_adoptable_free_text_head_edit(
-            snapshot_consumed_texts,
-            consumed_texts,
-            response_body,
-        )
-}
-
 /// First non-empty, trimmed line of `text`, or `None` when blank.
 pub(crate) fn first_nonempty_line(text: &str) -> Option<&str> {
     text.lines().map(str::trim).find(|l| !l.is_empty())
@@ -1346,7 +1062,10 @@ pub(crate) fn first_nonempty_line(text: &str) -> Option<&str> {
 /// summary (first line truncated + elided-char count + a pointer to the full
 /// `agent:queue` text) instead of the verbatim prompt. `None` (default)
 /// preserves the verbatim copy the user asked to keep "for now".
-pub(crate) fn format_consumed_prompt_echo(consumed_texts: &[String], max_chars: Option<usize>) -> String {
+pub(crate) fn format_consumed_prompt_echo(
+    consumed_texts: &[String],
+    max_chars: Option<usize>,
+) -> String {
     let mut out = String::from("> **Queue prompt:**\n>\n");
     let mut first_block = true;
     for text in consumed_texts {
@@ -1652,8 +1371,10 @@ pub(crate) fn plan_queue_prompt_consumption(
                 new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
             }
 
-            let response_first_line = active_response_body_for_queue_consumption(file)?
-                .and_then(|body| first_nonempty_line(&body).map(str::to_string));
+            let response_first_line = crate::capture::load_active(file)
+                .ok()
+                .flatten()
+                .and_then(|c| first_nonempty_line(&c.response_body).map(str::to_string));
             current = embed_consumed_prompt_in_response(
                 &current,
                 &consumed_texts,
@@ -1680,86 +1401,25 @@ pub(crate) fn plan_queue_prompt_consumption(
         }
     }
 
-    let active_capture = crate::capture::load_active(file)?;
-    let ignored_inactive_response_capture = active_capture.as_ref().is_some_and(|capture| {
-        !capture_state_allows_queue_response(capture) && !capture.response_body.trim().is_empty()
-    });
-    let response_body = active_capture
-        .as_ref()
-        .and_then(capture_response_body_for_queue_consumption);
-    let targeted_prompt = (leading_done_consume_count == 0)
-        .then(|| response_targeted_queue_prompt(content, &entries, response_body.as_deref()))
-        .flatten();
-    if targeted_prompt.is_none()
-        && leading_done_consume_count == 0
-        && ignored_inactive_response_capture
-    {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "queue_consume_refused_inactive_capture_positional_fallback file={}",
-                file.display()
-            ),
-        );
-        return Ok(None);
-    }
-    if let Some(targeted_prompt) = targeted_prompt.as_ref()
-        && !targeted_prompt.free_text
-    {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "queue_consume_refused_id_backed_target_without_explicit_signal file={} ordinal={} head={:?}",
-                file.display(),
-                targeted_prompt.ordinal,
-                targeted_prompt.text
-            ),
-        );
-        return Ok(None);
-    }
-
     let consume_count = leading_done_consume_count.max(1);
-    let (completed_entries, consumed_texts, consumed_node_keys) =
-        if let Some(targeted_prompt) = targeted_prompt.as_ref() {
-            let (completed_entries, consumed_texts) =
-                mark_queue_prompt_ordinal_completed(&entries, targeted_prompt.ordinal);
-            if consumed_texts.is_empty() {
-                anyhow::bail!(
-                    "queue consume: targeted queue prompt ordinal {} was not found",
-                    targeted_prompt.ordinal
-                );
-            }
-            let consumed_node_keys =
-                queue_prompt_node_keys_for_ordinals(content, &[targeted_prompt.ordinal], &consumed_texts)?;
-            (completed_entries, consumed_texts, consumed_node_keys)
-        } else {
-            let consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
-            let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "queue consume: queue_active is true but document queue has no prompt to consume"
-                )
-            })?;
-            if leading_done_consume_count == 0 && !queue_head_is_free_text_prompt(content)? {
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "queue_consume_refused_id_backed_head_without_explicit_signal file={} head={:?}",
-                        file.display(),
-                        consumed_text
-                    ),
-                );
-                return Ok(None);
-            }
-            let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
-            let completed_entries =
-                crate::queue::mark_first_n_prompts_completed(&entries, consume_count);
-            (completed_entries, consumed_texts, consumed_node_keys)
-        };
+    let consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
     let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
         anyhow::anyhow!(
             "queue consume: queue_active is true but document queue has no prompt to consume"
         )
     })?;
+    if leading_done_consume_count == 0 && !queue_head_is_free_text_prompt(content)? {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_consume_refused_id_backed_head_without_explicit_signal file={} head={:?}",
+                file.display(),
+                consumed_text
+            ),
+        );
+        return Ok(None);
+    }
+    let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
     let node_ops = consumed_node_keys
         .keys
         .iter()
@@ -1768,6 +1428,7 @@ pub(crate) fn plan_queue_prompt_consumption(
         .collect::<Vec<_>>();
 
     let has_auto = crate::queue::has_auto_attr(&comp.attrs);
+    let completed_entries = crate::queue::mark_first_n_prompts_completed(&entries, consume_count);
     let remaining = crate::queue::prompts(&completed_entries).len();
     let drained = remaining == 0;
     let new_entries = if drained {
@@ -1801,7 +1462,7 @@ pub(crate) fn plan_queue_prompt_consumption(
     }
 
     // Update snapshot in sync. Required closeouts must be able to prove the
-    // same answered prompt was removed from both the file and the snapshot.
+    // same head prompt was removed from both the file and the snapshot.
     let snap = snapshot::load(file)?.ok_or_else(|| {
         anyhow::anyhow!("queue consume: queue_active is true but snapshot is missing")
     })?;
@@ -1818,33 +1479,8 @@ pub(crate) fn plan_queue_prompt_consumption(
     let snap_entries =
         crate::queue::parse(snap_body).context("queue consume: failed to parse snapshot queue")?;
     let snap_has_auto = crate::queue::has_auto_attr(&snap_queue.attrs);
-    let (snap_completed_entries, snapshot_consumed_texts, snapshot_node_keys) =
-        if targeted_prompt.is_some() {
-            let (snap_completed_entries, snapshot_consumed_texts) =
-                mark_queue_prompt_matching_text_completed(
-                    &snap_entries,
-                    &consumed_text,
-                    response_body.as_deref(),
-                );
-            (
-                snap_completed_entries,
-                snapshot_consumed_texts,
-                QueuePromptNodeKeys {
-                    keys: Vec::new(),
-                    ast_backed: false,
-                },
-            )
-        } else {
-            let snapshot_consumed_texts = first_n_queue_prompt_texts(&snap_entries, consume_count);
-            let snapshot_node_keys = queue_prompt_node_keys_for_count(&snap, consume_count)?;
-            let snap_completed_entries =
-                crate::queue::mark_first_n_prompts_completed(&snap_entries, consume_count);
-            (
-                snap_completed_entries,
-                snapshot_consumed_texts,
-                snapshot_node_keys,
-            )
-        };
+    let snapshot_consumed_texts = first_n_queue_prompt_texts(&snap_entries, consume_count);
+    let snapshot_node_keys = queue_prompt_node_keys_for_count(&snap, consume_count)?;
     if snapshot_consumed_texts.len() != consumed_texts.len() {
         anyhow::bail!(
             "queue consume: snapshot has {} prompt(s) available but document consumed {}",
@@ -1857,21 +1493,22 @@ pub(crate) fn plan_queue_prompt_consumption(
     // unpinned spelling of a head while the live document carries the `:pushpin:`
     // spelling of the same logical item. The pin is priority metadata, not
     // identity, so a raw text comparison spuriously fails the cycle. Normalize
-    // both sides through `strip_priority_markers` before the equality check. A
-    // settled live edit to a free-text head can also leave the snapshot with the
-    // pre-edit prefix; when the captured `### Re:` targets the live head, adopt
-    // the live prompt instead of failing the closeout (#queue-edit-closeout).
-    if !consumed_prompt_heads_match(
-        &snapshot_consumed_texts,
-        &consumed_texts,
-        response_body.as_deref(),
-    ) {
+    // both sides through `strip_priority_markers` before the equality check.
+    let norm = |texts: &[String]| {
+        texts
+            .iter()
+            .map(|t| crate::queue::strip_priority_markers(t))
+            .collect::<Vec<_>>()
+    };
+    if norm(&snapshot_consumed_texts) != norm(&consumed_texts) {
         anyhow::bail!(
             "queue consume: snapshot head prompts {:?} do not match document head prompts {:?}",
             snapshot_consumed_texts,
             consumed_texts
         );
     }
+    let snap_completed_entries =
+        crate::queue::mark_first_n_prompts_completed(&snap_entries, consume_count);
     let snap_remaining = crate::queue::prompts(&snap_completed_entries).len();
     let snap_new_entries = if snap_remaining == 0 {
         Vec::new()
@@ -1882,14 +1519,13 @@ pub(crate) fn plan_queue_prompt_consumption(
         // #finalize-divergence-orphans-committed-head / IPC-CRDT resilience: the
         // document `content` here is the post-CRDT-merge result — the merge has
         // already reconciled the agent (snapshot) side against concurrent
-        // user/editor edits on the disk side. The same-head proof above already
-        // confirmed we consumed the right head (or a captured response targeted
-        // the live spelling of a settled free-text head edit); this
-        // remaining-queue difference is exactly the concurrent edit the CRDT
-        // merge resolved. Hard-bailing here re-rejected the merge the pipeline
-        // just succeeded at, leaving an orphaned unstruck head that re-serves
-        // (the divergence error hit repeatedly under live editor races).
-        // Reconcile instead: the merged document queue is
+        // user/editor edits on the disk side. The same-head proof above
+        // (`snapshot_consumed_texts == consumed_texts`) already confirmed we
+        // consumed the right head; this remaining-queue difference is exactly the
+        // concurrent edit the CRDT merge resolved. Hard-bailing here re-rejected
+        // the merge the pipeline just succeeded at, leaving an orphaned unstruck
+        // head that re-serves (the divergence error hit repeatedly under live
+        // editor races). Reconcile instead: the merged document queue is
         // authoritative, and the snapshot below adopts the document's `new_body`,
         // so both sides converge on the head-struck merged state. Record the
         // reconciliation for forensics rather than failing the cycle.
@@ -1938,10 +1574,10 @@ pub(crate) fn plan_queue_prompt_consumption(
     // and the snapshot, so the selective-commit boundary stays consistent) when
     // the prompt is not already present in the exchange. Fail-safe: any locator
     // miss leaves the content unchanged rather than risk corrupting the exchange.
-    let response_first_line = response_body
-        .as_deref()
-        .and_then(first_nonempty_line)
-        .map(str::to_string);
+    let response_first_line = crate::capture::load_active(file)
+        .ok()
+        .flatten()
+        .and_then(|c| first_nonempty_line(&c.response_body).map(str::to_string));
     current = embed_consumed_prompt_in_response(
         &current,
         &consumed_texts,
@@ -2097,7 +1733,15 @@ mod core_tests {
     #[test]
     fn explicit_signal_halt_without_flag_does_not_consume() {
         // (a) Halt response, no --done/--pending-gate/--pending-edit → no consume.
-        assert!(!queue_head_has_explicit_completion_signal(crate::test_support::HALT_QUEUE_DOC, &[], &[], &[]).unwrap());
+        assert!(
+            !queue_head_has_explicit_completion_signal(
+                crate::test_support::HALT_QUEUE_DOC,
+                &[],
+                &[],
+                &[]
+            )
+            .unwrap()
+        );
     }
     #[test]
     fn explicit_signal_done_flag_consumes() {
@@ -2150,7 +1794,8 @@ mod core_tests {
     }
     #[test]
     fn explicit_signal_none_when_queue_inactive() {
-        let inactive = crate::test_support::HALT_QUEUE_DOC.replace("queue_active: true", "queue_active: false");
+        let inactive = crate::test_support::HALT_QUEUE_DOC
+            .replace("queue_active: true", "queue_active: false");
         assert!(
             !queue_head_has_explicit_completion_signal(&inactive, &["foo".to_string()], &[], &[],)
                 .unwrap()
@@ -2241,49 +1886,6 @@ mod core_tests {
             mark_entries_completed_by_done_ids(&entries, &["opportunistic".to_string()]);
         assert!(marked.is_empty());
         assert_eq!(updated, entries);
-    }
-    #[test]
-    fn done_id_marking_ignores_prose_reference_prompts() {
-        let entries = crate::queue::parse(concat!(
-            "- :pushpin: [#qrefmisstrike]\n",
-            "- :pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item.\n",
-            "- do [#tail]\n",
-        ))
-        .unwrap();
-
-        let (updated, marked) =
-            mark_entries_completed_by_done_ids(&entries, &["qrefmisstrike".to_string()]);
-        assert_eq!(marked, vec![":pushpin: [#qrefmisstrike]".to_string()]);
-        assert!(matches!(
-            &updated[0],
-            crate::queue::QueueEntry::Completed(prompt)
-                if prompt.text == ":pushpin: [#qrefmisstrike]"
-        ));
-        assert!(matches!(
-            &updated[1],
-            crate::queue::QueueEntry::Prompt(prompt)
-                if prompt.text.starts_with(":pushpin: I moved [#qrefmisstrike]")
-        ));
-    }
-    #[test]
-    fn queue_prompt_done_id_extracts_only_directive_shapes() {
-        assert_eq!(queue_prompt_done_id("do [#foo]"), Some("foo".to_string()));
-        assert_eq!(
-            queue_prompt_done_id("advance [#foo]"),
-            Some("foo".to_string())
-        );
-        assert_eq!(
-            queue_prompt_done_id(":pushpin: [#qrefmisstrike]"),
-            Some("qrefmisstrike".to_string())
-        );
-        assert_eq!(
-            queue_prompt_done_id("What are #next-steps to follow-up on #gq5c?"),
-            None
-        );
-        assert_eq!(
-            queue_prompt_done_id("Approve [#shoptiers]. What are #next-steps?"),
-            None
-        );
     }
     #[test]
     fn free_text_queue_head_detection() {
@@ -2420,7 +2022,10 @@ mod core_tests {
             !queue_head_is_free_text_prompt(preset_and_tracked).unwrap(),
             "a preset token that is also a tracked backlog id stays id-backed"
         );
-        assert!(!head_id_is_registered_preset(preset_and_tracked, "advance-review"));
+        assert!(!head_id_is_registered_preset(
+            preset_and_tracked,
+            "advance-review"
+        ));
 
         // An unregistered #-token (preset name not in frontmatter) is NOT treated
         // as a preset — it stays id-backed so it is never struck blind.
@@ -2524,186 +2129,6 @@ mod core_tests {
             "snapshot must adopt the reconciled document queue:\n{snap_result}"
         );
     }
-
-    #[test]
-    fn queue_consume_adopts_settled_free_text_head_edit_from_live_document() {
-        let dir = tempfile::tempdir().unwrap();
-        let doc = dir.path().join("s.md");
-        let old_head =
-            "Why was there so much churn in the last queue turn? I was editing unrelated queue items. Use";
-        let edited_head = ":pushpin: Why was there so much churn in the last queue turn? I was editing unrelated queue items. Use AST instead of byte-by-byte comparison.";
-        let response = format!("### Re: {edited_head} — gpt-5\n\nFixed.\n");
-        let content = format!(
-            concat!(
-                "---\nqueue_active: true\n---\n\n",
-                "<!-- agent:exchange -->\n",
-                "{response}",
-                "<!-- /agent:exchange -->\n\n",
-                "<!-- agent:queue go -->\n",
-                "- {edited_head}\n",
-                "- keep unrelated queue item\n",
-                "<!-- /agent:queue -->\n",
-            ),
-            response = response,
-            edited_head = edited_head,
-        );
-        let snap = format!(
-            concat!(
-                "---\nqueue_active: true\n---\n\n",
-                "<!-- agent:exchange -->\n",
-                "{response}",
-                "<!-- /agent:exchange -->\n\n",
-                "<!-- agent:queue go -->\n",
-                "- {old_head}\n",
-                "- keep unrelated queue item\n",
-                "<!-- /agent:queue -->\n",
-            ),
-            response = response,
-            old_head = old_head,
-        );
-        std::fs::write(&doc, &content).unwrap();
-        snapshot::save(&doc, &snap).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&snap), Some(&content)).unwrap();
-        crate::capture::capture_response(&doc, &response).unwrap();
-
-        let outcome = consume_queue_prompt_force_disk(&doc)
-            .expect("edited free-text head should reconcile instead of bailing")
-            .expect("the answered edited head should be consumed");
-
-        assert_eq!(outcome.consumed_text, edited_head);
-        let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(
-            result.contains(&format!("- ~~{edited_head}~~\n")),
-            "live edited head must be struck:\n{result}"
-        );
-        assert!(
-            result.contains("- keep unrelated queue item\n"),
-            "unrelated queue item must be preserved:\n{result}"
-        );
-        let snap_result = snapshot::load(&doc).unwrap().unwrap();
-        assert!(
-            snap_result.contains(&format!("- ~~{edited_head}~~\n")),
-            "snapshot must adopt the live edited head:\n{snap_result}"
-        );
-        assert!(
-            snap_result.contains("- keep unrelated queue item\n"),
-            "snapshot must preserve unrelated queue item:\n{snap_result}"
-        );
-        assert!(
-            !snap_result.contains(&format!("- {old_head}\n")),
-            "snapshot must not keep the stale pre-edit head:\n{snap_result}"
-        );
-    }
-
-    #[test]
-    fn queue_consume_targets_response_heading_instead_of_first_live_prompt() {
-        let dir = tempfile::tempdir().unwrap();
-        let doc = dir.path().join("s.md");
-        let skipped = ":pushpin: I moved [#qrefmisstrike] as the next item in the queue but agent-doc demoted the item. Any item I place should have :pushpin: added.";
-        let target = "The PCP/supervisor driven restart + `/clear` based on context usage is not working in this queue turn. This workflow is great with Claude Code. Why not with Codex?";
-        let tail = "`agent:exchange` with attribute `queue` should add items into the queue while the queue is running.";
-        let response = format!("### Re: {target} — gpt-5\n\nFixed.\n");
-        let content = format!(
-            concat!(
-                "---\nqueue_active: true\n---\n\n",
-                "<!-- agent:exchange -->\n",
-                "{response}",
-                "<!-- /agent:exchange -->\n\n",
-                "<!-- agent:queue go -->\n",
-                "- {skipped}\n",
-                "- {target}\n",
-                "- {tail}\n",
-                "<!-- /agent:queue -->\n",
-            ),
-            response = response,
-            skipped = skipped,
-            target = target,
-            tail = tail,
-        );
-        std::fs::write(&doc, &content).unwrap();
-        snapshot::save(&doc, &content).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
-        crate::capture::capture_response(&doc, &response).unwrap();
-
-        let outcome = consume_queue_prompt_force_disk(&doc)
-            .expect("targeted non-head free-text prompt should consume")
-            .expect("the response-targeted queue prompt should be consumed");
-
-        assert_eq!(outcome.consumed_text, target);
-        assert_eq!(outcome.remaining, 2);
-        let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(
-            result.contains(&format!("- {skipped}\n")),
-            "the skipped prompt must remain live:\n{result}"
-        );
-        assert!(
-            !result.contains(&format!("- ~~{skipped}~~\n")),
-            "the skipped prompt must not be struck:\n{result}"
-        );
-        assert!(
-            result.contains(&format!("- ~~{target}~~\n")),
-            "the response-targeted prompt must be struck:\n{result}"
-        );
-        assert!(
-            result.contains(&format!("- {tail}\n")),
-            "tail prompt must remain live:\n{result}"
-        );
-        let snap_result = snapshot::load(&doc).unwrap().unwrap();
-        assert!(
-            snap_result.contains(&format!("- {skipped}\n"))
-                && snap_result.contains(&format!("- ~~{target}~~\n"))
-                && snap_result.contains(&format!("- {tail}\n")),
-            "snapshot must mirror targeted queue consumption:\n{snap_result}"
-        );
-    }
-
-    #[test]
-    fn queue_consume_ignores_discarded_capture_instead_of_striking_head_by_position() {
-        let dir = tempfile::tempdir().unwrap();
-        let doc = dir.path().join("s.md");
-        let head = ":round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.";
-        let stale_target = "`agent:exchange` with attribute `queue` should add items into the queue while the queue is running.";
-        let stale_response = format!("### Re: {stale_target} — gpt-5\n\nFixed.\n");
-        let content = format!(
-            concat!(
-                "---\nqueue_active: true\n---\n\n",
-                "<!-- agent:exchange -->\n",
-                "{stale_response}",
-                "<!-- /agent:exchange -->\n\n",
-                "<!-- agent:queue go -->\n",
-                "- {head}\n",
-                "- ~~{stale_target}~~\n",
-                "<!-- /agent:queue -->\n",
-            ),
-            stale_response = stale_response,
-            head = head,
-            stale_target = stale_target,
-        );
-        std::fs::write(&doc, &content).unwrap();
-        snapshot::save(&doc, &content).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
-        crate::capture::capture_response(&doc, &stale_response).unwrap();
-        crate::capture::mark_discarded(&doc).unwrap();
-
-        let outcome = consume_queue_prompt_force_disk(&doc)
-            .expect("discarded capture should be ignored without consuming");
-
-        assert!(outcome.is_none());
-        let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(
-            result.contains(&format!("- {head}\n")),
-            "live head must remain queued:\n{result}"
-        );
-        assert!(
-            !result.contains(&format!("- ~~{head}~~\n")),
-            "discarded stale response must not strike the live head:\n{result}"
-        );
-        assert!(
-            result.contains(&format!("- ~~{stale_target}~~\n")),
-            "previously consumed target should stay consumed:\n{result}"
-        );
-    }
-
     #[test]
     fn queue_consume_uses_node_keys_to_preserve_duplicate_prompt_identity() {
         let dir = tempfile::tempdir().unwrap();
@@ -2776,43 +2201,6 @@ mod core_tests {
             "an answered free-text head must be consumed even on the IPC-timeout closeout"
         );
     }
-
-    #[test]
-    fn consume_decision_keeps_undrainable_free_text_before_drainable_id_head() {
-        let dir = tempfile::tempdir().unwrap();
-        let doc = dir.path().join("s.md");
-        let content = concat!(
-            "---\nqueue_active: true\n---\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [ ] [#snbc2] collapse baseline file into snapshot-store variant\n",
-            "<!-- /agent:backlog -->\n\n",
-            "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" priority go -->\n",
-            "- :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`.\n",
-            "- do [#snbc2]\n",
-            "<!-- /agent:queue -->\n",
-        );
-        std::fs::write(&doc, content).unwrap();
-
-        assert_eq!(
-            crate::queue_continuation::live_drainable_continuation_prompt_text(&doc, content)
-                .as_deref(),
-            Some("do [#snbc2]")
-        );
-        assert!(
-            !queue_consumption_allowed_for_response(
-                &doc,
-                Some(content),
-                content,
-                "### Re: Stop blocking the turn on CI\n\nDone.",
-                &[],
-                &[],
-                &[],
-            )
-            .unwrap(),
-            "an unrelated response must not consume an undrainable leading free-text queue line"
-        );
-    }
-
     #[test]
     fn consume_decision_strikes_synthetic_preset_head_on_heading_match() {
         let dir = tempfile::tempdir().unwrap();
@@ -3020,8 +2408,6 @@ Old.
         // Queue parser strips the `- ` bullet, so heads arrive as `do [#id]`.
         assert!(queue_head_is_bare_do_directive("do [#foo]"));
         assert!(queue_head_is_bare_do_directive("do #foo"));
-        assert!(queue_head_is_bare_do_directive("advance [#foo]"));
-        assert!(queue_head_is_bare_do_directive(":pushpin: advance #foo"));
         assert!(queue_head_is_bare_do_directive(":pushpin: do [#foo]"));
         assert!(queue_head_is_bare_do_directive(":round_pushpin: do #foo"));
         // A synthetic/preset prompt carrying a trailing `#preset` id is NOT a

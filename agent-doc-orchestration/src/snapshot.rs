@@ -263,8 +263,7 @@ pub fn save(doc: &Path, content: &str) -> Result<()> {
 /// markdown, or `None` if the overlay failed to decode/project (logged, never
 /// swallowed). Pure (no I/O).
 fn project_overlay_roundtrip(content: &str) -> Option<String> {
-    let state =
-        agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(content).encode_state();
+    let state = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(content).encode_state();
     match agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&state) {
         Ok(overlay) => match overlay.to_markdown() {
             Ok(markdown) => Some(markdown),
@@ -373,7 +372,10 @@ const BASELINE_OVERLAY_EXT: &str = "overlay.yrs";
 /// `.md` wins on any divergence (see [`load_baseline_model`]).
 pub fn mps_enabled() -> bool {
     match std::env::var("AGENT_DOC_MPS") {
-        Ok(v) => !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off"),
+        Ok(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
         Err(_) => true,
     }
 }
@@ -399,8 +401,7 @@ pub fn save_baseline_model(doc: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let state =
-        agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(content).encode_state();
+    let state = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(content).encode_state();
     let parent = path.parent().unwrap_or(Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
@@ -443,11 +444,9 @@ pub fn load_baseline_model(doc: &Path, md_baseline: Option<&str>) -> Result<Opti
         Some(b) => b,
         None => return Ok(None),
     };
-    let overlay = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state_or_migrate(
-        &bytes,
-        md_baseline,
-    )
-    .with_context(|| format!("failed to decode baseline overlay {}", path.display()))?;
+    let overlay =
+        agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state_or_migrate(&bytes, md_baseline)
+            .with_context(|| format!("failed to decode baseline overlay {}", path.display()))?;
     let projection = overlay
         .to_markdown()
         .with_context(|| format!("failed to project baseline overlay {}", path.display()))?;
@@ -1168,7 +1167,6 @@ fn acquire_crdt_lock(doc: &Path) -> Result<File> {
         .with_context(|| format!("failed to acquire CRDT lock on {}", lock_path.display()))?;
     Ok(file)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -2087,7 +2085,11 @@ Second answer line three.
     fn mps_baseline_model_none_when_absent() {
         let (_dir, doc) = setup();
         // No sidecar pinned → caller falls back to the `.md` baseline.
-        assert!(load_baseline_model(&doc, Some("anything")).unwrap().is_none());
+        assert!(
+            load_baseline_model(&doc, Some("anything"))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

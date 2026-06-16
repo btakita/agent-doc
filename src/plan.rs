@@ -846,7 +846,6 @@ fn shared_doc_security_blockers(
         .collect()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

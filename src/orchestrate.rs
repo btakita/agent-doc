@@ -1536,88 +1536,86 @@ fn inject_prompt_into_doc(doc: &str, task: &str) -> Result<String> {
     Ok(result)
 }
 
-
-
 #[cfg(test)]
 mod th {
     use super::*;
-use std::cell::RefCell;
-use tempfile::TempDir;
-pub(crate) struct EnvGuard {
-    pub(crate) key: &'static str,
-    pub(crate) prev: Option<String>,
-    pub(crate) _lock: std::sync::MutexGuard<'static, ()>,
-}
-impl EnvGuard {
-    pub(crate) fn set(key: &'static str, value: &str) -> Self {
-        let lock = crate::test_support::TEST_ENV_LOCK.lock().unwrap();
-        let prev = std::env::var(key).ok();
-        unsafe { std::env::set_var(key, value) };
-        Self {
-            key,
-            prev,
-            _lock: lock,
+    use std::cell::RefCell;
+    use tempfile::TempDir;
+    pub(crate) struct EnvGuard {
+        pub(crate) key: &'static str,
+        pub(crate) prev: Option<String>,
+        pub(crate) _lock: std::sync::MutexGuard<'static, ()>,
+    }
+    impl EnvGuard {
+        pub(crate) fn set(key: &'static str, value: &str) -> Self {
+            let lock = crate::test_support::TEST_ENV_LOCK.lock().unwrap();
+            let prev = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key,
+                prev,
+                _lock: lock,
+            }
         }
     }
-}
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        if let Some(value) = &self.prev {
-            unsafe { std::env::set_var(self.key, value) };
-        } else {
-            unsafe { std::env::remove_var(self.key) };
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.prev {
+                unsafe { std::env::set_var(self.key, value) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
         }
     }
-}
-pub(crate) struct FakeLifecycleOps {
-    pub(crate) baseline_file: String,
-    pub(crate) preflight_calls: RefCell<usize>,
-    pub(crate) finalize_calls: RefCell<Vec<String>>,
-    pub(crate) session_checks: RefCell<usize>,
-}
-impl LifecycleOps for FakeLifecycleOps {
-    fn preflight(&self, file: &Path) -> Result<PreflightOutput> {
-        *self.preflight_calls.borrow_mut() += 1;
-        let doc = fs::read_to_string(file)?;
-        Ok(PreflightOutput {
-            diff: Some(format!(
-                "--- snapshot\n+++ document\n+{}",
-                doc.lines().last().unwrap_or("")
-            )),
-            no_changes: false,
-            baseline_file: Some(self.baseline_file.clone()),
-            ..PreflightOutput::default()
-        })
+    pub(crate) struct FakeLifecycleOps {
+        pub(crate) baseline_file: String,
+        pub(crate) preflight_calls: RefCell<usize>,
+        pub(crate) finalize_calls: RefCell<Vec<String>>,
+        pub(crate) session_checks: RefCell<usize>,
     }
+    impl LifecycleOps for FakeLifecycleOps {
+        fn preflight(&self, file: &Path) -> Result<PreflightOutput> {
+            *self.preflight_calls.borrow_mut() += 1;
+            let doc = fs::read_to_string(file)?;
+            Ok(PreflightOutput {
+                diff: Some(format!(
+                    "--- snapshot\n+++ document\n+{}",
+                    doc.lines().last().unwrap_or("")
+                )),
+                no_changes: false,
+                baseline_file: Some(self.baseline_file.clone()),
+                ..PreflightOutput::default()
+            })
+        }
 
-    fn finalize(
-        &self,
-        file: &Path,
-        _baseline_file: Option<&str>,
-        response: &str,
-        _mode: ResolvedMode,
-    ) -> Result<()> {
-        self.finalize_calls.borrow_mut().push(response.to_string());
-        write::apply_template_from_string(file, response)
-    }
+        fn finalize(
+            &self,
+            file: &Path,
+            _baseline_file: Option<&str>,
+            response: &str,
+            _mode: ResolvedMode,
+        ) -> Result<()> {
+            self.finalize_calls.borrow_mut().push(response.to_string());
+            write::apply_template_from_string(file, response)
+        }
 
-    fn session_check(&self, _file: &Path) -> Result<()> {
-        *self.session_checks.borrow_mut() += 1;
-        Ok(())
+        fn session_check(&self, _file: &Path) -> Result<()> {
+            *self.session_checks.borrow_mut() += 1;
+            Ok(())
+        }
     }
-}
-type AgentEnv = Vec<(String, Option<String>)>;
-type ParallelRunCall = (
-    String,
-    Vec<parallel::ParallelTask>,
-    Option<String>,
-    bool,
-    bool,
-    u64,
-    bool,
-);
-pub(crate) fn test_graph_evidence_plan() -> crate::tsift_graph::TsiftGraphEvidencePlan {
-    crate::tsift_graph::TsiftGraphEvidencePlan {
+    type AgentEnv = Vec<(String, Option<String>)>;
+    type ParallelRunCall = (
+        String,
+        Vec<parallel::ParallelTask>,
+        Option<String>,
+        bool,
+        bool,
+        u64,
+        bool,
+    );
+    pub(crate) fn test_graph_evidence_plan() -> crate::tsift_graph::TsiftGraphEvidencePlan {
+        crate::tsift_graph::TsiftGraphEvidencePlan {
         targets: vec!["gkke".to_string()],
         graph_db_status: crate::tsift_graph::TsiftGraphDbStatus {
             root: Some("/tmp/repo".to_string()),
@@ -1855,809 +1853,811 @@ pub(crate) fn test_graph_evidence_plan() -> crate::tsift_graph::TsiftGraphEviden
         }),
         next_commands: Vec::new(),
     }
-}
-pub(crate) struct FakeAgentRunner {
-    pub(crate) prompts: RefCell<Vec<String>>,
-    pub(crate) envs: RefCell<Vec<AgentEnv>>,
-    pub(crate) fresh_calls: RefCell<usize>,
-    pub(crate) streaming_calls: RefCell<usize>,
-    pub(crate) response: String,
-    pub(crate) streaming_chunks: Option<Vec<StreamChunk>>,
-}
-pub(crate) struct MutatingAgentRunner {
-    pub(crate) fresh_calls: RefCell<usize>,
-    pub(crate) response: String,
-}
-impl FreshAgentRunner for FakeAgentRunner {
-    fn send_fresh(
-        &self,
-        _file: &Path,
-        prompt: &str,
-        _agent_name: &str,
-        _agent_config: Option<&AgentConfig>,
-        _env: Vec<(String, Option<String>)>,
-        _model: Option<&str>,
-    ) -> Result<String> {
-        *self.fresh_calls.borrow_mut() += 1;
-        self.prompts.borrow_mut().push(prompt.to_string());
-        self.envs.borrow_mut().push(_env);
-        Ok(self.response.clone())
     }
-
-    fn send_fresh_streaming(
-        &self,
-        _file: &Path,
-        prompt: &str,
-        _agent_name: &str,
-        _agent_config: Option<&AgentConfig>,
-        _env: Vec<(String, Option<String>)>,
-        _model: Option<&str>,
-    ) -> Result<Option<Box<dyn Iterator<Item = Result<StreamChunk>>>>> {
-        let Some(chunks) = &self.streaming_chunks else {
-            return Ok(None);
-        };
-        *self.streaming_calls.borrow_mut() += 1;
-        self.prompts.borrow_mut().push(prompt.to_string());
-        self.envs.borrow_mut().push(_env);
-        Ok(Some(Box::new(chunks.clone().into_iter().map(Ok))))
+    pub(crate) struct FakeAgentRunner {
+        pub(crate) prompts: RefCell<Vec<String>>,
+        pub(crate) envs: RefCell<Vec<AgentEnv>>,
+        pub(crate) fresh_calls: RefCell<usize>,
+        pub(crate) streaming_calls: RefCell<usize>,
+        pub(crate) response: String,
+        pub(crate) streaming_chunks: Option<Vec<StreamChunk>>,
     }
-}
-impl FreshAgentRunner for MutatingAgentRunner {
-    fn send_fresh(
-        &self,
-        file: &Path,
-        _prompt: &str,
-        _agent_name: &str,
-        _agent_config: Option<&AgentConfig>,
-        _env: Vec<(String, Option<String>)>,
-        _model: Option<&str>,
-    ) -> Result<String> {
-        let mut calls = self.fresh_calls.borrow_mut();
-        *calls += 1;
-        if *calls == 1 {
-            let doc = fs::read_to_string(file)?;
-            let updated = doc.replace(
-                "- do #first\n- do #second",
-                "- do #first\n- do #inserted\n- do #second",
-            );
-            fs::write(file, updated)?;
+    pub(crate) struct MutatingAgentRunner {
+        pub(crate) fresh_calls: RefCell<usize>,
+        pub(crate) response: String,
+    }
+    impl FreshAgentRunner for FakeAgentRunner {
+        fn send_fresh(
+            &self,
+            _file: &Path,
+            prompt: &str,
+            _agent_name: &str,
+            _agent_config: Option<&AgentConfig>,
+            _env: Vec<(String, Option<String>)>,
+            _model: Option<&str>,
+        ) -> Result<String> {
+            *self.fresh_calls.borrow_mut() += 1;
+            self.prompts.borrow_mut().push(prompt.to_string());
+            self.envs.borrow_mut().push(_env);
+            Ok(self.response.clone())
         }
-        Ok(self.response.clone())
+
+        fn send_fresh_streaming(
+            &self,
+            _file: &Path,
+            prompt: &str,
+            _agent_name: &str,
+            _agent_config: Option<&AgentConfig>,
+            _env: Vec<(String, Option<String>)>,
+            _model: Option<&str>,
+        ) -> Result<Option<Box<dyn Iterator<Item = Result<StreamChunk>>>>> {
+            let Some(chunks) = &self.streaming_chunks else {
+                return Ok(None);
+            };
+            *self.streaming_calls.borrow_mut() += 1;
+            self.prompts.borrow_mut().push(prompt.to_string());
+            self.envs.borrow_mut().push(_env);
+            Ok(Some(Box::new(chunks.clone().into_iter().map(Ok))))
+        }
     }
-}
-pub(crate) struct CaptureAgent {
-    pub(crate) seen_prompt: RefCell<Vec<String>>,
-    pub(crate) seen_session_id: RefCell<Vec<Option<String>>>,
-    pub(crate) seen_fork: RefCell<Vec<bool>>,
-}
-#[derive(Default)]
-pub(crate) struct FakeParallelRunner {
-    pub(crate) calls: RefCell<Vec<ParallelRunCall>>,
-}
-impl ParallelRunner for FakeParallelRunner {
-    fn run(&self, file: &Path, config: parallel::ParallelConfig) -> Result<()> {
-        self.calls.borrow_mut().push((
-            file.display().to_string(),
-            config.tasks,
-            config.model,
-            config.no_git,
-            config.no_worktree,
-            config.timeout_secs,
-            config.dry_run,
-        ));
-        Ok(())
+    impl FreshAgentRunner for MutatingAgentRunner {
+        fn send_fresh(
+            &self,
+            file: &Path,
+            _prompt: &str,
+            _agent_name: &str,
+            _agent_config: Option<&AgentConfig>,
+            _env: Vec<(String, Option<String>)>,
+            _model: Option<&str>,
+        ) -> Result<String> {
+            let mut calls = self.fresh_calls.borrow_mut();
+            *calls += 1;
+            if *calls == 1 {
+                let doc = fs::read_to_string(file)?;
+                let updated = doc.replace(
+                    "- do #first\n- do #second",
+                    "- do #first\n- do #inserted\n- do #second",
+                );
+                fs::write(file, updated)?;
+            }
+            Ok(self.response.clone())
+        }
     }
-}
-impl agent::Agent for CaptureAgent {
-    fn send(
-        &self,
-        prompt: &str,
-        session_id: Option<&str>,
-        fork: bool,
-        _model: Option<&str>,
-    ) -> Result<agent::AgentResponse> {
-        self.seen_prompt.borrow_mut().push(prompt.to_string());
-        self.seen_session_id
-            .borrow_mut()
-            .push(session_id.map(str::to_string));
-        self.seen_fork.borrow_mut().push(fork);
-        Ok(agent::AgentResponse {
-            text: "ok".to_string(),
-            session_id: None,
-        })
+    pub(crate) struct CaptureAgent {
+        pub(crate) seen_prompt: RefCell<Vec<String>>,
+        pub(crate) seen_session_id: RefCell<Vec<Option<String>>>,
+        pub(crate) seen_fork: RefCell<Vec<bool>>,
     }
-}
-pub(crate) fn template_doc() -> String {
-    "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nBody\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n".to_string()
-}
-// --- parse_list_item prompt-prefix stripping (bug #orch3) ---
-pub(crate) fn setup_snapshot_dir(dir: &Path) {
-    fs::create_dir_all(dir.join(".agent-doc")).unwrap();
-}
+    #[derive(Default)]
+    pub(crate) struct FakeParallelRunner {
+        pub(crate) calls: RefCell<Vec<ParallelRunCall>>,
+    }
+    impl ParallelRunner for FakeParallelRunner {
+        fn run(&self, file: &Path, config: parallel::ParallelConfig) -> Result<()> {
+            self.calls.borrow_mut().push((
+                file.display().to_string(),
+                config.tasks,
+                config.model,
+                config.no_git,
+                config.no_worktree,
+                config.timeout_secs,
+                config.dry_run,
+            ));
+            Ok(())
+        }
+    }
+    impl agent::Agent for CaptureAgent {
+        fn send(
+            &self,
+            prompt: &str,
+            session_id: Option<&str>,
+            fork: bool,
+            _model: Option<&str>,
+        ) -> Result<agent::AgentResponse> {
+            self.seen_prompt.borrow_mut().push(prompt.to_string());
+            self.seen_session_id
+                .borrow_mut()
+                .push(session_id.map(str::to_string));
+            self.seen_fork.borrow_mut().push(fork);
+            Ok(agent::AgentResponse {
+                text: "ok".to_string(),
+                session_id: None,
+            })
+        }
+    }
+    pub(crate) fn template_doc() -> String {
+        "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nBody\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n".to_string()
+    }
+    // --- parse_list_item prompt-prefix stripping (bug #orch3) ---
+    pub(crate) fn setup_snapshot_dir(dir: &Path) {
+        fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+    }
 }
 #[cfg(test)]
-pub(crate) use th::{CaptureAgent, EnvGuard, FakeAgentRunner, FakeLifecycleOps, FakeParallelRunner, MutatingAgentRunner, setup_snapshot_dir, template_doc, test_graph_evidence_plan};
+pub(crate) use th::{
+    CaptureAgent, EnvGuard, FakeAgentRunner, FakeLifecycleOps, FakeParallelRunner,
+    MutatingAgentRunner, setup_snapshot_dir, template_doc, test_graph_evidence_plan,
+};
 
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use std::cell::RefCell;
-use tempfile::TempDir;
-#[test]
-fn agent_doc_binary_resolution_works_without_path_when_current_exe_exists() {
-    let dir = TempDir::new().unwrap();
-    let current = dir.path().join("current-agent-doc");
-    std::fs::write(&current, "current").unwrap();
+    use std::cell::RefCell;
+    use tempfile::TempDir;
+    #[test]
+    fn agent_doc_binary_resolution_works_without_path_when_current_exe_exists() {
+        let dir = TempDir::new().unwrap();
+        let current = dir.path().join("current-agent-doc");
+        std::fs::write(&current, "current").unwrap();
 
-    let resolved =
-        resolve_agent_doc_binary_from_env(Some(current.clone()), None, None, dir.path())
-            .unwrap();
+        let resolved =
+            resolve_agent_doc_binary_from_env(Some(current.clone()), None, None, dir.path())
+                .unwrap();
 
-    assert_eq!(resolved, current);
-}
-#[test]
-fn agent_doc_binary_resolution_falls_back_when_current_exe_is_stale() {
-    let dir = TempDir::new().unwrap();
-    let path_bin_dir = dir.path().join("bin");
-    let path_bin = path_bin_dir.join("agent-doc");
-    std::fs::create_dir_all(&path_bin_dir).unwrap();
-    std::fs::write(&path_bin, "path").unwrap();
+        assert_eq!(resolved, current);
+    }
+    #[test]
+    fn agent_doc_binary_resolution_falls_back_when_current_exe_is_stale() {
+        let dir = TempDir::new().unwrap();
+        let path_bin_dir = dir.path().join("bin");
+        let path_bin = path_bin_dir.join("agent-doc");
+        std::fs::create_dir_all(&path_bin_dir).unwrap();
+        std::fs::write(&path_bin, "path").unwrap();
 
-    let resolved = resolve_agent_doc_binary_from_env(
-        Some(dir.path().join("deleted-agent-doc")),
-        Some(OsString::from("agent-doc")),
-        Some(path_bin_dir.into_os_string()),
-        dir.path(),
-    )
-    .unwrap();
+        let resolved = resolve_agent_doc_binary_from_env(
+            Some(dir.path().join("deleted-agent-doc")),
+            Some(OsString::from("agent-doc")),
+            Some(path_bin_dir.into_os_string()),
+            dir.path(),
+        )
+        .unwrap();
 
-    assert_eq!(resolved, path_bin);
-}
-#[test]
-fn internal_spawn_context_names_binary_cwd_and_path_presence() {
-    let context = internal_command_spawn_context("finalize", Path::new("/tmp/agent-doc"));
+        assert_eq!(resolved, path_bin);
+    }
+    #[test]
+    fn internal_spawn_context_names_binary_cwd_and_path_presence() {
+        let context = internal_command_spawn_context("finalize", Path::new("/tmp/agent-doc"));
 
-    assert!(context.contains("agent-doc finalize"));
-    assert!(context.contains("binary=/tmp/agent-doc"));
-    assert!(context.contains("cwd="));
-    assert!(context.contains("PATH_present="));
-}
-#[test]
-fn extract_tasks_prefers_last_fenced_list() {
-    let text = "Notes\n\n- old one\n\n```md\n- do first\n- do second\n```\n";
-    assert_eq!(
-        extract_tasks_from_text(text),
-        vec!["do first".to_string(), "do second".to_string()]
-    );
-}
-#[test]
-fn extract_tasks_uses_last_markdown_list() {
-    let text = "alpha\n\n- first\n- second\n\nTail\n";
-    assert_eq!(
-        extract_tasks_from_text(text),
-        vec!["first".to_string(), "second".to_string()]
-    );
-}
-#[test]
-fn resolve_task_batch_collects_exchange_prompt_presets() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    fs::write(
+        assert!(context.contains("agent-doc finalize"));
+        assert!(context.contains("binary=/tmp/agent-doc"));
+        assert!(context.contains("cwd="));
+        assert!(context.contains("PATH_present="));
+    }
+    #[test]
+    fn extract_tasks_prefers_last_fenced_list() {
+        let text = "Notes\n\n- old one\n\n```md\n- do first\n- do second\n```\n";
+        assert_eq!(
+            extract_tasks_from_text(text),
+            vec!["do first".to_string(), "do second".to_string()]
+        );
+    }
+    #[test]
+    fn extract_tasks_uses_last_markdown_list() {
+        let text = "alpha\n\n- first\n- second\n\nTail\n";
+        assert_eq!(
+            extract_tasks_from_text(text),
+            vec!["first".to_string(), "second".to_string()]
+        );
+    }
+    #[test]
+    fn resolve_task_batch_collects_exchange_prompt_presets() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(
         &doc,
         "---\nprompt_presets:\n  \"#1\": |\n    Keep the work tree clean.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\npreset #1\n- do #prep\n- do #report\n<!-- /agent:exchange -->\n",
     )
     .unwrap();
 
-    let batch = resolve_task_batch(
-        &doc,
-        &OrchestrateConfig {
-            mode: OrchestrateMode::Sequential,
-            tasks_explicit: Vec::new(),
-            from_file: None,
-            from_exchange: true,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: true,
-            no_worktree: true,
-            timeout_secs: 30,
-            dry_run: true,
-            plan: false,
-        },
-    )
-    .unwrap();
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
 
-    assert_eq!(
-        batch.tasks,
-        vec!["do #prep".to_string(), "do #report".to_string()]
-    );
-    assert_eq!(batch.requested_presets, vec!["#1".to_string()]);
-}
-#[test]
-fn resolve_task_batch_canonicalizes_bare_hashtag_prompt_preset() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    fs::write(
+        assert_eq!(
+            batch.tasks,
+            vec!["do #prep".to_string(), "do #report".to_string()]
+        );
+        assert_eq!(batch.requested_presets, vec!["#1".to_string()]);
+    }
+    #[test]
+    fn resolve_task_batch_canonicalizes_bare_hashtag_prompt_preset() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(
         &doc,
         "---\nprompt_presets:\n  \"#spec-test\": |\n    Run checks.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\npreset spec-test\n- do #prep\n<!-- /agent:exchange -->\n",
     )
     .unwrap();
 
-    let batch = resolve_task_batch(
-        &doc,
-        &OrchestrateConfig {
-            mode: OrchestrateMode::Sequential,
-            tasks_explicit: Vec::new(),
-            from_file: None,
-            from_exchange: true,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: true,
-            no_worktree: true,
-            timeout_secs: 30,
-            dry_run: true,
-            plan: false,
-        },
-    )
-    .unwrap();
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
 
-    assert_eq!(batch.requested_presets, vec!["#spec-test".to_string()]);
-    assert_eq!(
-        load_prompt_preset_block(&doc, &batch.requested_presets)
-            .unwrap()
-            .as_deref(),
-        Some("(preset #spec-test)\nRun checks.\n")
-    );
-}
-#[test]
-fn resolve_task_batch_collects_active_queue_for_auto_dag() {
-    let dir = TempDir::new().unwrap();
-    let doc = dir.path().join("session.md");
-    fs::write(
+        assert_eq!(batch.requested_presets, vec!["#spec-test".to_string()]);
+        assert_eq!(
+            load_prompt_preset_block(&doc, &batch.requested_presets)
+                .unwrap()
+                .as_deref(),
+            Some("(preset #spec-test)\nRun checks.\n")
+        );
+    }
+    #[test]
+    fn resolve_task_batch_collects_active_queue_for_auto_dag() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(
         &doc,
         "---\nqueue_active: true\nprompt_presets:\n  \"#spec-test\": |\n    Run checks.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\npreset spec-test\n- do #prep\n- do #report after #prep\n<!-- /agent:queue -->\n",
     )
     .unwrap();
 
-    let batch = resolve_task_batch(
-        &doc,
-        &OrchestrateConfig {
-            mode: OrchestrateMode::Dag,
-            tasks_explicit: Vec::new(),
-            from_file: None,
-            from_exchange: false,
-            from_queue: true,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: true,
-            no_worktree: true,
-            timeout_secs: 30,
-            dry_run: true,
-            plan: false,
-        },
-    )
-    .unwrap();
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Dag,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: false,
+                from_queue: true,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
 
-    assert_eq!(
-        batch.tasks,
-        vec!["do #prep".to_string(), "do #report after #prep".to_string()]
-    );
-    assert_eq!(batch.requested_presets, vec!["#spec-test".to_string()]);
-}
-#[test]
-fn apply_prompt_preset_block_prefixes_task_prompt() {
-    let rendered = apply_prompt_preset_block(
-        "do #prep",
-        Some("(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean.\n"),
-    );
-    assert_eq!(
-        rendered,
-        "(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean.\ndo #prep"
-    );
-}
-#[test]
-fn exchange_task_source_fingerprint_detects_list_mutations() {
-    let original = ExchangeTaskSourceFingerprint {
-        tasks: vec!["do #first".to_string(), "do #second".to_string()],
-        requested_presets: vec!["#spec".to_string()],
-    };
-    let source = find_exchange_task_source(
+        assert_eq!(
+            batch.tasks,
+            vec!["do #prep".to_string(), "do #report after #prep".to_string()]
+        );
+        assert_eq!(batch.requested_presets, vec!["#spec-test".to_string()]);
+    }
+    #[test]
+    fn apply_prompt_preset_block_prefixes_task_prompt() {
+        let rendered = apply_prompt_preset_block(
+            "do #prep",
+            Some("(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean.\n"),
+        );
+        assert_eq!(
+            rendered,
+            "(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean.\ndo #prep"
+        );
+    }
+    #[test]
+    fn exchange_task_source_fingerprint_detects_list_mutations() {
+        let original = ExchangeTaskSourceFingerprint {
+            tasks: vec!["do #first".to_string(), "do #second".to_string()],
+            requested_presets: vec!["#spec".to_string()],
+        };
+        let source = find_exchange_task_source(
         "sync orchestra\npreset #spec\n- do #first\n- do #second\n<!-- agent:boundary:keep -->\n",
         &original,
     )
     .unwrap();
-    assert_eq!(source, original);
+        assert_eq!(source, original);
 
-    let boundary_only = find_exchange_task_source(
+        let boundary_only = find_exchange_task_source(
         "sync orchestra\npreset #spec\n- do #first\n- do #second\n<!-- agent:boundary:new -->\n",
         &source,
     )
     .unwrap();
-    assert_eq!(boundary_only, source);
+        assert_eq!(boundary_only, source);
 
-    let inserted = find_exchange_task_source(
-        "sync orchestra\npreset #spec\n- do #first\n- do #inserted\n- do #second\n",
-        &source,
-    )
-    .unwrap();
-    assert_ne!(inserted, source);
+        let inserted = find_exchange_task_source(
+            "sync orchestra\npreset #spec\n- do #first\n- do #inserted\n- do #second\n",
+            &source,
+        )
+        .unwrap();
+        assert_ne!(inserted, source);
 
-    let reordered = find_exchange_task_source(
-        "sync orchestra\npreset #spec\n- do #second\n- do #first\n",
-        &source,
-    );
-    assert!(reordered.is_none());
+        let reordered = find_exchange_task_source(
+            "sync orchestra\npreset #spec\n- do #second\n- do #first\n",
+            &source,
+        );
+        assert!(reordered.is_none());
 
-    let quoted_later = find_exchange_task_source(
+        let quoted_later = find_exchange_task_source(
         "sync orchestra\npreset #spec\n- do #first\n- do #second\n\n### Re: response — gpt-5\n\n- do #first\n- do #extra\n- do #second\n",
         &source,
     )
     .unwrap();
-    assert_eq!(quoted_later, source);
-}
-#[test]
-fn inject_prompt_inserts_before_boundary() {
-    let updated = inject_prompt_into_doc(&template_doc(), "do #gkke").unwrap();
-    let prompt_pos = updated.find("❯ do #gkke").unwrap();
-    let boundary_pos = updated.find("<!-- agent:boundary:keep -->").unwrap();
-    assert!(prompt_pos < boundary_pos);
-}
-#[test]
-fn send_fresh_response_uses_no_resume() {
-    let agent = CaptureAgent {
-        seen_prompt: RefCell::new(Vec::new()),
-        seen_session_id: RefCell::new(Vec::new()),
-        seen_fork: RefCell::new(Vec::new()),
-    };
-    let response = send_fresh_response(&agent, "prompt", Some("gpt-5")).unwrap();
-    assert_eq!(response.text, "ok");
-    assert_eq!(agent.seen_session_id.borrow().as_slice(), &[None]);
-    assert_eq!(agent.seen_fork.borrow().as_slice(), &[false]);
-    assert_eq!(
-        agent.seen_prompt.borrow().as_slice(),
-        &["prompt".to_string()]
-    );
-}
-#[test]
-fn parallel_graph_context_maps_worker_packet_to_lower_agent_job_packet() {
-    let graph_evidence = test_graph_evidence_plan();
-    let prompt =
-        apply_parallel_graph_context("do #gkke", "do #gkke".to_string(), Some(&graph_evidence));
+        assert_eq!(quoted_later, source);
+    }
+    #[test]
+    fn inject_prompt_inserts_before_boundary() {
+        let updated = inject_prompt_into_doc(&template_doc(), "do #gkke").unwrap();
+        let prompt_pos = updated.find("❯ do #gkke").unwrap();
+        let boundary_pos = updated.find("<!-- agent:boundary:keep -->").unwrap();
+        assert!(prompt_pos < boundary_pos);
+    }
+    #[test]
+    fn send_fresh_response_uses_no_resume() {
+        let agent = CaptureAgent {
+            seen_prompt: RefCell::new(Vec::new()),
+            seen_session_id: RefCell::new(Vec::new()),
+            seen_fork: RefCell::new(Vec::new()),
+        };
+        let response = send_fresh_response(&agent, "prompt", Some("gpt-5")).unwrap();
+        assert_eq!(response.text, "ok");
+        assert_eq!(agent.seen_session_id.borrow().as_slice(), &[None]);
+        assert_eq!(agent.seen_fork.borrow().as_slice(), &[false]);
+        assert_eq!(
+            agent.seen_prompt.borrow().as_slice(),
+            &["prompt".to_string()]
+        );
+    }
+    #[test]
+    fn parallel_graph_context_maps_worker_packet_to_lower_agent_job_packet() {
+        let graph_evidence = test_graph_evidence_plan();
+        let prompt =
+            apply_parallel_graph_context("do #gkke", "do #gkke".to_string(), Some(&graph_evidence));
 
-    assert!(prompt.contains("\"lower_agent_job_packet\""));
-    assert!(prompt.contains("\"contract_version\": \"agent-doc-lower-agent-job-v1\""));
-    assert!(prompt.contains("\"source_contract_version\": \"worker-prompt-packet-v1\""));
-    assert!(prompt.contains("\"packet_id\": \"wpp-gkke\""));
-    assert!(prompt.contains("\"owned_files\": ["));
-    assert!(prompt.contains("\"read_only_context\": ["));
-    assert!(prompt.contains("\"forbidden_files\": []"));
-    assert!(prompt.contains("\"expected_tests\": ["));
-    assert!(prompt.contains("\"expansion_commands\": ["));
-    assert!(prompt.contains("\"fail_closed_prompt\""));
-    assert!(prompt.contains("Fail closed if the task requires a forbidden/shared file"));
-}
-#[test]
-fn finalize_suffix_uses_only_unseen_stream_tail() {
-    let streamed = "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n";
-    let full = "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->\n";
-    let delta = finalize_suffix_from_streamed_prefix(streamed, full).unwrap();
-    assert!(!delta.contains("### Re: streamed — gpt-5"));
-    assert!(delta.contains("Implemented and verified."));
-}
-#[test]
-fn orchestrate_template_finalize_wraps_plain_response_as_exchange_patch() {
-    let finalize = orchestrate_finalize_text_for_template(
-        "### Re: plain orch — gpt-5\n\nImplemented and verified.".to_string(),
-    );
+        assert!(prompt.contains("\"lower_agent_job_packet\""));
+        assert!(prompt.contains("\"contract_version\": \"agent-doc-lower-agent-job-v1\""));
+        assert!(prompt.contains("\"source_contract_version\": \"worker-prompt-packet-v1\""));
+        assert!(prompt.contains("\"packet_id\": \"wpp-gkke\""));
+        assert!(prompt.contains("\"owned_files\": ["));
+        assert!(prompt.contains("\"read_only_context\": ["));
+        assert!(prompt.contains("\"forbidden_files\": []"));
+        assert!(prompt.contains("\"expected_tests\": ["));
+        assert!(prompt.contains("\"expansion_commands\": ["));
+        assert!(prompt.contains("\"fail_closed_prompt\""));
+        assert!(prompt.contains("Fail closed if the task requires a forbidden/shared file"));
+    }
+    #[test]
+    fn finalize_suffix_uses_only_unseen_stream_tail() {
+        let streamed = "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n";
+        let full = "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->\n";
+        let delta = finalize_suffix_from_streamed_prefix(streamed, full).unwrap();
+        assert!(!delta.contains("### Re: streamed — gpt-5"));
+        assert!(delta.contains("Implemented and verified."));
+    }
+    #[test]
+    fn orchestrate_template_finalize_wraps_plain_response_as_exchange_patch() {
+        let finalize = orchestrate_finalize_text_for_template(
+            "### Re: plain orch — gpt-5\n\nImplemented and verified.".to_string(),
+        );
 
-    assert!(finalize.starts_with("<!-- patch:exchange -->"));
-    assert!(finalize.contains("### Re: plain orch"));
-    assert!(finalize.ends_with("<!-- /patch:exchange -->\n"));
-}
-#[test]
-fn orchestrate_template_finalize_does_not_wrap_transcript_response() {
-    let transcript = "❯ do #next\n### Re: malformed — gpt-5\nBody";
-    let finalize = orchestrate_finalize_text_for_template(transcript.to_string());
+        assert!(finalize.starts_with("<!-- patch:exchange -->"));
+        assert!(finalize.contains("### Re: plain orch"));
+        assert!(finalize.ends_with("<!-- /patch:exchange -->\n"));
+    }
+    #[test]
+    fn orchestrate_template_finalize_does_not_wrap_transcript_response() {
+        let transcript = "❯ do #next\n### Re: malformed — gpt-5\nBody";
+        let finalize = orchestrate_finalize_text_for_template(transcript.to_string());
 
-    assert_eq!(finalize, transcript);
-}
-#[test]
-fn streamed_flush_waits_for_exchange_patch_marker() {
-    assert!(!should_stream_exchange_patch(
-        "### Re: malformed streaming closeout — gpt-5\nBody"
-    ));
-    assert!(should_stream_exchange_patch(
-        "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n"
-    ));
-}
-#[test]
-fn resolve_dag_tasks_supports_fan_in_dependencies() {
-    let tasks = [
-        "do #prep. Prepare context",
-        "[after=#prep] do #bench. Run benchmarks",
-        "[id=report after=#prep,#bench] Summarize both results",
-    ];
+        assert_eq!(finalize, transcript);
+    }
+    #[test]
+    fn streamed_flush_waits_for_exchange_patch_marker() {
+        assert!(!should_stream_exchange_patch(
+            "### Re: malformed streaming closeout — gpt-5\nBody"
+        ));
+        assert!(should_stream_exchange_patch(
+            "<!-- patch:exchange -->\n### Re: streamed — gpt-5\n"
+        ));
+    }
+    #[test]
+    fn resolve_dag_tasks_supports_fan_in_dependencies() {
+        let tasks = [
+            "do #prep. Prepare context",
+            "[after=#prep] do #bench. Run benchmarks",
+            "[id=report after=#prep,#bench] Summarize both results",
+        ];
 
-    let parsed = tasks
-        .iter()
-        .enumerate()
-        .map(|(idx, task)| parse_dag_task_line(task, idx).unwrap())
-        .collect::<Vec<_>>();
+        let parsed = tasks
+            .iter()
+            .enumerate()
+            .map(|(idx, task)| parse_dag_task_line(task, idx).unwrap())
+            .collect::<Vec<_>>();
 
-    assert_eq!(parsed[0].id, "#prep");
-    assert!(parsed[0].deps.is_empty());
-    assert_eq!(parsed[1].id, "#bench");
-    assert_eq!(parsed[1].deps, vec!["#prep".to_string()]);
-    assert_eq!(parsed[2].id, "report");
-    assert_eq!(
-        parsed[2].deps,
-        vec!["#prep".to_string(), "#bench".to_string()]
-    );
-    assert_eq!(parsed[2].prompt, "Summarize both results");
-}
-#[test]
-fn dag_schedule_rejects_unknown_dependency() {
-    let tasks = vec![DagTask {
-        id: "#prep".to_string(),
-        prompt: "do #prep".to_string(),
-        deps: vec!["#missing".to_string()],
-    }];
+        assert_eq!(parsed[0].id, "#prep");
+        assert!(parsed[0].deps.is_empty());
+        assert_eq!(parsed[1].id, "#bench");
+        assert_eq!(parsed[1].deps, vec!["#prep".to_string()]);
+        assert_eq!(parsed[2].id, "report");
+        assert_eq!(
+            parsed[2].deps,
+            vec!["#prep".to_string(), "#bench".to_string()]
+        );
+        assert_eq!(parsed[2].prompt, "Summarize both results");
+    }
+    #[test]
+    fn dag_schedule_rejects_unknown_dependency() {
+        let tasks = vec![DagTask {
+            id: "#prep".to_string(),
+            prompt: "do #prep".to_string(),
+            deps: vec!["#missing".to_string()],
+        }];
 
-    let err = plan_dag_execution(&tasks).unwrap_err().to_string();
-    assert!(
-        err.contains("unknown task `#missing`"),
-        "unexpected error: {err}"
-    );
-}
-#[test]
-fn dag_schedule_rejects_cycles() {
-    let tasks = vec![
-        DagTask {
-            id: "#a".to_string(),
-            prompt: "do #a".to_string(),
-            deps: vec!["#b".to_string()],
-        },
-        DagTask {
-            id: "#b".to_string(),
-            prompt: "do #b".to_string(),
-            deps: vec!["#a".to_string()],
-        },
-    ];
+        let err = plan_dag_execution(&tasks).unwrap_err().to_string();
+        assert!(
+            err.contains("unknown task `#missing`"),
+            "unexpected error: {err}"
+        );
+    }
+    #[test]
+    fn dag_schedule_rejects_cycles() {
+        let tasks = vec![
+            DagTask {
+                id: "#a".to_string(),
+                prompt: "do #a".to_string(),
+                deps: vec!["#b".to_string()],
+            },
+            DagTask {
+                id: "#b".to_string(),
+                prompt: "do #b".to_string(),
+                deps: vec!["#a".to_string()],
+            },
+        ];
 
-    let err = plan_dag_execution(&tasks).unwrap_err().to_string();
-    assert!(
-        err.contains("dag dependency cycle detected"),
-        "unexpected error: {err}"
-    );
-}
-#[test]
-fn parse_list_item_strips_prompt_prefix() {
-    let result = parse_list_item("❯ - do #task1");
-    assert_eq!(result, Some("do #task1".to_string()));
-}
-#[test]
-fn parse_list_item_strips_prompt_prefix_with_star() {
-    let result = parse_list_item("❯ * do #task2");
-    assert_eq!(result, Some("do #task2".to_string()));
-}
-#[test]
-fn parse_list_item_without_prefix_still_works() {
-    let result = parse_list_item("- do #task3");
-    assert_eq!(result, Some("do #task3".to_string()));
-}
-#[test]
-fn parse_list_item_strips_prompt_prefix_numbered() {
-    let result = parse_list_item("❯ 1. do #task4");
-    assert_eq!(result, Some("do #task4".to_string()));
-}
-#[test]
-fn collect_markdown_list_blocks_with_prompt_prefix() {
-    let text = "❯ - do #a\n❯ - do #b\n\nsome other text\n";
-    let blocks = collect_markdown_list_blocks(text);
-    assert_eq!(blocks.len(), 1);
-    assert_eq!(blocks[0], vec!["do #a".to_string(), "do #b".to_string()]);
-}
-#[test]
-fn from_exchange_scopes_to_tail_bare_directive() {
-    let dir = TempDir::new().unwrap();
-    setup_snapshot_dir(dir.path());
-    let doc = dir.path().join("session.md");
+        let err = plan_dag_execution(&tasks).unwrap_err().to_string();
+        assert!(
+            err.contains("dag dependency cycle detected"),
+            "unexpected error: {err}"
+        );
+    }
+    #[test]
+    fn parse_list_item_strips_prompt_prefix() {
+        let result = parse_list_item("❯ - do #task1");
+        assert_eq!(result, Some("do #task1".to_string()));
+    }
+    #[test]
+    fn parse_list_item_strips_prompt_prefix_with_star() {
+        let result = parse_list_item("❯ * do #task2");
+        assert_eq!(result, Some("do #task2".to_string()));
+    }
+    #[test]
+    fn parse_list_item_without_prefix_still_works() {
+        let result = parse_list_item("- do #task3");
+        assert_eq!(result, Some("do #task3".to_string()));
+    }
+    #[test]
+    fn parse_list_item_strips_prompt_prefix_numbered() {
+        let result = parse_list_item("❯ 1. do #task4");
+        assert_eq!(result, Some("do #task4".to_string()));
+    }
+    #[test]
+    fn collect_markdown_list_blocks_with_prompt_prefix() {
+        let text = "❯ - do #a\n❯ - do #b\n\nsome other text\n";
+        let blocks = collect_markdown_list_blocks(text);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], vec!["do #a".to_string(), "do #b".to_string()]);
+    }
+    #[test]
+    fn from_exchange_scopes_to_tail_bare_directive() {
+        let dir = TempDir::new().unwrap();
+        setup_snapshot_dir(dir.path());
+        let doc = dir.path().join("session.md");
 
-    let snapshot_content = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
-        "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
-        "Compacted summary.\n\n",
-        "❯ Previous prompt\n\n",
-        "### Re: response — opus-4-6\n\n",
-        "Recommendations:\n\n",
-        "- **#stale1** — fix stale-task parsing\n",
-        "- **#envt1** — fix env test\n\n",
-        "All marked [recommended].\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n",
-    );
+        let snapshot_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "Compacted summary.\n\n",
+            "❯ Previous prompt\n\n",
+            "### Re: response — opus-4-6\n\n",
+            "Recommendations:\n\n",
+            "- **#stale1** — fix stale-task parsing\n",
+            "- **#envt1** — fix env test\n\n",
+            "All marked [recommended].\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
 
-    let current_content = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
-        "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
-        "Compacted summary.\n\n",
-        "❯ Previous prompt\n\n",
-        "### Re: response — opus-4-6 (HEAD)\n\n",
-        "Recommendations:\n\n",
-        "- **#stale1** — fix stale-task parsing\n",
-        "- **#envt1** — fix env test\n\n",
-        "All marked [recommended].\n\n",
-        "do #stale1\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n",
-    );
+        let current_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "Compacted summary.\n\n",
+            "❯ Previous prompt\n\n",
+            "### Re: response — opus-4-6 (HEAD)\n\n",
+            "Recommendations:\n\n",
+            "- **#stale1** — fix stale-task parsing\n",
+            "- **#envt1** — fix env test\n\n",
+            "All marked [recommended].\n\n",
+            "do #stale1\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
 
-    fs::write(&doc, current_content).unwrap();
-    snapshot::save(&doc, snapshot_content).unwrap();
+        fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
 
-    let batch = resolve_task_batch(
-        &doc,
-        &OrchestrateConfig {
-            mode: OrchestrateMode::Sequential,
-            tasks_explicit: Vec::new(),
-            from_file: None,
-            from_exchange: true,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: true,
-            no_worktree: true,
-            timeout_secs: 30,
-            dry_run: true,
-            plan: false,
-        },
-    )
-    .unwrap();
-
-    assert_eq!(
-        batch.tasks,
-        vec!["do #stale1".to_string()],
-        "should extract user's bare directive, not response list items"
-    );
-}
-#[test]
-fn from_exchange_scopes_to_tail_list_directive() {
-    let dir = TempDir::new().unwrap();
-    setup_snapshot_dir(dir.path());
-    let doc = dir.path().join("session.md");
-
-    let snapshot_content = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
-        "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
-        "❯ Old prompt\n\n",
-        "### Re: old response — opus-4-6\n\n",
-        "Old list:\n\n",
-        "- old item 1\n",
-        "- old item 2\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n",
-    );
-
-    let current_content = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
-        "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
-        "❯ Old prompt\n\n",
-        "### Re: old response — opus-4-6 (HEAD)\n\n",
-        "Old list:\n\n",
-        "- old item 1\n",
-        "- old item 2\n\n",
-        "- do #new1\n",
-        "- do #new2\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n",
-    );
-
-    fs::write(&doc, current_content).unwrap();
-    snapshot::save(&doc, snapshot_content).unwrap();
-
-    let batch = resolve_task_batch(
-        &doc,
-        &OrchestrateConfig {
-            mode: OrchestrateMode::Sequential,
-            tasks_explicit: Vec::new(),
-            from_file: None,
-            from_exchange: true,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: true,
-            no_worktree: true,
-            timeout_secs: 30,
-            dry_run: true,
-            plan: false,
-        },
-    )
-    .unwrap();
-
-    assert_eq!(
-        batch.tasks,
-        vec!["do #new1".to_string(), "do #new2".to_string()],
-        "should extract user's new list items, not old response list items"
-    );
-}
-#[test]
-fn from_exchange_falls_back_without_snapshot() {
-    let dir = TempDir::new().unwrap();
-    setup_snapshot_dir(dir.path());
-    let doc = dir.path().join("session.md");
-
-    let content = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
-        "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
-        "- do #task1\n",
-        "- do #task2\n",
-        "<!-- /agent:exchange -->\n",
-    );
-
-    fs::write(&doc, content).unwrap();
-
-    let batch = resolve_task_batch(
-        &doc,
-        &OrchestrateConfig {
-            mode: OrchestrateMode::Sequential,
-            tasks_explicit: Vec::new(),
-            from_file: None,
-            from_exchange: true,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: true,
-            no_worktree: true,
-            timeout_secs: 30,
-            dry_run: true,
-            plan: false,
-        },
-    )
-    .unwrap();
-
-    assert_eq!(
-        batch.tasks,
-        vec!["do #task1".to_string(), "do #task2".to_string()],
-        "without snapshot should fall back to full exchange extraction"
-    );
-}
-#[test]
-fn from_exchange_multiple_responses_picks_latest_directive() {
-    let dir = TempDir::new().unwrap();
-    setup_snapshot_dir(dir.path());
-    let doc = dir.path().join("session.md");
-
-    let snapshot_content = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
-        "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
-        "Compacted: old orchestration ran tasks #a, #b, #c.\n\n",
-        "❯ What should we do next?\n\n",
-        "### Re: next steps — opus-4-6\n\n",
-        "I recommend:\n\n",
-        "1. Fix stale-task parsing\n",
-        "2. Fix env test\n",
-        "3. Manual test orchestrate\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n",
-    );
-
-    let current_content = concat!(
-        "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
-        "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
-        "Compacted: old orchestration ran tasks #a, #b, #c.\n\n",
-        "❯ What should we do next?\n\n",
-        "### Re: next steps — opus-4-6 (HEAD)\n\n",
-        "I recommend:\n\n",
-        "1. Fix stale-task parsing\n",
-        "2. Fix env test\n",
-        "3. Manual test orchestrate\n\n",
-        "do #stale1\n",
-        "<!-- agent:boundary:abc123 -->\n",
-        "<!-- /agent:exchange -->\n",
-    );
-
-    fs::write(&doc, current_content).unwrap();
-    snapshot::save(&doc, snapshot_content).unwrap();
-
-    let batch = resolve_task_batch(
-        &doc,
-        &OrchestrateConfig {
-            mode: OrchestrateMode::Sequential,
-            tasks_explicit: Vec::new(),
-            from_file: None,
-            from_exchange: true,
-            from_queue: false,
-            resume_schedule: None,
-            agent: None,
-            model: None,
-            no_git: true,
-            no_worktree: true,
-            timeout_secs: 30,
-            dry_run: true,
-            plan: false,
-        },
-    )
-    .unwrap();
-
-    assert_eq!(
-        batch.tasks,
-        vec!["do #stale1".to_string()],
-        "should extract user's directive, not the numbered list from the response"
-    );
-}
-#[test]
-fn build_agent_prompt_carries_forward_active_format_requirements() {
-    let doc = concat!(
-        "❯ Please organize the backlog into a 2-level list. ",
-        "Place the urgent-security matters at the top. ",
-        "Use a numeric list where appropriate.\n",
-        "### Re: backlog organization — gpt-5\n",
-        "Done.\n",
-    );
-
-    let prompt = build_agent_prompt(
-        Path::new("session.md"),
-        ResolvedMode {
-            format: crate::frontmatter::AgentDocFormat::Template,
-            write: crate::frontmatter::AgentDocWrite::Crdt,
-        },
-        Some("diff"),
-        doc,
-        None,
-    );
-    assert!(
-        prompt.contains(
-            "Active document-level formatting / structure requirements carried forward"
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
         )
-    );
-    assert!(prompt.contains(
+        .unwrap();
+
+        assert_eq!(
+            batch.tasks,
+            vec!["do #stale1".to_string()],
+            "should extract user's bare directive, not response list items"
+        );
+    }
+    #[test]
+    fn from_exchange_scopes_to_tail_list_directive() {
+        let dir = TempDir::new().unwrap();
+        setup_snapshot_dir(dir.path());
+        let doc = dir.path().join("session.md");
+
+        let snapshot_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "❯ Old prompt\n\n",
+            "### Re: old response — opus-4-6\n\n",
+            "Old list:\n\n",
+            "- old item 1\n",
+            "- old item 2\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let current_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "❯ Old prompt\n\n",
+            "### Re: old response — opus-4-6 (HEAD)\n\n",
+            "Old list:\n\n",
+            "- old item 1\n",
+            "- old item 2\n\n",
+            "- do #new1\n",
+            "- do #new2\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            batch.tasks,
+            vec!["do #new1".to_string(), "do #new2".to_string()],
+            "should extract user's new list items, not old response list items"
+        );
+    }
+    #[test]
+    fn from_exchange_falls_back_without_snapshot() {
+        let dir = TempDir::new().unwrap();
+        setup_snapshot_dir(dir.path());
+        let doc = dir.path().join("session.md");
+
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "- do #task1\n",
+            "- do #task2\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        fs::write(&doc, content).unwrap();
+
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            batch.tasks,
+            vec!["do #task1".to_string(), "do #task2".to_string()],
+            "without snapshot should fall back to full exchange extraction"
+        );
+    }
+    #[test]
+    fn from_exchange_multiple_responses_picks_latest_directive() {
+        let dir = TempDir::new().unwrap();
+        setup_snapshot_dir(dir.path());
+        let doc = dir.path().join("session.md");
+
+        let snapshot_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "Compacted: old orchestration ran tasks #a, #b, #c.\n\n",
+            "❯ What should we do next?\n\n",
+            "### Re: next steps — opus-4-6\n\n",
+            "I recommend:\n\n",
+            "1. Fix stale-task parsing\n",
+            "2. Fix env test\n",
+            "3. Manual test orchestrate\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let current_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
+            "Compacted: old orchestration ran tasks #a, #b, #c.\n\n",
+            "❯ What should we do next?\n\n",
+            "### Re: next steps — opus-4-6 (HEAD)\n\n",
+            "I recommend:\n\n",
+            "1. Fix stale-task parsing\n",
+            "2. Fix env test\n",
+            "3. Manual test orchestrate\n\n",
+            "do #stale1\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            batch.tasks,
+            vec!["do #stale1".to_string()],
+            "should extract user's directive, not the numbered list from the response"
+        );
+    }
+    #[test]
+    fn build_agent_prompt_carries_forward_active_format_requirements() {
+        let doc = concat!(
+            "❯ Please organize the backlog into a 2-level list. ",
+            "Place the urgent-security matters at the top. ",
+            "Use a numeric list where appropriate.\n",
+            "### Re: backlog organization — gpt-5\n",
+            "Done.\n",
+        );
+
+        let prompt = build_agent_prompt(
+            Path::new("session.md"),
+            ResolvedMode {
+                format: crate::frontmatter::AgentDocFormat::Template,
+                write: crate::frontmatter::AgentDocWrite::Crdt,
+            },
+            Some("diff"),
+            doc,
+            None,
+        );
+        assert!(
+            prompt.contains(
+                "Active document-level formatting / structure requirements carried forward"
+            )
+        );
+        assert!(prompt.contains(
         "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
     ));
-}
-#[test]
-fn build_agent_prompt_uses_bounded_context_pack_for_warn_level_prompt_targets() {
-    let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
+    }
+    #[test]
+    fn build_agent_prompt_uses_bounded_context_pack_for_warn_level_prompt_targets() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
        Done.\n\
        +do [#ctxpack]. spec-test-build-install-commit-push\n\
        <!-- /agent:exchange -->\n";
-    let doc = concat!(
-        "## Exchange\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Session Summary\n\n",
-        "Compacted earlier turns.\n\n",
-        "### Re: older topic — gpt-5\n\n",
-        "Older response body.\n",
-        "<!-- /agent:exchange -->\n\n",
-        "<!-- agent:backlog -->\n",
-        "- [ ] [#ctxpack] Add bounded context pack\n",
-        "<!-- /agent:backlog -->\n",
-    );
-    let report = agent_doc_orchestration::session_accretion::SessionAccretionReport {
-        level: agent_doc_orchestration::session_accretion::SessionAccretionLevel::Warn,
-        reasons: vec!["document hit 2 no-op closeouts in the last 30 minutes".to_string()],
-        ..Default::default()
-    };
+        let doc = concat!(
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Compacted earlier turns.\n\n",
+            "### Re: older topic — gpt-5\n\n",
+            "Older response body.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#ctxpack] Add bounded context pack\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let report = agent_doc_orchestration::session_accretion::SessionAccretionReport {
+            level: agent_doc_orchestration::session_accretion::SessionAccretionLevel::Warn,
+            reasons: vec!["document hit 2 no-op closeouts in the last 30 minutes".to_string()],
+            ..Default::default()
+        };
 
-    let prompt = build_agent_prompt(
-        Path::new("session.md"),
-        ResolvedMode {
-            format: crate::frontmatter::AgentDocFormat::Template,
-            write: crate::frontmatter::AgentDocWrite::Crdt,
-        },
-        Some(diff),
-        doc,
-        Some(&report),
-    );
-    assert!(prompt.contains("<response_context level=\"warn\">"));
-    assert!(!prompt.contains("<document>\n## Exchange"));
+        let prompt = build_agent_prompt(
+            Path::new("session.md"),
+            ResolvedMode {
+                format: crate::frontmatter::AgentDocFormat::Template,
+                write: crate::frontmatter::AgentDocWrite::Crdt,
+            },
+            Some(diff),
+            doc,
+            Some(&report),
+        );
+        assert!(prompt.contains("<response_context level=\"warn\">"));
+        assert!(!prompt.contains("<document>\n## Exchange"));
+    }
 }
-}
-

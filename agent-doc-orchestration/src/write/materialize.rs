@@ -64,7 +64,10 @@ pub(crate) fn same_ignoring_trailing_newlines(left: &str, right: &str) -> bool {
     left.trim_end_matches('\n') == right.trim_end_matches('\n')
 }
 
-pub(crate) fn serialize_template_response(patches: &[template::PatchBlock], unmatched: &str) -> String {
+pub(crate) fn serialize_template_response(
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+) -> String {
     let mut out = String::new();
     for patch in patches {
         out.push_str("<!-- patch:");
@@ -99,7 +102,10 @@ pub(crate) fn serialize_template_response(patches: &[template::PatchBlock], unma
     out
 }
 
-pub(crate) fn response_materialization_probe(patches: &[template::PatchBlock], unmatched: &str) -> String {
+pub(crate) fn response_materialization_probe(
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+) -> String {
     let mut selected = patches
         .iter()
         .filter(|patch| patch.name == "exchange")
@@ -119,7 +125,10 @@ pub(crate) fn response_materialization_probe(patches: &[template::PatchBlock], u
     materialized_template_response(&selected, probe_unmatched)
 }
 
-pub(crate) fn materialized_template_response(patches: &[template::PatchBlock], unmatched: &str) -> String {
+pub(crate) fn materialized_template_response(
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+) -> String {
     let mut out = String::new();
     for patch in patches {
         push_materialization_segment(&mut out, &patch.content);
@@ -151,17 +160,34 @@ pub fn response_materialization_probe_from_response(response: &str) -> String {
     // them would never match the committed HEAD/archive content and
     // `stuck_captured_cycle` would false-alarm on a response that is in fact
     // committed (#8j86). Strip them from the probe so the match mirrors commit.
-    crate::git::strip_guard_markers(&probe)
+    strip_ephemeral_markers(&probe)
 }
 
 pub fn response_materialized_in_content(response: &str, content: &str) -> bool {
     let probe = response_materialization_probe_from_response(response);
-    probe.trim().is_empty()
+    if probe.trim().is_empty()
         || crate::repair::response_already_applied(content, &probe)
         || crate::repair::response_already_applied_after_prefix_strip(content, &probe)
+    {
+        return true;
+    }
+    let normalized_content = strip_ephemeral_markers(content);
+    normalized_content != content
+        && (crate::repair::response_already_applied(&normalized_content, &probe)
+            || crate::repair::response_already_applied_after_prefix_strip(
+                &normalized_content,
+                &probe,
+            ))
 }
 
-pub(crate) fn reject_marker_response_with_zero_patches(marker_count: usize, patch_count: usize) -> Result<()> {
+fn strip_ephemeral_markers(content: &str) -> String {
+    crate::git::strip_guard_markers(content)
+}
+
+pub(crate) fn reject_marker_response_with_zero_patches(
+    marker_count: usize,
+    patch_count: usize,
+) -> Result<()> {
     if patch_count == 0 && marker_count > 0 {
         anyhow::bail!(
             "template patchback parsed zero patches despite {marker_count} patch marker(s); refusing to capture a malformed response"
@@ -345,7 +371,9 @@ pub(crate) fn repair_partial_response_materialization_before_fallback(
     Ok(())
 }
 
-pub(crate) fn response_materialization_probe_from_ipc_payload(payload: &serde_json::Value) -> String {
+pub(crate) fn response_materialization_probe_from_ipc_payload(
+    payload: &serde_json::Value,
+) -> String {
     let patches = payload
         .get("patches")
         .and_then(|value| value.as_array())
@@ -862,6 +890,26 @@ mod core_tests {
             "<!-- agent:exchange -->\n",
             "### Re: visible body — gpt-5\n\n",
             "The document contains the applied body only.\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_content(response, content));
+    }
+    #[test]
+    fn patch_wrapped_response_matches_visible_body_with_transient_markers() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: visible body — gpt-5\n\n",
+            "The document contains the applied body only.\n",
+            "No follow-up. <!-- no-pending-capture -->\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: visible body — gpt-5 (HEAD)\n\n",
+            "The document contains the applied body only.\n",
+            "No follow-up. <!-- no-pending-capture -->\n",
             "<!-- agent:boundary:test -->\n",
             "<!-- /agent:exchange -->\n",
         );

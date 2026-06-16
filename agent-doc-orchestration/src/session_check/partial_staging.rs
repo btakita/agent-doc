@@ -191,7 +191,9 @@ pub(crate) fn partial_staging_candidate_repos(file: &Path) -> Result<Vec<std::pa
     Ok(repos)
 }
 
-pub(crate) fn partial_staging_finding_for_repo(repo: &Path) -> Result<Option<PartialStagingFinding>> {
+pub(crate) fn partial_staging_finding_for_repo(
+    repo: &Path,
+) -> Result<Option<PartialStagingFinding>> {
     if git_stdout(repo, &["rev-parse", "--verify", "HEAD^"])?.is_none() {
         return Ok(None);
     }

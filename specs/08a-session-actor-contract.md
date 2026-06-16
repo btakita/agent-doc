@@ -152,21 +152,17 @@ Later phases may refine caller values without changing the field names.
   issue=prompt_not_submitted`; when Codex hook tracking or OpenCode pane-state
   tracking requires dispatch proof but only acceptance is observed, it logs
   `route_submit_issue issue=accepted_without_dispatch_start_proof`.
-- Codex AND Claude direct-pane submit get one bare-`Enter` re-submit
-  (`#jbcodexsubmit` / `#jbclaudesubmit`). Both TUI composers can leave the routed
-  trigger drafted when the text and its trailing carriage return arrive as a
-  single merged `send-keys` payload (`submit_text_for_harness` emits the
-  non-opencode `Enter` suffix inline for both), so when a Codex or Claude
-  direct-pane submit times out with the trigger still visible, route sends a
-  separate `Enter` key event and re-polls the acceptance window exactly once,
-  recording `route_submit_resubmit ... action=enter_key result=accepted|still_visible`.
+- Enter-key direct-pane submit profiles get one bare-`Enter` re-submit
+  (`#jbcodexsubmit` / `#jbclaudesubmit`). Codex, Claude, OpenCode, and default
+  tmux submits send literal text followed by a named tmux `Enter`; when a submit
+  still times out with the trigger visibly drafted, route sends one separate
+  `Enter` key event and re-polls the acceptance window exactly once, recording
+  `route_submit_resubmit ... action=enter_key result=accepted|still_visible`.
   If the exact same routed trigger is already visible in the composer before
   route sends anything, route takes that same one-`Enter` path first instead of
   appending another trigger; a later idle prompt below the trigger classifies it
-  as stale scrollback, not active draft input.
-  This is scoped to the two harnesses that travel the merged text+CR submit path
-  — OpenCode submits via the separate Kitty Return sequence and is unchanged —
-  and never loops on a genuinely stuck pane.
+  as stale scrollback, not active draft input. This recovery never loops on a
+  genuinely stuck pane.
 - Repeated dispatches are queue-first once a document actor is already busy.
   Route must first try to drain an open binary-owned closeout (`repair` /
   strict commit / `session-check`) so an idle console can accept the reroute

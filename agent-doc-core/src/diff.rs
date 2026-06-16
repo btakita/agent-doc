@@ -2597,7 +2597,6 @@ fn truncate_for_reason(s: &str) -> &str {
     if s.len() <= 80 { s } else { &s[..80] }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

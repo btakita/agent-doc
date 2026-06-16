@@ -470,7 +470,7 @@ pub fn review_phase_routed(prior: &str, current: &str) -> bool {
 /// having no continuation required (#qchurn). It computes the same drainable set as
 /// the in-session `drainable_head_count` (`#qcontdrain`: both defer only
 /// `[operator-verify]`).
-pub fn live_drainable_continuation_prompt_text(file: &Path, content: &str) -> Option<String> {
+pub fn live_drainable_continuation_head(file: &Path, content: &str) -> Option<String> {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let (fm, _) = crate::frontmatter::parse_for_file_with_context(content, file, &rc).ok()?;
     if fm.queue_active != Some(true) {
@@ -501,12 +501,7 @@ pub fn live_drainable_continuation_prompt_text(file: &Path, content: &str) -> Op
         &deferred_ids,
         preset_supplies_directive,
     )?;
-    Some(head.text.trim().to_string())
-}
-
-pub fn live_drainable_continuation_head(file: &Path, content: &str) -> Option<String> {
-    let head_text = live_drainable_continuation_prompt_text(file, content)?;
-    Some(extract_head_id(&head_text).unwrap_or(head_text))
+    Some(extract_head_id(&head.text).unwrap_or_else(|| head.text.trim().to_string()))
 }
 
 /// Count of agent-drainable heads in `content`'s active queue (`#cleardrainsignal`).

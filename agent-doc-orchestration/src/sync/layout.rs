@@ -158,7 +158,10 @@ pub(crate) fn same_sync_file(lhs: &str, rhs: &str) -> bool {
     }
 }
 
-pub(crate) fn focused_column_index(remembered_layout: &[String], focus: Option<&str>) -> Option<usize> {
+pub(crate) fn focused_column_index(
+    remembered_layout: &[String],
+    focus: Option<&str>,
+) -> Option<usize> {
     let focus = focus?.trim();
     if focus.is_empty() {
         return None;
@@ -343,27 +346,27 @@ pub(crate) fn filter_duplicate_synthetic_registry_candidates(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use crate::sessions::IsolatedTmux;
-use std::process::Command as ProcessCommand;
-use std::time::Duration;
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn recover_existing_associated_pane_reuses_latest_open_session_log_owner() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+    use crate::sessions::IsolatedTmux;
+    use std::process::Command as ProcessCommand;
+    use std::time::Duration;
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn recover_existing_associated_pane_reuses_latest_open_session_log_owner() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
 
-    std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
-    let doc = tmp.path().join("tasks").join("owned.md");
-    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-    std::fs::write(
-        &doc,
-        "---\nagent_doc_session: associated-session-log\n---\n",
-    )
-    .unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: associated-session-log\n---\n",
+        )
+        .unwrap();
 
-    let iso = IsolatedTmux::new("sync-associated-session-log-owner");
-    let owner_pane = iso.new_session("test", tmp.path()).unwrap();
-    std::fs::write(
+        let iso = IsolatedTmux::new("sync-associated-session-log-owner");
+        let owner_pane = iso.new_session("test", tmp.path()).unwrap();
+        std::fs::write(
             tmp.path().join(".agent-doc/logs/associated-session-log.log"),
             format!(
                 "[1] session_start file=tasks/owned.md pane={} session=associated-session-log\n[2] codex_start mode=fresh restart_count=0\n",
@@ -372,731 +375,745 @@ fn recover_existing_associated_pane_reuses_latest_open_session_log_owner() {
         )
         .unwrap();
 
-    let recovery = recover_existing_associated_pane(
-        &iso,
-        &doc,
-        "associated-session-log",
-        None,
-        &RefCell::new(std::collections::HashMap::new()),
-    );
+        let recovery = recover_existing_associated_pane(
+            &iso,
+            &doc,
+            "associated-session-log",
+            None,
+            &RefCell::new(std::collections::HashMap::new()),
+        );
 
-    assert!(matches!(
-        recovery,
-        ExistingAssociatedPaneRecovery::Recovered(ref pane) if pane == &owner_pane
-    ));
-    let entry = lookup_registry_entry_for_file_session(&doc, "associated-session-log")
-        .expect("recovered pane should be registered in the document registry");
-    assert_eq!(entry.pane, owner_pane);
-    let candidates = find_associated_panes(&iso, &doc, "associated-session-log");
-    assert_eq!(candidates.len(), 1);
-    assert!(
-        candidates[0]
-            .sources
-            .contains(&AssociatedPaneSource::SessionLog),
-        "expected session-log ownership proof: {:?}",
-        candidates[0].sources
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn recover_existing_associated_pane_reregisters_supervisor_owned_pane() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+        assert!(matches!(
+            recovery,
+            ExistingAssociatedPaneRecovery::Recovered(ref pane) if pane == &owner_pane
+        ));
+        let entry = lookup_registry_entry_for_file_session(&doc, "associated-session-log")
+            .expect("recovered pane should be registered in the document registry");
+        assert_eq!(entry.pane, owner_pane);
+        let candidates = find_associated_panes(&iso, &doc, "associated-session-log");
+        assert_eq!(candidates.len(), 1);
+        assert!(
+            candidates[0]
+                .sources
+                .contains(&AssociatedPaneSource::SessionLog),
+            "expected session-log ownership proof: {:?}",
+            candidates[0].sources
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn recover_existing_associated_pane_reregisters_supervisor_owned_pane() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
 
-    std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-    let doc = tmp.path().join("tasks").join("owned.md");
-    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-    std::fs::write(&doc, "---\nagent_doc_session: associated-supervisor\n---\n").unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: associated-supervisor\n---\n").unwrap();
 
-    let iso = IsolatedTmux::new("sync-associated-supervisor");
-    let pane = iso.new_session("test", tmp.path()).unwrap();
-    let pane_pid = iso
-        .raw_cmd(&["display-message", "-t", &pane, "-p", "#{pane_pid}"])
-        .unwrap()
-        .trim()
-        .parse::<u32>()
+        let iso = IsolatedTmux::new("sync-associated-supervisor");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let pane_pid = iso
+            .raw_cmd(&["display-message", "-t", &pane, "-p", "#{pane_pid}"])
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+        let supervisor_instance_id = "instance-1".to_string();
+
+        let _ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), "associated-supervisor", {
+                let supervisor_instance_id = supervisor_instance_id.clone();
+                move |method| match method {
+                    crate::supervisor::ipc::IpcMethod::Pid => {
+                        crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
+                            "pid": pane_pid
+                        }))
+                    }
+                    crate::supervisor::ipc::IpcMethod::State => {
+                        crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
+                            "supervisor_pid": pane_pid,
+                            "supervisor_instance_id": supervisor_instance_id,
+                        }))
+                    }
+                    _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
+                }
+            })
+            .unwrap();
+
+        let recovery = recover_existing_associated_pane(
+            &iso,
+            &doc,
+            "associated-supervisor",
+            None,
+            &RefCell::new(std::collections::HashMap::new()),
+        );
+
+        assert!(matches!(
+            recovery,
+            ExistingAssociatedPaneRecovery::Recovered(_)
+        ));
+        assert_eq!(
+            sessions::lookup("associated-supervisor").unwrap(),
+            Some(pane.clone())
+        );
+        let entry = lookup_registry_entry_for_file_session(&doc, "associated-supervisor")
+            .expect("recovered pane should be registered in the document registry");
+        assert_eq!(entry.pane, pane);
+        assert_eq!(entry.pid, pane_pid);
+        assert_eq!(entry.supervisor_instance_id, supervisor_instance_id);
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn reregister_recovered_owner_preserves_existing_supervisor_identity_without_socket() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: preserved-supervisor\n---\n").unwrap();
+
+        let iso = IsolatedTmux::new("sync-preserve-supervisor-entry");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let pane_pid = pane_pid_from_tmux(&iso, &pane).unwrap();
+        let window = iso.pane_window(&pane).unwrap();
+
+        sessions::register_full_with_cwd_in(
+            tmp.path(),
+            "preserved-supervisor",
+            &pane,
+            "tasks/owned.md",
+            pane_pid,
+            &window,
+            &tmp.path().to_string_lossy(),
+        )
         .unwrap();
-    let supervisor_instance_id = "instance-1".to_string();
+        let mut registry = sessions::load_in(tmp.path()).unwrap();
+        let key = sessions::canonical_registry_key_in(tmp.path(), doc.to_string_lossy().as_ref());
+        let entry = registry.get_mut(&key).expect("seeded entry should exist");
+        entry.supervisor_instance_id = "instance-preserved".to_string();
+        sessions::save_in(tmp.path(), &registry).unwrap();
 
-    let _ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), "associated-supervisor", {
-        let supervisor_instance_id = supervisor_instance_id.clone();
-        move |method| match method {
-            crate::supervisor::ipc::IpcMethod::Pid => {
-                crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                    "pid": pane_pid
-                }))
-            }
-            crate::supervisor::ipc::IpcMethod::State => {
-                crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                    "supervisor_pid": pane_pid,
-                    "supervisor_instance_id": supervisor_instance_id,
-                }))
-            }
-            _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
-        }
-    })
-    .unwrap();
+        reregister_recovered_owner(&iso, &doc, "preserved-supervisor", &pane).unwrap();
 
-    let recovery = recover_existing_associated_pane(
-        &iso,
-        &doc,
-        "associated-supervisor",
-        None,
-        &RefCell::new(std::collections::HashMap::new()),
-    );
+        let entry = lookup_registry_entry_for_file_session(&doc, "preserved-supervisor")
+            .expect("recovered owner should keep its registry entry");
+        assert_eq!(entry.pane, pane);
+        assert_eq!(entry.pid, pane_pid);
+        assert_eq!(entry.supervisor_instance_id, "instance-preserved");
+    }
+    #[test]
+    fn column_memory_restores_empty_placeholder_columns() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let left = tmp.path().join("left.md");
+        let right = tmp.path().join("right.md");
+        std::fs::write(&left, "---\nagent_doc_session: left\n---\n").unwrap();
+        std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
 
-    assert!(matches!(
-        recovery,
-        ExistingAssociatedPaneRecovery::Recovered(_)
-    ));
-    assert_eq!(
-        sessions::lookup("associated-supervisor").unwrap(),
-        Some(pane.clone())
-    );
-    let entry = lookup_registry_entry_for_file_session(&doc, "associated-supervisor")
-        .expect("recovered pane should be registered in the document registry");
-    assert_eq!(entry.pane, pane);
-    assert_eq!(entry.pid, pane_pid);
-    assert_eq!(entry.supervisor_instance_id, supervisor_instance_id);
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn reregister_recovered_owner_preserves_existing_supervisor_identity_without_socket() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+        let remembered = vec![
+            left.canonicalize().unwrap().to_string_lossy().to_string(),
+            String::new(),
+        ];
+        let cols = vec![
+            String::new(),
+            right.canonicalize().unwrap().to_string_lossy().to_string(),
+        ];
 
-    std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-    let doc = tmp.path().join("tasks").join("owned.md");
-    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-    std::fs::write(&doc, "---\nagent_doc_session: preserved-supervisor\n---\n").unwrap();
+        assert_eq!(
+            apply_column_memory(&cols, &remembered),
+            vec![
+                left.canonicalize().unwrap().to_string_lossy().to_string(),
+                right.canonicalize().unwrap().to_string_lossy().to_string(),
+            ],
+            "blank editor columns should keep their position long enough to restore remembered panes"
+        );
+    }
+    #[test]
+    fn column_memory_skips_duplicate_remembered_doc_already_visible_elsewhere() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let right = tmp.path().join("right.md");
+        std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
 
-    let iso = IsolatedTmux::new("sync-preserve-supervisor-entry");
-    let pane = iso.new_session("test", tmp.path()).unwrap();
-    let pane_pid = pane_pid_from_tmux(&iso, &pane).unwrap();
-    let window = iso.pane_window(&pane).unwrap();
+        let remembered = vec![
+            right.canonicalize().unwrap().to_string_lossy().to_string(),
+            String::new(),
+        ];
+        let cols = vec![
+            String::new(),
+            right.canonicalize().unwrap().to_string_lossy().to_string(),
+        ];
 
-    sessions::register_full_with_cwd_in(
-        tmp.path(),
-        "preserved-supervisor",
-        &pane,
-        "tasks/owned.md",
-        pane_pid,
-        &window,
-        &tmp.path().to_string_lossy(),
-    )
-    .unwrap();
-    let mut registry = sessions::load_in(tmp.path()).unwrap();
-    let key = sessions::canonical_registry_key_in(tmp.path(), doc.to_string_lossy().as_ref());
-    let entry = registry.get_mut(&key).expect("seeded entry should exist");
-    entry.supervisor_instance_id = "instance-preserved".to_string();
-    sessions::save_in(tmp.path(), &registry).unwrap();
+        assert_eq!(
+            apply_column_memory(&cols, &remembered),
+            cols,
+            "a remembered doc should not be duplicated into an empty sibling column when it is already visible"
+        );
+    }
+    #[test]
+    fn build_layout_state_preserves_prior_distinct_doc_when_current_cols_duplicate() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let left = tmp.path().join("left.md");
+        let right = tmp.path().join("right.md");
+        std::fs::write(&left, "---\nagent_doc_session: left\n---\n").unwrap();
+        std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
 
-    reregister_recovered_owner(&iso, &doc, "preserved-supervisor", &pane).unwrap();
-
-    let entry = lookup_registry_entry_for_file_session(&doc, "preserved-supervisor")
-        .expect("recovered owner should keep its registry entry");
-    assert_eq!(entry.pane, pane);
-    assert_eq!(entry.pid, pane_pid);
-    assert_eq!(entry.supervisor_instance_id, "instance-preserved");
-}
-#[test]
-fn column_memory_restores_empty_placeholder_columns() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let left = tmp.path().join("left.md");
-    let right = tmp.path().join("right.md");
-    std::fs::write(&left, "---\nagent_doc_session: left\n---\n").unwrap();
-    std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
-
-    let remembered = vec![
-        left.canonicalize().unwrap().to_string_lossy().to_string(),
-        String::new(),
-    ];
-    let cols = vec![
-        String::new(),
-        right.canonicalize().unwrap().to_string_lossy().to_string(),
-    ];
-
-    assert_eq!(
-        apply_column_memory(&cols, &remembered),
-        vec![
+        let saved_layout = vec![
             left.canonicalize().unwrap().to_string_lossy().to_string(),
             right.canonicalize().unwrap().to_string_lossy().to_string(),
-        ],
-        "blank editor columns should keep their position long enough to restore remembered panes"
-    );
-}
-#[test]
-fn column_memory_skips_duplicate_remembered_doc_already_visible_elsewhere() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let right = tmp.path().join("right.md");
-    std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
+        ];
+        let duplicate_cols = vec![
+            right.canonicalize().unwrap().to_string_lossy().to_string(),
+            right.canonicalize().unwrap().to_string_lossy().to_string(),
+        ];
 
-    let remembered = vec![
-        right.canonicalize().unwrap().to_string_lossy().to_string(),
-        String::new(),
-    ];
-    let cols = vec![
-        String::new(),
-        right.canonicalize().unwrap().to_string_lossy().to_string(),
-    ];
+        assert_eq!(
+            build_layout_state(&duplicate_cols, &saved_layout),
+            saved_layout,
+            "duplicate current columns should not overwrite a previously distinct remembered layout"
+        );
+    }
+    #[test]
+    fn column_memory_round_trip_persists_and_restores_across_cycles() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let left = tmp.path().join("left.md");
+        let right = tmp.path().join("right.md");
+        std::fs::write(&left, "---\nagent_doc_session: left-sess\n---\n").unwrap();
+        std::fs::write(&right, "---\nagent_doc_session: right-sess\n---\n").unwrap();
 
-    assert_eq!(
-        apply_column_memory(&cols, &remembered),
-        cols,
-        "a remembered doc should not be duplicated into an empty sibling column when it is already visible"
-    );
-}
-#[test]
-fn build_layout_state_preserves_prior_distinct_doc_when_current_cols_duplicate() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let left = tmp.path().join("left.md");
-    let right = tmp.path().join("right.md");
-    std::fs::write(&left, "---\nagent_doc_session: left\n---\n").unwrap();
-    std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
+        let left_path = left.canonicalize().unwrap().to_string_lossy().to_string();
+        let right_path = right.canonicalize().unwrap().to_string_lossy().to_string();
 
-    let saved_layout = vec![
-        left.canonicalize().unwrap().to_string_lossy().to_string(),
-        right.canonicalize().unwrap().to_string_lossy().to_string(),
-    ];
-    let duplicate_cols = vec![
-        right.canonicalize().unwrap().to_string_lossy().to_string(),
-        right.canonicalize().unwrap().to_string_lossy().to_string(),
-    ];
+        // Cycle 1: both columns filled → build_layout_state records them
+        let cols_filled = vec![left_path.clone(), right_path.clone()];
+        let no_prior = vec![];
+        let state_1 = build_layout_state(&cols_filled, &no_prior);
+        assert_eq!(state_1, vec![left_path.clone(), right_path.clone()]);
 
-    assert_eq!(
-        build_layout_state(&duplicate_cols, &saved_layout),
-        saved_layout,
-        "duplicate current columns should not overwrite a previously distinct remembered layout"
-    );
-}
-#[test]
-fn column_memory_round_trip_persists_and_restores_across_cycles() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let left = tmp.path().join("left.md");
-    let right = tmp.path().join("right.md");
-    std::fs::write(&left, "---\nagent_doc_session: left-sess\n---\n").unwrap();
-    std::fs::write(&right, "---\nagent_doc_session: right-sess\n---\n").unwrap();
+        // Cycle 2: left column goes empty (user opens non-markdown file) → apply_column_memory restores it
+        let cols_empty_left = vec![String::new(), right_path.clone()];
+        let restored = apply_column_memory(&cols_empty_left, &state_1);
+        assert_eq!(
+            restored,
+            vec![left_path.clone(), right_path.clone()],
+            "round-trip: empty left column should be restored from prior cycle's layout state"
+        );
 
-    let left_path = left.canonicalize().unwrap().to_string_lossy().to_string();
-    let right_path = right.canonicalize().unwrap().to_string_lossy().to_string();
+        // Cycle 2 continued: build_layout_state persists the restored state
+        let state_2 = build_layout_state(&restored, &state_1);
+        assert_eq!(
+            state_2,
+            vec![left_path.clone(), right_path.clone()],
+            "round-trip: layout state should survive through restore + re-persist"
+        );
+    }
+    #[test]
+    fn column_memory_cross_root_doc_restores_from_submodule_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let submodule = tmp.path().join("src/boost-client/tasks");
+        std::fs::create_dir_all(&submodule).unwrap();
 
-    // Cycle 1: both columns filled → build_layout_state records them
-    let cols_filled = vec![left_path.clone(), right_path.clone()];
-    let no_prior = vec![];
-    let state_1 = build_layout_state(&cols_filled, &no_prior);
-    assert_eq!(state_1, vec![left_path.clone(), right_path.clone()]);
+        let root_doc = tmp.path().join("tasks/bugs.md");
+        std::fs::create_dir_all(root_doc.parent().unwrap()).unwrap();
+        std::fs::write(&root_doc, "---\nagent_doc_session: root-sess\n---\n").unwrap();
 
-    // Cycle 2: left column goes empty (user opens non-markdown file) → apply_column_memory restores it
-    let cols_empty_left = vec![String::new(), right_path.clone()];
-    let restored = apply_column_memory(&cols_empty_left, &state_1);
-    assert_eq!(
-        restored,
-        vec![left_path.clone(), right_path.clone()],
-        "round-trip: empty left column should be restored from prior cycle's layout state"
-    );
+        let child_doc = submodule.join("monsterrodholders.md");
+        std::fs::write(&child_doc, "---\nagent_doc_session: monster-sess\n---\n").unwrap();
 
-    // Cycle 2 continued: build_layout_state persists the restored state
-    let state_2 = build_layout_state(&restored, &state_1);
-    assert_eq!(
-        state_2,
-        vec![left_path.clone(), right_path.clone()],
-        "round-trip: layout state should survive through restore + re-persist"
-    );
-}
-#[test]
-fn column_memory_cross_root_doc_restores_from_submodule_path() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let submodule = tmp.path().join("src/boost-client/tasks");
-    std::fs::create_dir_all(&submodule).unwrap();
+        let root_path = root_doc
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let child_path = child_doc
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
 
-    let root_doc = tmp.path().join("tasks/bugs.md");
-    std::fs::create_dir_all(root_doc.parent().unwrap()).unwrap();
-    std::fs::write(&root_doc, "---\nagent_doc_session: root-sess\n---\n").unwrap();
+        // Prior layout: root on left, child on right
+        let saved = vec![root_path.clone(), child_path.clone()];
 
-    let child_doc = submodule.join("monsterrodholders.md");
-    std::fs::write(&child_doc, "---\nagent_doc_session: monster-sess\n---\n").unwrap();
+        // Current: left empty (non-markdown focused), child on right
+        let cols = vec![String::new(), child_path.clone()];
+        let restored = apply_column_memory(&cols, &saved);
+        assert_eq!(
+            restored,
+            vec![root_path.clone(), child_path.clone()],
+            "cross-root doc in submodule path should restore from column memory"
+        );
+    }
+    #[test]
+    fn column_memory_preserves_right_column_when_left_is_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let right = tmp.path().join("right.md");
+        std::fs::write(&right, "---\nagent_doc_session: right-sess\n---\n").unwrap();
+        let right_path = right.canonicalize().unwrap().to_string_lossy().to_string();
 
-    let root_path = root_doc
-        .canonicalize()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
-    let child_path = child_doc
-        .canonicalize()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
+        // No prior layout at all — fresh start
+        let cols = vec![String::new(), right_path.clone()];
+        let no_saved: Vec<String> = vec![];
+        let result = apply_column_memory(&cols, &no_saved);
+        assert_eq!(
+            result,
+            vec![String::new(), right_path.clone()],
+            "right-column doc must stay in position even with no column memory to restore"
+        );
 
-    // Prior layout: root on left, child on right
-    let saved = vec![root_path.clone(), child_path.clone()];
+        // build_layout_state should record empty left, filled right
+        let state = build_layout_state(&result, &no_saved);
+        assert_eq!(
+            state,
+            vec![String::new(), right_path],
+            "layout state must preserve column positions including empty slots"
+        );
+    }
+    #[test]
+    fn safe_passive_focus_only_switch_expands_active_column_from_memory() {
+        let saved_layout = vec!["tasks/left.md".to_string(), "tasks/right.md".to_string()];
+        let focused = vec!["tasks/new-left.md".to_string()];
 
-    // Current: left empty (non-markdown focused), child on right
-    let cols = vec![String::new(), child_path.clone()];
-    let restored = apply_column_memory(&cols, &saved);
-    assert_eq!(
-        restored,
-        vec![root_path.clone(), child_path.clone()],
-        "cross-root doc in submodule path should restore from column memory"
-    );
-}
-#[test]
-fn column_memory_preserves_right_column_when_left_is_empty() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let right = tmp.path().join("right.md");
-    std::fs::write(&right, "---\nagent_doc_session: right-sess\n---\n").unwrap();
-    let right_path = right.canonicalize().unwrap().to_string_lossy().to_string();
+        let expanded = expand_focus_only_columns_for_editor_switch(
+            &focused,
+            &saved_layout,
+            Some(0),
+            AutoStartMode::SafePassive,
+        );
+        assert_eq!(
+            expanded,
+            vec![
+                "tasks/new-left.md".to_string(),
+                "tasks/right.md".to_string()
+            ],
+            "a focus-only editor switch should replace the active tmux side and keep the sibling side visible"
+        );
 
-    // No prior layout at all — fresh start
-    let cols = vec![String::new(), right_path.clone()];
-    let no_saved: Vec<String> = vec![];
-    let result = apply_column_memory(&cols, &no_saved);
-    assert_eq!(
-        result,
-        vec![String::new(), right_path.clone()],
-        "right-column doc must stay in position even with no column memory to restore"
-    );
+        let full_mode = expand_focus_only_columns_for_editor_switch(
+            &focused,
+            &saved_layout,
+            Some(0),
+            AutoStartMode::Full,
+        );
+        assert_eq!(
+            full_mode, focused,
+            "manual/full sync keeps the literal editor projection"
+        );
+    }
+    #[test]
+    fn focus_only_switch_prefers_existing_focused_column_over_active_tmux_pane() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let left = root.join("tasks/left.md");
+        let right = root.join("tasks/right.md");
+        std::fs::create_dir_all(left.parent().unwrap()).unwrap();
+        std::fs::write(&left, "---\nagent_doc_session: left\n---\n").unwrap();
+        std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
 
-    // build_layout_state should record empty left, filled right
-    let state = build_layout_state(&result, &no_saved);
-    assert_eq!(
-        state,
-        vec![String::new(), right_path],
-        "layout state must preserve column positions including empty slots"
-    );
-}
-#[test]
-fn safe_passive_focus_only_switch_expands_active_column_from_memory() {
-    let saved_layout = vec!["tasks/left.md".to_string(), "tasks/right.md".to_string()];
-    let focused = vec!["tasks/new-left.md".to_string()];
+        let left = left.canonicalize().unwrap().to_string_lossy().to_string();
+        let right = right.canonicalize().unwrap().to_string_lossy().to_string();
+        let saved_layout = vec![left.clone(), right.clone()];
+        let resolved_column = focused_column_index(&saved_layout, Some(&right))
+            .or(Some(0))
+            .expect("focused right column should resolve");
+        assert_eq!(
+            resolved_column, 1,
+            "the focused document column should beat the stale active pane column"
+        );
+        let expanded = expand_focus_only_columns_for_editor_switch(
+            std::slice::from_ref(&right),
+            &saved_layout,
+            Some(resolved_column),
+            AutoStartMode::SafePassive,
+        );
 
-    let expanded = expand_focus_only_columns_for_editor_switch(
-        &focused,
-        &saved_layout,
-        Some(0),
-        AutoStartMode::SafePassive,
-    );
-    assert_eq!(
-        expanded,
-        vec![
-            "tasks/new-left.md".to_string(),
-            "tasks/right.md".to_string()
-        ],
-        "a focus-only editor switch should replace the active tmux side and keep the sibling side visible"
-    );
+        assert_eq!(
+            expanded,
+            vec![left, right],
+            "when the focused document is already visible, focus-only sync should select that column instead of replacing the currently active tmux pane"
+        );
+    }
+    #[test]
+    fn exact_visible_projection_does_not_expand_from_remembered_focus_only_layout() {
+        let saved_layout = vec![
+            "tasks/tsift.md".to_string(),
+            "tasks/software/corky.md".to_string(),
+        ];
+        let focused = vec!["tasks/tsift.md".to_string()];
 
-    let full_mode = expand_focus_only_columns_for_editor_switch(
-        &focused,
-        &saved_layout,
-        Some(0),
-        AutoStartMode::Full,
-    );
-    assert_eq!(
-        full_mode, focused,
-        "manual/full sync keeps the literal editor projection"
-    );
-}
-#[test]
-fn focus_only_switch_prefers_existing_focused_column_over_active_tmux_pane() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let root = tmp.path();
-    let left = root.join("tasks/left.md");
-    let right = root.join("tasks/right.md");
-    std::fs::create_dir_all(left.parent().unwrap()).unwrap();
-    std::fs::write(&left, "---\nagent_doc_session: left\n---\n").unwrap();
-    std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
+        let expanded = apply_focus_only_expansion_policy(
+            &focused,
+            &saved_layout,
+            Some(0),
+            AutoStartMode::SafePassive,
+            false,
+        );
+        assert_eq!(
+            expanded, saved_layout,
+            "legacy focus-only sync still preserves remembered sibling columns"
+        );
 
-    let left = left.canonicalize().unwrap().to_string_lossy().to_string();
-    let right = right.canonicalize().unwrap().to_string_lossy().to_string();
-    let saved_layout = vec![left.clone(), right.clone()];
-    let resolved_column = focused_column_index(&saved_layout, Some(&right))
-        .or(Some(0))
-        .expect("focused right column should resolve");
-    assert_eq!(
-        resolved_column, 1,
-        "the focused document column should beat the stale active pane column"
-    );
-    let expanded = expand_focus_only_columns_for_editor_switch(
-        std::slice::from_ref(&right),
-        &saved_layout,
-        Some(resolved_column),
-        AutoStartMode::SafePassive,
-    );
+        let exact = apply_focus_only_expansion_policy(
+            &focused,
+            &saved_layout,
+            Some(0),
+            AutoStartMode::SafePassive,
+            true,
+        );
+        assert_eq!(
+            exact, focused,
+            "editor snapshots marked exact-visible must not reintroduce stale remembered siblings"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn explicit_non_agent_window_preserves_layout_when_session_lacks_agent_doc_window() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/boost-client");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+        let _cwd = ScopedCurrentDir::set(root);
 
-    assert_eq!(
-        expanded,
-        vec![left, right],
-        "when the focused document is already visible, focus-only sync should select that column instead of replacing the currently active tmux pane"
-    );
-}
-#[test]
-fn exact_visible_projection_does_not_expand_from_remembered_focus_only_layout() {
-    let saved_layout = vec![
-        "tasks/tsift.md".to_string(),
-        "tasks/software/corky.md".to_string(),
-    ];
-    let focused = vec!["tasks/tsift.md".to_string()];
-
-    let expanded = apply_focus_only_expansion_policy(
-        &focused,
-        &saved_layout,
-        Some(0),
-        AutoStartMode::SafePassive,
-        false,
-    );
-    assert_eq!(
-        expanded, saved_layout,
-        "legacy focus-only sync still preserves remembered sibling columns"
-    );
-
-    let exact = apply_focus_only_expansion_policy(
-        &focused,
-        &saved_layout,
-        Some(0),
-        AutoStartMode::SafePassive,
-        true,
-    );
-    assert_eq!(
-        exact, focused,
-        "editor snapshots marked exact-visible must not reintroduce stale remembered siblings"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn explicit_non_agent_window_preserves_layout_when_session_lacks_agent_doc_window() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let root = tmp.path();
-    let subroot = root.join("src/boost-client");
-    std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-    std::fs::create_dir_all(root.join("tasks")).unwrap();
-    std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
-    std::fs::create_dir_all(subroot.join("tasks")).unwrap();
-    std::fs::write(
-        root.join(".agent-doc/config.toml"),
-        "tmux_session = \"test\"\n",
-    )
-    .unwrap();
-    let _cwd = ScopedCurrentDir::set(root);
-
-    let non_agent = root.join("tasks/test1.md");
-    std::fs::write(
-        &non_agent,
-        "# plain markdown without agent-doc frontmatter\n",
-    )
-    .unwrap();
-    let child_doc = subroot.join("tasks/monsterrodholders.md");
-    std::fs::write(
+        let non_agent = root.join("tasks/test1.md");
+        std::fs::write(
+            &non_agent,
+            "# plain markdown without agent-doc frontmatter\n",
+        )
+        .unwrap();
+        let child_doc = subroot.join("tasks/monsterrodholders.md");
+        std::fs::write(
             &child_doc,
             "---\nagent_doc_session: monster-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
         )
         .unwrap();
 
-    let iso = IsolatedTmux::new("sync-explicit-non-agent-window");
-    let root_pane = iso.new_session("test", root).unwrap();
-    iso.raw_cmd(&["rename-window", "-t", "test:0", "notes"])
+        let iso = IsolatedTmux::new("sync-explicit-non-agent-window");
+        let root_pane = iso.new_session("test", root).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "notes"])
+            .unwrap();
+        let root_window = iso.pane_window(&root_pane).unwrap();
+
+        let child_pane = iso
+            .raw_cmd(&[
+                "new-window",
+                "-t",
+                "test:",
+                "-n",
+                "workspace",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "-c",
+                subroot.to_string_lossy().as_ref(),
+            ])
+            .unwrap()
+            .trim()
+            .to_string();
+        let child_window = iso.pane_window(&child_pane).unwrap();
+        assert_ne!(
+            child_window, root_window,
+            "repro needs a separate child window"
+        );
+
+        sessions::register_full_with_cwd_in(
+            &subroot,
+            "monster-session",
+            &child_pane,
+            &child_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &child_pane).unwrap(),
+            &child_window,
+            &subroot.to_string_lossy(),
+        )
         .unwrap();
-    let root_window = iso.pane_window(&root_pane).unwrap();
 
-    let child_pane = iso
-        .raw_cmd(&[
-            "new-window",
-            "-t",
-            "test:",
-            "-n",
-            "workspace",
-            "-P",
-            "-F",
-            "#{pane_id}",
-            "-c",
-            subroot.to_string_lossy().as_ref(),
-        ])
-        .unwrap()
-        .trim()
-        .to_string();
-    let child_window = iso.pane_window(&child_pane).unwrap();
-    assert_ne!(
-        child_window, root_window,
-        "repro needs a separate child window"
-    );
+        run_with_options_internal(
+            &[
+                non_agent.to_string_lossy().to_string(),
+                child_doc.to_string_lossy().to_string(),
+            ],
+            Some(root_window.as_str()),
+            None,
+            AutoStartMode::Full,
+            false,
+            &iso,
+        )
+        .unwrap();
 
-    sessions::register_full_with_cwd_in(
-        &subroot,
-        "monster-session",
-        &child_pane,
-        &child_doc.to_string_lossy(),
-        pane_pid_from_tmux(&iso, &child_pane).unwrap(),
-        &child_window,
-        &subroot.to_string_lossy(),
-    )
-    .unwrap();
+        assert_eq!(
+            iso.list_panes_ordered(&root_window).unwrap(),
+            vec![root_pane.clone()],
+            "full sync should preserve the explicit non-agent window instead of reconciling child agent-doc panes onto it"
+        );
+        assert!(
+            iso.pane_alive(&child_pane),
+            "the child document pane should stay alive when sync cannot find a named agent-doc window"
+        );
+        let entry = lookup_registry_entry_for_file_session(&child_doc, "monster-session")
+            .expect("child registry entry should remain present");
+        assert_eq!(
+            entry.pane, child_pane,
+            "sync should not replace the child pane when the explicit target window is not an agent-doc window"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn rescue_missing_window_uses_visible_file_registry_not_cwd_registry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/session-share");
 
-    run_with_options_internal(
-        &[
-            non_agent.to_string_lossy().to_string(),
-            child_doc.to_string_lossy().to_string(),
-        ],
-        Some(root_window.as_str()),
-        None,
-        AutoStartMode::Full,
-        false,
-        &iso,
-    )
-    .unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+        let _cwd = ScopedCurrentDir::set(&subroot);
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"4\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            subroot.join(".agent-doc/config.toml"),
+            "tmux_session = \"1\"\n",
+        )
+        .unwrap();
 
-    assert_eq!(
-        iso.list_panes_ordered(&root_window).unwrap(),
-        vec![root_pane.clone()],
-        "full sync should preserve the explicit non-agent window instead of reconciling child agent-doc panes onto it"
-    );
-    assert!(
-        iso.pane_alive(&child_pane),
-        "the child document pane should stay alive when sync cannot find a named agent-doc window"
-    );
-    let entry = lookup_registry_entry_for_file_session(&child_doc, "monster-session")
-        .expect("child registry entry should remain present");
-    assert_eq!(
-        entry.pane, child_pane,
-        "sync should not replace the child pane when the explicit target window is not an agent-doc window"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn rescue_missing_window_uses_visible_file_registry_not_cwd_registry() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let root = tmp.path();
-    let subroot = root.join("src/session-share");
-
-    std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-    std::fs::create_dir_all(root.join("tasks")).unwrap();
-    std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
-    std::fs::create_dir_all(subroot.join("tasks")).unwrap();
-    let _cwd = ScopedCurrentDir::set(&subroot);
-    std::fs::write(
-        root.join(".agent-doc/config.toml"),
-        "tmux_session = \"4\"\n",
-    )
-    .unwrap();
-    std::fs::write(
-        subroot.join(".agent-doc/config.toml"),
-        "tmux_session = \"1\"\n",
-    )
-    .unwrap();
-
-    let root_doc = root.join("tasks/agent-doc-bugs2.md");
-    let child_doc = subroot.join("tasks/claudescore-3.md");
-    std::fs::write(
+        let root_doc = root.join("tasks/agent-doc-bugs2.md");
+        let child_doc = subroot.join("tasks/claudescore-3.md");
+        std::fs::write(
             &root_doc,
             "---\nagent_doc_session: root-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
         )
         .unwrap();
-    std::fs::write(
+        std::fs::write(
             &child_doc,
             "---\nagent_doc_session: child-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
         )
         .unwrap();
 
-    let iso = IsolatedTmux::new("sync-visible-registry-rescue");
-    let root_pane = iso.new_session("4", root).unwrap();
-    iso.raw_cmd(&["rename-window", "-t", "4:0", "agent-doc"])
+        let iso = IsolatedTmux::new("sync-visible-registry-rescue");
+        let root_pane = iso.new_session("4", root).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "4:0", "agent-doc"])
+            .unwrap();
+        let child_pane = iso.new_session("1", subroot.as_path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "1:0", "agent-doc"])
+            .unwrap();
+
+        let second_root_pane = iso.split_window(&root_pane, root, "-dh").unwrap();
+        iso.stash_pane(&root_pane, "4").unwrap();
+        iso.stash_pane(&second_root_pane, "4").unwrap();
+        iso.raw_cmd(&["select-window", "-t", "4:stash"]).unwrap();
+
+        let root_stash_window = iso.pane_window(&root_pane).unwrap();
+        let child_window = iso.pane_window(&child_pane).unwrap();
+
+        sessions::register_full_with_cwd_in(
+            root,
+            "root-session",
+            &root_pane,
+            &root_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &root_pane).unwrap(),
+            &root_stash_window,
+            &root.to_string_lossy(),
+        )
         .unwrap();
-    let child_pane = iso.new_session("1", subroot.as_path()).unwrap();
-    iso.raw_cmd(&["rename-window", "-t", "1:0", "agent-doc"])
+        sessions::register_full_with_cwd_in(
+            &subroot,
+            "child-session",
+            &child_pane,
+            &child_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &child_pane).unwrap(),
+            &child_window,
+            &subroot.to_string_lossy(),
+        )
         .unwrap();
 
-    let second_root_pane = iso.split_window(&root_pane, root, "-dh").unwrap();
-    iso.stash_pane(&root_pane, "4").unwrap();
-    iso.stash_pane(&second_root_pane, "4").unwrap();
-    iso.raw_cmd(&["select-window", "-t", "4:stash"]).unwrap();
+        let root_entry = lookup_registry_entry_for_file_session(&root_doc, "root-session")
+            .expect("root document registry should resolve across cwd boundaries");
+        assert_eq!(root_entry.pane, root_pane);
+        assert!(
+            rescue_missing_agent_doc_window_from_candidates(
+                &iso,
+                "4",
+                "agent-doc",
+                std::slice::from_ref(&root_pane),
+            ),
+            "visible-file rescue should recover the missing root agent-doc window even when cwd points at a child project"
+        );
+        let recreated_window = iso
+            .pane_window(&root_pane)
+            .expect("rescued pane should remain queryable");
+        let rescued_session = iso
+            .pane_session(&root_pane)
+            .expect("rescued root pane session should be queryable");
+        assert_eq!(
+            rescued_session, "4",
+            "rescued root pane should stay in session 4"
+        );
+        assert_eq!(
+            window_name_for_window_id(&iso, &recreated_window).as_deref(),
+            Some("agent-doc"),
+            "rescued pane should now live in an agent-doc window"
+        );
+        let recreated_panes = iso
+            .list_window_panes(&recreated_window)
+            .expect("recreated window should be queryable");
+        assert!(
+            recreated_panes.contains(&root_pane) || recreated_panes.contains(&second_root_pane),
+            "recreated agent-doc window should contain one of the root session panes, got {:?}",
+            recreated_panes
+        );
+    }
+    #[test]
+    fn lookup_registry_entry_for_file_session_uses_document_project_root() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/session-share");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
 
-    let root_stash_window = iso.pane_window(&root_pane).unwrap();
-    let child_window = iso.pane_window(&child_pane).unwrap();
+        let doc = subroot.join("tasks/claudescore-3.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: child-session\n---\n\n# Child\n",
+        )
+        .unwrap();
 
-    sessions::register_full_with_cwd_in(
-        root,
-        "root-session",
-        &root_pane,
-        &root_doc.to_string_lossy(),
-        pane_pid_from_tmux(&iso, &root_pane).unwrap(),
-        &root_stash_window,
-        &root.to_string_lossy(),
-    )
-    .unwrap();
-    sessions::register_full_with_cwd_in(
-        &subroot,
-        "child-session",
-        &child_pane,
-        &child_doc.to_string_lossy(),
-        pane_pid_from_tmux(&iso, &child_pane).unwrap(),
-        &child_window,
-        &subroot.to_string_lossy(),
-    )
-    .unwrap();
+        let mut registry = sessions::SessionRegistry::new();
+        let canonical = doc.canonicalize().unwrap();
+        let key =
+            sessions::canonical_registry_key_in(&subroot, canonical.to_string_lossy().as_ref());
+        registry.insert(
+            key,
+            sessions::SessionEntry {
+                pane: "%44".to_string(),
+                pid: 2374580,
+                cwd: subroot.to_string_lossy().to_string(),
+                started: "2026-04-30T21:04:50Z".to_string(),
+                session_id: "child-session".to_string(),
+                file: "tasks/claudescore-3.md".to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: "instance-1".to_string(),
+            },
+        );
+        sessions::save_in(&subroot, &registry).unwrap();
 
-    let root_entry = lookup_registry_entry_for_file_session(&root_doc, "root-session")
-        .expect("root document registry should resolve across cwd boundaries");
-    assert_eq!(root_entry.pane, root_pane);
-    assert!(
-        rescue_missing_agent_doc_window_from_candidates(
-            &iso,
-            "4",
-            "agent-doc",
-            std::slice::from_ref(&root_pane),
-        ),
-        "visible-file rescue should recover the missing root agent-doc window even when cwd points at a child project"
-    );
-    let recreated_window = iso
-        .pane_window(&root_pane)
-        .expect("rescued pane should remain queryable");
-    let rescued_session = iso
-        .pane_session(&root_pane)
-        .expect("rescued root pane session should be queryable");
-    assert_eq!(
-        rescued_session, "4",
-        "rescued root pane should stay in session 4"
-    );
-    assert_eq!(
-        window_name_for_window_id(&iso, &recreated_window).as_deref(),
-        Some("agent-doc"),
-        "rescued pane should now live in an agent-doc window"
-    );
-    let recreated_panes = iso
-        .list_window_panes(&recreated_window)
-        .expect("recreated window should be queryable");
-    assert!(
-        recreated_panes.contains(&root_pane) || recreated_panes.contains(&second_root_pane),
-        "recreated agent-doc window should contain one of the root session panes, got {:?}",
-        recreated_panes
-    );
-}
-#[test]
-fn lookup_registry_entry_for_file_session_uses_document_project_root() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let root = tmp.path();
-    let subroot = root.join("src/session-share");
-    std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-    std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
-    std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+        let _cwd = ScopedCurrentDir::set(root);
+        let entry = lookup_registry_entry_for_file_session(
+            Path::new("src/session-share/tasks/claudescore-3.md"),
+            "child-session",
+        )
+        .expect("cross-root registry entry should resolve through child project root");
+        assert_eq!(entry.pane, "%44");
+        assert_eq!(entry.file, "tasks/claudescore-3.md");
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn register_synced_files_keeps_authoritative_actor_projection() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let _cwd = ScopedCurrentDir::set(root);
 
-    let doc = subroot.join("tasks/claudescore-3.md");
-    std::fs::write(
-        &doc,
-        "---\nagent_doc_session: child-session\n---\n\n# Child\n",
-    )
-    .unwrap();
-
-    let mut registry = sessions::SessionRegistry::new();
-    let canonical = doc.canonicalize().unwrap();
-    let key = sessions::canonical_registry_key_in(&subroot, canonical.to_string_lossy().as_ref());
-    registry.insert(
-        key,
-        sessions::SessionEntry {
-            pane: "%44".to_string(),
-            pid: 2374580,
-            cwd: subroot.to_string_lossy().to_string(),
-            started: "2026-04-30T21:04:50Z".to_string(),
-            session_id: "child-session".to_string(),
-            file: "tasks/claudescore-3.md".to_string(),
-            window: "@1".to_string(),
-            supervisor_instance_id: "instance-1".to_string(),
-        },
-    );
-    sessions::save_in(&subroot, &registry).unwrap();
-
-    let _cwd = ScopedCurrentDir::set(root);
-    let entry = lookup_registry_entry_for_file_session(
-        Path::new("src/session-share/tasks/claudescore-3.md"),
-        "child-session",
-    )
-    .expect("cross-root registry entry should resolve through child project root");
-    assert_eq!(entry.pane, "%44");
-    assert_eq!(entry.file, "tasks/claudescore-3.md");
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn register_synced_files_keeps_authoritative_actor_projection() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let root = tmp.path();
-    std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-    std::fs::create_dir_all(root.join("tasks")).unwrap();
-    let _cwd = ScopedCurrentDir::set(root);
-
-    let doc = root.join("tasks/actor-owned.md");
-    std::fs::write(
+        let doc = root.join("tasks/actor-owned.md");
+        std::fs::write(
             &doc,
             "---\nagent_doc_session: actor-owned\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
         )
         .unwrap();
 
-    let iso = IsolatedTmux::new("sync-register-authoritative-actor");
-    let actor_pane = iso.new_session("test", root).unwrap();
-    let other_pane = iso.split_window(&actor_pane, root, "-dh").unwrap();
-    let actor_window = iso.pane_window(&actor_pane).unwrap();
+        let iso = IsolatedTmux::new("sync-register-authoritative-actor");
+        let actor_pane = iso.new_session("test", root).unwrap();
+        let other_pane = iso.split_window(&actor_pane, root, "-dh").unwrap();
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
 
-    sessions::register_full_with_cwd(
-        "actor-owned",
-        &actor_pane,
-        &doc.to_string_lossy(),
-        pane_pid_from_tmux(&iso, &actor_pane).unwrap(),
-        &actor_window,
-        &root.to_string_lossy(),
-    )
-    .unwrap();
-    crate::session_actor::project_binding_in(
-        root,
-        &doc.to_string_lossy(),
-        "actor-owned",
-        &actor_pane,
-        &actor_window,
-        "sync",
-        "test_actor_projection",
-    )
-    .unwrap();
+        sessions::register_full_with_cwd(
+            "actor-owned",
+            &actor_pane,
+            &doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &actor_pane).unwrap(),
+            &actor_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        crate::session_actor::project_binding_in(
+            root,
+            &doc.to_string_lossy(),
+            "actor-owned",
+            &actor_pane,
+            &actor_window,
+            "sync",
+            "test_actor_projection",
+        )
+        .unwrap();
 
-    register_synced_files(
-        &iso,
-        &[("actor-owned".to_string(), doc.clone())],
-        &[(doc.clone(), other_pane.clone())],
-    );
+        register_synced_files(
+            &iso,
+            &[("actor-owned".to_string(), doc.clone())],
+            &[(doc.clone(), other_pane.clone())],
+        );
 
-    let entry = lookup_registry_entry_for_file_session(&doc, "actor-owned")
-        .expect("registry entry should remain present");
-    assert_eq!(
-        entry.pane, actor_pane,
-        "sync must keep sessions.json projected onto the authoritative actor pane"
-    );
-}
-#[test]
-fn filter_duplicate_synthetic_registry_candidates_drops_ambiguous_same_root_duplicate_pane() {
-    let filtered = filter_duplicate_synthetic_registry_candidates(vec![
-        synthetic_registry_candidate("claudescore", "tasks/claudescore.md", "%250", false, true),
-        synthetic_registry_candidate(
-            "claudescore-3",
-            "tasks/claudescore-3.md",
-            "%250",
-            false,
-            true,
-        ),
-    ]);
+        let entry = lookup_registry_entry_for_file_session(&doc, "actor-owned")
+            .expect("registry entry should remain present");
+        assert_eq!(
+            entry.pane, actor_pane,
+            "sync must keep sessions.json projected onto the authoritative actor pane"
+        );
+    }
+    #[test]
+    fn filter_duplicate_synthetic_registry_candidates_drops_ambiguous_same_root_duplicate_pane() {
+        let filtered = filter_duplicate_synthetic_registry_candidates(vec![
+            synthetic_registry_candidate(
+                "claudescore",
+                "tasks/claudescore.md",
+                "%250",
+                false,
+                true,
+            ),
+            synthetic_registry_candidate(
+                "claudescore-3",
+                "tasks/claudescore-3.md",
+                "%250",
+                false,
+                true,
+            ),
+        ]);
 
-    assert!(
-        filtered.is_empty(),
-        "ambiguous same-root duplicate pane claims should be dropped before tmux-router sync"
-    );
-}
-#[test]
-fn filter_duplicate_synthetic_registry_candidates_keeps_unique_live_owner() {
-    let filtered = filter_duplicate_synthetic_registry_candidates(vec![
-        synthetic_registry_candidate("claudescore", "tasks/claudescore.md", "%250", false, true),
-        synthetic_registry_candidate(
-            "claudescore-3",
-            "tasks/claudescore-3.md",
-            "%250",
-            true,
-            true,
-        ),
-    ]);
+        assert!(
+            filtered.is_empty(),
+            "ambiguous same-root duplicate pane claims should be dropped before tmux-router sync"
+        );
+    }
+    #[test]
+    fn filter_duplicate_synthetic_registry_candidates_keeps_unique_live_owner() {
+        let filtered = filter_duplicate_synthetic_registry_candidates(vec![
+            synthetic_registry_candidate(
+                "claudescore",
+                "tasks/claudescore.md",
+                "%250",
+                false,
+                true,
+            ),
+            synthetic_registry_candidate(
+                "claudescore-3",
+                "tasks/claudescore-3.md",
+                "%250",
+                true,
+                true,
+            ),
+        ]);
 
-    assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].session_id, "claudescore-3");
-    assert_eq!(filtered[0].entry.pane, "%250");
-}
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].session_id, "claudescore-3");
+        assert_eq!(filtered[0].entry.pane, "%250");
+    }
 }

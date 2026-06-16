@@ -191,7 +191,9 @@ pub(crate) fn exchange_line_spans(text: &str) -> Vec<(usize, usize, &str)> {
     spans
 }
 
-pub(crate) fn duplicate_exchange_tail_prompt_lines(lines: &[(usize, usize, &str)]) -> Option<Vec<String>> {
+pub(crate) fn duplicate_exchange_tail_prompt_lines(
+    lines: &[(usize, usize, &str)],
+) -> Option<Vec<String>> {
     let mut prompt_lines = Vec::new();
     for (_, _, line) in lines {
         let trimmed = line.trim();
@@ -627,96 +629,96 @@ pub(crate) fn strip_html_comments(text: &str) -> String {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use std::path::Path;
-use tempfile::TempDir;
-#[test]
-fn guard_no_duplicate_prompt_residue_outside_exchange_rejects_plain_markdown_duplicate() {
-    let prompt =
-        "Please keep this exact sentence around for duplicate residue coverage in markdown";
-    let doc = format!(
-        concat!(
+    use std::path::Path;
+    use tempfile::TempDir;
+    #[test]
+    fn guard_no_duplicate_prompt_residue_outside_exchange_rejects_plain_markdown_duplicate() {
+        let prompt =
+            "Please keep this exact sentence around for duplicate residue coverage in markdown";
+        let doc = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "### Re: duplicate residue — gpt-5\n\n",
+                "Answered.\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "# Notes\n\n",
+                "{prompt}\n"
+            ),
+            prompt = prompt
+        );
+
+        let err = guard_no_duplicate_prompt_residue_outside_exchange(&doc).unwrap_err();
+
+        assert!(
+            err.to_string().contains("duplicate prompt residue outside"),
+            "unexpected error: {err}"
+        );
+    }
+    #[test]
+    fn guard_no_duplicate_prompt_residue_outside_exchange_allows_tracked_components() {
+        let prompt =
+            "Please keep this exact sentence around for duplicate residue coverage in markdown";
+        let doc = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "### Re: duplicate residue — gpt-5\n\n",
+                "Answered.\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "{prompt}\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+
+        guard_no_duplicate_prompt_residue_outside_exchange(&doc).unwrap();
+    }
+    #[test]
+    fn remove_duplicate_answered_tail_scrubs_prefixed_replay_residue() {
+        // Answered-form residue (carries `❯ `) re-added below the boundary is
+        // safely removable replay residue.
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
             "<!-- agent:exchange patch=append -->\n",
-            "❯ {prompt}\n",
-            "### Re: duplicate residue — gpt-5\n\n",
-            "Answered.\n",
+            "❯ go\n",
+            "### Re: go — gpt-5\n\n",
+            "Did the thing.\n",
             "<!-- agent:boundary:head -->\n",
-            "<!-- /agent:exchange -->\n\n",
-            "# Notes\n\n",
-            "{prompt}\n"
-        ),
-        prompt = prompt
-    );
-
-    let err = guard_no_duplicate_prompt_residue_outside_exchange(&doc).unwrap_err();
-
-    assert!(
-        err.to_string().contains("duplicate prompt residue outside"),
-        "unexpected error: {err}"
-    );
-}
-#[test]
-fn guard_no_duplicate_prompt_residue_outside_exchange_allows_tracked_components() {
-    let prompt =
-        "Please keep this exact sentence around for duplicate residue coverage in markdown";
-    let doc = format!(
-        concat!(
+            "❯ go\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let cleaned = remove_duplicate_answered_exchange_prompt_tail(doc)
+            .expect("prefixed answered-form residue should be scrubbed");
+        assert!(
+            !cleaned.contains("head -->\n❯ go"),
+            "answered-form residue tail must be removed:\n{cleaned}"
+        );
+        assert!(
+            cleaned.contains("❯ go\n### Re: go"),
+            "answered history must be preserved:\n{cleaned}"
+        );
+    }
+    #[test]
+    fn remove_duplicate_answered_tail_preserves_unprefixed_live_prompt() {
+        // #ipcfullprompt-recur: a freshly-typed prompt (no `❯ `) that matches a
+        // previously-answered prompt is a LIVE prompt and must never be scrubbed.
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
             "<!-- agent:exchange patch=append -->\n",
-            "❯ {prompt}\n",
-            "### Re: duplicate residue — gpt-5\n\n",
-            "Answered.\n",
+            "❯ go\n",
+            "### Re: go — gpt-5\n\n",
+            "Did the thing.\n",
             "<!-- agent:boundary:head -->\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:backlog -->\n",
-            "{prompt}\n",
-            "<!-- /agent:backlog -->\n"
-        ),
-        prompt = prompt
-    );
-
-    guard_no_duplicate_prompt_residue_outside_exchange(&doc).unwrap();
-}
-#[test]
-fn remove_duplicate_answered_tail_scrubs_prefixed_replay_residue() {
-    // Answered-form residue (carries `❯ `) re-added below the boundary is
-    // safely removable replay residue.
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "❯ go\n",
-        "### Re: go — gpt-5\n\n",
-        "Did the thing.\n",
-        "<!-- agent:boundary:head -->\n",
-        "❯ go\n",
-        "<!-- /agent:exchange -->\n",
-    );
-    let cleaned = remove_duplicate_answered_exchange_prompt_tail(doc)
-        .expect("prefixed answered-form residue should be scrubbed");
-    assert!(
-        !cleaned.contains("head -->\n❯ go"),
-        "answered-form residue tail must be removed:\n{cleaned}"
-    );
-    assert!(
-        cleaned.contains("❯ go\n### Re: go"),
-        "answered history must be preserved:\n{cleaned}"
-    );
-}
-#[test]
-fn remove_duplicate_answered_tail_preserves_unprefixed_live_prompt() {
-    // #ipcfullprompt-recur: a freshly-typed prompt (no `❯ `) that matches a
-    // previously-answered prompt is a LIVE prompt and must never be scrubbed.
-    let doc = concat!(
-        "---\nagent_doc_format: template\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "❯ go\n",
-        "### Re: go — gpt-5\n\n",
-        "Did the thing.\n",
-        "<!-- agent:boundary:head -->\n",
-        "go\n",
-        "<!-- /agent:exchange -->\n",
-    );
-    assert!(
-        remove_duplicate_answered_exchange_prompt_tail(doc).is_none(),
-        "a bare re-typed live prompt must be preserved"
-    );
-}
+            "go\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert!(
+            remove_duplicate_answered_exchange_prompt_tail(doc).is_none(),
+            "a bare re-typed live prompt must be preserved"
+        );
+    }
 }

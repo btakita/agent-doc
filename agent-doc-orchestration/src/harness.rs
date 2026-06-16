@@ -1121,7 +1121,6 @@ fn apply_sgr_sequence(sequence: &str, faint: &mut bool) {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

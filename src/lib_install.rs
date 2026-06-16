@@ -139,7 +139,10 @@ pub(crate) fn run_paths(source: Option<&Path>, target_dir: Option<&Path>) -> Res
 /// (`0`/`false`/`no`/`off`) opts out and restores the print-only hint.
 fn recycle_on_install_enabled() -> bool {
     match std::env::var("AGENT_DOC_RECYCLE_ON_INSTALL") {
-        Ok(v) => !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off"),
+        Ok(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
         Err(_) => true,
     }
 }

@@ -328,6 +328,23 @@ SQLite counts for actor documents, lifecycle transitions, supervisor leases,
 dispatch receipts, queue heads, queue controls, queue backpressure, document
 cycles, pending mutations, projection diagnostics, admin operations,
 crash-recovery markers, and layout state.
+`agent-doc controller status` and `agent-doc admin inspect --json` must also
+include a `freshness` object that compares running controller/supervisor binary
+inodes against the installed agent-doc binary inode when the platform exposes
+that proof. `admin inspect` includes the route-owned supervisor process when the
+target actor has a supervisor lease. Non-JSON inspect output summarizes the same
+state as `freshness=controller:<state>,supervisor:<state>`.
+
+Supervisor auto-install (`AGENT_DOC_SUPERVISOR_AUTO_INSTALL` /
+`agent_doc_supervisor_auto_install`) is a dogfood-only lifecycle policy. The
+idle supervisor may run `cargo build --release`, `cargo install --path .`, and
+`agent-doc lib-install` only when the served document is an agent-doc dogfood
+session document: a document inside the agent-doc source checkout, under
+`tasks/agent-doc/`, or one of the legacy agent-doc task documents. A sibling
+project session in the same superproject, such as
+`tasks/professional/equityfundingsource.md` or `tasks/software/lazily-rs.md`,
+must not resolve `src/agent-doc` as its auto-install crate root even when the
+env/frontmatter/project auto-install knob is truthy.
 
 Read-only admin calls may be served from the in-memory snapshot when the result
 includes the snapshot generation/version. Mutating admin calls must enter through

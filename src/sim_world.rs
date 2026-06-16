@@ -2075,7 +2075,9 @@ fn recycle_clear_pipeline_resumes_go_mode_drain_as_a_step() {
     // `admin recycle --all-projects` marks recycle at the next idle boundary; a later
     // `cargo install` made the binary stale with auto-recycle opted in.
     world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
-    world.apply(SimCommand::EnableSupervisorAutoRecycle).unwrap();
+    world
+        .apply(SimCommand::EnableSupervisorAutoRecycle)
+        .unwrap();
     world.apply(SimCommand::OperatorRecycleMark).unwrap();
 
     // First idle tick: the idle boundary recycles in place onto the fresh binary,
@@ -2182,7 +2184,10 @@ fn restart_supervisor_drains_then_reexecs_in_place_no_dropped_turn() {
             "the restart stays pending while the turn drains (tick {tick})"
         );
         assert_eq!(world.route.durable.generation, gen_before);
-        assert!(world.recycle_clear.binary_stale, "binary still stale mid-turn");
+        assert!(
+            world.recycle_clear.binary_stale,
+            "binary still stale mid-turn"
+        );
     }
 
     // The in-flight turn finishes (drains) → the pane returns to a dispatch-ready
@@ -2453,7 +2458,9 @@ fn opted_out_document_clears_and_drains_without_auto_recycle() {
     world.apply(SimCommand::BindRouteOwner).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
     // Explicit opt-out (default is now ON).
-    world.apply(SimCommand::DisableSupervisorAutoRecycle).unwrap();
+    world
+        .apply(SimCommand::DisableSupervisorAutoRecycle)
+        .unwrap();
 
     let gen_before = world.route.durable.generation;
     let pane_before = world.route.durable.pane_id.clone();
@@ -2602,7 +2609,9 @@ fn non_dogfood_document_auto_recycles_and_drains_from_opt_in_alone() {
     // into auto-recycle — but the operator never ran `admin recycle`. The opt-in alone
     // must drive the recycle.
     world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
-    world.apply(SimCommand::EnableSupervisorAutoRecycle).unwrap();
+    world
+        .apply(SimCommand::EnableSupervisorAutoRecycle)
+        .unwrap();
 
     // First idle tick: stale + opt-in + turn boundary → `supervisor_recycle_action`
     // returns Recycle (no operator mark needed). The in-place `execve` promotes the
@@ -2697,7 +2706,9 @@ fn failed_reexec_recycle_keeps_session_alive_and_does_not_retry() {
     let pane_before = world.route.durable.pane_id.clone();
 
     world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
-    world.apply(SimCommand::EnableSupervisorAutoRecycle).unwrap();
+    world
+        .apply(SimCommand::EnableSupervisorAutoRecycle)
+        .unwrap();
     world.apply(SimCommand::MarkReexecWillFail).unwrap();
 
     // Idle boundary: the recycle is attempted and fails.
@@ -2750,7 +2761,9 @@ fn qflood2_drain_holds_trigger_until_own_clear_settles() {
     world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
 
     // The watch sends its own `/clear` (no manual cooldown marker written).
-    world.apply(SimCommand::SupervisorContextResetClear).unwrap();
+    world
+        .apply(SimCommand::SupervisorContextResetClear)
+        .unwrap();
 
     // The first 3 settle ticks must HOLD the trigger (drain_settle_skip), never
     // dispatching into the in-flight clear.
@@ -2786,7 +2799,9 @@ fn qflood2_drain_dedups_trigger_already_pending_in_composer() {
     world.apply(SimCommand::BindRouteOwner).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
     world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
-    world.apply(SimCommand::SetTriggerAlreadyPending(true)).unwrap();
+    world
+        .apply(SimCommand::SetTriggerAlreadyPending(true))
+        .unwrap();
 
     // The pane is idle and a head is waiting, but the trigger is already pending:
     // the drain must dedup-skip, not stack a second copy.
@@ -2799,7 +2814,9 @@ fn qflood2_drain_dedups_trigger_already_pending_in_composer() {
 
     // Once the composer clears (operator submitted / consumed the pending trigger),
     // the drain dispatches normally — the dedup never permanently suppresses it.
-    world.apply(SimCommand::SetTriggerAlreadyPending(false)).unwrap();
+    world
+        .apply(SimCommand::SetTriggerAlreadyPending(false))
+        .unwrap();
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(
         world.coverage.go_drain_dispatches, 0,
@@ -2869,14 +2886,16 @@ fn clear_cooldown_without_active_head_stays_authoritative() {
 
 #[test]
 fn clear_cooldown_deferred_operator_clear_blocks_resume() {
-    // When an operator-deferred clear is still pending delivery, that path owns its
-    // own resume — the cooldown auto-expiry must defer to it even with a live head.
+    // When an operator-deferred clear is still pending but the pane is busy, that
+    // path owns its own resume — the cooldown auto-expiry must defer instead of
+    // resuming the queue underneath an in-flight turn.
     let mut world = SimWorld::new(2_028);
     world.apply(SimCommand::BindRouteOwner).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
     world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
     world.apply(SimCommand::DeferOperatorClearPending).unwrap();
     world.apply(SimCommand::SessionClear).unwrap();
+    world.apply(SimCommand::SupervisorBusy).unwrap();
 
     for _ in 0..8 {
         world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
@@ -2886,6 +2905,53 @@ fn clear_cooldown_deferred_operator_clear_blocks_resume() {
         "a pending deferred operator clear blocks the auto-resume"
     );
     assert_eq!(world.coverage.clear_cooldown_resumes, 0);
+}
+
+#[test]
+fn deferred_operator_clear_settles_before_resuming_drain() {
+    // A deferred operator clear runs in the inter-turn idle gap. After it lands,
+    // the next queue trigger must wait for the same clear-settle debounce as the
+    // watch's own context-reset clears; otherwise `/clear` and the next drain
+    // command can concatenate and the old context keeps accumulating.
+    let mut world = SimWorld::new(2_030);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
+    world.apply(SimCommand::DeferOperatorClearPending).unwrap();
+    world.apply(SimCommand::SessionClear).unwrap();
+
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert!(
+        !world.recycle_clear.deferred_operator_clear_pending,
+        "the idle gap delivers the deferred clear"
+    );
+    assert!(
+        !world.recycle_clear.clear_cooldown_active,
+        "delivery drops the manual cooldown marker"
+    );
+    assert!(
+        world.recycle_clear.awaiting_clear_settle,
+        "delivery must engage the in-flight-clear settle gate"
+    );
+    assert_eq!(world.coverage.go_drain_dispatches, 0);
+
+    for tick in 1..4 {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+        assert_eq!(
+            world.coverage.go_drain_dispatches, 0,
+            "drain must wait while the deferred clear settles (tick {tick})"
+        );
+    }
+
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert!(
+        !world.recycle_clear.awaiting_clear_settle,
+        "the settle gate releases after the debounce window"
+    );
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 1,
+        "the queue resumes only after the deferred clear settles"
+    );
 }
 
 #[test]
@@ -4838,4 +4904,38 @@ fn integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_ba
         "clearing the lease hands the drain back to the supervisor"
     );
     drop(dir);
+}
+
+#[test]
+fn simworld_jb_run_and_clear_share_codex_named_enter_submit_contract() {
+    // #jbcodexsubmit: JB `Run Agent Doc` and `Clear Session Context` both route
+    // through the shared live-pane submit primitive. SimWorld drives the two
+    // operator-facing actions, then pins the production helper's submit contract.
+    let mut world = SimWorld::new(2026_06_16);
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::DispatchOperatorPrompt).unwrap();
+    world.apply(SimCommand::SessionClear).unwrap();
+
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+    assert_eq!(world.coverage.session_clears, 1);
+    assert_eq!(
+        agent_doc_orchestration::sessions::tmux_submit_mode_for_harness("codex"),
+        "tmux_literal_text_enter_key"
+    );
+    assert_eq!(
+        agent_doc_orchestration::sessions::tmux_submit_transform_for_harness("codex"),
+        "tmux_text_enter_key"
+    );
+    assert_eq!(
+        agent_doc_orchestration::sessions::tmux_submit_key_for_harness("codex"),
+        "Enter"
+    );
+    assert_eq!(
+        agent_doc_orchestration::sessions::tmux_submit_mode_for_harness("claude"),
+        "tmux_literal_text_enter_key"
+    );
+    assert_eq!(
+        agent_doc_orchestration::sessions::tmux_submit_mode_for_harness("opencode"),
+        "tmux_literal_text_enter_key"
+    );
 }

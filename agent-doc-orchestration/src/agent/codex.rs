@@ -2247,7 +2247,6 @@ impl Iterator for CodexStreamIterator {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

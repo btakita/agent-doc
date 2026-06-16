@@ -944,7 +944,10 @@ fn canonical_singleton_name(name: &str) -> Option<&'static str> {
     if is_backlog_component(name) {
         return Some(BACKLOG_COMPONENT);
     }
-    SINGLETON_COMPONENT_NAMES.iter().copied().find(|&s| s == name)
+    SINGLETON_COMPONENT_NAMES
+        .iter()
+        .copied()
+        .find(|&s| s == name)
 }
 
 /// True when `marker` contains an odd number of unescaped double-quotes — an
@@ -1135,7 +1138,6 @@ fn match_html_comment_at(content: &str, pos: usize) -> Option<(usize, &str)> {
     }
     None
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1490,7 +1492,11 @@ new content here\n\
         assert_eq!(components.len(), 1);
         assert_eq!(components[0].name, "exchange");
         assert!(components[0].content(doc).contains("new content here"));
-        assert!(components[0].content(doc).contains("attributes were dropped"));
+        assert!(
+            components[0]
+                .content(doc)
+                .contains("attributes were dropped")
+        );
     }
 
     #[test]

@@ -2,7 +2,10 @@
 
 use super::*;
 
-pub(crate) fn stale_snapshot_reset_drift(snapshot_doc: &str, current_doc: &str) -> Option<(usize, usize)> {
+pub(crate) fn stale_snapshot_reset_drift(
+    snapshot_doc: &str,
+    current_doc: &str,
+) -> Option<(usize, usize)> {
     let snapshot_clean = strip_boundary_for_dedup(snapshot_doc);
     let current_clean = strip_boundary_for_dedup(current_doc);
     let snapshot_len = snapshot_clean.len();
@@ -667,7 +670,12 @@ pub fn converge_document_or_disk(
 /// sites are CLI document mutations that must not newly fail when no editor is
 /// attached. `current` is the expected current on-disk content the editor delta
 /// is computed against; `source` labels the `ops.log` `<source>_writeback` line.
-pub fn converge_or_disk_write(file: &Path, current: &str, target: &str, source: &str) -> Result<()> {
+pub fn converge_or_disk_write(
+    file: &Path,
+    current: &str,
+    target: &str,
+    source: &str,
+) -> Result<()> {
     if try_editor_converge(file, target, current, source)? {
         return Ok(());
     }
@@ -708,7 +716,10 @@ pub(crate) fn live_prompt_drift_convergence_patches(
     Ok(patches)
 }
 
-pub(crate) fn live_prompt_drift_convergence_frontmatter(file_content: &str, snapshot: &str) -> Option<String> {
+pub(crate) fn live_prompt_drift_convergence_frontmatter(
+    file_content: &str,
+    snapshot: &str,
+) -> Option<String> {
     let file_frontmatter = raw_frontmatter_yaml(file_content);
     let snapshot_frontmatter = raw_frontmatter_yaml(snapshot)?;
     if file_frontmatter == Some(snapshot_frontmatter) {
@@ -813,9 +824,7 @@ mod core_tests {
             "the exchange replace must carry the compacted summary body: {patches:?}"
         );
         assert!(
-            !patches
-                .iter()
-                .any(|patch| patch["component"] == "queue"),
+            !patches.iter().any(|patch| patch["component"] == "queue"),
             "a queue replace would clobber the operator's concurrent edits: {patches:?}"
         );
     }
@@ -837,7 +846,10 @@ mod core_tests {
 
         // The fake editor acks with the compacted content, mirroring a JB plugin
         // that applied the exchange `op:replace` and converged its buffer.
-        let _listener = crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), compacted.clone());
+        let _listener = crate::test_support::start_live_prompt_drift_ack_listener(
+            dir.path(),
+            compacted.clone(),
+        );
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let converged = try_editor_converge(&doc, &compacted, &source, "compact").unwrap();
@@ -880,7 +892,8 @@ mod core_tests {
         let target = crate::test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        let _listener = crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), target.clone());
+        let _listener =
+            crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), target.clone());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
@@ -1047,7 +1060,8 @@ mod core_tests {
         crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
         crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
-        let _listener = crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), snapshot.clone());
+        let _listener =
+            crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), snapshot.clone());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
@@ -1156,8 +1170,10 @@ mod core_tests {
         // Snapshot consumed the queued `do [#fix]` (struck) and carries the full
         // `### Re:` response; the fragmented disk file also struck it but lost the
         // response body → wedge shape.
-        let snapshot = crate::test_support::drift_content_ours().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
-        let fragmented = crate::test_support::drift_baseline().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
+        let snapshot =
+            crate::test_support::drift_content_ours().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
+        let fragmented =
+            crate::test_support::drift_baseline().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
         fs::write(&doc, &fragmented).unwrap();
         snapshot::save(&doc, &snapshot).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();

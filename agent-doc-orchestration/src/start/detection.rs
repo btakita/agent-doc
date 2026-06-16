@@ -55,7 +55,10 @@ pub(crate) fn current_child_prompt_visible(
     child_output_prompt_visible(harness, &output)
 }
 
-pub(crate) fn child_output_prompt_visible(harness: &crate::harness::HarnessConfig, output: &str) -> bool {
+pub(crate) fn child_output_prompt_visible(
+    harness: &crate::harness::HarnessConfig,
+    output: &str,
+) -> bool {
     // #opencode-idle-detection-post-turn: for OpenCode, check only the bottom
     // N lines for idle chrome instead of requiring the entire scrollback to be
     // ignorable chrome. After a turn completes the pane keeps completed-turn
@@ -148,7 +151,9 @@ pub(crate) fn supervisor_pane_payload_already_pending(
         .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
     let tmux = crate::sessions::Tmux::default_server();
     let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
-    Some(crate::route::recent_lines_contain_trigger(&content, payload))
+    Some(crate::route::recent_lines_contain_trigger(
+        &content, payload,
+    ))
 }
 
 /// Decide whether the idle-queue watch should reconcile a stale-busy actor back
@@ -267,222 +272,222 @@ pub(crate) fn is_help_screen_visible(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use crate::config::Config;
-use crate::frontmatter::Frontmatter;
-use crate::hooks::fire_doc_hooks;
-use crate::project_config;
-use crate::sessions::IsolatedTmux;
-use std::collections::HashMap;
-use tempfile::TempDir;
-#[test]
-fn stale_busy_reconcile_fires_after_debounce_over_idle_pane() {
-    // Actor wedged busy, live pane shows no busy cue, cooldown clear, and the
-    // idle-over-busy condition has held for the full debounce window: reconcile.
-    assert!(stale_busy_idle_reconcile_decision(
-        true,
-        false,
-        false,
-        STALE_BUSY_RECONCILE_TICKS
-    ));
-}
-#[test]
-fn stale_busy_reconcile_preserves_already_dispatched_head_dedup() {
-    let mut idle_busy_ticks = STALE_BUSY_RECONCILE_TICKS;
-    let last_dispatched = reconcile_stale_busy_idle_queue_state(
-        Some("do [#learn-ohio-duplicate-gate]".to_string()),
-        &mut idle_busy_ticks,
-    );
-
-    assert_eq!(idle_busy_ticks, 0);
-    assert_eq!(
-        idle_queue_drain_decision(
-            false,
+    use crate::config::Config;
+    use crate::frontmatter::Frontmatter;
+    use crate::hooks::fire_doc_hooks;
+    use crate::project_config;
+    use crate::sessions::IsolatedTmux;
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+    #[test]
+    fn stale_busy_reconcile_fires_after_debounce_over_idle_pane() {
+        // Actor wedged busy, live pane shows no busy cue, cooldown clear, and the
+        // idle-over-busy condition has held for the full debounce window: reconcile.
+        assert!(stale_busy_idle_reconcile_decision(
             true,
             false,
             false,
-            Some("do [#learn-ohio-duplicate-gate]"),
-            last_dispatched.as_deref(),
-        ),
-        IdleQueueDrainDecision::SkipAlreadyDispatched
-    );
-}
-#[test]
-fn stale_busy_reconcile_waits_for_full_debounce() {
-    // One idle observation is not enough — a turn spinning up briefly shows no
-    // busy cue. Hold off until the debounce window is satisfied.
-    for ticks in 0..STALE_BUSY_RECONCILE_TICKS {
-        assert!(
-            !stale_busy_idle_reconcile_decision(true, false, false, ticks),
-            "should not reconcile after only {ticks} idle ticks"
+            STALE_BUSY_RECONCILE_TICKS
+        ));
+    }
+    #[test]
+    fn stale_busy_reconcile_preserves_already_dispatched_head_dedup() {
+        let mut idle_busy_ticks = STALE_BUSY_RECONCILE_TICKS;
+        let last_dispatched = reconcile_stale_busy_idle_queue_state(
+            Some("do [#learn-ohio-duplicate-gate]".to_string()),
+            &mut idle_busy_ticks,
+        );
+
+        assert_eq!(idle_busy_ticks, 0);
+        assert_eq!(
+            idle_queue_drain_decision(
+                false,
+                true,
+                false,
+                false,
+                Some("do [#learn-ohio-duplicate-gate]"),
+                last_dispatched.as_deref(),
+            ),
+            IdleQueueDrainDecision::SkipAlreadyDispatched
         );
     }
-}
-#[test]
-fn stale_busy_reconcile_skips_when_pane_busy() {
-    // The pane shows a busy cue — a turn is genuinely running. Never reconcile,
-    // regardless of how many ticks elapsed.
-    assert!(!stale_busy_idle_reconcile_decision(
-        true,
-        true,
-        false,
-        STALE_BUSY_RECONCILE_TICKS + 10
-    ));
-}
-#[test]
-fn stale_busy_reconcile_skips_when_actor_ready() {
-    // Actor already dispatchable: nothing to reconcile.
-    assert!(!stale_busy_idle_reconcile_decision(
-        false,
-        false,
-        false,
-        STALE_BUSY_RECONCILE_TICKS
-    ));
-}
-#[test]
-fn stale_busy_reconcile_skips_during_clear_cooldown() {
-    // A non-interrupting operator clear paused the loop; do not race it by
-    // flipping the actor ready underneath the deferred clear.
-    assert!(!stale_busy_idle_reconcile_decision(
-        true,
-        false,
-        true,
-        STALE_BUSY_RECONCILE_TICKS
-    ));
-}
-#[test]
-fn opencode_permission_prompt_translates_legacy_arrows_to_tab_controls() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::opencode();
-    record_recent_output(
+    #[test]
+    fn stale_busy_reconcile_waits_for_full_debounce() {
+        // One idle observation is not enough — a turn spinning up briefly shows no
+        // busy cue. Hold off until the debounce window is satisfied.
+        for ticks in 0..STALE_BUSY_RECONCILE_TICKS {
+            assert!(
+                !stale_busy_idle_reconcile_decision(true, false, false, ticks),
+                "should not reconcile after only {ticks} idle ticks"
+            );
+        }
+    }
+    #[test]
+    fn stale_busy_reconcile_skips_when_pane_busy() {
+        // The pane shows a busy cue — a turn is genuinely running. Never reconcile,
+        // regardless of how many ticks elapsed.
+        assert!(!stale_busy_idle_reconcile_decision(
+            true,
+            true,
+            false,
+            STALE_BUSY_RECONCILE_TICKS + 10
+        ));
+    }
+    #[test]
+    fn stale_busy_reconcile_skips_when_actor_ready() {
+        // Actor already dispatchable: nothing to reconcile.
+        assert!(!stale_busy_idle_reconcile_decision(
+            false,
+            false,
+            false,
+            STALE_BUSY_RECONCILE_TICKS
+        ));
+    }
+    #[test]
+    fn stale_busy_reconcile_skips_during_clear_cooldown() {
+        // A non-interrupting operator clear paused the loop; do not race it by
+        // flipping the actor ready underneath the deferred clear.
+        assert!(!stale_busy_idle_reconcile_decision(
+            true,
+            false,
+            true,
+            STALE_BUSY_RECONCILE_TICKS
+        ));
+    }
+    #[test]
+    fn opencode_permission_prompt_translates_legacy_arrows_to_tab_controls() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(
         &shared,
         b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject ctrl+f fullscreen \xe2\x87\x86 select enter confirm\n",
     );
 
-    let translated = normalize_stdin_for_harness_permission_prompt(
-        &shared,
-        &harness,
-        b"\x1b[C\x1b[C\x1b[D\x1b[Atext",
-    )
-    .expect("OpenCode permission prompt should translate legacy arrow escapes");
+        let translated = normalize_stdin_for_harness_permission_prompt(
+            &shared,
+            &harness,
+            b"\x1b[C\x1b[C\x1b[D\x1b[Atext",
+        )
+        .expect("OpenCode permission prompt should translate legacy arrow escapes");
 
-    assert_eq!(translated, b"\t\t\x1b[Z\x1b[Ztext");
-}
-#[test]
-fn opencode_permission_prompt_translation_is_gated_to_permission_dialog() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::opencode();
-    record_recent_output(&shared, b"Ask anything...\n");
+        assert_eq!(translated, b"\t\t\x1b[Z\x1b[Ztext");
+    }
+    #[test]
+    fn opencode_permission_prompt_translation_is_gated_to_permission_dialog() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(&shared, b"Ask anything...\n");
 
-    assert!(
-        normalize_stdin_for_harness_permission_prompt(&shared, &harness, b"\x1b[C").is_none(),
-        "normal OpenCode prompt editing must keep arrow keys unchanged"
-    );
+        assert!(
+            normalize_stdin_for_harness_permission_prompt(&shared, &harness, b"\x1b[C").is_none(),
+            "normal OpenCode prompt editing must keep arrow keys unchanged"
+        );
 
-    let codex = crate::harness::HarnessConfig::codex();
-    record_recent_output(
+        let codex = crate::harness::HarnessConfig::codex();
+        record_recent_output(
         &shared,
         b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject ctrl+f fullscreen \xe2\x87\x86 select enter confirm\n",
     );
-    assert!(
-        normalize_stdin_for_harness_permission_prompt(&shared, &codex, b"\x1b[C").is_none(),
-        "non-OpenCode harnesses must not receive OpenCode permission key translation"
-    );
-}
-#[test]
-fn opencode_permission_prompt_fallback_detects_orange_highlight_without_footer() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::opencode();
-    // Simulate a newer OpenCode version where the footer text changed but the
-    // orange selection highlight (48;2;245;167;66) is still present.
-    record_recent_output(
-        &shared,
-        b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject\n",
-    );
-    let translated = normalize_stdin_for_harness_permission_prompt(
-        &shared, &harness, b"\x1b[C",
-    )
-    .expect("fallback detection must translate arrows even without the standard footer text");
-    assert_eq!(translated, b"\t");
-}
-#[test]
-fn opencode_permission_prompt_fallback_requires_allow_or_reject_label() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::opencode();
-    // Orange highlight alone (no permission labels) must not trigger translation.
-    record_recent_output(
-        &shared,
-        b"\x1b[48;2;245;167;66msome other highlighted text\x1b[0m\n",
-    );
-    assert!(
-        normalize_stdin_for_harness_permission_prompt(&shared, &harness, b"\x1b[C").is_none(),
-        "orange highlight without permission labels must not trigger arrow translation"
-    );
-}
-#[test]
-fn current_child_prompt_visible_uses_latest_nonempty_line() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::codex();
-    record_recent_output(&shared, b"old output\n");
-    record_recent_output(&shared, "❯\n".as_bytes());
-    record_recent_output(&shared, b"resumed child still printing\n");
-    assert!(
-        !current_child_prompt_visible(&shared, &harness),
-        "an earlier prompt in the current child transcript should not count once newer non-prompt output follows it"
-    );
-}
-#[test]
-fn current_child_prompt_visible_accepts_prompt_from_current_child_output() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::codex();
-    record_recent_output(&shared, b"resumed child ready\n");
-    record_recent_output(&shared, "❯\n".as_bytes());
-    assert!(current_child_prompt_visible(&shared, &harness));
-}
-#[test]
-fn current_child_prompt_visible_handles_suffix_prompt_line() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::codex();
-    record_recent_output(&shared, "/tmp/project ❯\n".as_bytes());
-    assert!(current_child_prompt_visible(&shared, &harness));
-}
-#[test]
-fn current_child_prompt_visible_skips_codex_footer_line() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::codex();
-    record_recent_output(&shared, "›\n".as_bytes());
-    record_recent_output(
-        &shared,
-        "gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used\n".as_bytes(),
-    );
-    assert!(current_child_prompt_visible(&shared, &harness));
-}
-#[test]
-fn current_child_prompt_visible_rejects_busy_output_above_codex_footer() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::codex();
-    record_recent_output(&shared, "›\n".as_bytes());
-    record_recent_output(&shared, b"resumed child still printing\n");
-    record_recent_output(
-        &shared,
-        "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
-    );
-    assert!(!current_child_prompt_visible(&shared, &harness));
-}
-#[test]
-fn current_child_prompt_visible_accepts_opencode_status_chrome_without_proof_output() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::opencode();
-    record_recent_output(
-        &shared,
-        "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n".as_bytes(),
-    );
-    assert!(current_child_prompt_visible(&shared, &harness));
-}
-#[test]
-fn current_child_prompt_visible_accepts_opencode_idle_splash_without_prompt_glyph() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::opencode();
-    record_recent_output(
+        assert!(
+            normalize_stdin_for_harness_permission_prompt(&shared, &codex, b"\x1b[C").is_none(),
+            "non-OpenCode harnesses must not receive OpenCode permission key translation"
+        );
+    }
+    #[test]
+    fn opencode_permission_prompt_fallback_detects_orange_highlight_without_footer() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        // Simulate a newer OpenCode version where the footer text changed but the
+        // orange selection highlight (48;2;245;167;66) is still present.
+        record_recent_output(
+            &shared,
+            b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject\n",
+        );
+        let translated = normalize_stdin_for_harness_permission_prompt(
+            &shared, &harness, b"\x1b[C",
+        )
+        .expect("fallback detection must translate arrows even without the standard footer text");
+        assert_eq!(translated, b"\t");
+    }
+    #[test]
+    fn opencode_permission_prompt_fallback_requires_allow_or_reject_label() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        // Orange highlight alone (no permission labels) must not trigger translation.
+        record_recent_output(
+            &shared,
+            b"\x1b[48;2;245;167;66msome other highlighted text\x1b[0m\n",
+        );
+        assert!(
+            normalize_stdin_for_harness_permission_prompt(&shared, &harness, b"\x1b[C").is_none(),
+            "orange highlight without permission labels must not trigger arrow translation"
+        );
+    }
+    #[test]
+    fn current_child_prompt_visible_uses_latest_nonempty_line() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        record_recent_output(&shared, b"old output\n");
+        record_recent_output(&shared, "❯\n".as_bytes());
+        record_recent_output(&shared, b"resumed child still printing\n");
+        assert!(
+            !current_child_prompt_visible(&shared, &harness),
+            "an earlier prompt in the current child transcript should not count once newer non-prompt output follows it"
+        );
+    }
+    #[test]
+    fn current_child_prompt_visible_accepts_prompt_from_current_child_output() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        record_recent_output(&shared, b"resumed child ready\n");
+        record_recent_output(&shared, "❯\n".as_bytes());
+        assert!(current_child_prompt_visible(&shared, &harness));
+    }
+    #[test]
+    fn current_child_prompt_visible_handles_suffix_prompt_line() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        record_recent_output(&shared, "/tmp/project ❯\n".as_bytes());
+        assert!(current_child_prompt_visible(&shared, &harness));
+    }
+    #[test]
+    fn current_child_prompt_visible_skips_codex_footer_line() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        record_recent_output(&shared, "›\n".as_bytes());
+        record_recent_output(
+            &shared,
+            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used\n".as_bytes(),
+        );
+        assert!(current_child_prompt_visible(&shared, &harness));
+    }
+    #[test]
+    fn current_child_prompt_visible_rejects_busy_output_above_codex_footer() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        record_recent_output(&shared, "›\n".as_bytes());
+        record_recent_output(&shared, b"resumed child still printing\n");
+        record_recent_output(
+            &shared,
+            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
+        );
+        assert!(!current_child_prompt_visible(&shared, &harness));
+    }
+    #[test]
+    fn current_child_prompt_visible_accepts_opencode_status_chrome_without_proof_output() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(
+            &shared,
+            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n".as_bytes(),
+        );
+        assert!(current_child_prompt_visible(&shared, &harness));
+    }
+    #[test]
+    fn current_child_prompt_visible_accepts_opencode_idle_splash_without_prompt_glyph() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(
         &shared,
         "\
                                                                                                  ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▄ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
@@ -495,13 +500,13 @@ fn current_child_prompt_visible_accepts_opencode_idle_splash_without_prompt_glyp
 "
         .as_bytes(),
     );
-    assert!(current_child_prompt_visible(&shared, &harness));
-}
-#[test]
-fn current_child_prompt_visible_detects_opencode_post_turn_idle() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::opencode();
-    record_recent_output(
+        assert!(current_child_prompt_visible(&shared, &harness));
+    }
+    #[test]
+    fn current_child_prompt_visible_detects_opencode_post_turn_idle() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(
         &shared,
         "\
 $ cargo test -p agent-doc-orchestration
@@ -530,148 +535,148 @@ cargo install — installed agent-doc 0.34.0
 "
         .as_bytes(),
     );
-    assert!(
-        current_child_prompt_visible(&shared, &harness),
-        "post-turn OpenCode pane with idle bottom chrome must be detected as prompt-visible"
-    );
-}
-#[test]
-fn idle_queue_prompt_visible_trusts_ready_actor_over_stale_renderer_tail() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::claude();
-    *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
-    record_recent_output(&shared, b"turn committed, renderer tail has no composer\n");
+        assert!(
+            current_child_prompt_visible(&shared, &harness),
+            "post-turn OpenCode pane with idle bottom chrome must be detected as prompt-visible"
+        );
+    }
+    #[test]
+    fn idle_queue_prompt_visible_trusts_ready_actor_over_stale_renderer_tail() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::claude();
+        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
+        record_recent_output(&shared, b"turn committed, renderer tail has no composer\n");
 
-    assert!(
-        !current_child_prompt_visible(&shared, &harness),
-        "stale output alone should not prove an idle composer"
-    );
-    assert!(
-        idle_queue_prompt_visible(&shared, &harness),
-        "the supervisor's ready actor state should let the idle queue drain"
-    );
-}
-#[test]
-fn idle_queue_prompt_visible_keeps_blocker_over_ready_actor() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::claude();
-    *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
-    record_recent_output(
-        &shared,
-        concat!(
-            "✶ Generating… (3s · esc to interrupt)\n",
-            "❯\n",
-            "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host\n",
-            "  ⏵⏵ bypass permissions on · 1 shell\n",
-        )
-        .as_bytes(),
-    );
+        assert!(
+            !current_child_prompt_visible(&shared, &harness),
+            "stale output alone should not prove an idle composer"
+        );
+        assert!(
+            idle_queue_prompt_visible(&shared, &harness),
+            "the supervisor's ready actor state should let the idle queue drain"
+        );
+    }
+    #[test]
+    fn idle_queue_prompt_visible_keeps_blocker_over_ready_actor() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::claude();
+        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
+        record_recent_output(
+            &shared,
+            concat!(
+                "✶ Generating… (3s · esc to interrupt)\n",
+                "❯\n",
+                "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host\n",
+                "  ⏵⏵ bypass permissions on · 1 shell\n",
+            )
+            .as_bytes(),
+        );
 
-    assert!(
-        !idle_queue_prompt_visible(&shared, &harness),
-        "active-turn blockers must win over a stale ready actor state"
-    );
-}
-#[test]
-fn route_owned_live_pane_busy_requires_idle_prompt_before_reap() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::codex();
-    shared.running.store(true, Ordering::Relaxed);
-    record_recent_output(&shared, b"exploring repository\n");
+        assert!(
+            !idle_queue_prompt_visible(&shared, &harness),
+            "active-turn blockers must win over a stale ready actor state"
+        );
+    }
+    #[test]
+    fn route_owned_live_pane_busy_requires_idle_prompt_before_reap() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        record_recent_output(&shared, b"exploring repository\n");
 
-    let reason = route_owned_live_pane_busy_reason(&shared, &harness)
-        .expect("running child without prompt should block route-owned reap");
+        let reason = route_owned_live_pane_busy_reason(&shared, &harness)
+            .expect("running child without prompt should block route-owned reap");
 
-    assert!(reason.contains("live_pane_busy_no_idle_prompt"));
-    assert!(reason.contains("exploring repository"));
-}
-#[test]
-fn route_owned_live_pane_busy_trusts_ready_actor_over_stale_renderer_tail() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::codex();
-    shared.running.store(true, Ordering::Relaxed);
-    *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
-    record_recent_output(&shared, "›\n".as_bytes());
-    record_recent_output(&shared, b"Working...\n");
-    record_recent_output(
-        &shared,
-        "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
-    );
+        assert!(reason.contains("live_pane_busy_no_idle_prompt"));
+        assert!(reason.contains("exploring repository"));
+    }
+    #[test]
+    fn route_owned_live_pane_busy_trusts_ready_actor_over_stale_renderer_tail() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
+        record_recent_output(&shared, "›\n".as_bytes());
+        record_recent_output(&shared, b"Working...\n");
+        record_recent_output(
+            &shared,
+            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
+        );
 
-    assert_eq!(route_owned_live_pane_busy_reason(&shared, &harness), None);
-}
-#[test]
-fn route_owned_live_pane_busy_keeps_ready_actor_for_blocking_prompt_state() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::codex();
-    shared.running.store(true, Ordering::Relaxed);
-    *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
-    record_recent_output(&shared, "›\n".as_bytes());
-    record_recent_output(&shared, b"tab to queue message\n");
-    record_recent_output(
-        &shared,
-        "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
-    );
+        assert_eq!(route_owned_live_pane_busy_reason(&shared, &harness), None);
+    }
+    #[test]
+    fn route_owned_live_pane_busy_keeps_ready_actor_for_blocking_prompt_state() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
+        record_recent_output(&shared, "›\n".as_bytes());
+        record_recent_output(&shared, b"tab to queue message\n");
+        record_recent_output(
+            &shared,
+            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
+        );
 
-    let reason = route_owned_live_pane_busy_reason(&shared, &harness)
-        .expect("queued composer state must still block route-owned reap");
+        let reason = route_owned_live_pane_busy_reason(&shared, &harness)
+            .expect("queued composer state must still block route-owned reap");
 
-    assert!(reason.contains("live_pane_busy_blocked_prompt"));
-    assert!(reason.contains("queued draft in composer"));
-}
-#[test]
-fn route_owned_live_pane_busy_allows_idle_prompt_reap() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::codex();
-    shared.running.store(true, Ordering::Relaxed);
-    record_recent_output(&shared, b"done\n");
-    record_recent_output(&shared, "›\n".as_bytes());
+        assert!(reason.contains("live_pane_busy_blocked_prompt"));
+        assert!(reason.contains("queued draft in composer"));
+    }
+    #[test]
+    fn route_owned_live_pane_busy_allows_idle_prompt_reap() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        record_recent_output(&shared, b"done\n");
+        record_recent_output(&shared, "›\n".as_bytes());
 
-    assert_eq!(route_owned_live_pane_busy_reason(&shared, &harness), None);
-}
-#[test]
-fn is_help_screen_visible_detects_opencode_help() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::opencode();
-    record_recent_output(
-        &shared,
-        b"opencode [project]           start opencode tui\n",
-    );
-    record_recent_output(
-        &shared,
-        b"opencode run [message..]     run opencode with a message\n",
-    );
-    record_recent_output(
-        &shared,
-        b"opencode debug               debugging and troubleshooting tools\n",
-    );
-    assert!(is_help_screen_visible(&shared, &harness));
-}
-#[test]
-fn is_help_screen_visible_rejects_normal_opencode_output() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    let harness = crate::harness::HarnessConfig::opencode();
-    record_recent_output(&shared, b"some normal output\n");
-    record_recent_output(&shared, b">\n");
-    assert!(!is_help_screen_visible(&shared, &harness));
-}
-#[test]
-fn prompt_visible_requires_ready_transition_on_first_prompt() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    assert!(prompt_visible_requires_ready_transition(&shared));
-    assert!(
-        !prompt_visible_requires_ready_transition(&shared),
-        "a repeated prompt without an intervening busy transition should not retrigger ready"
-    );
-}
-#[test]
-fn prompt_visible_requires_ready_transition_after_busy_dispatch() {
-    let shared = SupervisorShared::new("test", "test-instance".to_string());
-    shared.prompt_visible_once.store(true, Ordering::Relaxed);
-    *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Busy);
-    assert!(
-        prompt_visible_requires_ready_transition(&shared),
-        "a busy actor that surfaces the prompt again must return to ready"
-    );
-}
+        assert_eq!(route_owned_live_pane_busy_reason(&shared, &harness), None);
+    }
+    #[test]
+    fn is_help_screen_visible_detects_opencode_help() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(
+            &shared,
+            b"opencode [project]           start opencode tui\n",
+        );
+        record_recent_output(
+            &shared,
+            b"opencode run [message..]     run opencode with a message\n",
+        );
+        record_recent_output(
+            &shared,
+            b"opencode debug               debugging and troubleshooting tools\n",
+        );
+        assert!(is_help_screen_visible(&shared, &harness));
+    }
+    #[test]
+    fn is_help_screen_visible_rejects_normal_opencode_output() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(&shared, b"some normal output\n");
+        record_recent_output(&shared, b">\n");
+        assert!(!is_help_screen_visible(&shared, &harness));
+    }
+    #[test]
+    fn prompt_visible_requires_ready_transition_on_first_prompt() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        assert!(prompt_visible_requires_ready_transition(&shared));
+        assert!(
+            !prompt_visible_requires_ready_transition(&shared),
+            "a repeated prompt without an intervening busy transition should not retrigger ready"
+        );
+    }
+    #[test]
+    fn prompt_visible_requires_ready_transition_after_busy_dispatch() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        shared.prompt_visible_once.store(true, Ordering::Relaxed);
+        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Busy);
+        assert!(
+            prompt_visible_requires_ready_transition(&shared),
+            "a busy actor that surfaces the prompt again must return to ready"
+        );
+    }
 }

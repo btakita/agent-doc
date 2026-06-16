@@ -204,11 +204,9 @@ impl DispatchOnlyReopenDelivery {
     pub const fn submit_mode_for_harness(self, harness_binary: &str) -> &'static str {
         match self {
             DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_normalized_submit",
-            DispatchOnlyReopenDelivery::DirectPaneSubmit => match harness_binary.as_bytes() {
-                b"codex" => "tmux_literal_text_enter_key",
-                b"opencode" => "tmux_literal_kitty_return",
-                _ => "tmux_literal_cr",
-            },
+            DispatchOnlyReopenDelivery::DirectPaneSubmit => {
+                crate::sessions::tmux_submit_mode_for_harness(harness_binary)
+            }
         }
     }
 
@@ -1433,27 +1431,6 @@ mod tests {
     }
 
     #[test]
-    fn direct_pane_submit_mode_is_harness_specific() {
-        let delivery = DispatchOnlyReopenDelivery::DirectPaneSubmit;
-        assert_eq!(
-            delivery.submit_mode_for_harness("codex"),
-            "tmux_literal_text_enter_key"
-        );
-        assert_eq!(
-            delivery.submit_mode_for_harness("opencode"),
-            "tmux_literal_kitty_return"
-        );
-        assert_eq!(
-            delivery.submit_mode_for_harness("claude"),
-            "tmux_literal_cr"
-        );
-        assert_eq!(
-            DispatchOnlyReopenDelivery::SupervisorIpcOnce.submit_mode_for_harness("codex"),
-            "supervisor_normalized_submit"
-        );
-    }
-
-    #[test]
     fn dispatch_only_proof_policy_requires_hook_visible_codex_and_opencode() {
         assert!(dispatch_only_dispatch_start_proof_required(
             DispatchOnlyProofPolicyFacts {
@@ -1509,12 +1486,34 @@ mod tests {
         };
 
         let log = dispatch_only_sent_log_message(facts);
+        assert!(log.contains("submit_mode=tmux_literal_text_enter_key"));
         assert!(log.contains("proof=accepted"));
         assert!(log.contains("proof_scope=accepted_only"));
 
         let refusal = accepted_only_dispatch_start_refusal_message(facts);
+        assert!(refusal.contains("tmux_literal_text_enter_key"));
         assert!(refusal.contains("only pane-input acceptance proof was available"));
         assert!(refusal.contains("treating this as not dispatched"));
+    }
+
+    #[test]
+    fn dispatch_only_direct_submit_mode_is_harness_specific() {
+        assert_eq!(
+            DispatchOnlyReopenDelivery::DirectPaneSubmit.submit_mode_for_harness("codex"),
+            "tmux_literal_text_enter_key"
+        );
+        assert_eq!(
+            DispatchOnlyReopenDelivery::DirectPaneSubmit.submit_mode_for_harness("opencode"),
+            "tmux_literal_text_enter_key"
+        );
+        assert_eq!(
+            DispatchOnlyReopenDelivery::DirectPaneSubmit.submit_mode_for_harness("claude"),
+            "tmux_literal_text_enter_key"
+        );
+        assert_eq!(
+            DispatchOnlyReopenDelivery::SupervisorIpcOnce.submit_mode_for_harness("codex"),
+            "supervisor_normalized_submit"
+        );
     }
 
     #[test]

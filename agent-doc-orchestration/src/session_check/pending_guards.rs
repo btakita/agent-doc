@@ -1,6 +1,9 @@
 use super::*;
 
-pub(crate) fn check_pending_capture_guard(file: &Path, rc: &crate::graph::RunContext) -> Result<GuardResult> {
+pub(crate) fn check_pending_capture_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_capture_guard_mode_with_context(file, rc)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
@@ -257,7 +260,10 @@ pub fn resolve_auto_done_with_context(_file: &Path, rc: &crate::graph::RunContex
     Ok(rc.project_config().guards.auto_done.unwrap_or(false))
 }
 
-pub(crate) fn check_pending_done_guard(file: &Path, rc: &crate::graph::RunContext) -> Result<GuardResult> {
+pub(crate) fn check_pending_done_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {

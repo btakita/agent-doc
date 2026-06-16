@@ -579,80 +579,84 @@ pub(crate) fn check_committed_without_response_body_guard(file: &Path) -> Result
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use std::fs;
-use std::io::Write;
-use std::process::Command;
-#[test]
-fn committed_without_response_body_guard_passes_recovered_exchange_body_without_capture_metadata() {
-    // Recovery may commit a visible `### Re:` after the original queue-drain
-    // cycle lost its capture metadata. The committed exchange body is still
-    // sufficient proof that the missing-response closeout has been repaired.
-    let _lock = crate::test_support::env_lock();
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-    fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
-    let doc = root.join("doc.md");
-    let content = concat!(
-        "---\nagent_doc_session: test\n---\n\n",
-        "<!-- agent:exchange patch=append -->\n",
-        "### Session Summary\n\nCompacted.\n\n",
-        "### Re: do [#ipc1] / do [#39c5]\n\nRecovered.\n",
-        "<!-- /agent:exchange -->\n"
-    )
-    .to_string();
-    fs::write(&doc, &content).unwrap();
-    crate::snapshot::save(&doc, &content).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
-    crate::cycle_state::mark_pending_mutations(&doc).unwrap();
-    crate::cycle_state::record_pending_done_ids(&doc, &["ipc1".to_string(), "39c5".to_string()])
+    use std::fs;
+    use std::io::Write;
+    use std::process::Command;
+    #[test]
+    fn committed_without_response_body_guard_passes_recovered_exchange_body_without_capture_metadata()
+     {
+        // Recovery may commit a visible `### Re:` after the original queue-drain
+        // cycle lost its capture metadata. The committed exchange body is still
+        // sufficient proof that the missing-response closeout has been repaired.
+        let _lock = crate::test_support::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\nCompacted.\n\n",
+            "### Re: do [#ipc1] / do [#39c5]\n\nRecovered.\n",
+            "<!-- /agent:exchange -->\n"
+        )
+        .to_string();
+        fs::write(&doc, &content).unwrap();
+        crate::snapshot::save(&doc, &content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        crate::cycle_state::record_pending_done_ids(
+            &doc,
+            &["ipc1".to_string(), "39c5".to_string()],
+        )
         .unwrap();
-    crate::cycle_state::record_active_queue_heads(
-        &doc,
-        &["do [#ipc1]".to_string(), "do [#39c5]".to_string()],
-    )
-    .unwrap();
-    crate::cycle_state::mark_committed(&doc, "commit_success", Some(&content), Some(&content))
+        crate::cycle_state::record_active_queue_heads(
+            &doc,
+            &["do [#ipc1]".to_string(), "do [#39c5]".to_string()],
+        )
         .unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&content), Some(&content))
+            .unwrap();
 
-    assert!(matches!(
-        check_committed_without_response_body_guard(&doc).unwrap(),
-        GuardResult::None
-    ));
-}
-#[test]
-fn committed_without_response_body_guard_skips_noop_commit_reap_only_cycle() {
-    // Deadlock repro (tsift.md cycle-1780257680821): a `finalize --done X` whose
-    // only effect was reaping an item already reflected in HEAD commits a no-op
-    // (`commit_already_current`) and sets `had_pending_mutations`, but writes no
-    // response body. The guard must NOT fire — a no-op commit committed no
-    // binary-owned work this turn, so there is nothing a response would
-    // accompany; firing wedges the cycle in an infinite
-    // session-check-interrupted loop because the `write --commit` recovery is
-    // itself a no-op. A real side-effect commit (`commit_success`) still fires.
-    let _lock = crate::test_support::env_lock();
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-    fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
-    let doc = root.join("doc.md");
-    let current =
-        "---\nagent_doc_session: test\n---\n\n## Exchange\n\ndo [#nsga4verify]\n".to_string();
-    fs::write(&doc, &current).unwrap();
-    crate::snapshot::save(&doc, &current).unwrap();
-    crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
-    crate::cycle_state::mark_pending_mutations(&doc).unwrap();
-    crate::cycle_state::record_pending_done_ids(&doc, &["nsga4verify".to_string()]).unwrap();
-    crate::cycle_state::mark_committed(
-        &doc,
-        "commit_already_current",
-        Some(&current),
-        Some(&current),
-    )
-    .unwrap();
-    assert!(matches!(
-        check_committed_without_response_body_guard(&doc).unwrap(),
-        GuardResult::None
-    ));
-}
+        assert!(matches!(
+            check_committed_without_response_body_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+    #[test]
+    fn committed_without_response_body_guard_skips_noop_commit_reap_only_cycle() {
+        // Deadlock repro (tsift.md cycle-1780257680821): a `finalize --done X` whose
+        // only effect was reaping an item already reflected in HEAD commits a no-op
+        // (`commit_already_current`) and sets `had_pending_mutations`, but writes no
+        // response body. The guard must NOT fire — a no-op commit committed no
+        // binary-owned work this turn, so there is nothing a response would
+        // accompany; firing wedges the cycle in an infinite
+        // session-check-interrupted loop because the `write --commit` recovery is
+        // itself a no-op. A real side-effect commit (`commit_success`) still fires.
+        let _lock = crate::test_support::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let current =
+            "---\nagent_doc_session: test\n---\n\n## Exchange\n\ndo [#nsga4verify]\n".to_string();
+        fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, &current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        crate::cycle_state::record_pending_done_ids(&doc, &["nsga4verify".to_string()]).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_already_current",
+            Some(&current),
+            Some(&current),
+        )
+        .unwrap();
+        assert!(matches!(
+            check_committed_without_response_body_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
 }

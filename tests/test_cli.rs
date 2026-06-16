@@ -761,10 +761,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `git/tests.rs` (large-module split, #splitmods2). The 6 removed
         // `guard_` occurrences were test-assertion literals, not production
         // hot-path guards.
-        // +2 (#efsmrgmarkers): commit pre-stage now runs the shared raw conflict
-        // marker guard on snapshot and worktree content before staging, so
-        // postcommit reconciliation cannot adopt raw merge-marker blocks.
-        ("agent-doc-orchestration/src/git.rs", "guard_") => 20,
+        ("agent-doc-orchestration/src/git.rs", "guard_") => 18,
         ("agent-doc-orchestration/src/git/normalize.rs", "guard_") => 1,
         // +1 (`reason=committed_content_lost`): #pcwc post-commit auto-reconcile
         // logs when it restored the working tree to HEAD because committed content
@@ -985,10 +982,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // fallback through the single `guard_visible_write_idle_and_current`
         // guard inside `atomic_write_if_current_pub`. Fewer hot-path guard
         // tokens, not more — the guard boundary is centralized, not added.
-        // +3 (#efsmrgmarkers): response-bearing template normalization now
-        // runs the shared raw conflict marker guard after ordinary structure
-        // repair and after safe duplicate-scaffold repair paths.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 48,
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 45,
         ("agent-doc-orchestration/src/write/pending_checks.rs", "guard_") => 4,
         ("agent-doc-orchestration/src/write/materialize.rs", "guard_") => 3,
         ("agent-doc-orchestration/src/write/exchange_reconcile.rs", "guard_") => 5,

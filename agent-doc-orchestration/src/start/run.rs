@@ -6,6 +6,38 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     run_with_reap_policy(file, force, route_owned, RouteOwnedReapPolicy::Auto)
 }
 
+fn start_console_status(
+    session_log: &mut Option<std::fs::File>,
+    route_owned: bool,
+    message: impl AsRef<str>,
+) {
+    let message = message.as_ref();
+    let printed = !route_owned || crate::input_diag::verbose_enabled();
+    log_event(
+        session_log,
+        &format!(
+            "start_console_status route_owned={} printed={} message={:?}",
+            route_owned, printed, message
+        ),
+    );
+    if printed {
+        eprintln!("{message}");
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ChildLaunchPlan {
+    use_continue_args: bool,
+    auto_trigger: bool,
+}
+
+fn child_launch_plan(first_run: bool, auto_trigger_next_launch: bool) -> ChildLaunchPlan {
+    ChildLaunchPlan {
+        use_continue_args: !first_run,
+        auto_trigger: auto_trigger_next_launch || !first_run,
+    }
+}
+
 pub fn run_with_reap_policy(
     file: &Path,
     force: bool,
@@ -22,10 +54,10 @@ pub fn run_with_reap_policy(
     // Opt-in gate: a plain `.md` must not be auto-converted into a session.
     frontmatter::require_agent_doc_document(&content, file)?;
     let (updated_content, session_id) = frontmatter::ensure_session_for_file(&content, file)?;
+    let generated_session_uuid = updated_content != content;
     if updated_content != content {
         std::fs::write(file, &updated_content)
             .with_context(|| format!("failed to write {}", file.display()))?;
-        eprintln!("Generated session UUID: {}", session_id);
     }
 
     let rc = crate::graph::RunContext::new(file.to_path_buf());
@@ -37,18 +69,31 @@ pub fn run_with_reap_policy(
             .ok()
             .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
     });
+    let mut session_log = open_session_log(&canonical, &session_id);
+    if generated_session_uuid {
+        start_console_status(
+            &mut session_log,
+            route_owned,
+            format!("Generated session UUID: {session_id}"),
+        );
+    }
     match crate::project_controller::close_stale_starting_actors_for_caller(
         &project_root,
         std::time::Duration::from_secs(3600),
         false,
         "start",
     ) {
-        Ok((closed, kept)) if closed > 0 => eprintln!(
-            "[start] actors: {} stale starting closed, {} still active",
-            closed, kept
+        Ok((closed, kept)) if closed > 0 => start_console_status(
+            &mut session_log,
+            route_owned,
+            format!("[start] actors: {closed} stale starting closed, {kept} still active"),
         ),
         Ok(_) => {}
-        Err(e) => eprintln!("[start] actor gc warning: {}", e),
+        Err(e) => start_console_status(
+            &mut session_log,
+            route_owned,
+            format!("[start] actor gc warning: {e}"),
+        ),
     }
 
     // Resolve harness config from frontmatter agent > config default_agent > claude
@@ -66,14 +111,22 @@ pub fn run_with_reap_policy(
             ("fallback", "claude")
         };
         let env_harness = agent_doc_core::model_tier::detect_harness();
-        eprintln!(
-            "[start] harness resolved: binary={} source={} env={}",
-            harness.binary, source, env_harness
+        start_console_status(
+            &mut session_log,
+            route_owned,
+            format!(
+                "[start] harness resolved: binary={} source={} env={}",
+                harness.binary, source, env_harness
+            ),
         );
         if env_harness != "default" && env_harness != harness.binary {
-            eprintln!(
-                "[start] WARNING: harness mismatch — from_context resolved {} (via {}) but env detect_harness returned {}",
-                harness.binary, source, env_harness
+            start_console_status(
+                &mut session_log,
+                route_owned,
+                format!(
+                    "[start] WARNING: harness mismatch - from_context resolved {} (via {}) but env detect_harness returned {}",
+                    harness.binary, source, env_harness
+                ),
             );
         }
     }
@@ -130,12 +183,16 @@ pub fn run_with_reap_policy(
 
     if let Some((miss, supersession)) = crate::startup_miss::take_superseded_startup_miss(file)? {
         let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
-        eprintln!(
-            "[start] clearing stale startup-miss on pane {} from {} for {} because newer registered owner {} already took over",
-            miss.pane_id,
-            miss_ts,
-            file.display(),
-            supersession.registered_pane
+        start_console_status(
+            &mut session_log,
+            route_owned,
+            format!(
+                "[start] clearing stale startup-miss on pane {} from {} for {} because newer registered owner {} already took over",
+                miss.pane_id,
+                miss_ts,
+                file.display(),
+                supersession.registered_pane
+            ),
         );
         crate::ops_log::log_op(
             file,
@@ -185,9 +242,13 @@ pub fn run_with_reap_policy(
             }
         }
     } else {
-        eprintln!(
-            "[start] --force: bypassing existing session pane reuse for {}",
-            file.display()
+        start_console_status(
+            &mut session_log,
+            route_owned,
+            format!(
+                "[start] --force: bypassing existing session pane reuse for {}",
+                file.display()
+            ),
         );
     }
 
@@ -213,10 +274,15 @@ pub fn run_with_reap_policy(
         std::process::id(),
         &supervisor_instance_id,
     )?;
-    eprintln!("Registered session {} → pane {}", &session_id[..8], pane_id);
-
-    // Open session log
-    let mut session_log = open_session_log(&canonical, &session_id);
+    start_console_status(
+        &mut session_log,
+        route_owned,
+        format!(
+            "Registered session {} -> pane {}",
+            &session_id[..8],
+            pane_id
+        ),
+    );
     // A `start` always mints a new ownership epoch, including when the launcher
     // pane differs from the registry's stale pane (a pane move IS an ownership
     // transition). The earlier no-bump `infer_latest_generation` branch for the
@@ -325,7 +391,11 @@ pub fn run_with_reap_policy(
     match crate::snapshot::ensure_initialized(file) {
         Ok(true) => {
             log_event(&mut session_log, "snapshot_validated action=initialized");
-            eprintln!("[start] snapshot integrity validated (initialized)");
+            start_console_status(
+                &mut session_log,
+                route_owned,
+                "[start] snapshot integrity validated (initialized)",
+            );
         }
         Ok(false) => {
             log_event(&mut session_log, "snapshot_validated action=already_valid");
@@ -335,7 +405,11 @@ pub fn run_with_reap_policy(
                 &mut session_log,
                 &format!("snapshot_validation_failed error={}", e),
             );
-            eprintln!("[start] warning: snapshot validation failed: {}", e);
+            start_console_status(
+                &mut session_log,
+                route_owned,
+                format!("[start] warning: snapshot validation failed: {e}"),
+            );
         }
     }
 
@@ -388,7 +462,11 @@ pub fn run_with_reap_policy(
             codex_network_access,
             &resolved_env,
         );
-        eprintln!("[start] codex network access: {}", status.summary());
+        start_console_status(
+            &mut session_log,
+            route_owned,
+            format!("[start] codex network access: {}", status.summary()),
+        );
         if let Some(err) = status.mismatch_error() {
             anyhow::bail!(err);
         }
@@ -584,6 +662,7 @@ pub fn run_with_reap_policy(
         log_event(&mut session_log, "supervisor_reexec_reentry detected");
     }
     let mut first_run = true;
+    let mut auto_trigger_next_launch = false;
     let mut restart_count: u32 = 0;
     let mut resize_watcher: Option<resize::ResizeWatcher> = None;
     let mut failed_resume_tracker = FailedResumeTracker::default();
@@ -603,12 +682,19 @@ pub fn run_with_reap_policy(
                 restart_reason,
             );
         }
-        // Build args for this iteration
-        let auto_trigger;
-        let args = if !first_run {
-            auto_trigger = true;
+        // Build args for this iteration. A restart can be "fresh" (base args,
+        // no resume/continue flags) while still needing the document trigger
+        // re-submitted after the new child prompt appears.
+        let launch_plan = child_launch_plan(first_run, auto_trigger_next_launch);
+        auto_trigger_next_launch = false;
+        let auto_trigger = launch_plan.auto_trigger;
+        let args = if launch_plan.use_continue_args {
             let restart_args = harness.restart_args(&base_args)?;
-            eprintln!("Restarting {} (continue)...", harness.binary);
+            start_console_status(
+                &mut session_log,
+                route_owned,
+                format!("Restarting {} (continue)...", harness.binary),
+            );
             log_event(
                 &mut session_log,
                 &format!(
@@ -618,9 +704,12 @@ pub fn run_with_reap_policy(
             );
             restart_args
         } else {
-            auto_trigger = false;
             let args = base_args.clone();
-            eprintln!("Starting {}...", harness.binary);
+            start_console_status(
+                &mut session_log,
+                route_owned,
+                format!("Starting {}...", harness.binary),
+            );
             log_event(
                 &mut session_log,
                 &format!(
@@ -702,9 +791,6 @@ pub fn run_with_reap_policy(
         shared.stop_requested.store(false, Ordering::Relaxed);
         shared.ctrl_d_forwarded.store(false, Ordering::Relaxed);
         shared.ctrl_c_forwarded.store(false, Ordering::Relaxed);
-        shared
-            .ctrl_z_operator_stop
-            .store(false, Ordering::Relaxed);
         shared
             .auto_trigger_outcome
             .store(AutoTriggerOutcome::NotNeeded as u8, Ordering::Relaxed);
@@ -924,6 +1010,7 @@ pub fn run_with_reap_policy(
         if shared.restart_requested.load(Ordering::Relaxed) {
             let mode = shared.restart_mode.lock().unwrap().clone();
             first_run = mode == "fresh";
+            auto_trigger_next_launch = true;
             restart_count += 1;
             log_event(
                 &mut session_log,
@@ -951,7 +1038,6 @@ pub fn run_with_reap_policy(
             shared.ctrl_c_forwarded.load(Ordering::Relaxed),
         );
         let ctrl_d_forwarded = shared.ctrl_d_forwarded.load(Ordering::Relaxed);
-        let ctrl_z_operator_stop = shared.ctrl_z_operator_stop.load(Ordering::Relaxed);
         let failed_resume =
             resume_handoff_failed(auto_trigger, ctrl_d_forwarded, auto_trigger_outcome);
         let clean_exit_before_prompt =
@@ -963,13 +1049,10 @@ pub fn run_with_reap_policy(
             failed_resume_tracker.reset();
         }
 
-        // Operator control keys are intentional shutdown requests, not
-        // supervisor crash signals, so keep policy on the clean-exit path and
-        // surface the restart/quit prompt.
-        let policy_exit_code = policy_exit_code_for_supervisor(
-            code,
-            ctrl_c_forwarded_interrupt || ctrl_z_operator_stop,
-        );
+        // Forwarded operator Ctrl+C is an intentional shutdown request, not a
+        // supervisor crash signal, so keep the policy state on the clean-exit
+        // path and surface the same restart/quit prompt as Ctrl+D.
+        let policy_exit_code = policy_exit_code_for_supervisor(code, ctrl_c_forwarded_interrupt);
         let action = policy.on_exit(policy_exit_code);
         *shared.supervisor_state.lock().unwrap() = policy.state;
         let action_name = match &action {
@@ -980,14 +1063,13 @@ pub fn run_with_reap_policy(
         log_event(
             &mut session_log,
             &format!(
-                "restart_eval pane={} harness={} exit_code={} {} auto_trigger_outcome={} ctrl_d={} ctrl_z={} state={} action={}",
+                "restart_eval pane={} harness={} exit_code={} {} auto_trigger_outcome={} ctrl_d={} state={} action={}",
                 pane_id,
                 harness.binary,
                 code,
                 exit_provenance,
                 auto_trigger_outcome.as_str(),
                 ctrl_d_forwarded,
-                ctrl_z_operator_stop,
                 policy.state.as_str(),
                 action_name
             ),
@@ -1049,7 +1131,6 @@ pub fn run_with_reap_policy(
                             ctrl_c_forwarded_interrupt,
                             failed_resume,
                             ctrl_d_forwarded,
-                            ctrl_z_operator_stop,
                             recent_failures,
                             clean_exit_before_prompt,
                         ) {
@@ -1104,39 +1185,6 @@ pub fn run_with_reap_policy(
                                 ) {
                                     PromptOutcome::Quit => {
                                         break "user_quit_after_ctrl_d";
-                                    }
-                                    PromptOutcome::RestartFresh => {
-                                        raw_mode.resume();
-                                        first_run = true;
-                                        restart_count += 1;
-                                        suppress_stale_ctrl_d_until_prompt = false;
-                                    }
-                                }
-                            }
-                            RestartContinueExitStrategy::CtrlZPromptUser => {
-                                shared.transition_actor_state(
-                                    crate::session_actor::ActorState::WaitingInput,
-                                    "supervisor",
-                                    "ctrl_z_prompt",
-                                );
-                                raw_mode.suspend();
-                                eprintln!(
-                                    "\n{} stopped after stdin Ctrl+Z.",
-                                    harness.binary
-                                );
-                                log_event(
-                                    &mut session_log,
-                                    &format!("ctrl_z_prompt_user restart_count={}", restart_count),
-                                );
-                                match prompt_for_restart_or_quit(
-                                    &mut session_log,
-                                    "ctrl_z",
-                                    "Press Enter to restart fresh, or 'q' to exit.",
-                                    "user_quit_after_ctrl_z",
-                                    PromptEofPolicy::Quit,
-                                ) {
-                                    PromptOutcome::Quit => {
-                                        break "user_quit_after_ctrl_z";
                                     }
                                     PromptOutcome::RestartFresh => {
                                         raw_mode.resume();
@@ -1207,6 +1255,7 @@ pub fn run_with_reap_policy(
                                     );
                                 }
                                 first_run = true;
+                                auto_trigger_next_launch = auto_trigger;
                                 restart_count += 1;
                             }
                             RestartContinueExitStrategy::Resume => {
@@ -1297,16 +1346,24 @@ pub fn run_with_reap_policy(
         ),
     );
     log_event(&mut session_log, "session_end");
-    eprintln!("Session ended for {}", file.display());
+    start_console_status(
+        &mut session_log,
+        route_owned,
+        format!("Session ended for {}", file.display()),
+    );
     if route_owned && route_owned_completion.load(Ordering::Relaxed) {
         log_event(
             &mut session_log,
             &format!("route_owned_reap_pane pane={}", pane_id),
         );
-        eprintln!(
-            "[start] route-owned cycle committed for {}; reaping pane {}",
-            file.display(),
-            pane_id
+        start_console_status(
+            &mut session_log,
+            route_owned,
+            format!(
+                "[start] route-owned cycle committed for {}; reaping pane {}",
+                file.display(),
+                pane_id
+            ),
         );
         let _ = tmux.raw_cmd(&["kill-pane", "-t", &pane_id]);
     }
@@ -1317,415 +1374,470 @@ pub fn run_with_reap_policy(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-use crate::config::Config;
-use crate::frontmatter::Frontmatter;
-use crate::hooks::fire_doc_hooks;
-use crate::project_config;
-use crate::sessions::IsolatedTmux;
-use std::collections::HashMap;
-use tempfile::TempDir;
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn relocate_noop_when_already_correct_session() {
-    let iso = IsolatedTmux::new("start-reloc-noop");
-    let pane = iso
-        .new_session("sess-a", std::path::Path::new("/tmp"))
+    use crate::config::Config;
+    use crate::frontmatter::Frontmatter;
+    use crate::hooks::fire_doc_hooks;
+    use crate::project_config;
+    use crate::sessions::IsolatedTmux;
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    #[test]
+    fn route_owned_start_status_logs_without_printing_by_default() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("session.log");
+        let mut log = Some(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+                .unwrap(),
+        );
+
+        start_console_status(&mut log, true, "[start] harness resolved: binary=codex");
+        drop(log);
+
+        let content = std::fs::read_to_string(log_path).unwrap();
+        assert!(
+            content.contains("start_console_status route_owned=true printed=false"),
+            "route-owned status should be log-only by default: {content}"
+        );
+        assert!(
+            content.contains("[start] harness resolved: binary=codex"),
+            "status proof should remain in the session log: {content}"
+        );
+    }
+
+    #[test]
+    fn child_launch_plan_separates_fresh_args_from_auto_trigger() {
+        assert_eq!(
+            child_launch_plan(true, false),
+            ChildLaunchPlan {
+                use_continue_args: false,
+                auto_trigger: false,
+            },
+            "initial supervisor launch should open the harness without typing agent-doc"
+        );
+        assert_eq!(
+            child_launch_plan(false, false),
+            ChildLaunchPlan {
+                use_continue_args: true,
+                auto_trigger: true,
+            },
+            "continue-mode restart should resume and re-submit agent-doc"
+        );
+        assert_eq!(
+            child_launch_plan(true, true),
+            ChildLaunchPlan {
+                use_continue_args: false,
+                auto_trigger: true,
+            },
+            "fresh restart still needs to re-submit agent-doc after the new prompt"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn relocate_noop_when_already_correct_session() {
+        let iso = IsolatedTmux::new("start-reloc-noop");
+        let pane = iso
+            .new_session("sess-a", std::path::Path::new("/tmp"))
+            .unwrap();
+        // pane is already in sess-a; no relocation needed
+        let result = relocate_if_wrong_session(&iso, &pane, "sess-a");
+        assert!(
+            result,
+            "should return true (noop — already in correct session)"
+        );
+        // Verify pane is still in sess-a
+        let sess = iso.pane_session(&pane).unwrap();
+        assert_eq!(sess, "sess-a");
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn relocate_succeeds_cross_session() {
+        let iso = IsolatedTmux::new("start-reloc-cross");
+        let _pane_a = iso
+            .new_session("sess-a", std::path::Path::new("/tmp"))
+            .unwrap();
+        let pane_b = iso
+            .new_session("sess-b", std::path::Path::new("/tmp"))
+            .unwrap();
+        // pane_b is in sess-b; expected is sess-a — should auto-relocate
+        let result = relocate_if_wrong_session(&iso, &pane_b, "sess-a");
+        assert!(result, "should return true after successful relocation");
+        let sess = iso.pane_session(&pane_b).unwrap();
+        assert_eq!(sess, "sess-a", "pane should be in sess-a after relocation");
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn relocate_fails_gracefully_when_no_anchor() {
+        let iso = IsolatedTmux::new("start-reloc-noanchor");
+        let pane = iso
+            .new_session("sess-a", std::path::Path::new("/tmp"))
+            .unwrap();
+        // Expected session "sess-nonexistent" has no active pane — relocation should fail gracefully
+        let result = relocate_if_wrong_session(&iso, &pane, "sess-nonexistent");
+        assert!(
+            !result,
+            "should return false when no anchor pane exists in expected session"
+        );
+        // pane should still be in original session
+        let sess = iso.pane_session(&pane).unwrap();
+        assert_eq!(
+            sess, "sess-a",
+            "pane should remain in original session on failure"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn start_rebinds_dead_project_session_to_current_pane_session() {
+        let dir = TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"0\"\n",
+        )
         .unwrap();
-    // pane is already in sess-a; no relocation needed
-    let result = relocate_if_wrong_session(&iso, &pane, "sess-a");
-    assert!(
-        result,
-        "should return true (noop — already in correct session)"
-    );
-    // Verify pane is still in sess-a
-    let sess = iso.pane_session(&pane).unwrap();
-    assert_eq!(sess, "sess-a");
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn relocate_succeeds_cross_session() {
-    let iso = IsolatedTmux::new("start-reloc-cross");
-    let _pane_a = iso
-        .new_session("sess-a", std::path::Path::new("/tmp"))
+
+        let iso = IsolatedTmux::new("start-rebind-dead-session");
+        let pane = iso.new_session("14", dir.path()).unwrap();
+
+        let relocated = relocate_if_wrong_session(&iso, &pane, "0");
+        assert!(
+            !relocated,
+            "missing anchor in dead configured session should fall back to current pane session"
+        );
+
+        rebind_project_tmux_session_if_expected_dead(&iso, &pane, "0");
+
+        assert_eq!(
+            project_config::project_tmux_session().as_deref(),
+            Some("14")
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn start_does_not_rebind_live_project_session_pin() {
+        let dir = TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"0\"\n",
+        )
         .unwrap();
-    let pane_b = iso
-        .new_session("sess-b", std::path::Path::new("/tmp"))
-        .unwrap();
-    // pane_b is in sess-b; expected is sess-a — should auto-relocate
-    let result = relocate_if_wrong_session(&iso, &pane_b, "sess-a");
-    assert!(result, "should return true after successful relocation");
-    let sess = iso.pane_session(&pane_b).unwrap();
-    assert_eq!(sess, "sess-a", "pane should be in sess-a after relocation");
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn relocate_fails_gracefully_when_no_anchor() {
-    let iso = IsolatedTmux::new("start-reloc-noanchor");
-    let pane = iso
-        .new_session("sess-a", std::path::Path::new("/tmp"))
-        .unwrap();
-    // Expected session "sess-nonexistent" has no active pane — relocation should fail gracefully
-    let result = relocate_if_wrong_session(&iso, &pane, "sess-nonexistent");
-    assert!(
-        !result,
-        "should return false when no anchor pane exists in expected session"
-    );
-    // pane should still be in original session
-    let sess = iso.pane_session(&pane).unwrap();
-    assert_eq!(
-        sess, "sess-a",
-        "pane should remain in original session on failure"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn start_rebinds_dead_project_session_to_current_pane_session() {
-    let dir = TempDir::new().unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    std::fs::write(
-        dir.path().join(".agent-doc/config.toml"),
-        "tmux_session = \"0\"\n",
-    )
-    .unwrap();
 
-    let iso = IsolatedTmux::new("start-rebind-dead-session");
-    let pane = iso.new_session("14", dir.path()).unwrap();
+        let iso = IsolatedTmux::new("start-rebind-live-session");
+        let _expected_pane = iso.new_session("0", dir.path()).unwrap();
+        let pane = iso.new_session("14", dir.path()).unwrap();
 
-    let relocated = relocate_if_wrong_session(&iso, &pane, "0");
-    assert!(
-        !relocated,
-        "missing anchor in dead configured session should fall back to current pane session"
-    );
+        rebind_project_tmux_session_if_expected_dead(&iso, &pane, "0");
 
-    rebind_project_tmux_session_if_expected_dead(&iso, &pane, "0");
+        assert_eq!(project_config::project_tmux_session().as_deref(), Some("0"));
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn existing_session_pane_action_refuses_proven_live_owner() {
+        let iso = IsolatedTmux::new("start-duplicate-live-pane");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pane_a = iso.new_session("test", tmp.path()).unwrap();
+        let pane_b = iso.split_window(&pane_a, tmp.path(), "-dh").unwrap();
+        let entry = crate::sessions::SessionEntry {
+            pane: pane_a.clone(),
+            pid: 0,
+            cwd: tmp.path().display().to_string(),
+            started: String::new(),
+            session_id: "start-duplicate-live-pane".to_string(),
+            file: "tasks/software/corky.md".to_string(),
+            window: iso.pane_window(&pane_a).unwrap_or_default(),
+            supervisor_instance_id: String::new(),
+        };
 
-    assert_eq!(
-        project_config::project_tmux_session().as_deref(),
-        Some("14")
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn start_does_not_rebind_live_project_session_pin() {
-    let dir = TempDir::new().unwrap();
-    let _cwd_guard = ScopedCurrentDir::set(dir.path());
-    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-    std::fs::write(
-        dir.path().join(".agent-doc/config.toml"),
-        "tmux_session = \"0\"\n",
-    )
-    .unwrap();
+        let action =
+            existing_session_pane_action_from_entry(&iso, &pane_b, Some(&entry), Some(&pane_a));
+        assert_eq!(
+            action,
+            Some(ExistingSessionPaneAction::Refuse(pane_a.clone()))
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn existing_session_refusal_keeps_launcher_pane_in_original_session() {
+        let iso = IsolatedTmux::new("start-reuse-keeps-launcher-session");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let owner_pane = iso.new_session("sess-a", tmp.path()).unwrap();
+        let launcher_pane = iso.new_session("sess-b", tmp.path()).unwrap();
+        let entry = crate::sessions::SessionEntry {
+            pane: owner_pane.clone(),
+            pid: 0,
+            cwd: tmp.path().display().to_string(),
+            started: String::new(),
+            session_id: "start-reuse-keeps-launcher-session".to_string(),
+            file: "tasks/software/corky.md".to_string(),
+            window: iso.pane_window(&owner_pane).unwrap_or_default(),
+            supervisor_instance_id: String::new(),
+        };
 
-    let iso = IsolatedTmux::new("start-rebind-live-session");
-    let _expected_pane = iso.new_session("0", dir.path()).unwrap();
-    let pane = iso.new_session("14", dir.path()).unwrap();
+        let action = existing_session_pane_action_from_entry(
+            &iso,
+            &launcher_pane,
+            Some(&entry),
+            Some(&owner_pane),
+        );
+        assert_eq!(
+            action,
+            Some(ExistingSessionPaneAction::Refuse(owner_pane.clone()))
+        );
+        assert_eq!(
+            iso.pane_session(&launcher_pane).unwrap(),
+            "sess-b",
+            "refusing an existing live owner must not relocate the launcher pane"
+        );
+        assert_eq!(iso.pane_session(&owner_pane).unwrap(), "sess-a");
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn existing_session_pane_action_ignores_same_pane() {
+        let iso = IsolatedTmux::new("start-duplicate-same-pane");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let entry = crate::sessions::SessionEntry {
+            pane: pane.clone(),
+            pid: 0,
+            cwd: tmp.path().display().to_string(),
+            started: String::new(),
+            session_id: "start-duplicate-same-pane".to_string(),
+            file: "tasks/software/corky.md".to_string(),
+            window: iso.pane_window(&pane).unwrap_or_default(),
+            supervisor_instance_id: String::new(),
+        };
 
-    rebind_project_tmux_session_if_expected_dead(&iso, &pane, "0");
+        let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None);
+        assert_eq!(action, None);
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn existing_session_pane_action_refuses_alive_stale_registration_without_owner() {
+        let iso = IsolatedTmux::new("start-stale-alive-pane");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pane_a = iso.new_session("test", tmp.path()).unwrap();
+        let pane_b = iso.split_window(&pane_a, tmp.path(), "-dh").unwrap();
+        let entry = crate::sessions::SessionEntry {
+            pane: pane_a.clone(),
+            pid: 0,
+            cwd: tmp.path().display().to_string(),
+            started: String::new(),
+            session_id: "start-stale-alive-pane".to_string(),
+            file: "tasks/software/corky.md".to_string(),
+            window: iso.pane_window(&pane_a).unwrap_or_default(),
+            supervisor_instance_id: String::new(),
+        };
 
-    assert_eq!(project_config::project_tmux_session().as_deref(), Some("0"));
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn existing_session_pane_action_refuses_proven_live_owner() {
-    let iso = IsolatedTmux::new("start-duplicate-live-pane");
-    let tmp = tempfile::TempDir::new().unwrap();
-    let pane_a = iso.new_session("test", tmp.path()).unwrap();
-    let pane_b = iso.split_window(&pane_a, tmp.path(), "-dh").unwrap();
-    let entry = crate::sessions::SessionEntry {
-        pane: pane_a.clone(),
-        pid: 0,
-        cwd: tmp.path().display().to_string(),
-        started: String::new(),
-        session_id: "start-duplicate-live-pane".to_string(),
-        file: "tasks/software/corky.md".to_string(),
-        window: iso.pane_window(&pane_a).unwrap_or_default(),
-        supervisor_instance_id: String::new(),
-    };
+        let action = existing_session_pane_action_from_entry(&iso, &pane_b, Some(&entry), None);
+        assert_eq!(
+            action,
+            Some(ExistingSessionPaneAction::Refuse(pane_a.clone()))
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn existing_session_pane_action_ignores_dead_registered_pane() {
+        let iso = IsolatedTmux::new("start-duplicate-dead-pane");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let entry = crate::sessions::SessionEntry {
+            pane: "%999999".to_string(),
+            pid: 0,
+            cwd: tmp.path().display().to_string(),
+            started: String::new(),
+            session_id: "start-duplicate-dead-pane".to_string(),
+            file: "tasks/software/corky.md".to_string(),
+            window: String::new(),
+            supervisor_instance_id: String::new(),
+        };
 
-    let action =
-        existing_session_pane_action_from_entry(&iso, &pane_b, Some(&entry), Some(&pane_a));
-    assert_eq!(
-        action,
-        Some(ExistingSessionPaneAction::Refuse(pane_a.clone()))
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn existing_session_refusal_keeps_launcher_pane_in_original_session() {
-    let iso = IsolatedTmux::new("start-reuse-keeps-launcher-session");
-    let tmp = tempfile::TempDir::new().unwrap();
-    let owner_pane = iso.new_session("sess-a", tmp.path()).unwrap();
-    let launcher_pane = iso.new_session("sess-b", tmp.path()).unwrap();
-    let entry = crate::sessions::SessionEntry {
-        pane: owner_pane.clone(),
-        pid: 0,
-        cwd: tmp.path().display().to_string(),
-        started: String::new(),
-        session_id: "start-reuse-keeps-launcher-session".to_string(),
-        file: "tasks/software/corky.md".to_string(),
-        window: iso.pane_window(&owner_pane).unwrap_or_default(),
-        supervisor_instance_id: String::new(),
-    };
+        let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None);
+        assert_eq!(action, None);
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn format_existing_pane_conflict_error_includes_manual_tmux_commands() {
+        let iso = IsolatedTmux::new("start-conflict-error");
+        let tmp = TempDir::new().unwrap();
+        let owner_pane = iso.new_session("test", tmp.path()).unwrap();
+        let launcher_pane = iso.split_window(&owner_pane, tmp.path(), "-dh").unwrap();
+        let doc = tmp.path().join("tasks/software/corky.md");
+        let rendered = format_existing_pane_conflict_error(&iso, &doc, &launcher_pane, &owner_pane);
+        assert!(rendered.contains("tmux list-panes -a"));
+        assert!(rendered.contains(&format!("tmux kill-pane -t {}", launcher_pane)));
+        assert!(rendered.contains(&format!("tmux kill-pane -t {}", owner_pane)));
+        assert!(rendered.contains(&owner_pane));
+        assert!(rendered.contains(&launcher_pane));
+    }
+    #[test]
+    fn start_invalid_frontmatter_returns_contextual_error() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("bad.md");
+        std::fs::write(&file, "---\nprompt_presets:\n  key: [oops\n---\n").unwrap();
 
-    let action = existing_session_pane_action_from_entry(
-        &iso,
-        &launcher_pane,
-        Some(&entry),
-        Some(&owner_pane),
-    );
-    assert_eq!(
-        action,
-        Some(ExistingSessionPaneAction::Refuse(owner_pane.clone()))
-    );
-    assert_eq!(
-        iso.pane_session(&launcher_pane).unwrap(),
-        "sess-b",
-        "refusing an existing live owner must not relocate the launcher pane"
-    );
-    assert_eq!(iso.pane_session(&owner_pane).unwrap(), "sess-a");
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn existing_session_pane_action_ignores_same_pane() {
-    let iso = IsolatedTmux::new("start-duplicate-same-pane");
-    let tmp = tempfile::TempDir::new().unwrap();
-    let pane = iso.new_session("test", tmp.path()).unwrap();
-    let entry = crate::sessions::SessionEntry {
-        pane: pane.clone(),
-        pid: 0,
-        cwd: tmp.path().display().to_string(),
-        started: String::new(),
-        session_id: "start-duplicate-same-pane".to_string(),
-        file: "tasks/software/corky.md".to_string(),
-        window: iso.pane_window(&pane).unwrap_or_default(),
-        supervisor_instance_id: String::new(),
-    };
+        let err = run(&file, false, false).unwrap_err();
+        let message = err.to_string();
 
-    let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None);
-    assert_eq!(action, None);
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn existing_session_pane_action_refuses_alive_stale_registration_without_owner() {
-    let iso = IsolatedTmux::new("start-stale-alive-pane");
-    let tmp = tempfile::TempDir::new().unwrap();
-    let pane_a = iso.new_session("test", tmp.path()).unwrap();
-    let pane_b = iso.split_window(&pane_a, tmp.path(), "-dh").unwrap();
-    let entry = crate::sessions::SessionEntry {
-        pane: pane_a.clone(),
-        pid: 0,
-        cwd: tmp.path().display().to_string(),
-        started: String::new(),
-        session_id: "start-stale-alive-pane".to_string(),
-        file: "tasks/software/corky.md".to_string(),
-        window: iso.pane_window(&pane_a).unwrap_or_default(),
-        supervisor_instance_id: String::new(),
-    };
-
-    let action = existing_session_pane_action_from_entry(&iso, &pane_b, Some(&entry), None);
-    assert_eq!(
-        action,
-        Some(ExistingSessionPaneAction::Refuse(pane_a.clone()))
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn existing_session_pane_action_ignores_dead_registered_pane() {
-    let iso = IsolatedTmux::new("start-duplicate-dead-pane");
-    let tmp = tempfile::TempDir::new().unwrap();
-    let pane = iso.new_session("test", tmp.path()).unwrap();
-    let entry = crate::sessions::SessionEntry {
-        pane: "%999999".to_string(),
-        pid: 0,
-        cwd: tmp.path().display().to_string(),
-        started: String::new(),
-        session_id: "start-duplicate-dead-pane".to_string(),
-        file: "tasks/software/corky.md".to_string(),
-        window: String::new(),
-        supervisor_instance_id: String::new(),
-    };
-
-    let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None);
-    assert_eq!(action, None);
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn format_existing_pane_conflict_error_includes_manual_tmux_commands() {
-    let iso = IsolatedTmux::new("start-conflict-error");
-    let tmp = TempDir::new().unwrap();
-    let owner_pane = iso.new_session("test", tmp.path()).unwrap();
-    let launcher_pane = iso.split_window(&owner_pane, tmp.path(), "-dh").unwrap();
-    let doc = tmp.path().join("tasks/software/corky.md");
-    let rendered = format_existing_pane_conflict_error(&iso, &doc, &launcher_pane, &owner_pane);
-    assert!(rendered.contains("tmux list-panes -a"));
-    assert!(rendered.contains(&format!("tmux kill-pane -t {}", launcher_pane)));
-    assert!(rendered.contains(&format!("tmux kill-pane -t {}", owner_pane)));
-    assert!(rendered.contains(&owner_pane));
-    assert!(rendered.contains(&launcher_pane));
-}
-#[test]
-fn start_invalid_frontmatter_returns_contextual_error() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let file = tmp.path().join("bad.md");
-    std::fs::write(&file, "---\nprompt_presets:\n  key: [oops\n---\n").unwrap();
-
-    let err = run(&file, false, false).unwrap_err();
-    let message = err.to_string();
-
-    assert!(message.contains("invalid YAML frontmatter in"));
-    assert!(message.contains("bad.md"));
-    assert!(message.contains("Frontmatter excerpt:"));
-    assert!(message.contains("> 2 |   key: [oops"));
-    assert!(
-        message.contains("Fix the frontmatter between the opening and closing --- markers")
-    );
-}
-#[test]
-fn idle_queue_drain_payload_uses_trigger_for_codex() {
-    let payload = idle_queue_drain_payload(
-        "tasks/monsterrodholders.md",
-        &crate::harness::HarnessConfig::codex(),
-        "JB Run Agent Doc on monsterrodholders.md stalled.",
-    );
-
-    assert_eq!(payload, "agent-doc tasks/monsterrodholders.md");
-    assert!(!payload.contains("Agent-doc active queue continuation"));
-    assert!(!payload.contains("JB Run Agent Doc on monsterrodholders.md stalled."));
-    assert_eq!(
-        idle_queue_drain_payload_kind(
+        assert!(message.contains("invalid YAML frontmatter in"));
+        assert!(message.contains("bad.md"));
+        assert!(message.contains("Frontmatter excerpt:"));
+        assert!(message.contains("> 2 |   key: [oops"));
+        assert!(
+            message.contains("Fix the frontmatter between the opening and closing --- markers")
+        );
+    }
+    #[test]
+    fn idle_queue_drain_payload_uses_trigger_for_codex() {
+        let payload = idle_queue_drain_payload(
+            "tasks/monsterrodholders.md",
             &crate::harness::HarnessConfig::codex(),
-            "JB Run Agent Doc on monsterrodholders.md stalled."
-        ),
-        "trigger"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn managed_capability_proof_status_uses_tmux_message_not_pane_output() {
-    let tmp = TempDir::new().unwrap();
-    let iso = IsolatedTmux::new("start-capability-proof-status");
-    let pane = iso.new_session("test", tmp.path()).unwrap();
-    let event = "opencode_capability_proof status=proven network=proven";
+            "JB Run Agent Doc on monsterrodholders.md stalled.",
+        );
 
-    display_managed_capability_proof_status(&iso, &pane, "opencode", event)
-        .expect("proof status should be surfaced through tmux display-message");
-    std::thread::sleep(Duration::from_millis(150));
+        assert_eq!(payload, "agent-doc tasks/monsterrodholders.md");
+        assert!(!payload.contains("Agent-doc active queue continuation"));
+        assert!(!payload.contains("JB Run Agent Doc on monsterrodholders.md stalled."));
+        assert_eq!(
+            idle_queue_drain_payload_kind(
+                &crate::harness::HarnessConfig::codex(),
+                "JB Run Agent Doc on monsterrodholders.md stalled."
+            ),
+            "trigger"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn managed_capability_proof_status_uses_tmux_message_not_pane_output() {
+        let tmp = TempDir::new().unwrap();
+        let iso = IsolatedTmux::new("start-capability-proof-status");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let event = "opencode_capability_proof status=proven network=proven";
 
-    let captured = iso.capture_pane(&pane, Some(20)).unwrap();
-    assert!(
-        !captured.contains(event),
-        "tmux display-message must not write proof diagnostics into pane output: {captured}"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn dispatch_submit_text_to_tmux_uses_pane_submit_path() {
-    let tmp = TempDir::new().unwrap();
-    let iso = IsolatedTmux::new("start-ipc-submit-path");
-    let pane = iso.new_session("test", tmp.path()).unwrap();
-    let output_path = tmp.path().join("submit.txt");
-    let done_path = tmp.path().join("done.txt");
+        display_managed_capability_proof_status(&iso, &pane, "opencode", event)
+            .expect("proof status should be surfaced through tmux display-message");
+        std::thread::sleep(Duration::from_millis(150));
 
-    std::thread::sleep(Duration::from_millis(150));
-    iso.send_keys(
-        &pane,
-        &format!(
-            "sh -lc 'IFS= read -r line; printf \"%s\" \"$line\" > \"{}\"; touch \"{}\"'",
-            output_path.display(),
-            done_path.display()
-        ),
-    )
-    .unwrap();
-    std::thread::sleep(Duration::from_millis(150));
+        let captured = iso.capture_pane(&pane, Some(20)).unwrap();
+        assert!(
+            !captured.contains(event),
+            "tmux display-message must not write proof diagnostics into pane output: {captured}"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn dispatch_submit_text_to_tmux_uses_pane_submit_path() {
+        let tmp = TempDir::new().unwrap();
+        let iso = IsolatedTmux::new("start-ipc-submit-path");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let output_path = tmp.path().join("submit.txt");
+        let done_path = tmp.path().join("done.txt");
 
-    dispatch_submit_text_to_tmux(&iso, &pane, "agent-doc tasks/software/tsift.md\n", "claude")
+        std::thread::sleep(Duration::from_millis(150));
+        iso.send_keys(
+            &pane,
+            &format!(
+                "sh -lc 'IFS= read -r line; printf \"%s\" \"$line\" > \"{}\"; touch \"{}\"'",
+                output_path.display(),
+                done_path.display()
+            ),
+        )
         .unwrap();
-    for _ in 0..40 {
-        if done_path.exists() {
-            break;
+        std::thread::sleep(Duration::from_millis(150));
+
+        dispatch_submit_text_to_tmux(&iso, &pane, "agent-doc tasks/software/tsift.md\n", "claude")
+            .unwrap();
+        for _ in 0..40 {
+            if done_path.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
-        std::thread::sleep(Duration::from_millis(50));
+
+        assert!(done_path.exists(), "expected submitted command to complete");
+        assert_eq!(
+            std::fs::read_to_string(&output_path).unwrap(),
+            "agent-doc tasks/software/tsift.md"
+        );
     }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn supervisor_ipc_tmux_pipeline_delivers_submit_arrows_and_enter() {
+        let tmp = TempDir::new().unwrap();
+        let iso = IsolatedTmux::new("start-ipc-live-supervisor-input-e2e");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let output_path = tmp.path().join("input.bin");
+        let done_path = tmp.path().join("done.txt");
+        let prompt = "agent-doc tasks/software/tsift.md";
+        let expected = format!("{prompt}\n\x1b[A\x1b[B\x1b[D\x1b[C\n").into_bytes();
 
-    assert!(done_path.exists(), "expected submitted command to complete");
-    assert_eq!(
-        std::fs::read_to_string(&output_path).unwrap(),
-        "agent-doc tasks/software/tsift.md"
-    );
-}
-#[test]
-#[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn supervisor_ipc_tmux_pipeline_delivers_submit_arrows_and_enter() {
-    let tmp = TempDir::new().unwrap();
-    let iso = IsolatedTmux::new("start-ipc-live-supervisor-input-e2e");
-    let pane = iso.new_session("test", tmp.path()).unwrap();
-    let output_path = tmp.path().join("input.bin");
-    let done_path = tmp.path().join("done.txt");
-    let prompt = "agent-doc tasks/software/tsift.md";
-    let expected = format!("{prompt}\n\x1b[A\x1b[B\x1b[D\x1b[C\n").into_bytes();
+        std::thread::sleep(Duration::from_millis(150));
+        iso.send_keys(
+            &pane,
+            &format!(
+                "sh -lc 'stty raw -echo; dd bs=1 count={} of=\"{}\" 2>/dev/null; touch \"{}\"'",
+                expected.len(),
+                output_path.display(),
+                done_path.display()
+            ),
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(150));
 
-    std::thread::sleep(Duration::from_millis(150));
-    iso.send_keys(
-        &pane,
-        &format!(
-            "sh -lc 'stty raw -echo; dd bs=1 count={} of=\"{}\" 2>/dev/null; touch \"{}\"'",
-            expected.len(),
-            output_path.display(),
-            done_path.display()
-        ),
-    )
-    .unwrap();
-    std::thread::sleep(Duration::from_millis(150));
+        let _tmux_env = ScopedEnvVar::set("TMUX", tmux_env_for_server(&iso));
+        let shared = Arc::new(SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            "claude",
+            None,
+            Some(crate::session_actor::ActorState::Ready),
+            Some(pane.clone()),
+        ));
+        let shared_for_ipc = shared.clone();
+        let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), "test-session", {
+            move |method| handle_ipc(method, &shared_for_ipc)
+        })
+        .unwrap();
 
-    let _tmux_env = ScopedEnvVar::set("TMUX", tmux_env_for_server(&iso));
-    let shared = Arc::new(SupervisorShared::with_actor_runtime(
-        "test",
-        "test-instance".to_string(),
-        "claude",
-        None,
-        Some(crate::session_actor::ActorState::Ready),
-        Some(pane.clone()),
-    ));
-    let shared_for_ipc = shared.clone();
-    let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), "test-session", {
-        move |method| handle_ipc(method, &shared_for_ipc)
-    })
-    .unwrap();
+        let response = crate::supervisor::ipc::send_command(
+            ipc.path(),
+            &IpcMethod::Inject {
+                bytes: prompt.to_string(),
+            },
+        )
+        .expect("supervisor IPC inject should succeed");
+        assert!(response.ok, "supervisor IPC inject should return ok");
 
-    let response = crate::supervisor::ipc::send_command(
-        ipc.path(),
-        &IpcMethod::Inject {
-            bytes: prompt.to_string(),
-        },
-    )
-    .expect("supervisor IPC inject should succeed");
-    assert!(response.ok, "supervisor IPC inject should return ok");
+        crate::sessions::send_key(&iso, &pane, "Up").unwrap();
+        crate::sessions::send_key(&iso, &pane, "Down").unwrap();
+        crate::sessions::send_key(&iso, &pane, "Left").unwrap();
+        crate::sessions::send_key(&iso, &pane, "Right").unwrap();
+        crate::sessions::send_key(&iso, &pane, "Enter").unwrap();
 
-    crate::sessions::send_key(&iso, &pane, "Up").unwrap();
-    crate::sessions::send_key(&iso, &pane, "Down").unwrap();
-    crate::sessions::send_key(&iso, &pane, "Left").unwrap();
-    crate::sessions::send_key(&iso, &pane, "Right").unwrap();
-    crate::sessions::send_key(&iso, &pane, "Enter").unwrap();
-
-    for _ in 0..40 {
-        if done_path.exists() {
-            break;
+        for _ in 0..40 {
+            if done_path.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
-        std::thread::sleep(Duration::from_millis(50));
+
+        assert!(
+            done_path.exists(),
+            "expected supervisor IPC inject to submit through the live tmux pane"
+        );
+        let actual = std::fs::read(&output_path).unwrap();
+        let expected_cr = format!("{prompt}\r\x1b[A\x1b[B\x1b[D\x1b[C\r").into_bytes();
+        assert!(
+            actual == expected || actual == expected_cr,
+            "raw harness should receive prompt submit, arrows, and final Enter"
+        );
+
+        ipc.stop();
     }
-
-    assert!(
-        done_path.exists(),
-        "expected supervisor IPC inject to submit through the live tmux pane"
-    );
-    let actual = std::fs::read(&output_path).unwrap();
-    let expected_cr = format!("{prompt}\r\x1b[A\x1b[B\x1b[D\x1b[C\r").into_bytes();
-    assert!(
-        actual == expected || actual == expected_cr,
-        "raw harness should receive prompt submit, arrows, and final Enter"
-    );
-
-    ipc.stop();
-}
 }

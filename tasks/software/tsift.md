@@ -149,11 +149,6 @@ Source links: [NVIDIA RTX 5090](https://www.nvidia.com/en-us/geforce/graphics-ca
 
 > **Queue prompt:**
 >
-> How can I use a local model to support both tsift and agent-doc for local Knowledge models?
-
-
-> **Queue prompt:**
->
 > Can I use the Qwen2.5-Coder-32B with my current available vRAM?
 
 
@@ -174,29 +169,98 @@ Practical guidance:
 - **Quality try:** `Q5_K_M` if you keep context moderate, for example 8k-16k to start.
 - **Tight / test-only:** `Q6_K` may fit only with small context and careful settings; expect failures or CPU offload if the runtime is not efficient.
 - **Avoid as default:** `Q8_0`, fp16, or very large 32k-128k contexts on one 32 GB card.
-6. Keep hot-path query behavior local and cached: no live model call merely because an agent asked for context.
-5. Have agent-doc retrieve only through tsift commands: `memory search`, `context-pack`, `finding list`, and graph/search envelopes.
-4. Let `tsift finding harvest` optionally use the local extractor for draft candidates from agent-doc archives.
-3. Add schema-constrained extraction records with provenance and confidence.
-2. Teach `tsift summarize --extract` to use `models.roles.extractor_*` instead of assuming one remote provider.
-1. Add a shared tsift model config and OpenAI-compatible adapter.
-- optionally propose backlog/review dedupe candidates, but never silently mutate them without the existing agent-doc closeout path
-- enrich `context-pack` packets with local semantic concepts and trusted findings
-- answer `agent-doc memory search` / duplicate-work checks through tsift retrieval
-- extract draft findings/decisions/notes from agent-doc archives
-- summarize committed exchange tails into `.tsift/memory.db`
 
 For tsift model support, this means Qwen2.5-Coder-32B is a reasonable `code.quality` / `5090-local` profile, not a portable default. The portable default should stay around 7B-14B or a small MoE/20B-class model, because other users may only have 8-16 GB of VRAM.
 
 I would run it through `llama.cpp`/GGUF or another runtime with explicit GPU layer/context controls. `ollama` is not installed on this machine right now (`ollama list` failed with `command not found`), so I could not inspect an existing local Ollama model tag or size.
 
 No code changed this cycle. Verification was hardware/document only: `tsift status`, `agent-doc preflight`, `agent-doc plan`, `nvidia-smi`, and `ollama list`. `tsift status` still reports one missing workspace scope, so I did not rely on tsift graph/search evidence.
-<!-- agent:boundary:84914b49 -->
+
+### Re: local model shared by tsift and agent-doc — gpt-5
+
+> **Queue prompt:**
+>
+> How can I use a local model to support both tsift and agent-doc for local Knowledge models?
+
+
+Use one local model stack, but keep tsift and agent-doc responsibilities separate.
+
+The right shape is a **local knowledge sidecar**: a local OpenAI-compatible model endpoint plus a shared tsift model registry/config. tsift uses it for batch extraction, embeddings, reranking, and graph enrichment. agent-doc uses tsift as the knowledge substrate instead of embedding its own separate RAG system.
+
+Recommended architecture:
+
+```text
+local model server
+  OpenAI-compatible HTTP endpoint
+  chat/extraction model: Qwen2.5-Coder-32B Q4/Q5 on the 5090, smaller fallback for others
+  embedding model: Qwen3-Embedding or BGE-M3
+  reranker model: Qwen3-Reranker
+        |
+        v
+tsift model adapter / registry
+  role names: extractor.fast, extractor.quality, code.quality, embedding.default, reranker.default
+  schema-validated JSON extraction
+  provenance: model, quant, prompt version, source handle, confidence
+        |
+        v
+tsift durable stores
+  .tsift/summaries.db   cached LLM entities/relationships/summaries
+  .tsift/memory.db      agent-doc closeout/session memory events
+  .tsift/findings.db    trusted/draft findings, decisions, notes
+  .tsift/graph.db       projected graph/query surface
+        |
+        v
+agent-doc
+  preflight/plan/finalize stay deterministic
+  memory index/search and context-pack pull from tsift
+  local model is used only through tsift-backed knowledge commands
+```
+
+For **tsift**, the local model should replace or supplement the current remote-only extraction path. The spec currently describes `tsift summarize --extract` as a batch LLM extraction path that stores entities, relationships, summaries, model name, and token counts in `.tsift/summaries.db`. Generalize that to a provider-neutral adapter:
+
+```toml
+[models.local]
+provider = "openai-compatible"
+base_url = "http://127.0.0.1:8080/v1"
+
+[models.roles]
+extractor_fast = "qwen3-4b-instruct-q4"
+extractor_quality = "qwen3-14b-instruct-q4"
+code_quality = "qwen2.5-coder-32b-instruct-q4_k_m"
+embedding_default = "qwen3-embedding-0.6b"
+reranker_default = "qwen3-reranker-0.6b"
+```
+
+For **agent-doc**, do not put the local model on the critical write/commit path. agent-doc should keep doing deterministic preflight, queue, CRDT, finalize, and session-check work. The local model should help *around* that path:
+
+- summarize committed exchange tails into `.tsift/memory.db`
+- extract draft findings/decisions/notes from agent-doc archives
+- answer `agent-doc memory search` / duplicate-work checks through tsift retrieval
+- enrich `context-pack` packets with local semantic concepts and trusted findings
+- optionally propose backlog/review dedupe candidates, but never silently mutate them without the existing agent-doc closeout path
+
+The important rule: **tsift owns knowledge; agent-doc consumes knowledge.** That avoids two memory systems drifting apart.
+
+For your 5090, Qwen2.5-Coder-32B in a 4-bit or 5-bit quant is a good `code.quality` local model. I would still keep a smaller `extractor_fast` profile because many knowledge jobs do not need 32B: turning session text into candidate `Finding` / `Decision` / `Note` records is usually a schema extraction problem, not a deep reasoning problem.
+
+A pragmatic rollout would be:
+
+1. Add a shared tsift model config and OpenAI-compatible adapter.
+2. Teach `tsift summarize --extract` to use `models.roles.extractor_*` instead of assuming one remote provider.
+3. Add schema-constrained extraction records with provenance and confidence.
+4. Let `tsift finding harvest` optionally use the local extractor for draft candidates from agent-doc archives.
+5. Have agent-doc retrieve only through tsift commands: `memory search`, `context-pack`, `finding list`, and graph/search envelopes.
+6. Keep hot-path query behavior local and cached: no live model call merely because an agent asked for context.
+
+This gives you local knowledge models for both projects without making every agent-doc turn depend on the GPU being idle. If the GPU is busy or the local server is down, agent-doc still runs; tsift simply reports stale/missing extraction and suggests the explicit refresh command.
+
+Local docs checked: `src/agent-doc/README.md` session memory retrieval, `src/tsift/specs/search-navigation.md` summarize extraction, `src/tsift/specs/graph.md` findings/semantic graph, and `src/tsift/specs/architecture.md` memory + MemGraphRAG crates. No code changed this cycle. Verification was document/local-doc review only: `tsift status`, `agent-doc preflight`, `agent-doc plan`, targeted `rg`, targeted `sed`, `agent-doc repair`, and `git diff`. `tsift status` still reports one missing workspace scope, so I avoided tsift graph/search evidence.
+<!-- agent:boundary:8e73c2e1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

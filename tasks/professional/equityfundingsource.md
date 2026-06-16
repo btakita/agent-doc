@@ -216,7 +216,32 @@ Commands: `agent-doc preflight`, `agent-doc plan`, `git status --short`, and tar
 Verification: code inspection only; no tests run because no code changed.
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:ecee3a48 -->
+
+### Re: Verbal Amount — gpt-5
+
+> **Queue prompt:**
+>
+> Verbal amount
+
+
+`Verbal amount` is EFS-local interested-lender workflow state, not TMO loan state and not a formal funding commitment by itself.
+
+Classification: EFS D1 source of truth; TMO-related only as pre-commitment context on a TMO-backed deal.
+
+Evidence:
+- The Available Deal `Interested Lenders` workflow stores the field as `verbal_commitment_amount` on `investor_deal_interests`.
+- Saving the workflow can also set `verbal_commitment_recorded_at`, which makes `deal_interest_workflow_stage_` derive the local `verbal_commitment` stage and next action `Convert to formal funding commitment`.
+- The admin patch route writes `verbal_commitment_amount` / `verbal_commitment_recorded_at` directly to `investor_deal_interests`.
+- The explicit `tmo_cache_outbox` writeback path found in this workflow area remains `select_lender`, not verbal amount.
+
+Boundary: this should be treated as an admin note that a lender verbally indicated an amount. The formal commitment/funding path should remain the `funds`/Funding Commits flow, with TMO writeback only through reviewed/gated mappings.
+
+Changed paths: none.
+Commands: `agent-doc preflight`, `agent-doc plan`, `git status --short`, and targeted `rg` inspection in `src/equityfundingsource-dev`.
+Verification: code inspection only; no tests run because no code changed.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:0838e823 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -232,7 +257,7 @@ Do these steps + fields relate to TMO state?
 - ~~Mark Call Completed~~
 - ~~Start Underwriting~~
 - ~~Call scheduled~~
-- Verbal amount
+- ~~Verbal amount~~
 - Contact method
 - Pre-doc conditions
 - Pre-doc instructions

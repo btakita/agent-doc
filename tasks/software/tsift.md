@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -255,13 +255,47 @@ A pragmatic rollout would be:
 This gives you local knowledge models for both projects without making every agent-doc turn depend on the GPU being idle. If the GPU is busy or the local server is down, agent-doc still runs; tsift simply reports stale/missing extraction and suggests the explicit refresh command.
 
 Local docs checked: `src/agent-doc/README.md` session memory retrieval, `src/tsift/specs/search-navigation.md` summarize extraction, `src/tsift/specs/graph.md` findings/semantic graph, and `src/tsift/specs/architecture.md` memory + MemGraphRAG crates. No code changed this cycle. Verification was document/local-doc review only: `tsift status`, `agent-doc preflight`, `agent-doc plan`, targeted `rg`, targeted `sed`, `agent-doc repair`, and `git diff`. `tsift status` still reports one missing workspace scope, so I avoided tsift graph/search evidence.
-<!-- agent:boundary:0aca2c1c -->
+
+### Re: local model training — gpt-5
+
+> **Queue prompt:**
+>
+> Do the local models need training?
+
+
+Not initially. For tsift, the right default is **pretrained local models + schema-constrained extraction + fixtures**, not fine-tuning.
+
+There are two different things that can get blurred together:
+
+- **Running extraction/index refresh:** yes. tsift needs explicit refresh jobs such as `tsift summarize --extract <path>` to populate cached semantic/entity/relationship rows, and then graph refresh can project those rows. That is not model training; it is building the local knowledge cache.
+- **Training or fine-tuning model weights:** no, not as the first move. Use off-the-shelf Qwen/Gemma/Phi/Devstral-style models behind an OpenAI-compatible local endpoint, force structured JSON output, validate provenance/confidence/source handles, and measure extraction quality before deciding that weights need to move.
+
+The current spec supports that boundary. `tsift summarize --extract` is the explicit batch model path and stores model/provenance in `summaries.db`; query behavior is supposed to stay local/cached rather than doing live model calls on cache miss. The graph semantic path also has a deterministic local baseline today: `tsift-local-hash-v1` embeddings for semantic concept/entity rows. So the near-term work is not training; it is provider-neutral local inference, constrained extraction, and evaluation.
+
+What we do need is a **labeled evaluation corpus** that could later become training data:
+
+- accepted/rejected `Finding` / `Decision` / `Note` candidates from agent-doc sessions
+- true/false entity and relationship extractions with source anchors
+- examples of hallucinated edges, missing concepts, bad confidence, and bad provenance
+- retrieval fixtures measuring whether semantic rows improve `graph-db related`, `context-pack`, and memory search
+- latency and token/VRAM budgets for small, balanced, and 5090-local profiles
+
+Only train after those fixtures show a stable failure pattern that prompting, JSON schema constraints, better chunking, a stronger pretrained model, embeddings, or reranking do not fix. If training becomes justified, I would start smaller than full LLM fine-tuning:
+
+- calibrate thresholds and confidence labels first
+- tune prompts/grammars and extraction schemas second
+- consider a lightweight classifier or reranker third
+- consider LoRA fine-tuning for extraction only after there are enough labeled examples and a clear precision/recall target
+
+The strongest rule for tsift remains: deterministic AST extraction owns code facts. A model can propose semantic knowledge, but it should enter as cached, provenance-bearing, confidence-scored candidates until tests and accepted review promote it.
+
+No code changed this cycle. Verification/context used: `agent-doc preflight`, `agent-doc plan/read`, `tsift status` at the workspace root, `tsift status` in `src/tsift` showing the submodule index fresh, targeted `tsift --envelope search`, targeted `tsift --envelope source-read` for `specs/search-navigation.md` and `specs/graph.md`, `tsift --envelope symbol-read SEMANTIC_EMBEDDING_MODEL`, and `git status --short`. The parent workspace still reports one missing unrelated workspace scope (`FDE-Project-Interview`), but the `src/tsift` index is fresh and I relied on that narrower submodule context. The worktree has unrelated existing changes; I left them untouched.
+<!-- agent:boundary:a6a1137b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Do the local models need training?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

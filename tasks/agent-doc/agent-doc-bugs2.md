@@ -64,6 +64,11 @@ Proof for this cycle:
 
 > **Queue prompt:**
 >
+> Would lean-lang help to create proper invariants? So agents can create unnecessary architecture sprawl?
+
+
+> **Queue prompt:**
+>
 > :pushpin: [#jbruncloseoutstate]
 
 
@@ -80,7 +85,7 @@ Proof for this cycle:
 - Verification: focused route tests passed; `make check` passed clippy, 4,550 nextest tests, doctests, and the ignored medium SimWorld closeout corpus. Latest GitHub CI on `main` is green (`27594082265`).
 - Confidence: high for this JB Run Agent Doc failure mode; medium for the full family until more route/repair/session-check decisions are collapsed into the shared closeout recovery layer.
 - Escalation: none.
-<!-- agent:boundary:9efa2c53 -->
+<!-- agent:boundary:59a3f5dd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -88,7 +93,7 @@ Proof for this cycle:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` still does not work. What is wrong with the codebase? This is disturbing? Seems like we need a refactoring project to be able to reliably make this fix.~~
 - ~~:pushpin: [#jbruncloseoutstate]~~
-- Would lean-lang help to create proper invariants? So agents can create unnecessary architecture sprawl?
+- ~~Would lean-lang help to create proper invariants? So agents can create unnecessary architecture sprawl?~~
 - How can we have the agents think architecturally instead of the default sprawl code?
 ---
 Typing into the queue during the turn cause the conversation to be interrupted. ![img_30.png](img_30.png). A pre-finalize response was uncommitted causing the response to be treated as a user prompt ![img_31.png](img_31.png). After restart, JB `Run Agent Doc` error.

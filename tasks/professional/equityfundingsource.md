@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -54,14 +54,14 @@ Proof:
 - Verification: no application code changed; no tests or deploy run.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:8899decc -->
+<!-- agent:boundary:6cbdfdaf -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - :pushpin: Move "Interested Lenders" above "Final Loan Documents". deploy
 - do [#efs-interest-order]
 <!-- /agent:queue -->

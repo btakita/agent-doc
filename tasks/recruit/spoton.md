@@ -54,13 +54,32 @@ Compacted content:
 - Do not lead with generic AI chatbot ideas. Their pain is state, timing, ownership, and confidence around real-world installation.
 - Keep emphasizing restaurant-owner reality: they are busy, margin-sensitive, constantly interrupted, and not sitting at a desk waiting to complete onboarding tasks.
 - Rafael explicitly liked that your questions were product-led. Keep doing that: ask about impact, funnel stages, and human workflow before implementation details.
-<!-- agent:boundary:9936ec37 -->
+
+### Re: SpotOn interview prep closeout — gpt-5
+
+> **Queue prompt:**
+>
+> corky gpu to transcribe + diarize [2026-06-11 12-31-50.mp4](../../../../../Videos/2026-06-11%2012-31-50.mp4) if we don't already have a transcript.
+
+
+The prep bullets above are the interview notes. The missing frame is:
+
+- Transcript status: [spoton-2026-06-11-call-transcript.md](spoton-2026-06-11-call-transcript.md) already exists, so I did not re-run the larger video through Corky/GPU transcription.
+- Website context checked: SpotOn publicly positions itself around restaurant POS, online ordering, reservations, labor/team tools, AI profit analysis, integrations, dedicated onboarding, menu setup, training, and 24/7 support ([SpotOn](https://www.spoton.com/), [Restaurant POS](https://www.spoton.com/restaurant-pos/), [New restaurant openings](https://www.spoton.com/restaurant-pos/new-restaurant-openings/), [AI menu assistant](https://www.spoton.com/solutions/ai-menu-assistant/)).
+- Main thesis: help them turn the signed-to-installed path from a manual white-glove operations workflow into a measurable activation product without losing the hospitality promise.
+
+Concise live answer you can use:
+
+> I would approach this as an activation funnel from signed contract to installed POS. First I would make the state of every merchant explicit: what is missing, who owns the next action, how long it has been stuck, and what risk signals we have. Then I would look for places where product can replace low-value manual follow-up with a clear merchant checklist, self-scheduling, upload/review flows, and automated nudges. I would still keep humans in the loop, but reserve them for high-intent moments where they can actually unblock the install. The goal is not just fewer calls; it is fewer unclear steps, faster momentum after signing, and a higher install rate without losing the hospitality that SpotOn sells.
+
+Closeout proof: changed path is the session document only; no new transcript artifact was created. Commands included preflight, plan/read, transcript inspection, SpotOn web review, sidecar reset, recovery preflight, and this force-disk finalize. No code tests were run because no code changed. Confidence is medium-high; exact funnel stage weights still need confirmation from SpotOn.
+<!-- agent:boundary:245750bf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- corky gpu to transcribe + diarize [2026-06-11 12-31-50.mp4](../../../../../Videos/2026-06-11%2012-31-50.mp4) if we don't already have a transcript.
+- ~~corky gpu to transcribe + diarize [2026-06-11 12-31-50.mp4](../../../../../Videos/2026-06-11%2012-31-50.mp4) if we don't already have a transcript.~~
 - Read the transcript. Look at the spoton.com website. What are some things to look out for in the interview today? How can I help them convert more signups -> installs.
 <!-- /agent:queue -->
 

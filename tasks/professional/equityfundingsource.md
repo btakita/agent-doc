@@ -280,7 +280,7 @@ Verification:
 - GitHub Actions check: both the EFS submodule and parent repo report no workflow named `CI`.
 
 Preflight reported high exchange accretion and one session-drift warning; queue work was still actionable, so I completed the implementation and deploy. Confidence: high. Escalation: none.
-<!-- agent:boundary:97e3f97a -->
+<!-- agent:boundary:4300e609 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -298,6 +298,7 @@ deploy
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#jrnz] Use display flex so the cards can stack horizontally. ![img_18.png](img_18.png)
 <!-- /agent:backlog -->
 
 ## Review

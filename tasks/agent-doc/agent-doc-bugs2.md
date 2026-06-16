@@ -453,7 +453,43 @@ Verification:
 Confidence: high. The implementation is isolated, tested for validation/document scoping/append-only behavior/required vocabulary, and the full repo check passed.
 
 Escalation: none.
-<!-- agent:boundary:6dd7e8c9 -->
+
+### Re: do [#archcomponentmerge] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#archcomponentmerge]
+
+
+Implemented `#archcomponentmerge` in submodule commit `ec24c571` (`fix: fence queue consume editor convergence`).
+
+Changed paths:
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/agent-doc-orchestration/src/write/converge.rs`
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/PatchGenerationFenceTest.kt`
+- `src/agent-doc/specs/07-orchestration-commands.md`
+- parent gitlink `src/agent-doc`
+
+What changed:
+- Reused the existing `turn_scope` managed-component contract for broad component-scoped conflict semantics.
+- Enforced the queue-consume editor convergence case at node scope: queue completion now travels as an exact `node_patches` strike keyed to the consumed queue node.
+- Removed the broad legacy `queue` component replacement from queue-consume editor IPC when a queue node patch is available, so sibling queue edits are not conflated with the consumed head.
+- Added raw and transient-marker-normalized baseline hashes to convergence payloads.
+- Extended the JetBrains generation fence so delayed socket/file patches are dropped when the live buffer no longer matches either baseline, while `(HEAD)`, boundary comments, guard markers, and pipeline frontmatter churn remain tolerated.
+- Documented the queue-consume editor IPC rule and added a release note.
+
+Verification:
+- `cargo test -p agent-doc-orchestration queue_consume_editor_convergence_payload_is_node_keyed_and_fenced`
+- `cargo test -p agent-doc-core turn_scope`
+- `make check` (clippy, 4,583 nextest tests, doctests, medium SimWorld corpus)
+- `/usr/bin/zsh -lc 'GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin'` from `src/agent-doc/editors/jetbrains`
+- `gh run list --workflow CI --limit 1` -> latest CI `27607675117` succeeded on `main`
+
+Confidence: high. The broad component-scope classifier remains covered by `turn_scope` tests, and this commit adds focused enforcement for the risky queue-consume editor IPC path.
+
+Escalation: none.
+<!-- agent:boundary:b14bb9ca -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -476,7 +512,7 @@ Escalation: none.
 - ~~do [#fcc0-live-verify]~~
 - ~~do [#archstatekernel]~~
 - ~~do [#archproofledger]~~
-- do [#archcomponentmerge]
+- ~~do [#archcomponentmerge]~~
 - do [#archsimworldmatrix]
 - do [#archuistates]
 - do [#cwsp]
@@ -512,7 +548,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#archcomponentmerge] Define and enforce managed-component merge semantics: queue, exchange, backlog, status, review, and done archive each have separate bases and conflict rules; only same-component incompatible edits become user-visible conflicts.
 - [ ] [#archsimworldmatrix] Add SimWorld/property transition-table coverage for the architecture primitives: stale supervisor recycle, queue edit during closeout, degraded/file-IPC fallback, live buffer drift, compact/replay, and operator-only/no-drainable queue outcomes.
 - [ ] [#archuistates] Replace raw route/write conflict strings in JB/Codex/OpenCode surfaces with a small typed outcome vocabulary: queued behind owner, recovered and retried, deferred for operator proof, no drainable work, real component conflict, and blocked with exact unblocker.
 - [ ] [#cwsp] [operator-verify] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38 and recycling the live supervisor onto that build, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.

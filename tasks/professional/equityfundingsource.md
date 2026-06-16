@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,33 @@ committed
 Compacted content:
 - Archived 1 response topic(s): inactive queued Interested Lenders ordering request
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:90cb34ca -->
+
+### Re: Remove "Loan Terms" from Available deal admin page & dialog. Deploy — gpt-5
+
+> **Queue prompt:**
+>
+> Remove "Loan Terms" from Available deal admin page & dialog. Deploy 
+
+
+Removed the `Loan Terms` summary card from `AdminLoanDetail`, which is reused by the Available Deal admin detail page and the embedded deal dialog. I also removed the now-unused `/api/admin/loans/${loan_id}/tmo` fetch and term-display helpers from that component.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+
+Verification:
+- `bun test tests/tmo-loan-details-density.test.ts` passed.
+- `make check` passed: 750 tests, app build, worker build.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` reported no pending migrations before and after deploy.
+- `make deploy` completed successfully. Worker version: `fdc995a1-c564-4886-8f16-78d9d537e94c`.
+- Live smoke checks: `/` returned `200`; `/portal-admin/deals` returned `303` behind Access.
+- `git diff --check` passed.
+
+CI note: `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this repo.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:23ace1d7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +72,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Remove "Loan Terms" from Available deal admin page & dialog. Deploy 
 <!-- /agent:queue -->
 
 ## Backlog

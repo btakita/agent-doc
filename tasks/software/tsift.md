@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -51,17 +51,25 @@ Compacted content:
 Went through `agent:review`. There is exactly one item, and it is already advanced to the agent ceiling — no new backlog item is warranted:
 
 - **[#1td4]** crates.io publish job migrated to OIDC trusted publishing. **Code complete and on origin/main** (fe4144b -> f29f7a2; `rust-lang/crates-io-auth-action@v1`, `id-token: write`, no `CARGO_REGISTRY_TOKEN`). Its actionable continuation **already exists in the backlog as [#vmax]** — register the Trusted Publisher for all 23 crates, set `TSIFT_ENABLE_CRATES_PUBLISH=true`, re-tag `v0.1.70` to verify OIDC publish. Those steps require a crates.io account + browser 2FA, which an agent cannot perform, so #vmax is correctly `[operator-verify]` and #1td4 stays `[/]` gated until the operator completes registration.
+- acceptance should be gated by extraction precision/recall fixtures plus the existing MemGraphRAG latency gate; no default-on path until it improves retrieval quality without blowing the budget
+- low-confidence or unanchored edges should enter as tentative authored/semantic nodes, not hard graph facts
+- model output must be schema-validated JSON with provenance, model/version, confidence, source handles, and deterministic fallback
+- deterministic code AST extraction remains authoritative for symbols, spans, call edges, and ownership
+- run offline or behind a feature flag during summarize/import/project refresh, where latency and correctness can be measured
+- expand query seeds into typed semantic concepts before `graph-db related`
+- label limitations, hypotheses, failure modes, benchmark claims, table/figure semantics, and citation-style relationships
+- extract `Finding` / `Decision` / `Note` candidates from session/doc text with anchors and confidence
 
 **Net:** nothing new to add. The review item is already paired with its actionable backlog item; the only thing left is operator-gated crates.io registration — adding another item would just duplicate #vmax. #1td4 stays gated; #vmax stays the operator handle.
 
 This empties the `#advance-review` drain; #vmax is `[operator-verify]` so go-mode defers it (queue has no remaining agent-drainable head).
-<!-- agent:boundary:d697643d -->
+<!-- agent:boundary:6f4a7bb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#vmax]
+- :pushpin: Should we use a small model such as a 4B model instead of a MemGraphRag for some cases? See https://www.youtube.com/watch?v=QuTcXMgPanw Use YT transcript or corky gpu.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

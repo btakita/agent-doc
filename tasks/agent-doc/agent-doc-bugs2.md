@@ -294,15 +294,53 @@ Verification:
 ❯ - Latest GitHub Actions `CI` on `main` is green: run `27588543817`, completed successfully on 2026-06-16T01:47:40Z.
 
 `agent-doc lib-install` installed `/home/brian/.cargo/bin/libagent_doc-0.34.1.so` and marked 2 controllers for idle recycle. No escalation was needed. Source commit/push was not done because `src/agent-doc` already has broad unrelated dirty changes, including some of the same files; staging whole files would mix this fix with pre-existing work.
-<!-- agent:boundary:093a8f3f -->
+
+### Re: commit + push uncommitted agent-doc files — gpt-5
+
+> **Queue prompt:**
+>
+> commit + push uncommitted agent-doc files
+
+
+Committed and pushed the uncommitted `src/agent-doc` submodule files.
+
+Commit/push proof:
+- `src/agent-doc`: committed `cdbc1a78` (`chore: checkpoint agent-doc updates`) and pushed `main` to `github.com:btakita/agent-doc.git`.
+- Parent repo: committed the `src/agent-doc` submodule pointer as `37bee5bcc` (`agent-doc: checkpoint submodule updates`) and pushed `main` to `github.com:btakita/agent-loop.git`.
+
+Verification carried into the commit:
+- `cargo fmt --check`
+- `git diff --check`
+- `cargo test -p agent-doc-orchestration dogfood_crate_root_rejects_unrelated_superproject_docs`
+- `cargo test -p agent-doc-orchestration supervisor_auto_install`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc lib-install`
+
+Current state:
+- `src/agent-doc` is clean and even with `origin/main`.
+- Parent repo is even with `origin/main` for committed work, but still has unrelated dirty files and untracked work outside this queue head.
+- Latest `src/agent-doc` GitHub Actions `CI` for `cdbc1a78` is in progress: run `27593485048`, started 2026-06-16T04:08:16Z. Per the closeout rules, I recorded it as pending instead of blocking on `gh run watch`.
+
+No escalation was needed.
+<!-- agent:boundary:ced8e25e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~JB `Run Agent Doc` on equityfundingsource.md after a fresh auto-sync did not submit the prompt.~~
-- commit + push uncommitted agent-doc files
-- Why not just shell out `tmux send-keys "Command" Enter`?
+- ~~commit + push uncommitted agent-doc files~~
+---
+Typing into the queue during the turn cause the conversation to be interrupted. ![img_30.png](img_30.png). A pre-finalize response was uncommitted causing the response to be treated as a user prompt ![img_31.png](img_31.png). After restart, JB `Run Agent Doc` error.
+
+```
+[route] target tmux session: 0
+Error: authoritative actor generation 438 for tasks/agent-doc/agent-doc-bugs2.md owns pane %110 but route could not drain the active closeout before dispatch: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+```
+---
+- Why not just shell out `tmux send-keys "Command" Enter`? Is the JB `Run Agent Doc` not-submiting an issue or is it the fact that logic is still spread all over the codebase and we are hitting the various conditions that use this spaghetti logic?
 - :pushpin: Only agent-doc dogfooding sessions should auto-build + install. The equityfundingsource.md session should not auto-install ![img_29.png](img_29.png)
 - :pushpin: How can I tell if the supervisor + CPC are up to date? Why is the formatting all messed up? ![2026-06-15_22-56.png](../../../../../Pictures/agent-loop/2026-06-15_22-56.png) Also I'm seeing some shells from the supervisor are 2 lines too low. See where the `agent-doc admin --help` starts in the screenshot.
 ---

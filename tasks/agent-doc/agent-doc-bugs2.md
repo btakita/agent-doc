@@ -335,17 +335,7 @@ Proof for this cycle:
 - Verification: focused timeout tests passed; `make check` passed; `cargo install --path .` succeeded; latest pre-push `src/agent-doc` CI was green, and the new pushed `src/agent-doc` CI run `27597293180` was in progress when checked. The parent repo has no workflow named `CI`.
 - Confidence: high for the timeout-budget regression; medium for live JB proof until the stale route-owned supervisor is recycled and the operator reruns `Run Agent Doc` from the IDE.
 - Escalation: none.
-❯ - Escalation: none.
-❯ - Confidence: high for the timeout-budget regression; medium for live JB proof until the stale route-owned supervisor is recycled and the operator reruns `Run Agent Doc` from the IDE.
-❯ - Verification: focused timeout tests passed; `make check` passed; `cargo install --path .` succeeded; latest pre-push `src/agent-doc` CI was green, and the new pushed `src/agent-doc` CI run `27597293180` was in progress when checked. The parent repo has no workflow named `CI`.
-❯ - Commands: `tsift status`; `agent-doc --version`; `agent-doc preflight ...`; `agent-doc plan ...`; `agent-doc read ...`; `agent-doc admin inspect ... --json`; targeted `tsift`/`rg` source and log inspections; `cargo fmt`; `cargo test -p agent-doc-orchestration dispatch_only_starting_pane_ready_timeout -- --nocapture`; `git diff --check`; `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`; `gh run list --workflow CI --limit 1`; `tsift --envelope digest-runner --kind log --path . --shell-command 'cargo install --path .'`; `git commit`; `git push origin main`.
-❯ - Code commits: `src/agent-doc` `3cc88c04` (`fix(route): honor editor wait budget for boot probe`); parent repo `8d26b15fe` (`chore: bump agent-doc route wait fix`). Both were pushed to `origin/main`.
-❯ - Changed paths: `src/agent-doc/agent-doc-orchestration/src/route.rs`, `src/agent-doc/specs/07-session-tmux-commands.md`, parent submodule pointer `src/agent-doc`, and this session document.
-❯ - Out of scope: no plugin/UI refactor; the plugin was already constructing the right command.
-❯ - Transition rows covered: default dispatch-only starting-pane timeout, explicit editor override, active-turn blocker, and prompt-ready success.
-❯ - Policy owner: route readiness policy in `agent-doc-orchestration/src/route.rs` and the dispatch-only adapter in `route/dispatch_only.rs`.
-❯ - Invariant: JB's explicit readiness budget must be the actual pre-submit wait on every dispatch-only slow-start path.
-<!-- agent:boundary:feb816d3 -->
+<!-- agent:boundary:2fe62979 -->
 <!-- /agent:exchange -->
 
 ## Queue

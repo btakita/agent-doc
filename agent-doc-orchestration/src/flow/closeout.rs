@@ -601,6 +601,169 @@ impl CloseoutRecoveryState {
     }
 }
 
+/// Input facts that are already known at a closeout recovery call site.
+///
+/// This is intentionally small for `#smcloseoutdecision`; the follow-on evidence
+/// refactor owns gathering these facts from sidecars, IPC, and controller state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CloseoutRecoveryDecisionInput<'a> {
+    /// A routed/JB prompt is waiting and should not be typed over an unresolved
+    /// closeout.
+    pub prompt_context_available: bool,
+    /// Low-level blocker text from the caller, retained only as evidence on the
+    /// typed decision boundary.
+    pub blocker_reason: Option<&'a str>,
+    /// Positive proof that the active capture is stale and superseded by visible
+    /// exchange content, so retiring it will not drop the user's intended answer.
+    pub stale_capture_supersession_proof: Option<&'a str>,
+}
+
+/// Typed closeout recovery policy boundary (`#smcloseoutdecision`).
+///
+/// Route, repair, session-check, and write/commit should converge on this
+/// action-shaped decision instead of string-matching individual guard errors.
+/// See `tasks/agent-doc/plan-run-agent-doc-closeout-recovery-state-machine.md`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloseoutRecoveryDecision {
+    /// No closeout recovery remains.
+    AlreadyCommitted,
+    /// The existing response/cycle can be safely replayed or completed by the
+    /// binary without choosing between competing user-authored contents.
+    ReplaySafe {
+        state: CloseoutRecoveryState,
+        command: String,
+    },
+    /// A stale capture can be retired because superseding visible content proves
+    /// the captured body should not be replayed.
+    RetireStaleCapture {
+        state: CloseoutRecoveryState,
+        proof: String,
+    },
+    /// Sidecars are stale relative to the visible markdown and can be rebuilt
+    /// from the visible file.
+    ResetSidecarsFromVisible {
+        state: CloseoutRecoveryState,
+        command: String,
+    },
+    /// A new routed prompt must wait behind the unresolved closeout instead of
+    /// being submitted to the pane.
+    QueuePromptForAfterCloseout {
+        state: CloseoutRecoveryState,
+        reason: String,
+    },
+    /// Recovery is not safe because a required proof is missing.
+    Blocked {
+        state: CloseoutRecoveryState,
+        missing_proof: String,
+        recommended: String,
+    },
+}
+
+impl CloseoutRecoveryDecision {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AlreadyCommitted => "already_committed",
+            Self::ReplaySafe { .. } => "replay_safe",
+            Self::RetireStaleCapture { .. } => "retire_stale_capture",
+            Self::ResetSidecarsFromVisible { .. } => "reset_sidecars_from_visible",
+            Self::QueuePromptForAfterCloseout { .. } => "queue_prompt_for_after_closeout",
+            Self::Blocked { .. } => "blocked",
+        }
+    }
+
+    pub const fn state(&self) -> Option<CloseoutRecoveryState> {
+        match self {
+            Self::AlreadyCommitted => None,
+            Self::ReplaySafe { state, .. }
+            | Self::RetireStaleCapture { state, .. }
+            | Self::ResetSidecarsFromVisible { state, .. }
+            | Self::QueuePromptForAfterCloseout { state, .. }
+            | Self::Blocked { state, .. } => Some(*state),
+        }
+    }
+}
+
+pub fn decide_closeout_recovery(
+    file: &Path,
+    input: CloseoutRecoveryDecisionInput<'_>,
+) -> CloseoutRecoveryDecision {
+    let state = classify_closeout_recovery_state(file);
+    closeout_recovery_decision_from_state(file, state, input)
+}
+
+pub fn closeout_recovery_decision_from_state(
+    file: &Path,
+    state: CloseoutRecoveryState,
+    input: CloseoutRecoveryDecisionInput<'_>,
+) -> CloseoutRecoveryDecision {
+    if input.prompt_context_available {
+        return CloseoutRecoveryDecision::QueuePromptForAfterCloseout {
+            state,
+            reason: input
+                .blocker_reason
+                .unwrap_or_else(|| state.as_str())
+                .to_string(),
+        };
+    }
+
+    if state == CloseoutRecoveryState::Clean {
+        return CloseoutRecoveryDecision::AlreadyCommitted;
+    }
+
+    if let Some(proof) = input.stale_capture_supersession_proof
+        && matches!(
+            state,
+            CloseoutRecoveryState::MissingResponseBody
+                | CloseoutRecoveryState::UnsafeUserContentDrift
+        )
+    {
+        return CloseoutRecoveryDecision::RetireStaleCapture {
+            state,
+            proof: proof.to_string(),
+        };
+    }
+
+    match state {
+        CloseoutRecoveryState::Clean => CloseoutRecoveryDecision::AlreadyCommitted,
+        CloseoutRecoveryState::DirectResponsePatchback
+        | CloseoutRecoveryState::BoundaryOnlyDrift
+        | CloseoutRecoveryState::NestedParentPointerStale
+        | CloseoutRecoveryState::OpenEmptyPreflight
+        | CloseoutRecoveryState::QueueMetadataDrift => CloseoutRecoveryDecision::ReplaySafe {
+            state,
+            command: state.recovery_command(file).unwrap_or_default(),
+        },
+        CloseoutRecoveryState::SidecarVisibleDrift => {
+            CloseoutRecoveryDecision::ResetSidecarsFromVisible {
+                state,
+                command: state.recovery_command(file).unwrap_or_default(),
+            }
+        }
+        CloseoutRecoveryState::OpenCycle => CloseoutRecoveryDecision::Blocked {
+            state,
+            missing_proof: "open cycle must finish, be replayed, or be explicitly queued behind"
+                .to_string(),
+            recommended: state.recovery_command(file).unwrap_or_default(),
+        },
+        CloseoutRecoveryState::MissingResponseBody => CloseoutRecoveryDecision::Blocked {
+            state,
+            missing_proof: "captured response body presence or supersession proof".to_string(),
+            recommended: state.recovery_command(file).unwrap_or_default(),
+        },
+        CloseoutRecoveryState::EscapedTemplatePatch => CloseoutRecoveryDecision::Blocked {
+            state,
+            missing_proof: "unescaped patchback blocks that can be applied safely".to_string(),
+            recommended: state.recovery_command(file).unwrap_or_default(),
+        },
+        CloseoutRecoveryState::UnsafeUserContentDrift => CloseoutRecoveryDecision::Blocked {
+            state,
+            missing_proof: "proof that visible user-authored content is metadata-only drift"
+                .to_string(),
+            recommended: state.recovery_command(file).unwrap_or_default(),
+        },
+    }
+}
+
 /// Outcome of [`apply_closeout_recovery`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecoveryApplication {
@@ -1336,6 +1499,94 @@ mod tests {
                 cmd.contains("tasks/doc.md"),
                 "command should name the file: {cmd:?}"
             );
+        }
+    }
+
+    #[test]
+    fn recovery_decision_maps_states_to_typed_outcomes() {
+        use CloseoutRecoveryDecision::*;
+        use CloseoutRecoveryState::*;
+        let f = Path::new("tasks/doc.md");
+
+        assert_eq!(
+            closeout_recovery_decision_from_state(
+                f,
+                Clean,
+                CloseoutRecoveryDecisionInput::default()
+            ),
+            AlreadyCommitted
+        );
+
+        assert_eq!(
+            closeout_recovery_decision_from_state(
+                f,
+                OpenCycle,
+                CloseoutRecoveryDecisionInput {
+                    prompt_context_available: true,
+                    blocker_reason: Some("active closeout"),
+                    stale_capture_supersession_proof: None,
+                },
+            ),
+            QueuePromptForAfterCloseout {
+                state: OpenCycle,
+                reason: "active closeout".to_string(),
+            }
+        );
+
+        match closeout_recovery_decision_from_state(
+            f,
+            DirectResponsePatchback,
+            CloseoutRecoveryDecisionInput::default(),
+        ) {
+            ReplaySafe { state, command } => {
+                assert_eq!(state, DirectResponsePatchback);
+                assert!(command.contains("write --commit"), "{command}");
+            }
+            other => panic!("direct patchback should be replay-safe: {other:?}"),
+        }
+
+        match closeout_recovery_decision_from_state(
+            f,
+            SidecarVisibleDrift,
+            CloseoutRecoveryDecisionInput::default(),
+        ) {
+            ResetSidecarsFromVisible { state, command } => {
+                assert_eq!(state, SidecarVisibleDrift);
+                assert!(command.contains("reset --from-current"), "{command}");
+            }
+            other => panic!("sidecar drift should reset sidecars: {other:?}"),
+        }
+
+        assert_eq!(
+            closeout_recovery_decision_from_state(
+                f,
+                MissingResponseBody,
+                CloseoutRecoveryDecisionInput {
+                    stale_capture_supersession_proof: Some("heading already answered"),
+                    ..CloseoutRecoveryDecisionInput::default()
+                },
+            ),
+            RetireStaleCapture {
+                state: MissingResponseBody,
+                proof: "heading already answered".to_string(),
+            }
+        );
+
+        match closeout_recovery_decision_from_state(
+            f,
+            MissingResponseBody,
+            CloseoutRecoveryDecisionInput::default(),
+        ) {
+            Blocked {
+                state,
+                missing_proof,
+                recommended,
+            } => {
+                assert_eq!(state, MissingResponseBody);
+                assert!(missing_proof.contains("response body"), "{missing_proof}");
+                assert!(recommended.contains("write --commit"), "{recommended}");
+            }
+            other => panic!("missing response body should block: {other:?}"),
         }
     }
 

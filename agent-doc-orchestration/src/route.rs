@@ -2204,7 +2204,18 @@ fn classify_route_closeout_block(
     reason: String,
     has_prompt_context: bool,
 ) -> RouteCloseoutBlockDecision {
-    if has_prompt_context {
+    let recovery_decision = crate::flow::closeout::decide_closeout_recovery(
+        file,
+        crate::flow::closeout::CloseoutRecoveryDecisionInput {
+            prompt_context_available: has_prompt_context,
+            blocker_reason: Some(&reason),
+            stale_capture_supersession_proof: None,
+        },
+    );
+    if matches!(
+        recovery_decision,
+        crate::flow::closeout::CloseoutRecoveryDecision::QueuePromptForAfterCloseout { .. }
+    ) {
         return RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout;
     }
     let active_queue_head = std::fs::read_to_string(file)

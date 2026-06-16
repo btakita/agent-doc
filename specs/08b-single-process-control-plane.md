@@ -104,6 +104,24 @@ still gather evidence and perform I/O, but the transition rows are now typed and
 unit-covered. Later controller cutover work must replace ad hoc guard branching
 with calls to this kernel before adding more route-edge guards.
 
+## Workflow invariant catalog
+
+`flow::workflow_invariants` owns the machine-readable invariant catalog used by
+doctor/autofix work. Catalog entries have stable ids, severity, declared fact
+sources, an `ok_predicate`, disproof markers, safe remediation, operator-gated
+remediation, and SimWorld/regression coverage. The initial catalog covers:
+
+- `queue_continuation`
+- `stale_supervisor`
+- `closeout_commit`
+- `editor_convergence`
+- `generation_redirect`
+- `parent_gitlink`
+
+The catalog is data-only and serializable as
+`workflow-invariant-catalog-v1`; runtime diagnosis must evaluate these fields
+instead of scraping prose from session docs or specs.
+
 ## Document write and watch authority
 
 The store actor owns `.agent-doc/state.db` as the single durable-state writer.

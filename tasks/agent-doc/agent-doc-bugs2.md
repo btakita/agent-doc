@@ -213,8 +213,8 @@ Proof:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: The Enter still was not applied to the prompt after the restart. As I was typing, `/clear` was accumulating. It seems the separate Enter does not work. Can you have the supervisor or the PCP take snapshots of the terminal oput so you can investigate what happens? Perhaps to self-correct and log what the issues are?~~
 - [#cwsp]
-- :pushpin: What are #next-steps to refactor State Machines or other architecture to fix reoccurring classes of bugs?
-- :pushpin: Add the tasks for the State Machines and architecture to the end of `agent:queue`.
+- ~~:pushpin: What are #next-steps to refactor State Machines or other architecture to fix reoccurring classes of bugs?~~
+- ~~:pushpin: Add the tasks for the State Machines and architecture to the end of `agent:queue`.~~
 ---
 :pushpin: After restarting a session in the terminal, JB `Run Agent Doc` errors. It should not error.
 ```

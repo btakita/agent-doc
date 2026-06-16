@@ -329,7 +329,46 @@ Verification:
 - Preflight still warns that the route-owned agent-doc supervisor is stale; this write bypassed it with `--force-disk`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:52d3ef62 -->
+
+### Re: Borrower Info formatting + deploy — gpt-5
+
+Closed the queued Borrower Info/card-wrap/deploy request.
+
+Implemented:
+- Borrower Onboarding Data now treats email-like fields as no-wrap values and gives them wide cards, so email addresses do not split across lines.
+- Borrower Info now stacks contact rows, uses right-aligned copy buttons, and places Mailing Address / Property Address labels above their values.
+- `CopyValue` now keeps the copied text as the shrinkable flex item so copy icons stay visible/aligned for long values.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev` parent gitlink
+
+Commits/push:
+- EFS submodule: `0133bb0 fix(admin): refine borrower info layout` pushed to `origin/main`.
+- Parent repo: `4421fb9ef chore(efs): update borrower info layout submodule` pushed to `origin/main`.
+
+Deploy proof:
+- `make deploy` completed successfully.
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker version: `3e3053c4-7e59-4ede-94cc-a434940a73e7`
+- Deployed browser asset: `/index.browser-XDOLRWEI.js`
+- Remote D1 migrations: no migrations to apply before and after deploy.
+
+Verification:
+- Focused test passed: `bun test tests/tmo-loan-details-density.test.ts`.
+- EFS `make check` passed: 739 tests, 0 fail, app build, Worker build. The log includes the expected non-fatal `error: d1 down` from the passing outbox failure-handling test.
+- Top-level `make check` passed.
+- Live `/` returned `200`.
+- Live `/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f` returned `303` to admin login, expected for the protected route.
+- Downloaded deployed `/index.browser-XDOLRWEI.js`; it contains `ADMIN_INLINE_INFO_STACK_STYLE`, `Mailing Address`, `Property Address`, `ADMIN_INLINE_INFO_COPY_VALUE_NOWRAP_STYLE`, and `admin_field_value_nowrap_`.
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
+- `src/equityfundingsource-dev` is clean after deploy.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:2bcc0173 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -337,6 +376,9 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+Email Address should not wrap in the cards ![img_22.png](img_22.png)
+Format Borrower Info. Right align copy buttons. Place Mailing & Property Address labels above field. ![img_23.png](img_23.png)
+deploy
 <!-- /agent:queue -->
 
 ## Backlog

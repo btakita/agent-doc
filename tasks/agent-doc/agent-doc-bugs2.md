@@ -556,7 +556,32 @@ Implemented `ui-outcome-v1` in `src/agent-doc` at submodule commit `a7cc582a`.
 The new typed surface vocabulary covers `queued_behind_owner`, `recovered_and_retried`, `deferred_for_operator_proof`, `no_drainable_work`, `real_component_conflict`, and `blocked_with_exact_unblocker`. Controller dispatch-blocked proof payloads, route/Codex/OpenCode/JB queue/refusal messages, session-check queue-idle output, and JetBrains route/write conflict surfaces now emit `ui_outcome=...` fields while preserving legacy prose for compatibility.
 
 Verification passed: `cargo fmt`; focused Rust outcome/route/controller/session-check tests; JetBrains `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`; `make check` (4,586 nextest tests, doctests, medium SimWorld); latest CI was green (`27607675117`).
-<!-- agent:boundary:69c6a3c8 -->
+
+### Re: do [#cwsp] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#cwsp]
+
+
+Implemented `#cwsp` in `src/agent-doc` and committed the submodule as `9870c5ef` (`fix: defer owner-pane queue sibling edits`).
+
+What changed:
+- Preflight now derives owner-pane unresolved-prompt detection from filtered user-intent prompt changes, not raw prompt-bearing changes.
+- Same-pane active-queue fallback can be suppressed when an open owner cycle plus the persisted active turn scope prove a new queue prompt is independent of the current turn.
+- Direct `agent-doc <FILE>` in the Codex owner pane now returns a no-op/defer for that independent queue edit before precommit or prompt-prefix normalization, so it does not dispatch into the busy owner pane, mutate the document, or increment the wedge counter.
+- Recursive preflight preserves the active owner turn-scope sidecar instead of replacing it with the sibling queue item's derived scope.
+
+Regression coverage added in `tests/run_integration.rs` for both direct-run and preflight JSON behavior, including preserved durable turn scope.
+
+Verification passed:
+- `cargo fmt`
+- `cargo test -p agent-doc --test run_integration codex_owned_pane_ -- --nocapture`
+- `cargo test -p agent-doc --test run_integration preflight_ -- --nocapture`
+- `cargo test -p agent-doc-orchestration preflight::semantic_diff::tests::user_intent -- --nocapture`
+- `make check` (clippy, 4,588 nextest tests, doctests, medium SimWorld)
+- `gh run list --workflow CI --limit 1` shows latest CI run `27607675117` completed successfully.
+<!-- agent:boundary:200298d1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -582,7 +607,8 @@ Verification passed: `cargo fmt`; focused Rust outcome/route/controller/session-
 - ~~do [#archcomponentmerge]~~
 - ~~do [#archsimworldmatrix]~~
 - ~~do [#archuistates]~~
-- do [#cwsp]
+- ~~do [#cwsp]~~
+- Create a plan to orchestrate subagents to manage specific roles such as architecture, testing, implementation, refactoring. The main agent will coordinate the subagents to synthesize the solution. Ensure there is feedback between the subagents and the coordinating agent to ensure reliable, well designed outcomes, that appropriately solve the issues. Find root causes and factor the codebase to consolidate logic.
 - do [#wfinvcatalog]
 - do [#wfinvdoctor]
 - do [#wfinvautofix]
@@ -615,7 +641,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#cwsp] [operator-verify] [recommended] If queue editing still interrupts an active Codex owner after installing `src/agent-doc` 2464ba38 and recycling the live supervisor onto that build, add a busy-owner queue-edit suppression guard: queue edits during an active cycle must stay as document state until current closeout commits, must not dispatch into the busy owner pane, and must not let a pre-finalize assistant response be reclassified as a user prompt.
 - [ ] [#wfinvcatalog] Create a machine-readable workflow invariant catalog: each invariant has id, fact sources, ok predicate, disproof markers, severity, safe remediation, operator-gated remediation, and SimWorld/regression coverage. Start with queue continuation, stale supervisor, closeout commit, editor convergence, generation redirect, and parent gitlink invariants.
 - [ ] [#wfinvdoctor] Add an agent-doc workflow doctor/diagnose command that evaluates the invariant catalog against preflight/session-check JSON, ops.log markers, cycle_state, actor state, git state, and editor proof sidecars; output typed ok/recoverable/blocked/operator results with exact repair commands.
 - [ ] [#wfinvautofix] Add an invariant-driven autofix planner that executes only proven safe repairs automatically, gates destructive/operator actions, de-duplicates repeated symptoms by invariant id, and records proof markers so queue/backlog items do not multiply for the same root cause.

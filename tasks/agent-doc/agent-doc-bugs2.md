@@ -182,6 +182,17 @@ Proof for this cycle:
 3. `#binconflictscope` makes conflict classification component-scoped across exchange, queue, backlog, status, review, done/archive, gitlink, and editor writeback.
 2. `#binstalepause` applies that contract to stale queue pauses so stale supervisor / pause / no-drainable-head cases recover or defer with proof instead of surfacing as conflicts.
 1. `#binoutcomes` defines the shared outcome contract first: `ok`, `recoverable`, `blocked`, or `operator`, with invariant id, proof marker, and one allowed next action.
+- Submodule commit: `f9e2b932 architecture: add workflow state kernel`.
+- Latest CI: `27607675117` completed successfully on `main`.
+- `make check` passed: clippy, 4,579 nextest tests, doctests, and the ignored medium SimWorld corpus test.
+- `cargo test -p agent-doc-orchestration pcp_supervisor_handoff` passed.
+- `cargo test -p agent-doc-orchestration workflow_state` passed.
+- Out of scope: left the pre-existing dirty write-convergence, JetBrains plugin, `specs/07`, and `VERSIONS.md` changes unstaged for their later architecture items.
+- Spec: `specs/08b-single-process-control-plane.md` documents the workflow-state kernel contract and the supervisor handoff state machine.
+- Adjacent architecture state: `start::decisions` now includes the PCP supervisor handoff state machine with tests for happy path, pre-promotion rollback, and post-promotion repair-only escalation.
+- Transition rows covered by tests: stale-supervisor surface/recycle-now/recycle-after-debounce; queue dispatch/defer for clear cooldown, busy pane, active turn, loop owner, already-dispatched head; captured-response append/complete/replay/retire/retry/current-generation and queued-behind-closeout; live-buffer apply/defer/request-save/block-unattributed-drift.
+- Policy owner: `agent-doc-orchestration/src/flow/workflow_state.rs`, exported from `flow/mod.rs`.
+- Invariant: route/queue/closeout/editor-write policy now has a pure mirror-mode `flow::workflow_state` kernel: evidence kind -> typed decision -> single allowed mutation -> required proof list. It covers stale supervisor, queue drainability, captured response, and live-buffer decisions without performing I/O.
 ❯ - Git: submodule commits must have matching parent gitlink commits before the closeout is called complete.
 ❯ - Editor convergence: no direct disk write is allowed to count as healthy when an editor IPC listener should have converged the buffer; `File Cache Conflict` is always a disproof marker.
 ❯ - Supervisor freshness: installed binary newer than serving supervisor implies recoverable stale-supervisor state, not random IPC drift.
@@ -280,10 +291,10 @@ I added backlog items for the invariant catalog, a workflow doctor, and invarian
 
 I added the binary-logic implementation slice as the next architecture layer ahead of the existing state-kernel work. The new work is intentionally narrow and ordered:
 
-❯ 1. `#binoutcomes` defines the shared outcome contract first: `ok`, `recoverable`, `blocked`, or `operator`, with invariant id, proof marker, and one allowed next action.
-❯ 2. `#binstalepause` applies that contract to stale queue pauses so stale supervisor / pause / no-drainable-head cases recover or defer with proof instead of surfacing as conflicts.
-❯ 3. `#binconflictscope` makes conflict classification component-scoped across exchange, queue, backlog, status, review, done/archive, gitlink, and editor writeback.
-❯ 4. `#binconflictdedupe` coalesces repeated symptoms by invariant/document/component/content hash so one root cause does not spawn repeated queue conflicts.
+1. `#binoutcomes` defines the shared outcome contract first: `ok`, `recoverable`, `blocked`, or `operator`, with invariant id, proof marker, and one allowed next action.
+2. `#binstalepause` applies that contract to stale queue pauses so stale supervisor / pause / no-drainable-head cases recover or defer with proof instead of surfacing as conflicts.
+3. `#binconflictscope` makes conflict classification component-scoped across exchange, queue, backlog, status, review, done/archive, gitlink, and editor writeback.
+4. `#binconflictdedupe` coalesces repeated symptoms by invariant/document/component/content hash so one root cause does not spawn repeated queue conflicts.
 
 Those should run before `#archstatekernel`, `#archproofledger`, `#archcomponentmerge`, `#archsimworldmatrix`, and `#archuistates`, because they define the binary vocabulary the architecture primitives should implement rather than leaving each primitive to invent its own classification rules. The workflow-invariant items remain useful follow-ons: they can consume these outcome ids once the contract exists.
 
@@ -379,23 +390,23 @@ I also scanned the conflict side. The recent `File Cache Conflict` strings in `o
 
 Implemented the architecture-state boundary in the agent-doc submodule.
 
-- Invariant: route/queue/closeout/editor-write policy now has a pure mirror-mode `flow::workflow_state` kernel: evidence kind -> typed decision -> single allowed mutation -> required proof list. It covers stale supervisor, queue drainability, captured response, and live-buffer decisions without performing I/O.
-- Policy owner: `agent-doc-orchestration/src/flow/workflow_state.rs`, exported from `flow/mod.rs`.
-- Transition rows covered by tests: stale-supervisor surface/recycle-now/recycle-after-debounce; queue dispatch/defer for clear cooldown, busy pane, active turn, loop owner, already-dispatched head; captured-response append/complete/replay/retire/retry/current-generation and queued-behind-closeout; live-buffer apply/defer/request-save/block-unattributed-drift.
-- Adjacent architecture state: `start::decisions` now includes the PCP supervisor handoff state machine with tests for happy path, pre-promotion rollback, and post-promotion repair-only escalation.
-- Spec: `specs/08b-single-process-control-plane.md` documents the workflow-state kernel contract and the supervisor handoff state machine.
-- Out of scope: left the pre-existing dirty write-convergence, JetBrains plugin, `specs/07`, and `VERSIONS.md` changes unstaged for their later architecture items.
+❯ - Invariant: route/queue/closeout/editor-write policy now has a pure mirror-mode `flow::workflow_state` kernel: evidence kind -> typed decision -> single allowed mutation -> required proof list. It covers stale supervisor, queue drainability, captured response, and live-buffer decisions without performing I/O.
+❯ - Policy owner: `agent-doc-orchestration/src/flow/workflow_state.rs`, exported from `flow/mod.rs`.
+❯ - Transition rows covered by tests: stale-supervisor surface/recycle-now/recycle-after-debounce; queue dispatch/defer for clear cooldown, busy pane, active turn, loop owner, already-dispatched head; captured-response append/complete/replay/retire/retry/current-generation and queued-behind-closeout; live-buffer apply/defer/request-save/block-unattributed-drift.
+❯ - Adjacent architecture state: `start::decisions` now includes the PCP supervisor handoff state machine with tests for happy path, pre-promotion rollback, and post-promotion repair-only escalation.
+❯ - Spec: `specs/08b-single-process-control-plane.md` documents the workflow-state kernel contract and the supervisor handoff state machine.
+❯ - Out of scope: left the pre-existing dirty write-convergence, JetBrains plugin, `specs/07`, and `VERSIONS.md` changes unstaged for their later architecture items.
 
 Verification:
 
-- `cargo test -p agent-doc-orchestration workflow_state` passed.
-- `cargo test -p agent-doc-orchestration pcp_supervisor_handoff` passed.
-- `make check` passed: clippy, 4,579 nextest tests, doctests, and the ignored medium SimWorld corpus test.
-- Latest CI: `27607675117` completed successfully on `main`.
-- Submodule commit: `f9e2b932 architecture: add workflow state kernel`.
+❯ - `cargo test -p agent-doc-orchestration workflow_state` passed.
+❯ - `cargo test -p agent-doc-orchestration pcp_supervisor_handoff` passed.
+❯ - `make check` passed: clippy, 4,579 nextest tests, doctests, and the ignored medium SimWorld corpus test.
+❯ - Latest CI: `27607675117` completed successfully on `main`.
+❯ - Submodule commit: `f9e2b932 architecture: add workflow state kernel`.
 
 Confidence: high. The new kernel is intentionally mirror-mode; runtime call-site replacement belongs to the later controller cutover work.
-<!-- agent:boundary:f843ebc4 -->
+<!-- agent:boundary:99bc74ec -->
 <!-- /agent:exchange -->
 
 ## Queue

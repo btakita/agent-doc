@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -143,12 +143,13 @@ Product moves that could raise signup-to-install conversion:
 The interview question I would ask: “Do signed merchants drop before hardware financing, during financing approval, after hardware order, or closer to install day, and do we tag the reason clearly enough to know whether this is financing anxiety versus implementation friction?”
 
 Verification note: this synthesis is based on the watched YouTube video transcript and frame contact sheet. No code changed and no test suite was applicable.
-<!-- agent:boundary:958c4bad -->
+<!-- agent:boundary:975e327e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- I'm assuming that Spoton is using a CRM. What sort of work is needed to improve the onboarding experience?
 <!-- /agent:queue -->
 
 ## Backlog

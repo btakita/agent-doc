@@ -85,7 +85,32 @@ Verification: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, root/su
 Closed the recovery bookkeeping from the previous response. The earlier closeout answered the JB logging question and added `#jbrunlogproof`; session-check then caught an unintended strike of `#lazilyqrestore`, so I restored that queue head and left the new `do [#jbrunlogproof]` implementation item queued rather than marking it done in this diagnostic-only turn.
 
 Changed paths this repair: session document only. Verification: `agent-doc preflight`, `agent-doc plan`, queue/exchange reads, and session-check diagnostics during recovery. No source tests/build were run because this repair did not change source code.
-<!-- agent:boundary:131907a0 -->
+
+### Re: #jbrunlogproof — gpt-5
+
+Implemented durable proof logging for JB `Run Agent Doc` no-submit diagnostics in `agent-doc`.
+
+What changed:
+- JetBrains now opens a `RunAgentDocAttemptLedger` entry for each manual click and records `clicked`, `await_typing_idle`, `typing_idle`, `documents_saved`, `route_prepare`, `route_command_built`, `route_start`, retry/supersede stages, and the final route outcome.
+- Controller blocked-dispatch diagnostics now include non-sensitive proof fields for queue blockers: `blocked_head_bytes`, `blocked_head_sha256`, and, when the caller supplies `harness=...`, `trigger_bytes` / `trigger_sha256`. These are persisted on `dispatch_attempts`, emitted as `dispatch_blocked_proof`, and included in the route error. Raw prompt text is still not persisted for this proof path.
+- Specs/tests now cover the JetBrains ledger contract and the controller `queue_paused` proof fields.
+
+Verification:
+- `cargo test -p agent-doc-orchestration controller_queue_control_rejects_stale_generation_and_blocks_dispatch_when_paused`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.SubmitActionTest --tests com.github.btakita.agentdoc.TerminalUtilTest --tests com.github.btakita.agentdoc.RunAgentDocAttemptLedgerTest`
+- `make check`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
+- `make bump-plugin` built `agent-doc-jetbrains-0.2.166.zip` and `agent-doc-jetbrains-0.2.166-signed.zip`
+- `cargo install --path .`
+- `agent-doc plugin install --local jetbrains` installed `0.2.166` into active IntelliJIdea2026.1; IDEA restart is required to load it.
+- Latest pre-existing CI on `main` was green before push.
+
+Commits:
+- local source commit: `dae60075`
+- pushed `origin/main`: `f27a388b` (`fix(jb): add run-agent-doc proof logging`)
+
+The remaining live verification items in this document are still operator-owned; this closes the durable logging/proof implementation item.
+<!-- agent:boundary:f20ed12d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -136,7 +161,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jbrunlogproof] #agent-doc-bug: add durable JB Run Agent Doc no-submit proof logging. Wire `RunAgentDocAttemptLedger` into `SubmitAction`/`TerminalUtil.sendToTerminal`, persist clicked/typing-idle/save/route-start/route-exit stages, and make controller/route queue-paused dispatch diagnostics include prompt/trigger byte counts and hashes for the blocked head so the operator can prove whether the prompt was read, queued, injected, accepted, or blocked. Include spec/tests for `queue_paused`, stale-supervisor `#qchurn`, and direct-pane submit evidence.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

@@ -163,14 +163,35 @@ Proof for this cycle:
 - Verification: `git diff --check` passed; `make check` passed, including instruction-files tests and the `src/agent-doc` check suite. The root repo has no workflow named `CI`; the latest `Agent Doc` workflow run (`27595064029`) is red on pushed head `227e708`, but both jobs had empty steps and `--log-failed` returned `log not found`, so I treated that as an external CI-start failure rather than a failure from this local runbook commit.
 - Confidence: high for the runbook coverage and discoverability.
 - Escalation: none.
-<!-- agent:boundary:78457879 -->
+
+### Re: architecture-first should be dogfooding-only — gpt-5
+
+> **Queue prompt:**
+>
+> The architecture first runbook should only apply to agent-doc development & dogfooding...It should not be installed.
+
+
+Corrected. The architecture-first guidance is now only a repository-level agent-doc development/dogfooding runbook, not part of the installable agent-doc skill.
+
+I removed `.claude/skills/agent-doc/runbooks/architecture-first.md`, made `runbooks/architecture-first.md` the self-contained canonical copy, and updated `AGENTS.md` to label it `architecture-first (agent-doc development/dogfooding only)`. I also verified there are no remaining `architecture-first` references under `.claude/skills/agent-doc`, so future skill installs will not carry this runbook.
+
+No new backlog item is needed from this correction.
+
+Proof for this cycle:
+- Changed paths: removed `.claude/skills/agent-doc/runbooks/architecture-first.md`; updated `runbooks/architecture-first.md`, `AGENTS.md`, and this session document.
+- Repo commit: `2a6f8cc78` (`docs(agent-doc): keep architecture runbook local`).
+- Commands: `agent-doc preflight ...`; `agent-doc plan ...`; `rg -n "architecture-first" .claude/skills/agent-doc runbooks/architecture-first.md AGENTS.md`; `git diff --check`; `make check`; `gh run list --workflow "Agent Doc" --limit 1`; `git commit -m "docs(agent-doc): keep architecture runbook local"`.
+- Verification: `git diff --check` passed; `make check` passed again. The latest `Agent Doc` Actions run is still the unrelated empty-log failure on pushed head `227e708`, not this local commit.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:4072d7a9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Create a skill/runbook to apply the architecture strategy that you recommended.~~
-- The architecture first runbook should only apply to agent-doc development & dogfooding...It should not be installed.
+- ~~The architecture first runbook should only apply to agent-doc development & dogfooding...It should not be installed.~~
 ---
 Typing into the queue during the turn cause the conversation to be interrupted. ![img_30.png](img_30.png). A pre-finalize response was uncommitted causing the response to be treated as a user prompt ![img_31.png](img_31.png). After restart, JB `Run Agent Doc` error.
 

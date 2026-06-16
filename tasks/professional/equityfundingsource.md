@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -302,7 +302,7 @@ Verification:
 - `lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx`: TMO Loan Terms, Borrower Detail, Collateral, and Encumbrance now render as peer flex cards with `flex-wrap`, bounded widths, and consolidated field columns.
 
 Preflight reported high exchange accretion and one session-drift warning; queue work was still actionable, so I completed the implementation and deploy. Confidence: high. Escalation: none.
-<!-- agent:boundary:c68bc6c2 -->
+<!-- agent:boundary:6e67f938 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -310,11 +310,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-Space should be horizontally consolidated ![img_17.png](img_17.png)
-Final Loan Documents can be a card view and narrower.
-Borrower Onboarding Data should be a card view and narrower.
-deploy
-- do [#jrnz]
 <!-- /agent:queue -->
 
 ## Backlog

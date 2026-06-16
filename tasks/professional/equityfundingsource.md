@@ -160,7 +160,43 @@ Verification:
 I did not rerun the full app suite in this pass because there were no code changes since the prior green `make check`; `make deploy` rebuilt the app and Worker before upload. Preflight reported high exchange accretion, but the active queue was drainable, so I continued the deploy cycle.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:66de993b -->
+
+### Re: Card views for loan detail sections — gpt-5
+
+> **Queue prompt:**
+>
+> The Loan Status, Application Record, Borrower Info, Borrower Detail, Collateral can be card views. It is currently too wide ![img_16.png](img_16.png)
+> https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f and https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline dialogs.
+
+Changed the shared admin loan detail layout so the standalone `/portal-admin/loans/:id` page and embedded Deal Pipeline dialogs use bounded card-style sections instead of wide label/value strips.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx`
+- `src/equityfundingsource-dev/tests/tmo-loan-details-density.test.ts`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev` parent gitlink
+
+What changed:
+- `Loan Status`, `Application Record`, and `Borrower Info` are now peer cards in a responsive summary grid rather than a fixed two-column layout with stacked info cards.
+- `Application Record` and `Borrower Info` now use compact field tiles, so copied values, statuses, dates, and subject-property details do not stretch across the whole dialog.
+- TMO `Loan Terms`, `Borrower Detail`, `Collateral`, and `Encumbrance` now render as bounded card grids capped around dialog-friendly widths instead of a single full-width row/grid strip.
+- Removed the outer admin `Loan Details From TMO` card wrapper so the new TMO cards are not nested inside another card.
+
+Commits/push:
+- EFS app: `8fccb35 fix(admin): card dense loan detail sections` pushed to `origin/main`.
+- Parent gitlink: `92a753019 chore(efs): update dense loan detail layout submodule` committed locally; parent push follows this agent-doc closeout.
+
+Verification:
+- `bun test tests/tmo-loan-details-density.test.ts tests/boolean-checkbox-fields.test.ts` passed: 9 tests.
+- `make check` in `src/equityfundingsource-dev` passed: 739 tests, app build, and Worker build.
+- Top-level `make check` passed.
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo reported no workflow named `CI`.
+
+I did not deploy this cycle because the session preset was `#spec-test-commit-push`, not a deploy preset; the production URLs will reflect this after the next deploy.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:38a5a6eb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -168,6 +204,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+The Loan Status, Application Record, Borrower Info, Borrower Detail, Collateral can be card views. It is currently too wide ![img_16.png](img_16.png)
+https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f and https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline dialogs.
 <!-- /agent:queue -->
 
 ## Backlog

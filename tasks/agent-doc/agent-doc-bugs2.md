@@ -59,15 +59,37 @@ Proof for this cycle:
 - Verification: whitespace checks passed; latest `src/agent-doc` CI is green; no Rust build/test/install was run because this cycle added a plan and backlog item, not source code.
 - Confidence: high on diagnosis; medium on sufficiency until the refactor lands.
 - Escalation: none.
-<!-- agent:boundary:65d9206e -->
+
+### Re: #jbruncloseoutstate — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: [#jbruncloseoutstate]
+
+
+Implemented the first concrete closeout-recovery state-machine slice in `src/agent-doc` and marked `#jbruncloseoutstate` done.
+
+The fix is deliberately narrow: route now classifies a blocked active closeout through a typed `RouteCloseoutBlockDecision` instead of falling straight through to the raw capture/replay error. Prompt-bearing JB reroutes still enqueue the prompt behind the active closeout; plain `Run Agent Doc` / active-queue reroutes now detect the existing live queue head and wait behind the closeout instead of surfacing `captured response baseline no longer matches current document` as a terminal operator error. If there is neither a prompt to preserve nor an active queue head, it still fails closed with the original blocker.
+
+This reuses the existing `flow::closeout` recovery state machine rather than adding a parallel architecture. Lean is still not the right first tool here: the useful invariant is now expressed in Rust as an exhaustive route decision with regression tests, and the broader formal-model question can come after the typed recovery boundary is stable.
+
+Proof for this cycle:
+- Changed paths: `src/agent-doc/agent-doc-orchestration/src/route.rs`, parent submodule pointer `src/agent-doc`, and this session document.
+- Code commit: `src/agent-doc` `2464ba38` (`fix(route): wait active queue behind blocked closeout`).
+- Commands: `cargo fmt`; `cargo test -p agent-doc-orchestration closeout_block_decision -- --nocapture`; `cargo test -p agent-doc-orchestration route::tests::drain_reaps_completed_review_item_across_all_surfaces -- --nocapture`; `make check`; `gh run list --workflow CI --limit 1`; `git diff --check`.
+- Verification: focused route tests passed; `make check` passed clippy, 4,550 nextest tests, doctests, and the ignored medium SimWorld closeout corpus. Latest GitHub CI on `main` is green (`27594082265`).
+- Confidence: high for this JB Run Agent Doc failure mode; medium for the full family until more route/repair/session-check decisions are collapsed into the shared closeout recovery layer.
+- Escalation: none.
+<!-- agent:boundary:9efa2c53 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` still does not work. What is wrong with the codebase? This is disturbing? Seems like we need a refactoring project to be able to reliably make this fix.~~
-- :pushpin: [#jbruncloseoutstate]
+- ~~:pushpin: [#jbruncloseoutstate]~~
 - Would lean-lang help to create proper invariants? So agents can create unnecessary architecture sprawl?
+- How can we have the agents think architecturally instead of the default sprawl code?
 ---
 Typing into the queue during the turn cause the conversation to be interrupted. ![img_30.png](img_30.png). A pre-finalize response was uncommitted causing the response to be treated as a user prompt ![img_31.png](img_31.png). After restart, JB `Run Agent Doc` error.
 
@@ -115,7 +137,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jbruncloseoutstate] [clean-session] Implement the closeout recovery state-machine refactor from tasks/agent-doc/plan-run-agent-doc-closeout-recovery-state-machine.md: introduce typed CloseoutRecoveryDecision/evidence API, route/JB Run Agent Doc through it, unify sidecar reset/replay/retire mutations, and add SimWorld transition-table coverage.
 - [ ] [#lazilyqrestore] [operator-verify] Restore/account for lost queue content in `tasks/software/lazily-rs.md`: that document is foreign-owned by another pane, so capture the intended lost queue heads from the owning lazily-rs session/doc history/snapshots/sidecars, restore them as backlog items there, or record explicit user-removal proof. Related #queue-clear-unrun-items/#manual-queue-head-loss/#queue-user-edit-overwrite.
 - [ ] [#recyclerestart-verify] [operator-verify] #recyclerestart live proof + promotion: Q1 (recycle ENOENT / restart) + Q2 (FFI self-heal sync guard, supersede-newer-generation) are committed (agent-doc 0b31e90c, fa6a230a) but NOT promoted onto the live stale supervisor — the img_23 stall is the pre-fix binary. Recycle/restart the supervisor onto the new build (agent-doc admin recycle --all-projects, or restart), then confirm: kill-pane + JB Sync Tmux Layout no longer reports Sync deferred, and a real idle/next-queue recycle restarts/re-clears the agent session. Cannot be agent-done. Plan: tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md
 - [ ] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof — two-live-IDE CRDT broadcast convergence: with the installed build, edit the same managed doc in JB and VS Code at once and confirm both editor buffers receive the broadcast patch and converge (no clobber). Implementation landed agent-doc cddad87b (id/deliver/merge, SimWorld-covered, CI green). Cannot be agent-done — needs two live editors. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md

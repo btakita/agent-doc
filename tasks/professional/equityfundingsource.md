@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -55,7 +55,32 @@ Verification: `bun test tests/admin-investor-pipeline.test.ts` passed (61 tests)
 Committed and pushed: EFS submodule `6ba172b` (`feat(admin): track lender communication follow-ups (#deal-interest-communication)`) to `btakita/equityfundingsource-dev:main`; parent repo pointer `7f62390ad` (`chore(efs): advance lender communication pipeline`) to `btakita/agent-loop:main`.
 
 Escalation: none. Confidence: high. No deploy was run; this queue item used the `#spec-test-commit-push` path, and the new D1 migration will be applied by the normal deploy path. Exchange is large, but the active queue was drainable, so I did not pause for compaction.
-<!-- agent:boundary:e2e0d8ef -->
+
+### Re: Deal Pipeline + GoHighLevel — gpt-5
+
+> **Queue prompt:**
+>
+> I'm talking about the Deal Pipeline. https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f and the Available Deal dialog. The admin will communicate with lenders over email and select a lender. Would Go High Level integration be a good idea here?
+
+
+Yes, GHL is a good fit here, but only as the communication/CRM layer, not as the source of truth for the Deal Pipeline.
+
+For the Available Deal dialog, EFS should own the durable deal state: which lenders are interested, who was selected, package/document permissions, borrower document requests, verbal commitment, funding allocation, audit history, and TMO/R2/D1 links. That state is too EFS-specific and too tied to documents/security to move into GHL.
+
+GHL is useful around that core workflow: send the lender package email, include a calendar link, create follow-up tasks, track replies/conversations, update a CRM opportunity/contact, and keep Robert/Judith's outreach automations in one familiar CRM. Official docs support the basic shape: HighLevel has APIs for contacts, messaging, workflows, calendars, webhooks, and more; the Conversations API has a `POST /conversations/messages` endpoint; workflows include email/SMS/call/manual-action steps and create/update opportunity actions. Sources checked: https://help.gohighlevel.com/support/solutions/articles/48001060529-highlevel-api-documentation, https://marketplace.gohighlevel.com/docs/ghl/conversations/send-a-new-message/, https://help.gohighlevel.com/support/solutions/articles/155000002294-what-are-workflow-actions-complete-list-.
+
+Recommended architecture:
+
+1. EFS remains canonical. The Available Deal dialog should show interested lenders and selection controls directly from D1 (`investor_deal_interests`, funds/allocations, documents).
+2. GHL is an adapter. Store GHL contact/conversation/opportunity/message IDs on the EFS interest/deal rows, but never require GHL to render the Deal Pipeline.
+3. Start narrow. First integration should be "Send package / start follow-up" from the Available Deal dialog: sync or create lender contact in GHL, send/trigger the email, store the GHL message/conversation ID, and log the result in EFS.
+4. Pull replies back into EFS only as communication history. A reply can update last-contact/next-follow-up fields, but selecting a lender should remain an explicit admin action in EFS.
+5. Avoid GHL as the pipeline board. Its opportunity pipeline can mirror a deal for CRM visibility, but EFS needs to model multiple interested lenders per deal, multi-lender allocations, private document access, and TMO writeback gates.
+
+Caveats: use current HighLevel API docs and private integration/OAuth rather than legacy V1 API patterns; their docs say V1 reached end-of-support on December 31, 2025. Also confirm Robert's enterprise/sub-account access includes the API/workflow features needed, because HighLevel says API access varies by plan.
+
+Changed paths: session document only. Verification: reviewed local EFS Deal Pipeline/Lender Pipeline notes and current official HighLevel API/workflow docs. Escalation: none. Confidence: medium-high.
+<!-- agent:boundary:15f26d1d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,12 +88,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- I'm talking about the Deal Pipeline. https://equityfundingsource.brian-takita.workers.dev/portal-admin/loans/45ddae53-3e7f-43b1-a627-17b79b06fa3f and the Available Deal dialog. The admin will communicate with lenders over email and select a lender. Would Go High Level integration be a good idea here?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#deal-pipeline-ghl-adapter] [recommended] Deal Pipeline GoHighLevel adapter spike: keep EFS/D1 as source of truth for Available Deal lender selection, document permissions, and audit; evaluate a narrow GHL integration for outbound package emails, calendar/follow-up automation, inbound reply capture, and CRM opportunity/contact visibility. Decide required GHL IDs to store on `investor_deal_interests` / deal rows and whether to trigger GHL workflows or send via Conversations API.
 <!-- /agent:backlog -->
 
 ## Review

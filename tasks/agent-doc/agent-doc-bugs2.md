@@ -997,7 +997,43 @@ Remaining open evidence gaps:
 - Failure fallback path: no top-level `supervisor_reexec_failed fallback=continue_current_binary` event appears in the searched logs; the proof observed here is the clean success path.
 
 No code changed for this sweep.
-<!-- agent:boundary:d1ac377e -->
+Implemented and pushed.
+
+> **Queue prompt:**
+>
+> :pushpin: I switched mrh-servers.md from Claude to Codex by restarting agent-doc. Now JB `Run Agent Doc` is unresponsive. The Codex session was idle.
+> ```
+> resync: pruned 1 stale session(s)
+> [route] target tmux session: 0
+> [route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client
+> Error: dispatch-only codex reopen refused to inject into pane %103 for tasks/mrh-servers.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
+> ```
+
+
+Updated agent-doc’s `AGENTS.md` in the clean agent-doc worktree to make CI passive: use one-shot CI checks, record status, do not wait/watch/block the turn unless explicitly asked.
+
+Also drained the agent-doc queue items that were active:
+- `#opverify-editor-proof`
+- `#opverify-recycle-proof`
+- closed exact-proof duplicates: `#suprehotreload`, `#aazp`, `#4myd`, `#cleandrainsup-verify`
+
+Verification already run for the code change:
+- `cargo test -p agent-doc-orchestration operator_control -- --nocapture`
+- `cargo test -p agent-doc-orchestration restart_continue_strategy -- --nocapture`
+- `cargo check -p agent-doc`
+- `make check`
+- `git diff --check`
+
+Pushed commits:
+- agent-doc submodule: `9d8bc5ee`
+- parent repo latest: `4241da5f8`
+
+Passive CI status:
+- agent-doc `CI`: success
+- parent `Agent Doc`: run `27585324961` failed immediately; GitHub had no failed log available yet (`log not found`), and I did not block on it per the new instruction.
+
+Preflight now reports `queue_drainable_head_count=0`.
+<!-- agent:boundary:29b5905a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -1012,7 +1048,7 @@ resync: pruned 1 stale session(s)
 Error: dispatch-only codex reopen refused to inject into pane %103 for tasks/mrh-servers.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
 ```
 ---
-- :round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.
+- ~~:round_pushpin: #simworld for JB `Run Agent Doc` to Codex. Also test `/clear`. Tests should simulate the submit behavior and guard against the CR sending.~~
 - ~~do [#codexctrlz]~~
 - ~~do [#opverify-submit-proof]~~
 - ~~do [#opverify-editor-proof]~~

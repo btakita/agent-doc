@@ -38,7 +38,40 @@ committed
 Compacted content:
 - Archived 1 response topic(s): #investor-pipeline-resequence and borrower portal messages
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): compact archive summary / no-op closeout; #gq5c follow-up next...
-<!-- agent:boundary:052d7604 -->
+
+### Re: Remove redundant "Published deals" + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> Remove redundant "Published deals" in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline
+
+
+Removed the redundant `Published deals` cross-cut board lane from `/portal-admin/pipeline`. The board now renders only the real pipeline phase columns, while the per-loan `Published` badge and publish/close deal actions remain intact.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev` parent gitlink
+
+Commits:
+- EFS app: `5d19911 fix(admin): remove redundant published deals column`
+- Parent gitlink: `a2f34ece4 chore(efs): update deployed app submodule`
+
+Deploy:
+- Rebasing onto `origin/main` brought in pending migration `0069_final_loan_docs_signature.sql`; inspected it before deploy. It only adds final-document signature/notary columns and an index to `loans`.
+- `make deploy` applied that migration and deployed Worker version `6c5106e4-63f7-4b8e-8306-8322846d9212`.
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts` passed: 53 tests.
+- `make check` in `src/equityfundingsource-dev` passed after rebase: 736 tests, app build, Worker build.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` after deploy: no migrations to apply.
+- Live smoke: `/` returned 200; `/portal-admin/pipeline` returned 303 to the admin login, as expected for the protected route.
+- Downloaded the deployed browser asset `/index.browser-VRGDIGYI.js`; it contains no `Published deals` column string or removed lane identifiers.
+- GitHub Actions check: this submodule has no `.github/workflows`, and `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
+- Top-level `make check` is not EFS-specific and failed in existing `src/agent-doc` tests: one tmux isolation failure (`duplicate session: test`) and one IPC long-path timeout. The EFS app suite and deploy proof are green.
+
+Confidence: high for the EFS fix and deploy. Escalation: none.
+<!-- agent:boundary:56a1e7bc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,8 +79,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- What are #next-steps to have the "Available Deals" subpipeline which includes Processing + Underwriting steps in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?
-- Remove redundant "Published deals" in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline
+- ~~What are #next-steps to have the "Available Deals" subpipeline which includes Processing + Underwriting steps in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?~~
+- ~~Remove redundant "Published deals" in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline~~
 - deploy
 <!-- /agent:queue -->
 

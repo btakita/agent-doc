@@ -10,6 +10,7 @@ pub mod closeout;
 pub mod document_mutation;
 pub mod operator_clear;
 pub mod orchestration_batch;
+pub mod outcome;
 pub mod proof;
 pub mod routed_reopen;
 pub mod session_cycle;

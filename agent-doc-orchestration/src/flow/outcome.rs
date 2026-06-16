@@ -1,0 +1,224 @@
+use serde::{Deserialize, Serialize};
+use std::fmt;
+
+pub const BINARY_OUTCOME_CONTRACT_VERSION: &str = "binary-outcome-v1";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BinaryOutcomeClass {
+    Ok,
+    Recoverable,
+    Blocked,
+    Operator,
+}
+
+impl BinaryOutcomeClass {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Recoverable => "recoverable",
+            Self::Blocked => "blocked",
+            Self::Operator => "operator",
+        }
+    }
+}
+
+impl fmt::Display for BinaryOutcomeClass {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BinaryOutcome {
+    pub contract_version: String,
+    pub class: BinaryOutcomeClass,
+    pub invariant_id: String,
+    pub proof_marker: String,
+    pub next_action: String,
+}
+
+impl BinaryOutcome {
+    pub fn new(
+        class: BinaryOutcomeClass,
+        invariant_id: impl Into<String>,
+        proof_marker: impl Into<String>,
+        next_action: impl Into<String>,
+    ) -> Result<Self, BinaryOutcomeError> {
+        let invariant_id = validate_token("invariant_id", invariant_id.into())?;
+        let proof_marker = validate_token("proof_marker", proof_marker.into())?;
+        let next_action = validate_token("next_action", next_action.into())?;
+        Ok(Self {
+            contract_version: BINARY_OUTCOME_CONTRACT_VERSION.to_string(),
+            class,
+            invariant_id,
+            proof_marker,
+            next_action,
+        })
+    }
+
+    pub fn ok(
+        invariant_id: impl Into<String>,
+        proof_marker: impl Into<String>,
+        next_action: impl Into<String>,
+    ) -> Result<Self, BinaryOutcomeError> {
+        Self::new(
+            BinaryOutcomeClass::Ok,
+            invariant_id,
+            proof_marker,
+            next_action,
+        )
+    }
+
+    pub fn recoverable(
+        invariant_id: impl Into<String>,
+        proof_marker: impl Into<String>,
+        next_action: impl Into<String>,
+    ) -> Result<Self, BinaryOutcomeError> {
+        Self::new(
+            BinaryOutcomeClass::Recoverable,
+            invariant_id,
+            proof_marker,
+            next_action,
+        )
+    }
+
+    pub fn blocked(
+        invariant_id: impl Into<String>,
+        proof_marker: impl Into<String>,
+        next_action: impl Into<String>,
+    ) -> Result<Self, BinaryOutcomeError> {
+        Self::new(
+            BinaryOutcomeClass::Blocked,
+            invariant_id,
+            proof_marker,
+            next_action,
+        )
+    }
+
+    pub fn operator(
+        invariant_id: impl Into<String>,
+        proof_marker: impl Into<String>,
+        next_action: impl Into<String>,
+    ) -> Result<Self, BinaryOutcomeError> {
+        Self::new(
+            BinaryOutcomeClass::Operator,
+            invariant_id,
+            proof_marker,
+            next_action,
+        )
+    }
+
+    pub fn log_fields(&self) -> String {
+        format!(
+            "binary_outcome={} invariant={} proof_marker={} next_action={}",
+            self.class.as_str(),
+            self.invariant_id,
+            self.proof_marker,
+            self.next_action
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BinaryOutcomeError {
+    EmptyField { field: &'static str },
+    InvalidToken { field: &'static str, value: String },
+}
+
+impl fmt::Display for BinaryOutcomeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyField { field } => write!(f, "{field} must not be empty"),
+            Self::InvalidToken { field, value } => {
+                write!(f, "{field} must be a single field-safe token: {value}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for BinaryOutcomeError {}
+
+fn validate_token(field: &'static str, value: String) -> Result<String, BinaryOutcomeError> {
+    if value.trim().is_empty() {
+        return Err(BinaryOutcomeError::EmptyField { field });
+    }
+    if value.trim() != value || !value.chars().all(is_token_char) {
+        return Err(BinaryOutcomeError::InvalidToken { field, value });
+    }
+    Ok(value)
+}
+
+fn is_token_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn binary_outcome_records_required_contract_fields() {
+        let outcome = BinaryOutcome::recoverable(
+            "supervisor_freshness",
+            "supervisor_binary_stale_self_recycled",
+            "restart_supervisor_once_and_retry",
+        )
+        .unwrap();
+
+        assert_eq!(outcome.contract_version, "binary-outcome-v1");
+        assert_eq!(outcome.class, BinaryOutcomeClass::Recoverable);
+        assert_eq!(outcome.invariant_id, "supervisor_freshness");
+        assert_eq!(
+            outcome.log_fields(),
+            "binary_outcome=recoverable invariant=supervisor_freshness proof_marker=supervisor_binary_stale_self_recycled next_action=restart_supervisor_once_and_retry"
+        );
+    }
+
+    #[test]
+    fn binary_outcome_classes_are_stable_snake_case() {
+        assert_eq!(BinaryOutcomeClass::Ok.as_str(), "ok");
+        assert_eq!(BinaryOutcomeClass::Recoverable.as_str(), "recoverable");
+        assert_eq!(BinaryOutcomeClass::Blocked.as_str(), "blocked");
+        assert_eq!(BinaryOutcomeClass::Operator.as_str(), "operator");
+
+        let json = serde_json::to_value(
+            BinaryOutcome::operator(
+                "two_editor_convergence",
+                "missing_live_vscode_ack",
+                "request_operator_live_proof",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(json["class"], "operator");
+        assert_eq!(json["next_action"], "request_operator_live_proof");
+    }
+
+    #[test]
+    fn binary_outcome_rejects_ambiguous_or_multi_action_fields() {
+        assert_eq!(
+            BinaryOutcome::ok("", "proof", "continue").unwrap_err(),
+            BinaryOutcomeError::EmptyField {
+                field: "invariant_id"
+            }
+        );
+
+        assert!(matches!(
+            BinaryOutcome::blocked("queue head", "proof", "stop").unwrap_err(),
+            BinaryOutcomeError::InvalidToken {
+                field: "invariant_id",
+                ..
+            }
+        ));
+
+        assert!(matches!(
+            BinaryOutcome::recoverable("queue_head", "proof", "retry,clear").unwrap_err(),
+            BinaryOutcomeError::InvalidToken {
+                field: "next_action",
+                ..
+            }
+        ));
+    }
+}

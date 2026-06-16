@@ -104,7 +104,22 @@ Proof:
 - Commands: `tsift status` in the parent repo, `tsift status` in the EFS submodule, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
 - Verification: no application code changed; no tests or deploy run.
 - Escalation: none.
-<!-- agent:boundary:5e4c1579 -->
+
+### Re: inactive queued EFS deal-interest request — gpt-5
+
+I did not run the EFS repo work or deploy from this cycle. Preflight found the new EFS directive inside `agent:queue`, but the document frontmatter says `queue: stop` and the queue block had no active `go`, so agent-doc treated it as inactive queue residue rather than executable repo work.
+
+The requested work is preserved as backlog item `#efs-deals-interest-admin-sync`: rename the investor dashboard label to "Deals of interest", fix the lender-interest action so `btak.dev+investor@gmail.com` appears in admin Available Deal Interested lenders, update spec/tests, commit, push, and deploy.
+
+Warnings surfaced:
+- Preflight flagged `#dropbox-sync-adapter`, `#dzmm-writeback-replay`, and `#zwws-vestings-local` as possible stale review items because related done entries may already cover them. I left them unchanged.
+
+Proof:
+- Changed paths: session document/backlog only.
+- Commands: `tsift status` in the parent repo, `tsift status` in the EFS submodule, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc repair --apply-recovery`.
+- Verification: no application code changed; no tests or deploy run.
+- Escalation: none.
+<!-- agent:boundary:6cc179ab -->
 <!-- /agent:exchange -->
 ###
 <!--

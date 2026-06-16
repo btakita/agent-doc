@@ -1581,6 +1581,17 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     {
         let outcome = repair_stale_preflight_started_cycle(file)?;
         if outcome != RepairOutcome::Noop {
+            let refreshed_content = std::fs::read_to_string(file).with_context(|| {
+                format!(
+                    "failed to read document after stale preflight repair {}",
+                    file.display()
+                )
+            })?;
+            let response_prefix_repaired_doc =
+                repair_response_body_prompt_prefixes_if_needed(file, &refreshed_content)?;
+            if response_prefix_repaired_doc != refreshed_content {
+                return Ok(RepairOutcome::TemplateNormalized);
+            }
             return Ok(outcome);
         }
         if recover_missing_commit_boundary(file, "repair_commit_boundary_recovered")?.is_some() {
@@ -3287,6 +3298,42 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
         assert_eq!(state.last_event, "repair_preflight_stale_lock");
+    }
+
+    #[test]
+    fn recover_stale_preflight_cycle_strips_response_body_prompt_prefixes() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Do the repair.\n",
+            "### Re: repair — gpt-5\n\n",
+            "Verification passed:\n",
+            "❯ - `make check`\n",
+            "❯ - `agent-doc write --commit`\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let repaired = run(&doc).unwrap();
+        assert_eq!(repaired, RepairOutcome::TemplateNormalized);
+
+        let doc_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(doc_after.contains("\n- `make check`\n- `agent-doc write --commit`\n"));
+        assert!(
+            !doc_after.contains("❯ - `make check`")
+                && !doc_after.contains("❯ - `agent-doc write --commit`"),
+            "stale-preflight repair must canonicalize response-owned proof lines:\n{doc_after}"
+        );
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("repair_preflight_stale_lock"));
+        assert!(log.contains("repair_response_body_prompt_prefix_stripped"));
     }
 
     #[test]

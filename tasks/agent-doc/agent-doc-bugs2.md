@@ -111,13 +111,42 @@ Verification passed: `cargo test -p agent-doc-orchestration route_submit --lib`,
 Remote CI: `src/agent-doc` GitHub Actions `CI` run `27651569734` is still `in_progress`; local full verification passed, so I did not wait on `gh run watch`. The parent repo has no workflow named `CI`.
 
 Escalation: none. No JetBrains plugin update is required for this fix; it is in the Rust CLI/orchestration path. Confidence: high for preventing route/supervisor input concatenation and for the new proof marker.
-<!-- agent:boundary:7bc20ae2 -->
+
+### Re: JB clear/run submit restart race closeout — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Clear Session Context` does not submit with Enter. JB `Run Agent Doc` sends a `/clear` and restart. After a couple restart JB `Run Agent Doc` still does not send Enter. Should we remove Codex-specific logic with JB commands and just use the same path as with Claude Code?
+
+
+Closed this queue head with a binary-side fix, not JetBrains-specific command logic. The JB actions already route through the shared CLI/orchestration path, so the root fix is durable supervisor state around context clears.
+
+Implemented:
+- `src/agent-doc` now persists supervisor-owned context clears in `.agent-doc/context-clear-in-flight/<doc-hash>.json`.
+- A restarted/recycled idle-queue watcher treats that marker as authoritative, blocks drains while the clear is settling, and sends one shared Enter-profile submit key when the clear command is still visible in the composer.
+- The marker is cleared only after the existing fresh-idle debounce.
+- Marker writes cover deferred operator clears, context-reset clear sends/resubmits, and `/clear` queue-head dispatches.
+- `AGENTS.md` now says to inspect CI once with `gh run list --workflow CI --limit 1`, record queued/in-progress status, and not use `gh run watch` as a closeout gate unless explicitly asked.
+
+Verification:
+- Focused tests passed: `context_clear_marker`, `drain_settle_gate`, `pending_payload_enter_resubmit`, `idle_queue`, `route_submit`, `context_reset`.
+- Full `make check` passed locally: clippy, 4,607 nextest tests, doctests, and the medium SimWorld corpus check.
+- `make install` completed; installed binary reports `agent-doc 0.34.1`.
+- CI status was checked once after push: latest `src/agent-doc` CI run `27652696239` was `in_progress`, so I recorded that and did not wait.
+
+Pushed:
+- `src/agent-doc` commit `7752bfc6 fix: persist supervisor context clear state`.
+- parent gitlink commit `a23cbfcbe agent-doc: update context clear race fix`.
+- parent instruction commit `f804b3ccf docs: clarify CI closeout check`.
+
+Confidence: high for the restart/race class. The fix keeps JB thin and moves the state machine into the shared Rust path used by both JB and CLI entrypoints.
+<!-- agent:boundary:52205c6f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: JB `Clear Session Context` does not submit with Enter. JB `Run Agent Doc` sends a `/clear` and restart. After a couple restart JB `Run Agent Doc` still does not send Enter. Should we remove Codex-specific logic with JB commands and just use the same path as with Claude Code?
+- ~~:pushpin: JB `Clear Session Context` does not submit with Enter. JB `Run Agent Doc` sends a `/clear` and restart. After a couple restart JB `Run Agent Doc` still does not send Enter. Should we remove Codex-specific logic with JB commands and just use the same path as with Claude Code?~~
 - Should we have more state machine logic to prevent race conditions?
 - [#resprectail]
 <!-- /agent:queue -->

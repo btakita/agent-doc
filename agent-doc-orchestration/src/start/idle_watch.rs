@@ -450,9 +450,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         );
                         None
                     }
-                };
+            };
             let context_clear_pending = context_clear_marker.as_ref().and_then(|marker| {
-                supervisor_pane_payload_already_pending(&shared, &marker.command)
+                supervisor_pane_payload_already_pending(&shared, &marker.command, &harness)
             });
             if let Some(marker) = context_clear_marker.as_ref() {
                 context_reset_in_flight = true;
@@ -1230,7 +1230,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // pressing Enter once instead of declaring the queue
                         // handled.
                         let clear_already_pending =
-                            supervisor_pane_payload_already_pending(&shared, clear_cmd);
+                            supervisor_pane_payload_already_pending(&shared, clear_cmd, &harness);
                         let resubmit_key = format!("context_reset:{head}");
                         if idle_queue_pending_payload_needs_enter_resubmit(
                             &harness.binary,
@@ -1426,7 +1426,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // draft may simply be waiting for the bare submit key, so
                         // submit it once.
                         let payload_already_pending =
-                            supervisor_pane_payload_already_pending(&shared, &drain_payload);
+                            supervisor_pane_payload_already_pending(
+                                &shared,
+                                &drain_payload,
+                                &harness,
+                            );
                         let resubmit_key = format!("drain:{head}");
                         if idle_queue_pending_payload_needs_enter_resubmit(
                             &harness.binary,

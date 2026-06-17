@@ -140,10 +140,22 @@ pub(crate) fn supervisor_pane_has_busy_cue(
 ///
 /// Reuses `route::cycle_ack::recent_lines_contain_trigger`, the same
 /// still-in-composer detector the route acceptance poll uses, so the dedup is
-/// keyed off the harness composer rather than scrollback far above it.
+/// keyed off the harness composer rather than scrollback far above it. For
+/// `agent-doc <path>` triggers, also reuse route's draft equivalence matcher so
+/// a visible relative-path draft dedups an absolute trigger for the same file.
+pub(crate) fn supervisor_pane_payload_pending_in_content(
+    content: &str,
+    payload: &str,
+    harness: &crate::harness::HarnessConfig,
+) -> bool {
+    crate::route::recent_lines_contain_trigger(content, payload)
+        || crate::route::direct_pane_existing_draft_visible(content, payload, harness)
+}
+
 pub(crate) fn supervisor_pane_payload_already_pending(
     shared: &SupervisorShared,
     payload: &str,
+    harness: &crate::harness::HarnessConfig,
 ) -> Option<bool> {
     let pane = shared
         .inject_pane
@@ -151,8 +163,8 @@ pub(crate) fn supervisor_pane_payload_already_pending(
         .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
     let tmux = crate::sessions::Tmux::default_server();
     let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
-    Some(crate::route::recent_lines_contain_trigger(
-        &content, payload,
+    Some(supervisor_pane_payload_pending_in_content(
+        &content, payload, harness,
     ))
 }
 
@@ -310,6 +322,23 @@ mod tests {
                 last_dispatched.as_deref(),
             ),
             IdleQueueDrainDecision::SkipAlreadyDispatched
+        );
+    }
+    #[test]
+    fn supervisor_pending_payload_matches_relative_codex_agent_doc_draft() {
+        let harness = crate::harness::HarnessConfig::codex();
+        let payload = "agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md";
+        let content = "\
+› agent-doc tasks/monsterrodholders.md
+agent-doc tasks/monsterrodholders.md
+agent-doc tasks/monsterrodholders.md
+agent-doc tasks/monsterrodholders.md
+gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 0% use
+";
+
+        assert!(
+            supervisor_pane_payload_pending_in_content(content, payload, &harness),
+            "idle-queue dedupe must recognize equivalent relative Codex drafts before appending another trigger"
         );
     }
     #[test]

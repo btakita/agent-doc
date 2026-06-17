@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -261,12 +261,13 @@ The configured local model path is the new `tsift-local-model` profile set, not 
 It is not being used as a live local model right now. The live probe reported the RTX 5090 available with 32,607 MiB total VRAM, 31,971 MiB free, and no GPU model processes. `pgrep -af "ollama|llama|vllm|qwen|ggml"` also found no matching provider process.
 
 Current implementation status: the local-model substrate, KG extraction trait, lifecycle/VRAM cleanup checks, and multi-run verification are in place. The active default code paths still have deterministic hash fallback providers (`HashKgExtractor` / `HashSemanticProvider`) unless a caller supplies a real local extractor/provider. So the answer is: Qwen3-32B Q4 is the intended/default local KG extractor profile for this machine, but it is not currently loaded or serving tsift work.
-<!-- agent:boundary:7d9f70a1 -->
+<!-- agent:boundary:c16ab12f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Please set up the local model to start working.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

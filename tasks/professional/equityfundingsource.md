@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -234,7 +234,7 @@ Shipped proactive TMO-account-missing warnings across the admin UI so the admin 
 - Smoke: `/`, `/funded-deals`, `/login` all 200
 
 Queue drained.
-<!-- agent:boundary:e3e2c5b7 -->
+<!-- agent:boundary:296bb920 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -242,6 +242,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- In the InterestedLenderCard where the TMO account is not linked, there should be a button under Show/Hide workflow to link the account to TMO. deploy
 <!-- /agent:queue -->
 
 ## Backlog

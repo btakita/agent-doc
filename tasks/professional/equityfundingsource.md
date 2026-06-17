@@ -55,7 +55,23 @@ Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-
 Verification: focused tests passed (`108 pass`); full check passed (`750 pass`, build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:dc63a990 -->
+
+### Re: Start Underwriting — gpt-5
+
+> **Queue prompt:**
+>
+> Start Underwriting
+
+Completed and pushed the `Start Underwriting` removal for the Available Deal -> Interested Lenders workflow.
+
+Changed paths: `src/equityfundingsource-dev` commit `447538a` removes `underwriting_started_at` from the deal-interest workflow stage model, admin API serialization/update SQL, Interested Lenders UI controls, lender pipeline modal, loan-interest row typing, PRD wording, and tests; adds migration `0075_drop_deal_interest_underwriting_started.sql` to drop the column. Parent repo commit `c69fdbd2a` updates the EFS submodule pointer.
+
+Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
+
+Verification: focused tests passed (`109 pass`); full check passed (`751 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:443588b8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,14 +83,14 @@ In "Available Deal" -> "Interested Lenders" tab
 
 Delete fields, db records, and logic relating to:
 - ~~Mark Call Completed~~
-- Start Underwriting
+- ~~Start Underwriting~~
 - Call scheduled
 - Verbal amount
 - Contact method
 - Pre-doc conditions
 - Pre-doc instructions
 - Lender contact summary
-<!-- /agent:queue -->
+ <!-- /agent:queue -->
 
 ## Backlog
 

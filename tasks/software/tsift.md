@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -39,13 +39,19 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): #advance-review; small model vs MemGraphRAG; model support matrix; 3 more
 - Prior summary/context: prior compacted content: **[#1td4]** crates.io publish job migrated to OIDC trusted publishing. **Code complete and o...
-<!-- agent:boundary:f151c654 -->
+- `gh run list --workflow CI --limit 1` could not run because the root repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+- `make check` passed.
+- `git diff --check -- tasks/software/plan-tsift-local-kg-model-support.md` passed.
+4. Evaluation-only: Qwen3.5-35B-A3B, gated until a reduced-context single-5090 profile is proven.
+3. Embedding companion: Qwen3-Embedding 0.6B/4B/8B, starting small and benchmarking up when vector quality matters.
+2. Throughput/long-context candidate: Qwen3-30B-A3B-Instruct-2507 quantized, because it has 30.5B total / 3.3B activated parameters and 262K native context.
+1. Default extractor/reasoner: Qwen3-32B quantized local profile, because the RTX 5090 has enough free VRAM for a 4-bit 32B-class model and Qwen3-32B has 32K native context with YaRN validation beyond that.
+<!-- agent:boundary:626138a6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Please create a plan for local model support for Knowledge Graphs. Add tasks to the backlog and queue. Read my current 5090 usage and prioritize the optimal local model for my machine. Make sure the Knowledge Graph can work with both tsift and agent-doc via tsift-* library. We should be able to support multiple runs. Make sure the vRAM is cleared when not needed.  
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -54,6 +60,12 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#kgm1] [queue] Spec local-model Knowledge Graph contracts in tasks/software/plan-tsift-local-kg-model-support.md, src/tsift/SPEC.md, and package READMEs: provider-neutral runtime traits, model profile ranking, structured extraction schema, run manifest fields, and graph provenance semantics.
+- [ ] [#kgm2] [queue] Implement the tsift local-model substrate from tasks/software/plan-tsift-local-kg-model-support.md: GPU/VRAM probe, RTX 5090 profile, Qwen3-32B default ranking, Qwen3-30B-A3B throughput fallback, Qwen3-Embedding companion profiles, and CLI status output.
+- [ ] [#kgm3] [queue] Replace the tsift-memgraphrag hash-only semantic path from tasks/software/plan-tsift-local-kg-model-support.md with a pluggable local embedding/extraction provider while retaining tsift-local-hash-v1 as deterministic fallback for tests.
+- [ ] [#kgm4] [queue] Add the shared tsift-kg extraction pipeline from tasks/software/plan-tsift-local-kg-model-support.md for tsift and agent-doc: chunk source/session/memory inputs, call the local model, validate JSON entities/relations, and upsert GraphProjection rows into SQLite plus backend candidates.
+- [ ] [#kgm5] [queue] Add model lifecycle and VRAM cleanup controls from tasks/software/plan-tsift-local-kg-model-support.md: per-run lease, idle TTL, Ollama keep_alive=0, llama.cpp router unload, process-kill fallback, nvidia-smi before/after proof, and single-5090 concurrency guard.
+- [ ] [#kgm6] [queue] Add multi-run verification from tasks/software/plan-tsift-local-kg-model-support.md: two sequential KG runs, interrupted-run cleanup, no duplicate/stale graph facts, no orphaned model processes, VRAM returns near baseline, make check, and tsift graph/memory smoke tests.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift-md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 

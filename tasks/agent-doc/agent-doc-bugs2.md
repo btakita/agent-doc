@@ -164,14 +164,29 @@ The Codex `Run Agent Doc` no-submit symptom is covered by `src/agent-doc` commit
 On retrying `Return`: do not retry unboundedly. The safe rule is bounded and proof-gated. Clear Session Context now does one submit-key retry only when the clear command is still visible in the active input. Run Agent Doc should not keep pressing Return after input was accepted, because that can duplicate dispatch if the route proof is stale. A future improvement can add the same bounded retry only for the narrow case where the routed trigger remains visibly drafted and no dispatch proof exists.
 
 I also removed the transient merge-marker artifact and the `(HEAD)` label from the previous failed closeout. I did not implement the broader CRDT-retry-on-typing-merge change in this pass; that queue item remains active.
-<!-- agent:boundary:21e96d0f -->
+
+### Re: Return retry policy — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Should JB `Run Agent Doc` & `Clear Session Context` Codex retry `Return` until submit occurs? Same with JB `Clear Session Context` Opencode?
+
+
+Use bounded proof-gated retry, not retry-until-submit.
+
+For `Clear Session Context`, the right behavior is what just landed: submit the harness-native clear command, poll the active input, and retry the submit key once only if the command is still visibly drafted. That applies to Codex `/clear` and OpenCode `/new`. If the command remains visible after the retry, fail closed with a visible blocker instead of pretending clear succeeded.
+
+For `Run Agent Doc`, do not keep pressing `Return` after pane input was accepted. That risks duplicate dispatch when the pane accepted the command but dispatch-start proof is stale or delayed. The safer behavior is: if the routed trigger is still visibly drafted, one bounded re-submit is reasonable; if pane input was accepted but dispatch-start proof does not appear, fail closed with the attempt id and route snapshot. That is the behavior now in `dc7ddb88` for Codex accepted-only proof gaps.
+
+The broader CRDT-retry item from the typing/merge incident is still queued for implementation; I did not consume it here.
+<!-- agent:boundary:2205b112 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` Codex did not submit.~~
-- :pushpin: Should JB `Run Agent Doc` & `Clear Session Context` Codex retry `Return` until submit occurs? Same with JB `Clear Session Context` Opencode?
+- ~~:pushpin: Should JB `Run Agent Doc` & `Clear Session Context` Codex retry `Return` until submit occurs? Same with JB `Clear Session Context` Opencode?~~
 - :pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.
 - :pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.
 - backlog with `queue` attribute is not adding items into the queue.

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -114,7 +114,7 @@ Reviewed all 4 `[operator-drive]` review items. One ship-stopper found, one revi
 **Verification:** 58/58 tests pass, `ruff check` clean, `ty check` clean. `twine check` PASSED on both rebuilt dist artifacts. Fresh-venv install round-trip confirmed `Signal→Slot` works without recursion.
 
 SPEC + CHANGELOG updated to document the re-entrancy-safe invalidation semantics. Review #kb9b updated: ship-stopper cleared, dist artifacts rebuilt and verified.
-<!-- agent:boundary:155ff8f8 -->
+<!-- agent:boundary:fa69aed9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -123,6 +123,7 @@ SPEC + CHANGELOG updated to document the re-entrancy-safe invalidation semantics
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

@@ -34,13 +34,17 @@ use std::path::{Path, PathBuf};
 
 const RECENT_WINDOW_SECS: u64 = 30 * 60;
 const WARN_EXCHANGE_LINES: usize = 160;
-const BLOCK_EXCHANGE_LINES: usize = 240;
+// Block thresholds are intentionally high so session-accretion never reaches
+// `block` during a normal multi-cycle queue drain (operator directive: the
+// queue must not stall by default). `warn` still surfaces a heads-up; only
+// genuine crash indicators (restart churn + startup-miss) block by default.
+const BLOCK_EXCHANGE_LINES: usize = 800;
 const WARN_RESPONSE_SECTIONS: usize = 8;
-const BLOCK_RESPONSE_SECTIONS: usize = 12;
+const BLOCK_RESPONSE_SECTIONS: usize = 40;
 const WARN_RECENT_COMMITTED_CYCLES: usize = 6;
-const BLOCK_RECENT_COMMITTED_CYCLES: usize = 10;
+const BLOCK_RECENT_COMMITTED_CYCLES: usize = 60;
 const WARN_RECENT_NOOP_CLOSEOUTS: usize = 2;
-const BLOCK_RECENT_NOOP_CLOSEOUTS: usize = 3;
+const BLOCK_RECENT_NOOP_CLOSEOUTS: usize = 20;
 const WARN_RESTART_EVENTS: usize = 2;
 const BLOCK_RESTART_EVENTS: usize = 3;
 const RECENT_SESSION_LOSS_WARN: usize = 2;

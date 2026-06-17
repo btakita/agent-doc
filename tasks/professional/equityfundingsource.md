@@ -103,7 +103,23 @@ Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-
 Verification: focused tests passed (`111 pass`); full check passed (`753 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:7f66adb8 -->
+
+### Re: Contact method — gpt-5
+
+> **Queue prompt:**
+>
+> Contact method
+
+Completed and pushed the `Contact method` removal for the Available Deal -> Interested Lenders workflow.
+
+Changed paths: `src/equityfundingsource-dev` commit `f7e71ea` removes `lender_last_contact_method` from deal-interest admin API contracts, admin update SQL, workflow summaries, Interested Lenders UI dropdowns, and tests; adds migration `0078_drop_deal_interest_contact_method.sql` to drop the column. Last-contact timestamp, summary, and next-follow-up tracking remain. Parent repo commit `acbb89b6e` updates the EFS submodule pointer.
+
+Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `git diff --check`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
+
+Verification: focused tests passed (`112 pass`); full check passed (`754 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:2b749d16 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,7 +134,7 @@ Delete fields, db records, and logic relating to:
 - ~~Start Underwriting~~
 - ~~Call scheduled~~
 - ~~Verbal amount~~
-- Contact method
+- ~~Contact method~~
 - Pre-doc conditions
 - Pre-doc instructions
 - Lender contact summary

@@ -1627,6 +1627,18 @@ fn bare_write_placed_response_body(file: &Path) -> Result<bool> {
     Ok(crate::session_check::detect_bypassed_response_write_between(&head, &current).is_some())
 }
 
+fn consume_queue_prompts_for_done_ids_closeout(
+    file: &Path,
+    done_ids: &[String],
+    force_disk: bool,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    if force_disk {
+        consume_queue_prompts_with_outcome(file, done_ids, true)
+    } else {
+        consume_queue_prompts_for_done_ids_with_outcome(file, done_ids)
+    }
+}
+
 pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
     let file = options.file.as_path();
 
@@ -2063,15 +2075,17 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             CommitMode::None => {}
             CommitMode::BestEffort => {
                 if queue_consumption_allowed {
-                    if let Err(e) =
-                        consume_queue_prompts_for_done_ids_with_outcome(file, &queue_completion_ids)
-                    {
+                    if let Err(e) = consume_queue_prompts_for_done_ids_closeout(
+                        file,
+                        &queue_completion_ids,
+                        options.force_disk,
+                    ) {
                         eprintln!("[queue] warning: consumption failed: {}", e);
                     }
                     if let Err(e) = mark_completed_queue_prompts_for_done_ids(
                         file,
                         &queue_completion_ids,
-                        false,
+                        options.force_disk,
                     ) {
                         eprintln!("[queue] warning: done-id marking failed: {}", e);
                     }
@@ -2079,7 +2093,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                     match mark_completed_queue_prompts_for_done_ids(
                         file,
                         &queue_completion_ids,
-                        false,
+                        options.force_disk,
                     ) {
                         Ok(0) => eprintln!("{}", queue_skip_diagnostic_for_file(file)?),
                         Ok(_) => {}
@@ -2089,13 +2103,21 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             }
             CommitMode::Required => {
                 if queue_consumption_allowed {
-                    consume_queue_prompts_for_done_ids_with_outcome(file, &queue_completion_ids)?;
-                    mark_completed_queue_prompts_for_done_ids(file, &queue_completion_ids, false)?;
+                    consume_queue_prompts_for_done_ids_closeout(
+                        file,
+                        &queue_completion_ids,
+                        options.force_disk,
+                    )?;
+                    mark_completed_queue_prompts_for_done_ids(
+                        file,
+                        &queue_completion_ids,
+                        options.force_disk,
+                    )?;
                 } else {
                     let marked = mark_completed_queue_prompts_for_done_ids(
                         file,
                         &queue_completion_ids,
-                        false,
+                        options.force_disk,
                     )?;
                     if marked == 0 {
                         eprintln!("{}", queue_skip_diagnostic_for_file(file)?);
@@ -4687,6 +4709,59 @@ mod tests {
         assert!(log.contains("flow=document_mutation"));
         assert!(log.contains("reason=visible_write_typing_defer_active_typing:test_visible_write"));
         assert!(log.contains("visible_write_deferred_active_typing"));
+    }
+    #[test]
+    fn force_disk_closeout_queue_consume_bypasses_active_listener() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let source = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: do the fix — opus-4-8\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do the fix\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string();
+        fs::write(&doc, &source).unwrap();
+        snapshot::save(&doc, &source).unwrap();
+
+        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+
+        let err = consume_queue_prompts_for_done_ids_closeout(&doc, &[], false).unwrap_err();
+        let err = format!("{err:?}");
+        assert!(
+            err.contains("refused direct disk write"),
+            "non-force queue consume must fail closed with an active listener: {err}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            source,
+            "non-force closeout must not write behind an active listener"
+        );
+
+        let outcome = consume_queue_prompts_for_done_ids_closeout(&doc, &[], true)
+            .expect("force-disk closeout queue consume should write directly")
+            .expect("force-disk closeout should consume the answered head");
+
+        assert_eq!(outcome.consumed_count, 1);
+        let result = fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("queue: stop") && !result.contains("queue_active: true"),
+            "drained queue consume should clear the active queue flag:\n{result}"
+        );
+        assert!(
+            !result.contains("- do the fix"),
+            "force-disk recovery must remove the answered queue head:\n{result}"
+        );
+        assert!(
+            result.contains("> do the fix"),
+            "force-disk recovery must retain the answered prompt in the response quote:\n{result}"
+        );
     }
     #[test]
     fn visible_write_guard_blocks_when_current_changed_after_merge() {

@@ -104,7 +104,7 @@ dependencies = [
  "indexmap",
  "instruction-files",
  "interprocess",
- "lazily 0.11.0",
+ "lazily 0.11.1",
  "libc",
  "notify",
  "portable-pty",
@@ -1407,7 +1407,7 @@ dependencies = [
 
 [[package]]
 name = "lazily"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "arc-swap",
  "parking_lot",

@@ -437,9 +437,8 @@ pub fn run_template(
 /// `baseline` is the document content at the time the response was generated.
 ///
 /// When `force_disk` is false and `.agent-doc/patches/` exists (plugin installed),
-/// tries IPC first. On IPC timeout, writes locally, commits when possible,
-/// removes the queued fallback patch after the local closeout, and exits with
-/// code 75 (EX_TEMPFAIL).
+/// tries IPC first. On IPC timeout or missing proof, retains the pending response
+/// and fails closed for retry instead of writing the document behind the editor.
 /// When `force_disk` is true, always uses direct disk write.
 pub fn run_stream(
     file: &Path,
@@ -572,7 +571,7 @@ pub fn run_stream(
         // `try_ipc` skips the wedged socket internally and prefers the file-IPC
         // patch queue (plugin applies via Document API) so a degraded stream
         // write never manufactures a raw-disk File Cache Conflict; the disk
-        // write happens only as the last-resort IPC-timeout path below.
+        // unproven IPC attempt below fails closed instead of writing behind the editor.
         if patches_dir.exists() {
             // Compute content_ours (baseline + patches) for snapshot saving.
             // The IPC path sends patches to the plugin but we need a clean snapshot
@@ -732,339 +731,23 @@ pub fn run_stream(
                 repair::clear_pending(file)?;
                 return Ok(());
             }
-            // IPC timeout — patch file was already cleaned up by try_ipc,
-            // but we want to leave a NEW patch file in place for the plugin
-            // to pick up later. Re-write it with the SAME patch_id so the
-            // plugin can deduplicate if the original IPC delivery was late.
-            // Guard: if the cycle was already committed (e.g., a concurrent
-            // closeout succeeded), skip the re-write to prevent re-dirtying.
-            if let Some(ref committed_id) = cycle_already_committed(file) {
-                eprintln!(
-                    "[write] run_stream IPC timeout: cycle {} already committed — skipping fallback patch re-write",
-                    committed_id
-                );
-                log_closeout_guard(
-                    file,
-                    crate::flow::types::FlowStage::TerminalGuard,
-                    crate::flow::types::FlowOutcome::Blocked,
-                    crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
-                );
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "run_stream_ipc_timeout_skip_fallback file={} cycle_id={} reason=already_committed",
-                        file.display(),
-                        committed_id
-                    ),
-                );
-                cleanup_fallback_patch_files(file);
-                drop(doc_lock);
-                repair::clear_pending(file)?;
-                return Ok(());
-            }
-            let hash = snapshot::doc_hash(file)?;
-            let patch_file = patches_dir.join(format!("{}.json", hash));
-
-            // Use shared helper for synthesis (same boundary-aware logic as try_ipc)
-            let norm_lines_for_timeout = if normalize_prefix_lines.is_empty() {
-                None
-            } else {
-                Some(normalize_prefix_lines.as_slice())
-            };
-            // Reuse the same boundary seed (patch_id) as the try_ipc build so the
-            // fallback patch carries an IDENTICAL boundary, not a fresh random one
-            // — the plugin then dedups/replaces instead of appending a second copy
-            // (#finalize-visible-buffer-ipc-timeout-race).
-            let ipc_patches = build_ipc_patches_json(
-                file,
-                &patches,
-                &unmatched,
-                norm_lines_for_timeout,
-                Some(&ipc_result.patch_id),
-            )?;
-            let ipc_node_patches = build_ipc_node_patches_json(Some(base), Some(&content_ours));
-
-            // Same dedup guard as try_ipc: don't send unmatched when it was synthesized into a patch.
-            let effective_unmatched = if patches.is_empty() && !ipc_patches.is_empty() {
-                ""
-            } else {
-                unmatched.trim()
-            };
-
-            // Reuse the patch_id from try_ipc so the plugin deduplicates
-            // if the original socket/file delivery was applied late.
-            let mut ipc_payload = serde_json::json!({
-                    "file": canonical.to_string_lossy(),
-                    "patches": ipc_patches,
-                    "node_patches": ipc_node_patches,
-                    "unmatched": effective_unmatched,
-                    "baseline": ipc_baseline.unwrap_or(""),
-                    "reposition_boundary": true,
-            });
-            ipc_payload["patch_id"] = serde_json::Value::String(ipc_result.patch_id.clone());
-
-            // Include normalize_prefix_lines so a later plugin pickup restores
-            // the `❯ ` prefixes in the buffer (matches the primary IPC payload).
-            // Without this the plugin would only apply component patches and
-            // the working tree would diverge from the snapshot.
-            if let Some(lines) = norm_lines_for_timeout
-                && !lines.is_empty()
-            {
-                ipc_payload["normalize_prefix_lines"] = serde_json::Value::Array(
-                    lines
-                        .iter()
-                        .map(|l| serde_json::Value::String(l.clone()))
-                        .collect(),
-                );
-            }
-
-            // Include frontmatter if present
-            let frontmatter_yaml: Option<String> = patches
-                .iter()
-                .find(|p| p.name == "frontmatter")
-                .map(|p| p.content.trim().to_string());
-            if let Some(ref yaml) = frontmatter_yaml {
-                ipc_payload["frontmatter"] = serde_json::Value::String(yaml.clone());
-            }
-
-            atomic_write(&patch_file, &serde_json::to_string_pretty(&ipc_payload)?)?;
-
-            eprintln!("[write] IPC timeout — response saved as patch, awaiting plugin");
-            // CRDT merge on IPC timeout: content_ours (baseline + patches) may
-            // diverge from the on-disk file (user edits, pending mutations from
-            // main.rs). Use the same CRDT merge as the normal disk path to
-            // preserve all concurrent changes.
-            let content_current =
-                std::fs::read_to_string(file).unwrap_or_else(|_| content_at_start.clone());
-            let (final_content, crdt_state) = if let Some(repaired_current) =
-                adopt_current_response_without_duplication(
-                    file,
-                    base,
-                    &content_ours,
-                    &content_current,
-                    snapshot_doc.as_deref(),
-                    &response,
-                )? {
-                // Plugin already applied the response before the sidecar ack
-                // arrived. Re-normalize the current transcript so a retry can
-                // still restore missing `❯ ` prefixes without duplicating the
-                // response via CRDT merge.
-                eprintln!(
-                    "[write] IPC timeout path: response already in current file; adopting normalized current content"
-                );
-                crate::ops_log::log_op(
-                    file,
-                    "ipc_timeout_plugin_already_applied: adopting normalized current content",
-                );
-                let doc = crate::crdt::CrdtDoc::from_text(&repaired_current);
-                (repaired_current, doc.encode_state())
-            } else if content_current == base {
-                let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
-                (content_ours.clone(), doc.encode_state())
-            } else {
-                eprintln!("[write] IPC timeout path: file modified, CRDT merging...");
-                let base_state = snapshot::crdt_merge_base_state(file, base)?.state;
-                match merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)
-                {
-                    Ok(merged) => merged,
-                    Err(e) => {
-                        eprintln!(
-                            "[write] WARNING: CRDT merge failed on exit(75), falling back to splice: {}",
-                            e
-                        );
-                        let spliced = splice_pending_component(&content_ours, &content_current);
-                        let doc = crate::crdt::CrdtDoc::from_text(&spliced);
-                        (spliced, doc.encode_state())
-                    }
-                }
-            };
-            let final_content = normalize_final_template_content(
-                file,
-                base,
-                snapshot_doc.as_deref(),
-                Some(&content_current),
-                &final_content,
-                Some(&response),
-            )?;
-            let snapshot_mode = snapshot_persist_mode_with_current(
-                baseline,
-                base,
-                &content_current,
-                &content_ours,
-                &final_content,
+            eprintln!(
+                "[write] editor IPC did not prove the write — refusing direct document write; retry after the editor applies the queued patch"
             );
-            let snapshot_content =
-                snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
-            let snapshot_crdt_state = match snapshot_mode {
-                SnapshotPersistMode::FinalContent => crdt_state.clone(),
-                SnapshotPersistMode::ContentOurs => {
-                    crate::crdt::CrdtDoc::from_text(&content_ours).encode_state()
-                }
-            };
-            // Snapshot saved BEFORE document write (#wcf5).
-            if let Err(e) = guard_visible_write_idle_and_current(
+            crate::ops_log::log_op(
                 file,
-                "run_stream_ipc_timeout",
-                &content_current,
-            ) {
-                eprintln!(
-                    "[write] WARNING: visible write deferred before exit(75): {}",
-                    e
-                );
-                std::process::exit(75);
-            }
-            if let Err(e) = snapshot::save(file, snapshot_content) {
-                eprintln!(
-                    "[write] WARNING: snapshot save before exit(75) failed: {}",
-                    e
-                );
-            }
-            if let Err(e) =
-                snapshot::save_document_crdt(file, &snapshot_crdt_state, snapshot_content)
-            {
-                eprintln!(
-                    "[write] WARNING: CRDT state save before exit(75) failed: {}",
-                    e
-                );
-            }
-            let local_write_applied = match atomic_write(file, &final_content) {
-                Ok(_) => true,
-                Err(e) => {
-                    eprintln!(
-                        "[write] WARNING: failed to write to working tree before exit(75): {}",
-                        e
-                    );
-                    false
-                }
-            };
-            // The snapshot + disk write above are the only work that needs the
-            // pre-response doc lock; release it now so the queue-consume below
-            // (and any other re-entrant `acquire_doc_lock` caller) does not
-            // flock-deadlock against our own still-held guard. `acquire_doc_lock`
-            // uses an exclusive flock that conflicts across separate opens within
-            // the same process, so holding `doc_lock` across
-            // `consume_queue_prompts_with_outcome` self-deadlocks
-            // (#queue-consume-on-stream-ipc-timeout-deadlock).
+                &format!(
+                    "run_stream_ipc_retry_required_no_disk_write file={} patch_id={} patches={} recovery=retry_without_disk_write",
+                    file.display(),
+                    ipc_result.patch_id,
+                    patches.len()
+                ),
+            );
             drop(doc_lock);
-            if local_write_applied {
-                log_exchange_write_diagnostic(
-                    file,
-                    "run_stream_ipc_timeout",
-                    "stream_ipc_timeout_disk",
-                    Some(&ipc_result.patch_id),
-                    baseline,
-                    &content_current,
-                    &final_content,
-                    &patches,
-                    &unmatched,
-                );
-                write_claimed_patch_sentinel(&project_root, &ipc_result.patch_id);
-                // #queue-consume-on-stream-ipc-timeout: this closeout commits the
-                // response and `exit(75)`s WITHOUT returning to the Phase 3c queue
-                // consume in `write_with_options`. Consume the answered head here
-                // (force-disk — the IPC/editor that just timed out is dead, so the
-                // visible-write guard would only stall again) before committing, so
-                // the struck head lands in the same commit. Otherwise a finalized
-                // response leaves an unstruck head that re-serves the
-                // already-answered prompt and treadmills the auto-loop on the next
-                // preflight. The decision matches the strict closeout exactly.
-                match queue_consumption_allowed_for_response(
-                    file,
-                    baseline,
-                    &content_current,
-                    &response,
-                    &flags.pending_done_ids,
-                    &flags.pending_kept_open_ids,
-                    &[],
-                ) {
-                    Ok(true) => {
-                        let mut queue_completion_ids = explicit_queue_completion_ids(
-                            &flags.pending_done_ids,
-                            &flags.pending_kept_open_ids,
-                            &[],
-                        );
-                        if let Some(head_id) = queue_targeted_completion_id_for_current_head(
-                            file,
-                            baseline,
-                            &content_current,
-                            &response,
-                            &flags.pending_done_ids,
-                        )? && !queue_completion_ids
-                            .iter()
-                            .any(|id| normalize_done_id(id) == head_id)
-                        {
-                            queue_completion_ids.push(head_id);
-                        }
-                        if let Err(e) =
-                            consume_queue_prompts_with_outcome(file, &queue_completion_ids, true)
-                        {
-                            eprintln!(
-                                "[queue] warning: consume on stream IPC-timeout failed: {}",
-                                e
-                            );
-                        }
-                        if let Err(e) = mark_completed_queue_prompts_for_done_ids(
-                            file,
-                            &queue_completion_ids,
-                            true,
-                        ) {
-                            eprintln!(
-                                "[queue] warning: done-id marking on stream IPC-timeout failed: {}",
-                                e
-                            );
-                        }
-                    }
-                    Ok(false) => {
-                        let queue_completion_ids = explicit_queue_completion_ids(
-                            &flags.pending_done_ids,
-                            &flags.pending_kept_open_ids,
-                            &[],
-                        );
-                        let marked = mark_completed_queue_prompts_for_done_ids(
-                            file,
-                            &queue_completion_ids,
-                            true,
-                        )
-                        .unwrap_or_else(|e| {
-                            eprintln!(
-                                "[queue] warning: done-id marking on stream IPC-timeout failed: {}",
-                                e
-                            );
-                            0
-                        });
-                        if marked == 0
-                            && let Ok(diag) = queue_skip_diagnostic_for_file(file)
-                        {
-                            eprintln!("{}", diag);
-                        }
-                    }
-                    Err(e) => eprintln!(
-                        "[queue] warning: queue consume decision on stream IPC-timeout failed: {}",
-                        e
-                    ),
-                }
-            }
-            // #exit75-done-reap-not-atomic: this stream IPC-timeout closeout
-            // commits and `exit(75)`s WITHOUT returning to `complete_required_closeout`,
-            // so reap the `[x]` items the --done flags just marked HERE, before the
-            // commit, so the reap lands in the same exit-75 commit instead of
-            // stranding a completed item for a recovery preflight (which also
-            // strands a fresh `preflight_started` cycle). `run_pending_maintenance`
-            // writes the reaped/archived doc + snapshot (no commit); the commit
-            // below stages it. Idempotent (no-op when nothing is `[x]`) + non-fatal.
-            if let Err(e) = crate::preflight::run_pending_maintenance(file) {
-                eprintln!(
-                    "[commit] stream IPC-timeout pending-reap maintenance failed (non-fatal): {}",
-                    e
-                );
-            }
-            if crate::git::is_in_git_repo(file) {
-                match crate::git::commit(file) {
-                    Ok(_) => cleanup_fallback_patch_files(file),
-                    Err(e) => eprintln!("[commit] warning: commit before exit(75) failed: {}", e),
-                }
-            }
-            std::process::exit(75); // EX_TEMPFAIL
+            anyhow::bail!(
+                "editor IPC did not prove the write for {}; pending response retained for retry; refusing direct document write",
+                file.display()
+            );
         }
     }
 
@@ -1348,7 +1031,7 @@ pub fn run_stream(
 /// Instead of modifying the document directly, writes a JSON file to
 /// `.agent-doc/patches/<hash>.json`. The IDE plugin picks it up, applies
 /// patches via Document API (no external file change dialog), and deletes
-/// the file as ACK. Falls back to direct stream write on timeout.
+/// the file as ACK. Fails closed on timeout or missing proof.
 pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -1524,7 +1207,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 &expected_response,
                 &content,
             ) {
-                repair_partial_response_materialization_before_fallback(
+                log_partial_response_materialization_for_retry(
                     file,
                     "explicit_file_ipc",
                     &expected_response,
@@ -1574,14 +1257,14 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         std::thread::sleep(poll_interval);
     }
 
-    // Timeout — fall back to direct stream write
+    // Timeout or missing materialization — keep the editor/IPC path authoritative.
     if consumed_without_materialization {
         eprintln!(
-            "[write] IPC patch was consumed without materializing the response — falling back to direct write"
+            "[write] IPC patch was consumed without materializing the response — refusing direct document write; retry required"
         );
     } else {
         eprintln!(
-            "[write] IPC timeout ({}s) — falling back to direct write",
+            "[write] IPC timeout ({}s) — leaving patch for editor retry; refusing direct document write",
             timeout.as_secs()
         );
         log_ipc_proof_failure(
@@ -1589,7 +1272,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
             "explicit_file_ipc",
             Some(&patch_id),
             "no_ack",
-            "direct_write_fallback",
+            "retry_without_disk_write",
             &format!(
                 "timeout_secs={} patch_file={}",
                 timeout.as_secs(),
@@ -1597,14 +1280,12 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
             ),
         );
     }
-    // Clean up the unconsumed patch file
-    let _ = std::fs::remove_file(&patch_file);
 
     // Guard: if the cycle was already committed by a concurrent closeout,
-    // skip the fallback disk write to prevent re-dirtying the document.
+    // clean stale IPC files to prevent re-dirtying the document.
     if let Some(ref committed_id) = cycle_already_committed(file) {
         eprintln!(
-            "[write] run_ipc timeout fallback: cycle {} already committed — skipping disk write",
+            "[write] run_ipc timeout retry: cycle {} already committed — cleaning stale patch",
             committed_id
         );
         log_closeout_guard(
@@ -1621,97 +1302,26 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 committed_id
             ),
         );
+        cleanup_fallback_patch_files(file);
+        drop(doc_lock);
+        repair::clear_pending(file)?;
         return Ok(());
     }
 
-    // Fall back to stream write logic
-    let mut content_ours = template::apply_patches_with_overrides_with_context(
-        base,
-        &patches,
-        &unmatched,
-        file,
-        &mode_overrides,
-        Some(&rc),
-    )
-    .context("failed to apply template patches")?;
-    content_ours =
-        normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
-
-    // Apply frontmatter patch if present
-    if let Some(ref yaml) = frontmatter_yaml {
-        content_ours = crate::frontmatter::merge_fields(&content_ours, yaml)
-            .context("failed to apply frontmatter patch")?;
-    }
-    let content_current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to re-read {}", file.display()))?;
-    let (final_content, crdt_state) = if content_current == base {
-        let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
-        (content_ours.clone(), doc.encode_state())
-    } else if let Some(repaired_current) = adopt_current_response_without_duplication(
-        file,
-        base,
-        &content_ours,
-        &content_current,
-        snapshot_doc.as_deref(),
-        &response,
-    )? {
-        eprintln!(
-            "[write] IPC fallback: response already in current file; adopting normalized current content"
-        );
-        let doc = crate::crdt::CrdtDoc::from_text(&repaired_current);
-        (repaired_current, doc.encode_state())
-    } else {
-        eprintln!("[write] File was modified during response generation. CRDT merging...");
-        // Match the normal stream write path: the explicit/locked baseline is
-        // the common ancestor for this response cycle. The persisted `.yrs`
-        // sidecar may be stale relative to that baseline when the editor timed
-        // out while the user was typing, and using it here can replay old
-        // document content as a fresh concurrent insertion.
-        let base_state = snapshot::crdt_merge_base_state(file, base)?.state;
-        match merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current) {
-            Ok(merged) => merged,
-            Err(e) => {
-                eprintln!(
-                    "[write] WARNING: CRDT merge failed in IPC fallback, falling back to splice: {}",
-                    e
-                );
-                let spliced = splice_pending_component(&content_ours, &content_current);
-                let doc = crate::crdt::CrdtDoc::from_text(&spliced);
-                (spliced, doc.encode_state())
-            }
-        }
-    };
-    let final_content = normalize_final_template_content(
-        file,
-        base,
-        snapshot_doc.as_deref(),
-        Some(&content_current),
-        &final_content,
-        Some(&response),
-    )?;
-    log_exchange_write_diagnostic(
-        file,
-        "run_ipc_timeout_fallback",
-        "ipc_timeout_disk",
-        None,
-        baseline,
-        &content_current,
-        &final_content,
-        &patches,
-        &unmatched,
-    );
-    guard_visible_write_idle_and_current(file, "run_ipc_timeout_fallback", &content_current)?;
-    atomic_write(file, &final_content)?;
-    snapshot::save(file, &final_content)?;
-    snapshot::save_document_crdt(file, &crdt_state, &final_content)?;
     drop(doc_lock);
-    repair::clear_pending(file)?;
-    eprintln!(
-        "[write] Stream patches applied to {} ({} components patched, CRDT fallback)",
-        file.display(),
-        patches.len()
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "run_ipc_retry_required_no_disk_write file={} patch_id={} consumed_without_materialization={} recovery=retry_without_disk_write",
+            file.display(),
+            patch_id,
+            consumed_without_materialization
+        ),
     );
-    Ok(())
+    anyhow::bail!(
+        "editor IPC did not prove the write for {}; pending response retained for retry; refusing direct document write",
+        file.display()
+    );
 }
 
 /// Apply an append-mode response from a string (not stdin).
@@ -2031,7 +1641,7 @@ mod tests {
     fn build_ipc_patches_json_seeded_boundary_is_stable_across_rebuilds() {
         // #finalize-visible-buffer-ipc-timeout-race ROOT-CAUSE REGRESSION:
         // a single write builds its IPC patches more than once (socket attempt →
-        // file-IPC fallback → run_stream timeout re-write). Each rebuild used to
+        // file-IPC fallback → old run_stream timeout re-write). Each rebuild used to
         // mint a FRESH random boundary, so the plugin saw the same response under
         // two different boundary IDs and appended it twice — doubling the editor
         // buffer (live repro: 57970 → 107235 bytes). Seeding the boundary from the

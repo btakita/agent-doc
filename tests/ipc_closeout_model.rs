@@ -55,7 +55,7 @@ fn model_transition(transport: IpcTransport, hazard: Option<CloseoutHazard>) -> 
         (
             IpcTransport::Socket | IpcTransport::File,
             Some(CloseoutHazard::BadAckContent | CloseoutHazard::PartialResponseMaterialization),
-        ) => CloseoutTransition::Fallback(SnapshotSource::ContentOurs),
+        ) => CloseoutTransition::RejectBeforeCommit,
         (
             IpcTransport::Socket | IpcTransport::File,
             Some(CloseoutHazard::PromptDrift | CloseoutHazard::PostBlockSnapshotAbsorb),
@@ -333,17 +333,17 @@ fn ipc_closeout_transition_table_forbids_unsafe_commits() {
         (
             IpcTransport::Socket,
             Some(CloseoutHazard::BadAckContent),
-            CloseoutTransition::Fallback(SnapshotSource::ContentOurs),
+            CloseoutTransition::RejectBeforeCommit,
         ),
         (
             IpcTransport::File,
             Some(CloseoutHazard::BadAckContent),
-            CloseoutTransition::Fallback(SnapshotSource::ContentOurs),
+            CloseoutTransition::RejectBeforeCommit,
         ),
         (
             IpcTransport::File,
             Some(CloseoutHazard::PartialResponseMaterialization),
-            CloseoutTransition::Fallback(SnapshotSource::ContentOurs),
+            CloseoutTransition::RejectBeforeCommit,
         ),
         (
             IpcTransport::Socket,
@@ -486,8 +486,8 @@ proptest! {
 }
 
 #[test]
-fn file_ipc_bad_ack_content_falls_back_before_commit() {
-    let (tmp, doc, baseline, _original) = setup_project(true);
+fn file_ipc_bad_ack_content_fails_closed_before_commit() {
+    let (tmp, doc, baseline, original) = setup_project(true);
     let root = tmp.path();
     let agent_doc_dir = root.join(".agent-doc");
     let patches_dir = agent_doc_dir.join("patches");
@@ -495,6 +495,7 @@ fn file_ipc_bad_ack_content_falls_back_before_commit() {
     let corrupt_marker = "bad-ack-content-only";
     let corrupt_ack = format!("### Re: bad ack - gpt-5\n{corrupt_marker}\n");
     let response = response_text("bad ack");
+    let initial_head = head_blob(root);
 
     let watcher = std::thread::spawn(move || {
         let started = Instant::now();
@@ -522,17 +523,28 @@ fn file_ipc_bad_ack_content_falls_back_before_commit() {
         false
     });
 
-    run_finalize_expect(root, &doc, &baseline, &response, 75);
+    run_finalize_expect(root, &doc, &baseline, &response, 1);
     assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
 
+    let visible = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        original, visible,
+        "bad ack-content must not be repaired through a direct document write"
+    );
     let head = head_blob(root);
-    assert!(head.contains(&response_body("bad ack")));
+    assert_eq!(
+        initial_head, head,
+        "bad ack-content must fail before committing any response"
+    );
     assert!(
         !head.contains(corrupt_marker),
         "bad ack-content sidecar must not become the committed document:\n{head}"
     );
     let snapshot = fs::read_to_string(snapshot_path(root, &doc)).unwrap();
-    assert!(snapshot.contains(&response_body("bad ack")));
+    assert!(
+        !snapshot.contains(&response_body("bad ack")),
+        "bad ack-content retry must not save the fallback response snapshot:\n{snapshot}"
+    );
     assert!(
         !snapshot.contains(corrupt_marker),
         "bad ack-content sidecar must not become the saved snapshot:\n{snapshot}"
@@ -540,12 +552,16 @@ fn file_ipc_bad_ack_content_falls_back_before_commit() {
     let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
     assert!(
         ops_log.contains("ipc_materialization_missing_response"),
-        "bad ACK should fall back before snapshot/commit with a materialization diagnostic:\n{ops_log}"
+        "bad ACK should fail before snapshot/commit with a materialization diagnostic:\n{ops_log}"
+    );
+    assert!(
+        ops_log.contains("recovery=retry_without_disk_write"),
+        "bad ACK should request an editor retry without a direct disk write:\n{ops_log}"
     );
 }
 
 #[test]
-fn file_ipc_partial_response_materialization_falls_back_before_commit() {
+fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
     let (tmp, doc, baseline, _original) = setup_project(true);
     let root = tmp.path();
     let agent_doc_dir = root.join(".agent-doc");
@@ -553,6 +569,7 @@ fn file_ipc_partial_response_materialization_falls_back_before_commit() {
     let ack_dir = agent_doc_dir.join("ack-content");
     let response = response_text("partial response");
     let partial_marker = "partial-only-response-heading";
+    let initial_head = head_blob(root);
 
     let doc_for_watcher = doc.clone();
     let watcher = std::thread::spawn(move || {
@@ -586,17 +603,32 @@ fn file_ipc_partial_response_materialization_falls_back_before_commit() {
         false
     });
 
-    run_finalize_expect(root, &doc, &baseline, &response, 75);
+    run_finalize_expect(root, &doc, &baseline, &response, 1);
     assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
 
+    let visible = fs::read_to_string(&doc).unwrap();
+    assert!(
+        visible.contains(partial_marker),
+        "editor-visible partial materialization should remain for retry:\n{visible}"
+    );
+    assert!(
+        !visible.contains(&response_body("partial response")),
+        "partial materialization must not be completed by a direct disk write:\n{visible}"
+    );
     let head = head_blob(root);
-    assert!(head.contains(&response_body("partial response")));
+    assert_eq!(
+        initial_head, head,
+        "partial response materialization must fail before committing"
+    );
     assert!(
         !head.contains(partial_marker),
         "partial response materialization must not reach the commit:\n{head}"
     );
     let snapshot = fs::read_to_string(snapshot_path(root, &doc)).unwrap();
-    assert!(snapshot.contains(&response_body("partial response")));
+    assert!(
+        !snapshot.contains(&response_body("partial response")),
+        "partial materialization retry must not save the fallback response snapshot:\n{snapshot}"
+    );
     assert!(
         !snapshot.contains(partial_marker),
         "partial response materialization must not become the saved snapshot:\n{snapshot}"
@@ -604,7 +636,11 @@ fn file_ipc_partial_response_materialization_falls_back_before_commit() {
     let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
     assert!(
         ops_log.contains("ipc_materialization_missing_response"),
-        "partial materialization should fall back before snapshot/commit:\n{ops_log}"
+        "partial materialization should fail before snapshot/commit:\n{ops_log}"
+    );
+    assert!(
+        ops_log.contains("recovery=retry_without_disk_write"),
+        "partial materialization should request an editor retry without a direct disk write:\n{ops_log}"
     );
 }
 
@@ -812,9 +848,10 @@ fn commit_fails_closed_when_drift_carries_disk_only_user_prompt() {
 }
 
 #[test]
-fn file_ipc_timeout_claims_stale_patch_before_commit() {
+fn file_ipc_timeout_retains_patch_before_retry() {
     let (tmp, doc, baseline, _original) = setup_project(true);
     let root = tmp.path();
+    let initial_head = head_blob(root);
 
     agent_doc()
         .current_dir(root)
@@ -828,10 +865,21 @@ fn file_ipc_timeout_claims_stale_patch_before_commit() {
         ])
         .write_stdin(response_text("stale patch replay"))
         .assert()
-        .code(75);
+        .failure()
+        .stderr(predicates::str::contains(
+            "recovery=retry_without_disk_write",
+        ));
 
     let head = head_blob(root);
-    assert!(head.contains(&response_body("stale patch replay")));
+    assert_eq!(
+        initial_head, head,
+        "IPC timeout must fail before committing a response"
+    );
+    let visible = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !visible.contains(&response_body("stale patch replay")),
+        "IPC timeout must not write the response directly to the document"
+    );
 
     let patch_jsons = fs::read_dir(root.join(".agent-doc/patches"))
         .unwrap()
@@ -839,8 +887,8 @@ fn file_ipc_timeout_claims_stale_patch_before_commit() {
         .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
         .collect::<Vec<_>>();
     assert!(
-        patch_jsons.is_empty(),
-        "timeout fallback must remove stale file IPC payloads before they can replay"
+        !patch_jsons.is_empty(),
+        "IPC timeout should retain file IPC payloads for editor retry"
     );
 
     let claimed_entries = fs::read_dir(root.join(".agent-doc/claimed-patches"))
@@ -848,7 +896,12 @@ fn file_ipc_timeout_claims_stale_patch_before_commit() {
         .filter_map(Result::ok)
         .collect::<Vec<_>>();
     assert!(
-        !claimed_entries.is_empty(),
-        "timeout fallback should claim removed file IPC payloads before commit closeout"
+        claimed_entries.is_empty(),
+        "IPC timeout should not claim an uncommitted payload"
+    );
+    let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("recovery=retry_without_disk_write"),
+        "IPC timeout should request a retry without direct document write:\n{ops_log}"
     );
 }

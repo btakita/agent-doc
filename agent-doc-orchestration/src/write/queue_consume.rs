@@ -686,10 +686,9 @@ pub(crate) fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
 
 /// Resolve whether this cycle's committed response should consume (strike) the
 /// active queue head. Single source of truth for the strict-closeout decision so
-/// alternate closeouts — notably the `run_stream` IPC-timeout `exit(75)` path,
-/// which never returns to the `write_with_options` Phase 3c consume — advance the
-/// queue identically and never leave an answered head queued to treadmill the
-/// auto-loop on the next preflight (#queue-consume-on-stream-ipc-timeout).
+/// successful closeouts advance the queue identically and never leave an answered
+/// head queued to treadmill the auto-loop on the next preflight. Unproven IPC
+/// attempts fail before queue consumption and must be retried.
 ///
 /// Mirrors the layered signals: explicit `do queue` / prompt-target / `--done`
 /// triggers, explicit `--done`/`--pending-gate`/`--pending-edit` completion of an
@@ -2198,7 +2197,7 @@ mod core_tests {
                 &[],
             )
             .unwrap(),
-            "an answered free-text head must be consumed even on the IPC-timeout closeout"
+            "an answered free-text head must be consumed on successful closeout"
         );
     }
     #[test]

@@ -339,10 +339,11 @@ fn write_commit_empty_stdin_does_not_commit_live_prompt_drift() {
 }
 
 #[test]
-fn stream_ipc_timeout_commit_removes_fallback_patch_file() {
+fn stream_ipc_timeout_retains_patch_and_refuses_direct_write() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
     init_git_repo(tmp.path(), &doc);
+    let initial_head = head_blob(tmp.path());
     let baseline = write_baseline(tmp.path(), &session_stream_doc_content());
 
     agent_doc()
@@ -358,16 +359,23 @@ fn stream_ipc_timeout_commit_removes_fallback_patch_file() {
             "<!-- patch:exchange -->\n### Re: ipc timeout — gpt-5\nbody\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .code(75);
+        .failure()
+        .stderr(predicates::str::contains(
+            "recovery=retry_without_disk_write",
+        ))
+        .stderr(predicates::str::contains(
+            "refusing direct document write",
+        ));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        content.contains("### Re: ipc timeout — gpt-5"),
-        "timeout fallback should write the response locally"
+        !content.contains("### Re: ipc timeout — gpt-5"),
+        "IPC timeout must not write the response directly to the document"
     );
-    assert!(
-        head_blob(tmp.path()).contains("### Re: ipc timeout — gpt-5"),
-        "timeout fallback should commit the local response before exiting 75"
+    assert_eq!(
+        initial_head,
+        head_blob(tmp.path()),
+        "IPC timeout must fail before committing any response"
     );
 
     let patch_jsons = fs::read_dir(tmp.path().join(".agent-doc/patches"))
@@ -376,28 +384,20 @@ fn stream_ipc_timeout_commit_removes_fallback_patch_file() {
         .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
         .collect::<Vec<_>>();
     assert!(
-        patch_jsons.is_empty(),
-        "committed timeout fallback must remove queued patch JSON so the plugin cannot replay it"
-    );
-
-    let claimed_entries = fs::read_dir(tmp.path().join(".agent-doc/claimed-patches"))
-        .unwrap()
-        .filter_map(|entry| entry.ok())
-        .collect::<Vec<_>>();
-    assert!(
-        !claimed_entries.is_empty(),
-        "timeout fallback should leave a claimed-patch sentinel for any watcher that already saw the file"
+        !patch_jsons.is_empty(),
+        "IPC timeout should leave the patch queued for an editor retry"
     );
 }
 
 #[test]
-fn ipc_timeout_fallback_uses_baseline_not_stale_crdt_state() {
+fn ipc_timeout_retry_does_not_merge_from_stale_crdt_state() {
     let tmp = TempDir::new().unwrap();
     for subdir in [
         "patches",
         "snapshots",
         "crdt",
         "locks",
+        "logs",
         "pending",
         "pre-response",
     ] {
@@ -429,6 +429,7 @@ fn ipc_timeout_fallback_uses_baseline_not_stale_crdt_state() {
     );
     fs::write(&doc, base).unwrap();
     init_git_repo(tmp.path(), &doc);
+    let initial_head = head_blob(tmp.path());
     fs::write(&doc, &current).unwrap();
     let baseline = write_baseline(tmp.path(), base);
     let stale_doc = agent_doc::crdt::CrdtDoc::from_text(stale);
@@ -448,15 +449,38 @@ fn ipc_timeout_fallback_uses_baseline_not_stale_crdt_state() {
             "<!-- patch:exchange -->\n### Re: ipc stale crdt — gpt-5\nbody\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains(
+            "recovery=retry_without_disk_write",
+        ));
 
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("### Re: ipc stale crdt — gpt-5"));
-    assert!(content.contains("while typing note"));
+    assert!(
+        !content.contains("### Re: ipc stale crdt — gpt-5"),
+        "IPC timeout must not merge a response through stale CRDT state"
+    );
+    assert!(
+        content.contains("while typing note"),
+        "live editor typing should remain untouched for retry"
+    );
     assert_eq!(
         content.matches("[#keep] Keep this backlog item").count(),
         1,
-        "IPC timeout fallback must not replay shared document structure from stale CRDT state"
+        "IPC timeout retry must not replay shared document structure from stale CRDT state"
+    );
+    assert_eq!(
+        initial_head,
+        head_blob(tmp.path()),
+        "IPC timeout retry must fail before committing"
+    );
+    let patch_jsons = fs::read_dir(tmp.path().join(".agent-doc/patches"))
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+        .collect::<Vec<_>>();
+    assert!(
+        !patch_jsons.is_empty(),
+        "IPC timeout should retain the queued patch for a retry"
     );
 }
 

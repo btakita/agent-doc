@@ -990,8 +990,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/write/pending_checks.rs", "guard_") => 4,
         ("agent-doc-orchestration/src/write/materialize.rs", "guard_") => 3,
         ("agent-doc-orchestration/src/write/exchange_reconcile.rs", "guard_") => 5,
-        ("agent-doc-orchestration/src/write/run_entry.rs", "guard_") => 12,
-        ("agent-doc-orchestration/src/write/run_entry.rs", "reason=") => 2,
+        // -2 `guard_`, -1 `reason=` (#nodiskipc): active IPC timeout/no-proof
+        // paths no longer enter the direct document-write fallback, so the removed
+        // visible-write guard/reason tokens are retired rather than rerouted.
+        ("agent-doc-orchestration/src/write/run_entry.rs", "guard_") => 10,
+        ("agent-doc-orchestration/src/write/run_entry.rs", "reason=") => 1,
         // queue-prompt consumption, IPC transport/repair, and live-prompt-drift
         // convergence extracted into write/queue_consume.rs, write/ipc.rs, and
         // write/converge.rs (#splitmods3 large-module split). The moved
@@ -1008,8 +1011,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // boundary is introduced. +1 `reason=` for the audited
         // `content_ours_adoption_refused_stale_supervisor ... reason=supervisor_binary_stale`
         // ops-log diagnostic routed through `log_ipc_proof_failure`.
-        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 14,
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 17,
+        // -2 `guard_`, +1 `reason=` (#nodiskipc): sidecar-normalization and IPC
+        // dedupe repair no longer fall back to direct disk repair guards when
+        // editor redelivery is unproven; they fail closed with a retry reason.
+        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 12,
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 18,
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "guard_") => 8,
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 10,
         ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 5,

@@ -37,9 +37,9 @@ call must leave the same recovery surface as the equivalent CLI closeout.
 Do not standardize on the Claude Code slash command or Skill-tool path across
 all harnesses. That path is not available to Codex. Standardize on the
 harness-neutral closeout and document-mutation path instead: component patches
-first, full-content editor IPC disabled, guarded disk/snapshot repair when an
-editor IPC patch cannot be proven, and a mandatory commit/session-check
-boundary. If a corruption appears only in Codex sessions, treat it as evidence
+first, full-content editor IPC disabled, fail-closed retry when an editor IPC
+patch cannot be proven, and a mandatory commit/session-check boundary. If a
+corruption appears only in Codex sessions, treat it as evidence
 that the Codex invocation, hook recovery, or final-response capture bypassed the
 shared closeout path, not as permission to add a Codex-specific write-back path.
 

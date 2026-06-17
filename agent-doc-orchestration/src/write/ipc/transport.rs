@@ -108,7 +108,7 @@ pub fn queue_file_ipc_reposition_boundary(
 ///
 /// When `reuse_patch_id` is provided, that ID is used instead of generating a new
 /// one. This ensures the plugin can deduplicate when the same logical write is
-/// retried via the timeout fallback path.
+/// retried after an IPC timeout.
 #[allow(clippy::too_many_arguments)]
 pub fn try_ipc(
     file: &Path,
@@ -204,12 +204,12 @@ pub fn try_ipc(
     // socket attempt and let the write fall through to the file-IPC patch queue
     // below — the plugin's file watcher still applies it via the Document API,
     // so a degraded session never manufactures an IDEA "File Cache Conflict".
-    // The disk write becomes the true last resort, reached by the caller only
-    // when file IPC also fails to deliver (`success: false`).
+    // If file IPC also cannot prove delivery, callers fail closed and retry
+    // instead of writing the document directly.
     let socket_degraded = ipc_direct_disk_degraded(&project_root, file)?;
     if socket_degraded {
         eprintln!(
-            "[write] IPC socket degraded for {} — preferring file-IPC patch queue (disk write is last resort)",
+            "[write] IPC socket degraded for {} — preferring file-IPC patch queue (no automatic disk fallback)",
             file.display()
         );
         log_ipc_dewedge_prefer_file_ipc(file, "try_ipc");
@@ -410,7 +410,7 @@ pub fn try_ipc(
                         &expected_response,
                         &repair_decision.snapshot_content,
                     ) {
-                        repair_partial_response_materialization_before_fallback(
+                        log_partial_response_materialization_for_retry(
                             file,
                             "socket_ack_content",
                             &expected_response,
@@ -538,7 +538,7 @@ pub fn try_ipc(
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "ipc_socket_sidecar_timeout file={} — falling back to disk write",
+                        "ipc_socket_sidecar_timeout file={} — retrying through file_ipc_without_disk_write",
                         file.display()
                     ),
                 );
@@ -547,7 +547,7 @@ pub fn try_ipc(
                     "socket_ipc",
                     Some(&patch_id),
                     "no_ack_content_sidecar",
-                    "direct_write_fallback",
+                    "file_ipc_retry_without_disk_write",
                     "ack_content_timeout=true",
                 );
                 if let Some(ref cycle_id) = cycle_already_committed(file) {
@@ -648,9 +648,9 @@ pub fn try_ipc(
                         // of skipping straight to a raw disk write — the plugin
                         // applies the queued patch via the Document API, so this
                         // degraded write never manufactures a File Cache Conflict.
-                        // Disk write stays the true last resort (file-IPC timeout).
+                        // File-IPC timeout now fails closed so the editor remains authoritative.
                         eprintln!(
-                            "[write] IPC socket degraded for {} after repeated socket ack timeouts — falling back to file-IPC patch queue (disk write is last resort)",
+                            "[write] IPC socket degraded for {} after repeated socket ack timeouts — falling back to file-IPC patch queue (no automatic disk fallback)",
                             file.display()
                         );
                         log_ipc_dewedge_prefer_file_ipc(file, "socket_ipc_timeout");
@@ -879,8 +879,8 @@ pub enum FullContentIpcMode {
 ///
 /// This function intentionally never emits socket or file IPC payloads. It
 /// keeps the terminal committed-cycle cleanup guard and diagnostic logging so
-/// callers can fall back to the guarded disk/snapshot path without handing the
-/// editor a whole-document replacement.
+/// response callers can fail closed without handing the editor a whole-document
+/// replacement.
 #[allow(dead_code)]
 pub fn try_ipc_full_content(file: &Path, content: &str) -> Result<bool> {
     try_ipc_full_content_with_mode(file, content, FullContentIpcMode::ResponseFallback, None)
@@ -1387,7 +1387,7 @@ pub(crate) fn write_ipc_and_poll(
                 // File on disk hasn't changed — plugin likely failed to apply the patch.
                 // Don't save snapshot with content that was never applied.
                 eprintln!(
-                    "[write] IPC patch consumed but file unchanged on disk — plugin may have failed to apply. Falling back to disk write."
+                    "[write] IPC patch consumed but file unchanged on disk — plugin may have failed to apply; retry required."
                 );
                 return Ok(false);
             }
@@ -1399,7 +1399,7 @@ pub(crate) fn write_ipc_and_poll(
                 && current_on_disk != full_content
             {
                 eprintln!(
-                    "[write] IPC full-content patch consumed but final content does not match payload — falling back to disk write."
+                    "[write] IPC full-content patch consumed but final content does not match payload — retry required."
                 );
                 crate::ops_log::log_op(
                     doc_file,
@@ -1435,7 +1435,7 @@ pub(crate) fn write_ipc_and_poll(
                     });
                     if !any_present {
                         eprintln!(
-                            "[write] IPC patch consumed but response content not found in file — plugin may have partially failed. Falling back to disk write."
+                            "[write] IPC patch consumed but response content not found in file — plugin may have partially failed. Retry required without direct disk write."
                         );
                         return Ok(false);
                     }
@@ -1448,7 +1448,7 @@ pub(crate) fn write_ipc_and_poll(
                 &expected_response,
                 &current_on_disk,
             ) {
-                repair_partial_response_materialization_before_fallback(
+                log_partial_response_materialization_for_retry(
                     doc_file,
                     "file_ipc",
                     &expected_response,
@@ -1625,9 +1625,9 @@ pub(crate) fn write_ipc_and_poll(
         std::thread::sleep(poll_interval);
     }
 
-    // Timeout — clean up unconsumed patch file
+    // Timeout — leave the unconsumed patch for editor-owned retry.
     eprintln!(
-        "[write] IPC timeout ({}s) — falling back to direct write",
+        "[write] IPC timeout ({}s) — leaving patch for editor retry; refusing direct document write",
         timeout.as_secs()
     );
     log_ipc_proof_failure(
@@ -1635,14 +1635,13 @@ pub(crate) fn write_ipc_and_poll(
         "file_ipc",
         patch_id_for_diagnostics,
         "no_ack",
-        "direct_write_fallback",
+        "retry_without_disk_write",
         &format!(
             "timeout_secs={} patch_file={}",
             timeout.as_secs(),
             patch_file.display()
         ),
     );
-    let _ = std::fs::remove_file(patch_file);
     Ok(false)
 }
 
@@ -2587,7 +2586,7 @@ mod submodule_patch_routing_tests {
             "exchange",
             "### Re: Please reply — gpt-5\n\nAnswered.",
         );
-        let result = try_ipc(
+        let err = try_ipc(
             &doc,
             &[patch],
             "",
@@ -2597,26 +2596,29 @@ mod submodule_patch_routing_tests {
             None,
             Some("already-applied-duplicate"),
         )
-        .unwrap();
+        .unwrap_err();
 
-        assert!(result.success);
-        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            err.to_string().contains("refusing direct document write"),
+            "already_applied duplicate repair must fail closed: {err}"
+        );
         assert_eq!(
-            snap.matches("### Re: Please reply — gpt-5").count(),
-            1,
-            "already_applied snapshot must dedupe duplicate response headings: {snap}"
+            crate::snapshot::load(&doc).unwrap().as_deref(),
+            Some(baseline),
+            "already_applied duplicate repair must not snapshot unproven dedupe"
         );
         let disk = fs::read_to_string(&doc).unwrap();
         assert_eq!(
             disk.matches("### Re: Please reply — gpt-5").count(),
-            1,
-            "already_applied disk repair must converge with deduped snapshot: {disk}"
+            2,
+            "already_applied duplicate repair must leave the editor-visible duplicate state untouched: {disk}"
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("ipc_dedupe_repaired_working_tree")
-                && log.contains("ipc_socket_already_applied_snapshot"),
-            "dedupe repair should be logged:\n{log}"
+            log.contains("ipc_visible_repair_retry_required_no_disk_write")
+                && log.contains("recovery=retry_without_disk_write")
+                && !log.contains("ipc_socket_already_applied_snapshot"),
+            "dedupe retry should be logged without snapshot adoption:\n{log}"
         );
     }
 
@@ -2689,7 +2691,7 @@ mod submodule_patch_routing_tests {
     }
 
     #[test]
-    fn socket_ack_content_prompt_duplication_uses_content_ours_and_repairs_visible_buffer() {
+    fn socket_ack_content_prompt_duplication_fails_closed_without_editor_repair() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let agent_doc_dir = root.join(".agent-doc");
@@ -2743,7 +2745,7 @@ mod submodule_patch_routing_tests {
 
         let patch =
             crate::template::PatchBlock::new("exchange", "### Re: Production key — gpt-5\n\nDone.");
-        let result = try_ipc(
+        let err = try_ipc(
             &doc,
             &[patch],
             "",
@@ -2753,21 +2755,21 @@ mod submodule_patch_routing_tests {
             None,
             Some("duplicated-ack-content"),
         )
-        .unwrap();
+        .unwrap_err();
 
         assert!(
-            result.success,
-            "IPC delivery should remain successful while snapshot adoption falls back"
+            err.to_string().contains("refusing direct document write"),
+            "duplicated ack-content repair must fail closed instead of repairing disk: {err}"
         );
         assert_eq!(
             snapshot::load(&doc).unwrap().as_deref(),
-            Some(content_ours),
-            "duplicated ack-content must not become the committed snapshot"
+            Some(baseline),
+            "duplicated ack-content must not replace the existing snapshot without editor proof"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            content_ours,
-            "visible duplicated ack-content should be repaired from the guarded response image"
+            duplicated_ack_content,
+            "visible duplicated ack-content should remain editor-owned"
         );
         assert!(
             crate::cycle_state::load(&doc)
@@ -2780,13 +2782,14 @@ mod submodule_patch_routing_tests {
         assert!(
             log.contains("reason=prompt_duplication_in_ack_content")
                 && log.contains("duplicate_prompt_count=1")
-                && log.contains("ipc_dedupe_repaired_working_tree"),
-            "duplicate sidecar rejection and visible repair should be logged:\n{log}"
+                && log.contains("ipc_visible_repair_retry_required_no_disk_write"),
+            "duplicate sidecar rejection and retry should be logged:\n{log}"
         );
         assert!(
             log.contains("ipc_proof_insufficient")
                 && log.contains("invariant=prompt_duplication_in_ack_content")
-                && log.contains("recovery=content_ours_snapshot_and_visible_repair"),
+                && log.contains("recovery=content_ours_snapshot_and_visible_repair")
+                && log.contains("recovery=retry_without_disk_write"),
             "duplicate prompt ACK should name its failed invariant and recovery:\n{log}"
         );
     }
@@ -4426,7 +4429,7 @@ mod late_fallback_patch_guard_tests {
     }
 
     #[test]
-    fn template_ipc_dedupe_repair_uses_disk_not_full_content_redelivery() {
+    fn template_ipc_dedupe_repair_requires_editor_delivery() {
         let tmp = TempDir::new().unwrap();
         let bad_state = concat!(
             "---\nagent_doc_format: template\n---\n\n",
@@ -4472,7 +4475,12 @@ mod late_fallback_patch_guard_tests {
 
         let decision = IpcRepairDecision::file_read(bad_state.to_string())
             .apply_ipc_dedupe(repaired.to_string(), bad_state.to_string());
-        repair_ipc_decision_visible_state(&doc, &decision, Some("source-patch")).unwrap();
+        let err =
+            repair_ipc_decision_visible_state(&doc, &decision, Some("source-patch")).unwrap_err();
+        assert!(
+            err.to_string().contains("refusing direct document write"),
+            "template duplicate repair must fail closed without editor delivery: {err}"
+        );
 
         assert_eq!(
             calls.load(std::sync::atomic::Ordering::SeqCst),
@@ -4481,15 +4489,15 @@ mod late_fallback_patch_guard_tests {
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            repaired,
-            "template duplicate repair should fall back to guarded disk repair"
+            bad_state,
+            "template duplicate repair must leave the editor-visible bad state untouched"
         );
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("full_content_ipc_scope_rejected")
                 && ops_log.contains("scope=template_frontmatter")
-                && ops_log.contains("ipc_dedupe_repaired_working_tree"),
-            "template fullContent rejection and disk repair should be logged:\n{ops_log}"
+                && ops_log.contains("ipc_visible_repair_retry_required_no_disk_write"),
+            "template fullContent rejection and retry should be logged:\n{ops_log}"
         );
 
         let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));

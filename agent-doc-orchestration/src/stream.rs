@@ -20,8 +20,9 @@
 //!   `thinking_target` is set, or interleaved as `<details>` when unset.
 //! - On stream completion: saves crash-recovery pending file, writes final content, saves
 //!   CRDT state + snapshot, clears pending file, and updates `resume` frontmatter field.
-//! - `flush_to_document()` tries IPC to the IDE plugin first; falls back to flock +
-//!   atomic write on IPC absence or timeout.
+//! - `flush_to_document()` tries IPC to the IDE plugin first. It falls back to
+//!   flock + atomic write only when IPC is unavailable; an unproven active IPC
+//!   attempt fails closed for retry.
 //! - `build_prompt()` produces distinct prompts for first submit (no `resume`) vs.
 //!   resumed sessions (includes diff + full document). Resumed prompts also restate
 //!   ordered request blocks extracted from the diff so the agent does not anchor only
@@ -488,8 +489,8 @@ fn stream_loop(
 /// so far, not just the delta.
 ///
 /// When a JetBrains/VS Code plugin is active (`.agent-doc/patches/` directory
-/// exists), attempts IPC first to avoid "externally modified" dialogs. Falls
-/// back to direct write on IPC timeout.
+/// exists), attempts IPC first to avoid "externally modified" dialogs. An
+/// unproven active IPC attempt fails closed rather than writing behind the editor.
 pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str) -> Result<()> {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     // Build a patch block targeting the component
@@ -503,11 +504,28 @@ pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str)
 
     // Try IPC first — if plugin is active, it applies patches via Document API
     // (no "externally modified" dialog, cursor preserved, undo preserved)
-    if crate::write::try_ipc(file, &patches, &unmatched, None, None, None, None, None)?.success {
+    let ipc_available = file
+        .canonicalize()
+        .ok()
+        .map(|canonical| {
+            crate::write::resolve_ipc_project_root_pub(&canonical)
+                .join(".agent-doc/patches")
+                .exists()
+        })
+        .unwrap_or(false);
+    let ipc_result =
+        crate::write::try_ipc(file, &patches, &unmatched, None, None, None, None, None)?;
+    if ipc_result.success {
         return Ok(());
     }
+    if ipc_available {
+        anyhow::bail!(
+            "editor IPC did not prove the stream flush for {}; refusing direct document write",
+            file.display()
+        );
+    }
 
-    // IPC not available or timed out — fall back to direct write
+    // IPC not available — fall back to direct write.
 
     // Force replace mode for stream target — buffer is cumulative, not incremental
     let mut mode_overrides = std::collections::HashMap::new();
@@ -639,6 +657,45 @@ mod tests {
             !result.contains("Old content"),
             "old content should be replaced: {}",
             result
+        );
+    }
+
+    #[test]
+    fn flush_active_ipc_timeout_does_not_write_document_directly() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("locks")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let content = "---\nagent_doc_mode: stream\n---\n\n# Test\n\n<!-- agent:output -->\nOld content\n<!-- /agent:output -->\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let err = flush_to_document(&doc, "New streamed content", "output", content).unwrap_err();
+
+        assert!(
+            err.to_string().contains("refusing direct document write"),
+            "active IPC timeout should fail closed, got: {err:#}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            content,
+            "active IPC timeout must not mutate the document directly"
+        );
+        let queued: Vec<_> = std::fs::read_dir(agent_doc_dir.join("patches"))
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .collect();
+        assert!(
+            !queued.is_empty(),
+            "active IPC timeout must leave the patch queued for editor retry"
+        );
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("recovery=retry_without_disk_write"),
+            "timeout should log retry-without-disk recovery:\n{ops_log}"
         );
     }
 

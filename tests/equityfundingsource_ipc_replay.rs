@@ -311,6 +311,49 @@ fn assert_no_patch_jsons(project: &ReplayProject) {
     );
 }
 
+fn patch_jsons(project: &ReplayProject) -> Vec<PathBuf> {
+    fs::read_dir(project.patches_dir())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect()
+}
+
+fn assert_retry_left_live_prompt_without_response(project: &ReplayProject, topic: &str) {
+    let heading = response_heading(topic);
+    let body = response_payload_line(topic);
+    let visible = project.visible();
+    assert!(
+        visible.contains(EFS_LIVE_PROMPT),
+        "live EFS prompt should remain visible for retry:\n{visible}"
+    );
+    assert!(
+        !visible.contains(&heading) && !visible.contains(&body),
+        "IPC timeout must not write the response directly:\n{visible}"
+    );
+
+    let head = project.head();
+    assert!(
+        !head.contains(EFS_LIVE_PROMPT),
+        "live EFS prompt typed after preflight must not be committed:\n{head}"
+    );
+    assert!(
+        !head.contains(&heading) && !head.contains(&body),
+        "IPC timeout must fail before committing the response:\n{head}"
+    );
+
+    let snapshot = project.snapshot();
+    assert!(
+        !snapshot.contains(EFS_LIVE_PROMPT),
+        "retry failure must not absorb the live prompt into the snapshot:\n{snapshot}"
+    );
+    assert!(
+        !snapshot.contains(&heading) && !snapshot.contains(&body),
+        "retry failure must not snapshot the unmaterialized response:\n{snapshot}"
+    );
+}
+
 #[test]
 fn equityfundingsource_socket_ipc_replays_typing_during_finalize() {
     let project = setup_replay_project(true);
@@ -419,21 +462,30 @@ fn equityfundingsource_file_ipc_ack_sidecar_replays_typing_during_finalize() {
 }
 
 #[test]
-fn equityfundingsource_stale_patch_replay_is_claimed_before_late_editor_pickup() {
+fn equityfundingsource_timeout_retains_patch_for_editor_retry() {
     let project = setup_replay_project(true);
     project.type_live_prompt_after_preflight();
 
-    run_finalize(&project, "EFS stale patch replay", 75, &[]);
+    run_finalize(&project, "EFS stale patch replay", 1, &[]);
 
-    assert_live_prompt_visible_but_uncommitted(&project, "EFS stale patch replay");
-    assert_no_patch_jsons(&project);
+    assert_retry_left_live_prompt_without_response(&project, "EFS stale patch replay");
+    let patches = patch_jsons(&project);
+    assert!(
+        !patches.is_empty(),
+        "IPC timeout should retain queued patches for editor retry"
+    );
     let claimed = fs::read_dir(project.agent_doc_dir().join("claimed-patches"))
         .unwrap()
         .filter_map(Result::ok)
         .collect::<Vec<_>>();
     assert!(
-        !claimed.is_empty(),
-        "timeout fallback should claim stale patch ids before a late watcher can replay them"
+        claimed.is_empty(),
+        "IPC timeout should not claim uncommitted patches"
+    );
+    let ops_log = fs::read_to_string(project.agent_doc_dir().join("logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("recovery=retry_without_disk_write"),
+        "IPC timeout should request an editor retry without direct document write:\n{ops_log}"
     );
 }
 

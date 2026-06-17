@@ -55,11 +55,12 @@ flowchart TD
 ## Key Invariants
 
 - Template documents and documents with `agent:*` components must use component
-  patches or guarded disk repair. They must not use full-document IPC for normal
-  response writes.
-- Whole-document IPC is disabled in the first-party binary. Any path that would
-  emit `fullContent` logs `full_content_ipc_disabled`, returns `false`, and lets
-  the caller use the guarded disk/snapshot path.
+  patches or fail closed for retry when editor repair cannot be proven. They must
+  not use full-document IPC for normal response writes.
+- Whole-document IPC is disabled in the first-party binary. Any normal response
+  path that would emit `fullContent` logs `full_content_ipc_disabled`, returns
+  `false`, and cannot authorize a direct disk/snapshot repair without separate
+  editor-owned proof.
 - Editor plugins also reject or delete legacy/foreign `fullContent` payloads
   without applying them. Source-buffer proof is diagnostic-only.
 - Write paths that touch `agent:exchange` run duplicate-prompt repair before

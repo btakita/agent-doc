@@ -43,13 +43,14 @@
 //!   `merge::merge_contents_crdt` for conflict-free merge. Saves both a text
 //!   snapshot and a CRDT state snapshot after every flush. Supports IPC-first
 //!   writes: when `.agent-doc/patches/` exists and `--force-disk` is not set,
-//!   tries `try_ipc` first; on timeout (exit code 75 / `EX_TEMPFAIL`) writes
-//!   locally and removes the fallback patch file after a successful local
-//!   commit so an editor watcher cannot replay it later.
+//!   tries `try_ipc` first; on timeout or missing proof, retains the pending
+//!   response/queued patch and fails closed so the operator retries through the
+//!   editor path instead of writing behind the active buffer.
 //!
 //! - `run_ipc`: explicit IPC-only mode. Serialises patches as JSON to
 //!   `.agent-doc/patches/<hash>.json`, polls for the plugin to delete the file
-//!   as ACK (2 s timeout), then falls back to the direct CRDT disk path.
+//!   as ACK (2 s timeout), then fails closed without direct disk fallback when
+//!   the write is unproven.
 //! - `run_command(options, commit_mode)`: shared CLI entrypoint for `write` and
 //!   `finalize`. `finalize` is always strict. `write --commit` stays
 //!   best-effort for non-session documents and `--pending-only`, but upgrades to
@@ -1355,8 +1356,8 @@ fn read_explicit_baseline_md(file: &Path, baseline_file: Option<&Path>) -> Resul
 /// cycle (`#finalize-stale-baseline-reopen-friction`).
 ///
 /// The cycle phase is `Committed` whenever the prior finalize already closed and
-/// no fresh `preflight` reopened the cycle (for example an exit-75 IPC-timeout
-/// retry, or a second response in the same turn). Historically this always failed
+/// no fresh `preflight` reopened the cycle (for example a post-commit retry or a
+/// second response in the same turn). Historically this always failed
 /// closed with "run `agent-doc preflight` and retry", forcing a manual reopen even
 /// for a legitimately new response.
 ///
@@ -2038,9 +2039,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // triggers, explicit `--done`/`--pending-gate`/`--pending-edit` completion of
     // an id-backed head, a synthetic/preset heading-id match, and a free-text head
     // answered by this cycle's response — all resolve through
-    // `queue_consumption_allowed_for_response` so every closeout, including the
-    // stream IPC-timeout `exit(75)` path, uses an identical decision
-    // (#queue-consume-on-stream-ipc-timeout).
+    // `queue_consumption_allowed_for_response` so every successful closeout uses
+    // an identical decision. Unproven IPC retries fail before this phase and do
+    // not advance the queue.
     if write_result.is_ok() {
         let response_body = crate::capture::load_active(file)?
             .map(|capture| capture.response_body)
@@ -4457,10 +4458,9 @@ mod tests {
     }
     // #queue-strike-on-halt: queue head consumption requires an explicit
     // closeout flag, not a `### Re:` heading that merely names the head.
-    // #queue-consume-on-stream-ipc-timeout: the shared decision used by both the
-    // strict closeout and the stream IPC-timeout `exit(75)` closeout. Mirrors the
-    // exact scenario that treadmilled the auto-loop: a free-text head answered by
-    // a finalize response whose write fell back to direct disk on IPC timeout.
+    // #queue-consume-on-stream-ipc-timeout: the shared decision used by strict
+    // closeout. A retired unproven-IPC direct-disk path used to treadmill the
+    // auto-loop when a free-text head was answered but not struck.
     #[test]
     fn dropped_prompt_lines_after_content_ours_captures_unowned_prompt() {
         let baseline = concat!(
@@ -5444,21 +5444,21 @@ scratch
             "should return false on timeout (no plugin)"
         );
 
-        // Patch file should be cleaned up after timeout
+        // Patch file should remain queued for an editor-owned retry.
         let patches_dir = agent_doc_dir.join("patches");
         let entries: Vec<_> = fs::read_dir(&patches_dir)
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
         assert!(
-            entries.is_empty(),
-            "patch file should be cleaned up after timeout"
+            !entries.is_empty(),
+            "patch file should remain queued after timeout"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             log.contains("ipc_proof_insufficient")
                 && log.contains("invariant=no_ack")
-                && log.contains("recovery=direct_write_fallback"),
+                && log.contains("recovery=retry_without_disk_write"),
             "IPC timeout should log the failed invariant and recovery path:\n{log}"
         );
     }
@@ -5585,7 +5585,7 @@ scratch
         assert!(
             log.contains("ipc_proof_insufficient")
                 && log.contains("invariant=missing_response_probe")
-                && log.contains("recovery=direct_write_fallback"),
+                && log.contains("recovery=retry_without_disk_write"),
             "missing response materialization should name its invariant and recovery:\n{log}"
         );
     }
@@ -5659,7 +5659,7 @@ scratch
         assert!(
             log.contains("ipc_proof_insufficient")
                 && log.contains("invariant=live_exchange_without_ack_content")
-                && log.contains("recovery=direct_write_fallback"),
+                && log.contains("recovery=retry_without_disk_write"),
             "unacknowledged live-edit IPC should name its invariant and recovery:\n{log}"
         );
     }

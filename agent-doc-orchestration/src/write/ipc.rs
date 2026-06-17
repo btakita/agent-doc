@@ -163,14 +163,13 @@ pub(crate) fn log_ipc_dewedge_direct_disk_skip(file: &Path, transport: &str) {
 /// plugin's *socket* listener is wedged. The file-IPC patch queue uses a
 /// separate plugin file watcher that is very likely still alive, so a degraded
 /// write routes through it (the plugin applies via the Document API) instead of
-/// a raw disk write that manufactures an IDEA "File Cache Conflict". A direct
-/// disk write becomes the true last resort, reached only when file IPC also
-/// fails to deliver.
+/// a raw disk write that manufactures an IDEA "File Cache Conflict". If file IPC
+/// also fails to prove delivery, the write fails closed for retry.
 pub(crate) fn log_ipc_dewedge_prefer_file_ipc(file: &Path, transport: &str) {
     crate::ops_log::log_op(
         file,
         &format!(
-            "ipc_socket_degraded_prefer_file_ipc file={} transport={} reason=repeated_ack_timeout disk_write=last_resort",
+            "ipc_socket_degraded_prefer_file_ipc file={} transport={} reason=repeated_ack_timeout disk_write=disabled",
             file.display(),
             transport
         ),
@@ -379,25 +378,6 @@ pub(crate) fn normalized_content_ours_fallback(
     )
     .map(|(repaired, _)| repaired)
     .unwrap_or(normalized)
-}
-
-pub(crate) fn repair_disk_from_normalization_fallback(file: &Path, fallback: &str) -> Result<()> {
-    guard_visible_write_idle(file, "sidecar_normalization_fallback_repair")?;
-    atomic_write(file, fallback).with_context(|| {
-        format!(
-            "failed to repair {} from normalized content_ours fallback",
-            file.display()
-        )
-    })?;
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "sidecar_normalization_fallback_repaired_working_tree file={} bytes={}",
-            file.display(),
-            fallback.len()
-        ),
-    );
-    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1352,10 +1332,10 @@ impl FullContentRepairRedelivery {
     fn not_consumed_message(self) -> &'static str {
         match self {
             Self::NormalizationFallback => {
-                "[write] WARNING: sidecar normalization fallback repaired disk, but editor IPC repair was not consumed; reload the document if the editor view is stale"
+                "[write] sidecar normalization fallback editor repair was not consumed; refusing direct document write"
             }
             Self::IpcDedupe => {
-                "[write] WARNING: IPC duplicate-response repair updated disk, but editor IPC repair was not consumed; reload the document if the editor view is stale"
+                "[write] IPC duplicate-response repair was not consumed; refusing direct document write"
             }
         }
     }
@@ -1363,11 +1343,11 @@ impl FullContentRepairRedelivery {
     fn failed_message(self, error: &anyhow::Error) -> String {
         match self {
             Self::NormalizationFallback => format!(
-                "[write] WARNING: sidecar normalization fallback repaired disk, but editor IPC repair failed: {}; reload the document if the editor view is stale",
+                "[write] sidecar normalization fallback editor repair failed: {}; refusing direct document write",
                 error
             ),
             Self::IpcDedupe => format!(
-                "[write] WARNING: IPC duplicate-response repair updated disk, but editor IPC repair failed: {}; reload the document if the editor view is stale",
+                "[write] IPC duplicate-response repair failed: {}; refusing direct document write",
                 error
             ),
         }
@@ -1825,25 +1805,6 @@ pub(crate) fn redeliver_normalization_fallback_to_editor(
     )
 }
 
-pub(crate) fn repair_disk_from_ipc_dedupe(file: &Path, content: &str) -> Result<()> {
-    guard_visible_write_idle(file, "ipc_dedupe_repair")?;
-    atomic_write(file, content).with_context(|| {
-        format!(
-            "failed to repair {} after IPC duplicate-response dedupe",
-            file.display()
-        )
-    })?;
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "ipc_dedupe_repaired_working_tree file={} bytes={}",
-            file.display(),
-            content.len()
-        ),
-    );
-    Ok(())
-}
-
 #[cfg(test)]
 pub(crate) fn redeliver_ipc_dedupe_to_editor(
     file: &Path,
@@ -1931,14 +1892,34 @@ pub(crate) fn repair_ipc_decision_visible_state(
         return Ok(());
     }
 
-    match reason {
-        IpcDiskRepairReason::PrefixDivergence => {
-            repair_disk_from_normalization_fallback(file, &decision.snapshot_content)
-        }
-        IpcDiskRepairReason::IpcDedupe | IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe => {
-            repair_disk_from_ipc_dedupe(file, &decision.snapshot_content)
-        }
-    }
+    log_ipc_proof_failure(
+        file,
+        "ipc_visible_repair",
+        patch_id,
+        reason.label(),
+        "retry_without_disk_write",
+        &format!(
+            "redeliver_editor={} bad_len={} bad_hash={} repaired_len={} repaired_hash={}",
+            decision.redeliver_editor,
+            bad_len,
+            bad_hash,
+            decision.snapshot_content.len(),
+            crate::ops_log::content_hash(&decision.snapshot_content)
+        ),
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_visible_repair_retry_required_no_disk_write file={} patch_id={} repair_reason={} recovery=retry_without_disk_write",
+            file.display(),
+            patch_id.unwrap_or("-"),
+            reason.label()
+        ),
+    );
+    anyhow::bail!(
+        "editor IPC repair did not prove visible state for {}; pending response retained for retry; refusing direct document write",
+        file.display()
+    );
 }
 
 pub fn dedupe_ipc_snapshot_content(
@@ -2152,9 +2133,10 @@ fn with_test_stale_supervisor_content_ours_refusal<T>(f: impl FnOnce() -> T) -> 
 
 /// Result of an IPC write attempt, including the patch_id used.
 ///
-/// The `patch_id` is returned so callers (e.g., `run_stream()` timeout fallback)
-/// can reuse it for deduplication — the plugin tracks applied patch_ids and skips
-/// duplicates, preventing double-apply when both socket and file IPC fire.
+/// The `patch_id` is returned so callers can report/retry the same logical
+/// response — the plugin tracks applied patch_ids and skips duplicates,
+/// preventing double-apply when both socket and file IPC fire.
+#[derive(Debug)]
 pub struct IpcResult {
     /// Whether the plugin successfully consumed the patch.
     pub success: bool,
@@ -2475,7 +2457,7 @@ mod ack_content_snapshot_tests {
             }
         });
 
-        let result = try_ipc(
+        let err = try_ipc(
             &doc,
             &[patch],
             "",
@@ -2485,18 +2467,26 @@ mod ack_content_snapshot_tests {
             Some(normalize_prefix_lines.as_slice()),
             None,
         )
-        .unwrap();
+        .unwrap_err();
         assert!(
-            result.success,
-            "IPC should succeed when plugin consumes patch"
+            err.to_string().contains("refusing direct document write"),
+            "normalization fallback must fail closed instead of repairing disk: {err}"
         );
 
-        // Snapshot must use content_ours (has ❯ prefix), NOT the sidecar
-        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            original,
+            "missing-prefix sidecar must not trigger a direct document rewrite"
+        );
         assert!(
-            snap.contains("❯ do #jbpfx2"),
-            "snapshot must use content_ours with ❯ prefix; got: {}",
-            snap
+            snapshot::load(&doc).unwrap().is_none(),
+            "unproven normalization fallback must not save a snapshot"
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("sidecar_normalization_fallback")
+                && ops_log.contains("recovery=retry_without_disk_write"),
+            "ops log should record retry-only normalization fallback:\n{ops_log}"
         );
     }
 
@@ -2577,7 +2567,7 @@ agent response
             }
         });
 
-        let result = try_ipc(
+        let err = try_ipc(
             &doc,
             &[patch],
             "",
@@ -2587,23 +2577,22 @@ agent response
             Some(normalize_prefix_lines.as_slice()),
             None,
         )
-        .unwrap();
+        .unwrap_err();
         assert!(
-            result.success,
-            "IPC should succeed when plugin consumes patch"
+            err.to_string().contains("refusing direct document write"),
+            "normalization fallback must fail closed instead of repairing disk: {err}"
         );
 
-        let snap = snapshot::load(&doc).unwrap().unwrap();
-        assert!(
-            snap.contains("❯ do #bppfxstrip. spec-test-build-install-commit-push"),
-            "content_ours fallback must be normalized before snapshot save; got: {}",
-            snap
-        );
         let disk = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            disk.contains("❯ do #bppfxstrip. spec-test-build-install-commit-push"),
-            "content_ours fallback must repair the working tree before commit; got: {}",
+            disk.contains("do #bppfxstrip. spec-test-build-install-commit-push")
+                && !disk.contains("❯ do #bppfxstrip. spec-test-build-install-commit-push"),
+            "unproven normalization fallback must leave the editor-visible sidecar state untouched; got: {}",
             disk
+        );
+        assert!(
+            snapshot::load(&doc).unwrap().is_none(),
+            "unproven normalization fallback must not save a snapshot"
         );
     }
 
@@ -2611,8 +2600,8 @@ agent response
     fn normfallback_records_repaired_working_tree_when_sidecar_strips_prompt_prefix() {
         // Regression for #normfallback: the observed ops-log signal should be
         // backed by deterministic coverage. A plugin sidecar that drops a
-        // required prompt prefix must be rejected, and the binary fallback must
-        // repair the live file before any commit can capture the stripped form.
+        // required prompt prefix must be rejected, and an unproven editor repair
+        // must not rewrite the live file behind the editor.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -2691,7 +2680,7 @@ Covered.
             }
         });
 
-        let result = try_ipc(
+        let err = try_ipc(
             &doc,
             &[patch],
             "",
@@ -2701,21 +2690,20 @@ Covered.
             Some(normalize_prefix_lines.as_slice()),
             None,
         )
-        .unwrap();
+        .unwrap_err();
         assert!(
-            result.success,
-            "IPC should succeed when plugin consumes patch"
+            err.to_string().contains("refusing direct document write"),
+            "normalization fallback must fail closed instead of repairing disk: {err}"
         );
 
-        let snap = snapshot::load(&doc).unwrap().unwrap();
-        assert!(
-            snap.contains("❯ do [#normfallback]"),
-            "snapshot must use the normalized fallback rather than the stripped sidecar: {snap}"
-        );
         let disk = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            disk.contains("❯ do [#normfallback]"),
-            "working tree must be repaired to match the normalized fallback: {disk}"
+            disk.contains("do [#normfallback]") && !disk.contains("❯ do [#normfallback]"),
+            "unproven normalization fallback must leave the stripped editor state untouched: {disk}"
+        );
+        assert!(
+            snapshot::load(&doc).unwrap().is_none(),
+            "unproven normalization fallback must not save a snapshot"
         );
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
@@ -2724,8 +2712,8 @@ Covered.
             "ops log should record why the primary sidecar snapshot was rejected:\n{ops_log}"
         );
         assert!(
-            ops_log.contains("sidecar_normalization_fallback_repaired_working_tree"),
-            "ops log should record the explicit working-tree repair:\n{ops_log}"
+            ops_log.contains("ipc_visible_repair_retry_required_no_disk_write"),
+            "ops log should record retry without direct working-tree repair:\n{ops_log}"
         );
     }
 
@@ -3317,7 +3305,7 @@ agent response
             }
         });
 
-        let result = try_ipc(
+        let err = try_ipc(
             &doc,
             &[patch],
             "",
@@ -3327,22 +3315,20 @@ agent response
             Some(normalize_prefix_lines.as_slice()),
             None,
         )
-        .unwrap();
+        .unwrap_err();
         assert!(
-            result.success,
-            "IPC should succeed when plugin consumes patch"
+            err.to_string().contains("refusing direct document write"),
+            "normalization fallback must fail closed instead of repairing disk: {err}"
         );
 
-        let snap = snapshot::load(&doc).unwrap().unwrap();
-        assert!(
-            snap.contains("❯ do #splpend"),
-            "snapshot must preserve normalized prompt prefix; got: {}",
-            snap
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            disk, on_disk_with_pending,
+            "unproven normalization fallback must leave pending disk mutations untouched"
         );
         assert!(
-            snap.contains("- [ ] [#keepme] Preserve pending add from disk"),
-            "snapshot must preserve pending mutations from disk during normalization fallback; got: {}",
-            snap
+            snapshot::load(&doc).unwrap().is_none(),
+            "unproven normalization fallback must not save a snapshot"
         );
     }
 
@@ -3425,7 +3411,7 @@ agent response
             }
         });
 
-        let result = try_ipc(
+        let err = try_ipc(
             &doc,
             &[patch],
             "",
@@ -3435,25 +3421,24 @@ agent response
             Some(normalize_prefix_lines.as_slice()),
             None,
         )
-        .unwrap();
+        .unwrap_err();
         assert!(
-            result.success,
-            "IPC should succeed when plugin consumes patch"
+            err.to_string().contains("refusing direct document write"),
+            "normalization fallback must fail closed instead of repairing disk: {err}"
         );
 
         let disk = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            disk.contains("❯ do #commentdel"),
-            "normalization fallback must still repair the prompt prefix: {disk}"
+            disk.contains("do #commentdel") && !disk.contains("❯ do #commentdel"),
+            "unproven normalization fallback must not repair the prompt prefix on disk: {disk}"
         );
         assert!(
             !disk.contains("The tmux focus should be snappy."),
-            "normalization fallback must not restore a concurrently deleted scratch comment: {disk}"
+            "editor-visible deletion from the sidecar should remain untouched: {disk}"
         );
-        let snap = snapshot::load(&doc).unwrap().unwrap();
         assert!(
-            !snap.contains("The tmux focus should be snappy."),
-            "snapshot must also respect the concurrent comment deletion: {snap}"
+            snapshot::load(&doc).unwrap().is_none(),
+            "unproven normalization fallback must not save a snapshot"
         );
     }
 
@@ -4082,7 +4067,7 @@ mod core_tests {
         assert!(!patch_response_headings_already_in_head(&doc, &[patch]));
     }
     #[test]
-    fn ipc_ack_timeouts_degrade_current_session_to_direct_disk() {
+    fn ipc_ack_timeouts_degrade_current_session_to_file_ipc_retry() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -4196,16 +4181,16 @@ mod core_tests {
 
         assert!(
             !result.success,
-            "degraded file-IPC with no plugin should report not consumed (disk is last resort)"
+            "degraded file-IPC with no plugin should report not consumed for retry"
         );
-        // The file-IPC poll cleans up the unconsumed patch on timeout.
+        // The file-IPC poll leaves the unconsumed patch for editor retry.
         let leftover: Vec<_> = fs::read_dir(agent_doc_dir.join("patches"))
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
         assert!(
-            leftover.is_empty(),
-            "file-IPC timeout must clean up the unconsumed patch"
+            !leftover.is_empty(),
+            "file-IPC timeout must leave the unconsumed patch queued"
         );
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(

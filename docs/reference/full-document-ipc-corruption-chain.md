@@ -23,12 +23,12 @@ flowchart TD
   repeat["The stale full-document path can fire again and repeat the sequence"]
 
   disabledBinary["New binary: try_ipc_full_content logs disabled and returns false before socket/file payload construction"]
-  guardedDisk["Caller uses guarded disk/snapshot repair or narrow component patching"]
+  guardedDisk["Caller uses narrow component patching or fails closed for retry"]
   disabledPlugin["New editor plugins: delete file-watch fullContent patches and reject socket fullContent payloads"]
   adoptionGuard["New binary: ACK/file-read snapshot adoption rejects live prompt drift after preflight"]
   noReplace["No whole-buffer editor replacement occurs"]
   promptHandoff["Live prompt remains visible and outside the committed snapshot"]
-  narrowPatch["Only component patches, prefix normalization patches, reposition patches, or guarded disk repair remain"]
+  narrowPatch["Only component patches, prefix normalization patches, reposition patches, or retry-only failure remain"]
 
   typing --> staleState --> fullPayload
   fullPayload -- "yes, before this fix" --> oldReceiver --> wholeReplace --> clobber --> promptVariant --> duplicateRepair

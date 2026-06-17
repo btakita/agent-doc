@@ -113,7 +113,7 @@ flowchart TD
     D -->|"reload from disk"| E["safe: editor matches HEAD"]
     D -->|"accept cached editor buffer"| F["stale replay into working tree"]
     F --> G{"dedupe/replay classifier matches HEAD?"}
-    G -->|"yes"| H["repair working tree/snapshot without new response"]
+    G -->|"yes"| H["repair only through proven editor/disk-owned path"]
     G -->|"no"| I["fail closed: preserve drift for investigation"]
     G -->|"classifier misses duplicate"| J["bad path: duplicate exchange or old prompt can persist"]
 ```
@@ -153,7 +153,7 @@ working tree.
 Full-document IPC corruption is eliminated by construction only for first-party
 paths that obey these invariants:
 
-- template and component documents use component patches or guarded disk repair;
+- template and component documents use component patches or fail-closed retry;
 - first-party senders do not emit `fullContent` payloads for managed documents;
 - first-party editor plugins reject or delete legacy `fullContent` payloads;
 - ACK/file-read content cannot become snapshot authority when it contains

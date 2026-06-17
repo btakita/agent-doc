@@ -3194,10 +3194,8 @@ mod th {
         }
         panic!("fake socket listener did not start within 1s");
     }
-    // --- Fix 1: snapshot saved before process::exit(75) (structural test) ---
-    // The actual exit path in write::run_stream calls snapshot::save before process::exit(75).
-    // We verify this by checking that snapshot::save is callable at that point.
-    // Full integration testing requires IPC infrastructure; unit coverage is in write.rs.
+    // --- Retired: run_stream unproven-IPC direct write ---
+    // Unproven IPC now fails closed without saving snapshots or writing the document.
     // --- Submodule-aware commit routing ---
     // --- relative_to path normalization ---
     // --- #8jzg: resolve_pane_cwd tests ---

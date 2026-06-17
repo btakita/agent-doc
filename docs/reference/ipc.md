@@ -114,13 +114,13 @@ Before the plugin mutates the editor-visible buffer or writes an ACK sidecar, it
 
 ### Fallback
 
-If the patch file is not consumed within 2 seconds (plugin not installed or IDE not running), the binary:
+If the patch file is not consumed within 2 seconds while the IPC patch queue is active, the binary:
 
-1. Deletes the unconsumed patch file
-2. Falls back to direct CRDT stream write (`run_stream()`)
-3. Logs `[write] IPC timeout — falling back to direct write`
+1. Leaves the unconsumed patch file queued for the editor/plugin
+2. Retains the pending response for retry
+3. Logs `recovery=retry_without_disk_write`
 
-This makes `--ipc` safe to use unconditionally in the SKILL.md workflow.
+If no IPC patch queue exists, normal disk write paths may still run. Active IPC failures must not write the document directly.
 
 ### Component Mapping
 

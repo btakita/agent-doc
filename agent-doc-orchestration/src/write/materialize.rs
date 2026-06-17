@@ -208,7 +208,7 @@ pub(crate) fn ipc_response_materialized_or_fallback(
     let response_hash = crate::ops_log::content_hash(response);
     let content_hash = crate::ops_log::content_hash(content);
     eprintln!(
-        "[write] IPC {} consumed a patch for {}, but the materialized content is missing the captured response body — falling back before snapshot/commit",
+        "[write] IPC {} consumed a patch for {}, but the materialized content is missing the captured response body — retry required before snapshot/commit",
         source,
         file.display()
     );
@@ -228,7 +228,7 @@ pub(crate) fn ipc_response_materialized_or_fallback(
         source,
         None,
         "missing_response_probe",
-        "direct_write_fallback",
+        "retry_without_disk_write",
         &format!(
             "response_sha256={} content_len={} content_hash={}",
             response_hash,
@@ -339,7 +339,7 @@ pub(crate) fn strip_partial_response_materialization_from_exchange(
     Some(repaired)
 }
 
-pub(crate) fn repair_partial_response_materialization_before_fallback(
+pub(crate) fn log_partial_response_materialization_for_retry(
     file: &Path,
     source: &str,
     response: &str,
@@ -352,14 +352,14 @@ pub(crate) fn repair_partial_response_materialization_before_fallback(
         return Ok(());
     };
     eprintln!(
-        "[write] IPC {} partial response materialization removed before fallback for {}",
+        "[write] IPC {} partial response materialization left in editor buffer for retry for {}",
         source,
         file.display()
     );
     crate::ops_log::log_op(
         file,
         &format!(
-            "ipc_partial_materialization_removed file={} source={} response_sha256={} before_len={} after_len={}",
+            "ipc_partial_materialization_retained_for_retry file={} source={} response_sha256={} current_len={} stripped_len={}",
             file.display(),
             source,
             crate::ops_log::content_hash(response),
@@ -367,7 +367,6 @@ pub(crate) fn repair_partial_response_materialization_before_fallback(
             repaired.len()
         ),
     );
-    atomic_write(file, &repaired)?;
     Ok(())
 }
 

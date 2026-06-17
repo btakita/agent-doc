@@ -100,16 +100,13 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     timer.mark("cycle_state");
 
     // `#exit75-done-reap-not-atomic`: reap any `[x]` tracked items the response
-    // cycle marked done (`--done`) within the SAME closeout. The direct-write
-    // finalize path reaps during document mutation, but the IPC-timeout / file-IPC
-    // fallback (exit 75) commits the `[x]` and exits before that reap, so the
-    // completed item lingers and `enforce_clean_closeout` below fails closed —
-    // forcing a manual recovery `preflight` that also strands a fresh
-    // `preflight_started` cycle. `run_pending_maintenance` is the same reap
-    // preflight runs at cycle start: it writes the reaped/archived document +
+    // cycle marked done (`--done`) within the SAME closeout. The retired
+    // unproven-IPC fallback used to commit before this reap, so keep the terminal
+    // reap idempotent here for all successful closeouts. `run_pending_maintenance`
+    // is the same reap preflight runs at cycle start: it writes the reaped/archived document +
     // snapshot (it does not commit), so the snapshot-vs-HEAD retry immediately
     // below stages the reap. It is idempotent — a no-op when nothing is `[x]`
-    // (the direct path already reaped), so it only closes the exit-75 gap. Errors
+    // (the direct path already reaped), so it only closes the historical reap gap. Errors
     // are non-fatal: the `completed_pending_reap` guard still catches a miss.
     match crate::preflight::run_pending_maintenance(file) {
         Ok(_) => {

@@ -172,7 +172,7 @@ pub(crate) fn file_ipc_consumed_without_live_exchange_ack(
     let before_hash = crate::ops_log::content_hash(before);
     let after_hash = crate::ops_log::content_hash(after);
     eprintln!(
-        "[write] file IPC consumed for {} with live exchange edits but no ack-content proof and no exchange materialization — falling back before snapshot/commit",
+        "[write] file IPC consumed for {} with live exchange edits but no ack-content proof and no exchange materialization — retry required before snapshot/commit",
         file.display()
     );
     crate::ops_log::log_op(
@@ -191,7 +191,7 @@ pub(crate) fn file_ipc_consumed_without_live_exchange_ack(
         source,
         patch_id,
         "live_exchange_without_ack_content",
-        "direct_write_fallback",
+        "retry_without_disk_write",
         &format!("before_hash={} after_hash={}", before_hash, after_hash),
     );
     true

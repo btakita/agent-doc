@@ -2772,7 +2772,7 @@ Body\n\
         fs::write(
             tmp.path().join(".agent-doc/logs/ops.log"),
             format!(
-                "[100] ipc_proof_insufficient file={} invariant=no_ack recovery=direct_write_fallback\n[101] ipc_proof_insufficient file={} invariant=missing_response_probe recovery=direct_write_fallback\n",
+                "[100] ipc_proof_insufficient file={} invariant=no_ack recovery=retry_without_disk_write\n[101] ipc_proof_insufficient file={} invariant=missing_response_probe recovery=retry_without_disk_write\n",
                 other.display(),
                 doc.display()
             ),
@@ -2781,7 +2781,7 @@ Body\n\
 
         let diagnostic = latest_ipc_proof_diagnostic(&doc).unwrap().unwrap();
         assert!(diagnostic.contains("invariant=missing_response_probe"));
-        assert!(diagnostic.contains("recovery=direct_write_fallback"));
+        assert!(diagnostic.contains("recovery=retry_without_disk_write"));
     }
     #[test]
     fn detect_write_completed_commit_missing_returns_last_write_event() {
@@ -2819,7 +2819,7 @@ Body\n\
         crate::ops_log::log_op(
             &doc,
             &format!(
-                "ipc_proof_insufficient file={} source=file_ipc patch_id=p1 invariant=no_ack recovery=direct_write_fallback",
+                "ipc_proof_insufficient file={} source=file_ipc patch_id=p1 invariant=no_ack recovery=retry_without_disk_write",
                 doc.display()
             ),
         );
@@ -2828,7 +2828,7 @@ Body\n\
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("latest IPC proof diagnostic"));
                 assert!(message.contains("invariant=no_ack"));
-                assert!(message.contains("recovery=direct_write_fallback"));
+                assert!(message.contains("recovery=retry_without_disk_write"));
             }
             other => panic!("expected interrupted state, got {other:?}"),
         }

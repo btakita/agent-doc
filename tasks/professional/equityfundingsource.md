@@ -38,6 +38,36 @@ completed
 Compacted content:
 - Archived 10 response topic(s): Session recovery; Remove borrower communication type label; Show uploaded request documents; 7 more
 - Prior summary/context: prior compacted content: Archived 12 response topic(s): Mark Call Completed; Start Underwriting; Call scheduled; 9 more
+- Parent repo: `c6dda8865` (`Update EFS lender portal routes`)
+- EFS repo: `0d53ff6` (`Rename lender portal routes`)
+- EFS and parent relevant worktrees were clean after the commits.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no workflows.
+- `tsift digest-runner --kind test --path . --shell-command 'make check'` exited 0. The digest still flags the known non-fatal `error: d1 down` log from the outbox failure-path test, but the command passed.
+- `git diff --check` passed.
+- `bun test tests/investor-portal-e2e.test.ts tests/admin-investor-pipeline.test.ts tests/admin-investor-documents.test.ts tests/download-security.test.ts tests/lender-account-gate.test.ts tests/public-header.test.ts tests/investor-vestings.test.ts` passed: 168 tests, 0 fail.
+- `rg "/portal-investor" -n app lib tests docs prds bin public` now finds only the intentional legacy redirect and tests for it.
+- Added drift coverage that pins `/portal-lender` as canonical and verifies legacy redirect registration.
+- Added legacy 308 redirects for `/portal-investor`, `/portal-investor/:section`, and `/portal-investor/deals/:deal_id` to the equivalent `/portal-lender` paths.
+- Updated browser links, server header/footer/not-found links via the shared URL map, email CTA URLs, tests, and deployment docs/spec references.
+- Changed the shared lender portal base URL from `/portal-investor` to `/portal-lender`.
+- parent submodule pointer `src/equityfundingsource-dev`
+- `src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md`
+- `src/equityfundingsource-dev/docs/deploy.md`
+- `src/equityfundingsource-dev/tests/investor-vestings.test.ts`
+- `src/equityfundingsource-dev/tests/public-header.test.ts`
+- `src/equityfundingsource-dev/tests/lender-account-gate.test.ts`
+- `src/equityfundingsource-dev/tests/download-security.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-documents.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/accreditation.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/deal_detail.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/available_deals.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/dashboard.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/layout.tsx`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/lifecycle.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/portal/investor/routes.ts`
+- `src/equityfundingsource-dev/lib/ui--server--efs/urls/index.ts`
 <!-- agent:boundary:ae1fed8c -->
 <!-- /agent:exchange -->
 ###

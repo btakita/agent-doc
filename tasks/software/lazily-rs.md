@@ -87,7 +87,36 @@ The runbook alone wouldn't be "executable in one pass" without a driver binary, 
 **`#h6qb` stays `[operator-drive]` gated** — the runbook + driver advance the gate (make it executable in one pass), they do not satisfy it. The live two-host run is still operator-only.
 
 **Top of backlog: `#lzholonsscan`** (re-scan `evomimic/map-holons` recent commits to sharpen `#xccx`'s 7 OPEN QUESTIONS).
-<!-- agent:boundary:0864a939 -->
+
+### Re: do #lzholonsscan — Phase 0 surface shrunk 7→4 — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#lzholonsscan]
+
+Re-scanned `evomimic/map-holons` public sources (commits through `ab3239f` 2026-06-15, `ARCHITECTURE.md`, the [Layer 0: Holons](https://evomimic.gitbook.io/map-book/map-foundations/layer-0-holons.md) book page, and the [MAP Core Dev Docs](https://memetic-activation-platform.github.io/map-dev-docs/core/) reference) against the 7 OPEN QUESTIONS in `plan-map-holons-integration.md`. Wrote a dated re-scan section with per-question tags (answered-by-code / sharpened / still-needs-Steve).
+
+**Three questions substantially resolved from public sources:**
+
+- **Q2 (holon↔node/edge mapping) — answered-by-code.** Holons have typed relationships + properties + actions; relationships carry `holonic__attraction` (composition/aggregation/association continuum) and now have auto-materialized inverses (the recent inverse-relationship-persistence work). Maps cleanly: holon → `NodeSnapshot`, typed relationship → `EdgeSnapshot` with attraction as an edge weight/marker. *Open sub-question for Steve:* how to represent containment (holon-inside-holon).
+- **Q6 (transport expectations) — answered-by-code.** `ARCHITECTURE.md` is explicit: the repo "mirrors runtime execution contexts" — **hApp (WASM/Holochain)** and **Host (Native Rust + TS)** are strictly separated, with `shared_crates/` obeying WASM constraints. lazily-rs (tokio + threads) can run **only in the Host context**, attached via **Conductura** (the host command/integration subsystem + Holochain receptor). WebRTC/WS/IPC transports are for **host↔host** peer traffic (UI sync, DAHN visualizers), **not** Holochain DHT traffic. → `#akp3` WebSocket priority confirmed for host↔UI; WebRTC for host↔host across NAT.
+- **Q7 (references) — sharpened.** Canonical docs now exist: Layer 0 book (conceptual), repo `ARCHITECTURE.md` (workspace/build model), MAP Core Dev Docs (contributor-facing), and the DanceV2 PRO1/PRO2 command-contract PRs (#538, #544 — closest to a wire spec). Still no single `PROTOCOL.md`-equivalent.
+
+**Four sharpened but still-needs-Steve:**
+
+- **Q1 (holon identity)** — Holochain's `ActionHash`/`EntryHash` is implied; `NodeId(u64)` won't fit verbatim so the adapter needs a registry. *Confirm:* is there a separate semantic id stable across re-commits?
+- **Q3 (change feed)** — DanceV2 + commit pass 2 introduce a typed command/result surface, but no documented event stream for external subscribers. *Confirm:* change-event feed exists, or diff-on-snapshot is the integration pattern?
+- **Q4 (write authority)** — DanceV2 is the write path; Holochain source-chain + DHT is the authority. *Confirm:* does the adapter forward writes as DanceV2 commands from a single agent, or fan-out? How does this reconcile with lazily's single-writer-per-effect?
+- **Q5 (permissions)** — MAP's per-property/per-relationship "willingness to share" is finer-grained than lazily's per-node `PeerPermissions`. *Confirm:* per-property filtering (drop permissions on the floor) or collapse to per-node (over-share)?
+
+**Net effect on `#xccx` Phase 0:** the surface Steve has to answer shrinks from 7 questions to 4. Adapter scaffolding (Phase 1 read-only inbound) can start against the resolved 3 + working hypotheses on the open 4, then be corrected when Steve's answers land — no longer fully blocked on discovery.
+
+**`#xccx` stays `[operator-drive]` gated.** The re-scan advances it (Phase 0 closer to unblocked, Phase 1 scaffoldable) but does not satisfy it — Steve's input is still required before the adapter design is settled.
+
+**Commit + push:** superproject `824a305e3` → `btakita/agent-loop` main (`8bdd32002..824a305e3`). No lazily-rs submodule change (research/docs only).
+
+**Queue drained.** All three `do #id` directives from this session's review-triage cycle (`#lzwebrtcrunbook`, `#lzholonsscan`, and earlier `#lzstr0mframe` / `#lzstr0mpolldrive`) are closed. Backlog empty; four `[operator-drive]` review items remain (`#kb9b`, `#kabc`, `#h6qb`, `#xccx`) — all advanced where the agent-doable slice existed, none auto-resolved.
+<!-- agent:boundary:2780c967 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,7 +132,6 @@ The runbook alone wouldn't be "executable in one pass" without a driver binary, 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzholonsscan] [recommended] #lzholonsscan=Advance #xccx: re-scan evomimic/map-holons recent commits (active through 2026-06-15) to refine the 7 OPEN QUESTIONS in tasks/software/plan-map-holons-integration.md. Relevant recent themes that did not exist at the original #xccx discovery phase: DanceV2 command ingress (PRs #547/#549/#545 — addresses the write/conflict-model + transport questions), inverse relationship persistence + HasInverse materialization (addresses holon↔node/edge mapping), CollectionType schema (addresses holon identity), commit pass 2 relationship resolution, command contract alignment PRO1/PRO2 (wire-domain binding). For each question, record: answered-by-code / sharpened / still-needs-Steve. Output: update plan-map-holons-integration.md with a dated re-scan section. Does NOT unblock #xccx on its own (Steve input still needed for spec reference + preferred transport), but shrinks the surface he has to answer.
 <!-- /agent:backlog -->
 
 ## Review

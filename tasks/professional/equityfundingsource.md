@@ -38,7 +38,34 @@ completed
 Compacted content:
 - Archived 1 response topic(s): Catalog all portal messaging components. Make sure all portal messaging components support file uploads. deploy
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): Lender Conversation Uploads + Deploy; Lender Message Drag Uplo...
-<!-- agent:boundary:9c260f52 -->
+
+### Re: Ensure rwaldman100+admin@gmail.com has an admin account — glm-5.2
+
+> **Queue prompt:**
+>
+> Ensure rwaldman100+admin@gmail.com has an admin account.
+
+
+**Done.** Shipped idempotent admin provisioning so Robert's account is ensured deterministically rather than depending on an interactive signup.
+
+**Spec + impl** (`src/equityfundingsource-dev`, commit `6a2920f`, pushed `main`):
+- `ensure_admin_(db, {email, first_name, last_name})` (`lib/auth/repo.ts`) — missing → inserts admin (`password_hash=''`); present non-admin → promotes; already admin → no-op. Returns `{user, created}`. Also added `user__set_role_`.
+- `BOOTSTRAP_ADMINS` (`lib/auth/bootstrap_admins.ts`) — canonical seed list, first entry `rwaldman100+admin@gmail.com` (Robert Waldman), plus `ensure_bootstrap_admins_()` and `bootstrap_admins_sql_()` (idempotent `INSERT … ON CONFLICT(email) DO UPDATE SET role='admin'`).
+- `bin/ensure-admins.ts` — operational reconcile via the existing `cf-wrangler` credential path: `bun ./bin/ensure-admins.ts --remote|--local|--dry-run`.
+- Spec: `prds/admin-provisioning-spec.md`. Tests: `tests/admin-provisioning.test.ts` (10 cases).
+
+**Security:** ensured admins start with an empty password hash and sign in via `ADMIN_GLOBAL_PASSWORD` until they set a personal password; `ensure_admin_` is **not** exposed as an HTTP route, so it can't escalate privileges from a request.
+
+**Verify:** `bun run check` → 780 pass / 0 fail; worker build OK.
+
+**To make the account live on an environment**, run the reconcile (needs `CLOUDFLARE_API_TOKEN`/`ACCOUNT_ID` in `.env` for `--remote`):
+```bash
+bun ./bin/ensure-admins.ts --remote --dry-run   # preview SQL
+bun ./bin/ensure-admins.ts --remote             # apply
+```
+
+**Note on the next two queue items** (email-on-admin-creation): they layer cleanly on `ensure_admin_` (email when `created=true`), but real outbound send is still gated on a verified EFS Resend sending domain (`#f4rq`). Local capture works today; production send waits on that domain.
+<!-- agent:boundary:acf98888 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +73,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Ensure rwaldman100+admin@gmail.com has an admin account.
+- ~~Ensure rwaldman100+admin@gmail.com has an admin account.~~
 - Ensure all added admins are sent an email about their account.
 - Send rwaldman100+admin@gmail.com an email about his account.
 <!-- /agent:queue -->

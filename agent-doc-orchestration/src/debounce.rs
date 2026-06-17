@@ -656,7 +656,24 @@ fn live_buffer_snapshot_diverges_from_content(
     if let Some(prov) = write_provenance(file)
         && prov.timestamp_ms > snapshot.timestamp_ms
     {
-        log_live_buffer_decision(file, "suppressed", "write_provenance_newer_than_buffer");
+        log_live_buffer_decision_with_details(
+            file,
+            "suppressed",
+            "write_provenance_newer_than_buffer",
+            &format!(
+                " provenance_actor={} provenance_write_id={} provenance_timestamp_ms={} buffer_timestamp_ms={} provenance_len={} provenance_hash={} buffer_len={} buffer_hash={} stale_owner={} stale_attempt={}",
+                prov.actor,
+                prov.write_id,
+                prov.timestamp_ms,
+                snapshot.timestamp_ms,
+                prov.len,
+                prov.hash,
+                snapshot.len,
+                snapshot.hash,
+                prov.actor,
+                prov.write_id
+            ),
+        );
         return false;
     }
 
@@ -684,9 +701,13 @@ fn live_buffer_snapshot_diverges_from_content(
 /// why a buffer was (or was not) treated as a pending unsaved edit. Logging
 /// only; the return value of [`live_buffer_diverges_from_content`] is unchanged.
 fn log_live_buffer_decision(file: &str, decision: &str, reason: &str) {
+    log_live_buffer_decision_with_details(file, decision, reason, "");
+}
+
+fn log_live_buffer_decision_with_details(file: &str, decision: &str, reason: &str, details: &str) {
     crate::ops_log::log_op(
         std::path::Path::new(file),
-        &format!("live_buffer_classify decision={decision} reason={reason} file={file}"),
+        &format!("live_buffer_classify decision={decision} reason={reason} file={file}{details}"),
     );
 }
 
@@ -1204,6 +1225,18 @@ mod tests {
             live_buffer_diverges_from_content(&doc_str, "agent-doc wrote this").is_none(),
             "write provenance should suppress a digest that predates agent-doc's own write"
         );
+        let ops_log = tmp.path().join(".agent-doc").join("logs").join("ops.log");
+        let log = std::fs::read_to_string(&ops_log).expect("ops.log written");
+        assert!(
+            log.contains("reason=write_provenance_newer_than_buffer"),
+            "ops.log missing provenance suppression marker, got: {log}"
+        );
+        assert!(log.contains("provenance_actor=agent"), "{log}");
+        assert!(log.contains("provenance_write_id=wid-stale"), "{log}");
+        assert!(log.contains("stale_owner=agent"), "{log}");
+        assert!(log.contains("stale_attempt=wid-stale"), "{log}");
+        assert!(log.contains("buffer_timestamp_ms="), "{log}");
+        assert!(log.contains("provenance_timestamp_ms="), "{log}");
     }
 
     /// #pcp2 complement: provenance must NOT suppress a genuine unsaved editor

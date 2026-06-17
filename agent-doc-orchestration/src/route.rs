@@ -588,6 +588,29 @@ fn preserve_route_pane_snapshot(
     }
 }
 
+fn print_route_pane_snapshot_hint(
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    phase: &str,
+    snapshot: &RoutePaneSnapshot,
+) {
+    let mut message = format!(
+        "[route] preserved dispatch-start proof snapshot for {} pane {} harness={} phase={} capture_len={} capture_hash={}",
+        file.display(),
+        pane,
+        harness.binary,
+        phase,
+        snapshot.len,
+        snapshot.hash
+    );
+    if let Some(path) = snapshot.path.as_ref() {
+        message.push_str(&format!(" snapshot_path={}", path.display()));
+    }
+    append_editor_route_attempt(&mut message);
+    eprintln!("{message}");
+}
+
 #[derive(Debug, Clone, Copy)]
 struct RouteSubmitObservationFacts<'a> {
     file: &'a Path,

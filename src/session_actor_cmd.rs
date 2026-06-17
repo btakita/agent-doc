@@ -534,6 +534,7 @@ pub fn clear(file: &Path) -> Result<()> {
                         SUPERVISOR_INJECT_SUBMIT_MODE
                     ),
                 );
+                verify_supervisor_clear_submit(&ctx, &tmux, "supervisor_runtime")?;
             }
             SupervisorClearDelivery::LegacyClearUnsupported { error } => {
                 if !send_clear_to_resolved_pane(
@@ -559,6 +560,7 @@ pub fn clear(file: &Path) -> Result<()> {
                         SUPERVISOR_INJECT_SUBMIT_MODE
                     ),
                 );
+                verify_supervisor_clear_submit(&ctx, &tmux, "none")?;
             }
             SupervisorClearDelivery::LegacyClearUnsupported { error } => {
                 anyhow::bail!(
@@ -688,6 +690,38 @@ fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<SupervisorClearDeli
 
 fn supervisor_clear_legacy_unsupported_error(error: &str) -> bool {
     error.contains("parse error: unknown variant `clear`") && error.contains("expected one of")
+}
+
+fn verify_supervisor_clear_submit(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    pane_source: &str,
+) -> Result<()> {
+    let Some(pane) = ctx.supervisor_runtime.actor_pane_id.as_deref().or_else(|| {
+        ctx.actor_record
+            .as_ref()
+            .map(|record| record.pane_id.as_str())
+    }) else {
+        agent_doc_orchestration::ops_log::log_op(
+            &ctx.canonical_file,
+            &format!(
+                "session_clear_submit_verification_skipped file={} harness={} delivery=supervisor_ipc pane_source={} reason=no_actor_pane",
+                ctx.canonical_file.display(),
+                ctx.harness,
+                pane_source
+            ),
+        );
+        return Ok(());
+    };
+    verify_clear_submit_after_delivery(
+        tmux,
+        pane,
+        &ctx.canonical_file,
+        &ctx.harness,
+        harness_clear_command(&ctx.harness),
+        "supervisor_ipc_acceptance",
+        "session_clear.supervisor_ipc_resubmit",
+    )
 }
 
 fn send_clear_to_resolved_pane(
@@ -1613,19 +1647,39 @@ fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Re
             file.display()
         )
     })?;
-    let first = poll_clear_direct_submit_acceptance(
+    verify_clear_submit_after_delivery(
         tmux,
         pane,
         file,
         harness,
         command,
         "direct_pane_acceptance",
-    );
+        "session_clear.direct_pane_resubmit",
+    )
+}
+
+fn verify_clear_submit_after_delivery(
+    tmux: &Tmux,
+    pane: &str,
+    file: &Path,
+    harness: &str,
+    command: &str,
+    initial_phase: &str,
+    resubmit_source: &str,
+) -> Result<()> {
+    let first =
+        poll_clear_direct_submit_acceptance(tmux, pane, file, harness, command, initial_phase);
+    let mut final_phase = initial_phase;
+    let mut final_observation = first;
     if clear_direct_submit_needs_enter_resubmit(harness, &first) {
+        let resubmit_phase = match initial_phase {
+            "supervisor_ipc_acceptance" => "supervisor_ipc_resubmit_acceptance",
+            _ => "direct_pane_resubmit_acceptance",
+        };
         let submit_key = agent_doc_orchestration::sessions::tmux_submit_key_for_harness(harness);
         agent_doc_orchestration::input_diag::log_text_submit(
             Some(file),
-            "session_clear.direct_pane_resubmit",
+            resubmit_source,
             &format!("pane:{pane}"),
             "",
             Some(harness),
@@ -1639,19 +1693,16 @@ fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Re
                 "[clear] warning: {harness} clear resubmit {submit_key} failed for pane {pane}: {err}"
             );
         }
-        let second = poll_clear_direct_submit_acceptance(
-            tmux,
-            pane,
-            file,
-            harness,
-            command,
-            "direct_pane_resubmit_acceptance",
-        );
+        let second =
+            poll_clear_direct_submit_acceptance(tmux, pane, file, harness, command, resubmit_phase);
         agent_doc_orchestration::ops_log::log_op(
             file,
             &clear_direct_submit_resubmit_proof_line(file, pane, harness, second),
         );
+        final_phase = resubmit_phase;
+        final_observation = second;
     }
+    require_clear_submit_accepted(file, pane, harness, command, final_phase, final_observation)?;
     Ok(())
 }
 
@@ -1816,6 +1867,63 @@ fn clear_direct_submit_resubmit_proof_line(
     )
 }
 
+fn require_clear_submit_accepted(
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    command: &str,
+    phase: &str,
+    observation: ClearDirectSubmitObservation,
+) -> Result<()> {
+    if observation.status == ClearDirectSubmitStatus::Accepted {
+        return Ok(());
+    }
+    let line = clear_direct_submit_blocked_line(file, pane, harness, command, phase, observation);
+    agent_doc_orchestration::ops_log::log_op(file, &line);
+    anyhow::bail!(
+        "{}",
+        clear_direct_submit_blocked_message(file, pane, harness, command, phase, observation)
+    );
+}
+
+fn clear_direct_submit_blocked_line(
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    command: &str,
+    phase: &str,
+    observation: ClearDirectSubmitObservation,
+) -> String {
+    format!(
+        "session_clear_submit_blocked file={} pane={} harness={} phase={} command={} result={} elapsed_ms={} command_visible={} issue={} ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=restore_idle_prompt_and_retry unblocker=clear_command_not_consumed",
+        file.display(),
+        pane,
+        harness,
+        phase,
+        command,
+        observation.status.as_str(),
+        observation.elapsed.as_millis(),
+        observation.command_visible,
+        observation.status.issue().unwrap_or("submit_not_accepted")
+    )
+}
+
+fn clear_direct_submit_blocked_message(
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    command: &str,
+    phase: &str,
+    observation: ClearDirectSubmitObservation,
+) -> String {
+    format!(
+        "session_clear {harness} command `{command}` for {} was not proven submitted in pane {pane} after {phase} (result={}, command_visible={}); treating Clear Session Context as not submitted. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=restore_idle_prompt_and_retry unblocker=clear_command_not_consumed. Restore an idle {harness} prompt or restart the session, then run Clear Session Context again",
+        file.display(),
+        observation.status.as_str(),
+        observation.command_visible
+    )
+}
+
 fn short_clear_submit_content_hash(content: &str) -> String {
     let hash = agent_doc_orchestration::ops_log::content_hash(content);
     hash[..hash.len().min(12)].to_string()
@@ -1841,14 +1949,32 @@ fn clear_command_visible_in_active_input(
             harness.is_dispatch_ready_prompt_line(line.trim())
                 || line_starts_with_clear_prompt_prefix(line)
         });
-        return !later_has_idle_prompt;
+        if later_has_idle_prompt {
+            continue;
+        }
+        return true;
     }
     false
 }
 
 fn line_shows_clear_command_input(line: &str, command: &str) -> bool {
     let trimmed = line.trim();
-    trimmed == command || strip_clear_prompt_prefix(trimmed).trim() == command
+    clear_command_candidate_visible(trimmed, command)
+        || clear_command_candidate_visible(strip_clear_prompt_prefix(trimmed).trim(), command)
+}
+
+fn clear_command_candidate_visible(candidate: &str, command: &str) -> bool {
+    if candidate == command {
+        return true;
+    }
+    command == "/new"
+        && candidate
+            .strip_prefix("/new")
+            .map(|rest| {
+                let label = rest.trim_start();
+                label.starts_with("New session") || label.starts_with("session_new")
+            })
+            .unwrap_or(false)
 }
 
 fn line_starts_with_clear_prompt_prefix(line: &str) -> bool {
@@ -4237,6 +4363,21 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     }
 
     #[test]
+    fn clear_command_visible_detects_opencode_new_palette_row() {
+        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
+        let content = concat!(
+            "older output\n",
+            "/new        New session\n",
+            "/models     Select model\n",
+            "> /new\n",
+        );
+
+        assert!(clear_command_visible_in_active_input(
+            content, "/new", &harness
+        ));
+    }
+
+    #[test]
     fn clear_command_visible_ignores_stale_scrollback_before_idle_prompt() {
         let harness = agent_doc_orchestration::harness::HarnessConfig::claude();
         let content = concat!(
@@ -4329,6 +4470,51 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(retry.contains("session_clear_submit_resubmit"), "{retry}");
         assert!(retry.contains("action=submit_key key=Enter"), "{retry}");
         assert!(retry.contains("result=accepted"), "{retry}");
+    }
+
+    #[test]
+    fn clear_submit_blocked_lines_name_command_and_unblocker() {
+        let observation = ClearDirectSubmitObservation {
+            status: ClearDirectSubmitStatus::TimedOut,
+            elapsed: Duration::from_millis(2001),
+            command_visible: true,
+        };
+        let line = clear_direct_submit_blocked_line(
+            Path::new("/tmp/doc.md"),
+            "%12",
+            "opencode",
+            "/new",
+            "direct_pane_resubmit_acceptance",
+            observation,
+        );
+        assert!(line.contains("session_clear_submit_blocked"), "{line}");
+        assert!(line.contains("command=/new"), "{line}");
+        assert!(
+            line.contains("ui_outcome=blocked_with_exact_unblocker"),
+            "{line}"
+        );
+        assert!(
+            line.contains("unblocker=clear_command_not_consumed"),
+            "{line}"
+        );
+
+        let message = clear_direct_submit_blocked_message(
+            Path::new("/tmp/doc.md"),
+            "%12",
+            "opencode",
+            "/new",
+            "direct_pane_resubmit_acceptance",
+            observation,
+        );
+        assert!(message.contains("command `/new`"), "{message}");
+        assert!(
+            message.contains("treating Clear Session Context as not submitted"),
+            "{message}"
+        );
+        assert!(
+            message.contains("ui_outcome=blocked_with_exact_unblocker"),
+            "{message}"
+        );
     }
 
     #[test]

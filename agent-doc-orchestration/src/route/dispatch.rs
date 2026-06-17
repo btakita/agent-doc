@@ -553,12 +553,19 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
     });
     match sessions::capture_pane(tmux, pane) {
         Ok(content) => {
-            preserve_route_pane_snapshot(
+            let snapshot = preserve_route_pane_snapshot(
                 file,
                 pane,
                 harness,
                 "supervisor_dispatch_start_unproven",
                 &content,
+            );
+            print_route_pane_snapshot_hint(
+                file,
+                pane,
+                harness,
+                "supervisor_dispatch_start_unproven",
+                &snapshot,
             );
         }
         Err(err) => {
@@ -977,12 +984,19 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
             });
             match sessions::capture_pane(tmux, pane) {
                 Ok(content) => {
-                    preserve_route_pane_snapshot(
+                    let snapshot = preserve_route_pane_snapshot(
                         file,
                         pane,
                         harness,
                         "direct_pane_dispatch_start_unproven",
                         &content,
+                    );
+                    print_route_pane_snapshot_hint(
+                        file,
+                        pane,
+                        harness,
+                        "direct_pane_dispatch_start_unproven",
+                        &snapshot,
                     );
                 }
                 Err(err) => {

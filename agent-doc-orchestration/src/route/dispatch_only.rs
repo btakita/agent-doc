@@ -268,8 +268,8 @@ pub(crate) fn should_print_dispatch_only_unproven_progress() -> bool {
     flow_should_print_dispatch_only_unproven_progress()
 }
 
-pub(crate) fn dispatch_only_dispatch_start_proof_required() -> bool {
-    flow_dispatch_only_dispatch_start_proof_required()
+pub(crate) fn dispatch_only_dispatch_start_proof_required(harness: &HarnessConfig) -> bool {
+    flow_dispatch_only_dispatch_start_proof_required(&harness.binary)
 }
 
 pub(crate) fn require_dispatch_only_dispatch_start_proof(
@@ -279,7 +279,7 @@ pub(crate) fn require_dispatch_only_dispatch_start_proof(
     delivery: DispatchOnlyReopenDelivery,
     dispatch_start: RoutedDispatchStartProof,
 ) -> Result<()> {
-    let proof_required = dispatch_only_dispatch_start_proof_required();
+    let proof_required = dispatch_only_dispatch_start_proof_required(harness);
     let classification = classify_dispatch_start_proof(DispatchStartProofFacts {
         proof: dispatch_start,
         dispatch_start_proof_required: proof_required,
@@ -781,7 +781,7 @@ mod tests {
         );
     }
     #[test]
-    fn dispatch_only_codex_accepts_enter_delivery_even_with_visible_hooks() {
+    fn dispatch_only_codex_blocks_accepted_delivery_without_start_proof_even_with_visible_hooks() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
 
@@ -791,14 +791,20 @@ mod tests {
         std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        require_dispatch_only_dispatch_start_proof(
+        let err = require_dispatch_only_dispatch_start_proof(
             &doc,
             "%4",
             &HarnessConfig::codex(),
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
             RoutedDispatchStartProof::CommandAcceptedOnly,
         )
-        .expect("Codex dispatch-only accepts the shared Enter delivery path");
+        .expect_err("Codex dispatch-only must fail closed without dispatch-start proof");
+        let err = err.to_string();
+        assert!(
+            err.contains("only pane-input acceptance proof was available"),
+            "{err}"
+        );
+        assert!(err.contains("treating this as not dispatched"), "{err}");
 
         let message = route_dispatch_only_sent_log_message(
             &doc,
@@ -868,7 +874,7 @@ mod tests {
         );
     }
     #[test]
-    fn dispatch_only_submit_proof_gate_accepts_enter_delivery_for_all_harnesses() {
+    fn dispatch_only_submit_proof_gate_accepts_enter_delivery_for_non_codex_only() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
 
@@ -878,11 +884,7 @@ mod tests {
         std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        for harness in [
-            HarnessConfig::codex(),
-            HarnessConfig::opencode(),
-            HarnessConfig::claude(),
-        ] {
+        for harness in [HarnessConfig::opencode(), HarnessConfig::claude()] {
             require_dispatch_only_dispatch_start_proof(
                 &doc,
                 "%4",
@@ -890,8 +892,17 @@ mod tests {
                 DispatchOnlyReopenDelivery::DirectPaneSubmit,
                 RoutedDispatchStartProof::CommandAcceptedOnly,
             )
-            .expect("dispatch-only accepted delivery should pass for every harness");
+            .expect("accepted-only delivery remains an explicit success path for this harness");
         }
+        let err = require_dispatch_only_dispatch_start_proof(
+            &doc,
+            "%4",
+            &HarnessConfig::codex(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        )
+        .expect_err("Codex requires dispatch-start proof");
+        assert!(err.to_string().contains("dispatch-start proof"), "{err}");
     }
     #[test]
     fn dispatch_only_sent_log_marks_claude_accepted_only_scope() {

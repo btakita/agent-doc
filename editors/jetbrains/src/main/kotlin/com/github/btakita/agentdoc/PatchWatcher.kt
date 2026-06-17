@@ -4,6 +4,7 @@ import com.sun.jna.Pointer
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.TextEditor
@@ -905,7 +906,10 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (hasPendingMemoryDiskConflict(targetFile)) {
             markPatchDeferredForMemoryDiskConflict(patch)
             lastApplyWasDeferredForConflict = true
-            LOG.warn("[patch-watcher] File Cache Conflict pending for ${patch.file}; deferring patch until user resolves dialog $UI_OUTCOME_REAL_COMPONENT_CONFLICT")
+            LOG.warn(
+                "[patch-watcher] File Cache Conflict pending for ${patch.file}; deferring patch until user resolves dialog " +
+                    "${fileCacheConflictProof(patch, document, targetFile, fdm)} $UI_OUTCOME_REAL_COMPONENT_CONFLICT"
+            )
             refreshVisualHighlightersAfterFileCacheConflict(targetFile, "pending")
             return false
         }
@@ -919,7 +923,10 @@ class PatchWatcher(private val project: Project) : Disposable {
             )
         ) {
             lastApplyRejectedConflictCancel = true
-            LOG.warn("[patch-watcher] File Cache Conflict kept memory changes for ${patch.file}; rejecting patch without mutating document $UI_OUTCOME_REAL_COMPONENT_CONFLICT")
+            LOG.warn(
+                "[patch-watcher] File Cache Conflict kept memory changes for ${patch.file}; rejecting patch without mutating document " +
+                    "${fileCacheConflictProof(patch, document, targetFile, fdm)} $UI_OUTCOME_REAL_COMPONENT_CONFLICT"
+            )
             refreshVisualHighlightersAfterFileCacheConflict(targetFile, "cancel")
             return false
         }
@@ -1112,6 +1119,17 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     private fun clearPatchDeferredForMemoryDiskConflict(patch: IpcPatch) {
         memoryDiskConflictDeferredPatchIds.remove(patchConflictKey(patch))
+    }
+
+    private fun fileCacheConflictProof(
+        patch: IpcPatch,
+        document: Document,
+        targetFile: VirtualFile,
+        fdm: FileDocumentManager,
+    ): String {
+        return "conflict_key=${patchConflictKey(patch)} patch_id=${patch.patchId ?: "-"} " +
+            "document_unsaved=${fdm.isDocumentUnsaved(document)} document_stamp=${document.modificationStamp} " +
+            "file_stamp=${targetFile.modificationStamp}"
     }
 
     private fun refreshVisualHighlightersAfterFileCacheConflict(targetFile: VirtualFile, outcome: String) {

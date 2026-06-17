@@ -53,6 +53,8 @@ object TerminalUtil {
     private val OPS_LOG_PANE_REGEX = Regex("""\bpane=(\S+)""")
     private val OPS_LOG_STATE_REGEX = Regex("""\bstate=(\S+)""")
     private val OPS_LOG_CURRENT_COMMAND_REGEX = Regex("""\bcurrent_command=(\S+)""")
+    private val ROUTE_EDITOR_ATTEMPT_REGEX = Regex("""\beditor_attempt_id=(\S+)""")
+    private val ROUTE_SNAPSHOT_PATH_REGEX = Regex("""\bsnapshot_path=(\S+)""")
     private val RESTART_TELEMETRY_EVENT_NAMES = listOf(
         "session_restart_force_used",
         "session_restart_busy_pre_interrupt_idle",
@@ -196,6 +198,7 @@ object TerminalUtil {
         RETRYABLE_STARTING,
         BUSY_RUNNING,
         QUEUED_PENDING,
+        DISPATCH_START_UNPROVEN,
     }
 
     internal val inFlightRouteRegistry = InFlightRouteRegistry()
@@ -470,6 +473,13 @@ object TerminalUtil {
                             clearPersistedRouteFailureOutput(cwd, relativePath)
                             notifyRunAgentDocQueued(project, relativePath, output)
                             finalStage = "route_queued_pending"
+                            finalError = routeAttemptError(exitCode, failureKind, output)
+                            break
+                        } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN) {
+                            LOG.warn("[route] dispatch start unproven for $relativePath: $output")
+                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            notifyRunAgentDocDispatchUnproven(project, relativePath, output)
+                            finalStage = "route_dispatch_start_unproven"
                             finalError = routeAttemptError(exitCode, failureKind, output)
                             break
                         } else if (exitCode != 0) {
@@ -1301,10 +1311,22 @@ object TerminalUtil {
             isDispatchOnlyActiveTurnBlocked(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isDispatchOnlyBusyActorWaitTimeout(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isLatestRunStillBootingBusy(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
+            isDispatchStartUnproven(output) -> RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN
             isStartingActorRouteFailure(output) ->
                 RunAgentDocRouteFailureKind.RETRYABLE_STARTING
             else -> RunAgentDocRouteFailureKind.PERSISTENT
         }
+    }
+
+    private fun isDispatchStartUnproven(output: String): Boolean {
+        val lower = output.lowercase()
+        return lower.contains("accepted_without_dispatch_start_proof") ||
+            lower.contains("route_dispatch_only_submit_unproven") ||
+            (
+                lower.contains("dispatch-only") &&
+                    lower.contains("only pane-input acceptance proof") &&
+                    lower.contains("dispatch-start proof")
+            )
     }
 
     private fun isLatestRunStillBootingBusy(output: String): Boolean {
@@ -1614,6 +1636,26 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
             "It should run when that turn drains."
     }
 
+    internal fun buildRunAgentDocDispatchUnprovenMessage(relativePath: String, routeOutput: String): String {
+        val lines = routeOutput.lines()
+        val attemptId = latestRegexValue(lines, ROUTE_EDITOR_ATTEMPT_REGEX)
+        val snapshotPath = latestRegexValue(lines, ROUTE_SNAPSHOT_PATH_REGEX)
+        return buildString {
+            append("Agent Doc did not start for ")
+            append(relativePath)
+            append(".\nPane input was accepted, but dispatch-start proof did not appear.")
+            if (attemptId.isNotBlank()) {
+                append("\nAttempt: ")
+                append(attemptId)
+            }
+            if (snapshotPath.isNotBlank()) {
+                append("\nRoute snapshot: ")
+                append(snapshotPath)
+            }
+            append("\nWait for an idle prompt or restart the session, then run Agent Doc again.")
+        }
+    }
+
     private fun notifyRunAgentDocStillRunning(project: Project, relativePath: String, routeOutput: String) {
         val summary = buildRunAgentDocStillRunningMessage(relativePath)
         try {
@@ -1625,6 +1667,30 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
                 showHint(project, "Copied running route details for $relativePath")
             })
+            notification.notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $summary")
+        }
+    }
+
+    private fun notifyRunAgentDocDispatchUnproven(project: Project, relativePath: String, routeOutput: String) {
+        val summary = buildRunAgentDocDispatchUnprovenMessage(relativePath, routeOutput)
+        val snapshotPath = latestRegexValue(routeOutput.lines(), ROUTE_SNAPSHOT_PATH_REGEX)
+        try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(summary, NotificationType.WARNING)
+            notification.isImportant = true
+            notification.addAction(NotificationAction.createSimple("Copy details") {
+                CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
+                showHint(project, "Copied unproven route details for $relativePath")
+            })
+            if (snapshotPath.isNotBlank()) {
+                notification.addAction(NotificationAction.createSimple("Copy snapshot path") {
+                    CopyPasteManager.getInstance().setContents(StringSelection(snapshotPath))
+                    showHint(project, "Copied route snapshot path for $relativePath")
+                })
+            }
             notification.notify(project)
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")

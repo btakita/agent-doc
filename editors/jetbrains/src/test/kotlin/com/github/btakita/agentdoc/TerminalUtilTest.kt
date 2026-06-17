@@ -303,6 +303,27 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `accepted-only dispatch proof gap reports typed blocked outcome with attempt and snapshot`() {
+        val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"
+        val output = """
+            [route] preserved dispatch-start proof snapshot for $relativePath pane %12 harness=codex phase=direct_pane_dispatch_start_unproven capture_len=1234 capture_hash=e5b665883cc3 snapshot_path=/repo/.agent-doc/logs/route-submit/1781670099279-direct_pane_dispatch_start_unproven-codex-_12-e5b665883cc3.txt editor_attempt_id=1781670087547-4
+            Error: dispatch-only codex reopen for $relativePath was accepted in pane %12 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
+        """.trimIndent()
+        val message = TerminalUtil.buildRunAgentDocDispatchUnprovenMessage(relativePath, output)
+
+        assertEquals(
+            TerminalUtil.RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN,
+            TerminalUtil.classifyRunAgentDocRouteFailure(output),
+        )
+        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
+        assertTrue(message.contains("did not start"))
+        assertTrue(message.contains("dispatch-start proof"))
+        assertTrue(message.contains("Attempt: 1781670087547-4"))
+        assertTrue(message.contains("Route snapshot: /repo/.agent-doc/logs/route-submit/1781670099279-direct_pane_dispatch_start_unproven-codex-_12-e5b665883cc3.txt"))
+        assertFalse(message.contains("route failed"))
+    }
+
+    @Test
     fun `typed queued route outcome is reported as queued without prose matching`() {
         val output = """
             [route] dispatch deferred ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain

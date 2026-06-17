@@ -1018,8 +1018,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // regression assertions moved from the old disk-fallback
         // `reason=listener_degraded*` shape to `degraded_cause=...`, because the
         // raw disk fallback is gone and this is no longer a flow reason.
+        // +1 `reason=` (#wedged-ipc-ack-probe): the degraded-socket self-heal
+        // path now logs `ipc_socket_degraded_self_heal_probe_failed ... reason=...`
+        // when `ipc.sock` is connectable but the plugin does not ack, keeping
+        // the session on file-IPC instead of clearing the latch from connect-only
+        // evidence.
         ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 12,
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 16,
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 17,
         // +1 `guard_` (#fcc0-degraded-file-ipc): `IpcPollOptions::convergence`
         // centralizes the existing committed-cycle file-IPC poll guard for
         // convergence callers; this is a constructor for the existing guard, not

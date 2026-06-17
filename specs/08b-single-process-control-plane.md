@@ -203,8 +203,11 @@ single `write::atomic_write` chokepoint for editor-visible documents
 (`.agent-doc/` sidecar and snapshot writes are never routed). Both same-process
 document writers reach that one chokepoint: the IPC/finalize/queue
 `write.rs::atomic_write` directly, and the direct-run `run.rs::atomic_write` by
-delegating to `write::atomic_write_pub`. There is no parallel direct-disk writer
-that bypasses the queue.
+delegating to `write::atomic_write_pub`. Route-owned queued rerun writes are the
+one separate editor-visible mutation family; they must call the shared
+`converge_document_or_disk` gate before saving the matching snapshot, so a live
+IDE listener receives component/frontmatter IPC instead of a direct disk write.
+There is no parallel direct-disk writer that bypasses the queue.
 
 Every editor-visible document write now routes through the session actor's
 single ordered write queue (`write_queue::serialized_atomic_write`)

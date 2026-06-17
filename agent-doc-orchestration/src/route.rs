@@ -2469,8 +2469,13 @@ fn enqueue_route_dispatch_prompt(
 
     let activated = content != original;
     if activated {
-        crate::write::atomic_write_pub(file, &content)
-            .with_context(|| format!("failed to write queued dispatch to {}", file.display()))?;
+        crate::write::converge_document_or_disk(file, &content, &original, "route_dispatch_queue")
+            .with_context(|| {
+                format!(
+                    "failed to converge queued dispatch for {} through editor IPC/disk",
+                    file.display()
+                )
+            })?;
         crate::snapshot::save(file, &content).with_context(|| {
             format!(
                 "failed to sync snapshot after queueing dispatch for {}",
@@ -5278,6 +5283,70 @@ mod tests {
         assert_eq!(
             snapshot, updated,
             "route queueing must sync the snapshot so queue continuation is not treated as a modified head prompt"
+        );
+    }
+    #[test]
+    fn route_enqueue_dispatch_prompt_converges_via_editor_ipc_with_listener() {
+        // JB Run Agent Doc can queue a pending dispatch while the editor plugin
+        // owns the live buffer. That write must use the shared editor-converger,
+        // not a direct disk write that manufactures a File Cache Conflict.
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- existing queued prompt\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let expected = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- :pushpin: manual preempt prompt\n",
+            "- existing queued prompt\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+
+        let _listener =
+            crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), expected.into());
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+
+        let outcome =
+            enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
+                .expect("route enqueue should converge through editor IPC");
+
+        assert!(outcome.appended);
+        assert!(outcome.activated);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), expected);
+        assert_eq!(crate::snapshot::load(&doc).unwrap().unwrap(), expected);
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("route_dispatch_queue_editor_convergence_attempt")
+                && ops_log.contains("route_dispatch_queue_writeback")
+                && ops_log.contains("transport=editor_ipc"),
+            "route queue write must be observable as editor IPC convergence:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("transport=disk_fallback"),
+            "active-editor route queueing must not take a disk fallback:\n{ops_log}"
         );
     }
     #[test]

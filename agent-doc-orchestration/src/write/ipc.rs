@@ -134,18 +134,37 @@ pub(crate) fn ipc_direct_disk_degraded(project_root: &Path, file: &Path) -> Resu
         return Ok(false);
     }
     // `#ipc-degrade-self-heal`: the degrade latch is a circuit breaker, not a
-    // permanent session verdict. Once marked degraded the write path skips the
-    // socket, so it would otherwise never observe a recovered listener and would
-    // stay disk-only until the session restarts. Re-probe listener liveness: if
-    // the plugin's socket is accepting connections again, clear the latch and
-    // resume the reliable plugin (IPC) path immediately. The probe only runs
-    // while degraded (rare after the false-vote fixes), so it adds no cost to the
-    // healthy path.
-    if crate::ipc_socket::is_listener_active(project_root) {
-        remove_ipc_dewedge_marker(project_root, file, "listener_recovered")?;
-        return Ok(false);
+    // permanent session verdict. It may clear only when the plugin proves it can
+    // accept AND ack a lightweight message. A wedged JetBrains listener can leave
+    // `.agent-doc/ipc.sock` connectable (or with a full accept backlog) while the
+    // plugin handler no longer returns acks; a connect-only probe would wrongly
+    // clear the latch and route the next write back into the bad socket path.
+    match crate::ipc_socket::probe_listener_ack(project_root, ipc_dewedge_probe_timeout()) {
+        Ok(true) => {
+            remove_ipc_dewedge_marker(project_root, file, "listener_ack_recovered")?;
+            return Ok(false);
+        }
+        Ok(false) => {}
+        Err(err) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "ipc_socket_degraded_self_heal_probe_failed file={} reason={}",
+                    file.display(),
+                    err.to_string().replace(char::is_whitespace, "_")
+                ),
+            );
+        }
     }
     Ok(true)
+}
+
+fn ipc_dewedge_probe_timeout() -> std::time::Duration {
+    if cfg!(test) {
+        std::time::Duration::from_millis(250)
+    } else {
+        std::time::Duration::from_millis(750)
+    }
 }
 
 pub(crate) fn log_ipc_dewedge_direct_disk_skip(file: &Path, transport: &str) {
@@ -4150,6 +4169,48 @@ mod core_tests {
         assert!(
             !marker.exists(),
             "self-heal must remove the degraded marker"
+        );
+
+        let _ = std::fs::remove_file(crate::ipc_socket::socket_path(dir.path()));
+        drop(server);
+    }
+    #[test]
+    fn degraded_latch_does_not_self_heal_when_listener_connects_without_ack() {
+        // A wedged editor plugin can leave ipc.sock connectable while its accept
+        // / apply path no longer returns acks. The degraded latch must not clear
+        // on connect-only evidence; otherwise the next write re-enters the bad
+        // socket path instead of preferring file IPC.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: wedged-session\n---\n\ncontent").unwrap();
+
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
+
+        let root_clone = dir.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            let _ = crate::ipc_socket::start_listener(&root_clone, |_msg| None);
+        });
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+
+        assert!(
+            ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "connectable but non-acking listener must remain degraded"
+        );
+        let marker = dir
+            .path()
+            .join(".agent-doc/ipc-degraded")
+            .join(format!("{}.json", snapshot::doc_hash(&doc).unwrap()));
+        assert!(
+            marker.exists(),
+            "non-acking listener must not clear the degraded marker"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_socket_degraded_self_heal_probe_failed")
+                && log.contains("IPC_ack_timeout"),
+            "failed self-heal probe must be observable:\n{log}"
         );
 
         let _ = std::fs::remove_file(crate::ipc_socket::socket_path(dir.path()));

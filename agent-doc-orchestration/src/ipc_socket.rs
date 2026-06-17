@@ -110,6 +110,24 @@ fn try_connect(project_root: &Path) -> Result<interprocess::local_socket::Stream
 /// Send a JSON message to the plugin via socket IPC.
 /// Returns Ok(response) if the plugin acknowledges, Err if socket unavailable.
 pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<Option<String>> {
+    send_message_with_timeout(
+        project_root,
+        message,
+        Duration::from_secs(IPC_ACK_TIMEOUT_SECS),
+    )
+}
+
+/// Send a JSON message with an explicit ack timeout.
+///
+/// Most production sends use [`send_message`]. The explicit-timeout variant is
+/// reserved for liveness probes that must not clear a degraded-socket latch
+/// just because the OS accepted a connection while the plugin accept/apply loop
+/// is no longer returning acks.
+pub fn send_message_with_timeout(
+    project_root: &Path,
+    message: &serde_json::Value,
+    ack_timeout: Duration,
+) -> Result<Option<String>> {
     let stream = try_connect(project_root)?;
 
     // interprocess Stream implements Read + Write via halves
@@ -154,7 +172,7 @@ pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<
     // liveness and lets the binary keep waiting for the terminal ack instead of
     // declaring a false timeout while the plugin is still applying.
     loop {
-        match rx.recv_timeout(Duration::from_secs(IPC_ACK_TIMEOUT_SECS)) {
+        match rx.recv_timeout(ack_timeout) {
             Ok((Ok(0), _)) => {
                 return Err(anyhow::anyhow!(
                     "IPC ack: plugin closed connection without responding"
@@ -177,13 +195,25 @@ pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<
             }
             Ok((Err(e), _)) => return Err(anyhow::anyhow!("IPC ack read error: {}", e)),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                return Err(anyhow::anyhow!("IPC ack timeout ({IPC_ACK_TIMEOUT_SECS}s)"));
+                return Err(anyhow::anyhow!(
+                    "IPC ack timeout ({}ms)",
+                    ack_timeout.as_millis()
+                ));
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 return Err(anyhow::anyhow!("IPC reader thread disconnected"));
             }
         }
     }
+}
+
+/// Probe whether the socket listener can accept and ack a lightweight message.
+pub fn probe_listener_ack(project_root: &Path, timeout: Duration) -> Result<bool> {
+    let message = serde_json::json!({
+        "type": "vcs_refresh",
+        "probe": "ipc_degraded_self_heal",
+    });
+    send_message_with_timeout(project_root, &message, timeout).map(|_| true)
 }
 
 /// Tag a `patch` message with the `early_ack` opt-in when [`EARLY_ACK_ENABLED`]

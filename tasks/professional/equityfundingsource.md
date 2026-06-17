@@ -121,14 +121,14 @@ Commits pushed:
 - Parent repo: `c6dda8865` (`Update EFS lender portal routes`)
 
 Deploy remains queued as the next item. Escalation: none. Confidence: high.
-<!-- agent:boundary:0ad1ac24 -->
+<!-- agent:boundary:c20df83b -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

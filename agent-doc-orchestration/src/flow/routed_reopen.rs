@@ -323,8 +323,8 @@ pub fn classify_dispatch_start_proof(
     }
 }
 
-pub fn dispatch_only_dispatch_start_proof_required(harness_binary: &str) -> bool {
-    harness_binary == "codex"
+pub fn dispatch_only_dispatch_start_proof_required(_harness_binary: &str) -> bool {
+    false
 }
 
 pub fn should_print_dispatch_only_unproven_progress() -> bool {
@@ -1417,8 +1417,8 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_only_proof_policy_requires_dispatch_start_for_codex_only() {
-        assert!(dispatch_only_dispatch_start_proof_required("codex"));
+    fn dispatch_only_proof_policy_accepts_enter_delivery_for_all_harnesses() {
+        assert!(!dispatch_only_dispatch_start_proof_required("codex"));
         assert!(!dispatch_only_dispatch_start_proof_required("opencode"));
         assert!(!dispatch_only_dispatch_start_proof_required("claude"));
         assert!(should_print_dispatch_only_unproven_progress());

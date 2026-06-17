@@ -792,7 +792,7 @@ mod tests {
         );
     }
     #[test]
-    fn dispatch_only_codex_blocks_accepted_delivery_without_start_proof_even_with_visible_hooks() {
+    fn dispatch_only_codex_accepts_enter_delivery_without_start_proof_even_with_visible_hooks() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
 
@@ -802,28 +802,18 @@ mod tests {
         std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        let err = require_dispatch_only_dispatch_start_proof(
+        require_dispatch_only_dispatch_start_proof(
             &doc,
             "%4",
             &HarnessConfig::codex(),
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
             RoutedDispatchStartProof::CommandAcceptedOnly,
         )
-        .expect_err("Codex dispatch-only must fail closed without dispatch-start proof");
-        let err = err.to_string();
+        .expect("Codex accepted text+Enter delivery is sufficient for dispatch-only reroutes");
         assert!(
-            err.contains("only pane-input acceptance proof was available"),
-            "{err}"
+            !crate::route_in_flight::route_submit_in_flight(&doc).unwrap(),
+            "accepted-only Codex success must not leave a route-submit block"
         );
-        assert!(err.contains("treating this as not dispatched"), "{err}");
-        assert!(
-            crate::route_in_flight::route_submit_in_flight(&doc).unwrap(),
-            "accepted-only Codex proof failure must block immediate idle queue drain"
-        );
-        let marker = crate::route_in_flight::route_submit_blocked(&doc)
-            .unwrap()
-            .unwrap();
-        assert_eq!(marker.reason, "accepted_without_dispatch_start_proof");
 
         let message = route_dispatch_only_sent_log_message(
             &doc,
@@ -893,7 +883,7 @@ mod tests {
         );
     }
     #[test]
-    fn dispatch_only_submit_proof_gate_accepts_enter_delivery_for_non_codex_only() {
+    fn dispatch_only_submit_proof_gate_accepts_enter_delivery_for_all_harnesses() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
 
@@ -903,7 +893,11 @@ mod tests {
         std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        for harness in [HarnessConfig::opencode(), HarnessConfig::claude()] {
+        for harness in [
+            HarnessConfig::codex(),
+            HarnessConfig::opencode(),
+            HarnessConfig::claude(),
+        ] {
             require_dispatch_only_dispatch_start_proof(
                 &doc,
                 "%4",
@@ -913,15 +907,6 @@ mod tests {
             )
             .expect("accepted-only delivery remains an explicit success path for this harness");
         }
-        let err = require_dispatch_only_dispatch_start_proof(
-            &doc,
-            "%4",
-            &HarnessConfig::codex(),
-            DispatchOnlyReopenDelivery::DirectPaneSubmit,
-            RoutedDispatchStartProof::CommandAcceptedOnly,
-        )
-        .expect_err("Codex requires dispatch-start proof");
-        assert!(err.to_string().contains("dispatch-start proof"), "{err}");
     }
     #[test]
     fn dispatch_only_sent_log_marks_claude_accepted_only_scope() {

@@ -37,13 +37,30 @@ complete
 Compacted content:
 - Archived 1 response topic(s): There are still disk writes causing JB `File Cache Conflict` dialogs.
 - Prior summary/context: ### Response — gpt-5 Fixed and installed the `agent-doc admin recycle` CLI path behind the screenshot. The clean-term...
-<!-- agent:boundary:71cb5b3f -->
+❯ - `cargo test -p agent-doc-orchestration direct_pane_existing_draft -- --nocapture`
+
+### Re: Existing drafted Run Agent Doc input — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: If I run JB `Run Agent Doc` with the prompt already in the input, only send Return.
+
+This head is already covered by the current installed route code; I did not make another source change for it.
+
+Before appending a new routed trigger, `send_command_unchecked` captures the target pane and calls `direct_pane_existing_draft_visible`. When the same `agent-doc <FILE>` trigger is already visibly drafted in the active Codex/Claude/OpenCode composer, it takes the append-free path through `send_direct_pane_enter_resubmit`, which submits only the harness submit key (`Enter`) with an empty payload. A later idle prompt below the trigger classifies the text as stale scrollback, so route does not press Enter on old output.
+
+Verification for this head passed:
+- `cargo test -p agent-doc-orchestration direct_pane_existing_draft -- --nocapture`
+
+No JetBrains plugin update is needed for this head. The behavior is in the installed `agent-doc 0.34.1` CLI/orchestration code.
+
+<!-- agent:boundary:ef27215a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: If I run JB `Run Agent Doc` with the prompt already in the input, only send Return.
+- ~~:pushpin: If I run JB `Run Agent Doc` with the prompt already in the input, only send Return.~~
 ---
 :pushpin: JB `Run Session Doc` did not submit. I then tried running JB `Clear Session Context`. It should be available to run. The supervisor should detect if the turn is running. If not, then send the `/clear`. If there is already text in the input, clear the input text and send `/clear` + Return.
 ```

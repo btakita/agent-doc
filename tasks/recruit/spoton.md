@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -207,12 +207,13 @@ Done. No prior transcript existed, so I ran `corky transcribe --diarize` (GPU au
 It diarized into **6 speakers**. I did not pass `--speakers`, so they're labeled `Speaker 1`–`Speaker 6` (corky tried to prompt for names but ran non-interactively and skipped). Content is the SpotOn interview itself — opens with intros, schedule walkthrough, and the assistant-designer/role discussion. If you tell me who maps to which speaker number (e.g. Rafael = Speaker 3), I can relabel with `--speakers` or a search-replace pass.
 
 Closeout proof: new artifact `tasks/recruit/transcripts/2026-06-16-14-00-36-transcript.md` committed separately; session document persisted via this finalize. No code changed, so no test suite applied. Confidence high — transcription exited 0 and the file is well-formed with timestamps and speaker turns.
-<!-- agent:boundary:d15e8db1 -->
+<!-- agent:boundary:7e588f5d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- From the transcript, please help me draft a followup email to dustin-wasko https://www.linkedin.com/in/dustinwasko/. I would like to learn more about the job and how we can improve conversion of signed contracts to installs.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -121,7 +121,21 @@ I also checked the route/run proof coverage. Focused verification passed:
 - `cargo test -p agent-doc simeditor -- --nocapture` (3 tests: unsaved buffer survives commit, save/close falls back to disk, JB/VS Code authority parity)
 
 No code edits were needed for this item, so I marked `#jbpostclearcruft` done.
-<!-- agent:boundary:abf0e312 -->
+
+### Re: #rtwbcastlogproof closeout repair — gpt-5
+
+The stale-snapshot recovery drained `#rtwbcastlogproof`, but the dedicated response section was retired with the wedged captured body, so I am recording the proof explicitly here.
+
+`tasks/agent-doc/plan-realtime-editor-watcher.md` already records that Rung 4 Option A landed: per-editor live-buffer identity, targeted per-editor patch delivery, and the N-buffer CRDT broadcast seam. The current code emits structured proof markers for agent-side verification: `live_buffer_classify ...`, `realtime_doc_resolve authority=... reason=... diverged=...`, `mps_baseline_pin`, and `realtime_broadcast_queued file=... origin_editor_id=... target_editor_id=... patch_id=... merged_len=...`.
+
+Focused deterministic verification passed this cycle:
+
+- `cargo test -p agent-doc simeditor -- --nocapture` (3 tests)
+- `cargo test -p agent-doc multi_editor_crdt_broadcast_converges_without_file_cache_conflict -- --nocapture`
+- `cargo test -p agent-doc integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_back -- --nocapture`
+
+No code or plugin changes were needed, so no JB plugin install was requested. The backlog and queue are now drained.
+<!-- agent:boundary:8bbfec7e -->
 <!-- /agent:exchange -->
 
 ## Queue

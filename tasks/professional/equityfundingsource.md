@@ -119,7 +119,23 @@ Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-
 Verification: focused tests passed (`112 pass`); full check passed (`754 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:2b749d16 -->
+
+### Re: Pre-doc conditions — gpt-5
+
+> **Queue prompt:**
+>
+> Pre-doc conditions
+
+Completed and pushed the `Pre-doc conditions` removal for the Available Deal -> Interested Lenders workflow.
+
+Changed paths: `src/equityfundingsource-dev` commit `d660669` removes `pre_doc_conditions` from deal-interest admin/investor API contracts, admin update SQL, workflow summaries, Interested Lenders UI controls, specs/docs, and tests; adds migration `0079_drop_deal_interest_pre_doc_conditions.sql` to drop the column. `Pre-doc instructions` remains for the next queued item. Parent repo commit `e9142e929` updates the EFS submodule pointer.
+
+Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `git diff --check`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
+
+Verification: focused tests passed (`113 pass`); full check passed (`755 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:345b8e9f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,7 +151,7 @@ Delete fields, db records, and logic relating to:
 - ~~Call scheduled~~
 - ~~Verbal amount~~
 - ~~Contact method~~
-- Pre-doc conditions
+- ~~Pre-doc conditions~~
 - Pre-doc instructions
 - Lender contact summary
  <!-- /agent:queue -->

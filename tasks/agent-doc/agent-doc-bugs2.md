@@ -175,6 +175,11 @@ I also removed the transient merge-marker artifact and the `(HEAD)` label from t
 
 > **Queue prompt:**
 >
+> :pushpin: As the queue is draining, `agent-doc tasks/agent-doc/agent-doc-bugs2.md` is added to the agent input. It should not be added.
+
+
+> **Queue prompt:**
+>
 > :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit even after I started a new tmux pane and installed the plugin.
 
 
@@ -215,8 +220,16 @@ The repeated equityfundingsource failure after creating a new tmux pane and rein
 The new `route-submit-blocked` marker is set precisely on that accepted-without-dispatch-start path. While it is fresh, idle queue drain treats the route as still active and does not type another `agent-doc ...` trigger into that pane. No additional source change was needed beyond `40644257`, which is already installed with `agent-doc 0.34.1`.
 
 Verification remains the focused route tests plus full `make check`, `make install`, local version check, and latest green CI run recorded in the previous closeout.
+### Response — gpt-5
+Closed against the installed idle-drain guard in submodule commit `40644257`.
 
-<!-- agent:boundary:7350fcd2 -->
+The captured sequence was `accepted_without_dispatch_start_proof` for the equityfundingsource Codex pane, then `idle_queue_watch_drain ... payload_kind=trigger ... target=%41`. That is the specific path that put `agent-doc tasks/agent-doc/agent-doc-bugs2.md` into the agent input while the failed route was still unresolved.
+
+`route_submit_in_flight` now treats the new `route-submit-blocked` marker as an active route condition. When Codex delivery is accepted but lacks dispatch-start proof, the watcher skips that pane until the marker expires, so the queue drain cannot immediately type the next trigger into the same input. No additional source change was needed beyond `40644257`, already installed as `agent-doc 0.34.1`.
+
+Exchange size is now high, but the go-mode queue is active, so I am continuing to drain rather than compacting.
+
+<!-- agent:boundary:07bcc23e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -226,7 +239,7 @@ Verification remains the focused route tests plus full `make check`, `make insta
 - ~~:pushpin: Should JB `Run Agent Doc` & `Clear Session Context` Codex retry `Return` until submit occurs? Same with JB `Clear Session Context` Opencode?~~
 - ~~:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.~~
 - ~~:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit even after I started a new tmux pane and installed the plugin.~~
-- :pushpin: As the queue is draining, `agent-doc tasks/agent-doc/agent-doc-bugs2.md` is added to the agent input. It should not be added.
+- ~~:pushpin: As the queue is draining, `agent-doc tasks/agent-doc/agent-doc-bugs2.md` is added to the agent input. It should not be added.~~
 - :pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.
 - :pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.
 - backlog with `queue` attribute is not adding items into the queue.

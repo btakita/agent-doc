@@ -155,12 +155,12 @@ No JetBrains plugin update is needed; this is Rust binary/orchestration behavior
 
 Changed paths: `src/agent-doc/agent-doc-orchestration/src/write/converge.rs`, `src/agent-doc/agent-doc-orchestration/src/test_support.rs`, `src/agent-doc/agent-doc-orchestration/src/write/run_entry.rs`, `src/agent-doc/agent-doc-orchestration/src/compact.rs`, `src/agent-doc/agent-doc-orchestration/src/flow/workflow_invariants.rs`, `src/agent-doc/tests/test_cli.rs`, `src/agent-doc/VERSIONS.md`, `src/agent-doc/specs/07-closeout-commands.md`, `src/agent-doc/specs/07-orchestration-commands.md`, `src/agent-doc/runbooks/commit.md`, `src/agent-doc/runbooks/compact-exchange.md`, `src/agent-doc/runbooks/jb-cache-conflict.md`, plus root `src/agent-doc` submodule pointer.
 Escalation: none.
-<!-- agent:boundary:281cdb14 -->
+<!-- agent:boundary:3aef2477 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 ###
 <!--

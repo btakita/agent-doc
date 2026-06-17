@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -392,23 +392,13 @@ Verification:
 - `git log --oneline -5 -- tasks/professional/equityfundingsource.md`
 
 Confidence: high that this specific report is not the Enter-submit bug and is instead a stale/rebound proof false negative. Escalation: none.
-<!-- agent:boundary:92c7f824 -->
+<!-- agent:boundary:9c981289 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-JB `Run Agent Doc` stalled:
-```
-[route] target tmux session: 0
-[route] activated existing inactive agent:queue head "Mark Call Completed" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
-[route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 49% us
-[route] Still waiting for codex (3s)... last line: 
-[route] codex ready after 3.2s (21 polls)
-[route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md → pane %24
-[route] latency budget exceeded: phase dispatch_start_proof took 10113ms (budget 10000ms, pane=%24, harness=codex, outcome=unproven_but_accepted)
-Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %24 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
-```
+- [#jbproofrebind]
 <!-- /agent:queue -->
 ###
 <!--

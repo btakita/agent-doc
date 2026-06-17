@@ -175,6 +175,11 @@ I also removed the transient merge-marker artifact and the `(HEAD)` label from t
 
 > **Queue prompt:**
 >
+> :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit even after I started a new tmux pane and installed the plugin.
+
+
+> **Queue prompt:**
+>
 > :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.
 
 
@@ -202,8 +207,16 @@ The CRDT/template retry fix is already installed from `9e7de8d3`: explicit `--te
 Verification: focused route tests passed, `make check` passed with 4622 nextest tests plus doctests and the medium closeout simulation, `make install` completed, `agent-doc --version` reports `agent-doc 0.34.1`, and latest GitHub Actions CI on `main` is `completed/success` for run `27664844335`.
 
 Operational note: preflight still saw the active supervisor mapping a stale binary. `make install` marked 2 controllers for recycle at the next idle boundary, so the warning can persist until that boundary or a targeted supervisor restart.
+### Response — gpt-5
+Covered by the same installed route proof fix in submodule commit `40644257`.
 
-<!-- agent:boundary:8c7aefa7 -->
+The repeated equityfundingsource failure after creating a new tmux pane and reinstalling the plugin still matched the fail-closed route condition: tmux accepted the send, but Codex did not produce dispatch-start proof. Reinstalling the plugin did not address that path because the unsafe behavior was in the route/idle-drain coordination after accepted-but-unproven delivery.
+
+The new `route-submit-blocked` marker is set precisely on that accepted-without-dispatch-start path. While it is fresh, idle queue drain treats the route as still active and does not type another `agent-doc ...` trigger into that pane. No additional source change was needed beyond `40644257`, which is already installed with `agent-doc 0.34.1`.
+
+Verification remains the focused route tests plus full `make check`, `make install`, local version check, and latest green CI run recorded in the previous closeout.
+
+<!-- agent:boundary:7350fcd2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -212,7 +225,7 @@ Operational note: preflight still saw the active supervisor mapping a stale bina
 - ~~:pushpin: JB `Run Agent Doc` Codex did not submit.~~
 - ~~:pushpin: Should JB `Run Agent Doc` & `Clear Session Context` Codex retry `Return` until submit occurs? Same with JB `Clear Session Context` Opencode?~~
 - ~~:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.~~
-- :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit even after I started a new tmux pane and installed the plugin.
+- ~~:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit even after I started a new tmux pane and installed the plugin.~~
 - :pushpin: As the queue is draining, `agent-doc tasks/agent-doc/agent-doc-bugs2.md` is added to the agent input. It should not be added.
 - :pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.
 - :pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.

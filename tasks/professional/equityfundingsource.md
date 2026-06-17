@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,47 +33,17 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260617-053802.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260617-060619.md`*
 
 Compacted content:
-- Archived 10 response topic(s): Session recovery; Remove borrower communication type label; Show uploaded request documents; 7 more
-- Prior summary/context: prior compacted content: Archived 12 response topic(s): Mark Call Completed; Start Underwriting; Call scheduled; 9 more
-- Parent repo: `c6dda8865` (`Update EFS lender portal routes`)
-- EFS repo: `0d53ff6` (`Rename lender portal routes`)
-- EFS and parent relevant worktrees were clean after the commits.
-- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no workflows.
-- `tsift digest-runner --kind test --path . --shell-command 'make check'` exited 0. The digest still flags the known non-fatal `error: d1 down` log from the outbox failure-path test, but the command passed.
-- `git diff --check` passed.
-- `bun test tests/investor-portal-e2e.test.ts tests/admin-investor-pipeline.test.ts tests/admin-investor-documents.test.ts tests/download-security.test.ts tests/lender-account-gate.test.ts tests/public-header.test.ts tests/investor-vestings.test.ts` passed: 168 tests, 0 fail.
-- `rg "/portal-investor" -n app lib tests docs prds bin public` now finds only the intentional legacy redirect and tests for it.
-- Added drift coverage that pins `/portal-lender` as canonical and verifies legacy redirect registration.
-- Added legacy 308 redirects for `/portal-investor`, `/portal-investor/:section`, and `/portal-investor/deals/:deal_id` to the equivalent `/portal-lender` paths.
-- Updated browser links, server header/footer/not-found links via the shared URL map, email CTA URLs, tests, and deployment docs/spec references.
-- Changed the shared lender portal base URL from `/portal-investor` to `/portal-lender`.
-- parent submodule pointer `src/equityfundingsource-dev`
-- `src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md`
-- `src/equityfundingsource-dev/docs/deploy.md`
-- `src/equityfundingsource-dev/tests/investor-vestings.test.ts`
-- `src/equityfundingsource-dev/tests/public-header.test.ts`
-- `src/equityfundingsource-dev/tests/lender-account-gate.test.ts`
-- `src/equityfundingsource-dev/tests/download-security.test.ts`
-- `src/equityfundingsource-dev/tests/admin-investor-documents.test.ts`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/accreditation.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/deal_detail.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/available_deals.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/dashboard.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/layout.tsx`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/lifecycle.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/portal/investor/routes.ts`
-- `src/equityfundingsource-dev/lib/ui--server--efs/urls/index.ts`
+❯ - Archived 3 response topic(s): Rename investor routes to lender routes; Deploy lender portal route rename; Deploy
+❯ - Prior summary/context: prior compacted content: Archived 10 response topic(s): Session recovery; Remove borrower communication type label; S...
 
 ### Re: Rename investor routes to lender routes — gpt-5
 
 > **Queue prompt:**
 >
-> deploy
+> :pushpin: Move routes /portal-lender/ to /lenders/
 
 
 > **Queue prompt:**
@@ -119,64 +89,9 @@ Commands / verification:
 Commits pushed:
 - EFS repo: `0d53ff6` (`Rename lender portal routes`)
 - Parent repo: `c6dda8865` (`Update EFS lender portal routes`)
-- EFS and parent relevant worktrees were clean after deploy.
-- Live smoke checks: `/` returned 200; `/portal-lender/dashboard` returned 303 to `/login?role=investor&next=%2Fportal-lender%2Fdashboard`; `/portal-investor/dashboard` returned 308 to `/portal-lender/dashboard`.
-- Post-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` again reported no migrations to apply.
-- Deployed URL: `https://equityfundingsource.brian-takita.workers.dev`.
-- Current Worker Version ID: `a3235b14-547e-43b6-a132-24185c875474`.
-- `make deploy` succeeded: no D1 migrations to apply, 1 modified browser asset uploaded, and Worker `equityfundingsource` deployed.
-- `tsift digest-runner --kind test --path . --shell-command 'make check'` exited 0. The digest still flags the known non-fatal `error: d1 down` log from the outbox failure-path test, but the command passed.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` reported no remote D1 migrations before deploy.
-- `git status -sb` in `src/equityfundingsource-dev` showed clean `main...origin/main` before deploy.
 
-Deploy completed after the route rename. Escalation: none. Confidence: high.
-
-### Re: Deploy lender portal route rename — gpt-5
-
-> **Queue prompt:**
->
-> 301 redirect /portal-investor/* to /portal-lender/*
-
-
-Deployed the pushed lender portal route rename after the queue repair consumed the `deploy` head.
-
-Commands / verification:
-- `git status -sb` in `src/equityfundingsource-dev` showed clean `main...origin/main` before deploy.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` reported no remote D1 migrations before deploy.
-- `tsift digest-runner --kind test --path . --shell-command 'make check'` exited 0. The digest still flags the known non-fatal `error: d1 down` log from the outbox failure-path test, but the command passed.
-- `make deploy` succeeded: no D1 migrations to apply, 1 modified browser asset uploaded, and Worker `equityfundingsource` deployed.
-- Current Worker Version ID: `a3235b14-547e-43b6-a132-24185c875474`.
-- Deployed URL: `https://equityfundingsource.brian-takita.workers.dev`.
-- Post-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` again reported no migrations to apply.
-- Live smoke checks: `/` returned 200; `/portal-lender/dashboard` returned 303 to `/login?role=investor&next=%2Fportal-lender%2Fdashboard`; `/portal-investor/dashboard` returned 308 to `/portal-lender/dashboard`.
-- EFS and parent relevant worktrees were clean after deploy.
-
-Escalation: none. Confidence: high.
-
-### Re: Deploy — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-Deployed the current `main` build for Equity Funding Source to Cloudflare Workers.
-
-Changed paths:
-- None in `src/equityfundingsource-dev`; this cycle only redeployed the already-committed code.
-
-Commands / verification:
-- `git status -sb` in `src/equityfundingsource-dev` showed clean `main...origin/main` before deploy.
-- `bun run cf:d1:migrations:list:remote` before deploy reported no remote D1 migrations to apply.
-- `make deploy` succeeded: build + worker bundle completed, remote D1 migration apply reported no migrations, no updated asset files were uploaded, triggers were deployed, and Worker `equityfundingsource` deployed.
-- Deployed URL: `https://equityfundingsource.brian-takita.workers.dev`.
-- Current Worker Version ID: `d6251bec-71df-4430-857e-d15f311c47ad`.
-- Post-deploy `bun run cf:d1:migrations:list:remote` again reported no migrations to apply.
-- Live smoke checks: `/` returned `200`; `/portal-lender/dashboard` returned `303` to `/login?role=investor&next=%2Fportal-lender%2Fdashboard`; `/portal-investor/dashboard` returned `308` to `/portal-lender/dashboard`.
-- `git status -sb` in `src/equityfundingsource-dev` remained clean after deploy.
-- Parent repo status still has unrelated pre-existing dirty/ahead work outside this EFS deploy; I did not modify those paths.
-
-Escalation: none. Confidence: high.
-<!-- agent:boundary:8b3e7809 -->
+Deploy remains queued as the next item. Escalation: none. Confidence: high.
+<!-- agent:boundary:bffb1b51 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -184,6 +99,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: Move routes /portal-lender/ to /lenders/~~
+- :pushpin: Move routes /portal-borrower/ to /borrowers/
+- :pushpin: Move routes /portal-broker/ to /brokers/
+- :pushpin: Remove 301 redirect for /portal-investor/
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

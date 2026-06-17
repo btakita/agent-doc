@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,75 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260617-181044.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260617-184002.md`*
 
 Compacted content:
-- Archived 3 response topic(s): email reply threading + deploy; deploy; lender available deal website messaging + deploy
-- Prior summary/context: prior compacted content: Archived 6 response topic(s): Rename investor routes to lender routes; Move borrower portal ...
-
-### Re: Secure Message Attachments + Deploy — gpt-5
-
-Implemented, tested, pushed, and deployed secure-message attachments for the Equity Funding Source borrower/admin messaging flow.
-
-Summary:
-- Added persisted `chat_message_attachments` records linked to shared `documents` metadata and R2-stored objects.
-- Added multipart borrower/admin message posting, file-only message handling, guarded attachment downloads, and notification-email attachment forwarding.
-- Updated borrower/admin portal message composers to select, preview, send, and render attachments.
-- Updated PRD coverage and focused tests for schema, route contracts, email behavior, UI strings, and storage requirements.
-
-Changed paths:
-- `app/equityfundingsource/lib/borrower/messages/notify.ts`
-- `app/equityfundingsource/lib/borrower/messages/repo.ts`
-- `app/equityfundingsource/lib/borrower/messages/routes.ts`
-- `app/equityfundingsource/lib/email/local_capture.ts`
-- `app/equityfundingsource/migrations/0083_chat_message_attachments.sql`
-- `lib/ui--browser--efs/portal/admin/messages.tsx`
-- `lib/ui--browser--efs/portal/borrower/messages.tsx`
-- `lib/ui--server--efs/portal.ts`
-- `prds/equity-funding-source-lending-portal-prd.md`
-- `tests/borrower-messages.test.ts`
-- `tests/prd.test.ts`
-
-Verification:
-- `bun test tests/borrower-messages.test.ts tests/prd.test.ts` passed: 17 tests.
-- `make check` passed: 768 tests plus app and Worker builds.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` passed after deploy: no migrations to apply.
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` returned `200`.
-
-Commit, push, and deploy:
-- Committed in `src/equityfundingsource-dev`: `28bf6c5 feat(messages): add secure message attachments`.
-- Pushed `main` to `origin`.
-- Deployed with `make deploy`; Worker version `f78394e6-3a7d-4fe0-9bd4-e201ae1b670d` is live at `https://equityfundingsource.brian-takita.workers.dev`.
-- Remote D1 migration `0083_chat_message_attachments.sql` was applied successfully.
-
-CI:
-- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no listed workflows, so closeout is based on local verification and deploy smoke checks.
-
-Source note:
-- Attachment email sizing was capped conservatively against Cloudflare Email Service's documented 5 MiB total message limit: https://developers.cloudflare.com/email-service/api/send-emails/workers-api/
-
-### Re: Add rwaldman100+admin@gmail.com as an admin account on production. — gpt-5
-
-Added `rwaldman100+admin@gmail.com` as an active production admin account for Robert Waldman.
-
-Summary:
-- Checked production D1 first; no existing `users` row matched `rwaldman100+admin@gmail.com`.
-- Inserted an idempotent `users` row with `first_name = Robert`, `last_name = Waldman`, `role = admin`, and `status = active`.
-- Left `access_identity_sub` and `access_idp` empty so Cloudflare Access/Google can link the identity on first successful admin sign-in.
-- Left the personal password hash empty; the existing admin login path can still use the configured global admin password if needed.
-
-Verification:
-- Production D1 verification query returned `email = rwaldman100+admin@gmail.com`, `role = admin`, `status = active`, `access_identity_sub = null`, `access_idp = null`, and `password_empty = 1`.
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/admin/login` returned `200`.
-
-Repository/deploy:
-- No source changes were needed for this queue head.
-- No deploy was needed; this was a production D1 data update only.
-
-### Re: Closeout Repair — gpt-5
-
-Re-confirmed the production admin-account closeout after agent-doc IPC drift recovery. No additional application, deployment, or production data changes were made after the verified `rwaldman100+admin@gmail.com` admin account update.
-<!-- agent:boundary:e969d5d2 -->
+- Archived 3 response topic(s): Secure Message Attachments + Deploy; Add rwaldman100+admin@gmail.com as an admin account on production.; Closeout Repair
+- Prior summary/context: prior compacted content: Archived 3 response topic(s): email reply threading + deploy; deploy; lender available deal ...
+<!-- agent:boundary:b7ddf54c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- The lender "Available deal conversation" component should support uploads ![img_27.png](img_27.png). deploy
 <!-- /agent:queue -->
 
 ## Backlog

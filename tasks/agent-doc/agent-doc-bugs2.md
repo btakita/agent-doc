@@ -175,6 +175,11 @@ I also removed the transient merge-marker artifact and the `(HEAD)` label from t
 
 > **Queue prompt:**
 >
+> :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.
+
+
+> **Queue prompt:**
+>
 > :pushpin: Should JB `Run Agent Doc` & `Clear Session Context` Codex retry `Return` until submit occurs? Same with JB `Clear Session Context` Opencode?
 
 
@@ -185,7 +190,20 @@ For `Clear Session Context`, the right behavior is what just landed: submit the 
 For `Run Agent Doc`, do not keep pressing `Return` after pane input was accepted. That risks duplicate dispatch when the pane accepted the command but dispatch-start proof is stale or delayed. The safer behavior is: if the routed trigger is still visibly drafted, one bounded re-submit is reasonable; if pane input was accepted but dispatch-start proof does not appear, fail closed with the attempt id and route snapshot. That is the behavior now in `dc7ddb88` for Codex accepted-only proof gaps.
 
 The broader CRDT-retry item from the typing/merge incident is still queued for implementation; I did not consume it here.
-<!-- agent:boundary:9e8f3236 -->
+### Response — gpt-5
+Fixed and installed the route-submit guard for the equityfundingsource failure.
+
+The proof trail showed the submit was accepted by tmux but never reached Codex dispatch-start proof: `route_submit_observation ... result=accepted_without_dispatch_start_proof` for pane `%41`, followed by `idle_queue_watch_drain ... payload_kind=trigger ... target=%41`. That is the path that let the queue watcher type the next `agent-doc ...` trigger into the same pane after the failed submit.
+
+Submodule commit `40644257` adds a short-lived `route-submit-blocked` marker when Codex delivery is only accepted-without-dispatch-start. `route_submit_in_flight` now treats that marker as active, so idle queue drain skips the pane until the route attempt ages out instead of injecting another trigger into the agent input. This covers the equityfundingsource non-submit symptom and the queued `agent-doc tasks/...` injection symptom from the same proof failure.
+
+The CRDT/template retry fix is already installed from `9e7de8d3`: explicit `--template` on CRDT documents routes through stream/CRDT merge instead of diff3, so contended patchback recovery retries CRDT rather than producing a 3-way merge.
+
+Verification: focused route tests passed, `make check` passed with 4622 nextest tests plus doctests and the medium closeout simulation, `make install` completed, `agent-doc --version` reports `agent-doc 0.34.1`, and latest GitHub Actions CI on `main` is `completed/success` for run `27664844335`.
+
+Operational note: preflight still saw the active supervisor mapping a stale binary. `make install` marked 2 controllers for recycle at the next idle boundary, so the warning can persist until that boundary or a targeted supervisor restart.
+
+<!-- agent:boundary:8c7aefa7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -193,9 +211,9 @@ The broader CRDT-retry item from the typing/merge incident is still queued for i
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` Codex did not submit.~~
 - ~~:pushpin: Should JB `Run Agent Doc` & `Clear Session Context` Codex retry `Return` until submit occurs? Same with JB `Clear Session Context` Opencode?~~
-- :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.
+- ~~:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.~~
 - :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit even after I started a new tmux pane and installed the plugin.
-- As the queue is draining, 
+- :pushpin: As the queue is draining, `agent-doc tasks/agent-doc/agent-doc-bugs2.md` is added to the agent input. It should not be added.
 - :pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.
 - :pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.
 - backlog with `queue` attribute is not adding items into the queue.

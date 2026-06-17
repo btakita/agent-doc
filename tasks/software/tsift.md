@@ -63,18 +63,57 @@ Compacted content:
 ### Re: queue recovery closeout — gpt-5
 
 The recovery preflight committed the `#kgm1` closeout and advanced the active queue to `#kgm2`. No additional repo changes were made in this recovery closeout; `#kgm2` remains the next queued implementation item.
-<!-- agent:boundary:365dd98e -->
+
+### Re: #kgm2 local model substrate — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#kgm2]
+
+
+Implemented and committed the local-model substrate for tsift Knowledge Graph work.
+
+Changed paths:
+- `src/tsift/packages/tsift-local-model/` adds the provider-neutral local model profile, GPU probe, ranking, status report, and tests.
+- `src/tsift/Cargo.toml`, `src/tsift/Cargo.lock`, and `src/tsift/src/lib.rs` wire the new crate into the workspace and public library surface.
+- `src/tsift/packages/tsift-cli/Cargo.toml`, `src/tsift/packages/tsift-cli/src/cli.rs`, and `src/tsift/packages/tsift-cli/src/lib.rs` add `tsift local-model status [--json] [--no-probe]`.
+
+Behavior now available:
+- `tsift-local-model` exposes RTX 5090-aware `ModelProfile`, `GpuProbe`, `ProfileSelection`, and `LocalModelStatusReport` types.
+- The status command probes `nvidia-smi` when available, ranks extractor/embedding profiles, and degrades to the deterministic hash fallback when probing is disabled or unavailable.
+- The live probe on this machine reports RTX 5090, driver `610.43.02`, CUDA `13.3`, `32607 MiB` total VRAM, `179 MiB` used, `31971 MiB` free, with `qwen3-32b-q4` recommended for extraction and `qwen3-embedding-0.6b` for embedding.
+
+Commits:
+- `src/tsift`: `b0bea57 feat: add local model status substrate`
+- parent repo: `0ebc73cb9 tsift: add local model status substrate`
+
+Verification:
+- `cargo test -p tsift-local-model`
+- `cargo check -p tsift-cli`
+- `cargo run -p tsift-cli -- local-model status --json`
+- `cargo run -p tsift-cli -- local-model status --no-probe`
+- `cargo test -p tsift-cli cli_local_model_status_accepts_json_and_no_probe`
+- `git -C src/tsift diff --check`
+- `git -C src/tsift diff --cached --check`
+- `cargo test --workspace`
+- `make check`
+- `gh run list --workflow CI --limit 1` was attempted, but this repo has no workflow named `CI`; earlier workflow inspection showed only `Agent Doc`.
+
+Workspace note: unrelated formatting-only dirty files inside `src/tsift` were left unstaged.
+
+Confidence: high. Escalation: force-disk approved for the stuck IPC closeout. The next backlog item is `#kgm3`, replacing the MemGraphRAG semantic path with the shared provider surface.
+<!-- agent:boundary:3a2f017a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#kgm1]
-- do [#kgm2]
-- do [#kgm3]
-- do [#kgm4]
-- do [#kgm5]
-- do [#kgm6]
+- ~~do [#kgm1]~~
+- ~~:pushpin: do [#kgm2]~~
+- :pushpin: do [#kgm3]
+- :pushpin: do [#kgm4]
+- :pushpin: do [#kgm5]
+- :pushpin: do [#kgm6]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -83,7 +122,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgm2] [queue] Implement the tsift local-model substrate from tasks/software/plan-tsift-local-kg-model-support.md: GPU/VRAM probe, RTX 5090 profile, Qwen3-32B default ranking, Qwen3-30B-A3B throughput fallback, Qwen3-Embedding companion profiles, and CLI status output.
 - [ ] [#kgm3] [queue] Replace the tsift-memgraphrag hash-only semantic path from tasks/software/plan-tsift-local-kg-model-support.md with a pluggable local embedding/extraction provider while retaining tsift-local-hash-v1 as deterministic fallback for tests.
 - [ ] [#kgm4] [queue] Add the shared tsift-kg extraction pipeline from tasks/software/plan-tsift-local-kg-model-support.md for tsift and agent-doc: chunk source/session/memory inputs, call the local model, validate JSON entities/relations, and upsert GraphProjection rows into SQLite plus backend candidates.
 - [ ] [#kgm5] [queue] Add model lifecycle and VRAM cleanup controls from tasks/software/plan-tsift-local-kg-model-support.md: per-run lease, idle TTL, Ollama keep_alive=0, llama.cpp router unload, process-kill fallback, nvidia-smi before/after proof, and single-5090 concurrency guard.

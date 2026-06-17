@@ -113,6 +113,17 @@ Commits / push:
 - Replaced the Lender communication date fields in both admin UIs with a message list and `Message` composer, matching the borrower communication pattern.
 - Added `POST /api/admin/deal-interests/:id/lender-messages` and threaded `lender_messages` through workflow summaries, deal-interest admin responses, the lender pipeline, and deal detail.
 - Added `deal_interest_lender_messages` with migration `0082_deal_interest_lender_messages.sql`; it drops `lender_last_contact_at`, `lender_next_follow_up_at`, and the old follow-up index.
+- Parent repo: `a73347b80` (`Update EFS lender communication messages`)
+- EFS repo: `4e1d612` (`Replace lender contact fields with messages`)
+- GitHub Actions: `gh run list --workflow CI --limit 1` reports no workflow named CI, and `gh workflow list` returns no workflows.
+- `git diff --check` passed.
+- `bun run check` exited 0: 759 pass, 0 fail, builds completed. The digest runner still groups the known logged `error: d1 down` outbox-path message, but the command exit code and test tail are clean.
+- `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts` passed.
+- Updated tests to assert the new message API/UI/table and removal of the old timestamp logic.
+- Replaced the Lender communication date fields in both admin UIs with a message list and `Message` composer.
+- Threaded `lender_messages` through workflow summaries and admin deal-interest responses.
+- Added `POST /api/admin/deal-interests/:id/lender-messages`.
+- Added `deal_interest_lender_messages` and dropped `lender_last_contact_at`, `lender_next_follow_up_at`, and the old follow-up index.
 
 Escalation: none. Confidence: high.
 
@@ -123,7 +134,37 @@ Removed the dangling wrapped queue line `next to the Borroewr communication mess
 Changed paths: `tasks/professional/equityfundingsource.md` only.
 
 Commands / verification: `agent-doc preflight`, `agent-doc plan`, and `agent-doc finalize` closeout. Confidence: high. Escalation: none.
-<!-- agent:boundary:507d6fc6 -->
+
+### Re: Replace lender contact fields with messages — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Lender communication should have a "Message" flow...just like the browser communication message flow. Remove "Last contact" and "Next follow-up" fields, db columns, and logic.
+
+
+Implemented the lender communication message flow and removed the old Last contact / Next follow-up path from runtime code.
+
+Changed paths include the EFS admin repo/workflow types, investor-management handlers, admin routes, migration `0082_deal_interest_lender_messages.sql`, deal detail UI, lender pipeline UI, and the related admin/investor tests.
+
+What changed:
+- Added `deal_interest_lender_messages` and dropped `lender_last_contact_at`, `lender_next_follow_up_at`, and the old follow-up index.
+- Added `POST /api/admin/deal-interests/:id/lender-messages`.
+- Threaded `lender_messages` through workflow summaries and admin deal-interest responses.
+- Replaced the Lender communication date fields in both admin UIs with a message list and `Message` composer.
+- Updated tests to assert the new message API/UI/table and removal of the old timestamp logic.
+
+Verification:
+- `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts` passed.
+- `bun run check` exited 0: 759 pass, 0 fail, builds completed. The digest runner still groups the known logged `error: d1 down` outbox-path message, but the command exit code and test tail are clean.
+- `git diff --check` passed.
+- GitHub Actions: `gh run list --workflow CI --limit 1` reports no workflow named CI, and `gh workflow list` returns no workflows.
+
+Commits pushed:
+- EFS repo: `4e1d612` (`Replace lender contact fields with messages`)
+- Parent repo: `a73347b80` (`Update EFS lender communication messages`)
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:b1b2999d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,7 +174,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Available deals page/dialog: "Borrower communication" "Communication type" label should be removed.~~
 - ~~Available deals page/dialog: If the borrower uploaded a file for a Request Document(s) email, the acutal document should appear~~
-- :pushpin: Lender communication should have a "Message" flow...just like the browser communication message flow. Remove "Last contact" and "Next follow-up" fields, db columns, and logic.
+- ~~:pushpin: Lender communication should have a "Message" flow...just like the browser communication message flow. Remove "Last contact" and "Next follow-up" fields, db columns, and logic.~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

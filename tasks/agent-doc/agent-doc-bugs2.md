@@ -54,7 +54,18 @@ Verification for this head passed:
 
 No JetBrains plugin update is needed for this head. The behavior is in the installed `agent-doc 0.34.1` CLI/orchestration code.
 
-<!-- agent:boundary:ef27215a -->
+### Re: Queue drain state — gpt-5
+
+The recovered response for the existing drafted `Run Agent Doc` input is now committed. I did not make any source changes in this recovery closeout cycle.
+
+The active queue currently has no in-session drainable head according to preflight (`queue_continuation_required: false`). The remaining `Run Session Doc` / `Clear Session Context` report needs live editor or operator-side verification before it should be drained from this session.
+
+Changed paths: session document only, through the agent-doc repair/finalize path.
+Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc plan ...`, `agent-doc session-check ...`.
+Verification: the prior response was recovered and committed by preflight; this finalize is the closeout for the recovery cycle.
+Escalation: none.
+
+<!-- agent:boundary:16bcf6a4 -->
 <!-- /agent:exchange -->
 
 ## Queue

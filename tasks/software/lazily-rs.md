@@ -61,7 +61,33 @@ Went through all four `[operator-drive]` review items. **Two have completed thei
 **Backlog (priority order):** `#lzwebrtcrunbook` (concrete operator-enablement for the next live gate) → `#lzholonsscan` [recommended] (sharpen #xccx questions for Steve). Both are ready for `do #id` dispatch; neither is auto-implemented here (the `#advance-review` preset's task is to identify work, not execute it).
 
 **Top of backlog: `#lzwebrtcrunbook`.**
-<!-- agent:boundary:d732e9ff -->
+
+### Re: do #lzwebrtcrunbook — live e2e driver + runbook shipped — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#lzwebrtcrunbook]
+
+The runbook alone wouldn't be "executable in one pass" without a driver binary, so I shipped both halves. The operator can now run the live two-host gate with one command per side.
+
+**`examples/webrtc_live_e2e.rs`** (lazily-rs `a876967`, +148 lines) — operator-facing CLI binary behind `signaling-client + webrtc-str0m`. Positional args: `<signaling_url> <session> <peer_id> [offer_to_peer_id] [bind_addr]`. The 4th arg selects offerer mode (`offer_to_peer`); its absence selects answerer mode (`answer_next_offer`). After the channel opens, the offerer sends a permission-filtered `Snapshot` (node 1 readable, node 2 denied), the answerer asserts it received `nodes=[1]` — the exact shape of `tests/webrtc_signaling.rs` and `tests/str0m_net.rs`, so a green run on two real hosts proves the live path matches the tested localhost path. `OPEN_TIMEOUT = RECV_TIMEOUT = 30 s`. Registered in `Cargo.toml` with `required-features = ["signaling-client", "webrtc-str0m"]`.
+
+**`tasks/software/runbook-lazily-webrtc-live-e2e.md`** (superproject `8bdd32002`, +125 lines) — the operator procedure: prerequisites (deployed Worker + two hosts on different NATs + UDP firewall hole), build + execution commands for both sides, expected `[lazily-e2e] …` log output, timing budget, a troubleshooting matrix (answerer-not-joined-first, UDP blocked, symmetric NAT — host-only candidates can't traverse, signaling Worker down / `SIGNALING_MODE=allowlist`, `Str0mNetError::Closed` post-`#lzstr0mpolldrive` I/O error surfacing, permission-filter leak), and proof capture (both hosts' logs + candidate strings, topology, SHAs) for `#h6qb` closure.
+
+**Scope note on symmetric NAT:** the runbook is honest that `Str0mNet` advertises only a host ICE candidate today (no STUN/TURN), so a symmetric-NAT-only target deployment cannot traverse without a follow-up module. That's out of scope for `#h6qb` (which is about validating the existing backend over a realistic-but-traversable NAT pair), but the troubleshooting section names it so the operator knows when to file a follow-up rather than chase a misconfiguration.
+
+**Verification (local):**
+- `cargo build --example webrtc_live_e2e --features "signaling-client webrtc-str0m"` clean.
+- `cargo clippy --all-features --all-targets -- -D warnings` clean (fixed one `collapsible_if` lint in the answerer receive loop); `cargo fmt --check` clean.
+- `cargo test --features "signaling-client webrtc-str0m" --test webrtc_signaling --test str0m_net` → **3 passed** (1 signaling + 2 str0m_net, including the `#lzstr0mframe` burst regression); no regressions.
+- `cargo publish --dry-run --allow-dirty` clean.
+
+**Commit + push:** lazily-rs submodule `a876967` → `lazily-hub/lazily-rs` main (`bbed68a..a876967`); superproject `8bdd32002` → `btakita/agent-loop` main (`35a8df61d..8bdd32002`, carries both the runbook and the submodule bump). CI run `27724380481` queued at closeout — finishing from local evidence per the AGENTS.md "in-progress CI" rule.
+
+**`#h6qb` stays `[operator-drive]` gated** — the runbook + driver advance the gate (make it executable in one pass), they do not satisfy it. The live two-host run is still operator-only.
+
+**Top of backlog: `#lzholonsscan`** (re-scan `evomimic/map-holons` recent commits to sharpen `#xccx`'s 7 OPEN QUESTIONS).
+<!-- agent:boundary:0864a939 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,13 +96,13 @@ Went through all four `[operator-drive]` review items. **Two have completed thei
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#lzwebrtcrunbook]
+- ~~do [#lzwebrtcrunbook]~~
+- :pushpin: do [#lzholonsscan]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzwebrtcrunbook] #lzwebrtcrunbook=Advance #h6qb: write operator runbook for the live two-host/NAT WebRTC e2e run against the deployed #yxjw signaling Worker. Cover (a) two-host setup (signaling Worker URL + two peers on different hosts/NATs), (b) exact commands using offer_to_peer/answer_next_offer against the live Worker (cite tests/webrtc_signaling.rs as the localhost template), (c) expected output + timing (wait_open deadline, burst frame expectations post-#lzstr0mframe), (d) troubleshooting for common NAT failures (ICE candidate exchange, symmetric NAT, firewall), (e) what to capture as proof of the live run. Output: tasks/software/runbook-lazily-webrtc-live-e2e.md. Reduces operator friction and makes the live gate executable in one pass. NOTE: #h6qb itself stays [operator-drive] gated — the runbook advances the gate, does not satisfy it.
 - [ ] [#lzholonsscan] [recommended] #lzholonsscan=Advance #xccx: re-scan evomimic/map-holons recent commits (active through 2026-06-15) to refine the 7 OPEN QUESTIONS in tasks/software/plan-map-holons-integration.md. Relevant recent themes that did not exist at the original #xccx discovery phase: DanceV2 command ingress (PRs #547/#549/#545 — addresses the write/conflict-model + transport questions), inverse relationship persistence + HasInverse materialization (addresses holon↔node/edge mapping), CollectionType schema (addresses holon identity), commit pass 2 relationship resolution, command contract alignment PRO1/PRO2 (wire-domain binding). For each question, record: answered-by-code / sharpened / still-needs-Steve. Output: update plan-map-holons-integration.md with a dated re-scan section. Does NOT unblock #xccx on its own (Steve input still needed for spec reference + preferred transport), but shrinks the surface he has to answer.
 <!-- /agent:backlog -->
 

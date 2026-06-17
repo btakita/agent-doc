@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -135,7 +135,34 @@ It does **not** touch `lender_account`, so the rename preserved whatever was alr
   ```
 
 The guard is correct as designed — selecting a lender enqueues a gated TMO writeback (`tmo_selected_lender_outbox_enqueue_`) that needs a real account to sync to. No spec/test/code changes warranted, so `#spec-test-commit-push` doesn't apply this cycle. If you want a UI affordance to set `lender_account` on an existing investor without a lender-request round-trip, I can add that as a backlog item.
-<!-- agent:boundary:38402b69 -->
+
+### Re: Login account vs TMO lender_account — glm-5.2
+
+> **Queue prompt:**
+>
+> The lender does have an account. I was just logged in. Why did we get the error?
+
+Those are two different fields. The lender has a **login account** (`users.email` + `users.password_hash`, so they can authenticate), but the guard checks `users.lender_account` — the **TMO lender account number** from The Mortgage Office. That's a separate column that is empty.
+
+I confirmed there is exactly **one** code path that writes `users.lender_account`: `user__set_lender_account_` (`lib/auth/repo.ts:171`), called only from `admin_lender_requests_by_id_done_PUT_` (`lib/admin/investor_management/index.ts:1664`) — i.e. when an admin completes a lender request and types in the TMO account number. The investor signup/auth flow creates the login row but never sets `lender_account`. The same guard also fires on the investor side at `lib/investor/deal_marketplace/index.ts:435` ("A registered lender account is required before funding").
+
+**Verify directly** — run this against production D1 for the deal you hit:
+
+```sql
+SELECT u.email, u.lender_account, u.role,
+       (SELECT lr.status FROM lender_requests lr WHERE lr.user_id = u.id ORDER BY lr.created_at DESC LIMIT 1) AS latest_request_status
+FROM investor_deal_interests i
+JOIN users u ON u.id = i.user_id
+JOIN investment_deals d ON d.id = i.deal_id
+WHERE d.id = '7a0c1463-27bb-4d7c-82f7-2281b3c008d3';
+```
+
+You'll almost certainly see `lender_account = NULL` and `latest_request_status` either NULL (no lender request was ever submitted) or not `done`.
+
+**Fix:** complete a lender request for this investor via `PUT /api/admin/lender-requests/:id/done` with their real TMO account number (or set `users.lender_account` directly in D1). The select-lender action will then pass.
+
+No code change needed — the guard is correct; the `lender_account` column just isn't populated yet.
+<!-- agent:boundary:1012d9f5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -143,7 +170,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The lender does have an account. I was just logged in. Why did we get the error?
 <!-- /agent:queue -->
 
 ## Backlog

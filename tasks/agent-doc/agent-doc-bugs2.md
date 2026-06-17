@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -61,12 +61,15 @@ Top backlog item: `#jbpostclearcruft`.
 I also replaced the remaining gated review item `#rtwbcast-verify` with backlog item `#rtwbcastlogproof`, then cleared the review entry. That keeps the realtime editor watcher work actionable and log-backed instead of parked in `agent:review` waiting for live verification. No JB plugin install is needed yet; the next implementation cycle should request that only after code or logging changes land.
 
 No code or tests were run in this cycle; this was a backlog/queue capture closeout.
-<!-- agent:boundary:d2b5604d -->
+<!-- agent:boundary:584058d2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- [#jbpostclearcruft]
+- [#rtwbcastlogproof]
+- backlog items added during a turn are not auto-added to the queue when the `queue` attribute is on `agent:backlog`
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

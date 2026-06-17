@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -70,7 +70,7 @@ Deployed the EFS Worker. Pre-deploy checks all green: on `main`, clean tree, **8
 - Smoke tests: `/` 200, `/funded-deals` 200, `/login` 200.
 
 Queue drained (video-corpus struck as out-of-scope last cycle; deploy struck this cycle).
-<!-- agent:boundary:916fb7b9 -->
+<!-- agent:boundary:fe33dcfb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,6 +78,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Remove the "Urgent notifications" label in Available Deals dialog/page. Keep the $... remaining to fund.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog
@@ -85,7 +87,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:backlog priority queue -->
 <!-- /agent:backlog -->
 
-2## Review
+## Review
 
 <!-- agent:review -->
 - [/] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.

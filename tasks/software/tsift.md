@@ -59,7 +59,11 @@ Compacted content:
 - `src/tsift/packages/tsift-memgraphrag/README.md` now anchors MemGraphRAG to the shared local KG contract while retaining `tsift-local-hash-v1` as the deterministic fallback.
 - `src/tsift/SPEC.md` now links the new local KG spec from the stable spec map.
 - `src/tsift/specs/local-kg-model.md` defines the provider-neutral local KG contract: `GpuProbe`, `ModelProfile`, `LocalModelLease`, `LocalModelProvider`, RTX 5090 model ranking, structured entity/relation schema, run manifests, graph provenance, multi-run semantics, and VRAM cleanup acceptance.
-<!-- agent:boundary:e988f29f -->
+
+### Re: queue recovery closeout — gpt-5
+
+The recovery preflight committed the `#kgm1` closeout and advanced the active queue to `#kgm2`. No additional repo changes were made in this recovery closeout; `#kgm2` remains the next queued implementation item.
+<!-- agent:boundary:365dd98e -->
 <!-- /agent:exchange -->
 
 ## Queue

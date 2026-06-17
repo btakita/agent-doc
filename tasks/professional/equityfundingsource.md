@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -195,6 +195,8 @@ The queue is fully drained.
 - `bin/rename-accounts.ts` — `--remote|--local|--dry-run --password <v>` (or `PASSWORD`/`SHARED_PASSWORD` env). Reads the vault password at runtime via `passage btak/lucas-collab-password`, hashes it with `password__hash`, writes SQL to `.wrangler/tmp/rename-accounts.sql`, and pipes through `cf-wrangler d1 execute`. The plaintext password is never written to the repo — only the PBKDF2 hash crosses into D1.
 - Spec: `prds/admin-provisioning-spec.md` gains an "Account rename + shared password" section + verification query.
 - Tests: `tests/rename-accounts.test.ts` (10 cases) — exact operator map, SQL emit/escaping/idempotent no-op, base+alias predicate, and a fake-D1 execution test proving the three accounts rename and every operator-owned row verifies against the single shared password while an unrelated account is untouched.
+- **Role note:** `btak.dev+admin2@gmail.com` kept role `borrower` (rename doesn't promote). If the `+admin2` name implies it should be an admin, promote it separately via `BOOTSTRAP_ADMINS` + `bun ./bin/ensure-admins.ts --remote` (after that script's path bug is fixed) or `POST /api/admin/bootstrap-admins`. The queue only asked to rename, so I left the role untouched.
+- `#ensure-admins-wrangler-path` — same latent bug in `bin/ensure-admins.ts` (never yet run against remote); trivial mirror fix.
 
 **Verify:** `make check` → **812 pass / 0 fail** (+10 new); build + worker build OK. CLI `--help` and `--dry-run` smoke-tested; emitted SQL confirmed (3 renames + 2 password UPDATEs embedding the PBKDF2 hash).
 
@@ -231,6 +233,11 @@ The next queue head (`test2@investor.com → btak.dev+lender2@gmail.com`) is `RE
 
 > **Queue prompt:**
 >
+> do [#rename-accounts-apply]
+
+
+> **Queue prompt:**
+>
 > test2@investor.com to btak.dev+lender2@gmail.com
 
 
@@ -242,7 +249,7 @@ bun ./bin/rename-accounts.ts --remote            --password "$(passage btak/luca
 ```
 
 This drains the last rename prompt. The final queue head, `do [#rename-accounts-apply]`, is the operator step that actually runs that command against production D1.
-<!-- agent:boundary:d6624959 -->
+<!-- agent:boundary:6187f544 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -251,17 +258,13 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 Change user account emails:
-- ~~stormrunner06106@gmail.com to btak.dev+admin2@gmail.com~~
-- ~~test2@broker.com to btak.dev+broker2@gmail.com~~
-- ~~test2@investor.com to btak.dev+lender2@gmail.com~~
 All accounts with the base emails brian.takita@gmail.com and btak.dev@gmail.com should use the password defined in `passage btak/lucas-collab-password`. 
-- do [#rename-accounts-apply]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rename-accounts-apply] Run bun ./bin/rename-accounts.ts --remote (after --dry-run review) against production D1 to apply the three test-account email renames + the shared lucas-collab-password to brian.takita/btak.dev base accounts. Tool shipped at 385f7d8; needs CLOUDFLARE_API_TOKEN/ACCOUNT_ID in src/equityfundingsource-dev/.env + the vault password. Advances #rename-accounts.
+- [ ] [#ensure-admins-wrangler-path] Fix the same -c wrangler.toml -> -c ../../wrangler.toml bug in bin/ensure-admins.ts (cf-wrangler forces cwd=app_dir). Latent — ensure-admins has not yet been run against remote D1, so it would ENOENT on first remote use. Trivial 2-line change mirroring 768d52b.
 <!-- /agent:backlog -->
 
 2## Review

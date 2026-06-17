@@ -367,32 +367,34 @@ Current verification still passing after later changes:
 - `make install` installed the current CLI/cdylib and marked 2 controllers for idle-boundary recycle.
 
 Escalation: none. Confidence: high for the repository behavior; I did not run a new live JetBrains File Cache Conflict repro in this cycle.
-<!-- agent:boundary:d6a8b1dd -->
+
+### Re: agent-doc on monsterrodholders.md keeps on deleting the `agent:queue` element. — gpt-5
+
+> **Queue prompt:**
+>
+> agent-doc on monsterrodholders.md keeps on deleting the `agent:queue` element.
+
+
+Fixed and shipped.
+
+The stale-IPC repair path now preserves baseline `agent:queue` prompts when socket ACK content, file-IPC ACK content, or file-read fallback content omits them during `live_prompt_drift_after_preflight`. Those omissions are no longer treated as authoritative user deletions; the path logs `queue_live_deletion_ignored ... reason=unproven_ipc_candidate_queue_deletion` and the disjoint outside-edit forward-merge tolerance now refuses candidates that drop baseline queue prompts. Normal queue consumption and done-id handling remain the deletion authority.
+
+Changed files: `agent-doc-orchestration/src/write.rs`, `agent-doc-orchestration/src/write/ipc.rs`, `VERSIONS.md`, and `specs/07-closeout-commands.md`.
+
+Verification passed: focused regressions for `ipc_live_prompt_drift_content_ours_ignores_unproven_live_queue_deletions`, `preserve_content_ours_over_live_queue_deletions_keeps_baseline_prompts`, and `fintol_queue_deletion_is_not_forward_merged_with_outside_edit`; full `cargo test -p agent-doc-orchestration`; `cargo fmt`; `git diff --check`; full `make check` with 4,636 nextest tests plus doctests and medium simulation; and `make install` installed `agent-doc 0.34.1` plus the FFI library and marked two controllers for idle recycle.
+
+Pushed: `btakita/agent-doc` `a1e139d5` (`fix: ignore unproven live queue deletions`). The parent repo records that submodule SHA at pushed root HEAD `bfb58e854`; that parent commit was produced by a concurrent agent-doc session and includes its session document change along with the gitlink. Agent-doc CI run `27710668979` is in progress; the parent repo has no workflow named `CI`.
+<!-- agent:boundary:d8398e00 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: VSCode plugin should have the same specs + behavior as the JB plugin.~~
-~~~done
-JB `Run Agent Doc` worked on this document. But on equityfundingsource.md, did not submit:
-```
-resync: pruned 4 stale session(s)
-[route] target tmux session: 0
-[route] codex ready after 0.2s (1 polls)
-[route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md → pane %63
-[route] latency budget exceeded: phase dispatch_start_proof took 10114ms (budget 10000ms, pane=%63, harness=codex, outcome=unproven_but_accepted)
-[route] preserved dispatch-start proof snapshot for tasks/professional/equityfundingsource.md pane %63 harness=codex phase=direct_pane_dispatch_start_unproven capture_len=1174 capture_hash=809fcf302ba3 snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1781718619383-direct_pane_dispatch_start_unproven-codex-_63-809fcf302ba3.txt editor_attempt_id=1781718607979-3
-[route] bare codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %63, but no routed submission proof appeared after 10s
-Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %63 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
-```
-
-Why did the observation loop not detect the unsubmitted prompt and not send Return?
-~~~
-- ~~Still getting JB `File Cache Conflict`. Evaluate all paths in the codebase that can cause an external file write while the plugin is running. Make sure all paths only send the edit through the editor plugin while the editor plugin is running. VSCode should have the same behavior.~~
-- agent-doc on monsterrodholders.md keeps on deleting the `agent:queue` element.
+- ~~agent-doc on monsterrodholders.md keeps on deleting the `agent:queue` element.~~
 - agent-doc on Codex outputs console messages that obscures the TUI ![img_38.png](img_38.png) after a turn after a `/clear`, and after a restart.
 - agent-doc sent a prompt to Codex (does this with other models too) while a task was running ![img_39.png](img_39.png)
+- On monsterrodholders.md, after a JB `Clear Session Context` was successful, JB `Run Agent Doc` added a duplicate prompt (one with the relative path and one with the absolute path), and did not submit the prompt ![img_41.png](img_41.png).
+- agent-doc is spamming the same prompt as I type into the queue in Codex on monsterrodholders.md ![img_42.png](img_42.png)
 - Restart on equityfundingsource.md failed ![img_40.png](img_40.png)
 <!-- /agent:queue -->
 ###

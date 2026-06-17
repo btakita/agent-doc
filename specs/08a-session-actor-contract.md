@@ -172,11 +172,12 @@ accepted-without-dispatch-start proof and the same trigger is visibly drafted,
 route sends one late submit-key retry, records
 `route_submit_late_resubmit ... cause=dispatch_start_unproven_prompt_visible`,
 and rechecks dispatch-start proof. If the exact same routed trigger is already
-visible in the composer before route sends anything, route takes the same
-bounded submit-key path first instead of appending another trigger; a later idle
-prompt below the trigger classifies it as stale scrollback, not active draft
-input. This recovery never sends Enter after the trigger disappears and remains
-capped on a genuinely stuck pane.
+visible in the composer before route sends anything, or if the visible
+`agent-doc <relative-path>` draft resolves to the same file suffix as the routed
+absolute-path trigger, route takes the same bounded submit-key path first instead
+of appending another trigger; a later idle prompt below the trigger classifies it
+as stale scrollback, not active draft input. This recovery never sends Enter
+after the trigger disappears and remains capped on a genuinely stuck pane.
 - Repeated dispatches are queue-first once a document actor is already busy.
   Route must first try to drain an open binary-owned closeout (`repair` /
   strict commit / `session-check`) so an idle console can accept the reroute

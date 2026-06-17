@@ -199,6 +199,7 @@ pub(crate) fn direct_pane_existing_draft_visible(
     let lines: Vec<&String> = recent_lines.iter().rev().collect();
     for start in 0..lines.len() {
         if !line_contains_trigger(lines[start], trigger)
+            && !line_contains_equivalent_agent_doc_path_trigger(lines[start], trigger)
             && !wrapped_trigger_starts_at_line(&lines, start, trigger)
         {
             continue;
@@ -210,6 +211,96 @@ pub(crate) fn direct_pane_existing_draft_visible(
         return !later_has_idle_prompt;
     }
     false
+}
+
+fn line_contains_equivalent_agent_doc_path_trigger(line: &str, trigger: &str) -> bool {
+    let Some(trigger_path) = single_agent_doc_path_arg(trigger) else {
+        return false;
+    };
+    let stripped = strip_leading_prompt_prefix(line);
+    let tokens: Vec<&str> = stripped.split_whitespace().collect();
+    for pair in tokens.windows(2) {
+        let [command, path_arg] = pair else {
+            continue;
+        };
+        if is_agent_doc_command_token(command)
+            && agent_doc_path_args_equivalent(path_arg, trigger_path)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn single_agent_doc_path_arg(command_line: &str) -> Option<&str> {
+    let stripped = strip_leading_prompt_prefix(command_line);
+    let mut tokens = stripped.split_whitespace();
+    let command = tokens.next()?;
+    if !is_agent_doc_command_token(command) {
+        return None;
+    }
+    let path_arg = tokens.next()?;
+    if tokens.next().is_some() {
+        return None;
+    }
+    Some(path_arg)
+}
+
+fn is_agent_doc_command_token(token: &str) -> bool {
+    let token = token.trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
+    token == "agent-doc" || token == "/agent-doc"
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct AgentDocPathArg {
+    absolute: bool,
+    components: Vec<String>,
+}
+
+fn agent_doc_path_arg(token: &str) -> Option<AgentDocPathArg> {
+    let trimmed = token.trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        return None;
+    }
+    let slash_normalized = trimmed.replace('\\', "/");
+    let mut components = Vec::new();
+    for component in slash_normalized.split('/') {
+        if component.is_empty() || component == "." {
+            continue;
+        }
+        if component == ".." {
+            return None;
+        }
+        components.push(component.to_string());
+    }
+    if components.is_empty() {
+        return None;
+    }
+    Some(AgentDocPathArg {
+        absolute: slash_normalized.starts_with('/'),
+        components,
+    })
+}
+
+fn agent_doc_path_args_equivalent(visible: &str, trigger: &str) -> bool {
+    let Some(visible) = agent_doc_path_arg(visible) else {
+        return false;
+    };
+    let Some(trigger) = agent_doc_path_arg(trigger) else {
+        return false;
+    };
+    if visible.components == trigger.components {
+        return true;
+    }
+    if visible.absolute == trigger.absolute {
+        return false;
+    }
+    let (absolute, relative) = if visible.absolute {
+        (&visible, &trigger)
+    } else {
+        (&trigger, &visible)
+    };
+    absolute.components.ends_with(&relative.components)
 }
 
 fn wrapped_trigger_starts_at_line(lines: &[&String], start: usize, trigger: &str) -> bool {
@@ -1526,6 +1617,40 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
         assert!(
             direct_pane_existing_draft_visible(content, trigger, &harness),
             "wrapped current drafts should be submitted with the profile submit key rather than appended again"
+        );
+    }
+
+    #[test]
+    fn direct_pane_existing_draft_detection_matches_relative_codex_path() {
+        let harness = HarnessConfig::codex();
+        let trigger = "agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md";
+        let drafted = "\
+› agent-doc tasks/monsterrodholders.md
+gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 0% used
+";
+
+        assert!(
+            direct_pane_existing_draft_visible(drafted, trigger, &harness),
+            "a visible relative-path Codex draft for the same target should receive Enter instead of an appended absolute trigger"
+        );
+
+        let stale_scrollback = "\
+› agent-doc tasks/monsterrodholders.md
+preflight complete
+›
+";
+        assert!(
+            !direct_pane_existing_draft_visible(stale_scrollback, trigger, &harness),
+            "an idle prompt below an equivalent relative-path draft still proves scrollback"
+        );
+
+        let different_target = "\
+› agent-doc tasks/equityfundingsource.md
+gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 0% used
+";
+        assert!(
+            !direct_pane_existing_draft_visible(different_target, trigger, &harness),
+            "relative-path equivalence must not collapse different document names"
         );
     }
     #[test]

@@ -266,6 +266,11 @@ Deploy remains queued as the later `deploy` item. Escalation: none. Confidence: 
 
 > **Queue prompt:**
 >
+> /portal-investor should be /portal-lender
+
+
+> **Queue prompt:**
+>
 > https://equityfundingsource.brian-takita.workers.dev/portal-borrower/dashboard "Available deal" dialog should display the conversation about the "Available deal" with the admin + borrower.
 
 Implemented and pushed the borrower conversation display for the borrower dashboard Available-deal dialog. The borrower loan-number modal now receives the loan-scoped borrower chat thread from the borrower-owned loan detail API and renders it as an `Available deal conversation` card, labeling borrower messages as `You` and EFS/admin messages as `EFS`.
@@ -289,7 +294,7 @@ Commits pushed:
 - Parent repo: `c08063659` (`Update EFS borrower deal conversation`)
 
 Deploy remains queued as the later `deploy` item. Escalation: none. Confidence: high.
-<!-- agent:boundary:3cd9ec96 -->
+<!-- agent:boundary:6f795669 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -299,7 +304,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard "Available deal" dialog should display the conversation about the "Available deal" with the admin + lender.~~
 - ~~https://equityfundingsource.brian-takita.workers.dev/portal-borrower/dashboard "Available deal" dialog should display the conversation about the "Available deal" with the admin + borrower.~~
-- /portal-investor should be /portal-lender
+- ~~/portal-investor should be /portal-lender~~
 - deploy
 <!-- /agent:queue -->
 

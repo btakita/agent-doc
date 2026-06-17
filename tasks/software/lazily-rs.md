@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -76,7 +76,7 @@ Replaced all 12 `id.0 as usize` casts in `thread_safe.rs` with `usize::try_from(
 Added `From<serde_json::Error>` (cfg `ffi`) and `From<postcard::Error>` (cfg `ipc-binary`) for both `EncodeError` and `DecodeError` in `src/ipc.rs`, enabling ergonomic `?` propagation from serde/postcard call sites. Commit `8665e29`.
 
 **Verification:** fmt, clippy (`-D warnings`), build (all features), and 300+ tests pass across default/tokio/async feature combos. Loom exhaustive model tests: 14/15 passed; the last (`inline_seqlock_envelope_rejects_torn_and_stale`) timed out at 5min — a known resource-intensive exhaustive check, not a regression from these changes.
-<!-- agent:boundary:52e9c0ac -->
+<!-- agent:boundary:5d7cbf94 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,6 +85,7 @@ Added `From<serde_json::Error>` (cfg `ffi`) and `From<postcard::Error>` (cfg `ip
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Go through the review items. Add actionable backlog items to complete the review items.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,105 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260617-063907.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260617-181044.md`*
 
 Compacted content:
-- Archived 6 response topic(s): Rename investor routes to lender routes; Move borrower portal routes; Move broker portal routes; 3 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: email reply threading + deploy — gpt-5
-
-> **Queue prompt:**
->
-> The message emails should be from the configured site email address.
-
-
-Implemented and deployed the secure-message email reply path for the EFS app.
-
-What changed:
-- Outbound secure-message notification emails can now use a session-specific `Reply-To` generated from `MESSAGE_EMAIL_INBOUND_REPLY_TO`, including plus-address forms like `messages+{session_id}@...`.
-- `POST /api/email/inbound` now parses the originating session from an explicit `session_id` or the inbound recipient/headers, normalizes display-name `From` addresses, and appends the reply to the original `chat_sessions` thread.
-- Inbound replies are still fail-closed: provider shared secret first, then the sender email must resolve to an active admin or the portal user who owns the thread. Admin replies append as EFS; borrower/broker/investor replies append as portal-user messages and notify the admin side.
-- Admin message queries and unread counts now include broker portal users in the same chat stack, and the PRD/tests document the borrower/broker/admin reply-threading contract.
-
-Commits / deploy:
-- EFS implementation commit pushed: `f493336` (`feat(messages): thread email replies into chat (#xcvg)`).
-- Parent submodule pointer committed locally: `19f488bb1`.
-- Deployed via `make deploy`; Worker version `f2123f48-9ec9-4d19-a14f-a382c8bdf08f` is live at `https://equityfundingsource.brian-takita.workers.dev`.
-
-Verification:
-- `bun test tests/borrower-message-notify.test.ts tests/borrower-messages.test.ts` passed.
-- `make check` passed: 763 tests, app build, worker build.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` reports no migrations to apply.
-- Live smoke checks: `/` returned `200`; `/api/email/inbound` returned expected `501` because inbound routing remains disabled until provider config is set.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows.
-
-Config note: the deployed code is ready, but actual email reply ingestion remains intentionally disabled until inbound email routing is configured with `MESSAGE_EMAIL_INBOUND_ENABLED`, `MESSAGE_EMAIL_INBOUND_SECRET`, and `MESSAGE_EMAIL_INBOUND_REPLY_TO`.
-
-### Re: deploy — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-
-Deployed the current clean EFS worker commit again for the remaining `deploy` queue item.
-
-Deployment:
-- Ran `make deploy` from `src/equityfundingsource-dev`.
-- Remote D1 migrations reported `No migrations to apply`.
-- Cloudflare uploaded/deployed `equityfundingsource` at `https://equityfundingsource.brian-takita.workers.dev`.
-- Current Worker version: `a6386caf-17e0-4722-a36a-064ad5f7a1b6`.
-
-Verification:
-- `curl https://equityfundingsource.brian-takita.workers.dev/` returned `200`.
-- `POST /api/email/inbound` returned the expected disabled-state `501`.
-- `git -C src/equityfundingsource-dev status --short --branch` is clean on `main...origin/main`.
-
-Changed paths: no EFS source changes; only this agent-doc closeout is being committed. Escalation: none.
-
-### Re: lender available deal website messaging + deploy — gpt-5
-
-> **Queue prompt:**
->
-> The lender "Available deal conversation" component on all pages it appears on should support the lender to send messages from the website in addition to email. deploy
-
-Implemented, pushed, and deployed the lender website message path for the Available deal conversation.
-
-What changed:
-- Added `POST /api/investor/deals/:id/lender-messages` for authenticated lender/investor users.
-- The endpoint reuses or creates the lender's `investor_deal_interests` row, writes a `deal_interest_lender_messages` row with `sender_role: 'lender'`, and emits the existing admin realtime event so the admin interested-lender workflow refreshes.
-- Updated the lender deal detail `Available deal conversation` component with a website message form. This covers the standalone `/lenders/deals/:id` page and the dashboard embedded deal-detail dialog, because both render `InvestorDealDetail`.
-- Updated the lending portal PRD and test guards for the lender/EFS conversation data model and acceptance criteria.
-- While rebasing onto the latest remote EFS commits, fixed two stale string guards for the new shared `PortalModal` ownership of dialog role/height.
-
-Commits / push:
-- EFS submodule commit pushed: `f6230aa` (`feat(investor): let lenders message EFS from deal pages`).
-- Parent repo submodule pointer pushed: `432b46ee3` (`chore: update EFS lender messaging submodule`).
-
-Deploy:
-- Ran `make deploy` from `src/equityfundingsource-dev`.
-- Remote D1 migrations reported `No migrations to apply`.
-- Deployed Worker: `https://equityfundingsource.brian-takita.workers.dev`.
-- Current Worker version: `b576a4f3-dab4-4720-a123-034b8ba47804`.
-
-Verification:
-- Focused tests passed: `bun test tests/investor-portal-e2e.test.ts`, plus the two previously failing post-rebase guards.
-- Full local verification passed after rebase: `make check` with 767 tests, app build, and worker build.
-- Live smoke: `/` returned `200`; unauthenticated `POST /api/investor/deals/smoke/lender-messages` returned expected `401`.
-- GitHub Actions check: `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows.
-
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/investor/deal_marketplace/index.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/investor/routes.ts`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/deal_detail.tsx`
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
-- parent submodule pointer `src/equityfundingsource-dev`
-
-Preflight warnings were unrelated semantic-completion candidates for existing review items `#dropbox-sync-adapter`, `#dzmm-writeback-replay`, and `#zwws-vestings-local`; I did not change those gates. Confidence: high. Escalation: none.
-<!-- agent:boundary:81dd763f -->
+- Archived 3 response topic(s): email reply threading + deploy; deploy; lender available deal website messaging + deploy
+- Prior summary/context: prior compacted content: Archived 6 response topic(s): Rename investor routes to lender routes; Move borrower portal ...
+<!-- agent:boundary:a92eb057 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -139,6 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- All messaging should support attachments. The attachments should be sent via email be stored in the system. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -87,7 +87,23 @@ Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-
 Verification: focused tests passed (`110 pass`); full check passed (`752 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:ba4a8ea5 -->
+
+### Re: Verbal amount — gpt-5
+
+> **Queue prompt:**
+>
+> Verbal amount
+
+Completed and pushed the `Verbal amount` removal for the Available Deal -> Interested Lenders workflow.
+
+Changed paths: `src/equityfundingsource-dev` commit `7a6e2ed` removes `verbal_commitment_amount` from the deal-interest admin/investor API contracts, admin update SQL, Interested Lenders UI controls and display chips, investor timeline labels, specs, and tests; adds migration `0077_drop_deal_interest_verbal_amount.sql` to drop the column. Parent repo commit `7a0da0171` updates the EFS submodule pointer.
+
+Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `git diff --check`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
+
+Verification: focused tests passed (`111 pass`); full check passed (`753 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:7f66adb8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,7 +117,7 @@ Delete fields, db records, and logic relating to:
 - ~~Mark Call Completed~~
 - ~~Start Underwriting~~
 - ~~Call scheduled~~
-- Verbal amount
+- ~~Verbal amount~~
 - Contact method
 - Pre-doc conditions
 - Pre-doc instructions

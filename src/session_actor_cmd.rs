@@ -697,15 +697,11 @@ fn verify_supervisor_clear_submit(
     tmux: &Tmux,
     pane_source: &str,
 ) -> Result<()> {
-    let Some(pane) = ctx.supervisor_runtime.actor_pane_id.as_deref().or_else(|| {
-        ctx.actor_record
-            .as_ref()
-            .map(|record| record.pane_id.as_str())
-    }) else {
+    let Some(pane) = ctx.supervisor_runtime.actor_pane_id.as_deref() else {
         agent_doc_orchestration::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
-                "session_clear_submit_verification_skipped file={} harness={} delivery=supervisor_ipc pane_source={} reason=no_actor_pane",
+                "session_clear_submit_verification_skipped file={} harness={} delivery=supervisor_ipc pane_source={} reason=no_supervisor_actor_pane",
                 ctx.canonical_file.display(),
                 ctx.harness,
                 pane_source

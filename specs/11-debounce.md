@@ -72,9 +72,9 @@ captures first and sleeps after on a tightened
 `DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL` (150ms), but an empty first
 capture is not enough to prove acceptance: route waits for the empty capture to
 remain stable before accepting so a delayed Codex composer draft can still be
-seen and re-submitted with the harness submit key. If Codex later reaches
-accepted-only dispatch proof and the same prompt is visibly drafted, route sends
-one late submit-key retry and rechecks dispatch-start proof.
+seen and re-submitted with bounded harness submit-key retries. If Codex later
+reaches accepted-only dispatch proof and the same prompt is visibly drafted,
+route sends one late submit-key retry and rechecks dispatch-start proof.
 3. **Ready-prompt poll cadence tightened.** `wait_for_agent_ready_outcome` polled
    every 500ms and requires a 2-poll ready streak to debounce a transient prompt
    flicker, giving a ~500-1000ms ready floor. The poll interval is now

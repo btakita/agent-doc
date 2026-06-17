@@ -175,7 +175,42 @@ curl -X POST https://equityfundingsource.brian-takita.workers.dev/api/admin/boot
 That creates `rwaldman100+admin@gmail.com` if missing and sends the welcome email.
 
 The queue is fully drained.
-<!-- agent:boundary:397b201e -->
+
+### Re: Rename operator test accounts + shared password CLI — glm-5.2
+
+> **Queue prompt:**
+>
+> stormrunner06106@gmail.com to btak.dev+admin2@gmail.com
+
+
+> **Queue prompt:**
+>
+> Change user account emails (stormrunner06106@gmail.com→btak.dev+admin2@gmail.com; test2@broker.com→btak.dev+broker2@gmail.com; test2@investor.com→btak.dev+lender2@gmail.com). All accounts with base emails brian.takita@gmail.com and btak.dev@gmail.com should use the password from `passage btak/lucas-collab-password`.
+
+
+**Shipped** the idempotent operator tool that performs the renames + shared-password assignment, mirroring the `ensure-admins` pattern. The actual production D1 write is a one-command operator step (after a `--dry-run` review), matching how Robert's admin provisioning was shipped earlier this session.
+
+**Spec + impl** (`src/equityfundingsource-dev`, commit `385f7d8`, pushed `main`):
+- `lib/auth/rename_accounts.ts` — `RENAME_ACCOUNTS` (the 3 pairs), `SHARED_PASSWORD_BASE_EMAILS` (`brian.takita@gmail.com`, `btak.dev@gmail.com`), `rename_accounts_sql_()` (UPDATE keyed on the old email → a missing old row updates zero rows, so re-runs are safe), and `shared_password_sql_()` (`email = base OR email LIKE 'local+%@domain'`, so each base address **and** its Gmail `+alias` variants share the one password).
+- `bin/rename-accounts.ts` — `--remote|--local|--dry-run --password <v>` (or `PASSWORD`/`SHARED_PASSWORD` env). Reads the vault password at runtime via `passage btak/lucas-collab-password`, hashes it with `password__hash`, writes SQL to `.wrangler/tmp/rename-accounts.sql`, and pipes through `cf-wrangler d1 execute`. The plaintext password is never written to the repo — only the PBKDF2 hash crosses into D1.
+- Spec: `prds/admin-provisioning-spec.md` gains an "Account rename + shared password" section + verification query.
+- Tests: `tests/rename-accounts.test.ts` (10 cases) — exact operator map, SQL emit/escaping/idempotent no-op, base+alias predicate, and a fake-D1 execution test proving the three accounts rename and every operator-owned row verifies against the single shared password while an unrelated account is untouched.
+
+**Verify:** `make check` → **812 pass / 0 fail** (+10 new); build + worker build OK. CLI `--help` and `--dry-run` smoke-tested; emitted SQL confirmed (3 renames + 2 password UPDATEs embedding the PBKDF2 hash).
+
+**Operator step to make it live on production D1** (review the dry-run first):
+```bash
+bun ./bin/rename-accounts.ts --remote --dry-run --password "$(passage btak/lucas-collab-password)"
+bun ./bin/rename-accounts.ts --remote            --password "$(passage btak/lucas-collab-password)"
+```
+Then verify the rows:
+```bash
+bun ./app/equityfundingsource/bin/cf-wrangler.ts d1 execute equityfundingsource --remote -c wrangler.toml \
+  --command "SELECT email, role, password_hash != '' AS has_password FROM users WHERE email LIKE 'btak.dev+%' OR email = 'brian.takita@gmail.com'"
+```
+
+**On the inline questions** (admin for borrower-portal messages / borrower email round-trip): yes — `BOOTSTRAP_ADMINS` already ensures `rwaldman100+admin@gmail.com` owns the admin side (shipped earlier this session). Borrower send-notification + reply-back-into-chat + admin-reply-to-borrower email are all the existing `#xcvg` review item, gated on a verified EFS sending domain (`#f4rq`) + Google Workspace SMTP (`#m6ch`/`#p40t`); no new tracking needed.
+<!-- agent:boundary:330a83cb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -184,7 +219,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 Change user account emails:
-- stormrunner06106@gmail.com to btak.dev+admin2@gmail.com
+- ~~stormrunner06106@gmail.com to btak.dev+admin2@gmail.com~~
 - test2@broker.com to btak.dev+broker2@gmail.com
 - test2@investor.com to btak.dev+lender2@gmail.com
 
@@ -194,6 +229,7 @@ All accounts with the base emails brian.takita@gmail.com and btak.dev@gmail.com 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rename-accounts-apply] Run bun ./bin/rename-accounts.ts --remote (after --dry-run review) against production D1 to apply the three test-account email renames + the shared lucas-collab-password to brian.takita/btak.dev base accounts. Tool shipped at 385f7d8; needs CLOUDFLARE_API_TOKEN/ACCOUNT_ID in src/equityfundingsource-dev/.env + the vault password. Advances #rename-accounts.
 <!-- /agent:backlog -->
 
 2## Review

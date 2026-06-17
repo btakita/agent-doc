@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -63,7 +63,7 @@ Verification passed:
 - `make install`; `agent-doc --version` -> `0.34.1`
 
 The updated JetBrains plugin was installed into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ IDEA to activate it. The remaining queue items for OpenCode Clear Session Context and File Cache Conflict are still queued.
-<!-- agent:boundary:8a130408 -->
+<!-- agent:boundary:57b015cd -->
 <!-- /agent:exchange -->
 
 ## Queue

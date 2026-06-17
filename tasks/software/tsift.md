@@ -102,7 +102,48 @@ Verification:
 Workspace note: unrelated formatting-only dirty files inside `src/tsift` were left unstaged.
 
 Confidence: high. Escalation: force-disk approved for the stuck IPC closeout. The next backlog item is `#kgm3`, replacing the MemGraphRAG semantic path with the shared provider surface.
-<!-- agent:boundary:3a2f017a -->
+
+### Re: #kgm3 MemGraphRAG provider seam — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#kgm3]
+
+
+Implemented and committed the MemGraphRAG semantic provider seam.
+
+Changed paths:
+- `src/tsift/packages/tsift-memgraphrag/src/lib.rs`
+- `src/tsift/packages/tsift-memgraphrag/Cargo.toml`
+- `src/tsift/Cargo.lock`
+
+Behavior now available:
+- Added `SemanticProvider`, `SemanticProviderMetadata`, `SemanticProviderInput`, `SemanticConceptCandidate`, and `SemanticEmbedding` as the pluggable local extraction/embedding seam for MemGraphRAG semantic rows.
+- Added `HashSemanticProvider` as the deterministic default, preserving `tsift-local-hash-v1` for tests and no-model fallback behavior.
+- Added `append_memory_events_as_traversal_rows_with_provider(...)`; the existing `append_memory_events_as_traversal_rows(...)` now delegates to the hash fallback provider so existing callers keep working.
+- Semantic concept nodes now record `semantic_provider`, `semantic_provider_kind`, `semantic_extraction_model`, `semantic_key`, `embedding_provider`, `embedding_model`, `embedding_dimensions`, and `embedding`, and `mentions_concept` edges carry the semantic provider id.
+- `tsift-memgraphrag` now depends on `tsift-local-model` for shared `ProviderKind`, keeping the provider seam aligned with the local model substrate.
+
+Commits:
+- `src/tsift`: `7fb7f72 feat: add memgraphrag semantic provider seam`
+- Parent repo: current HEAD already records `src/tsift` at `7fb7f72` via `4ca28104b`.
+
+Verification:
+- `cargo test -p tsift-memgraphrag`
+- `cargo check -p tsift-cli`
+- `cargo test -p tsift-cli traversal_projection_materializes_cached_semantic_rows`
+- `cargo test -p tsift-cli semantic_related_query_uses_persisted_graph_embeddings`
+- `cargo test -p tsift-cli graph_db_related_query_uses_semantic_seeds_and_incident_neighborhoods`
+- `git -C src/tsift diff --check -- packages/tsift-memgraphrag/Cargo.toml packages/tsift-memgraphrag/src/lib.rs Cargo.lock`
+- `git -C src/tsift diff --cached --check`
+- `cargo test --workspace`
+- `make check`
+- `gh run list --workflow CI --limit 1` was attempted, but this repo has no workflow named `CI`.
+
+Workspace note: unrelated formatting-only dirty files inside `src/tsift` remain unstaged.
+
+Confidence: high. Escalation: force-disk approved for the stuck IPC closeout. The next backlog item is `#kgm4`, adding the shared `tsift-kg` extraction pipeline for tsift and agent-doc.
+<!-- agent:boundary:77226558 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -110,7 +151,7 @@ Confidence: high. Escalation: force-disk approved for the stuck IPC closeout. Th
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#kgm1]~~
 - ~~:pushpin: do [#kgm2]~~
-- :pushpin: do [#kgm3]
+- ~~:pushpin: do [#kgm3]~~
 - :pushpin: do [#kgm4]
 - :pushpin: do [#kgm5]
 - :pushpin: do [#kgm6]
@@ -122,7 +163,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgm3] [queue] Replace the tsift-memgraphrag hash-only semantic path from tasks/software/plan-tsift-local-kg-model-support.md with a pluggable local embedding/extraction provider while retaining tsift-local-hash-v1 as deterministic fallback for tests.
 - [ ] [#kgm4] [queue] Add the shared tsift-kg extraction pipeline from tasks/software/plan-tsift-local-kg-model-support.md for tsift and agent-doc: chunk source/session/memory inputs, call the local model, validate JSON entities/relations, and upsert GraphProjection rows into SQLite plus backend candidates.
 - [ ] [#kgm5] [queue] Add model lifecycle and VRAM cleanup controls from tasks/software/plan-tsift-local-kg-model-support.md: per-run lease, idle TTL, Ollama keep_alive=0, llama.cpp router unload, process-kill fallback, nvidia-smi before/after proof, and single-5090 concurrency guard.
 - [ ] [#kgm6] [queue] Add multi-run verification from tasks/software/plan-tsift-local-kg-model-support.md: two sequential KG runs, interrupted-run cleanup, no duplicate/stale graph facts, no orphaned model processes, VRAM returns near baseline, make check, and tsift graph/memory smoke tests.

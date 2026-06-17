@@ -210,7 +210,23 @@ bun ./app/equityfundingsource/bin/cf-wrangler.ts d1 execute equityfundingsource 
 ```
 
 **On the inline questions** (admin for borrower-portal messages / borrower email round-trip): yes — `BOOTSTRAP_ADMINS` already ensures `rwaldman100+admin@gmail.com` owns the admin side (shipped earlier this session). Borrower send-notification + reply-back-into-chat + admin-reply-to-borrower email are all the existing `#xcvg` review item, gated on a verified EFS sending domain (`#f4rq`) + Google Workspace SMTP (`#m6ch`/`#p40t`); no new tracking needed.
-<!-- agent:boundary:330a83cb -->
+
+### Re: test2@broker.com rename — already covered by the shipped tool — glm-5.2
+
+> **Queue prompt:**
+>
+> test2@broker.com to btak.dev+broker2@gmail.com
+
+
+**Already covered — no new repo work.** This rename is `RENAME_ACCOUNTS[1]` (`{ from: 'test2@broker.com', to: 'btak.dev+broker2@gmail.com' }`) in `lib/auth/rename_accounts.ts`, shipped last cycle at commit `385f7d8`. The operator CLI emits it in the same single SQL pass as the other two renames + the shared password:
+
+```bash
+bun ./bin/rename-accounts.ts --remote --dry-run --password "$(passage btak/lucas-collab-password)"  # review
+bun ./bin/rename-accounts.ts --remote            --password "$(passage btak/lucas-collab-password)"  # apply all 3 + password
+```
+
+The next queue head (`test2@investor.com → btak.dev+lender2@gmail.com`) is `RENAME_ACCOUNTS[2]` and is likewise already covered — same operator command applies it. After both, `do [#rename-accounts-apply]` is the tracked operator step to actually run that command against production D1.
+<!-- agent:boundary:22671d8f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -220,10 +236,10 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 Change user account emails:
 - ~~stormrunner06106@gmail.com to btak.dev+admin2@gmail.com~~
-- test2@broker.com to btak.dev+broker2@gmail.com
+- ~~test2@broker.com to btak.dev+broker2@gmail.com~~
 - test2@investor.com to btak.dev+lender2@gmail.com
-
 All accounts with the base emails brian.takita@gmail.com and btak.dev@gmail.com should use the password defined in `passage btak/lucas-collab-password`. 
+- do [#rename-accounts-apply]
 <!-- /agent:queue -->
 
 ## Backlog

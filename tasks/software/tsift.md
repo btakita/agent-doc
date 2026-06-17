@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -242,13 +242,31 @@ Verification run:
 - `make check`
 
 The CI lookup was attempted with `gh run list --workflow CI --limit 1`, but this repository still reports `could not find any workflows named CI`; local verification passed. The pre-existing unrelated dirty files under `src/tsift` remain unstaged.
-<!-- agent:boundary:a8f67c0c -->
+
+### Re: local model status — gpt-5
+
+> **Queue prompt:**
+>
+> What local model is setup to work with tsift? Is it being used now? 
+
+
+The configured local model path is the new `tsift-local-model` profile set, not a live always-on service. On this RTX 5090, `tsift local-model status --json` recommends:
+
+- Extractor: `qwen3-32b-q4` (`Qwen/Qwen3-32B-GGUF`, llama.cpp, 4-bit) as the default quality KG extractor/reasoner for a clear 5090.
+- Embedding/rerank companion: `qwen3-embedding-0.6b` (`Qwen/Qwen3-Embedding-0.6B-GGUF`) as the default low-pressure embedding profile.
+- Fallback extractor profile: `qwen3-30b-a3b-instruct-2507-q4` for throughput/long-context extraction.
+- Benchmark-only candidate: `qwen3.5-35b-a3b-q4`, currently not selectable on the live probe because its estimated footprint exceeds available free VRAM.
+- Built-in fallback: `tsift-local-hash-v1`, used for deterministic tests/offline runs and the current hash fallback KG/semantic paths.
+
+It is not being used as a live local model right now. The live probe reported the RTX 5090 available with 32,607 MiB total VRAM, 31,971 MiB free, and no GPU model processes. `pgrep -af "ollama|llama|vllm|qwen|ggml"` also found no matching provider process.
+
+Current implementation status: the local-model substrate, KG extraction trait, lifecycle/VRAM cleanup checks, and multi-run verification are in place. The active default code paths still have deterministic hash fallback providers (`HashKgExtractor` / `HashSemanticProvider`) unless a caller supplies a real local extractor/provider. So the answer is: Qwen3-32B Q4 is the intended/default local KG extractor profile for this machine, but it is not currently loaded or serving tsift work.
+<!-- agent:boundary:7d9f70a1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- What local model is setup to work with tsift? Is it being used now? 
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

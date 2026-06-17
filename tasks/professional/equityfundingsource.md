@@ -261,7 +261,35 @@ Commits pushed:
 - Parent repo: `8497e48d8` (`Update EFS lender deal conversation`)
 
 Deploy remains queued as the later `deploy` item. Escalation: none. Confidence: high.
-<!-- agent:boundary:129b0a5e -->
+
+### Re: Available deal borrower conversation — gpt-5
+
+> **Queue prompt:**
+>
+> https://equityfundingsource.brian-takita.workers.dev/portal-borrower/dashboard "Available deal" dialog should display the conversation about the "Available deal" with the admin + borrower.
+
+Implemented and pushed the borrower conversation display for the borrower dashboard Available-deal dialog. The borrower loan-number modal now receives the loan-scoped borrower chat thread from the borrower-owned loan detail API and renders it as an `Available deal conversation` card, labeling borrower messages as `You` and EFS/admin messages as `EFS`.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/borrower/loans/index.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/borrower/application_status.tsx`
+- `src/equityfundingsource-dev/tests/application-status-ui.test.ts`
+- `src/equityfundingsource-dev/tests/final-loan-docs.test.ts`
+- parent submodule pointer `src/equityfundingsource-dev`
+
+Verification:
+- `bun test tests/application-status-ui.test.ts tests/final-loan-docs.test.ts tests/borrower-messages.test.ts tests/admin-investor-pipeline.test.ts tests/borrower-dashboard.test.ts` passed: 109 tests, 0 fail.
+- `git diff --check` passed.
+- `bun run check` passed: 760 tests, 0 fail, browser build done, worker build done. The expected non-fatal `Error('d1 down')` outbox test log and local email-capture logs appeared, but the command exited 0.
+- `make check` passed with the same 760-test/build/worker-build gate.
+- GitHub Actions: `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no workflows.
+
+Commits pushed:
+- EFS repo: `84b6e21` (`Show borrower deal conversation`)
+- Parent repo: `c08063659` (`Update EFS borrower deal conversation`)
+
+Deploy remains queued as the later `deploy` item. Escalation: none. Confidence: high.
+<!-- agent:boundary:3cd9ec96 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -270,7 +298,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard "Available deal" dialog should display the conversation about the "Available deal" with the admin + lender.~~
-- https://equityfundingsource.brian-takita.workers.dev/portal-borrower/dashboard "Available deal" dialog should display the conversation about the "Available deal" with the admin + borrower.
+- ~~https://equityfundingsource.brian-takita.workers.dev/portal-borrower/dashboard "Available deal" dialog should display the conversation about the "Available deal" with the admin + borrower.~~
 - /portal-investor should be /portal-lender
 - deploy
 <!-- /agent:queue -->

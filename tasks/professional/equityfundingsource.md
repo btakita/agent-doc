@@ -18,14 +18,14 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-committed
+completed
 <!-- /agent:status -->
 
 ## Exchange
@@ -189,10 +189,49 @@ Verification:
 - The deployed browser asset `index.browser-3G2BPU4E.js` returns HTTP 200 and searching it for the removed labels/field keys returns no matches.
 - The live admin pipeline URL returns HTTP 303 from an unauthenticated shell, which is the expected auth redirect for that route.
 - Remote D1 schema for `investor_deal_interests` no longer includes the removed columns; it retains the intended date/workflow/GHL fields.
+- Relevant working-tree paths are clean after the commits and pushes.
+- Latest CI lookup could not be checked because `gh run list --workflow CI --limit 1` reported `could not find any workflows named CI`.
+- Full `make check` passed: `758 pass`, `0 fail`, `5343 expect() calls`, plus app and worker builds.
+- `git diff --check` passed.
+- Focused EFS tests passed: `124 pass`, `0 fail`, `1197 expect() calls`.
+- `git push origin main` in the parent repo
+- `git commit -m "Update EFS borrower communication message option"` in the parent repo
+- `git add src/equityfundingsource-dev`
+- `git push origin main` in `src/equityfundingsource-dev`
+- `git commit -m "Add borrower communication message option"` in `src/equityfundingsource-dev`
+- `gh run list --workflow CI --limit 1`
+- `make check`
+- `git diff --check`
+- `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts tests/borrower-messages.test.ts`
+- Refreshed admin workflow response hydration so borrower messages are returned consistently after send, document request, workflow update, deal detail load, and lender pipeline load.
+- Added an EFS letterhead lifecycle email template for general messages, including the loan number, property/application context, sender, message body, and borrower portal CTA.
+- Persisted those messages through the existing borrower chat message store with `sender_role: "efs"`, so they appear alongside borrower replies in both deal detail and lender pipeline workflows.
+- Added `POST /api/admin/deal-interests/:id/borrower-messages` for sending loan-scoped borrower messages from admin workflows.
+- Added a second Borrower communication type: `Message (General message with EFS letterhead with the Application info)`.
+- Parent repo: `2bf42cd8c` (`Update EFS borrower communication message option`), pushed to `origin/main`
+- EFS submodule: `4871080` (`Add borrower communication message option`), pushed to `origin/main`
+- `src/equityfundingsource-dev` submodule pointer in the parent repo
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+- `src/equityfundingsource-dev/tests/borrower-messages.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/templates/lifecycle.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/lifecycle.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/borrower/messages/repo.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/shared.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/investor_management/index.ts`
 
 I could not perform an authenticated browser check of the admin dialog from this shell, but the deployed bundle and production schema both reflect the removal.
 
 ### Re: Request Document(s) — gpt-5
+
+> **Queue prompt:**
+>
+> Message (General message with EFS letterhead with the Application info)
+
 
 > **Queue prompt:**
 >
@@ -208,7 +247,7 @@ Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-
 Verification: focused tests passed (`115 pass`); full `make check` passed (`757 pass`, app build, worker build). GitHub Actions CI could not be inspected because the EFS repo has no workflow named `CI`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:b52911ee -->
+<!-- agent:boundary:868c4822 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -222,8 +261,6 @@ Hide "GoHighLevel adapter" section.
 Move "Borrower document requests" under "Lender communication".
 
 Rename "Borrower document requests" to "Borrower communication". Add a dropdown containing:
-- ~~Request Document(s)~~
-- Message (General message with EFS letterhead with the Application info)
 
 The upload from the Request Document(s) email should send an email of receipt to the admin email. The upload should also be visible in the Borrower communication after the message sent by the admin. The message sent by the admin should remain visible after the borrower uploads the document(s).
 

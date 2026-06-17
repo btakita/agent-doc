@@ -38,7 +38,73 @@ completed
 Compacted content:
 - Archived 3 response topic(s): email reply threading + deploy; deploy; lender available deal website messaging + deploy
 - Prior summary/context: prior compacted content: Archived 6 response topic(s): Rename investor routes to lender routes; Move borrower portal ...
-<!-- agent:boundary:a92eb057 -->
+- Attachment email sizing was capped conservatively against Cloudflare Email Service's documented 5 MiB total message limit: https://developers.cloudflare.com/email-service/api/send-emails/workers-api/
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no listed workflows, so closeout is based on local verification and deploy smoke checks.
+- Remote D1 migration `0083_chat_message_attachments.sql` was applied successfully.
+- Deployed with `make deploy`; Worker version `f78394e6-3a7d-4fe0-9bd4-e201ae1b670d` is live at `https://equityfundingsource.brian-takita.workers.dev`.
+- Pushed `main` to `origin`.
+- Committed in `src/equityfundingsource-dev`: `28bf6c5 feat(messages): add secure message attachments`.
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` returned `200`.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` passed after deploy: no migrations to apply.
+- `make check` passed: 768 tests plus app and Worker builds.
+- `bun test tests/borrower-messages.test.ts tests/prd.test.ts` passed: 17 tests.
+- `tests/prd.test.ts`
+- `tests/borrower-messages.test.ts`
+- `prds/equity-funding-source-lending-portal-prd.md`
+- `lib/ui--server--efs/portal.ts`
+- `lib/ui--browser--efs/portal/borrower/messages.tsx`
+- `lib/ui--browser--efs/portal/admin/messages.tsx`
+- `app/equityfundingsource/migrations/0083_chat_message_attachments.sql`
+- `app/equityfundingsource/lib/email/local_capture.ts`
+- `app/equityfundingsource/lib/borrower/messages/routes.ts`
+- `app/equityfundingsource/lib/borrower/messages/repo.ts`
+- `app/equityfundingsource/lib/borrower/messages/notify.ts`
+- Updated PRD coverage and focused tests for schema, route contracts, email behavior, UI strings, and storage requirements.
+- Updated borrower/admin portal message composers to select, preview, send, and render attachments.
+- Added multipart borrower/admin message posting, file-only message handling, guarded attachment downloads, and notification-email attachment forwarding.
+- Added persisted `chat_message_attachments` records linked to shared `documents` metadata and R2-stored objects.
+
+### Re: Secure Message Attachments + Deploy — gpt-5
+
+Implemented, tested, pushed, and deployed secure-message attachments for the Equity Funding Source borrower/admin messaging flow.
+
+Summary:
+- Added persisted `chat_message_attachments` records linked to shared `documents` metadata and R2-stored objects.
+- Added multipart borrower/admin message posting, file-only message handling, guarded attachment downloads, and notification-email attachment forwarding.
+- Updated borrower/admin portal message composers to select, preview, send, and render attachments.
+- Updated PRD coverage and focused tests for schema, route contracts, email behavior, UI strings, and storage requirements.
+
+Changed paths:
+- `app/equityfundingsource/lib/borrower/messages/notify.ts`
+- `app/equityfundingsource/lib/borrower/messages/repo.ts`
+- `app/equityfundingsource/lib/borrower/messages/routes.ts`
+- `app/equityfundingsource/lib/email/local_capture.ts`
+- `app/equityfundingsource/migrations/0083_chat_message_attachments.sql`
+- `lib/ui--browser--efs/portal/admin/messages.tsx`
+- `lib/ui--browser--efs/portal/borrower/messages.tsx`
+- `lib/ui--server--efs/portal.ts`
+- `prds/equity-funding-source-lending-portal-prd.md`
+- `tests/borrower-messages.test.ts`
+- `tests/prd.test.ts`
+
+Verification:
+- `bun test tests/borrower-messages.test.ts tests/prd.test.ts` passed: 17 tests.
+- `make check` passed: 768 tests plus app and Worker builds.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` passed after deploy: no migrations to apply.
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` returned `200`.
+
+Commit, push, and deploy:
+- Committed in `src/equityfundingsource-dev`: `28bf6c5 feat(messages): add secure message attachments`.
+- Pushed `main` to `origin`.
+- Deployed with `make deploy`; Worker version `f78394e6-3a7d-4fe0-9bd4-e201ae1b670d` is live at `https://equityfundingsource.brian-takita.workers.dev`.
+- Remote D1 migration `0083_chat_message_attachments.sql` was applied successfully.
+
+CI:
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no listed workflows, so closeout is based on local verification and deploy smoke checks.
+
+Source note:
+- Attachment email sizing was capped conservatively against Cloudflare Email Service's documented 5 MiB total message limit: https://developers.cloudflare.com/email-service/api/send-emails/workers-api/
+<!-- agent:boundary:c02f9456 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -315,13 +315,63 @@ Changed paths: no repo source paths changed by me; the installed binary at `/hom
 **Why not "reducing the model" via quantization tier steps**: that is also possible (treat `-q4`/`-q3`/`-q2` as separate profiles), but per-call profile pinning already covers the common case — you switch profile, you don't re-quantize mid-flight. Quantization tiers would just be more entries in `default_model_profiles()`; congestion-aware `status` can already rank them via `rank_profiles_for_role`. No new substrate needed.
 
 **Recommended path this cycle**: green-light `#gctrl1` (lease registry, the foundational piece), then `#gctrl2` (per-call `--profile`) and `#gctrl3` (`swap` action). Defer `#gctrlIce` (daemon + preempt + multi-GPU) until contention is proven. No code changed this turn — this is a design decision seeking your green-light before implementation.
-<!-- agent:boundary:f61e77f7 -->
+
+### Re: #gctrl1 cooperative GPU lease registry — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#gctrl1]
+
+
+> **Queue prompt:**
+>
+> :pushpin: do [#gctrl1]
+
+
+Implemented, installed, and committed the cooperative GPU lease registry for tsift-local-model.
+
+What changed:
+- `packages/tsift-local-model/src/lib.rs` adds the registry types and the pure + file-backed APIs: `GpuLeaseRecord`, `GpuLeaseRegistry`, `GpuLeaseAcquisition{,Status}`, `GpuLeaseConflict`, `GpuLeaseRelease{,Outcome}`; `resolve_lease_file`, `is_pid_alive` (via `kill -0`), `read_lease_registry`, `write_lease_registry` (atomic temp + fsync + rename), `prune_stale_leases`, `apply_acquire`, `apply_release`, `acquire_lease`, `release_lease`, `show_registry`, `format_lease_show_human`. Also exposed `current_unix_seconds` as pub and cleaned one pre-existing collapsible-`if` so the clippy gate stays green.
+- `packages/tsift-local-model/Cargo.toml` adds `serde_json = "1"`.
+- `packages/tsift-cli/src/cli.rs` adds `LocalModelCommand::Lease { Acquire, Release, Show }` plus a `LeaseCommand` enum and `json_output()` accessor.
+- `packages/tsift-cli/src/lib.rs` wires the new subcommand via `cmd_local_model_lease`, including `--strict` exit-nonzero on conflict and JSON/human output.
+- `packages/tsift-local-model/README.md` documents the file location, schema, concurrency rules, staleness contract, and CLI surface.
+
+Concurrency rules match `LeaseMode`: `Exclusive` = one live holder per profile; `Shared` = many; `CpuOrHash` = bypass (no registry entry). A holder is stale when `kill -0` fails or when `idle_ttl_seconds > 0` and the age exceeds the TTL; stale holders are pruned on every acquire/release/show and reclaimed by a new acquirer. Pure logic takes an `is_alive: impl Fn(u32) -> bool` closure so tests inject deterministic liveness; file wrappers use the real `is_pid_alive`.
+
+Behavior now available:
+- `tsift local-model lease show [--lease-file F] [--include-stale] [--json]`
+- `tsift local-model lease acquire --profile <id> [--holder-pid P] [--holder-command C] [--idle-ttl-seconds S] [--vram-baseline-mib M|--no-probe] [--lease-file F] [--strict] [--json]`
+- `tsift local-model lease release --profile <id> [--holder-pid P] [--lease-file F] [--json]`
+- `acquire --strict` exits non-zero on conflict (verified: pid 99999 challenger against a live shell-pid holder returned exit 1 with `Error: gpu lease for "qwen3-32b-q4" is held by pid=<live>`).
+
+Resolution order for the registry path: `--lease-file` → `$TSIFT_LEASE_FILE` → `$XDG_STATE_HOME/tsift/gpu-lease.json` → `~/.tsift/gpu-lease.json` → `./.tsift/gpu-lease.json`.
+
+Commits:
+- `src/tsift`: `a5e717d feat: add cooperative GPU lease registry (#gctrl1)`
+- parent repo: `e3534df1e tsift: add cooperative GPU lease registry (#gctrl1)`
+
+Verification:
+- `cargo test -p tsift-local-model` → 22 passed (10 new lease tests + 12 existing).
+- `cargo test -p tsift-cli --lib cli_local_model_lease` → 3 passed (acquire/release/show parsing).
+- `cargo clippy -p tsift-local-model -p tsift-cli --all-targets -- -D warnings` → clean.
+- `cargo test --workspace` → all green (largest suite 378 passed).
+- `make check` → exit 0.
+- `cargo install --path . --force` → installed `tsift 0.1.70`.
+- Smoke: empty `show` → acquire by real shell pid → conflict attempt by dead pid 99999 returns `Conflict` with holder info and `--strict` exits 1 → human `show` displays the live lease → `release` returns `Released` with `remaining_holders: 0`.
+- `git -C src/tsift diff --cached --check` and parent `git diff --cached --check` → clean.
+- `gh run list --workflow CI --limit 1` could not run because the root repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+
+Workspace note: the pre-existing unrelated dirty files under `src/tsift` (`session_cost.rs`, `session_review.rs`, `infra.rs`, `exit_code.rs`, `log_digest.rs`) remain unstaged as before.
+
+Confidence: high. `#gctrl1` done. Next queued: `#gctrl2` (`--profile` pin on tsift KG/semantic commands).
+<!-- agent:boundary:21a361d7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#gctrl1]
+- ~~do [#gctrl1]~~
 - do [#gctrl2]
 - do [#gctrl3]
 - do [#gctrlice]
@@ -333,7 +383,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#gctrl1] [recommended] Implement cooperative GPU lease registry in tsift-local-model: a state file (~/.tsift/gpu-lease.json or /run/tsift/gpu-lease.json) keyed by profile_id with {pid, acquired_at, lease_mode, vram_baseline_mib}, plus acquire/release/stale-reclaim helpers. Expose `tsift local-model lease acquire|release|show`. Keep it cooperative (no daemon): producers check the file before probe and reclaim leases older than a TTL.
 - [ ] [#gctrl2] [recommended] Add `--profile <id>` flag to tsift KG/semantic commands so an agent-doc cycle can pin or downgrade the model per-call. When omitted, keep current behavior (rank by free VRAM). Allows a long agent-doc run to pick a small/hash profile during low-stakes phases without changing global state.
 - [ ] [#gctrl3] [recommended] Add `tsift local-model swap --to <profile>` lifecycle action distinct from `unload`: unload current profile, run the existing VRAM-cleanup proof, then load the target profile and emit a combined LocalModelLifecycleReport. Use it to implement mid-run downgrades (qwen3-32b-q4 -> qwen3-embedding-0.6b or hash fallback) without the caller orchestrating two commands.
 - [ ] [#gctrlice] [recommended] Icebox: revisit a full GPU control-pane daemon (with preempt and multi-GPU scheduling) only when proven need — more than 1 GPU, or more than 3 concurrent GPU consumers running at the same time. Until then the cooperative lease registry (#gctrl1) is the right-size answer.

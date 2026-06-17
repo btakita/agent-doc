@@ -653,7 +653,41 @@ Confidence: medium-high. The installed code contains the known fixes and the cur
 Escalation: none.
 
 Note: the session exchange is large, but the queue is active, so I did not compact or pause the drain.
-<!-- agent:boundary:552f3845 -->
+Implemented the Claude Code parity for the stderr/TUI bleed fix.
+
+Root cause: the earlier `#codexstderrtui` fix redirected routine supervisor stderr for Codex and OpenCode, but Claude Code was still excluded in two places: `HarnessConfig::is_tui_harness()` and the `agent-doc run` stderr redirect harness filter. That meant stale-busy reconcile, restart, and hot-reload `eprintln!` diagnostics could still paint over the Claude Code foreground TUI after `/clear` or recycle.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/harness.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/run.rs`
+- `src/agent-doc/agent-doc-orchestration/src/run.rs`
+- `src/agent-doc/specs/supervisor.md`
+- `src/agent-doc/VERSIONS.md`
+
+What changed:
+- `HarnessConfig::is_tui_harness()` now returns true for `claude`, `codex`, and `opencode`, so `agent-doc start` redirects supervisor stderr for all three managed TUI harnesses.
+- `agent-doc run` now uses a pure `run_stderr_redirect_harness(...)` helper that also includes `claude`, `codex`, and `opencode`.
+- Updated focused tests for both policy surfaces.
+- Updated supervisor spec and changelog; removed the stale statement that Claude remains attached to supervisor stderr.
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration is_tui_harness -- --nocapture`
+- `cargo test -p agent-doc-orchestration run_stderr_redirect_harnesses_include_claude_codex_and_opencode -- --nocapture`
+- `make check` passed: clippy, 4,645 nextest tests, doctests, and the medium deterministic simulation.
+- `git diff --check`
+- `make install` passed, installed `agent-doc 0.34.1` and `libagent_doc.so`, and marked 2 controllers for idle-boundary recycle.
+
+Published:
+- Source commit `e7d466f5` (`fix: redirect claude supervisor stderr`) pushed to `btakita/agent-doc` `main`.
+- The superproject `HEAD` / `origin/main` already records `src/agent-doc` at `e7d466f5`, so no additional parent gitlink commit was needed from this cycle.
+- Latest CI for `e7d466f5` is run `27717677634`, currently `in_progress`; previous CI run `27716913367` completed successfully.
+
+Confidence: high.
+Escalation: none.
+
+Note: the session exchange is large and this route-owned supervisor still warns stale until idle-boundary recycle, but the queue stayed active, so I did not compact or pause the drain.
+<!-- agent:boundary:49b7704b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -713,7 +747,7 @@ A prompt was sent but not submitted. This prompt may not be from the dispatch th
 - ~~:pushpin: agent-doc is spamming the same prompt as I type into the queue in Codex on monsterrodholders.md ![img_42.png](img_42.png).~~
 - ~~:pushpin: Restart on equityfundingsource.md failed ![img_40.png](img_40.png)~~
 - ~~:pushpin: I typed in the queue item "JB `Run Agent Doc` should have less latency to submit the prompt.", and agent-doc immediately struck it out.~~
-- :pushpin: Re: agent-doc on Codex outputs console messages that obscures the TUI: This should also apply to Claude Code...so all agent harnesses.
+- ~~:pushpin: Re: agent-doc on Codex outputs console messages that obscures the TUI: This should also apply to Claude Code...so all agent harnesses.~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

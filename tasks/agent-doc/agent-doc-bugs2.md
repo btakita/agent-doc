@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -108,6 +108,11 @@ No repo code changed in this cycle. Commands run: `agent-doc preflight`, `agent-
 
 > **Queue prompt:**
 >
+> Still getting JB `File Cache Conflict` dialogs.
+
+
+> **Queue prompt:**
+>
 > :pushpin: JB `Clear Session Context` does not send Return to opencode ![img_36.png](img_36.png)
 
 
@@ -121,17 +126,20 @@ I checked the live session document for the usual 3-way merge and patchback resi
 The current exchange also has a clean boundary and closing `&lt;!-- /agent:exchange --&gt;`. The artifact item appears to be stale: the prior closeout already says the transient merge marker residue was recovered through a narrow exchange-component replacement, and the current document no longer shows those markers.
 
 I did capture one concrete follow-up from the previous Codex Return proof cycle as backlog item `#cdxproof`, because that response identified an actionable dispatch-proof gap. No repo code changed for this merge-artifact check. Commands run: `agent-doc preflight`, `agent-doc plan`, `rg`, and `sed` on this document. Verification is the artifact search plus the agent-doc finalize/session-check closeout.
-<!-- agent:boundary:f05153ee -->
+
+### Re: Queue repair after capture recovery — gpt-5
+
+The merge-artifact cycle hit a captured-response recovery path. The document is now committed and session-check is OK, but the recovery over-consumed the two remaining queue prompts by folding them into the merge-artifact response header without actually addressing them.
+
+I am treating that as queue churn, not as completed work. I captured the skipped OpenCode Clear Session Context issue as backlog item `#opencode-enter`, and the remaining JetBrains File Cache Conflict issue as backlog item `#jb-fcc`. The existing Codex dispatch-proof follow-up is already captured as `#cdxproof`.
+
+For the merge-artifact item itself, the live document is clean: the search found no conflict markers or malformed patchback remnants. No repo code changed in this repair cycle. Commands run: `agent-doc write --commit`, `agent-doc session-check`, `sed`, `git log`, `agent-doc write --help`, and this repair write. Verification is the committed write plus session-check.
+<!-- agent:boundary:1d0967dd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: JB `Run Agent Doc` to this document stalled. No message. Can we remove some of the guard logic?~~
-- ~~:pushpin: JB `Clear Session Context` and `Run Agent Doc` to Codex does not send Return. See equityfundingsource.md~~
-- ~~3-way merge artifacts are in the response in this document.~~
-- ~~:pushpin: JB `Clear Session Context` does not send Return to opencode ![img_36.png](img_36.png)~~
-- Still getting JB `File Cache Conflict` dialogs.
 <!-- /agent:queue -->
 ###
 <!--
@@ -159,6 +167,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#opencode-enter] Investigate and fix JetBrains Clear Session Context to OpenCode not producing a proven Return/dispatch result. Use the img_36 repro plus route logs to distinguish text/Enter delivery, pane acceptance, and dispatch-start proof; add visible attempt-id diagnostics and regression coverage.
+- [ ] [#jb-fcc] Fix remaining JetBrains File Cache Conflict dialogs after stale supervisor / IPC drift symptoms. Verify supervisor version alignment, live-buffer refresh provenance, and editor writeback proof so conflicts become either resolved or logged with exact stale owner/attempt evidence.
 - [ ] [#cdxproof] Fix the Codex dispatch-start proof gap for JetBrains Run Agent Doc attempts that log `key=Enter` plus `accepted_without_dispatch_start_proof`: surface a visible blocked outcome with attempt id and route-submit snapshot, and add regression coverage for the accepted-only/no-start case.
 <!-- /agent:backlog -->
 

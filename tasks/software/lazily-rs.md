@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -93,7 +93,7 @@ Reviewed all 4 `[operator-drive]` review items. One ship-stopper found, one revi
 **#h6qb (#lzwebrtcnet-e2e):** The agent-doable slice (**#lzwebrtcwire**) is already DONE — `src/webrtc_signaling.rs` wires `SignalingClient`↔`Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate}` and `tests/webrtc_signaling.rs` covers the localhost handshake. Review text updated to reflect completion; only the live two-host/NAT run remains (operator-only).
 
 **#xccx (#lzholons):** Blocked on Steve Melville answering 7 OPEN QUESTIONS. The plan (`tasks/software/plan-map-holons-integration.md`) explicitly says "use [the] direct line to resolve the OPEN QUESTIONS rather than guessing." No agent-doable slice until answers land; stays operator-gated.
-<!-- agent:boundary:6c1a0380 -->
+<!-- agent:boundary:c90e2a82 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,6 +102,7 @@ Reviewed all 4 `[operator-drive]` review items. One ship-stopper found, one revi
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- [#syej]
 <!-- /agent:queue -->
 
 ## Backlog

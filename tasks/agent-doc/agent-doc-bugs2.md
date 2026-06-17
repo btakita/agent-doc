@@ -92,7 +92,28 @@ Landed in `src/agent-doc` commit `af33f35a` (`fix: sync pending adds into go que
 The superproject is at pushed commit `4b51726a2`, which records the updated submodule pointer and the plan file `tasks/agent-doc/plan-finalize-pending-add-queue-sync.md`.
 
 Verification from the implementation cycle passed: `make check`, focused queue tests, `cargo build`, and `cargo install --path .`.
-<!-- agent:boundary:46214773 -->
+
+### Re: #jbpostclearcruft — gpt-5
+
+> **Queue prompt:**
+>
+> [#jbpostclearcruft]
+
+
+I inspected the JetBrains attempt ledger and route logs for `tasks/agent-doc/agent-doc-bugs2.md`. The latest attempt `1781731458729-32` did not submit new text into Codex; it was queued behind an unresolved closeout, and the recovery at the start of this turn retired that stale captured response and rebuilt the document snapshot from the current markdown.
+
+For the post-`/clear` submit-cruft class, the current installed code already covers the recurrence rather than needing a new patch: `send_command_unchecked` detects an existing drafted `agent-doc <file>` trigger and sends the harness submit key instead of appending another trigger, including wrapped and relative-path Codex drafts; `session_actor_cmd` verifies `/clear` delivery, emits `session_clear_submit_observation ... issue=prompt_not_submitted`, and sends one bounded submit-key retry. The ops log for this file has the expected accepted retry proof, including `session_clear_submit_resubmit ... harness=codex action=submit_key key=Enter result=accepted` at `1781707327`, `1781717167`, `1781728649`, and `1781728659`.
+
+I also checked the route/run proof coverage. Focused verification passed:
+
+- `cargo test -p agent-doc clear_submit_proof_lines_report_prompt_issue_and_retry_outcome -- --nocapture`
+- `cargo test -p agent-doc clear_direct_submit_retry_is_scoped_to_visible_enter_profile_drafts -- --nocapture`
+- `cargo test -p agent-doc-orchestration route_submit_resubmit_proof_line_is_operator_greppable_for_both_harnesses -- --nocapture`
+- `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection -- --nocapture`
+- `cargo test -p agent-doc simworld_jb_run_and_clear_share_codex_enter_submit_contract -- --nocapture`
+
+No code edits were needed for this item, so I marked `#jbpostclearcruft` done.
+<!-- agent:boundary:9017c543 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -100,7 +121,7 @@ Verification from the implementation cycle passed: `make check`, focused queue t
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: backlog items added during a turn are not auto-added to the queue when the `queue` attribute is on `agent:backlog`~~
 - ~~:round_pushpin: do [#pendingaddqueuesync]~~
-- [#jbpostclearcruft]
+- ~~[#jbpostclearcruft]~~
 - [#rtwbcastlogproof]
 <!-- /agent:queue -->
 <!--
@@ -128,7 +149,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jbpostclearcruft] [clean-session] #agent-doc-bug 2026-06-17: JB Run Agent Doc after `/clear`/restart leaves Codex composer prompt cruft instead of submitting the routed `agent-doc` command. Evidence: tasks/agent-doc/img_45.png. First inspect `.agent-doc/state/editor-route-attempts/` and ops.log attempt-id submit markers (`tmux_text_enter`, `route_submit_late_resubmit`, `route_dispatch_start_proven`); then update/fix the shared Codex submit path if tasks/agent-doc/plan-jb-codex-submit.md and tasks/agent-doc/plan-jb-clear-session-context-submit.md do not already cover the recurrence.
 - [ ] [#rtwbcastlogproof] [clean-session] Replace cleared review gate #rtwbcast-verify with actionable log-backed realtime editor watcher proof: add or verify structured JB+VS Code convergence logging and SimWorld/log-review evidence so tasks/agent-doc/plan-realtime-editor-watcher.md can be completed without an `agent:review` live gate; ask for a JB plugin install only after code/logging changes land.
 <!-- /agent:backlog -->
 

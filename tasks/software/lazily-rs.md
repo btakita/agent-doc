@@ -156,7 +156,20 @@ Cut and published **v0.12.0** (not 0.11.2). The 3 commits since tag `v0.11.1` ad
 ### Re: release + publish — closeout repair pass (snapshot/HEAD realign) — glm-5.2
 
 Repair closeout for the v0.12.0 release cycle. The release work itself is unchanged and complete (crates.io `0.12.0` live, GitHub release `v0.12.0`, submodule `93d9286`, superproject `ecd4c65c4`). The prior `finalize` reached `committed` (`8b31777b0`) but a subsequent bare `preflight` introduced a 1-byte snapshot/HEAD boundary drift and an orphaned `preflight_started` cycle. Recovery: `cancel` cleared the orphan; this `write --commit` realigns the snapshot to HEAD and retries the editor/CRDT delivery path so `session-check` clears. No queue, backlog, or review changes in this pass — `#lzbenchbudget` stays the sole backlog item; queue is `#lzbenchbudget` (not in-session drainable, `queue_continuation_required=false`).
-<!-- agent:boundary:a41890de -->
+
+### Re: release + publish — CI fix: BENCHMARKS.md version-sync for v0.12.0 — glm-5.2
+
+Post-publish CI on the v0.12.0 release commit (`93d9286`) went **red** — but not flakiness and not the `#lzbenchbudget` overshoots. The failing test was `benchmark_report_harness::readme_benchmark_results_track_package_version` (`tests/spec_compliance.rs:812`): *"BENCHMARKS.md benchmark section should identify the current package version."* Root cause: I bumped `Cargo.toml` 0.11.1 → 0.12.0 but missed the per-release sync of the `Generated for package lazily version …` tag at `BENCHMARKS.md:8`. My local `make check` had passed only because it ran **before** the version bump (both strings were 0.11.1); CI ran post-bump and caught the drift. The prior code commit `a876967` was green, confirming the code itself was fine.
+
+**Fix (docs-only, no API/code change → no new crate release):**
+- `src/lazily-rs/BENCHMARKS.md:8` `0.11.1` → `0.12.0`. Verified `cargo test --test spec_compliance readme_benchmark_results_track_package_version` → **ok**. No other stale `0.11.1` refs in README/SPEC/PROTOCOL/docs/book.
+- lazily-rs submodule `28c170c` (`fix(docs): bump BENCHMARKS.md version tag to 0.12.0`) → `lazily-hub/lazily-rs` main (`93d9286..28c170c`).
+- superproject `5e18c7fbd` (gitlink bump) → `btakita/agent-loop` main (`ecd4c65c4..5e18c7fbd`).
+
+**Scope note on `#lzbenchbudget`:** this fix updates ONLY the version tag, not the lock-acquisition budget numbers — those remain at their pre-existing values and `make benchmark-check` stays red on the same four `thread_safe` overshoots. Whether to refresh those baselines (via `make benchmark-update`) or investigate a real contention regression is the `#lzbenchbudget` judgment call, still open in backlog. The published crates.io `0.12.0` artifact carries BENCHMARKS.md with the old `0.11.1` tag (a trivial doc-string inconsistency; crates.io versions are immutable so it stands — not worth a 0.12.1 for a benchmark-report version string).
+
+**Published artifact is functionally correct** — the version-tag drift is documentation only; no code/API in the published `0.12.0` is affected. New CI run triggered by `28c170c`; finishing from local evidence (test green) per the AGENTS.md in-flight-CI rule. `#lzbenchbudget` remains the queue head (not in-session drainable, `queue_continuation_required` per binary).
+<!-- agent:boundary:2d021baa -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -162,7 +162,45 @@ You'll almost certainly see `lender_account = NULL` and `latest_request_status` 
 **Fix:** complete a lender request for this investor via `PUT /api/admin/lender-requests/:id/done` with their real TMO account number (or set `users.lender_account` directly in D1). The select-lender action will then pass.
 
 No code change needed — the guard is correct; the `lender_account` column just isn't populated yet.
-<!-- agent:boundary:d883dede -->
+
+### Re: Login ≠ lender_account; accreditation is not checked here — glm-5.2
+
+> **Queue prompt:**
+>
+> The lender logged into the lender portal so they should have a lender account. Is this due to the lender not being accredited?
+
+No — neither logging in nor accreditation controls this error. The naming is confusing, so here's the exact distinction:
+
+| What you're thinking | Actual code field | Set by |
+|---|---|---|
+| Lender can log into the portal | `users.email` + `users.password_hash` + `users.role='investor'` | signup/auth flow |
+| Accreditation status | `users.accreditation_status` | admin accreditation review (`POST /api/admin/investor-accreditation/:id/decision`) |
+| **TMO lender account number** | **`users.lender_account`** | **admin lender-request completion (`PUT /api/admin/lender-requests/:id/done`)** — the only write path |
+
+The guard that fires checks **only** `users.lender_account` — the TMO account number from The Mortgage Office:
+
+```ts
+// lib/admin/investor_management/index.ts:1137-1138
+const lender_account = existing.investor_lender_account?.trim() ?? ''
+if (!lender_account) return c.json({ error: 'selected lender needs a TMO lender account before TMO sync' }, 409)
+```
+
+It does **not** check accreditation. It does **not** check whether the lender can log in. It checks one thing: is there a TMO account number string in `users.lender_account` for this investor?
+
+That number is **never** set by signup, login, or accreditation. It's an external identifier from The Mortgage Office system that an admin manually enters when completing a lender request. A lender can sign up, log in, be fully accredited, and express interest in deals — and still have `lender_account = NULL` if no admin completed their lender request with the TMO number.
+
+**To confirm and fix in one step**, run this against production D1 (`npx wrangler d1 execute ... --command "..."`):
+
+```sql
+-- Check current state
+SELECT email, lender_account, accreditation_status FROM users WHERE email = '<lender-email>';
+
+-- If lender_account is NULL and you know the TMO number, set it:
+-- UPDATE users SET lender_account = '<TMO-NUMBER>', updated_at = unixepoch() WHERE email = '<lender-email>';
+```
+
+This is a data gap, not a code bug. The one thing that would make this less confusing is renaming the error message or the column — say the word and I'll add a backlog item for clearer messaging (e.g., "lender has no TMO account number on file — complete their lender request first").
+<!-- agent:boundary:05947eb2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -170,7 +208,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The lender logged into the lender portal so they should have a lender account. Is this due to the lender not being accredited?
 <!-- /agent:queue -->
 
 ## Backlog

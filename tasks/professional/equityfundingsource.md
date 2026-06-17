@@ -70,7 +70,24 @@ Deployed the EFS Worker. Pre-deploy checks all green: on `main`, clean tree, **8
 - Smoke tests: `/` 200, `/funded-deals` 200, `/login` 200.
 
 Queue drained (video-corpus struck as out-of-scope last cycle; deploy struck this cycle).
-<!-- agent:boundary:fe33dcfb -->
+
+### Re: Remove "Urgent notifications" label — done, pushed — glm-5.2
+
+> **Queue prompt:**
+>
+> Remove the "Urgent notifications" label in Available Deals dialog/page. Keep the $... remaining to fund.
+
+
+Removed the "Urgent notifications" heading from `DealUrgentNotifications` (admin deal detail / Available Deals dialog) in `lib/ui--browser--efs/portal/admin/deal_detail.tsx`. The notification chips — package follow-up, pending commitments, open doc requests, and **"$... remaining to fund"** — all remain; the "Show all" toggle now renders its own row only when there are 4+ items.
+
+Verification: `make check` green — **812 tests pass / 0 fail**, build + `build:worker` OK.
+
+Commits + push (preset `#spec-test-commit-push`):
+- EFS `81e5fe4` `fix(admin): drop "Urgent notifications" label from deal detail` → pushed `b1f2f89..81e5fe4`
+- root `5184e58ef` submodule pointer bump (root push follows this closeout)
+
+Deploy remains queued as the next item.
+<!-- agent:boundary:cfd083fc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +95,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Remove the "Urgent notifications" label in Available Deals dialog/page. Keep the $... remaining to fund.
+- ~~Remove the "Urgent notifications" label in Available Deals dialog/page. Keep the $... remaining to fund.~~
 - deploy
 <!-- /agent:queue -->
 

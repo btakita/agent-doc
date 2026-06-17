@@ -133,15 +133,76 @@ Focused deterministic verification passed this cycle:
 - `cargo test -p agent-doc simeditor -- --nocapture` (3 tests)
 - `cargo test -p agent-doc multi_editor_crdt_broadcast_converges_without_file_cache_conflict -- --nocapture`
 - `cargo test -p agent-doc integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_back -- --nocapture`
+- `cargo install --path .`
+- `make check` (4650 nextest tests passed, 238 skipped, plus the ignored medium SimWorld check passed)
+- `git diff --check`
+- `cargo test -p agent-doc flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `cargo test -p agent-doc-orchestration converge_document_or_disk -- --nocapture`
+- `cargo test -p agent-doc-orchestration converge_or_disk_write -- --nocapture`
+- `cargo test -p agent-doc-orchestration try_editor_converge -- --nocapture`
+- `cargo test -p agent-doc-orchestration spent_preset_pause -- --nocapture`
+- `cargo test -p agent-doc-orchestration try_editor_converge_degraded_socket_succeeds_via_file_ipc_when_plugin_consumes -- --nocapture`
+- `cargo test -p agent-doc-orchestration try_editor_converge_skips_wedged_socket_when_latched_degraded -- --nocapture`
+- `cargo test -p agent-doc-orchestration dispatch_repairs_unserviceable_preset_token_pause_by_consuming_present_head -- --nocapture`
+- superproject commit `ec4aa2d84` — `chore: update agent-doc submodule for editor fixes`
+- `src/agent-doc` commit `cc79c412` — `fix: recover preset queue pauses without disk fallback`
 
 No code or plugin changes were needed, so no JB plugin install was requested. The backlog and queue are now drained.
-<!-- agent:boundary:2455099b -->
+
+### Re: JB Run Agent Doc queue pause and File Cache Conflict — gpt-5
+
+I treated the inactive queue edit as a fresh bug report and fixed both agent-doc paths it exposed.
+
+For the `tasks/software/tsift.md` dispatch block, the controller now recognizes the newer `preset-token queue heads (#bugs-observed) un-drainable` pause shape as the same repairable preset-token class as the older spent-preset pause. On dispatch it revalidates the live document, consumes the registered preset head when present, or clears the stale pause when absent, instead of leaving JB `Run Agent Doc` blocked behind `queue_paused` with `resume_or_clear_queue_control`.
+
+For the JB `File Cache Conflict` recurrence, I found one remaining raw-disk fallback in editor convergence: when the socket listener was latched degraded, `try_editor_converge` could still return to disk with `listener_degraded`. That is now changed to prefer the plugin-owned file-IPC patch queue and fail closed if file-IPC is missing or unproven. In other words, degraded socket no longer means raw session-document write behind a running JB/VS Code plugin.
+
+No JetBrains plugin code changed. I installed the updated local binary with `cargo install --path .`.
+
+Code landed and was pushed:
+
+- `src/agent-doc` commit `cc79c412` — `fix: recover preset queue pauses without disk fallback`
+- superproject commit `ec4aa2d84` — `chore: update agent-doc submodule for editor fixes`
+
+Verification passed:
+
+- `cargo test -p agent-doc-orchestration dispatch_repairs_unserviceable_preset_token_pause_by_consuming_present_head -- --nocapture`
+- `cargo test -p agent-doc-orchestration try_editor_converge_skips_wedged_socket_when_latched_degraded -- --nocapture`
+- `cargo test -p agent-doc-orchestration try_editor_converge_degraded_socket_succeeds_via_file_ipc_when_plugin_consumes -- --nocapture`
+- `cargo test -p agent-doc-orchestration spent_preset_pause -- --nocapture`
+- `cargo test -p agent-doc-orchestration try_editor_converge -- --nocapture`
+- `cargo test -p agent-doc-orchestration converge_or_disk_write -- --nocapture`
+- `cargo test -p agent-doc-orchestration converge_document_or_disk -- --nocapture`
+- `cargo test -p agent-doc flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `git diff --check`
+- `make check` (4650 nextest tests passed, 238 skipped, plus the ignored medium SimWorld check passed)
+- `cargo install --path .`
+
+CI check: `src/agent-doc` CI run `27722089925` was `in_progress` immediately after the push. The top-level repo has no workflow named `CI`, so `gh run list --workflow CI --limit 1` returned no matching workflow there.
+<!-- agent:boundary:7bb83524 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
-After closing the cod
+After closing the codex agent-doc session in my editor and opening opencode agent-doc session, then running JB `Run Agent Doc`
+```
+resync: pruned 4 stale session(s)
+[route] target tmux session: 0
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/tsift.md: failed_stage=queue_paused reason=preset-token queue heads (#bugs-observed) un-drainable: consume rejects as id-backed, --done fails (no such backlog id); work committed to HEAD 9f363f77d. Halting go-mode flood pending operator clear / agent-doc fix. receipt_id=3860 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control blocked_head_bytes=186 blocked_head_sha256=d052a79f3ac087154352f94541982e5a35a8b5800827cfb2584e5adaca7b36e5 trigger_bytes=34 trigger_sha256=ff0717b425820af71d61b41790930db5c3cf99f1ab121973bfc2671bdfe0e070
+```
+---
+- :pushpin: Still getting JB `File Cache Conflict` dialogs. JB plugin has been running for hours. It should not be possible to write to disk while JB plugin or VSCode plugin is running.
+---
+How can we prevent the wedge conflict from occurring, as what happened in equityfundingsource.md.
+```
+     Found the root cause: IntelliJ's agent-doc plugin owns the ipc.sock but has 22 unaccepted connections in the backlog — the plugin's accept loop is wedged. That's why every IPC attempt times                                            
+     out. Activating the tab can't fix a wedged socket accept loop. 
+```
+
+Aside from fixing the wedge, we should ensure the run does not stall.
+---
+- JB `Run Agent Doc` with Claude did not submit on spoton.md. We should have the loop detect the unsubmitted prompt and Enter.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

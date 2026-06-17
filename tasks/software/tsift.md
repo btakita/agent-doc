@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -46,12 +46,31 @@ Compacted content:
 3. Embedding companion: Qwen3-Embedding 0.6B/4B/8B, starting small and benchmarking up when vector quality matters.
 2. Throughput/long-context candidate: Qwen3-30B-A3B-Instruct-2507 quantized, because it has 30.5B total / 3.3B activated parameters and 262K native context.
 1. Default extractor/reasoner: Qwen3-32B quantized local profile, because the RTX 5090 has enough free VRAM for a 4-bit 32B-class model and Qwen3-32B has 32K native context with YaRN validation beyond that.
-<!-- agent:boundary:626138a6 -->
+- `gh run list --workflow CI --limit 1` could not run because the root repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+- `make check` passed after the contract docs were updated.
+- `git diff --check -- tasks/software/plan-tsift-local-kg-model-support.md` passed.
+- `git -C src/tsift diff --check -- SPEC.md specs/local-kg-model.md packages/tsift-memgraphrag/README.md packages/tsift-agent-doc/README.md packages/tsift-graph/README.md` passed.
+- Earlier planning commit remains `30eeef705`: `docs: plan tsift local kg models`
+- `17e46aa13` in the parent repo: `docs: update tsift local kg plan`
+- `475dbf4` in `src/tsift`: `docs: specify local kg model contracts`
+- `tasks/software/plan-tsift-local-kg-model-support.md` now points to the normative contract and summarizes the contract anchors.
+- `src/tsift/packages/tsift-graph/README.md` now states that local KG facts augment, not replace, deterministic tree-sitter graph extraction.
+- `src/tsift/packages/tsift-agent-doc/README.md` now states that agent-doc consumes `.tsift/graph.db`/`tsift-*` evidence and must not own a separate local-model lifecycle.
+- `src/tsift/packages/tsift-memgraphrag/README.md` now anchors MemGraphRAG to the shared local KG contract while retaining `tsift-local-hash-v1` as the deterministic fallback.
+- `src/tsift/SPEC.md` now links the new local KG spec from the stable spec map.
+- `src/tsift/specs/local-kg-model.md` defines the provider-neutral local KG contract: `GpuProbe`, `ModelProfile`, `LocalModelLease`, `LocalModelProvider`, RTX 5090 model ranking, structured entity/relation schema, run manifests, graph provenance, multi-run semantics, and VRAM cleanup acceptance.
+<!-- agent:boundary:e988f29f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- do [#kgm1]
+- do [#kgm2]
+- do [#kgm3]
+- do [#kgm4]
+- do [#kgm5]
+- do [#kgm6]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -60,7 +79,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgm1] [queue] Spec local-model Knowledge Graph contracts in tasks/software/plan-tsift-local-kg-model-support.md, src/tsift/SPEC.md, and package READMEs: provider-neutral runtime traits, model profile ranking, structured extraction schema, run manifest fields, and graph provenance semantics.
 - [ ] [#kgm2] [queue] Implement the tsift local-model substrate from tasks/software/plan-tsift-local-kg-model-support.md: GPU/VRAM probe, RTX 5090 profile, Qwen3-32B default ranking, Qwen3-30B-A3B throughput fallback, Qwen3-Embedding companion profiles, and CLI status output.
 - [ ] [#kgm3] [queue] Replace the tsift-memgraphrag hash-only semantic path from tasks/software/plan-tsift-local-kg-model-support.md with a pluggable local embedding/extraction provider while retaining tsift-local-hash-v1 as deterministic fallback for tests.
 - [ ] [#kgm4] [queue] Add the shared tsift-kg extraction pipeline from tasks/software/plan-tsift-local-kg-model-support.md for tsift and agent-doc: chunk source/session/memory inputs, call the local model, validate JSON entities/relations, and upsert GraphProjection rows into SQLite plus backend candidates.

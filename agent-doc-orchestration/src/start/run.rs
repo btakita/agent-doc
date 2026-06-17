@@ -614,7 +614,7 @@ pub fn run_with_reap_policy(
     // we even read it, breaking Enter for Claude Code's TUI.
     let raw_mode = RawMode::enable();
 
-    // Redirect stderr to a log file for TUI harnesses (e.g. OpenCode) so that
+    // Redirect stderr to a log file for TUI harnesses (Codex/OpenCode) so that
     // supervisor eprintln! diagnostics do not bleed over the child TUI render.
     if harness.is_tui_harness() {
         let logs_dir = project_root.join(".agent-doc").join("logs");

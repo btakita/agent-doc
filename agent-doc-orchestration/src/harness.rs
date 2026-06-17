@@ -146,7 +146,7 @@ impl HarnessConfig {
     }
 
     pub fn is_tui_harness(&self) -> bool {
-        self.binary == "opencode"
+        matches!(self.binary.as_str(), "codex" | "opencode")
     }
 
     /// Harness-native command that starts a fresh conversation context.
@@ -1178,7 +1178,7 @@ mod tests {
     #[test]
     fn is_tui_harness() {
         assert!(!HarnessConfig::claude().is_tui_harness());
-        assert!(!HarnessConfig::codex().is_tui_harness());
+        assert!(HarnessConfig::codex().is_tui_harness());
         assert!(HarnessConfig::opencode().is_tui_harness());
     }
 

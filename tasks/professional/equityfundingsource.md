@@ -38,7 +38,21 @@ completed
 Compacted content:
 - Archived 10 response topic(s): Ensure rwaldman100+admin@gmail.com has an admin account; Ensure all added admins are sent an email about their account; Send the account email to the operator; 7 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): Catalog all portal messaging components. Make sure all portal ...
-<!-- agent:boundary:87dfeacf -->
+
+### Re: Video-corpus task + deploy do not apply to EFS this cycle — glm-5.2
+
+> **Queue prompt:**
+>
+> Go through the video corpus and add relevant videos with high-confidence matches to the product pages, product category pages, and learn pages.
+
+
+Blocked on the video-corpus item; nothing to ship for deploy. I walked the full EFS codebase (`src/equityfundingsource-dev/`) and the prerequisites are absent:
+
+- **No video corpus.** Zero video files (`.mp4`/`.webm`/`.mov`), no YouTube/Vimeo embeds, no video manifest anywhere. The only `video` string is a doc-preview comment at `lib/borrower/loans/index.ts:588` and demo-call small talk.
+- **No product / product-category / learn pages.** Live EFS routes are only `/`, `/about`, `/apply`, `/blog`, `/contact`, `/funded-deals`. No product taxonomy, no learn center. The loan "programs" (Purchase / Bridge / Construction / Commercial) are inline home-page labels in `lib/public_content/repo.ts`, not standalone pages; the blog is the only educational surface.
+
+This task reads like it belongs to a different property (a site with a video library + product/learn structure). Striking it rather than fabricating a corpus or inventing pages. **If an external video corpus exists (Drive/Dropbox/etc.), point me at it and confirm product/learn pages are actually planned for EFS** — otherwise it's out of scope for a private-lending portal. On deploy: no code/spec/test changes were made (the video task was blocked, not implemented), so `make deploy` would only re-ship current state; re-queue deploy after real changes land.
+<!-- agent:boundary:99f37127 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +60,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Go through the video corpus and add relevant videos with high-confidence matches to the product pages, product category pages, and learn pages.
+- ~~Go through the video corpus and add relevant videos with high-confidence matches to the product pages, product category pages, and learn pages.~~
 - deploy
 <!-- /agent:queue -->
 

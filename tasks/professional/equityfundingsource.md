@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -287,7 +287,29 @@ Verification:
 Confidence: Medium. This preserves the dropped queue edit exactly as document content, but agent-doc classifies it as inactive residue unless the queue is activated with `go`/`start`.
 
 Escalation: None.
-<!-- agent:boundary:04a4da9e -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployed the current EFS Worker from `src/equityfundingsource-dev` commit `4871080` (`Add borrower communication message option`) to Cloudflare.
+
+Deployment:
+- Ran `make deploy` from `src/equityfundingsource-dev`.
+- Remote D1 migration step reported `No migrations to apply!` before and during deployment.
+- Published Worker version `e64fac65-ee56-42a3-9da1-18635ff88de0` at `https://equityfundingsource.brian-takita.workers.dev`.
+- Uploaded the new browser asset `/index.browser-3FHKPGRY.js`.
+
+Changed paths: none. The EFS submodule worktree remained clean after deploy; parent repo dirt was pre-existing and unrelated.
+
+Commands: `agent-doc preflight tasks/professional/equityfundingsource.md`; `agent-doc plan tasks/professional/equityfundingsource.md`; `tsift status`; `git pull --rebase origin main`; `make check`; `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`; `make deploy`; `curl` smoke checks for `/`, the admin pipeline URL, and `/index.browser-3FHKPGRY.js`; `gh run list --workflow CI --limit 1`; `git status --short`.
+
+Verification: `make check` passed (`758 pass`, `0 fail`, app build, Worker build); post-deploy migration list still reports no pending migrations; public homepage returned HTTP 200; protected admin pipeline URL returned HTTP 303 as expected from an unauthenticated shell; deployed browser asset returned HTTP 200. GitHub Actions CI lookup could not be inspected because the EFS repo has no workflow named `CI`.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:ea49f478 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -295,7 +317,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

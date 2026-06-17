@@ -329,14 +329,57 @@ This actually sharpens the earlier ownership point: because Hub is **legacy in-h
 Side note: this session document is getting large (exchange ~281 lines, 7 response sections — accretion is at the **block** threshold). If you'd like a cleaner session, run `/agent-doc compact tasks/recruit/spoton.md` to archive the older exchange. [recommended] Auto-compact is off, so nothing happens unless you ask.
 
 Closeout: changed path is the session document only. Grounding from `transcripts/2026-06-16-14-00-36-transcript.md` (Calvin: "we built... we call Hub"). No code changed, so no test suite applied. Confidence high that Hub ≠ HubSpot; the only residual uncertainty is the exact product identity of "Hub," which only SpotOn can confirm.
-<!-- agent:boundary:3d7e50a7 -->
+
+### Re: Does the 30% contract→install loss revise the assessment? — opus-4-8
+
+> **Queue prompt:**
+>
+> I was told in [2026-06-11 12-31-50-compressed.mp4](../../../../../Videos/2026-06-11%2012-31-50-compressed.mp4) that there is a 30% dropoff between the contract and install. Does that revise your earlier assessment?
+
+Short answer: **it doesn't overturn the assessment — it confirms and sharpens it, and turns a hypothesis into a quantified business case.** It's also not a new figure I missed by inference; it's straight from the Jun 11 call.
+
+#### The number is real and it's Mike's own framing
+
+In [spoton-2026-06-11-call-transcript.md](spoton-2026-06-11-call-transcript.md) (~31:11–31:24), Mike Kai says it almost verbatim:
+
+> "we have a lot of fall off and i'll give you a rough number — **70 eventually install and we lose 30** ... that's a meaty meaty bucket that we're trying to attack ... it's **30% of people that i have already signed the contract with** us, they just never processed."
+
+And he frames the stakes himself (~30:48–31:06): the car-dealership analogy — "not everyone comes to pick up the cars, and **every percentage point that we move up of that installed POS has huge impact to the bottom line**." So the 30% isn't trivia you're bringing me; it's the *explicit mandate of the role*. (My earlier grep missed it because it's spoken as "70 / 30" with no `%` sign, not because the assessment was built without it — the whole signed→install funnel thesis was already aimed at exactly this leak.)
+
+#### Why it confirms rather than revises
+
+Everything I proposed was a response to a leak whose existence I was inferring. The 30% replaces the inference with a measured number, and Mike's stated *causes* line up one-for-one with the product moves already in this doc:
+
+| Drop-off cause Mike named | Matching product move from the assessment |
+|---|---|
+| "drop off happens immediately during **underwriting** ... time kills deals" | Install-risk scoring keyed on time-since-signing + underwriting status; surface aging deals |
+| Deal "gets stuck on **phone call number three**" then "**goes dark**" | Self-scheduling / async upload / reminders so a missed call doesn't stall a deal |
+| "cold feet ... we ask them to do things ... I don't have time for this" | Merchant-facing launch checklist that keeps the deal warm without feeling like homework |
+| "**not a lot of skin in the game** up front" (deposits / inactivity fees) | Acknowledged — but see scope caveat below |
+| Menu "**80% of the way there**," go-live fails if not perfected | Production-grade menu QA before install day |
+
+So the 30% doesn't move the thesis; it loads it. The activation-funnel framing is the right one, and the call gives me the leak size to anchor it to.
+
+#### What it *does* revise (three refinements)
+
+1. **It changes how I'd pitch ROI in the interview.** Stop talking about "improving conversion" in the abstract; talk in points of the 30%. Mike already told you each recovered point is "huge impact to the bottom line," so the strongest framing is: *"of that 30%, which causes are the fattest — underwriting latency, call-three stalls, or menu/install readiness — and what's the recoverable fraction if product absorbs the low-value follow-up?"* That turns your product ideas into a sized opportunity, not a wish list.
+
+2. **Pin down the denominator before quoting it back.** Mike called it a "rough number," and "70 eventually install" is *gross/eventual* (some of the 30% are still slowly dying — he says marking one canceled "might take months"). Worth one clarifying question: is the 30% measured from signed contract, or from a later milestone like approved/hardware-shipped? Where the 30% is measured tells you which stage actually leaks, and it's the difference between "fix underwriting speed" and "fix install-day readiness." Don't present 30% as a precise funnel metric until you know its start line.
+
+3. **Respect the scope boundary Mike drew.** He explicitly said the pricing levers — deposits, inactivity fees ("one competitor literally calls it an inactivity fee") — are "**a bit out of our realm; we're trying to focus more on just the core friction parts.**" So even though "skin in the game" would obviously cut the 30%, that's sales/pricing territory, not the engineering charter. Keep your product pitch on *core friction* (underwriting follow-up, scheduling, going-dark prevention, menu QA, install-day confidence) and mention deposits only as "a lever you're already weighing," not as your proposal. This also dovetails with the Hub/Salesforce + workflow-latitude question already in this doc: the 30% is the *why*, and whether you can touch merchant-facing workflow is the *whether you can fix it*.
+
+#### One-line version for the interview
+
+> "The 30% you lose between signed and installed is exactly the funnel I'd treat as a product, not an ops queue — make every signed merchant's state and next blocker visible, automate the low-value follow-up that's losing deals at underwriting and call-three, and reserve humans for the high-intent saves. Before I'd size it, I'd want to know where in the funnel that 30% is actually measured from."
+
+Closeout: changed path is the session document only; no code, no transcript, no email changed. Grounding pulled directly from `spoton-2026-06-11-call-transcript.md` (~30:48–32:11, Mike Kai's "70 install / lose 30" + drop-off causes). No test suite applies. Confidence high on the transcript facts; the denominator caveat is the one genuinely open item, and only SpotOn can close it.
+<!-- agent:boundary:41e61567 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-Please elaborate on
-> How Hub and Salesforce divide responsibility for a merchant's lifecycle, and how much room the role has to change merchant-facing workflow versus internal tooling?
+I was told in [2026-06-11 12-31-50-compressed.mp4](../../../../../Videos/2026-06-11%2012-31-50-compressed.mp4) that there is a 30% dropoff between the contract and install. Does that revise your earlier assessment?
 <!-- /agent:queue -->
 
 ## Backlog

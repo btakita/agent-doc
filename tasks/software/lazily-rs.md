@@ -39,7 +39,19 @@ queue: start
 Compacted content:
 - Archived 8 response topic(s): Bug audit + fix; #next-steps; #jknk; 5 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): release + publish; LinkedIn scheduled post; LinkedIn post repair
-<!-- agent:boundary:8993e7e3 -->
+
+### Re: #lzrepourl — Cargo.toml repository URL fixed — glm-5.2
+
+> **Queue prompt:**
+>
+> [#lzrepourl]
+
+Fixed `Cargo.toml:7` `repository` from the stale `https://github.com/btakita/lazily-rs` to the canonical `https://github.com/lazily-hub/lazily-rs` (matching `book.toml:9-10` and `git remote origin`). The only stale reference in the crate — `rg` across `src/lazily-rs` found no other occurrences.
+
+**Verification:** `cargo build --all-features`, `cargo clippy --all-features --all-targets -- -D warnings`, `cargo fmt --check`, and `cargo test` all pass (metadata-only change).
+
+**Commit + push:** lazily-rs submodule `691fd3b` → `lazily-hub/lazily-rs` main (`1cee080..691fd3b`); superproject gitlink `7e525d275` → `btakita/agent-loop` main (`bfb58e854..7e525d275`).
+<!-- agent:boundary:4612128c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,14 +60,13 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- [#lzrepourl]
+- ~~[#lzrepourl]~~
 - [#lzloomtimeout]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzrepourl] #lzrepourl=Fix stale Cargo.toml repository URL (line 7: points to https://github.com/btakita/lazily-rs; actual git remote origin is lazily-hub/lazily-rs). Publishes a wrong repo link to crates.io/docs.rs. One-line fix; land before any crates.io publish.
 - [ ] [#lzloomtimeout] #lzloomtimeout=Bound the Loom exhaustive model for inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish (tests/thread_safe_loom.rs:1451) — 2 writer/reader threads + main body blow up the state space and never complete (>5min confirmed), leaving the torn/stale-read invariant for the inline seqlock without an exhaustive proof. Use loom::model_g preemption bounds or factor the model to shrink interleavings. Verification-coverage gap, not a known runtime race (non-exhaustive stress tests pass).
 <!-- /agent:backlog -->
 

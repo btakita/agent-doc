@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -69,7 +69,7 @@ The `inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish` mo
 **SPEC/docs corrected:** `SPEC.md` Loom-gate bullet and two `src/thread_safe.rs` doc-comments changed from *"modeled exhaustively"* to *"preemption-bounded"* for the combined envelope model (honest about the reduced coverage), with the validation method noted.
 
 **Commit + push:** lazily-rs submodule `641fbf2` → `lazily-hub/lazily-rs` main (`691fd3b..641fbf2`); superproject gitlink `1660e814c` → `btakita/agent-loop` main (`7e525d275..1660e814c`).
-<!-- agent:boundary:d50f16d9 -->
+<!-- agent:boundary:18a89f95 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,6 +78,7 @@ The `inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish` mo
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Release + publish
 <!-- /agent:queue -->
 
 ## Backlog

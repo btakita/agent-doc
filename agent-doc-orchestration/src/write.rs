@@ -641,6 +641,13 @@ pub fn response_target_disjoint_from_user_edit(
     if user_added.is_empty() {
         return false;
     }
+    // Queue deletions in a live IPC candidate are not proof of operator intent:
+    // the candidate may be a stale editor buffer with an older/empty
+    // `agent:queue`. Do not let a disjoint outside-edit forward merge carry
+    // that deletion into the committed union (#qdelipc).
+    if !queue_prompt_deletions_between(baseline, candidate).is_empty() {
+        return false;
+    }
     // The agent response always targets the `exchange` component. Confine the
     // forward-merge to user edits OUTSIDE `exchange` so a new prompt, a
     // response-body rewrite, or a re-typed answer (all inside `exchange`) is
@@ -812,6 +819,33 @@ fn queue_prompt_count(counts: &HashMap<String, usize>, prompt: &str) -> usize {
     counts.get(prompt).copied().unwrap_or(0)
 }
 
+/// Queue prompt texts that existed at `baseline` but are absent from the live
+/// IPC `candidate`.
+///
+/// In the live-prompt-drift repair branch the candidate may be a stale editor
+/// buffer, not an intentional operator queue edit. Treating these missing lines
+/// as authoritative silently deletes queue work from `content_ours` (#qdelipc).
+/// The safe default is to keep baseline queue prompts in `content_ours` and let
+/// the normal queue-consume / done-id paths remove them with proof.
+fn queue_prompt_deletions_between(baseline: &str, candidate: &str) -> Vec<String> {
+    let baseline_prompts = queue_prompt_texts(&queue_component_text(baseline));
+    if baseline_prompts.is_empty() {
+        return Vec::new();
+    }
+    let candidate_prompts = queue_prompt_texts(&queue_component_text(candidate));
+    let mut candidate_counts = queue_prompt_counts(&candidate_prompts);
+    let mut deleted = Vec::new();
+    for prompt in baseline_prompts {
+        let remaining = candidate_counts.entry(prompt.clone()).or_insert(0);
+        if *remaining > 0 {
+            *remaining -= 1;
+        } else {
+            deleted.push(prompt);
+        }
+    }
+    deleted
+}
+
 /// `#queue-user-edit-overwrite`: the user-authored queue prompt line(s) present
 /// in the IPC `candidate` (disk / ack sidecar) `agent:queue` that `content_ours`
 /// does not own; these would be silently deleted when `content_ours` is adopted.
@@ -863,91 +897,22 @@ fn dropped_queue_prompt_lines_after_content_ours(
     dropped
 }
 
-/// Preserve live queue deletions while still adopting the agent-owned
-/// `content_ours` response snapshot.
+/// Return `content_ours` unchanged while detecting unproven live queue deletions.
 ///
-/// Live queue additions are intentionally *not* folded into `content_ours`; they
-/// stay as visible next-cycle work and are covered by `dropped_queue_prompts` if
-/// an editor overwrite loses them. Deletions are different: if a prompt existed
-/// at baseline and the live IPC candidate removed it, raw `content_ours` would
-/// resurrect that deleted queue item in the response commit. Remove those
-/// baseline-owned deleted prompts from the `content_ours` queue only.
-fn apply_live_queue_deletions_to_content_ours(
+/// This used to fold candidate queue deletions into `content_ours`, but the
+/// candidate can be stale editor/ack content. On active docs like
+/// `monsterrodholders.md`, that made an old empty queue body authoritative and
+/// repeatedly erased live queue work. Preserve `content_ours`; callers log the
+/// ignored deletion count and keep the deletion out of forward-merge unions.
+fn preserve_content_ours_over_live_queue_deletions(
     baseline: &str,
     live_candidate: &str,
     content_ours: &str,
-) -> String {
-    let baseline_prompts = queue_prompt_texts(&queue_component_text(baseline));
-    if baseline_prompts.is_empty() {
-        return content_ours.to_string();
-    }
-    let candidate_prompts = queue_prompt_texts(&queue_component_text(live_candidate));
-    let baseline_counts = queue_prompt_counts(&baseline_prompts);
-    let candidate_counts = queue_prompt_counts(&candidate_prompts);
-    let deleted_counts: HashMap<String, usize> = baseline_counts
-        .iter()
-        .filter_map(|(prompt, baseline_count)| {
-            let candidate_count = queue_prompt_count(&candidate_counts, prompt);
-            let deleted = baseline_count.saturating_sub(candidate_count);
-            (deleted > 0).then(|| (prompt.clone(), deleted))
-        })
-        .collect();
-    if deleted_counts.is_empty() {
-        return content_ours.to_string();
-    }
-
-    let target_comps = match component::parse(content_ours) {
-        Ok(comps) => comps,
-        Err(_) => return content_ours.to_string(),
-    };
-    let Some(target_queue) = target_comps.iter().find(|c| c.name == "queue") else {
-        return content_ours.to_string();
-    };
-    let target_body = &content_ours[target_queue.open_end..target_queue.close_start];
-    let Ok(target_entries) = crate::queue::parse(target_body) else {
-        return content_ours.to_string();
-    };
-
-    let mut removed_counts: HashMap<String, usize> = HashMap::new();
-    let mut changed = false;
-    let mut kept = Vec::with_capacity(target_entries.len());
-    for entry in target_entries {
-        let remove = match &entry {
-            crate::queue::QueueEntry::Prompt(prompt) if !prompt.multiline => {
-                let text = prompt.text.trim().to_string();
-                let deleted_count = queue_prompt_count(&deleted_counts, &text);
-                if deleted_count == 0 {
-                    false
-                } else {
-                    let removed = removed_counts.entry(text).or_insert(0);
-                    if *removed < deleted_count {
-                        *removed += 1;
-                        true
-                    } else {
-                        false
-                    }
-                }
-            }
-            _ => false,
-        };
-        if remove {
-            changed = true;
-        } else {
-            kept.push(entry);
-        }
-    }
-
-    if !changed {
-        return content_ours.to_string();
-    }
-
-    let new_body = crate::queue::render(&kept);
-    let out = target_queue.replace_content(content_ours, &new_body);
-    if crate::queue::prompts(&kept).is_empty() {
-        frontmatter::merge_queue_state(&out, false).unwrap_or(out)
-    } else {
-        out
-    }
+) -> (String, Vec<String>) {
+    (
+        content_ours.to_string(),
+        queue_prompt_deletions_between(baseline, live_candidate),
+    )
 }
 
 fn snapshot_content_to_persist<'a>(
@@ -4610,7 +4575,7 @@ mod tests {
         );
     }
     #[test]
-    fn apply_live_queue_deletions_removes_deleted_items_without_absorbing_additions() {
+    fn preserve_content_ours_over_live_queue_deletions_keeps_baseline_prompts() {
         let content_ours = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:exchange -->\n",
@@ -4632,8 +4597,11 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
 
-        let reconciled =
-            apply_live_queue_deletions_to_content_ours(content_ours, live_candidate, content_ours);
+        let (reconciled, ignored) = preserve_content_ours_over_live_queue_deletions(
+            content_ours,
+            live_candidate,
+            content_ours,
+        );
 
         assert!(reconciled.contains("### Re: response — gpt-5"));
         assert!(!reconciled.contains("❯ live prompt after preflight"));
@@ -4644,9 +4612,10 @@ mod tests {
         );
         assert!(reconciled.contains("do [#head]"));
         assert!(
-            !reconciled.contains("do [#deleted]"),
-            "live queue deletion must not be resurrected:\n{reconciled}"
+            reconciled.contains("do [#deleted]"),
+            "unproven live queue deletion must not be folded into content_ours:\n{reconciled}"
         );
+        assert_eq!(ignored, vec!["do [#deleted]".to_string()]);
     }
     #[test]
     fn write_appends_response() {
@@ -5929,6 +5898,35 @@ scratch
         assert!(
             response_target_disjoint_from_user_edit(&baseline, &ours, &candidate),
             "a plain comment-note edit outside the response must be forward-mergeable"
+        );
+    }
+    #[test]
+    fn fintol_queue_deletion_is_not_forward_merged_with_outside_edit() {
+        // #qdelipc: a stale live IPC candidate can contain both an unrelated
+        // outside edit and an old/empty queue body. The outside edit is harmless,
+        // but the queue deletion has no consume/done proof, so the candidate must
+        // stay on the carry-forward path instead of being merged into HEAD.
+        let baseline = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#keep]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!--\nold parked note body\n-->\n",
+        )
+        .to_string();
+        let ours = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: do #fix — opus-4-8\n\nImplemented and verified with a long-enough response body to matter.\n<!-- /agent:exchange -->",
+        );
+        let candidate = ours
+            .replace("- do [#keep]\n", "")
+            .replace("old parked note body", "edited parked note body");
+        assert!(
+            !response_target_disjoint_from_user_edit(&baseline, &ours, &candidate),
+            "an unproven queue deletion must block forward merge even with an unrelated outside edit"
         );
     }
     #[test]

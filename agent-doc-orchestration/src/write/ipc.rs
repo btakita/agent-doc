@@ -658,18 +658,21 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
 
     let candidate = decision.snapshot_content.clone();
-    // #queue-user-edit-overwrite: a live queue deletion is authoritative — fold it
-    // into content_ours first so both the fail-closed path and the #fintol2
-    // forward-merge below reason about the user's reconciled queue.
-    let queue_reconciled_ours = apply_live_queue_deletions_to_content_ours(base, &candidate, ours);
-    if queue_reconciled_ours != ours {
+    // #qdelipc: live queue deletion in the IPC candidate is not proof of
+    // operator intent; stale editor/ack content can present an old empty queue.
+    // Preserve content_ours and log the ignored deletion count. Normal
+    // queue-consume / done-id paths remain the only closeout-time deletion proof.
+    let (queue_reconciled_ours, ignored_queue_deletions) =
+        preserve_content_ours_over_live_queue_deletions(base, &candidate, ours);
+    if !ignored_queue_deletions.is_empty() {
         crate::ops_log::log_op(
             file,
             &format!(
-                "queue_content_ours_reconciled file={} source={} patch_id={} reason=live_queue_deletion_authoritative",
+                "queue_live_deletion_ignored file={} source={} patch_id={} count={} reason=unproven_ipc_candidate_queue_deletion",
                 file.display(),
                 source,
-                patch_id.unwrap_or("-")
+                patch_id.unwrap_or("-"),
+                ignored_queue_deletions.len()
             ),
         );
     }
@@ -3893,7 +3896,7 @@ mod core_tests {
     use tempfile::TempDir;
 
     #[test]
-    fn ipc_live_prompt_drift_content_ours_preserves_live_queue_deletions() {
+    fn ipc_live_prompt_drift_content_ours_ignores_unproven_live_queue_deletions() {
         let dir = tempfile::tempdir().unwrap();
         let baseline = concat!(
             "---\nqueue_active: true\n---\n\n",
@@ -3961,17 +3964,17 @@ mod core_tests {
             decision.snapshot_content
         );
         assert!(
-            !decision.snapshot_content.contains("do [#deleted]"),
-            "live queue deletion must not be resurrected:\n{}",
+            decision.snapshot_content.contains("do [#deleted]"),
+            "unproven live queue deletion from a stale IPC candidate must not be folded into content_ours:\n{}",
             decision.snapshot_content
         );
         let log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            log.contains("queue_content_ours_reconciled")
-                && log.contains("reason=live_queue_deletion_authoritative")
+            log.contains("queue_live_deletion_ignored")
+                && log.contains("reason=unproven_ipc_candidate_queue_deletion")
                 && log.contains("dropped_queue_prompt_recorded"),
-            "queue reconciliation must leave ops.log proof:\n{log}"
+            "queue deletion must be ignored while queue additions still leave dropped-edit proof:\n{log}"
         );
     }
     #[test]

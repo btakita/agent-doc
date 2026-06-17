@@ -65,7 +65,29 @@ bun ./bin/ensure-admins.ts --remote             # apply
 ```
 
 **Note on the next two queue items** (email-on-admin-creation): they layer cleanly on `ensure_admin_` (email when `created=true`), but real outbound send is still gated on a verified EFS Resend sending domain (`#f4rq`). Local capture works today; production send waits on that domain.
-<!-- agent:boundary:acf98888 -->
+
+### Re: Ensure all added admins are sent an email about their account — glm-5.2
+
+> **Queue prompt:**
+>
+> Ensure all added admins are sent an email about their account.
+
+
+**Done.** Shipped the admin-provisioned email capability and wired it into every admin-creation path so each newly-added admin receives a welcome email.
+
+**Spec + impl** (`src/equityfundingsource-dev`, commit `3a69e1d`, pushed `main`):
+- `admin_provisioned_email_` (`lib/email/templates/lifecycle.ts`) — welcome template via the shared `render_`/`layout_` helpers; subject `Your Equity Funding Source admin account`, shows the tied email + admin-login CTA.
+- `notify_admin_provisioned_(env, {admin_email, admin_name})` + `notify_admins_provisioned_(env, results)` (`lib/email/lifecycle.ts`) — the batch notifier emails only `created:true` rows, so re-running the bootstrap seed never re-emails anyone. Returns `email_send_result_T` per recipient.
+- **Wired `POST /admin/signup`** (`lib/auth/routes.ts`) to fire `notify_admin_provisioned_` right after insert — best-effort (`.catch`), so a skipped send never blocks signup.
+
+**Delivery:** `email_send_direct_` captures locally in dev/CI and sends via the already-configured Cloudflare Email Service in production (`wrangler.toml` has `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED` + verified `MESSAGE_NOTIFICATION_FROM`), so no new env vars are required.
+
+**Verify:** `bun run check` → **787 pass / 0 fail** (+7 new); worker build OK.
+**Tests:** `tests/admin-provisioning-email.test.ts` (template render, no-prod-domain-leak, local capture, `SITE_URL` login link, batch created-only filter, signup wiring).
+**Spec:** `prds/admin-provisioning-spec.md` gains an Email-notification-on-provisioning section.
+
+**Next queue item** ("Send rwaldman100+admin@gmail.com an email about his account") is now unblocked and mechanical: run `bun ./bin/ensure-admins.ts --remote` to create Robert's row, then trigger `notify_admin_provisioned_` for it (e.g. via an admin-gated in-worker call) — the capability and production sender are both in place.
+<!-- agent:boundary:3af77d7c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,8 +96,10 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Ensure rwaldman100+admin@gmail.com has an admin account.~~
-- Ensure all added admins are sent an email about their account.
+- ~~Ensure all added admins are sent an email about their account.~~
 - Send rwaldman100+admin@gmail.com an email about his account.
+- All message boxes, portal and main site, should support Ctrl+Enter (Windows, Linux) or Cmd+Enter (OSX) to send the message.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

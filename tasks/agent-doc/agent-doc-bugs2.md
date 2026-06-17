@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -47,14 +47,14 @@ Verification passed:
 - Latest GitHub Actions CI on `main`: completed/success, run `27664844335`
 
 A new queue item about JB Run Agent Doc Enter retry behavior is still behind this item; I am not treating it as completed by this closeout.
-<!-- agent:boundary:493ed0d1 -->
+<!-- agent:boundary:f3efdde2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: agent-doc CLI has misformatted help message ![img_37.png](img_37.png)~~
-- ~~:pushpin: Resubmit Enter works with JB `Clear Session Context`. Resubmit Enter does not work with JB `Run Agent Doc`.~~
+- :pushpin: Resubmit Enter works with JB `Clear Session Context`. Resubmit Enter does not work with JB `Run Agent Doc`.
 - There are still disk writes causing JB `File Cache Conflict` dialogs.
 <!-- /agent:queue -->
 ###

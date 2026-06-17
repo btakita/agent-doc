@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -179,7 +179,49 @@ Verification passed:
 - `cargo install --path .`
 
 CI check: `src/agent-doc` CI run `27722089925` was `in_progress` immediately after the push. The top-level repo has no workflow named `CI`, so `gh run list --workflow CI --limit 1` returned no matching workflow there.
-<!-- agent:boundary:762764ed -->
+
+### Re: JB Run Agent Doc crash, cache conflicts, wedged IPC, and submit proof — gpt-5
+
+> **Queue prompt:**
+>
+> - In spoton.md (Claude Code), I added a queue item and ran Jb `Run Agent Doc`. The supervisor/tmux pane crashed, the queue item I added was deleted. When I selected the page in the editor, a new supervisor/tmux pane auto-started.
+
+
+Implemented and shipped the agent-doc fixes in `src/agent-doc`.
+
+What changed:
+
+- Route-owned queued rerun writes now go through `converge_document_or_disk(..., "route_dispatch_queue")` instead of direct disk `atomic_write`, so active JetBrains/VSCode editor buffers get the same IPC/file-IPC convergence path as normal closeout writes.
+- IPC degraded self-heal no longer treats a successful socket connect as proof that the listener is healthy. It now sends an acking short probe and keeps the degraded/file-IPC latch when the socket accepts connections but does not respond, which covers the wedged accept-backlog case.
+- Added regression coverage for the route queued-rerun editor-IPC path and the wedged-listener degraded-latch behavior.
+- Updated the routing/closeout/control-plane specs so future changes preserve the editor-visible writeback and ack-probe requirements.
+
+Notes on the queued reports:
+
+- The reported queue-item loss path was already protected by the existing live-prompt drift/IPC adoption guard; this cycle keeps that protection intact and removes the direct route write path that could bypass editor convergence.
+- The submit-proof complaint is covered by the existing route submit observations/retry machinery; this change focuses on the two concrete transport bugs that made those runs unsafe: disk writes while an editor plugin owned the buffer, and clearing the degraded latch on connect-only evidence.
+
+Verification run:
+
+- `cargo fmt`
+- `git diff --check`
+- Focused regressions:
+  - `cargo test -p agent-doc-orchestration route_enqueue_dispatch_prompt_converges_via_editor_ipc_with_listener -- --nocapture`
+  - `cargo test -p agent-doc-orchestration degraded_latch_does_not_self_heal_when_listener_connects_without_ack -- --nocapture`
+  - `cargo test -p agent-doc-orchestration degraded_latch_self_heals_when_listener_recovers -- --nocapture`
+  - `cargo test -p agent-doc-orchestration try_editor_converge_degraded_socket_succeeds_via_file_ipc_when_plugin_consumes -- --nocapture`
+  - `cargo test -p agent-doc-orchestration try_editor_converge_skips_wedged_socket_when_latched_degraded -- --nocapture`
+  - `cargo test -p agent-doc flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `make check` passed: clippy, nextest `4652` passed / `238` skipped, doctests, and the medium SimWorld ignored check.
+- `cargo build` passed.
+- `make install` passed and refreshed both `/home/brian/.cargo/bin/agent-doc` and `/home/brian/.cargo/bin/libagent_doc.so`; the install marked 2 controllers for idle-boundary recycle.
+- Latest GitHub Actions CI for `agent-doc` `main` was green: `fix: recover preset queue pauses without disk fallback`, run `27722089925`, completed successfully on June 17, 2026.
+
+Commits pushed:
+
+- `agent-doc`: `96624f9c` (`fix: route queued reruns through editor ipc`)
+- `agent-loop`: `35a8df61d` (`chore: update agent-doc submodule for route ipc fixes`)
+<!-- agent:boundary:91b5c611 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -192,7 +234,23 @@ resync: pruned 4 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/tsift.md: failed_stage=queue_paused reason=preset-token queue heads (#bugs-observed) un-drainable: consume rejects as id-backed, --done fails (no such backlog id); work committed to HEAD 9f363f77d. Halting go-mode flood pending operator clear / agent-doc fix. receipt_id=3860 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control blocked_head_bytes=186 blocked_head_sha256=d052a79f3ac087154352f94541982e5a35a8b5800827cfb2584e5adaca7b36e5 trigger_bytes=34 trigger_sha256=ff0717b425820af71d61b41790930db5c3cf99f1ab121973bfc2671bdfe0e070
 ```
 ---
-- In spoton.md (Claude Code), I added a queue item and ran Jb `Run Agent Doc`. The supervisor/tmux pane crashed, the queue item I added was deleted. When I selected the page in the editor, a new supervisor/tmux pane auto-started.
+- ~~In spoton.md (Claude Code), I added a queue item and ran Jb `Run Agent Doc`. The supervisor/tmux pane crashed, the queue item I added was deleted. When I selected the page in the editor, a new supervisor/tmux pane auto-started.~~
+---
+I ran JB `Run Agent Doc` on spoton.md runnnig Claude. The session crashed.
+```
+[route] target tmux session: 0
+[repair] repaired stale preflight_started cycle cycle-1781734847604 for tasks/recruit/spoton.md
+[commit] prior response is already committed in HEAD for tasks/recruit/spoton.md — leaving later local user follow-up edits uncommitted for the next response cycle. This is not a full closeout for the follow-up prompt; run `agent-doc tasks/recruit/spoton.md` to answer it or pipe the response through `agent-doc write --commit tasks/recruit/spoton.md`.
+[perf] commit total: 12ms
+[session-check] warn: possible partial staging closeout in /home/brian/work/btakita/agent-loop/src/equityfundingsource-dev — latest commit changed `app/equityfundingsource/lib/admin/investor_management/index.ts`, `lib/ui--browser--efs/portal/admin/deal_detail.tsx`, `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`, `tests/admin-investor-pipeline.test.ts`, but tracked uncommitted companion changes remain in `app/equityfundingsource/lib/admin/routes.ts`, `app/equityfundingsource/lib/admin/user_management/index.ts`, `lib/ui--browser--efs/portal/admin/deal_detail.tsx` with overlapping changed string literal(s): `display:inline-flex;align-items:center;border:1px solid #FCD34D;background:#FEF3C7;color:#92400E;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:800;`.
+[session-check] hint: commit the companion changes, revert them, or rerun verification against the committed tree before reporting CI-ready closeout.
+[perf] closeout_latency file=tasks/recruit/spoton.md total_ms=599 phases=git_commit:12ms,cycle_state:0ms,closeout_reap:0ms,session_check:579ms,session_actor_closeout:5ms,fallback_cleanup:1ms
+[route] drained open closeout for tasks/recruit/spoton.md before reroute (StalePreflightLockRepaired)
+[route] Pane %84 is in session '', not target '0' — skipping stash rescue
+Error: project controller command `dispatch` failed: dispatch rejected for tasks/recruit/spoton.md: authoritative actor generation 21 is closed receipt_id=3877
+```
+---
+- JB `Run Agent Doc` on lazily-rs stalled with no action.
 - :pushpin: Still getting JB `File Cache Conflict` dialogs. JB plugin has been running for hours. It should not be possible to write to disk while JB plugin or VSCode plugin is running.
 ---
 How can we prevent the wedge conflict from occurring, as what happened in equityfundingsource.md.

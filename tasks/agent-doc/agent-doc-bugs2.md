@@ -384,14 +384,31 @@ Changed files: `agent-doc-orchestration/src/write.rs`, `agent-doc-orchestration/
 Verification passed: focused regressions for `ipc_live_prompt_drift_content_ours_ignores_unproven_live_queue_deletions`, `preserve_content_ours_over_live_queue_deletions_keeps_baseline_prompts`, and `fintol_queue_deletion_is_not_forward_merged_with_outside_edit`; full `cargo test -p agent-doc-orchestration`; `cargo fmt`; `git diff --check`; full `make check` with 4,636 nextest tests plus doctests and medium simulation; and `make install` installed `agent-doc 0.34.1` plus the FFI library and marked two controllers for idle recycle.
 
 Pushed: `btakita/agent-doc` `a1e139d5` (`fix: ignore unproven live queue deletions`). The parent repo records that submodule SHA at pushed root HEAD `bfb58e854`; that parent commit was produced by a concurrent agent-doc session and includes its session document change along with the gitlink. Agent-doc CI run `27710668979` is in progress; the parent repo has no workflow named `CI`.
-<!-- agent:boundary:d8398e00 -->
+
+### Re: agent-doc on Codex outputs console messages that obscures the TUI ![img_38.png](img_38.png) after a turn after a `/clear`, and after a restart. — gpt-5
+
+> **Queue prompt:**
+>
+> agent-doc on Codex outputs console messages that obscures the TUI ![img_38.png](img_38.png) after a turn after a `/clear`, and after a restart.
+
+
+Fixed and shipped.
+
+The screenshot showed routine supervisor stderr painting over the Codex pane: stale-busy reconcile and hot-reload status lines. The existing `agent-doc start` path already redirected supervisor stderr for TUI harnesses, but Codex was incorrectly excluded from that classification. Codex is now classified with OpenCode as a TUI harness, so managed Codex supervisors redirect their own stderr to `.agent-doc/logs/supervisor-stderr.log` after startup instead of printing over the foreground TUI. Claude remains attached to supervisor stderr for its existing operator-prompt contract.
+
+Changed files: `agent-doc-orchestration/src/harness.rs`, `agent-doc-orchestration/src/start/run.rs`, `specs/supervisor.md`, and `VERSIONS.md`.
+
+Verification passed: `cargo fmt`; focused `cargo test -p agent-doc-orchestration is_tui_harness -- --nocapture`; focused `cargo test -p agent-doc-orchestration route_owned_start_status_logs_without_printing_by_default -- --nocapture`; `git diff --check`; full `make check` with 4,636 nextest tests plus doctests and medium simulation; and `make install`, which installed `agent-doc 0.34.1` plus the FFI library and marked two controllers for idle recycle.
+
+Pushed: `btakita/agent-doc` `560f7b49` (`fix: redirect codex supervisor stderr`) and parent gitlink commit `00c63c1a6` (`agent-doc: redirect codex supervisor stderr`), with root HEAD now recording `src/agent-doc` at `560f7b49`. Agent-doc CI run `27711235635` is in progress; the parent repo has no workflow named `CI`.
+<!-- agent:boundary:22bc1c70 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~agent-doc on monsterrodholders.md keeps on deleting the `agent:queue` element.~~
-- agent-doc on Codex outputs console messages that obscures the TUI ![img_38.png](img_38.png) after a turn after a `/clear`, and after a restart.
+- ~~agent-doc on Codex outputs console messages that obscures the TUI ![img_38.png](img_38.png) after a turn after a `/clear`, and after a restart.~~
 - agent-doc sent a prompt to Codex (does this with other models too) while a task was running ![img_39.png](img_39.png)
 - On monsterrodholders.md, after a JB `Clear Session Context` was successful, JB `Run Agent Doc` added a duplicate prompt (one with the relative path and one with the absolute path), and did not submit the prompt ![img_41.png](img_41.png).
 - agent-doc is spamming the same prompt as I type into the queue in Codex on monsterrodholders.md ![img_42.png](img_42.png)

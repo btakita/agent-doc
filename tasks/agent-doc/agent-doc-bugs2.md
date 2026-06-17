@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -123,14 +123,44 @@ New queue note: I saw the File Cache Conflict queue item and ran `make install` 
 
 Changed paths: `src/agent-doc/README.md`, `src/agent-doc/VERSIONS.md`, `src/agent-doc/agent-doc-orchestration/src/route/dispatch.rs`, `src/agent-doc/specs/08a-session-actor-contract.md`, `src/agent-doc/specs/11-debounce.md`, `src/agent-doc/src/session_actor_cmd.rs`, plus root `src/agent-doc` submodule pointer.
 Escalation: none.
-<!-- agent:boundary:0877f635 -->
+
+### Re: JB File Cache Conflict / external file edits — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Still getting JB `File Cache Conflict` dialogs. Sometimes they happen frequently. Ban external file edits when the plugin is running.
+
+
+Implemented and installed the binary-side ban on direct document writes while an editor plugin listener is running.
+
+What changed:
+- Shared editor convergence now allows disk fallback only when no JetBrains/VS Code IPC listener is active. Active-listener failures log `<source>_writeback ... transport=blocked reason=... action=refuse_external_disk_write` and fail closed.
+- The guarded document gate, plain maintenance gate, queue consume, template apply, compact, pending/review/dedupe/preflight maintenance, and live-prompt auto-recovery paths inherit the same rule.
+- Already-current active-listener updates are no-op successes (`transport=already_current`).
+- Specs, runbooks, changelog, and workflow-invariant vocabulary now describe the no-listener-only disk fallback contract.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p agent-doc-orchestration write::converge::core_tests -- --nocapture`
+- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `make check` (4635 passed, 238 skipped, doctests ok, ignored medium sim ok)
+
+Install / commits:
+- `src/agent-doc`: `59d2d9e5 block editor-active disk fallbacks` pushed to `origin/main`.
+- root pointer: `f5ed3a04c agent-doc: block editor-active disk fallbacks` committed locally.
+- `make install` installed the CLI and `libagent_doc.so`, marking 2 controllers for idle-boundary recycle.
+- Latest CI for `59d2d9e5` was `in_progress` when checked.
+
+No JetBrains plugin update is needed; this is Rust binary/orchestration behavior. The live route-owned supervisor for this doc still warns stale until the current busy turn reaches an idle boundary and recycles.
+
+Changed paths: `src/agent-doc/agent-doc-orchestration/src/write/converge.rs`, `src/agent-doc/agent-doc-orchestration/src/test_support.rs`, `src/agent-doc/agent-doc-orchestration/src/write/run_entry.rs`, `src/agent-doc/agent-doc-orchestration/src/compact.rs`, `src/agent-doc/agent-doc-orchestration/src/flow/workflow_invariants.rs`, `src/agent-doc/tests/test_cli.rs`, `src/agent-doc/VERSIONS.md`, `src/agent-doc/specs/07-closeout-commands.md`, `src/agent-doc/specs/07-orchestration-commands.md`, `src/agent-doc/runbooks/commit.md`, `src/agent-doc/runbooks/compact-exchange.md`, `src/agent-doc/runbooks/jb-cache-conflict.md`, plus root `src/agent-doc` submodule pointer.
+Escalation: none.
+<!-- agent:boundary:281cdb14 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Run Session Doc` did not submit to Codex on monsterrodholders.md. It was once working but now it is not. Do we have logging to isolate exactly why? Try polling Return until the submission occurs. I just want to see something work with Codex then we can refine the solution.~~
-- :pushpin: Still getting JB `File Cache Conflict` dialogs. Sometimes they happen frequently. Ban external file edits when the plugin is running.
 <!-- /agent:queue -->
 ###
 <!--

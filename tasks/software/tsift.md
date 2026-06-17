@@ -174,7 +174,41 @@ Verification:
 - `gh run list --workflow CI --limit 1` still reports `could not find any workflows named CI`, matching the earlier repo state.
 
 Workspace note: the pre-existing unrelated formatting-only dirty files under `src/tsift` remain unstaged. The next queued item is `#kgm5` for lifecycle and VRAM cleanup controls.
-<!-- agent:boundary:cbc1e796 -->
+
+### Re: #kgm5 lifecycle and VRAM cleanup controls - gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#kgm5]
+
+
+Implemented provider-neutral local-model lifecycle and cleanup controls.
+
+What changed:
+- Added timestamped `GpuProbe` records, `LocalModelLease`, unload action descriptions, lifecycle reports, cleanup statuses, and before/after VRAM cleanup evaluation in `tsift-local-model`.
+- Added provider-specific cleanup action planning for llama.cpp router unload, Ollama `keep_alive: 0`/`ollama stop`, vLLM sleep mode, process-exit fallback, and no-GPU fallback profiles.
+- Added cleanup proof logic that passes when post-unload VRAM returns within tolerance, accepts increases accounted for by non-tsift GPU processes, and fails when a tsift/llama/Ollama/vLLM process remains or VRAM stays materially above baseline.
+- Added `tsift local-model unload` with live or synthetic probes, JSON/human output, configurable tolerance, provider endpoint/pid metadata, and `--strict` failure mode for run gates.
+- Documented the lifecycle contracts in `packages/tsift-local-model/README.md`.
+
+Commits:
+- `d26043e` in `src/tsift`: `feat: add local model lifecycle cleanup`
+- `a06f91f0d` in the parent repo: `tsift: add local model lifecycle cleanup`
+
+Verification:
+- `cargo test -p tsift-local-model`
+- `cargo test -p tsift-cli cli_local_model_unload_accepts_probe_and_strict_flags`
+- `cargo check -p tsift-cli`
+- `cargo run -p tsift-cli -- local-model unload --pre-used-mib 200 --post-used-mib 800 --provider-pid 42 --json`
+- `cargo run -p tsift-cli -- local-model unload --pre-used-mib 200 --post-used-mib 2000 --strict --json` exited non-zero as expected.
+- `git -C src/tsift diff --check -- packages/tsift-local-model packages/tsift-cli/src/cli.rs packages/tsift-cli/src/lib.rs`
+- `git -C src/tsift diff --cached --check`
+- `cargo test --workspace`
+- `make check`
+- `gh run list --workflow CI --limit 1` still reports `could not find any workflows named CI`.
+
+Workspace note: the unrelated pre-existing dirty files under `src/tsift` remain unstaged. The next queued item is `#kgm6` for multi-run verification.
+<!-- agent:boundary:377bd7ae -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -184,7 +218,7 @@ Workspace note: the pre-existing unrelated formatting-only dirty files under `sr
 - ~~:pushpin: do [#kgm2]~~
 - ~~:pushpin: do [#kgm3]~~
 - ~~:pushpin: do [#kgm4]~~
-- :pushpin: do [#kgm5]
+- ~~:pushpin: do [#kgm5]~~
 - :pushpin: do [#kgm6]
 <!-- /agent:queue -->
 <!--
@@ -194,7 +228,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgm5] [queue] Add model lifecycle and VRAM cleanup controls from tasks/software/plan-tsift-local-kg-model-support.md: per-run lease, idle TTL, Ollama keep_alive=0, llama.cpp router unload, process-kill fallback, nvidia-smi before/after proof, and single-5090 concurrency guard.
 - [ ] [#kgm6] [queue] Add multi-run verification from tasks/software/plan-tsift-local-kg-model-support.md: two sequential KG runs, interrupted-run cleanup, no duplicate/stale graph facts, no orphaned model processes, VRAM returns near baseline, make check, and tsift graph/memory smoke tests.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift-md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->

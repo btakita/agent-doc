@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,109 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260617-192214.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260617-193814.md`*
 
 Compacted content:
-- Archived 2 response topic(s): Lender Conversation Uploads + Deploy; Lender Message Drag Uploads + Deploy
-- Prior summary/context: prior compacted content: Archived 3 response topic(s): Secure Message Attachments + Deploy; Add rwaldman100+admin@gma...
-- Live smoke: investor login returned HTTP 200; unauthenticated admin messages returned HTTP 303 to `/login?role=admin&next=%2Fportal-admin%2Fmessages`
-- Root `make check`: exited 0
-- Full EFS check: 770 passed, 0 failed; browser and Worker builds completed
-- Focused suite: 130 passed, 0 failed
-- `curl -sS -D - -o /dev/null 'https://equityfundingsource.brian-takita.workers.dev/portal-admin/messages'`
-- `curl -sS -D - -o /dev/null 'https://equityfundingsource.brian-takita.workers.dev/login?role=investor'`
-- `bun run deploy:worker`
-- `git -C src/equityfundingsource-dev push origin main`
-- `git -C src/equityfundingsource-dev diff --check`
-- `gh run list --workflow CI --limit 1` in parent repo and EFS submodule; both reported no workflow named `CI`
-- `make check`
-- `bun run check`
-- `bun test tests/borrower-messages.test.ts tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`
-- Live URL: `https://equityfundingsource.brian-takita.workers.dev`
-- Worker version: `2a0bf516-73b7-47bf-a9d6-eceb215dfd4b`
-- No remote D1 migrations to apply
-- `bun run deploy:worker`
-- Parent pointer: `98d8c7511` (`agent-doc(equityfundingsource): portal messaging uploads`), local only because the parent repo has unrelated dirty/ahead state
-- EFS submodule: `f4ca742` (`Add uploads to admin borrower workflows`), pushed to `origin/main`
-- `src/equityfundingsource-dev` submodule pointer in parent repo
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/borrower-messages.test.ts`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/investor_management/index.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/borrower/messages/routes.ts`
-- Admin investor-pipeline borrower communication
-- Admin deal-detail borrower communication
-- Admin investor-pipeline lender communication
-- Admin deal-detail lender communication
-- Investor available-deal Message EFS
-- Admin Messages
-- Borrower Messages
-
-### Re: Catalog all portal messaging components. Make sure all portal messaging components support file uploads. deploy — gpt-5
-
-> **Queue prompt:**
->
-> Catalog all portal messaging components. Make sure all portal messaging components support file uploads. deploy
-
-
-Implemented, pushed, and deployed.
-
-Cataloged portal messaging compose surfaces:
-- Borrower Messages
-- Admin Messages
-- Investor available-deal Message EFS
-- Admin deal-detail lender communication
-- Admin investor-pipeline lender communication
-- Admin deal-detail borrower communication
-- Admin investor-pipeline borrower communication
-
-The missing upload support was the admin borrower-communication compose path inside deal-interest workflows. I wired both admin locations to the shared borrower secure-message upload parser, so borrower workflow messages now accept JSON text, multipart text, attachments, and attachment-only sends. Stored attachment metadata now flows back through workflow summaries and renders as guarded download links in both admin deal detail and the investor pipeline workflow history.
-
-changed_paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/borrower/messages/routes.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/investor_management/index.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/tests/borrower-messages.test.ts`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev` submodule pointer in parent repo
-
-commits:
-- EFS submodule: `f4ca742` (`Add uploads to admin borrower workflows`), pushed to `origin/main`
-- Parent pointer: `98d8c7511` (`agent-doc(equityfundingsource): portal messaging uploads`), local only because the parent repo has unrelated dirty/ahead state
-
-deploy:
-- `bun run deploy:worker`
-- No remote D1 migrations to apply
-- Worker version: `2a0bf516-73b7-47bf-a9d6-eceb215dfd4b`
-- Live URL: `https://equityfundingsource.brian-takita.workers.dev`
-
-commands:
-- `bun test tests/borrower-messages.test.ts tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`
-- `bun run check`
-- `make check`
-- `gh run list --workflow CI --limit 1` in parent repo and EFS submodule; both reported no workflow named `CI`
-- `git -C src/equityfundingsource-dev diff --check`
-- `git -C src/equityfundingsource-dev push origin main`
-- `bun run deploy:worker`
-- `curl -sS -D - -o /dev/null 'https://equityfundingsource.brian-takita.workers.dev/login?role=investor'`
-- `curl -sS -D - -o /dev/null 'https://equityfundingsource.brian-takita.workers.dev/portal-admin/messages'`
-
-verification:
-- Focused suite: 130 passed, 0 failed
-- Full EFS check: 770 passed, 0 failed; browser and Worker builds completed
-- Root `make check`: exited 0
-- Live smoke: investor login returned HTTP 200; unauthenticated admin messages returned HTTP 303 to `/login?role=admin&next=%2Fportal-admin%2Fmessages`
-
-confidence: high
-
-escalation: force-disk agent-doc closeout used after IPC proof failure, stale captured baseline replay failure, stale supervisor recycle, and session-specific restart refusal because the active pane was busy
-<!-- agent:boundary:6c4d37f4 -->
+- Archived 1 response topic(s): Catalog all portal messaging components. Make sure all portal messaging components support file uploads. deploy
+- Prior summary/context: prior compacted content: Archived 2 response topic(s): Lender Conversation Uploads + Deploy; Lender Message Drag Uplo...
+<!-- agent:boundary:9c260f52 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -143,6 +46,9 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Ensure rwaldman100+admin@gmail.com has an admin account.
+- Ensure all added admins are sent an email about their account.
+- Send rwaldman100+admin@gmail.com an email about his account.
 <!-- /agent:queue -->
 
 ## Backlog

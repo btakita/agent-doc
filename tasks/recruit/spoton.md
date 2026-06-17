@@ -1,6 +1,6 @@
 ---
 agent_doc_session: ebec48ed-d3ed-40f6-bcd0-c37938c43e8b
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -192,12 +192,13 @@ Specific questions to ask:
 One-line note on session state: the document exchange is large, but the queue was active, so I answered and closed the item rather than pausing for compaction.
 
 Closeout proof: changed path is the session document only. Commands included `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, and this `agent-doc finalize`. No code tests were run because no code changed. No escalation was needed. Confidence is medium-high; exact SpotOn CRM/vendor details were not verified and are not needed for this product/workflow answer.
-<!-- agent:boundary:219c579f -->
+<!-- agent:boundary:205d0a9f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- Corky GPU transcribe + diarize [2026-06-16 14-00-36-compressed.mp4](../../../../../Videos/2026-06-16%2014-00-36-compressed.mp4)
 <!-- /agent:queue -->
 
 ## Backlog

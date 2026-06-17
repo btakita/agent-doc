@@ -30,94 +30,26 @@ complete
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Response — gpt-5
-Fixed and installed the `agent-doc admin recycle` CLI path behind the screenshot.
+### Session Summary
 
-The clean-terminal reproduction did not show the right-shifted help text, but it did expose the actionable defect: `agent-doc admin recycle tasks/software/lazily-rs.md` treated the document path as an unexpected argument and fell into clap's generic usage/error path. `admin recycle` now accepts an optional `[FILE_OR_PROJECT_ROOT]` positional target, so a document path or project root can be passed directly. Relative document targets are anchored at the current directory and canonicalized before project-root discovery, so `tasks/...` resolves to the real project root instead of an empty path.
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260617-071418.md`*
 
-Implemented in `src/agent-doc` commit `e0fbb241 fix: accept recycle document targets`. The parent gitlink is committed in this closeout.
-
-Verification passed:
-- `cargo test -p agent-doc --test test_cli test_admin_recycle`
-- `cargo test -p agent-doc --test test_cli`
-- `make check` (4628 nextest tests passed, 238 skipped; doctests and medium closeout sim passed)
-- `make install`; `agent-doc --version` -> `agent-doc 0.34.1`
-- Installed CLI proof: `agent-doc admin recycle --help` shows `Usage: agent-doc admin recycle [OPTIONS] [FILE_OR_PROJECT_ROOT]`
-- Installed CLI proof: `agent-doc admin recycle tests/test_cli.rs --json` returns the absolute `src/agent-doc` project root with `"recycled":false`
-- Latest GitHub Actions CI on `main`: completed/success, run `27664844335`
-
-A new queue item about JB Run Agent Doc Enter retry behavior is still behind this item; I am not treating it as completed by this closeout.
-
-### Response — gpt-5
-I checked the current `src/agent-doc` route path against the Clear Session Context retry path. This item is already covered in the installed code; I did not make a new source change for it.
-
-For Run Agent Doc, `agent-doc-orchestration/src/route/dispatch.rs` has the bounded retry in `send_command_unchecked`: after the first direct-pane submit, `direct_pane_needs_enter_resubmit` allows exactly one bare submit-key retry when the harness is Codex, Claude, or OpenCode, the first submit window timed out, and the routed trigger is still visible in the active draft. It also handles the case where the routed command was already drafted before dispatch by calling the same submit-key path without appending another command. The proof line is `route_submit_resubmit ... action=submit_key key=Enter result=accepted|still_visible`.
-
-That is intentionally narrower than retry-until-submit. If pane input was accepted and the trigger is no longer visibly drafted, Run Agent Doc must not keep pressing Enter because that can duplicate a dispatch when only dispatch-start proof is stale. Those accepted-only cases remain blocked/diagnosed instead of resubmitted.
-
-Verification run for this head:
-- `cargo test -p agent-doc-orchestration direct_pane_resubmit -- --nocapture`
-- `cargo test -p agent-doc-orchestration route_submit_resubmit -- --nocapture`
-- Latest GitHub Actions CI on `main`: completed/success, run `27664844335`
-- `make install`; installed `agent-doc --version` reports `agent-doc 0.34.1`
-- `make check`
-- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
-- `cargo test -p agent-doc-orchestration route::dispatch -- --nocapture`
-- `cargo check -p agent-doc-orchestration`
-- `cargo test -p agent-doc-orchestration route_submit_resubmit -- --nocapture`
-- `cargo test -p agent-doc-orchestration direct_pane_resubmit -- --nocapture`
-- `cargo test -p agent-doc-orchestration direct_pane_acceptance -- --nocapture`
-- specs, README, and `VERSIONS.md` now describe the stable-empty and late-retry behavior.
-- if Codex later has accepted-without-dispatch-start proof and the same prompt is visibly sitting in the composer, route sends one late `Enter` retry, logs `route_submit_late_resubmit ... cause=dispatch_start_unproven_prompt_visible`, and rechecks dispatch-start proof;
-- a visible drafted trigger still gets the bounded shared `Enter` submit-key retry;
-- direct-pane submit acceptance now requires empty input to remain stable before accepting, so a delayed Codex draft can still be observed;
-
-Both passed. The next queue item remains queued.
-### Response — gpt-5
-I traced this FCC cycle to stale-supervisor disk/IPC drift, not to a newly found unguarded raw disk write in the current installed build.
-
-The current preflight warning names route-owned host supervisor pid `1617257` serving this document from a stale binary. The ops log also shows repeated stale-supervisor guard proofs such as `content_ours_adoption_refused_stale_supervisor` and `ipc_proof_insufficient ... invariant=supervisor_binary_stale ... recovery=candidate_snapshot_kept`, which means the current write path is refusing stale live-buffer adoption instead of accepting content that would recreate File Cache Conflict drift.
-
-I ran the safe recycle path for this document's project:
-
-```sh
-agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --json
-```
-
-It returned `{"project_root":"/home/brian/work/btakita/agent-loop","recycled":true,"scope":"project"}`.
-
-I did not force-restart the supervisor while this pane is busy. The earlier non-force `agent-doc session restart-supervisor ... --fresh` check refused with an alive-busy proof for pane `%12`, so the safe next state is to let this turn reach idle and allow the recycled controller/supervisor to be replaced without discarding the active pane.
-
-No source change was needed in this cycle.
-
-### Re: There are still disk writes causing JB `File Cache Conflict` dialogs. — gpt-5
-This is the explicit free-text queue-head proof for the FCC response above. The queue head was intentionally consumed after diagnosing the stale route-owned supervisor, marking the project controller recycled, and avoiding a force restart while the active pane was busy.
-
-<!-- no-free-text-queue-head-guard -->
-The code fix is implemented, tested, installed, and locally committed:
-
-> **Queue prompt:**
->
-> :pushpin: JB `Run Agent Doc` still does not submit to Codex. There seems to be a delay for Codex to receive the prompt compared to Claude Code & Opencode. Is there a way to not be timing dependent? But to see if the prompt is in the input then ensure Return is sent with retries?
-
-
-- `src/agent-doc`: `970bcb53`
-- parent gitlink: `67c2ffeef`
-- `make check` passed
-- `make install` passed, installed `agent-doc 0.34.1`
-- latest CI on `main` is green
-
-Closeout is blocked on editor IPC: socket IPC and explicit file IPC both failed to prove the session response write, and non-force supervisor restart refused because this pane is busy. I have not pushed yet because the session document has not finalized.
-
-Approve `--force-disk` closeout, or leave the captured response/IPC patch for the editor to apply?
-<!-- agent:boundary:c728b686 -->
+Compacted content:
+- Archived 1 response topic(s): There are still disk writes causing JB `File Cache Conflict` dialogs.
+- Prior summary/context: ### Response — gpt-5 Fixed and installed the `agent-doc admin recycle` CLI path behind the screenshot. The clean-term...
+<!-- agent:boundary:71cb5b3f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: JB `Run Agent Doc` still does not submit to Codex. There seems to be a delay for Codex to receive the prompt compared to Claude Code & Opencode. Is there a way to not be timing dependent? But to see if the prompt is in the input then ensure Return is sent with retries?~~
 - :pushpin: If I run JB `Run Agent Doc` with the prompt already in the input, only send Return.
+---
+:pushpin: JB `Run Session Doc` did not submit. I then tried running JB `Clear Session Context`. It should be available to run. The supervisor should detect if the turn is running. If not, then send the `/clear`. If there is already text in the input, clear the input text and send `/clear` + Return.
+```
+Clear Session Context is blocked while Run Agent Doc is dispatching for tasks/professional/equityfundingsource.md. Wait for dispatch to finish, or use Interrupt and Clear Session Context.
+```
+---
 <!-- /agent:queue -->
 ###
 <!--

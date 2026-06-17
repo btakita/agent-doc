@@ -38,7 +38,24 @@ committed
 Compacted content:
 - Archived 11 response topic(s): Uploaded Documents order; deploy; Remove "Interested Lenders" from "Available Deal" -> "Loan Detail" tab. deploy; 8 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): Remove "Loan Terms" from Available deal admin page & dialog. D...
-<!-- agent:boundary:8f644450 -->
+
+### Re: Mark Call Completed — gpt-5
+
+> **Queue prompt:**
+>
+> Mark Call Completed
+
+
+Completed and pushed the `Mark Call Completed` removal for the Available Deal -> Interested Lenders workflow.
+
+Changed paths: `src/equityfundingsource-dev` commit `5e68d77` removes the `call_completed_at` admin/investor API contract, UI controls, stage/timeline logic, tests, and docs/spec wording; adds migration `0074_drop_deal_interest_call_completed.sql` to drop the column and recreate the workflow index without it. Parent repo commit `3741d3378` updates the EFS submodule pointer.
+
+Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `make check`; `gh run list --workflow CI --limit 1`.
+
+Verification: focused tests passed (`108 pass`); full check passed (`750 pass`, build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:dc63a990 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,7 +66,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 In "Available Deal" -> "Interested Lenders" tab
 
 Delete fields, db records, and logic relating to:
-- Mark Call Completed
+- ~~Mark Call Completed~~
 - Start Underwriting
 - Call scheduled
 - Verbal amount

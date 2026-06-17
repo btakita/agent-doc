@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -47,6 +47,7 @@ Verification passed:
 - Latest GitHub Actions CI on `main`: completed/success, run `27664844335`
 
 A new queue item about JB Run Agent Doc Enter retry behavior is still behind this item; I am not treating it as completed by this closeout.
+
 ### Response — gpt-5
 I checked the current `src/agent-doc` route path against the Clear Session Context retry path. This item is already covered in the installed code; I did not make a new source change for it.
 
@@ -59,7 +60,7 @@ Verification run for this head:
 - `cargo test -p agent-doc-orchestration route_submit_resubmit -- --nocapture`
 
 Both passed. The next queue item remains queued.
-<!-- agent:boundary:572b5fc3 -->
+<!-- agent:boundary:ea7e5e12 -->
 <!-- /agent:exchange -->
 
 ## Queue

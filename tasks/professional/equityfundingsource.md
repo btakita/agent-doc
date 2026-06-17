@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -205,6 +205,11 @@ This is a data gap, not a code bug. The one thing that would make this less conf
 
 > **Queue prompt:**
 >
+> In the InterestedLenderCard where the TMO account is not linked, there should be a button under Show/Hide workflow to link the account to TMO. deploy
+
+
+> **Queue prompt:**
+>
 > The admin should see the current lender account as not being synced with TMO. Since there is no lender id on the account, the admin should be prompted to sync the lender with TMO in the admin Available deal dialog/page and the admin Lender dialog/page. The error message in the admin Available deal should be rendered above the "Select lender" button and be present in the toast message. deploy
 
 Shipped proactive TMO-account-missing warnings across the admin UI so the admin sees the problem *before* clicking "Select lender", plus a clearer toast error. Deployed.
@@ -232,9 +237,20 @@ Shipped proactive TMO-account-missing warnings across the admin UI so the admin 
 - Root `8b690b3ea` submodule pointer bump pushed
 - Worker deployed: **Version `8c43e5b7-370b-4fe2-b6c8-5d0071dde8ac`** at https://equityfundingsource.brian-takita.workers.dev
 - Smoke: `/`, `/funded-deals`, `/login` all 200
+- Worker deployed: **Version `fb14e2e4-6561-4654-8375-a6b1ab41f8e3`**
+- Root `2ec612576` submodule pointer bump pushed
+- EFS `80a7144` pushed `13ae196..80a7144`
+- On failure: toast shows the error
+- On success: card updates in place (badge + field flip to the account number), toast confirms
+- Enter submits, Escape cancels
+- Clicking reveals an inline monospace input ("TMO lender account #") with Link / Cancel buttons
+- "Link TMO account" button appears under the Workflow toggle when the lender has no TMO account
+- Registered in routes.ts alongside the other user-management PUTs
+- Admin-guarded, fires `notify_admin_event_`
+- Accepts `{ lender_account }`, validates via `clean_account_`, calls `user__set_lender_account_`
 
 Queue drained.
-<!-- agent:boundary:296bb920 -->
+<!-- agent:boundary:0e0dbdfa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -242,7 +258,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In the InterestedLenderCard where the TMO account is not linked, there should be a button under Show/Hide workflow to link the account to TMO. deploy
 <!-- /agent:queue -->
 
 ## Backlog

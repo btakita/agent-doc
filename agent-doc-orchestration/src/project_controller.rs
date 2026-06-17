@@ -4442,6 +4442,118 @@ mod tests {
         assert!(ops_log.contains("action=consume_head"));
     }
 
+    #[test]
+    fn dispatch_repairs_unserviceable_preset_token_pause_by_consuming_present_head() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/unserviceable-preset-token.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: session-preset\n",
+            "agent: opencode\n",
+            "queue_active: true\n",
+            "prompt_presets:\n",
+            "  '#bugs-observed': Record observed bugs.\n",
+            "---\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- #bugs-observed\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(&doc, "session-preset", "%41", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-preset",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let pause = ControllerRequest {
+            command: "queue_control".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(1),
+            state: Some("pause".to_string()),
+            caller: Some("admin".to_string()),
+            reason: Some("preset-token queue heads (#bugs-observed) un-drainable: consume rejects as id-backed, --done fails (no such backlog id); work committed to HEAD 9f363f77d. Halting go-mode flood pending operator clear / agent-doc fix.".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("pause".to_string()),
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&pause).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<ControllerAdminReceipt> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+
+        let dispatch = ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-preset".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("dispatch_only_reopen".to_string()),
+            diagnostic_payload: Some("preset-token unserviceable repair".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&dispatch).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(
+            envelope.ok,
+            "dispatch should not stay queue_paused: {response}"
+        );
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("- #bugs-observed"),
+            "registered preset-token head should be consumed:\n{updated}"
+        );
+        let conn = open_state_db(dir.path()).unwrap();
+        let document_id =
+            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let effective = state_store::load_effective_queue_control_from_db(
+            &conn,
+            &document_id,
+            &dir.path().to_string_lossy(),
+        )
+        .unwrap();
+        assert!(
+            effective.is_none(),
+            "preset-token pause must be cleared after consuming the head"
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("spent_preset_pause_repaired"));
+        assert!(ops_log.contains("preset=#bugs-observed"));
+        assert!(ops_log.contains("action=consume_head"));
+    }
+
     /// `#jbrestale`: a `queue_paused` dispatch bail whose pause reason is a stale-supervisor
     /// churn-stop must carry the `supervisor_restart_redirect` marker + the named stale pid
     /// (so the route path restarts + re-dispatches once), while a deliberate operator pause

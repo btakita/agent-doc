@@ -1014,9 +1014,17 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // -2 `guard_`, +1 `reason=` (#nodiskipc): sidecar-normalization and IPC
         // dedupe repair no longer fall back to direct disk repair guards when
         // editor redelivery is unproven; they fail closed with a retry reason.
+        // -2 `reason=` (#fcc0-degraded-file-ipc): the degraded convergence
+        // regression assertions moved from the old disk-fallback
+        // `reason=listener_degraded*` shape to `degraded_cause=...`, because the
+        // raw disk fallback is gone and this is no longer a flow reason.
         ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 12,
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 18,
-        ("agent-doc-orchestration/src/write/ipc/transport.rs", "guard_") => 8,
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 16,
+        // +1 `guard_` (#fcc0-degraded-file-ipc): `IpcPollOptions::convergence`
+        // centralizes the existing committed-cycle file-IPC poll guard for
+        // convergence callers; this is a constructor for the existing guard, not
+        // a new flow guard boundary.
+        ("agent-doc-orchestration/src/write/ipc/transport.rs", "guard_") => 9,
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 10,
         ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 5,
         // +9 (#fcc0-no-external-write): active editor listeners no longer allow
@@ -1028,7 +1036,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // not write behind the plugin. No new flow guard; this tightens the
         // existing converge boundary from `disk_fallback` to `transport=blocked`
         // while a listener is active.
-        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 18,
+        // -1 (#fcc0-degraded-file-ipc): the degraded-socket convergence branch no
+        // longer logs `reason=listener_degraded` on a disk fallback because that
+        // fallback is gone. It now records `degraded_cause=...` on the file-IPC /
+        // fail-closed path, preserving diagnostics without expanding flow reasons.
+        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 17,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

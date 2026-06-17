@@ -466,22 +466,64 @@ pub fn try_editor_converge(
     };
     // `#fcc0e`: integrate the converger with the `#ipcdrift` degraded-latch
     // circuit breaker. A session whose socket listener latched degraded
-    // (repeated ack timeouts) may short-circuit to disk only while no listener
-    // is accepting connections. The latch self-heals (`#ipc-degrade-self-heal`):
+    // (repeated ack timeouts) may skip the socket, but must still prefer the
+    // plugin-owned file-IPC queue before refusing the write. The latch self-heals
+    // (`#ipc-degrade-self-heal`):
     // `ipc_direct_disk_degraded` re-probes listener liveness and clears the
     // marker the moment the socket recovers.
     cleanup_legacy_ipc_degraded(&project_root);
+    if current_content == target {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} transport=already_current",
+                file.display()
+            ),
+        );
+        return Ok(true);
+    }
     match ipc_direct_disk_degraded(&project_root, file) {
         Ok(true) => {
-            log_ipc_dewedge_direct_disk_skip(file, source);
+            log_ipc_dewedge_prefer_file_ipc(file, source);
+            let canonical = file.canonicalize()?;
+            let patch_id = uuid::Uuid::new_v4().to_string();
+            let Some(payload) =
+                editor_convergence_payload(&canonical, target, current_content, source, &patch_id)?
+            else {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "{source}_writeback file={} transport=blocked degraded_cause=no_component_delta action=refuse_external_disk_write",
+                        file.display()
+                    ),
+                );
+                anyhow::bail!(
+                    "{source}: refused direct disk write for {} while editor IPC listener is degraded (cause=no_component_delta)",
+                    file.display()
+                );
+            };
+            if try_editor_converge_file_ipc(
+                file,
+                &project_root,
+                &payload,
+                &patch_id,
+                target,
+                source,
+                "listener_degraded",
+            )? {
+                return Ok(true);
+            }
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "{source}_writeback file={} transport=disk_fallback reason=listener_degraded",
+                    "{source}_writeback file={} transport=blocked degraded_cause=listener_degraded action=refuse_external_disk_write",
                     file.display()
                 ),
             );
-            return Ok(false);
+            anyhow::bail!(
+                "{source}: refused direct disk write for {} while editor IPC listener is degraded",
+                file.display()
+            );
         }
         Ok(false) => {}
         Err(e) => {
@@ -499,17 +541,6 @@ pub fn try_editor_converge(
             ),
         );
         return Ok(false);
-    }
-
-    if current_content == target {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "{source}_writeback file={} transport=already_current",
-                file.display()
-            ),
-        );
-        return Ok(true);
     }
 
     let canonical = file.canonicalize()?;
@@ -653,6 +684,77 @@ pub fn try_editor_converge(
             );
         }
     }
+}
+
+fn try_editor_converge_file_ipc(
+    file: &Path,
+    project_root: &Path,
+    payload: &serde_json::Value,
+    patch_id: &str,
+    target: &str,
+    source: &str,
+    reason: &str,
+) -> Result<bool> {
+    let patches_dir = project_root.join(".agent-doc/patches");
+    if !patches_dir.exists() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} transport=blocked degraded_cause={reason}_no_file_ipc action=refuse_external_disk_write",
+                file.display()
+            ),
+        );
+        return Ok(false);
+    }
+    let patch_file = patches_dir.join(format!("{patch_id}.json"));
+    let patch_count = payload
+        .get("patches")
+        .and_then(|value| value.as_array())
+        .map(Vec::len)
+        .unwrap_or(0)
+        + payload
+            .get("node_patches")
+            .and_then(|value| value.as_array())
+            .map(Vec::len)
+            .unwrap_or(0)
+        + usize::from(payload.get("frontmatter").is_some());
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "{source}_file_ipc_convergence_attempt file={} patch_id={} degraded_cause={} patches={}",
+            file.display(),
+            patch_id,
+            reason,
+            patch_count
+        ),
+    );
+    if write_ipc_and_poll(
+        &patch_file,
+        payload,
+        file,
+        patch_count,
+        IpcPollOptions::convergence(project_root, Some(target)),
+    )? {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} patch_id={} transport=file_ipc degraded_cause={}",
+                file.display(),
+                patch_id,
+                reason
+            ),
+        );
+        return Ok(true);
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "{source}_writeback file={} patch_id={} transport=blocked degraded_cause={reason}_file_ipc_unproven action=refuse_external_disk_write",
+            file.display(),
+            patch_id
+        ),
+    );
+    Ok(false)
 }
 
 pub(crate) fn editor_convergence_payload(

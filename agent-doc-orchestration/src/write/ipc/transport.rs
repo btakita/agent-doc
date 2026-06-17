@@ -1111,6 +1111,17 @@ pub(crate) struct IpcPollOptions<'a> {
     guard_committed_cycle: bool,
 }
 
+impl<'a> IpcPollOptions<'a> {
+    pub(crate) fn convergence(project_root: &'a Path, content_ours: Option<&'a str>) -> Self {
+        Self {
+            content_ours,
+            normalize_prefix_lines: None,
+            project_root,
+            guard_committed_cycle: true,
+        }
+    }
+}
+
 /// Send a reposition-only IPC signal to the plugin.
 ///
 /// No content changes — just tells the plugin to move the boundary marker

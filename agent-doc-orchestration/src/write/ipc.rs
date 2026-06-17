@@ -4272,10 +4272,9 @@ mod core_tests {
     #[test]
     fn try_editor_converge_skips_wedged_socket_when_latched_degraded() {
         // `#fcc0e`: once the de-wedge latch trips degraded (repeated socket ack
-        // timeouts) and no live listener can be re-probed, the converger must
-        // short-circuit to the disk fallback (`reason=listener_degraded`) instead
-        // of hammering the wedged socket on every queue/template converge — the
-        // same skip the reposition/finalize socket paths already take.
+        // timeouts) and no live listener can be re-probed, the converger must skip
+        // the wedged socket, try the plugin-owned file-IPC queue, then fail closed
+        // when no file watcher is present. It must not raw-write the document.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -4295,21 +4294,111 @@ mod core_tests {
             "two distinct ack timeouts must trip the degraded latch"
         );
 
-        let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
+        let err = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap_err();
         assert!(
-            !converged,
-            "a latched-degraded session must skip the socket and disk-fall-back"
+            err.to_string().contains("refused direct disk write"),
+            "a latched-degraded session without file IPC must fail closed: {err}"
         );
 
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            log.contains("queue_consume_writeback") && log.contains("reason=listener_degraded"),
+            log.contains("ipc_socket_degraded_prefer_file_ipc")
+                && log.contains("transport=queue_consume"),
+            "the degraded skip must prefer file IPC before failing:\n{log}"
+        );
+        assert!(
+            log.contains("queue_consume_writeback")
+                && log.contains("degraded_cause=listener_degraded_no_file_ipc")
+                && log.contains("action=refuse_external_disk_write"),
             "the degraded skip must be source-labelled in ops.log:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=disk_fallback"),
+            "the degraded converger must not take the old direct-disk bypass:\n{log}"
         );
         assert!(
             !log.contains("reason=no_listener"),
             "the degraded check must short-circuit before the no_listener check:\n{log}"
         );
+    }
+
+    #[test]
+    fn try_editor_converge_degraded_socket_succeeds_via_file_ipc_when_plugin_consumes() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "queue_consume").unwrap();
+        let degraded =
+            record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "queue_consume").unwrap();
+        assert!(
+            degraded,
+            "two distinct ack timeouts must trip the degraded latch"
+        );
+
+        let watcher_dir = agent_doc_dir.join("patches");
+        let watcher_ack_dir = agent_doc_dir.join("ack-content");
+        let watcher_doc = doc.clone();
+        let watcher_target = target.clone();
+        let watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                if let Ok(entries) = fs::read_dir(&watcher_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if !path.extension().is_some_and(|e| e == "json") {
+                            continue;
+                        }
+                        let payload_text = fs::read_to_string(&path).unwrap();
+                        let payload: serde_json::Value =
+                            serde_json::from_str(&payload_text).unwrap();
+                        let patch_id = payload
+                            .get("patch_id")
+                            .and_then(|value| value.as_str())
+                            .unwrap()
+                            .to_string();
+                        fs::write(&watcher_doc, &watcher_target).unwrap();
+                        fs::write(
+                            watcher_ack_dir.join(format!("{patch_id}.md")),
+                            &watcher_target,
+                        )
+                        .unwrap();
+                        fs::remove_file(path).unwrap();
+                        return true;
+                    }
+                }
+            }
+            false
+        });
+
+        let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
+        assert!(
+            converged,
+            "degraded convergence must succeed through file IPC when the plugin consumes it"
+        );
+        assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_socket_degraded_prefer_file_ipc")
+                && log.contains("queue_consume_file_ipc_convergence_attempt")
+                && log.contains("transport=file_ipc")
+                && log.contains("degraded_cause=listener_degraded"),
+            "degraded convergence should be auditable as file IPC:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=disk_fallback"),
+            "degraded convergence must not raw-write behind the plugin:\n{log}"
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), target);
     }
     #[test]
     fn ipc_snapshot_adoption_allowed_logs_benign_recheck() {

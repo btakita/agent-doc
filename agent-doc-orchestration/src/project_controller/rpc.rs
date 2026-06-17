@@ -1535,20 +1535,40 @@ pub(crate) fn stale_supervisor_pid_from_pause_reason(reason: &str) -> Option<u32
 pub(crate) fn spent_preset_id_from_pause_reason(reason: &str) -> Option<String> {
     let marker = " preset head is spent";
     let lower = reason.to_ascii_lowercase();
-    let idx = lower.find(marker)?;
-    let candidate = lower[..idx]
-        .rsplit(|ch: char| ch.is_whitespace() || matches!(ch, ':' | ';' | ',' | '(' | '['))
-        .next()?
-        .trim()
-        .trim_start_matches('#');
-    if candidate.is_empty()
-        || !candidate
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-    {
+    if let Some(idx) = lower.find(marker) {
+        let candidate = lower[..idx]
+            .rsplit(|ch: char| ch.is_whitespace() || matches!(ch, ':' | ';' | ',' | '(' | '['))
+            .next()?
+            .trim()
+            .trim_start_matches('#');
+        if valid_preset_pause_id(candidate) {
+            return Some(candidate.to_string());
+        }
+    }
+    preset_token_unserviceable_id_from_pause_reason(&lower)
+}
+
+fn preset_token_unserviceable_id_from_pause_reason(lower_reason: &str) -> Option<String> {
+    if !lower_reason.contains("preset-token") || !lower_reason.contains("un-drainable") {
         return None;
     }
-    Some(candidate.to_string())
+    let (_, rest) = lower_reason.split_once("(#")?;
+    let candidate: String = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        .collect();
+    if valid_preset_pause_id(&candidate) {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+fn valid_preset_pause_id(candidate: &str) -> bool {
+    !candidate.is_empty()
+        && candidate
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
 }
 
 fn active_queue_head_is_registered_preset(content: &str, preset_id: &str) -> Result<bool> {

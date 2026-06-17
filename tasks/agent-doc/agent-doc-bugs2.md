@@ -595,7 +595,38 @@ Pushed commits:
 - parent `6ae0ae41a agent-doc: accept codex context use footer`
 
 Latest `agent-doc` CI run `27716137208` for `84ca6e6d` was `in_progress` when checked once.
-<!-- agent:boundary:3e79cdc9 -->
+Fixed the Codex queue spam shown in `img_42.png`.
+
+Root cause: the idle supervisor checked whether a drain payload was already visible by literal trigger text only. For this pane, the queued payload was an absolute trigger like `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md`, while Codex was already showing the equivalent relative draft `agent-doc tasks/monsterrodholders.md`. Because the supervisor missed that equivalence, each idle pass appended another trigger instead of pressing Enter on the existing draft.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/start/detection.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
+- `src/agent-doc/VERSIONS.md`
+
+What changed:
+- Added `supervisor_pane_payload_pending_in_content(...)`, which keeps the existing literal recent-line check and also reuses route's `direct_pane_existing_draft_visible(...)` relative/absolute draft matcher.
+- Passed the harness config into the supervisor pending-payload checks so Codex draft equivalence is available before any queue append.
+- Added a regression test for the repeated relative `agent-doc tasks/monsterrodholders.md` composer state with `Context 0% use`.
+- Documented the fix in `VERSIONS.md`.
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration relative_codex -- --nocapture`
+- `make check`
+- `git diff --check`
+- `make install`
+
+Published:
+- Source commit `23454615` (`fix: dedupe codex relative queue drafts`) pushed to `btakita/agent-doc` `main`.
+- The superproject `HEAD` already records `src/agent-doc` at `23454615`, so no new parent gitlink commit was needed.
+- Latest CI for `23454615` is run `27716913367`, currently `in_progress`; previous CI run `27716137208` completed successfully.
+
+Confidence: high.
+Escalation: none.
+
+Note: the session exchange is large, but the queue is active, so I did not compact or pause the drain.
+<!-- agent:boundary:4add73ce -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -652,7 +683,7 @@ Error: dispatch-only codex reopen refused to inject into pane %75 for tasks/prof
 A prompt was sent but not submitted. This prompt may not be from the dispatch though...
 ---
 - ~~:pushpin: Opencode agent-doc lazily-rs.md running JB `Clear Session Context` does not submit ![img_44.png](img_44.png). The loop should ensure the `/new` is submitted by reading the TUI.~~
-- :pushpin: agent-doc is spamming the same prompt as I type into the queue in Codex on monsterrodholders.md ![img_42.png](img_42.png)
+- ~~:pushpin: agent-doc is spamming the same prompt as I type into the queue in Codex on monsterrodholders.md ![img_42.png](img_42.png).~~
 - :pushpin: Restart on equityfundingsource.md failed ![img_40.png](img_40.png)
 - :pushpin: I typed in the queue item "JB `Run Agent Doc` should have less latency to submit the prompt.", and agent-doc immediately struck it out.
 - :pushpin: Re: agent-doc on Codex outputs console messages that obscures the TUI: This should also apply to Claude Code...so all agent harnesses.

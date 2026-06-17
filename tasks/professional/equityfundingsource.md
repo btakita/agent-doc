@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -194,7 +194,46 @@ Commands / verification:
 - EFS git status is clean after deploy.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:84ec678a -->
+
+### Re: Lender message email and deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Implemented the lender email notification that was incorrectly consumed by the recovered deploy response, then deployed the updated worker.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/investor_management/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/lifecycle.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/templates/lifecycle.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- parent submodule pointer `src/equityfundingsource-dev`
+
+What changed:
+- Admin lender messages now call `notify_lender_deal_message_` after saving the message.
+- Added `lender_deal_message_email_`, using the shared EFS letterhead lifecycle layout and an `Open deal` CTA to `/portal-investor/deals/:deal_id`.
+- Tests now pin the lender message email template and handler wiring.
+
+Verification:
+- `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts` passed.
+- `bun run check` exited 0: 760 pass, 0 fail, builds completed. The digest runner still groups the known logged `error: d1 down` outbox-path message, but the command exit code and test tail are clean.
+- `git diff --check` passed.
+- GitHub Actions: `gh run list --workflow CI --limit 1` reports no workflow named CI, and `gh workflow list` returns no workflows.
+
+Commits pushed:
+- EFS repo: `e87b91e` (`Email lenders for admin deal messages`)
+- Parent repo: `c65504bc8` (`Update EFS lender message emails`)
+
+Deploy:
+- `bun run deploy:worker` completed successfully.
+- Remote D1: no migrations to apply.
+- Worker deployed at `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Worker Version ID: `b85010a4-adf0-4622-81af-c1bcf76e33e0`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:a17aaec4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -202,8 +241,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Available deal dialog/page: Lender communication message from admin should email the lender with the EFS + deal template.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

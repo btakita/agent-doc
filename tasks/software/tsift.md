@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -261,13 +261,46 @@ The configured local model path is the new `tsift-local-model` profile set, not 
 It is not being used as a live local model right now. The live probe reported the RTX 5090 available with 32,607 MiB total VRAM, 31,971 MiB free, and no GPU model processes. `pgrep -af "ollama|llama|vllm|qwen|ggml"` also found no matching provider process.
 
 Current implementation status: the local-model substrate, KG extraction trait, lifecycle/VRAM cleanup checks, and multi-run verification are in place. The active default code paths still have deterministic hash fallback providers (`HashKgExtractor` / `HashSemanticProvider`) unless a caller supplies a real local extractor/provider. So the answer is: Qwen3-32B Q4 is the intended/default local KG extractor profile for this machine, but it is not currently loaded or serving tsift work.
-<!-- agent:boundary:c16ab12f -->
+
+### Re: Please set up the local model to start working. What happens if I use corky gpu while the model is running? — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Please set up the local model to start working. What happens if I use corky gpu while the model is running?
+
+
+I installed the current local `tsift` CLI from `src/tsift`, so `/home/brian/.cargo/bin/tsift` now has the `local-model` commands that were implemented in the repo. `tsift --version` reports `0.1.70`, and `tsift local-model status` now works from the normal shell path.
+
+Live local-model state:
+- GPU: NVIDIA GeForce RTX 5090, 32,607 MiB total VRAM, 179 MiB used, 31,971 MiB free.
+- Recommended extractor: `qwen3-32b-q4`, estimated at 28,692 MiB, selectable on the current free VRAM.
+- Recommended embedding companion: `qwen3-embedding-0.6b`, estimated at 2,736 MiB, selectable.
+- Cleanup proof: `tsift local-model unload --json` reports cleanup `Proven` at the current baseline, with post-unload VRAM still 179 MiB.
+
+What is not running yet: no actual model server is installed or active. `ollama` and `llama-server` are not on PATH, and there are no matching GPU model provider processes. So the setup is now ready at the `tsift` CLI/profile/probe layer, but tsift still falls back to deterministic hash providers unless a real llama.cpp/Ollama/vLLM provider is installed, started, and wired into a caller.
+
+For `corky gpu`: the installed `corky 0.29.0` does not expose a `gpu` subcommand, and this installed build does not expose `transcribe` either. The local `src/corky` source tree describes GPU transcription as `corky transcribe` built with `transcribe-cuda`, not as a `corky gpu` command.
+
+If a GPU-enabled Corky transcription run uses the same local RTX 5090 while the Qwen3 32B tsift extractor is loaded, the two jobs contend for VRAM and CUDA. The tsift extractor is an exclusive large-GPU profile; after its estimated 28,692 MiB footprint, only about 3.3 GiB of currently-free VRAM remains. A Corky CUDA Whisper/diarization job could OOM, fail to allocate CUDA buffers, force one workload to slow down hard, or make tsift's post-run VRAM cleanup proof fail. It should not corrupt repo data; the risk is GPU memory pressure, latency, and failed model/transcription runs.
+
+Practical rule: unload or stop the tsift model provider before GPU Corky work, then re-run `tsift local-model status` after Corky finishes. If concurrency is necessary, use the hash fallback or a small embedding profile instead of the `qwen3-32b-q4` extractor.
+
+Commands/proof:
+- `cargo install --path . --force` from `src/tsift`
+- `tsift local-model status --json`
+- `tsift local-model status`
+- `tsift local-model unload --json`
+- `nvidia-smi` / `nvidia-smi --query-gpu=...`
+- `which ollama` and `which llama-server` both missing
+- `corky --version`, `corky --help`, `corky gpu --help`, and `corky help transcribe`
+
+Changed paths: no repo source paths changed by me; the installed binary at `/home/brian/.cargo/bin/tsift` was replaced. Push: none, because there was no repo code commit to push. Escalation: force-disk was used after the editor IPC path repeatedly failed to prove delivery. Confidence: high for the installed tsift setup and GPU contention assessment; medium for Corky command naming because the installed binary and local source agree on GPU transcription being feature-gated, but neither exposes a literal `corky gpu` subcommand here. The linked `headroom` repo is a local-first context compression/proxy/MCP project, not a GPU model runtime: https://github.com/chopratejas/headroom
+<!-- agent:boundary:14db2118 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Please set up the local model to start working.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

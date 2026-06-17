@@ -3264,6 +3264,206 @@ mod tests {
             "heartbeat must not create an actor transition"
         );
     }
+
+    #[test]
+    fn controller_supervisor_heartbeat_replaces_closed_same_supervisor_session() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/heartbeat-replace.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-old\nagent: opencode\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+
+        crate::session_actor::record_session_start_direct(&doc, "session-old", "%41", "@1", 1)
+            .unwrap();
+        let ready = crate::session_actor::transition_state_direct(
+            &doc,
+            "session-old",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+        upsert_supervisor_lease(
+            dir.path(),
+            &ready,
+            Some(999),
+            Some("/tmp/same-supervisor.sock"),
+            "ready",
+        )
+        .unwrap();
+        let conn = open_state_db(dir.path()).unwrap();
+        state_store::upsert_queue_control_in_db(
+            &conn,
+            &state_store::QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &doc.to_string_lossy(),
+                state: "paused",
+                reason: Some(
+                    "stale route-owned supervisor (pid 999) replaying already-answered queue item",
+                ),
+                operation_receipt_id: None,
+            },
+        )
+        .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-old",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Closed,
+            "supervisor",
+            "user_quit_clean_exit",
+        )
+        .unwrap();
+
+        let heartbeat = ControllerRequest {
+            command: "supervisor_heartbeat".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-new".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(2),
+            state: Some("ready".to_string()),
+            caller: None,
+            reason: None,
+            supervisor_pid: Some(999),
+            supervisor_socket: Some("/tmp/same-supervisor.sock".to_string()),
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let lease = handle_supervisor_heartbeat(&bootstrap, None, heartbeat).unwrap();
+        assert_eq!(lease.generation, 2);
+        assert_eq!(lease.supervisor_pid, Some(999));
+
+        let record = load_actor_record(dir.path(), &doc.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.session_id, "session-new");
+        assert_eq!(record.generation, 2);
+        assert_eq!(record.pane_id, "%41");
+        assert_eq!(record.state, crate::session_actor::ActorState::Ready);
+
+        let conn = open_state_db(dir.path()).unwrap();
+        let effective = state_store::load_effective_queue_control_from_db(
+            &conn,
+            &doc.to_string_lossy(),
+            &dir.path().to_string_lossy(),
+        )
+        .unwrap();
+        assert!(
+            effective.is_none(),
+            "replacement heartbeat should clear stale-supervisor queue pause"
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("controller_supervisor_replaced_closed_session"));
+        assert!(ops_log.contains("stale_supervisor_pause_superseded"));
+    }
+
+    #[test]
+    fn dispatch_clears_stale_supervisor_pause_that_predates_current_actor() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/dispatch-replace.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-old\nagent: opencode\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+
+        crate::session_actor::record_session_start_direct(&doc, "session-old", "%41", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-old",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Closed,
+            "supervisor",
+            "user_quit_clean_exit",
+        )
+        .unwrap();
+        let conn = open_state_db(dir.path()).unwrap();
+        state_store::upsert_queue_control_in_db(
+            &conn,
+            &state_store::QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &doc.to_string_lossy(),
+                state: "paused",
+                reason: Some(
+                    "stale route-owned supervisor (pid 999) replaying already-answered queue item",
+                ),
+                operation_receipt_id: None,
+            },
+        )
+        .unwrap();
+
+        let start = ControllerRequest {
+            command: "start_session".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-new".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: Some("@1".to_string()),
+            generation: Some(2),
+            state: None,
+            caller: Some("start".to_string()),
+            reason: Some("session_start".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let record = handle_start_session(&bootstrap, None, start).unwrap();
+        assert_eq!(record.generation, 2);
+
+        let dispatch = ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-new".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(2),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some("replacement dispatch".to_string()),
+        };
+        let auth = handle_dispatch(&bootstrap, None, dispatch).unwrap();
+        assert_eq!(auth.record.session_id, "session-new");
+        assert_eq!(auth.record.generation, 2);
+
+        let conn = open_state_db(dir.path()).unwrap();
+        let effective = state_store::load_effective_queue_control_from_db(
+            &conn,
+            &doc.to_string_lossy(),
+            &dir.path().to_string_lossy(),
+        )
+        .unwrap();
+        assert!(
+            effective.is_none(),
+            "dispatch should clear stale-supervisor pause from superseded actor"
+        );
+        let blocked: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dispatch_attempts WHERE failed_stage = 'queue_paused'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(blocked, 0, "dispatch must not stay queue_paused");
+    }
+
     #[test]
     fn gc_closes_stale_starting_actor_without_fresh_supervisor_lease() {
         let dir = tempfile::TempDir::new().unwrap();

@@ -1479,6 +1479,7 @@ pub(crate) fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
 ///   - `supervisor_binary_stale`
 ///   - `stale supervisor pid…`
 ///   - an explicit `needs operator recycle` remedy on a `churn-stop`
+///   - `stale route-owned supervisor…`
 ///
 /// When this returns true AND the live supervisor is actually stale (confirmed separately
 /// via [`process_binary_is_stale`] / [`current_binary_identity`]), the dispatch handler may
@@ -1491,6 +1492,7 @@ pub(crate) fn pause_reason_is_stale_supervisor_churn_stop(reason: &str) -> bool 
     if r.contains("supervisor_binary_stale")
         || r.contains("stale supervisor")
         || r.contains("stale host supervisor")
+        || r.contains("stale route-owned supervisor")
     {
         return true;
     }
@@ -1556,6 +1558,15 @@ fn resume_spent_preset_pause(
     document_id: &str,
     reason: &str,
 ) -> Result<()> {
+    resume_document_queue_control(project_root, file, document_id, reason)
+}
+
+fn resume_document_queue_control(
+    project_root: &Path,
+    file: &Path,
+    document_id: &str,
+    reason: &str,
+) -> Result<()> {
     let conn = open_state_db(project_root)?;
     state_store::upsert_queue_control_in_db(
         &conn,
@@ -1569,6 +1580,69 @@ fn resume_spent_preset_pause(
     )?;
     crate::ops_log::log_op(file, reason);
     Ok(())
+}
+
+fn clear_superseded_stale_supervisor_pause(
+    project_root: &Path,
+    file: &Path,
+    document_id: &str,
+    record: &crate::session_actor::ActorRecord,
+    control: &QueueControlStatus,
+) -> Result<bool> {
+    if control.scope_kind != "document"
+        || control.scope_id != document_id
+        || control.state != "paused"
+    {
+        return Ok(false);
+    }
+    let Some(reason) = control.reason.as_deref() else {
+        return Ok(false);
+    };
+    if !pause_reason_is_stale_supervisor_churn_stop(reason) {
+        return Ok(false);
+    }
+    if matches!(
+        record.state,
+        crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed
+    ) {
+        return Ok(false);
+    }
+
+    let conn = open_state_db(project_root)?;
+    let lease = load_supervisor_lease_from_db(&conn, document_id, record.generation)?;
+    let stale_pid = stale_supervisor_pid_from_pause_reason(reason);
+    let current_pid = lease.as_ref().and_then(|lease| lease.supervisor_pid);
+    let superseded_by_actor_transition = record.last_transition.prior_generation
+        < record.generation
+        && record.last_transition.new_generation == record.generation
+        && record.last_transition.timestamp >= control.updated_at;
+    let superseded_by_supervisor_pid =
+        stale_pid.is_some() && current_pid.is_some() && stale_pid != current_pid;
+    if !superseded_by_actor_transition && !superseded_by_supervisor_pid {
+        return Ok(false);
+    }
+
+    resume_document_queue_control(
+        project_root,
+        file,
+        document_id,
+        &format!(
+            "stale_supervisor_pause_superseded file={} stale_pid={} current_pid={} session={} pane={} generation={} actor_transition_at={} control_updated_at={} result=cleared",
+            file.display(),
+            stale_pid
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            current_pid
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            record.session_id,
+            record.pane_id,
+            record.generation,
+            record.last_transition.timestamp,
+            control.updated_at,
+        ),
+    )?;
+    Ok(true)
 }
 
 fn repair_spent_preset_pause_before_dispatch(
@@ -2823,6 +2897,90 @@ pub(crate) fn handle_start_session(
     Ok(record)
 }
 
+fn supervisor_report_matches_existing_lease(
+    project_root: &Path,
+    current: &crate::session_actor::ActorRecord,
+    request: &ControllerRequest,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    let Some(lease) =
+        load_supervisor_lease_from_db(&conn, &current.document_id, current.generation)?
+    else {
+        return Ok(false);
+    };
+    let same_pid =
+        request.supervisor_pid.is_some() && request.supervisor_pid == lease.supervisor_pid;
+    let same_socket = request.supervisor_socket.as_deref().is_some()
+        && request.supervisor_socket.as_deref() == lease.supervisor_socket.as_deref();
+    Ok(same_pid || same_socket)
+}
+
+fn replace_closed_actor_from_same_supervisor_report(
+    bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
+    file: &Path,
+    current: &crate::session_actor::ActorRecord,
+    request: &ControllerRequest,
+) -> Result<Option<crate::session_actor::ActorRecord>> {
+    let session_id = request_string(&request.session_id, "session_id")?;
+    let pane_id = request_string(&request.pane_id, "pane_id")?;
+    let generation = request_u64(request.generation, "generation")?;
+    let runtime_state = request
+        .state
+        .as_deref()
+        .unwrap_or(crate::session_actor::ActorState::Starting.as_str());
+    if current.state != crate::session_actor::ActorState::Closed
+        || generation <= current.generation
+        || current.pane_id != pane_id
+        || !supervisor_report_matches_existing_lease(&bootstrap.project_root, current, request)?
+    {
+        return Ok(None);
+    }
+    let state = crate::session_actor::ActorState::parse(runtime_state)
+        .with_context(|| format!("unknown supervisor runtime state: {runtime_state}"))?;
+    let replacement = crate::session_actor::ActorRecord {
+        document_id: current.document_id.clone(),
+        session_id,
+        generation,
+        pane_id,
+        window_id: current.window_id.clone(),
+        harness: crate::session_actor::detect_document_harness_in(
+            &bootstrap.project_root,
+            &current.document_id,
+        ),
+        state,
+        last_transition: crate::session_actor::ActorLastTransition {
+            caller: "supervisor".to_string(),
+            reason: "same_supervisor_session_replaced".to_string(),
+            timestamp: timestamp_secs(),
+            prior_generation: current.generation,
+            new_generation: generation,
+        },
+    };
+    let replacement = store_actor_record(
+        &bootstrap.project_root,
+        Some(current.generation),
+        &replacement,
+    )?;
+    refresh_runtime_after_actor_write(runtime)?;
+    let _ =
+        project_sessions_projection_for_actor(&bootstrap.project_root, &replacement.document_id);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "controller_supervisor_replaced_closed_session file={} prior_session={} new_session={} pane={} prior_generation={} new_generation={} state={}",
+            file.display(),
+            current.session_id,
+            replacement.session_id,
+            replacement.pane_id,
+            current.generation,
+            replacement.generation,
+            replacement.state.as_str(),
+        ),
+    );
+    Ok(Some(replacement))
+}
+
 pub(crate) fn handle_register_supervisor(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
@@ -2840,22 +2998,28 @@ pub(crate) fn handle_register_supervisor(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let record = actor_record_from_authority(bootstrap, runtime, &document_id)?
+    let mut record = actor_record_from_authority(bootstrap, runtime, &document_id)?
         .with_context(|| format!("missing actor record for supervisor {}", file.display()))?;
     if record.session_id != session_id
         || record.pane_id != pane_id
         || record.generation != generation
     {
-        anyhow::bail!(
-            "stale supervisor registration for {}: requested session={} pane={} generation={}, current session={} pane={} generation={}",
-            file.display(),
-            session_id,
-            pane_id,
-            generation,
-            record.session_id,
-            record.pane_id,
-            record.generation
-        );
+        if let Some(replacement) = replace_closed_actor_from_same_supervisor_report(
+            bootstrap, runtime, &file, &record, &request,
+        )? {
+            record = replacement;
+        } else {
+            anyhow::bail!(
+                "stale supervisor registration for {}: requested session={} pane={} generation={}, current session={} pane={} generation={}",
+                file.display(),
+                session_id,
+                pane_id,
+                generation,
+                record.session_id,
+                record.pane_id,
+                record.generation
+            );
+        }
     }
     upsert_supervisor_lease(
         &bootstrap.project_root,
@@ -2871,6 +3035,18 @@ pub(crate) fn handle_register_supervisor(
             session_id, pane_id, generation, runtime_state
         ),
     );
+    if let Ok(conn) = open_state_db(&bootstrap.project_root)
+        && let Ok(Some(control)) =
+            state_store::load_queue_control_from_db(&conn, "document", &document_id)
+    {
+        let _ = clear_superseded_stale_supervisor_pause(
+            &bootstrap.project_root,
+            &file,
+            &document_id,
+            &record,
+            &control,
+        );
+    }
     Ok(record)
 }
 
@@ -2994,22 +3170,28 @@ pub(crate) fn handle_supervisor_heartbeat(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let record = actor_record_from_authority(bootstrap, runtime, &document_id)?
+    let mut record = actor_record_from_authority(bootstrap, runtime, &document_id)?
         .with_context(|| format!("missing actor record for supervisor {}", file.display()))?;
     if record.session_id != session_id
         || record.pane_id != pane_id
         || record.generation != generation
     {
-        anyhow::bail!(
-            "stale supervisor heartbeat for {}: requested session={} pane={} generation={}, current session={} pane={} generation={}",
-            file.display(),
-            session_id,
-            pane_id,
-            generation,
-            record.session_id,
-            record.pane_id,
-            record.generation
-        );
+        if let Some(replacement) = replace_closed_actor_from_same_supervisor_report(
+            bootstrap, runtime, &file, &record, &request,
+        )? {
+            record = replacement;
+        } else {
+            anyhow::bail!(
+                "stale supervisor heartbeat for {}: requested session={} pane={} generation={}, current session={} pane={} generation={}",
+                file.display(),
+                session_id,
+                pane_id,
+                generation,
+                record.session_id,
+                record.pane_id,
+                record.generation
+            );
+        }
     }
     upsert_supervisor_lease(
         &bootstrap.project_root,
@@ -3025,6 +3207,18 @@ pub(crate) fn handle_supervisor_heartbeat(
             session_id, pane_id, generation, runtime_state
         ),
     );
+    if let Ok(conn) = open_state_db(&bootstrap.project_root)
+        && let Ok(Some(control)) =
+            state_store::load_queue_control_from_db(&conn, "document", &document_id)
+    {
+        let _ = clear_superseded_stale_supervisor_pause(
+            &bootstrap.project_root,
+            &file,
+            &document_id,
+            &record,
+            &control,
+        );
+    }
     load_supervisor_lease_from_db(
         &open_state_db(&bootstrap.project_root)?,
         &record.document_id,
@@ -3168,6 +3362,17 @@ pub(crate) fn handle_dispatch(
             &bootstrap.project_root,
             &file,
             &document_id,
+            control,
+        )?
+    {
+        queue_control = None;
+    }
+    if let Some(control) = queue_control.as_ref()
+        && clear_superseded_stale_supervisor_pause(
+            &bootstrap.project_root,
+            &file,
+            &document_id,
+            &record,
             control,
         )?
     {
@@ -5286,6 +5491,9 @@ mod tests {
         assert!(c("re-injected by Stale Supervisor PID 42"));
         assert!(c(
             "#qchurn no-op churn: go-mode re-injecting :pushpin: [#qchurn] each idle boundary; all heads are undrainable under stale host supervisor pid 2715614; zero drainable work"
+        ));
+        assert!(c(
+            "stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item"
         ));
         // `churn-stop` + the recycle remedy with no other signature still recovers.
         assert!(c("churn-stop: repeated injection; needs operator recycle"));

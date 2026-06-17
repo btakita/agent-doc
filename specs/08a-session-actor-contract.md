@@ -118,6 +118,12 @@ Later phases may refine caller values without changing the field names.
   fields no longer match the authoritative actor record, and it updates
   `supervisor_leases` with the latest runtime state while preserving the
   registered supervisor pid/socket across state-only reports.
+- Supervisor register/heartbeat reports for a newer session/generation may
+  replace the actor record only when the current actor is `Closed`, the pane is
+  unchanged, the reported generation is newer, and the report proves it comes
+  from the same existing supervisor lease by PID or socket. This lets a
+  same-supervisor Codex/OpenCode child restart clear closed state immediately
+  without weakening stale session/pane/generation rejection for live actors.
 - `prompt_visible_once` remains a child-lifecycle fact for restart heuristics, but
   prompt-driven `busy -> ready` recovery must fire after every later routed or
   auto-trigger dispatch that returns the same child to an idle prompt; it is not

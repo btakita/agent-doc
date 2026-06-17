@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -192,13 +192,27 @@ Specific questions to ask:
 One-line note on session state: the document exchange is large, but the queue was active, so I answered and closed the item rather than pausing for compaction.
 
 Closeout proof: changed path is the session document only. Commands included `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, and this `agent-doc finalize`. No code tests were run because no code changed. No escalation was needed. Confidence is medium-high; exact SpotOn CRM/vendor details were not verified and are not needed for this product/workflow answer.
-<!-- agent:boundary:205d0a9f -->
+
+### Re: Corky GPU transcribe + diarize 2026-06-16 call — opus-4-8
+
+> **Queue prompt:**
+>
+> Corky GPU transcribe + diarize [2026-06-16 14-00-36-compressed.mp4](../../../../../Videos/2026-06-16%2014-00-36-compressed.mp4)
+
+
+Done. No prior transcript existed, so I ran `corky transcribe --diarize` (GPU auto-detected) on `~/Videos/2026-06-16 14-00-36-compressed.mp4` and wrote:
+
+- **[transcripts/2026-06-16-14-00-36-transcript.md](transcripts/2026-06-16-14-00-36-transcript.md)** — 541 lines, ~47K, duration **62:10**.
+
+It diarized into **6 speakers**. I did not pass `--speakers`, so they're labeled `Speaker 1`–`Speaker 6` (corky tried to prompt for names but ran non-interactively and skipped). Content is the SpotOn interview itself — opens with intros, schedule walkthrough, and the assistant-designer/role discussion. If you tell me who maps to which speaker number (e.g. Rafael = Speaker 3), I can relabel with `--speakers` or a search-replace pass.
+
+Closeout proof: new artifact `tasks/recruit/transcripts/2026-06-16-14-00-36-transcript.md` committed separately; session document persisted via this finalize. No code changed, so no test suite applied. Confidence high — transcription exited 0 and the file is well-formed with timestamps and speaker turns.
+<!-- agent:boundary:d15e8db1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Corky GPU transcribe + diarize [2026-06-16 14-00-36-compressed.mp4](../../../../../Videos/2026-06-16%2014-00-36-compressed.mp4)
 <!-- /agent:queue -->
 
 ## Backlog

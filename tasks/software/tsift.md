@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -453,12 +453,13 @@ Reopen triggers (any one): a second GPU is installed; >3 concurrent GPU consumer
 Confidence: high (defer is the correct action; building the daemon now would be the over-engineering the original recommendation warned against). No source changes; no commit beyond the session-document closeout. The pre-existing unrelated dirty files under `src/tsift` remain unstaged as before.
 
 Queue drained: `#gctrl1` (lease registry), `#gctrl2` (profile preference), `#gctrl3` (swap action), `#gctrlice` (deferred) are all closed. The RTX 5090 / Qwen3 substrate now has a complete cooperative GPU resource story without a daemon.
-<!-- agent:boundary:b54a3d67 -->
+<!-- agent:boundary:f2b10b54 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Is the local model currently in use?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

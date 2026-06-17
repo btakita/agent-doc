@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -233,7 +233,7 @@ Deploy:
 - Current Worker Version ID: `b85010a4-adf0-4622-81af-c1bcf76e33e0`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:a17aaec4 -->
+<!-- agent:boundary:9ed65193 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -241,6 +241,10 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- https://equityfundingsource.brian-takita.workers.dev/portal-investor/dashboard "Available deal" dialog should display the conversation about the "Available deal" with the admin + lender.
+- https://equityfundingsource.brian-takita.workers.dev/portal-borrower/dashboard "Available deal" dialog should display the conversation about the "Available deal" with the admin + borrower.
+- /portal-investor should be /portal-lender
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

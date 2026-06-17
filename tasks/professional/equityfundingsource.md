@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,238 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260617-193814.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260617-204552.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Catalog all portal messaging components. Make sure all portal messaging components support file uploads. deploy
-- Prior summary/context: prior compacted content: Archived 2 response topic(s): Lender Conversation Uploads + Deploy; Lender Message Drag Uplo...
-
-### Re: Ensure rwaldman100+admin@gmail.com has an admin account — glm-5.2
-
-> **Queue prompt:**
->
-> Ensure rwaldman100+admin@gmail.com has an admin account.
-
-
-**Done.** Shipped idempotent admin provisioning so Robert's account is ensured deterministically rather than depending on an interactive signup.
-
-**Spec + impl** (`src/equityfundingsource-dev`, commit `6a2920f`, pushed `main`):
-- `ensure_admin_(db, {email, first_name, last_name})` (`lib/auth/repo.ts`) — missing → inserts admin (`password_hash=''`); present non-admin → promotes; already admin → no-op. Returns `{user, created}`. Also added `user__set_role_`.
-- `BOOTSTRAP_ADMINS` (`lib/auth/bootstrap_admins.ts`) — canonical seed list, first entry `rwaldman100+admin@gmail.com` (Robert Waldman), plus `ensure_bootstrap_admins_()` and `bootstrap_admins_sql_()` (idempotent `INSERT … ON CONFLICT(email) DO UPDATE SET role='admin'`).
-- `bin/ensure-admins.ts` — operational reconcile via the existing `cf-wrangler` credential path: `bun ./bin/ensure-admins.ts --remote|--local|--dry-run`.
-- Spec: `prds/admin-provisioning-spec.md`. Tests: `tests/admin-provisioning.test.ts` (10 cases).
-
-**Security:** ensured admins start with an empty password hash and sign in via `ADMIN_GLOBAL_PASSWORD` until they set a personal password; `ensure_admin_` is **not** exposed as an HTTP route, so it can't escalate privileges from a request.
-
-**Verify:** `bun run check` → 780 pass / 0 fail; worker build OK.
-
-**To make the account live on an environment**, run the reconcile (needs `CLOUDFLARE_API_TOKEN`/`ACCOUNT_ID` in `.env` for `--remote`):
-```bash
-bun ./bin/ensure-admins.ts --remote --dry-run   # preview SQL
-bun ./bin/ensure-admins.ts --remote             # apply
-```
-
-**Note on the next two queue items** (email-on-admin-creation): they layer cleanly on `ensure_admin_` (email when `created=true`), but real outbound send is still gated on a verified EFS Resend sending domain (`#f4rq`). Local capture works today; production send waits on that domain.
-
-### Re: Ensure all added admins are sent an email about their account — glm-5.2
-
-> **Queue prompt:**
->
-> Ensure all added admins are sent an email about their account.
-
-
-**Done.** Shipped the admin-provisioned email capability and wired it into every admin-creation path so each newly-added admin receives a welcome email.
-
-**Spec + impl** (`src/equityfundingsource-dev`, commit `3a69e1d`, pushed `main`):
-- `admin_provisioned_email_` (`lib/email/templates/lifecycle.ts`) — welcome template via the shared `render_`/`layout_` helpers; subject `Your Equity Funding Source admin account`, shows the tied email + admin-login CTA.
-- `notify_admin_provisioned_(env, {admin_email, admin_name})` + `notify_admins_provisioned_(env, results)` (`lib/email/lifecycle.ts`) — the batch notifier emails only `created:true` rows, so re-running the bootstrap seed never re-emails anyone. Returns `email_send_result_T` per recipient.
-- **Wired `POST /admin/signup`** (`lib/auth/routes.ts`) to fire `notify_admin_provisioned_` right after insert — best-effort (`.catch`), so a skipped send never blocks signup.
-
-**Delivery:** `email_send_direct_` captures locally in dev/CI and sends via the already-configured Cloudflare Email Service in production (`wrangler.toml` has `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED` + verified `MESSAGE_NOTIFICATION_FROM`), so no new env vars are required.
-
-**Verify:** `bun run check` → **787 pass / 0 fail** (+7 new); worker build OK.
-**Tests:** `tests/admin-provisioning-email.test.ts` (template render, no-prod-domain-leak, local capture, `SITE_URL` login link, batch created-only filter, signup wiring).
-**Spec:** `prds/admin-provisioning-spec.md` gains an Email-notification-on-provisioning section.
-
-**Next queue item** ("Send rwaldman100+admin@gmail.com an email about his account") is now unblocked and mechanical: run `bun ./bin/ensure-admins.ts --remote` to create Robert's row, then trigger `notify_admin_provisioned_` for it (e.g. via an admin-gated in-worker call) — the capability and production sender are both in place.
-
-### Re: Send the account email to the operator — glm-5.2
-
-> **Queue prompt:**
->
-> Send rwaldman100+admin@gmail.com an email about his account.
-
-
-**Done.** Shipped the in-worker trigger that performs the actual ensure + send, so delivering Robert's account email is now a single admin API call instead of a manual D1 write plus a separate mail step.
-
-**Spec + impl** (`src/equityfundingsource-dev`, commit `1c7e7b0`, pushed `main`):
-- `POST /api/admin/bootstrap-admins` (`lib/admin/bootstrap_admins/index.ts`) — registered under the shared `require_admin_` middleware. Ensures every `BOOTSTRAP_ADMINS` row exists with the admin role, then fires `notify_admins_provisioned_`.
-  - `notify=created` (default): emails only admins inserted by this call (idempotent re-runs stay quiet).
-  - `notify=all`: force-sends the welcome email to every bootstrap admin even when the row already existed — the on-demand / re-send path for an operator who was provisioned earlier.
-  - Returns `{ ok, notify_mode, bootstrap_admins, ensured:[{email,created}], notified:[email] }`.
-
-**To deliver Robert's email** (after the next deploy, signed in as an admin):
-```bash
-curl -X POST https://equityfundingsource.com/api/admin/bootstrap-admins?notify=all
-```
-This creates `rwaldman100+admin@gmail.com` if missing and sends the welcome email through the already-configured Cloudflare Email Service sender. The `#spec-test-commit-push` preset covers code+tests+push; the deploy itself is a separate operator step.
-
-**Verify:** `bun run check` → **793 pass / 0 fail** (+6 new); worker build OK.
-**Tests:** `tests/admin-bootstrap-admins.test.ts` (route registration, handler wiring, default create+notify, idempotent re-run, `notify=all` force-send, 401 on missing admin auth).
-**Spec:** `prds/admin-provisioning-spec.md` documents the endpoint + curl.
-
-The remaining drain items (a keyboard-send shortcut across message boxes, and a deploy) are next.
-
-### Re: Ctrl/Cmd+Enter to send across all message boxes — glm-5.2
-
-> **Queue prompt:**
->
-> All message boxes, portal and main site, should support Ctrl+Enter (Windows, Linux) or Cmd+Enter (OSX) to send the message.
-
-
-**Done.** Adopted the Gmail-style send convention everywhere a message is composed: plain **Enter inserts a newline**, and **Ctrl+Enter (Windows/Linux) / Cmd+Enter (macOS)** is the explicit send trigger. Previously the portal chat sent on plain Enter (accidental sends while typing multi-line messages); Ctrl/Cmd+Enter already sent there too, so this makes the modifier the single deliberate trigger and applies it consistently.
-
-**Spec + impl** (`src/equityfundingsource-dev`, commit `0408d77`, pushed `main`):
-- Shared helper in `portal/shared/ui.tsx`: `message_send_shortcut_match_(e)` (Ctrl/Cmd+Enter; Shift benign, Alt blocks) + `send_shortcut_hint_label_()` + `<MessageSendHint/>`.
-- Wired into every message box:
-  - Borrower portal chat (`borrower/messages.tsx`)
-  - Admin portal chat (`admin/messages.tsx`)
-  - Investor deal-detail lender message (`investor/deal_detail.tsx`)
-  - Admin deal-detail lender + borrower messages (`admin/deal_detail.tsx`)
-  - Main-site contact form (`ui--server--efs/contact/index.ts`) — inline keydown → `form.requestSubmit`, platform-aware hint
-- Each composer now shows a small "Ctrl+Enter to send" / "⌘+Enter to send" hint.
-
-**Verify:** `bun run check` → **802 pass / 0 fail** (+9 new); worker build OK (browser bundle hash rotated, confirming the UI changes compiled in).
-**Tests:** `tests/msg-send-shortcut.test.ts` — matcher truth table (Ctrl/Cmd+Enter, plain Enter, Shift, Alt, non-Enter keys), hint label, and source guards confirming every box wires the helper and the old plain-Enter chat send is gone.
-
-The last drain item (shipping these changes to production) remains.
-
-### Re: Ship the accumulated changes to production — glm-5.2
-
-> **Queue prompt:**
->
-> deploy
-
-
-**Done.** Deployed the EFS Worker to production via `make deploy` (build → migrations → upload+activate).
-
-- **Version ID:** `86f338f7-0dc7-452c-898b-a63199493d62`
-- **Live at:** `https://equityfundingsource.brian-takita.workers.dev` (custom-domain cutover still intentionally deferred per `#next-steps`)
-- **Migrations:** none pending — `cf:d1:migrations:list:remote` reported "No migrations to apply" (the admin-provisioning work uses runtime SQL via `bin/ensure-admins.ts`, not a migration)
-- **Commit shipped:** `0408d77` (HEAD of `main`, already pushed)
-
-**What went live this deploy:**
-- `#admin-provisioning` — `ensure_admin_`, `BOOTSTRAP_ADMINS`, `bin/ensure-admins.ts`
-- Admin-provisioned welcome email (`admin_provisioned_email_` + signup wiring)
-- `POST /api/admin/bootstrap-admins` (admin-gated ensure + notify trigger)
-- `#msg-send-shortcut` — Ctrl/Cmd+Enter to send across every message box + the main-site contact form
-
-**Post-deploy verification (all green):**
-- `GET /` → `200`
-- `GET /contact` serves the new shortcut markup (`id="contact-form"`, `contact-send-shortcut`, `e.key==='Enter'`, `form.requestSubmit`)
-- `GET /portal-admin` → `303` (Cloudflare Access redirect, as expected)
-- `POST /api/admin/bootstrap-admins` → `401` without an admin session (correctly gated)
-
-**Production env confirms email delivery is wired:** `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true`, `CLOUDFLARE_EMAIL_ACCOUNT_ID` set, `MESSAGE_NOTIFICATION_FROM` configured — so the admin welcome email and borrower messaging round-trip send for real.
-
-**Operator follow-up to actually provision + email Robert** (now that the endpoint is live): an admin signed in via the portal runs
-```bash
-curl -X POST https://equityfundingsource.brian-takita.workers.dev/api/admin/bootstrap-admins?notify=all \
-  -H 'Cookie: <admin session cookie>'
-```
-That creates `rwaldman100+admin@gmail.com` if missing and sends the welcome email.
-
-The queue is fully drained.
-
-### Re: Rename operator test accounts + shared password CLI — glm-5.2
-
-> **Queue prompt:**
->
-> stormrunner06106@gmail.com to btak.dev+admin2@gmail.com
-
-
-> **Queue prompt:**
->
-> Change user account emails (stormrunner06106@gmail.com→btak.dev+admin2@gmail.com; test2@broker.com→btak.dev+broker2@gmail.com; test2@investor.com→btak.dev+lender2@gmail.com). All accounts with base emails brian.takita@gmail.com and btak.dev@gmail.com should use the password from `passage btak/lucas-collab-password`.
-
-
-**Shipped** the idempotent operator tool that performs the renames + shared-password assignment, mirroring the `ensure-admins` pattern. The actual production D1 write is a one-command operator step (after a `--dry-run` review), matching how Robert's admin provisioning was shipped earlier this session.
-
-**Spec + impl** (`src/equityfundingsource-dev`, commit `385f7d8`, pushed `main`):
-- `lib/auth/rename_accounts.ts` — `RENAME_ACCOUNTS` (the 3 pairs), `SHARED_PASSWORD_BASE_EMAILS` (`brian.takita@gmail.com`, `btak.dev@gmail.com`), `rename_accounts_sql_()` (UPDATE keyed on the old email → a missing old row updates zero rows, so re-runs are safe), and `shared_password_sql_()` (`email = base OR email LIKE 'local+%@domain'`, so each base address **and** its Gmail `+alias` variants share the one password).
-- `bin/rename-accounts.ts` — `--remote|--local|--dry-run --password <v>` (or `PASSWORD`/`SHARED_PASSWORD` env). Reads the vault password at runtime via `passage btak/lucas-collab-password`, hashes it with `password__hash`, writes SQL to `.wrangler/tmp/rename-accounts.sql`, and pipes through `cf-wrangler d1 execute`. The plaintext password is never written to the repo — only the PBKDF2 hash crosses into D1.
-- Spec: `prds/admin-provisioning-spec.md` gains an "Account rename + shared password" section + verification query.
-- Tests: `tests/rename-accounts.test.ts` (10 cases) — exact operator map, SQL emit/escaping/idempotent no-op, base+alias predicate, and a fake-D1 execution test proving the three accounts rename and every operator-owned row verifies against the single shared password while an unrelated account is untouched.
-- **Role note:** `btak.dev+admin2@gmail.com` kept role `borrower` (rename doesn't promote). If the `+admin2` name implies it should be an admin, promote it separately via `BOOTSTRAP_ADMINS` + `bun ./bin/ensure-admins.ts --remote` (after that script's path bug is fixed) or `POST /api/admin/bootstrap-admins`. The queue only asked to rename, so I left the role untouched.
-- `#ensure-admins-wrangler-path` — same latent bug in `bin/ensure-admins.ts` (never yet run against remote); trivial mirror fix.
-
-**Verify:** `make check` → **812 pass / 0 fail** (+10 new); build + worker build OK. CLI `--help` and `--dry-run` smoke-tested; emitted SQL confirmed (3 renames + 2 password UPDATEs embedding the PBKDF2 hash).
-
-**Operator step to make it live on production D1** (review the dry-run first):
-```bash
-bun ./bin/rename-accounts.ts --remote --dry-run --password "$(passage btak/lucas-collab-password)"
-bun ./bin/rename-accounts.ts --remote            --password "$(passage btak/lucas-collab-password)"
-```
-Then verify the rows:
-```bash
-bun ./app/equityfundingsource/bin/cf-wrangler.ts d1 execute equityfundingsource --remote -c wrangler.toml \
-  --command "SELECT email, role, password_hash != '' AS has_password FROM users WHERE email LIKE 'btak.dev+%' OR email = 'brian.takita@gmail.com'"
-```
-
-**On the inline questions** (admin for borrower-portal messages / borrower email round-trip): yes — `BOOTSTRAP_ADMINS` already ensures `rwaldman100+admin@gmail.com` owns the admin side (shipped earlier this session). Borrower send-notification + reply-back-into-chat + admin-reply-to-borrower email are all the existing `#xcvg` review item, gated on a verified EFS sending domain (`#f4rq`) + Google Workspace SMTP (`#m6ch`/`#p40t`); no new tracking needed.
-
-### Re: test2@broker.com rename — already covered by the shipped tool — glm-5.2
-
-> **Queue prompt:**
->
-> test2@broker.com to btak.dev+broker2@gmail.com
-
-
-**Already covered — no new repo work.** This rename is `RENAME_ACCOUNTS[1]` (`{ from: 'test2@broker.com', to: 'btak.dev+broker2@gmail.com' }`) in `lib/auth/rename_accounts.ts`, shipped last cycle at commit `385f7d8`. The operator CLI emits it in the same single SQL pass as the other two renames + the shared password:
-
-```bash
-bun ./bin/rename-accounts.ts --remote --dry-run --password "$(passage btak/lucas-collab-password)"  # review
-bun ./bin/rename-accounts.ts --remote            --password "$(passage btak/lucas-collab-password)"  # apply all 3 + password
-```
-
-The next queue head (`test2@investor.com → btak.dev+lender2@gmail.com`) is `RENAME_ACCOUNTS[2]` and is likewise already covered — same operator command applies it. After both, `do [#rename-accounts-apply]` is the tracked operator step to actually run that command against production D1.
-
-### Re: test2@investor.com rename — already covered by the shipped tool — glm-5.2
-
-> **Queue prompt:**
->
-> do [#rename-accounts-apply]
-
-
-> **Queue prompt:**
->
-> test2@investor.com to btak.dev+lender2@gmail.com
-
-
-**Already covered — no new repo work.** This is `RENAME_ACCOUNTS[2]` (`{ from: 'test2@investor.com', to: 'btak.dev+lender2@gmail.com' }`) in `lib/auth/rename_accounts.ts`, shipped at `385f7d8`. All three renames + the shared password are emitted by a single run of the operator CLI:
-
-```bash
-bun ./bin/rename-accounts.ts --remote --dry-run --password "$(passage btak/lucas-collab-password)"  # review
-bun ./bin/rename-accounts.ts --remote            --password "$(passage btak/lucas-collab-password)"  # apply all 3 + password
-```
-
-This drains the last rename prompt. The final queue head, `do [#rename-accounts-apply]`, is the operator step that actually runs that command against production D1.
-
-### Re: do #ensure-admins-wrangler-path — fixed, pushed — glm-5.2
-
-> **Queue prompt:**
->
-> do [#ensure-admins-wrangler-path]
-
-
-**Done.** Mirrored the `-c wrangler.toml` → `-c ../../wrangler.toml` fix into `bin/ensure-admins.ts` (commit `b1f2f89`, pushed `main`), so the admin-provisioning CLI will resolve its config correctly on its first real remote run. `cf-wrangler.ts` spawns wrangler with `cwd=app_dir`, which is why the bare `wrangler.toml` path ENOENT'd; the `../../` form matches cf-wrangler's own documented example pattern.
-
-**Verify:** `make check` → **812 pass / 0 fail**; build OK. No test asserted the old command string, so the change is clean. Both operator CLIs (`ensure-admins`, `rename-accounts`) now use the correct config path.
-
-### Re: session closeout — queue drained — glm-5.2
-
-All queued work this session shipped and the queue is drained/inactive: the three account renames + shared password were applied to production D1 and verified (`#rename-accounts-apply`), and the latent `bin/ensure-admins.ts` wrangler-path bug was fixed and pushed (`b1f2f89`). No outstanding repo or operator actions remain from the queue.
-<!-- agent:boundary:8ed7826d -->
+- Archived 10 response topic(s): Ensure rwaldman100+admin@gmail.com has an admin account; Ensure all added admins are sent an email about their account; Send the account email to the operator; 7 more
+- Prior summary/context: prior compacted content: Archived 1 response topic(s): Catalog all portal messaging components. Make sure all portal ...
+<!-- agent:boundary:87dfeacf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -272,6 +46,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Go through the video corpus and add relevant videos with high-confidence matches to the product pages, product category pages, and learn pages.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -52,7 +52,25 @@ Blocked on the video-corpus item; nothing to ship for deploy. I walked the full 
 - **No product / product-category / learn pages.** Live EFS routes are only `/`, `/about`, `/apply`, `/blog`, `/contact`, `/funded-deals`. No product taxonomy, no learn center. The loan "programs" (Purchase / Bridge / Construction / Commercial) are inline home-page labels in `lib/public_content/repo.ts`, not standalone pages; the blog is the only educational surface.
 
 This task reads like it belongs to a different property (a site with a video library + product/learn structure). Striking it rather than fabricating a corpus or inventing pages. **If an external video corpus exists (Drive/Dropbox/etc.), point me at it and confirm product/learn pages are actually planned for EFS** — otherwise it's out of scope for a private-lending portal. On deploy: no code/spec/test changes were made (the video task was blocked, not implemented), so `make deploy` would only re-ship current state; re-queue deploy after real changes land.
-<!-- agent:boundary:99f37127 -->
+
+### Re: deploy — shipped to production — glm-5.2
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed the EFS Worker. Pre-deploy checks all green: on `main`, clean tree, **812 tests pass / 0 fail**, build + `build:worker` OK, no pending D1 migrations (production current through 0084).
+
+`make deploy` → build → no migrations to apply → Worker uploaded + activated.
+
+- **Version ID:** `7a9b9ada-e110-4c6d-aa3e-2d8d9243e194`
+- **URL:** https://equityfundingsource.brian-takita.workers.dev (cron `0 * * * *`)
+- Ships the committed-but-not-yet-deployed features: admin provisioning + `POST /api/admin/bootstrap-admins`, Ctrl/Cmd+Enter message-send across portal message boxes, contact-form update, auth CLI fixes.
+- Smoke tests: `/` 200, `/funded-deals` 200, `/login` 200.
+
+Queue drained (video-corpus struck as out-of-scope last cycle; deploy struck this cycle).
+<!-- agent:boundary:916fb7b9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,8 +78,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Go through the video corpus and add relevant videos with high-confidence matches to the product pages, product category pages, and learn pages.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

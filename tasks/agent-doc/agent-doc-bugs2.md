@@ -151,13 +151,26 @@ Implemented and installed the proof fixes.
 - Installed: `make install` updated the binary/cdylib and auto-marked 2 controllers for recycle; JetBrains plugin `0.2.168` installed to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`. Restart IntelliJ IDEA to activate it.
 
 Verification: `make check`; `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`; `./gradlew test buildPlugin`; `agent-doc --version`; latest GitHub Actions `CI` on `main` was completed/success. The separate monsterrodholders Sync Tmux Layout prompt is still queued; I did not implement that in this pass.
-<!-- agent:boundary:7c473122 -->
+
+### Re: Codex Return retry and merge artifact — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` Codex did not submit.
+
+
+The Codex `Run Agent Doc` no-submit symptom is covered by `src/agent-doc` commit `dc7ddb88`: Codex dispatch-only routes no longer treat pane-input acceptance as enough proof. They require dispatch-start proof, and if the pane accepted input but no proof appears, the JB notification now shows a blocked outcome with the route attempt id and route-submit snapshot.
+
+On retrying `Return`: do not retry unboundedly. The safe rule is bounded and proof-gated. Clear Session Context now does one submit-key retry only when the clear command is still visible in the active input. Run Agent Doc should not keep pressing Return after input was accepted, because that can duplicate dispatch if the route proof is stale. A future improvement can add the same bounded retry only for the narrow case where the routed trigger remains visibly drafted and no dispatch proof exists.
+
+I also removed the transient merge-marker artifact and the `(HEAD)` label from the previous failed closeout. I did not implement the broader CRDT-retry-on-typing-merge change in this pass; that queue item remains active.
+<!-- agent:boundary:21e96d0f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: JB `Run Agent Doc` Codex did not submit.
+- ~~:pushpin: JB `Run Agent Doc` Codex did not submit.~~
 - :pushpin: Should JB `Run Agent Doc` & `Clear Session Context` Codex retry `Return` until submit occurs? Same with JB `Clear Session Context` Opencode?
 - :pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.
 - :pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.

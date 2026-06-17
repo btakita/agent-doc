@@ -4307,16 +4307,15 @@ pub(crate) fn handle_admin_operation(
     )
 }
 
-pub(crate) fn project_root_from_arg(root: Option<&Path>) -> Result<PathBuf> {
-    let cwd;
+pub fn project_root_from_arg(root: Option<&Path>) -> Result<PathBuf> {
+    let cwd = std::env::current_dir()?;
     let start = match root {
-        Some(path) => path,
-        None => {
-            cwd = std::env::current_dir()?;
-            &cwd
-        }
+        Some(path) if path.is_absolute() => path.to_path_buf(),
+        Some(path) => cwd.join(path),
+        None => cwd,
     };
-    crate::snapshot::find_project_root(start)
+    let start = start.canonicalize().unwrap_or(start);
+    crate::snapshot::find_project_root(&start)
         .or_else(|| {
             if start.join(".git").exists() || start.join(".agent-doc").exists() {
                 Some(start.to_path_buf())

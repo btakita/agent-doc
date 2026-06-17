@@ -1102,6 +1102,41 @@ fn test_cli_help() {
 }
 
 #[test]
+fn test_admin_recycle_help_accepts_document_or_project_target() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["admin", "recycle", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("[FILE_OR_PROJECT_ROOT]"))
+        .stdout(predicate::str::contains(
+            "Optional document path or project root to recycle",
+        ));
+}
+
+#[test]
+fn test_admin_recycle_accepts_document_target() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    let tasks = root.join("tasks");
+    fs::create_dir_all(&tasks).unwrap();
+    let doc = tasks.join("session.md");
+    fs::write(&doc, "# Session\n").unwrap();
+    let doc_arg = Path::new("tasks/session.md");
+    let expected_root = root.canonicalize().unwrap().display().to_string();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(root);
+    cmd.args(["admin", "recycle", doc_arg.to_str().unwrap(), "--json"]);
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let stdout = String::from_utf8_lossy(&output);
+    assert!(!stdout.contains("unexpected argument"), "{stdout}");
+    assert!(stdout.contains("\"scope\":\"project\""), "{stdout}");
+    assert!(stdout.contains(&expected_root), "{stdout}");
+    assert!(stdout.contains("\"recycled\":false"), "{stdout}");
+}
+
+#[test]
 fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();

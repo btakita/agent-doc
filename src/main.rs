@@ -1388,6 +1388,9 @@ enum AdminAction {
     /// idle boundary (no dispatch in flight). Run after `cargo install` so a
     /// long-running controller stops serving the prior binary (`#ctlrecycle`).
     Recycle {
+        /// Optional document path or project root to recycle (defaults to the nearest project from CWD)
+        #[arg(value_name = "FILE_OR_PROJECT_ROOT")]
+        target: Option<PathBuf>,
         /// Project root to recycle (defaults to the nearest project from CWD)
         #[arg(long)]
         project_root: Option<PathBuf>,
@@ -3098,11 +3101,17 @@ fn main() -> anyhow::Result<()> {
                 Ok(())
             }
             AdminAction::Recycle {
+                target,
                 project_root,
                 all_projects,
                 json,
             } => {
                 if all_projects {
+                    if target.is_some() || project_root.is_some() {
+                        anyhow::bail!(
+                            "admin recycle --all-projects cannot be combined with FILE_OR_PROJECT_ROOT or --project-root"
+                        );
+                    }
                     let (recycled, skipped) =
                         agent_doc_orchestration::project_controller::recycle_controllers_all_projects()?;
                     if json {
@@ -3116,20 +3125,15 @@ fn main() -> anyhow::Result<()> {
                         );
                     }
                 } else {
-                    let root = match project_root {
-                        Some(r) => r,
-                        None => {
-                            let cwd = std::env::current_dir()?;
-                            agent_doc_orchestration::fs_util::find_project_root(&cwd).ok_or_else(
-                                || {
-                                    anyhow::anyhow!(
-                                        ".agent-doc/ project root not found from {}",
-                                        cwd.display()
-                                    )
-                                },
-                            )?
-                        }
-                    };
+                    if target.is_some() && project_root.is_some() {
+                        anyhow::bail!(
+                            "admin recycle accepts either FILE_OR_PROJECT_ROOT or --project-root, not both"
+                        );
+                    }
+                    let root_arg = project_root.as_deref().or(target.as_deref());
+                    let root = agent_doc_orchestration::project_controller::project_root_from_arg(
+                        root_arg,
+                    )?;
                     let recycled =
                         agent_doc_orchestration::project_controller::recycle_controller(&root)?;
                     if json {

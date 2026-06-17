@@ -156,7 +156,23 @@ Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-
 Verification: focused tests passed (`113 pass`); full check passed (`755 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:15d18da4 -->
+
+### Re: Lender contact summary — gpt-5
+
+> **Queue prompt:**
+>
+> Lender contact summary
+
+Completed and pushed the final Interested Lenders workflow field cleanup.
+
+Changed paths: `src/equityfundingsource-dev` commit `efa40c0` removes `pre_doc_instructions` and `lender_last_contact_summary` from deal-interest admin/investor API contracts, admin update SQL, workflow summaries, Interested Lenders UI controls, specs/docs, and tests; adds migrations `0080_drop_deal_interest_pre_doc_instructions.sql` and `0081_drop_deal_interest_contact_summary.sql` to drop the columns. Last-contact timestamp and next-follow-up date remain. Parent repo commit `60f9967cf` updates the EFS submodule pointer.
+
+Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `git diff --check`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
+
+Verification: focused tests passed (`115 pass`); full check passed (`757 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:bf4543e3 -->
 <!-- /agent:exchange -->
 ###
 <!--

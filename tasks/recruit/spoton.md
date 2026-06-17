@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -207,13 +207,47 @@ Done. No prior transcript existed, so I ran `corky transcribe --diarize` (GPU au
 It diarized into **6 speakers**. I did not pass `--speakers`, so they're labeled `Speaker 1`–`Speaker 6` (corky tried to prompt for names but ran non-interactively and skipped). Content is the SpotOn interview itself — opens with intros, schedule walkthrough, and the assistant-designer/role discussion. If you tell me who maps to which speaker number (e.g. Rafael = Speaker 3), I can relabel with `--speakers` or a search-replace pass.
 
 Closeout proof: new artifact `tasks/recruit/transcripts/2026-06-16-14-00-36-transcript.md` committed separately; session document persisted via this finalize. No code changed, so no test suite applied. Confidence high — transcription exited 0 and the file is well-formed with timestamps and speaker turns.
-<!-- agent:boundary:7e588f5d -->
+
+### Re: Followup email to Dustin Wasko — opus-4-8
+
+> **Queue prompt:**
+>
+> From the transcript, please help me draft a followup email to dustin-wasko https://www.linkedin.com/in/dustinwasko/. I would like to learn more about the job and how we can improve conversion of signed contracts to installs.
+
+Drafted below. Grounding from the Jun 16 transcript: the interview was a system-design session with **Calvin Moore** (principal engineer, hospitality/POS, near Charlotte NC) and **Rafa** shadowing. Calvin confirmed the role exists specifically to **raise conversion from signed contract to install**, and surfaced the real friction points himself: financed hardware creates an implied obligation even though the software is no-contract; penalty clauses cost more to pursue than to eat; signed accounts ship hardware that never activates; they're brainstorming acquisition deposits (with pushback from field sales); and engineering/R&D tracks merchant lifecycle in a legacy **Hub** system while **Salesforce** is the sales/ops source of truth. Dustin (`dwasko@spoton.com`) is the recruiter and the wrap-up explicitly routed further questions through him.
+
+**Subject:** Following up — SpotOn interview (Tue Jun 16)
+
+> Hi Dustin,
+>
+> Thanks again for setting up Tuesday's session with Calvin and Rafa. I enjoyed the design conversation, and the role stuck with me afterward. Turning the signed-contract-to-install path into a measurable, higher-converting product is exactly the kind of problem I like working on.
+>
+> A few things I'd love to understand better as the process continues:
+>
+> - How the team measures install conversion today, and where signed merchants most often drop off... financing, scheduling, menu readiness, hardware, or just going dark.
+> - How Hub and Salesforce divide responsibility for a merchant's lifecycle, and how much room the role has to change merchant-facing workflow versus internal tooling.
+> - What the next steps look like on your end, and your rough timeline.
+>
+> Calvin and I got into the tension between financed-hardware obligations and the no-contract software pitch, and the fact that the team is already weighing things like acquisition deposits. I've been thinking about that as an activation-funnel problem, and I have a few concrete product ideas I'd be glad to walk through if it's useful.
+>
+> Happy to send along anything else that would help. Looking forward to hearing what's next.
+>
+> Best,
+> Brian
+
+Notes on the draft:
+- **Tone:** warm and specific, not a generic thank-you. It name-drops Calvin/Rafa and the financing-obligation thread so Dustin can see real engagement, but stays short enough that a recruiter will actually read it.
+- **"Learn more about the job"** is covered by the three bullets (conversion metrics, Hub/Salesforce ownership and workflow latitude, next steps/timeline).
+- **"Improve conversion"** is signaled, not dumped... I kept the product ideas as an offer rather than pasting the full activation-funnel pitch, so it invites a follow-up call instead of front-loading a wall of suggestions.
+- **Per your no-auto-send rule, I did not send or create a Gmail draft.** Say the word and I'll push it to Gmail Drafts to `dwasko@spoton.com` (new thread; the prior "SpotOn Interview Availability" thread is stale for a post-interview followup), or tweak the wording first.
+
+Closeout: changed path is the session document only; no email was sent or drafted to Gmail. Commands were preflight, plan, transcript + mail-thread inspection, and this finalize. No code changed, so no test suite applied. Confidence high on the facts (pulled directly from the transcript and the mail thread for Dustin's address).
+<!-- agent:boundary:ae1474d1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- From the transcript, please help me draft a followup email to dustin-wasko https://www.linkedin.com/in/dustinwasko/. I would like to learn more about the job and how we can improve conversion of signed contracts to installs.
 <!-- /agent:queue -->
 
 ## Backlog

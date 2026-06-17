@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -152,7 +152,31 @@ Commands / verification:
 - EFS and parent relevant worktrees were clean after deploy.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:cc1d814c -->
+
+### Re: Deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployed the current `main` build for Equity Funding Source to Cloudflare Workers.
+
+Changed paths:
+- None in `src/equityfundingsource-dev`; this cycle only redeployed the already-committed code.
+
+Commands / verification:
+- `git status -sb` in `src/equityfundingsource-dev` showed clean `main...origin/main` before deploy.
+- `bun run cf:d1:migrations:list:remote` before deploy reported no remote D1 migrations to apply.
+- `make deploy` succeeded: build + worker bundle completed, remote D1 migration apply reported no migrations, no updated asset files were uploaded, triggers were deployed, and Worker `equityfundingsource` deployed.
+- Deployed URL: `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Worker Version ID: `d6251bec-71df-4430-857e-d15f311c47ad`.
+- Post-deploy `bun run cf:d1:migrations:list:remote` again reported no migrations to apply.
+- Live smoke checks: `/` returned `200`; `/portal-lender/dashboard` returned `303` to `/login?role=investor&next=%2Fportal-lender%2Fdashboard`; `/portal-investor/dashboard` returned `308` to `/portal-lender/dashboard`.
+- `git status -sb` in `src/equityfundingsource-dev` remained clean after deploy.
+- Parent repo status still has unrelated pre-existing dirty/ahead work outside this EFS deploy; I did not modify those paths.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:8b3e7809 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -160,8 +184,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~301 redirect /portal-investor/* to /portal-lender/*~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

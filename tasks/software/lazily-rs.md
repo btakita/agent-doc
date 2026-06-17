@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -53,7 +53,7 @@ Compacted content:
 ### Re: #next-steps — follow-up backlog — opus-4-6
 
 Remaining items added to backlog (in priority order). Top of backlog: **#lz57by-close**.
-<!-- agent:boundary:ba7370ec -->
+<!-- agent:boundary:650398fa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,7 +61,10 @@ Remaining items added to backlog (in priority order). Top of backlog: **#lz57by-
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- [#jknk]
+- [#tf0k]
+- [#j1vw]
 <!-- /agent:queue -->
 
 ## Backlog

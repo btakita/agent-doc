@@ -175,6 +175,11 @@ I also removed the transient merge-marker artifact and the `(HEAD)` label from t
 
 > **Queue prompt:**
 >
+> :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit yet again. I manually ran it. As the turn was running, `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md\n` was sent to the Codex input.
+
+
+> **Queue prompt:**
+>
 > :pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.
 
 
@@ -262,7 +267,21 @@ Verification: focused parser regressions, full `agent-doc-core` frontmatter test
 Operational note: the exact one-file sync verification focused `monsterrodholders.md` and stashed the other live panes as part of the requested one-file layout. That was a verification side effect, not part of the parser fix.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:759652a9 -->
+### Response — gpt-5
+Fixed the fresh equityfundingsource injection path in `src/agent-doc` submodule commit `ba56b4bf`.
+
+The latest relevant proof was the `05:38:06Z` JetBrains route attempt `1781674686162-6`. The ledger reported `route_success`, but ops showed it sent `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` to pane `%41` while that same pane was already in a manually started Codex turn. The actor record still said `ready`, so the authoritative-actor route bypassed the existing busy active-turn guard and used direct pane submit.
+
+The fix adds a live active-turn probe for dispatch-only authoritative actors even when the durable actor record says `Ready`. If the pane shows a Codex active-turn cue, route logs `route_dispatch_only_ready_actor_active_turn_blocked`, downgrades the local action state to `Busy`, forces `prompt_ready=false`, and lets the existing busy/queue/defer path run instead of injecting a second `agent-doc ...` line into the prompt.
+
+Changed paths: `src/agent-doc/agent-doc-orchestration/src/route.rs`, parent gitlink `src/agent-doc`, and this session document closeout. The unrelated dirty `src/boost-client` working tree was left untouched.
+
+Verification: focused route tests for the stale-ready probe and active-turn refusal passed; full `route::tests` passed with 112 passed and 7 ignored tmux integration tests; `make check` passed with 4626 nextest tests plus doctests and the medium closeout simulation; `make install` completed; `agent-doc --version` reports `agent-doc 0.34.1`; latest GitHub Actions CI on `main` is completed/success for run `27664844335`.
+
+Operational note: install marked 2 controllers for recycle at the next idle boundary. Until the stale live supervisor recycles, preflight can still warn that the currently running controller was launched from an older binary.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:3ab70bea -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -275,7 +294,7 @@ Escalation: none. Confidence: high.
 - ~~:pushpin: As the queue is draining, `agent-doc tasks/agent-doc/agent-doc-bugs2.md` is added to the agent input. It should not be added.~~
 - ~~:pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.~~
 - ~~:pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.~~
-- :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit yet again. I manually ran it. As the turn was running, `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md\n` was sent to the Codex input.
+- ~~:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit yet again. I manually ran it. As the turn was running, `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md\n` was sent to the Codex input.~~
 - backlog with `queue` attribute is not adding items into the queue.
 - :pushpin: agent-doc CLI has misformatted help message ![img_37.png](img_37.png)
 <!-- /agent:queue -->

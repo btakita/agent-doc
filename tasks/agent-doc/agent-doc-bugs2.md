@@ -32,17 +32,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260617-021642.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260617-021642.md`*
 
 Compacted content:
-❯ - Archived 10 response topic(s): JB Run Agent Doc Enter submit; JB Run Agent Doc route submit race; JB clear/run submit restart race closeout; 7 more
-❯ - Prior summary/context: prior compacted content: Archived 31 response topic(s): JB Run Agent Doc stale queue pause; binary logic for stale qu...
+- Archived 10 response topic(s): JB Run Agent Doc Enter submit; JB Run Agent Doc route submit race; JB clear/run submit restart race closeout; 7 more
+- Prior summary/context: prior compacted content: Archived 31 response topic(s): JB Run Agent Doc stale queue pause; binary logic for stale qu...
 Implemented the JetBrains Run Agent Doc parity cleanup.
-
-> **Queue prompt:**
->
-> :pushpin: Both Claude Code + Opencode have working JB `Run Agent Doc` behavior. Remove Codex-specific logic. Can we unify all tmux-related logic across the 3 agent harnesses?
-
 
 Dispatch-only reroutes now use one harness-neutral success policy: accepted shared tmux text+`Enter` delivery succeeds for Claude Code, Codex, and OpenCode, logging `proof=accepted proof_scope=accepted_only` when no stronger dispatch-start proof arrives. Codex hook proof and OpenCode pane-state proof still upgrade telemetry to `dispatch_start`, but Codex hook tracking no longer changes progress reporting or gates success differently.
 

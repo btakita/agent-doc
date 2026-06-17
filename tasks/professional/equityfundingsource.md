@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -191,7 +191,7 @@ Verification:
 - Remote D1 schema for `investor_deal_interests` no longer includes the removed columns; it retains the intended date/workflow/GHL fields.
 
 I could not perform an authenticated browser check of the admin dialog from this shell, but the deployed bundle and production schema both reflect the removal.
-<!-- agent:boundary:e7fbacbd -->
+<!-- agent:boundary:65759b1b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -199,6 +199,22 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+In Available deal dialog + page:
+
+Hide "GoHighLevel adapter" section.
+Move "Borrower document requests" under "Lender communication".
+
+Rename "Borrower document requests" to "Borrower communication". Add a dropdown containing:
+- Request Document(s)
+- Message (General message with EFS letterhead with the Application info)
+
+The upload from the Request Document(s) email should send an email of receipt to the admin email. The upload should also be visible in the Borrower communication after the message sent by the admin. The message sent by the admin should remain visible after the borrower uploads the document(s).
+
+"Lender communication" should be an email message system like "Borrower communication"...on EFS letterhead with the Application info.
+
+Email responses by lender or borrower should be emailed to the admin and be visible in the Available deal dialog + page.
+
+deploy
 <!-- /agent:queue -->
 
 ## Backlog

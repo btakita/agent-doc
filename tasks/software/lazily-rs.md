@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -69,7 +69,22 @@ The `inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish` mo
 **SPEC/docs corrected:** `SPEC.md` Loom-gate bullet and two `src/thread_safe.rs` doc-comments changed from *"modeled exhaustively"* to *"preemption-bounded"* for the combined envelope model (honest about the reduced coverage), with the validation method noted.
 
 **Commit + push:** lazily-rs submodule `641fbf2` → `lazily-hub/lazily-rs` main (`691fd3b..641fbf2`); superproject gitlink `1660e814c` → `btakita/agent-loop` main (`7e525d275..1660e814c`).
-<!-- agent:boundary:18a89f95 -->
+
+### Re: Release + publish — lazily v0.11.1 live on crates.io — glm-5.2
+
+> **Queue prompt:**
+>
+> Release + publish
+
+Confirmed scope with operator first: **v0.11.0 was already on crates.io**, and four patch-level commits since the `v0.11.0` tag were unpublished (ipc dead-code gating, SlotId cast hardening + `From` impls, repo URL fix, Loom envelope bound). Bumped to **v0.11.1** — no API or behavior changes, perf-neutral.
+
+**Release artifacts:**
+- Version bump `0.11.0 → 0.11.1` in `Cargo.toml` + `Cargo.lock`; `RELEASE_NOTES_v0.11.1.md` written; `BENCHMARKS.md` version string bumped (numbers unchanged — patch fixes are perf-neutral; `--no-run` regen on this dev box tripped machine-specific lock-acquisition budgets, a pre-existing reference-machine sensitivity, so numbers left for CI to regenerate).
+
+**Verification:** `cargo build --all-features`, `cargo clippy --all-features --all-targets -- -D warnings`, `cargo fmt --check` clean; full default suite green; `spec_compliance` 107/107; `cargo publish --dry-run` clean (73 files, ~235 KiB).
+
+**Published:** `cargo publish` → **`Published lazily v0.11.1 at registry crates-io`**. Tag `v0.11.1` pushed; GitHub release https://github.com/lazily-hub/lazily-rs/releases/tag/v0.11.1. Submodule `a04fd8e` (`641fbf2..a04fd8e`); superproject gitlink `0961d9b26`.
+<!-- agent:boundary:4414da1b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +93,6 @@ The `inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish` mo
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Release + publish
 <!-- /agent:queue -->
 
 ## Backlog

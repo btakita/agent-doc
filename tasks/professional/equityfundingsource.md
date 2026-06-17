@@ -38,7 +38,36 @@ completed
 Compacted content:
 - Archived 6 response topic(s): Rename investor routes to lender routes; Move borrower portal routes; Move broker portal routes; 3 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:11cb220d -->
+
+### Re: email reply threading + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> The message emails should be from the configured site email address.
+
+
+Implemented and deployed the secure-message email reply path for the EFS app.
+
+What changed:
+- Outbound secure-message notification emails can now use a session-specific `Reply-To` generated from `MESSAGE_EMAIL_INBOUND_REPLY_TO`, including plus-address forms like `messages+{session_id}@...`.
+- `POST /api/email/inbound` now parses the originating session from an explicit `session_id` or the inbound recipient/headers, normalizes display-name `From` addresses, and appends the reply to the original `chat_sessions` thread.
+- Inbound replies are still fail-closed: provider shared secret first, then the sender email must resolve to an active admin or the portal user who owns the thread. Admin replies append as EFS; borrower/broker/investor replies append as portal-user messages and notify the admin side.
+- Admin message queries and unread counts now include broker portal users in the same chat stack, and the PRD/tests document the borrower/broker/admin reply-threading contract.
+
+Commits / deploy:
+- EFS implementation commit pushed: `f493336` (`feat(messages): thread email replies into chat (#xcvg)`).
+- Parent submodule pointer committed locally: `19f488bb1`.
+- Deployed via `make deploy`; Worker version `f2123f48-9ec9-4d19-a14f-a382c8bdf08f` is live at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Verification:
+- `bun test tests/borrower-message-notify.test.ts tests/borrower-messages.test.ts` passed.
+- `make check` passed: 763 tests, app build, worker build.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` reports no migrations to apply.
+- Live smoke checks: `/` returned `200`; `/api/email/inbound` returned expected `501` because inbound routing remains disabled until provider config is set.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows.
+
+Config note: the deployed code is ready, but actual email reply ingestion remains intentionally disabled until inbound email routing is configured with `MESSAGE_EMAIL_INBOUND_ENABLED`, `MESSAGE_EMAIL_INBOUND_SECRET`, and `MESSAGE_EMAIL_INBOUND_REPLY_TO`.
+<!-- agent:boundary:7c0ea7c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +75,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The message emails should be from the configured site email address.
+- ~~The message emails should be from the configured site email address.~~
 - deploy
 <!-- /agent:queue -->
 

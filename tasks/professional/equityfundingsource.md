@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -38,7 +38,7 @@ completed
 Compacted content:
 - Archived 10 response topic(s): Session recovery; Remove borrower communication type label; Show uploaded request documents; 7 more
 - Prior summary/context: prior compacted content: Archived 12 response topic(s): Mark Call Completed; Start Underwriting; Call scheduled; 9 more
-<!-- agent:boundary:efe2d525 -->
+<!-- agent:boundary:ae1fed8c -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -93,7 +93,28 @@ Reviewed all 4 `[operator-drive]` review items. One ship-stopper found, one revi
 **#h6qb (#lzwebrtcnet-e2e):** The agent-doable slice (**#lzwebrtcwire**) is already DONE — `src/webrtc_signaling.rs` wires `SignalingClient`↔`Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate}` and `tests/webrtc_signaling.rs` covers the localhost handshake. Review text updated to reflect completion; only the live two-host/NAT run remains (operator-only).
 
 **#xccx (#lzholons):** Blocked on Steve Melville answering 7 OPEN QUESTIONS. The plan (`tasks/software/plan-map-holons-integration.md`) explicitly says "use [the] direct line to resolve the OPEN QUESTIONS rather than guessing." No agent-doable slice until answers land; stays operator-gated.
-<!-- agent:boundary:c90e2a82 -->
+
+### Re: #syej — Signal→Slot RecursionError fixed — glm-5.1
+
+> **Queue prompt:**
+>
+> [#syej]
+
+
+**Ship-stopper resolved.** The `RecursionError` when a `Signal` reads a `Slot` dependency is fixed (commit `30907ea` in lazily-py, gitlink `eb93a75ac` in superproject).
+
+**Root cause:** `Slot.__call__` fired `self.touch(resolved)` immediately after computing — still inside the `try` block with the slot on `slot_stack`. When a `_SignalSlot` read a `source` Slot during Signal construction, `source` computed, then `touch()` notified its subscriber (`reset _SignalSlot`), which cascaded through `Slot.reset` → `touch()` (before `_subscribers.clear()`) → mutual recursion. `Cell` avoided this because its `value` getter never touches on read.
+
+**Two-part fix** (`src/lazily/slot.py`):
+1. **Removed `touch()` from `Slot.__call__`** — computation must not cascade invalidation. Only explicit `reset` propagates (consistent with the SPEC, which never documented `__call__` touching).
+2. **`Slot.reset` clears subscribers before notification** — a subscriber that triggers a re-entrant reset finds an empty subscriber set, breaking the mutual recursion.
+
+**Test added:** `test_signal_depends_on_slot` — constructs a `Signal` with a `@slot` dependency (the exact scenario that crashed), asserts the value, and verifies caching + slot reset behavior.
+
+**Verification:** 58/58 tests pass, `ruff check` clean, `ty check` clean. `twine check` PASSED on both rebuilt dist artifacts. Fresh-venv install round-trip confirmed `Signal→Slot` works without recursion.
+
+SPEC + CHANGELOG updated to document the re-entrancy-safe invalidation semantics. Review #kb9b updated: ship-stopper cleared, dist artifacts rebuilt and verified.
+<!-- agent:boundary:155ff8f8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,19 +123,17 @@ Reviewed all 4 `[operator-drive]` review items. One ship-stopper found, one revi
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- [#syej]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#syej] #lzpysigfix=Fix Signal→Slot RecursionError in lazily-py v0.11.0: Slot.__call__ fires touch() during computation (slot.py:98) which cascades resets through the _SignalSlot↔source-Slot subscription cycle. Cell avoids this by not touching on read. Fix the re-entrant reset (defer touch past slot_stack pop, or clear subscribers before touch, or guard against re-entrant reset). Add test test_signal_depends_on_slot. Ship-stopper for #kb9b.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#kb9b] #lzpypub011=[operator-drive] Publish lazily-py v0.11.0: build artifacts are ready in src/lazily-py/dist/ (lazily-0.11.0-{whl,tar.gz}). From src/lazily-py: tag v0.11.0 + push, gh release create v0.11.0 --generate-notes, then python -m twine upload dist/* (needs PyPI token + browser/passkey 2FA). Gated on the pre-publish live-test confirm per the testing-gate rule. Commit 28f23e4 + superproject gitlink 6339ab2e1 already pushed.
+- [/] [#kb9b] #lzpypub011=[operator-drive] Publish lazily-py v0.11.0: SHIP-STOPPER #lzpysigfix is FIXED (commit 30907ea). Build artifacts rebuilt in src/lazily-py/dist/ (lazily-0.11.0-{whl,tar.gz}, twine check PASSED, fresh-venv install round-trip verified). From src/lazily-py: tag v0.11.0 + push, gh release create v0.11.0 --generate-notes, then python -m twine upload dist/* (needs PyPI token + browser/passkey 2FA). Gated on the pre-publish live-test confirm per the testing-gate rule. Commit 30907ea + superproject gitlink eb93a75ac already pushed.
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] Main LinkedIn post is published and repaired: Corky edit updated mail/social/20260616-lazily-architecture-linkedin.md / https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848 with the full body after the public post truncated at "The core is small: three primitives". Local metadata is committed in mail commit 07a9ea1 and superproject gitlink e7e0b08c1. Remaining operator follow-up: post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>` if still desired.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet backend through the LIVE #yxjw signaling Worker (two real hosts / NAT). Agent-doable slice (#lzwebrtcwire) is DONE: src/webrtc_signaling.rs wires SignalingClient↔Str0mNet and tests/webrtc_signaling.rs covers the localhost handshake. Remaining: live two-host/NAT run via deployed Worker — operator-only.
 - [/] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.

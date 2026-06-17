@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -87,7 +87,17 @@ Commits + push (preset `#spec-test-commit-push`):
 - root `5184e58ef` submodule pointer bump (root push follows this closeout)
 
 Deploy remains queued as the next item.
-<!-- agent:boundary:cfd083fc -->
+
+### Re: deploy — label fix shipped — glm-5.2
+
+Deployed the EFS Worker with the "Urgent notifications" label removal. Pre-deploy green: clean tree, no pending D1 migrations, `make check` already passed (**812 tests**). `make deploy` → build → no migrations → Worker activated.
+
+- **Version ID:** `fc6e89db-b8be-492f-9ce6-912b0aadee68`
+- Ships EFS `81e5fe4` (drop "Urgent notifications" label; "$... remaining to fund" kept)
+- Smoke: `/` `/funded-deals` `/login` all 200
+
+Queue drained.
+<!-- agent:boundary:a2839ddf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -95,8 +105,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Remove the "Urgent notifications" label in Available Deals dialog/page. Keep the $... remaining to fund.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

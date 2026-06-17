@@ -419,6 +419,12 @@ object TerminalUtil {
                         val process = ProcessBuilder(cmd)
                             .directory(java.io.File(cwd))
                             .redirectErrorStream(true)
+                            .apply {
+                                attempt?.let {
+                                    environment()["AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID"] = it.id
+                                    environment()["AGENT_DOC_EDITOR_ROUTE_KEY"] = it.routeKey
+                                }
+                            }
                             .start()
                         handle.bind(process)
                         val output = process.inputStream.bufferedReader().readText()

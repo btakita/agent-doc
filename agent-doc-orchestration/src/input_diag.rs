@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 
 const PREFIX: &str = "tmux_input_event";
+const EDITOR_ROUTE_ATTEMPT_ID_ENV: &str = "AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID";
 
 #[derive(Clone, Copy, Default)]
 pub struct KeyEventMeta<'a> {
@@ -29,6 +30,13 @@ fn sanitize_field(value: &str) -> String {
     } else {
         out
     }
+}
+
+fn editor_route_attempt_id() -> Option<String> {
+    std::env::var(EDITOR_ROUTE_ATTEMPT_ID_ENV)
+        .ok()
+        .map(|value| sanitize_field(&value))
+        .filter(|value| !value.is_empty())
 }
 
 fn bytes_hash(bytes: &[u8]) -> String {
@@ -78,6 +86,9 @@ pub fn format_key_event(
     }
     if let Some(detail) = detail {
         message.push_str(&format!(" detail={}", sanitize_field(detail)));
+    }
+    if let Some(attempt_id) = editor_route_attempt_id() {
+        message.push_str(&format!(" editor_attempt_id={attempt_id}"));
     }
     message
 }
@@ -345,6 +356,22 @@ mod tests {
         assert!(event.contains("bytes=6"));
         assert!(event.contains("sha256="));
         assert!(!event.contains("/clear"));
+    }
+
+    #[test]
+    fn input_events_include_editor_route_attempt_when_present() {
+        let _attempt_guard = EnvGuard::set(EDITOR_ROUTE_ATTEMPT_ID_ENV, "attempt 1/2");
+        let event = format_key_event(
+            "route.direct_pane_submit",
+            "pane:%42",
+            "tmux_text_enter",
+            "Enter",
+            5,
+            Some("codex"),
+            None,
+        );
+
+        assert!(event.contains("editor_attempt_id=attempt_1/2"), "{event}");
     }
 
     #[test]

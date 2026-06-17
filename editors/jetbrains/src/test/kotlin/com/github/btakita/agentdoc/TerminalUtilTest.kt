@@ -38,6 +38,8 @@ class TerminalUtilTest {
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_prepare\")"))
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_command_built\", command = cmd)"))
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_start\", command = cmd)"))
+        assertTrue(source.contains("AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID"))
+        assertTrue(source.contains("AGENT_DOC_EDITOR_ROUTE_KEY"))
         assertTrue(source.contains("\"route_retryable_starting\""))
         assertTrue(source.contains("attempt?.finishIfCurrent(stage, command = cmd, error = finalError)"))
     }

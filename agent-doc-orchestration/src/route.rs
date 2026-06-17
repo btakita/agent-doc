@@ -442,7 +442,7 @@ fn route_latency_message(
     harness: &HarnessConfig,
     outcome: &str,
 ) -> String {
-    format!(
+    let mut message = format!(
         "route_latency phase={} elapsed_ms={} budget_ms={} status={} pane={} harness={} outcome={}",
         phase,
         elapsed.as_millis(),
@@ -451,7 +451,24 @@ fn route_latency_message(
         pane,
         harness.binary,
         outcome
-    )
+    );
+    append_editor_route_attempt(&mut message);
+    message
+}
+
+const EDITOR_ROUTE_ATTEMPT_ID_ENV: &str = "AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID";
+
+fn editor_route_attempt_id() -> Option<String> {
+    std::env::var(EDITOR_ROUTE_ATTEMPT_ID_ENV)
+        .ok()
+        .map(|value| route_snapshot_field(&value))
+        .filter(|value| !value.is_empty())
+}
+
+fn append_editor_route_attempt(message: &mut String) {
+    if let Some(attempt_id) = editor_route_attempt_id() {
+        message.push_str(&format!(" editor_attempt_id={attempt_id}"));
+    }
 }
 
 fn short_content_hash(content: &str) -> String {
@@ -530,38 +547,36 @@ fn preserve_route_pane_snapshot(
 
     match path {
         Ok(path) => {
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "route_pane_snapshot file={} pane={} harness={} phase={} capture_len={} capture_hash={} snapshot_path={}",
-                    file.display(),
-                    pane,
-                    harness.binary,
-                    phase,
-                    snapshot.len,
-                    snapshot.hash,
-                    path.display()
-                ),
+            let mut message = format!(
+                "route_pane_snapshot file={} pane={} harness={} phase={} capture_len={} capture_hash={} snapshot_path={}",
+                file.display(),
+                pane,
+                harness.binary,
+                phase,
+                snapshot.len,
+                snapshot.hash,
+                path.display()
             );
+            append_editor_route_attempt(&mut message);
+            crate::ops_log::log_op(file, &message);
             RoutePaneSnapshot {
                 path: Some(path),
                 ..snapshot
             }
         }
         Err(err) => {
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "route_pane_snapshot_failed file={} pane={} harness={} phase={} capture_len={} capture_hash={} error={}",
-                    file.display(),
-                    pane,
-                    harness.binary,
-                    phase,
-                    snapshot.len,
-                    snapshot.hash,
-                    err.to_string().replace(char::is_whitespace, "_")
-                ),
+            let mut message = format!(
+                "route_pane_snapshot_failed file={} pane={} harness={} phase={} capture_len={} capture_hash={} error={}",
+                file.display(),
+                pane,
+                harness.binary,
+                phase,
+                snapshot.len,
+                snapshot.hash,
+                err.to_string().replace(char::is_whitespace, "_")
             );
+            append_editor_route_attempt(&mut message);
+            crate::ops_log::log_op(file, &message);
             eprintln!(
                 "[route] warning: failed to preserve pane snapshot for {} phase {}: {}",
                 file.display(),
@@ -612,6 +627,7 @@ fn route_submit_observation_message(facts: RouteSubmitObservationFacts<'_>) -> S
     if let Some(issue) = facts.observation.issue() {
         message.push_str(&format!(" issue={issue}"));
     }
+    append_editor_route_attempt(&mut message);
     message
 }
 
@@ -639,6 +655,7 @@ fn route_submit_issue_message(facts: RouteSubmitObservationFacts<'_>) -> Option<
     if let Some(proof) = facts.proof {
         message.push_str(&format!(" proof={}", proof.dispatch_stage_label()));
     }
+    append_editor_route_attempt(&mut message);
     Some(message)
 }
 
@@ -4760,6 +4777,39 @@ mod tests {
     use super::*;
     use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<String>,
+        _lock: crate::test_support::ProcessGlobalLockGuard,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let lock = crate::test_support::env_lock();
+            let prior = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self {
+                key,
+                prior,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     #[test]
     fn authoritative_actor_optimistic_queue_excludes_starting_state() {
         assert!(
@@ -6363,6 +6413,45 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert!(slow.contains("status=over_budget"), "{slow}");
         assert!(slow.contains("outcome=unproven_but_accepted"), "{slow}");
     }
+
+    #[test]
+    fn route_diagnostics_include_editor_attempt_id_when_present() {
+        let _attempt = EnvGuard::set(EDITOR_ROUTE_ATTEMPT_ID_ENV, "attempt 1/2");
+        let harness = HarnessConfig::codex();
+        let latency = route_latency_message(
+            "direct_pane_submit",
+            Duration::from_millis(120),
+            Duration::from_secs(1),
+            "%7",
+            &harness,
+            "accepted",
+        );
+        assert!(
+            latency.contains("editor_attempt_id=attempt_1_2"),
+            "{latency}"
+        );
+
+        let facts = RouteSubmitObservationFacts {
+            file: Path::new("/tmp/run-agent-doc.md"),
+            pane: "%7",
+            harness: &harness,
+            phase: "direct_pane_acceptance",
+            observation: RouteSubmitObservation::TriggerStillVisible,
+            trigger_visible: Some(true),
+            elapsed: Duration::from_millis(5123),
+            capture_len: Some(2048),
+            capture_hash: Some("abc123def456"),
+            proof: None,
+        };
+        let observation = route_submit_observation_message(facts);
+        assert!(
+            observation.contains("editor_attempt_id=attempt_1_2"),
+            "{observation}"
+        );
+        let issue = route_submit_issue_message(facts).expect("trigger-still-visible issue");
+        assert!(issue.contains("editor_attempt_id=attempt_1_2"), "{issue}");
+    }
+
     #[test]
     fn direct_pane_submit_budget_allows_acceptance_poll_slack() {
         assert_eq!(

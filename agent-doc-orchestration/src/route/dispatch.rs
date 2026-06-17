@@ -212,7 +212,7 @@ pub(crate) fn route_submit_resubmit_proof_line(
     elapsed: Duration,
 ) -> String {
     let submit_key = crate::sessions::tmux_submit_key_for_harness(harness_binary);
-    format!(
+    let mut message = format!(
         "route_submit_resubmit file={} pane={} harness={} action=submit_key key={} result={} elapsed_ms={}",
         file.display(),
         pane,
@@ -220,7 +220,9 @@ pub(crate) fn route_submit_resubmit_proof_line(
         submit_key,
         resubmit_result_label(second_status),
         elapsed.as_millis()
-    )
+    );
+    append_editor_route_attempt(&mut message);
+    message
 }
 
 fn send_direct_pane_enter_resubmit(

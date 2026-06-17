@@ -385,11 +385,12 @@ pub const DISPATCH_STALE_GENERATION_REDIRECT_MARKER: &str = "stale_generation_re
 /// caused by a STALE supervisor re-injecting an already-answered/operator-verify head
 /// (a churn-stop). The route dispatch path (`authorize_controller_dispatch`) recognizes
 /// it, restarts the stale supervisor once, lifts the stale-injected pause, and
-/// re-dispatches a single time instead of failing closed and forcing the operator to
-/// run `session restart-supervisor --force` by hand. Like the stale-generation marker
-/// it survives `request_controller`'s `project controller command \`dispatch\` failed:
-/// …` IPC wrapping. The bail still carries the human reason + the manual hint, so a
-/// `reexec_failed` fallback stays actionable.
+/// re-dispatches a single time instead of failing closed and forcing manual recovery.
+/// Like the stale-generation marker it survives `request_controller`'s
+/// `project controller command \`dispatch\` failed: …` IPC wrapping. The bail still
+/// carries the human reason + manual hint, so a `reexec_failed` fallback stays
+/// actionable without pointing routine stale-binary refresh at a destructive force
+/// path.
 pub const DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER: &str = "supervisor_restart_redirect";
 pub const STALE_QUEUE_PAUSE_INVARIANT_ID: &str = "stale_queue_pause";
 pub const STALE_QUEUE_PAUSE_NEXT_ACTION: &str = "restart_supervisor_once_and_retry";
@@ -1160,6 +1161,21 @@ pub(crate) fn host_supervisor_is_stale(
     }
 }
 
+/// `#fccsupwarn3` — user-facing warning for a stale route-owned host supervisor.
+/// Keep the routine stale-binary refresh path non-destructive: idle-boundary recycle
+/// or normal file-scoped restart. Force/interrupt-clear hatches are for genuinely
+/// wedged owners, not for picking up a freshly-installed binary.
+pub(crate) fn host_supervisor_stale_warning_message(supervisor_pid: u32) -> String {
+    format!(
+        "the route-owned host supervisor (pid {supervisor_pid}) serving this document is mapping \
+         a STALE agent-doc binary while a newer build is installed, so it can keep producing File \
+         Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift). Refresh it without discarding the \
+         live turn: `agent-doc admin recycle` (recycles at the next idle boundary) or \
+         `agent-doc session restart-supervisor <FILE>` (refuses busy panes). Avoid force/discard \
+         recovery for stale-binary refresh; those paths are only for wedged owners."
+    )
+}
+
 /// `#fccsupwarn2` — IO check for the route-owned HOST supervisor that serves `file`.
 ///
 /// THE GAP behind `#fccsupwarn`: `stale_supervisor_warning_for_doc` only inspected the
@@ -1196,13 +1212,7 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
     if !host_supervisor_is_stale(running_inode, installed_inode) {
         return None;
     }
-    Some(format!(
-        "the route-owned host supervisor (pid {supervisor_pid}) serving this document started \
-         before the currently-installed agent-doc binary — it is running a STALE build and keeps \
-         producing File Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift). Restart it so the \
-         latest fixes take effect: `agent-doc session restart-supervisor <FILE> --force`, \
-         `agent-doc session interrupt-clear <FILE> --force`, or restart the session."
-    ))
+    Some(host_supervisor_stale_warning_message(supervisor_pid))
 }
 
 /// `#fccsupwarn`/`#fccsupwarn2` — IO wrapper: resolve the live processes hosting `file`
@@ -4652,6 +4662,8 @@ mod tests {
             .expect("an active host on a stale binary must warn");
         assert!(msg.contains("STALE"), "message: {msg}");
         assert!(msg.contains("admin recycle"), "message: {msg}");
+        assert!(!msg.contains("--force"), "message: {msg}");
+        assert!(!msg.contains("interrupt-clear"), "message: {msg}");
 
         // Inactive controller (nothing hosting) → no warning even if stale.
         status.active = false;
@@ -4688,6 +4700,25 @@ mod tests {
         // Running inode unknown (non-Linux / unreadable `/proc/<pid>/exe`) → fail-open,
         // NOT stale, so a read error can never spam the warning.
         assert!(!host_supervisor_is_stale(None, installed_inode));
+    }
+
+    #[test]
+    fn host_supervisor_stale_warning_message_uses_non_destructive_refresh() {
+        // #fccsupwarn3 — a routine stale-binary refresh must never tell an agent to
+        // discard a live turn. Force/interrupt-clear remain explicit wedged-owner
+        // hatches, not stale-supervisor freshness guidance.
+        let msg = host_supervisor_stale_warning_message(166599);
+        assert!(msg.contains("pid 166599"), "message: {msg}");
+        assert!(msg.contains("STALE"), "message: {msg}");
+        assert!(msg.contains("agent-doc admin recycle"), "message: {msg}");
+        assert!(
+            msg.contains("agent-doc session restart-supervisor <FILE>"),
+            "message: {msg}"
+        );
+        assert!(msg.contains("idle boundary"), "message: {msg}");
+        assert!(msg.contains("refuses busy panes"), "message: {msg}");
+        assert!(!msg.contains("--force"), "message: {msg}");
+        assert!(!msg.contains("interrupt-clear"), "message: {msg}");
     }
 
     #[test]

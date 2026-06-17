@@ -343,9 +343,9 @@ pub(crate) fn authorize_controller_dispatch(
         // `#jbrestale`: a `queue_paused` bail whose pause was written by the churn
         // detector because a STALE supervisor re-injected a head is recoverable —
         // restart the supervisor once, lift the stale-injected pause, and re-dispatch a
-        // single time instead of failing closed and forcing a manual
-        // `session restart-supervisor --force`. A deliberate operator/spent-preset pause
-        // carries no marker and falls through to the terminal arm.
+        // single time instead of failing closed and forcing manual stale-supervisor
+        // recovery. A deliberate operator/spent-preset pause carries no marker and
+        // falls through to the terminal arm.
         Err(err) => {
             if let Some(recovery) =
                 crate::project_controller::dispatch_error_stale_queue_pause_recovery(
@@ -373,8 +373,7 @@ pub(crate) fn authorize_controller_dispatch(
 /// the stale-injected queue pause, then re-dispatch exactly once. Bounded to a single
 /// restart + re-dispatch: a still-paused / re-injected queue (or a genuinely wedged one)
 /// surfaces the error to the caller, so there is no restart loop. When the restart could
-/// not even be issued, fail closed with the original bail (it carries the manual
-/// `session restart-supervisor --force` guidance) and keep the pane alive.
+/// not even be issued, fail closed with the original bail and keep the pane alive.
 fn recover_dispatch_via_supervisor_restart(
     file: &Path,
     session_id: &str,

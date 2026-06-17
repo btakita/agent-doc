@@ -512,6 +512,10 @@ command into the authoritative session through the same canonical
   preflight cycle. This force path is intentionally separate from ordinary
   `session clear` and normal `interrupt-clear`, and its ops-log summary must
   report which cleanup steps actually ran.
+  Stale-binary freshness is not a wedged-owner discard: stale-supervisor
+  warnings and compaction recovery hints must use `agent-doc admin recycle` or
+  normal `agent-doc session restart-supervisor <FILE>`, which refuses
+  `alive-busy` panes, rather than this force path.
   For Codex panes, a capture
   that shows only Codex status/footer chrome such as the model/cwd/context line,
   with no prompt input or busy cue, is direct idle evidence for operator

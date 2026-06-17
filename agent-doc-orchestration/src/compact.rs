@@ -386,7 +386,7 @@ fn assert_non_exchange_items_preserved(
         ),
     );
     anyhow::bail!(
-        "[compact] INTERRUPTED: compaction dropped item(s) from non-exchange component(s) [{}] in {} (stage={}). Compaction must only archive/truncate the exchange; a singleton list component lost a whole tracked item (#compactdropitem — worse sibling of #compactqattr). The compact output was NOT committed. Re-run compaction; if it recurs, a concurrent stale-supervisor CRDT merge is interleaving over the written file — recycle/restart the supervisor (`agent-doc session restart-supervisor {} --force`) before retrying.",
+        "[compact] INTERRUPTED: compaction dropped item(s) from non-exchange component(s) [{}] in {} (stage={}). Compaction must only archive/truncate the exchange; a singleton list component lost a whole tracked item (#compactdropitem — worse sibling of #compactqattr). The compact output was NOT committed. Re-run compaction; if it recurs, a concurrent stale-supervisor CRDT merge is interleaving over the written file — refresh the stale supervisor without discarding the live turn (`agent-doc admin recycle` or `agent-doc session restart-supervisor {}`) before retrying.",
         dropped.join(", "),
         file.display(),
         stage,
@@ -464,7 +464,7 @@ fn assert_non_exchange_markers_preserved(
         ),
     );
     anyhow::bail!(
-        "[compact] INTERRUPTED: compaction altered the opening marker of non-exchange component(s) [{}] in {} (stage={}). Compaction must only archive/truncate the exchange and leave every other component opening marker byte-identical, including inline attributes like `priority`/`preset`/`go` (#compactqattr). The compact output was NOT committed. If this recurs from a non-wedged session it is a deterministic rebuild regression; if a stale-supervisor CRDT merge is interleaving over the written file, recycle/restart the supervisor (`agent-doc session restart-supervisor {} --force`) before retrying.",
+        "[compact] INTERRUPTED: compaction altered the opening marker of non-exchange component(s) [{}] in {} (stage={}). Compaction must only archive/truncate the exchange and leave every other component opening marker byte-identical, including inline attributes like `priority`/`preset`/`go` (#compactqattr). The compact output was NOT committed. If this recurs from a non-wedged session it is a deterministic rebuild regression; if a stale-supervisor CRDT merge is interleaving over the written file, refresh the stale supervisor without discarding the live turn (`agent-doc admin recycle` or `agent-doc session restart-supervisor {}`) before retrying.",
         changed.join(", "),
         file.display(),
         stage,
@@ -1400,6 +1400,9 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("#compactdropitem"), "message: {msg}");
         assert!(msg.contains("backlog 3→2"), "message: {msg}");
+        assert!(msg.contains("agent-doc admin recycle"), "message: {msg}");
+        assert!(!msg.contains("--force"), "message: {msg}");
+        assert!(!msg.contains("interrupt-clear"), "message: {msg}");
     }
 
     #[test]
@@ -2655,6 +2658,9 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("#compactqattr"), "got: {msg}");
         assert!(msg.contains("queue"), "got: {msg}");
+        assert!(msg.contains("agent-doc admin recycle"), "got: {msg}");
+        assert!(!msg.contains("--force"), "got: {msg}");
+        assert!(!msg.contains("interrupt-clear"), "got: {msg}");
     }
 
     #[test]

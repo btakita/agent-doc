@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -121,7 +121,7 @@ Notes:
 - Existing unrelated parent working-tree changes were left untouched.
 - Escalation: none.
 - Confidence: high.
-<!-- agent:boundary:3470b5c9 -->
+<!-- agent:boundary:2bb05af3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,6 +129,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- https://equityfundingsource.brian-takita.workers.dev/lenders/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3 Message EFS has an attach link. It should also support dragging uploads into the message area. deploy
 <!-- /agent:queue -->
 
 ## Backlog
@@ -136,7 +137,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:backlog priority queue -->
 <!-- /agent:backlog -->
 
-## Review
+2## Review
 
 <!-- agent:review -->
 - [/] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.

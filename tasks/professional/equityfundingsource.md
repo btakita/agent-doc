@@ -247,14 +247,35 @@ Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-
 Verification: focused tests passed (`115 pass`); full `make check` passed (`757 pass`, app build, worker build). GitHub Actions CI could not be inspected because the EFS repo has no workflow named `CI`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:cf438e60 -->
+
+### Re: Queue drain metadata — gpt-5
+
+No additional implementation work was needed in this cycle. The only detected document change was the drained queue activation token after the completed borrower-message work.
+
+Changed paths:
+- `tasks/professional/equityfundingsource.md`
+
+Commands run:
+- `agent-doc preflight tasks/professional/equityfundingsource.md`
+- `agent-doc commit tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` via MCP planner
+
+Verification:
+- Preflight reported `queue_drainable_head_count: 0` and `queue_continuation_required: false`.
+- Session-check for the prior implementation cycle reported `ok` before this metadata-only closeout.
+- No code tests were rerun for this metadata-only document cycle.
+
+Confidence: High. The code work was already committed, pushed, and verified in the previous response; this closeout only records the queue token drain.
+
+Escalation: None.
+<!-- agent:boundary:3b4a1db1 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

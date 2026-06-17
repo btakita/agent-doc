@@ -117,7 +117,11 @@ The code work for the active-editor IPC no-direct-disk policy and the monsterrod
 
 The remaining issue was the session document closeout state: editor prompt-marker lines had been materialized into the exchange tail, so session-check treated the tail as an unresolved prompt. This closeout records the recovery response through the MCP finalize path so the session can finish without treating that marked line as pending user input.
 Final hook recovery closeout: the malformed exchange tail has been repaired, the drained queue marker has converged, and this response closes the active hook-recovery turn.
-<!-- agent:boundary:38307e89 -->
+
+### Re: hook recovery closeout — gpt-5
+
+Recovered the closeout after the malformed prompt-marker tail. The implementation work remains complete, verified locally, installed, committed, and pushed; this response only gives agent-doc a committed assistant block after the stale prompt-only lines.
+<!-- agent:boundary:31dc61b4 -->
 <!-- /agent:exchange -->
 
 ## Queue

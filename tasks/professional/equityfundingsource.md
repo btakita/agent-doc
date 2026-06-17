@@ -46,7 +46,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Rename /portal-investor/ routes to /portal-lender/.
+- ~~Rename /portal-investor/ routes to /portal-lender/.~~
 - deploy
 <!-- /agent:queue -->
 

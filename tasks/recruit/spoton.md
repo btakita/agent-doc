@@ -303,7 +303,33 @@ They're linked: **your workflow latitude is constrained by the system topology.*
 The email keeps it to one polite, compact bullet on purpose — these sharper versions are for the live conversation or a follow-up call, where the messy integration answer is the most useful thing you can learn about whether the conversion mandate is actually achievable.
 
 Closeout: changed path is the session document only; no email sent or drafted. Grounding pulled from `transcripts/2026-06-16-14-00-36-transcript.md` (Calvin's Hub/Salesforce explanation near 01:00) and the prior Dustin draft in this doc. No code changed, so no test suite applied. Confidence high on the transcript facts; the interpretation of role scope is my analysis, not confirmed by SpotOn.
-<!-- agent:boundary:ca7683d8 -->
+
+### Re: Is Hub HubSpot or a different system? — opus-4-8
+
+> **Queue prompt:**
+>
+> Is Hub HubSpot or a different system?
+
+A **different system** — and it's worth being precise here because the names collide.
+
+In the transcript, Calvin's exact phrasing was: *"initially we built this central application we call **Hub** where you could see the whole life cycle of a merchant."* The operative word is **"we built."** Hub is SpotOn's own **internally-developed, homegrown application**, not [HubSpot](https://www.hubspot.com/) the third-party CRM/marketing SaaS. He described it as their **legacy** lifecycle system that engineering/R&D still uses to track merchant state.
+
+So the system map is:
+
+- **Hub** — SpotOn's in-house legacy app; original system of record for the full merchant lifecycle; still used by technical/R&D teams.
+- **Salesforce** — the commercial CRM ([salesforce.com](https://www.salesforce.com/)) they adopted later for sales and ops; now "the source of truth for a lot of things about a merchant."
+- **HubSpot** — *not mentioned in the interview at all.* It would be easy to misread "Hub" as "HubSpot," but there's no evidence they use HubSpot.
+
+One caveat: this is purely from how Calvin described it. "Hub" is a very common internal-tool name, so the safe move if it comes up again is to confirm — e.g. "When you say Hub, is that an internal SpotOn-built system rather than a vendor product?" But based on "we built... we call Hub," it's clearly their own software, not HubSpot.
+
+This actually sharpens the earlier ownership point: because Hub is **legacy in-house software**, changing the merchant lifecycle likely means working within (or migrating off) a system engineering already owns — different politics and different effort than if lifecycle state lived in a vendor CRM you can only configure.
+
+---
+
+Side note: this session document is getting large (exchange ~281 lines, 7 response sections — accretion is at the **block** threshold). If you'd like a cleaner session, run `/agent-doc compact tasks/recruit/spoton.md` to archive the older exchange. [recommended] Auto-compact is off, so nothing happens unless you ask.
+
+Closeout: changed path is the session document only. Grounding from `transcripts/2026-06-16-14-00-36-transcript.md` (Calvin: "we built... we call Hub"). No code changed, so no test suite applied. Confidence high that Hub ≠ HubSpot; the only residual uncertainty is the exact product identity of "Hub," which only SpotOn can confirm.
+<!-- agent:boundary:3d7e50a7 -->
 <!-- /agent:exchange -->
 
 ## Queue

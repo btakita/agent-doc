@@ -372,12 +372,43 @@ CI: latest `tmux-router` GitHub Actions `CI` run `27657724212` was `in_progress`
 Non-gate note: `cargo clippy --all-targets -- -D warnings` in `tmux-router` still fails on pre-existing test-only lints in `src/sync.rs` / `src/registry.rs`; the repo CI runs `cargo clippy -- -D warnings`, and that passed.
 
 Escalation: none. No JetBrains plugin update is required for this change; it is in the Rust router dependency and the installed agent-doc binary now uses it. Confidence: high for removing the remaining default `tmux-router` CR-submit path and preserving `Run Agent Doc` direct-pane proof as `tmux_text_enter`.
-<!-- agent:boundary:30cfb84c -->
+
+### Re: JB `Run Agent Doc` stalled dispatch proof — gpt-5
+
+I treated this as a routing/proof failure, not another tmux submit regression. The failed route reached `direct_pane_submit` with `submit_mode=tmux_text_enter`, and the `%24` snapshot shows the bare `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` prompt sitting in Codex input. The hard failure happened because dispatch-start proof did not arrive within the 10s gate.
+
+The later state shows the run did not stay lost. Logs record `%24` accepting input at `2026-06-17T01:35:22Z`, then that supervisor closed/rebound, and a later `%31` route recorded `dispatch_start_proven` with `proof=submitted`. `agent-doc session status tasks/professional/equityfundingsource.md` now reports the authoritative actor on pane `%31`, healthy/ready, with `controller_last_command: kind=dispatch_only_reopen accepted_stage=ready failed_stage=none`. The target document also has a later closeout commit, `5f3232bcc agent-doc(equityfundingsource): 2026-06-16 21:38:10`.
+
+So the JB error is best read as a false-negative proof diagnostic during actor churn: pane `%24` accepted the reopen but missed the start-proof window, then the authoritative actor moved to `%31` and the dispatch completed there. The suspicious boundary is `route/dispatch.rs` accepted-only timeout handling: before returning the hard IDE failure, it should re-check the current controller actor/routed-submit proof and include the rebound pane/generation when recovery already happened.
+
+No source code changed in this cycle. I added backlog item `#jbproofrebind` for that targeted fix.
+
+Verification:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `rg -a` over `.agent-doc/logs/ops.log` for `%24`, `dispatch_start_proof`, and accepted-only route events
+- `git log --oneline -5 -- tasks/professional/equityfundingsource.md`
+
+Confidence: high that this specific report is not the Enter-submit bug and is instead a stale/rebound proof false negative. Escalation: none.
+<!-- agent:boundary:92c7f824 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+JB `Run Agent Doc` stalled:
+```
+[route] target tmux session: 0
+[route] activated existing inactive agent:queue head "Mark Call Completed" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
+[route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 49% us
+[route] Still waiting for codex (3s)... last line: 
+[route] codex ready after 3.2s (21 polls)
+[route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md → pane %24
+[route] latency budget exceeded: phase dispatch_start_proof took 10113ms (budget 10000ms, pane=%24, harness=codex, outcome=unproven_but_accepted)
+Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %24 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
+```
 <!-- /agent:queue -->
 ###
 <!--
@@ -407,6 +438,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#jbproofrebind] Dispatch-only accepted-only proof timeout should re-query the controller authoritative actor and routed-submit proof after pane rebind/restart before returning a hard IDE failure; include rebound pane/generation in the diagnostic. Target: src/agent-doc/agent-doc-orchestration/src/route/dispatch.rs.
 <!-- /agent:backlog -->
 
 ## Review

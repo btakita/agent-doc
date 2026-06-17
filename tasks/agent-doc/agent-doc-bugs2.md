@@ -63,17 +63,33 @@ Verification passed:
 - `make install`; `agent-doc --version` -> `0.34.1`
 
 The updated JetBrains plugin was installed into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ IDEA to activate it. The remaining queue items for OpenCode Clear Session Context and File Cache Conflict are still queued.
-<!-- agent:boundary:99ec4cd2 -->
+
+### Re: Push and CI closeout — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Clear Session Context` to Codex does not send Return. See equityfundingsource.md
+
+
+The route-attempt diagnostic fix is landed and pushed. `src/agent-doc` is at `e547bba5 fix: correlate jetbrains route submit diagnostics`, and the parent repository is pushed through `edb422bb4 agent-doc(agent-doc-bugs2): 2026-06-17 00:08:44`.
+
+I also recovered the transient 3-way merge marker residue in this document through a narrow `agent-doc patch` exchange-component replacement from the clean committed component, then let preflight commit the queue additions. `agent-doc session-check` is OK; the remaining queue is still active.
+
+Remote check: latest Agent Doc workflow run `27665152710` failed before any job steps started because GitHub reported failed account payments or a spending limit that needs to be increased. There is no workflow named `CI` in this repository.
+<!-- agent:boundary:12e9e564 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` on codex still does not send Enter. Should we stop using tmux-router to make this easier to debug? This has been very difficult to identify which path is causing the issue. Do we have sufficient logging?~~
-- JB `Clear Session Context` to Codex does not send Return. See equityfundingsource.md
+- ~~JB `Clear Session Context` to Codex does not send Return. See equityfundingsource.md~~
 - 3-way merge artifacts are in the response in this document.
 - :pushpin: JB `Clear Session Context` does not send Return to opencode ![img_36.png](img_36.png)
 - Still getting JB `File Cache Conflict` dialogs.
+---
+JB ``
+---
 <!-- /agent:queue -->
 ###
 <!--

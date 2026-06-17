@@ -104,7 +104,25 @@ CI:
 
 Source note:
 - Attachment email sizing was capped conservatively against Cloudflare Email Service's documented 5 MiB total message limit: https://developers.cloudflare.com/email-service/api/send-emails/workers-api/
-<!-- agent:boundary:c02f9456 -->
+
+### Re: Add rwaldman100+admin@gmail.com as an admin account on production. — gpt-5
+
+Added `rwaldman100+admin@gmail.com` as an active production admin account for Robert Waldman.
+
+Summary:
+- Checked production D1 first; no existing `users` row matched `rwaldman100+admin@gmail.com`.
+- Inserted an idempotent `users` row with `first_name = Robert`, `last_name = Waldman`, `role = admin`, and `status = active`.
+- Left `access_identity_sub` and `access_idp` empty so Cloudflare Access/Google can link the identity on first successful admin sign-in.
+- Left the personal password hash empty; the existing admin login path can still use the configured global admin password if needed.
+
+Verification:
+- Production D1 verification query returned `email = rwaldman100+admin@gmail.com`, `role = admin`, `status = active`, `access_identity_sub = null`, `access_idp = null`, and `password_empty = 1`.
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/admin/login` returned `200`.
+
+Repository/deploy:
+- No source changes were needed for this queue head.
+- No deploy was needed; this was a production D1 data update only.
+<!-- agent:boundary:6f3794ad -->
 <!-- /agent:exchange -->
 ###
 <!--

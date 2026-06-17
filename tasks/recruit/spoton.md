@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -414,12 +414,13 @@ Here's a tightened set. I cut the compound phrasing, made each question probe ex
 Keep the email bullet as the one polite compact version; this set is for the live conversation or a follow-up call, where the messy integration answer is the most valuable thing you can learn.
 
 Closeout: changed path is the session document only; no code, transcript, or email changed. Grounding from the prior Hub/Salesforce analysis in this doc and `transcripts/2026-06-16-14-00-36-transcript.md` (Calvin on Hub vs Salesforce) plus the 30% figure in `spoton-2026-06-11-call-transcript.md`. No test suite applies. Confidence high. (Session exchange is large — 9 sections — but the queue was active so I drained it rather than pausing to compact.)
-<!-- agent:boundary:8fcc73a2 -->
+<!-- agent:boundary:716d53e2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- Please redraft the entire email.
 <!-- /agent:queue -->
 
 ## Backlog

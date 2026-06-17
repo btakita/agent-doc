@@ -459,7 +459,34 @@ Verification:
 - `make check` passed: 4,640 tests, doctests, and medium simulation
 - `make install` passed and marked one controller for idle-boundary recycle
 - Latest `agent-doc` CI run `27714361986` was `in_progress` when checked once.
-<!-- agent:boundary:8494c538 -->
+I checked `img_43.png`. It is covered by the fixes already shipped in this drain rather than a separate remaining code path.
+
+> **Queue prompt:**
+>
+> Codex JB `Run Agent Doc` after a JB `Clear Session Context` on monsterrodholders.md did not submit and displayed stderr ![img_43.png](img_43.png)
+
+
+The screenshot shows the post-clear Codex pane with agent-doc text present but not submitted, including the relative/absolute duplicate shape and a footer-only idle status. The shipped fixes address those pieces together:
+
+- `560f7b49 fix: redirect codex supervisor stderr` keeps Codex supervisor diagnostics from being written into the TUI input path.
+- `df57bf45 fix: submit relative agent-doc drafts` recognizes an existing relative `agent-doc tasks/...` draft as equivalent to the routed absolute path and submits it instead of appending another trigger.
+- `cc7eb165 fix: accept codex footer readiness` treats Codex footer-only idle chrome after clear/autostart as dispatch-ready once busy/protected-input checks pass, avoiding the stale “still booting” wait path.
+
+No additional source change was needed for this specific queue head.
+
+Verification already run for the shipped state:
+- `cargo test -p agent-doc-orchestration ready_prompt_candidate_`
+- `cargo test -p agent-doc-orchestration fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss`
+- `git diff --check`
+- `make check` passed: 4,640 tests, doctests, and medium simulation
+- `make install` passed
+
+Pushed commits:
+- source `560f7b49`, `df57bf45`, `cc7eb165`
+- parent `00c63c1a6`, `6db142662`, `bbc7de811`
+
+Latest `agent-doc` CI run `27714361986` was still `in_progress` when checked.
+<!-- agent:boundary:1a7fb804 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -470,8 +497,9 @@ Verification:
 - ~~agent-doc sent a prompt to Codex (does this with other models too) while a task was running ![img_39.png](img_39.png)~~
 - ~~On monsterrodholders.md, after a JB `Clear Session Context` was successful, JB `Run Agent Doc` added a duplicate prompt (one with the relative path and one with the absolute path), and did not submit the prompt ![img_41.png](img_41.png).~~
 - ~~:pushpin: JB `Run Agent Doc` and JB `Clear Session Context" should have less latency to submit the prompt...particularly on Codex.~~
-- Codex JB `Run Agent Doc` after a JB `Clear Session Context` on monsterrodholders.md did not submit and displayed stderr ![img_43.png](img_43.png)
+- ~~Codex JB `Run Agent Doc` after a JB `Clear Session Context` on monsterrodholders.md did not submit and displayed stderr ![img_43.png](img_43.png)~~
 - :pushpin: I typed in the queue item "JB `Run Agent Doc` should have less latency to submit the prompt.", and agent-doc immediately struck it out.
+- Restart when context threshold is reached is not working during this queue run on Codex.
 ---
 :pushpin: After JB `Clear Session Context`, JB `Run Session Context` stalled on equityfundingsource.md
 ```

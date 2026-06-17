@@ -92,17 +92,16 @@ Landed in `src/agent-doc` commit `af33f35a` (`fix: sync pending adds into go que
 The superproject is at pushed commit `4b51726a2`, which records the updated submodule pointer and the plan file `tasks/agent-doc/plan-finalize-pending-add-queue-sync.md`.
 
 Verification from the implementation cycle passed: `make check`, focused queue tests, `cargo build`, and `cargo install --path .`.
-
-<!-- agent:boundary:dfe3dc55 -->
+<!-- agent:boundary:46214773 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: backlog items added during a turn are not auto-added to the queue when the `queue` attribute is on `agent:backlog`~~
+- ~~:round_pushpin: do [#pendingaddqueuesync]~~
 - [#jbpostclearcruft]
 - [#rtwbcastlogproof]
-- do [#pendingaddqueuesync]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

@@ -37,13 +37,30 @@ complete
 Compacted content:
 ❯ - Archived 9 response topic(s): JetBrains Codex Run Agent Doc Enter diagnostics; Push and CI closeout; JB Run Agent Doc stall; 6 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:c345a605 -->
+### Response — gpt-5
+Fixed and installed the `agent-doc admin recycle` CLI path behind the screenshot.
+
+The clean-terminal reproduction did not show the right-shifted help text, but it did expose the actionable defect: `agent-doc admin recycle tasks/software/lazily-rs.md` treated the document path as an unexpected argument and fell into clap's generic usage/error path. `admin recycle` now accepts an optional `[FILE_OR_PROJECT_ROOT]` positional target, so a document path or project root can be passed directly. Relative document targets are anchored at the current directory and canonicalized before project-root discovery, so `tasks/...` resolves to the real project root instead of an empty path.
+
+Implemented in `src/agent-doc` commit `e0fbb241 fix: accept recycle document targets`. The parent gitlink is staged for this closeout.
+
+Verification passed:
+- `cargo test -p agent-doc --test test_cli test_admin_recycle`
+- `cargo test -p agent-doc --test test_cli`
+- `make check` (4628 nextest tests passed, 238 skipped; doctests and medium closeout sim passed)
+- `make install`; `agent-doc --version` -> `agent-doc 0.34.1`
+- Installed CLI proof: `agent-doc admin recycle --help` shows `Usage: agent-doc admin recycle [OPTIONS] [FILE_OR_PROJECT_ROOT]`
+- Installed CLI proof: `agent-doc admin recycle tests/test_cli.rs --json` returns the absolute `src/agent-doc` project root with `"recycled":false`
+- Latest GitHub Actions CI on `main`: completed/success, run `27664844335`
+
+A new queue item about JB Run Agent Doc Enter retry behavior is still behind this item; I am not treating it as completed by this closeout.
+<!-- agent:boundary:00b493ba -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: agent-doc CLI has misformatted help message ![img_37.png](img_37.png)
+- ~~:pushpin: agent-doc CLI has misformatted help message ![img_37.png](img_37.png)~~
 - :pushpin: Resubmit Enter works with JB `Clear Session Context`. Resubmit Enter does not work with JB `Run Agent Doc`.
 <!-- /agent:queue -->
 ###

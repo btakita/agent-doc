@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -373,13 +373,13 @@ So the 30% doesn't move the thesis; it loads it. The activation-funnel framing i
 > "The 30% you lose between signed and installed is exactly the funnel I'd treat as a product, not an ops queue — make every signed merchant's state and next blocker visible, automate the low-value follow-up that's losing deals at underwriting and call-three, and reserve humans for the high-intent saves. Before I'd size it, I'd want to know where in the funnel that 30% is actually measured from."
 
 Closeout: changed path is the session document only; no code, no transcript, no email changed. Grounding pulled directly from `spoton-2026-06-11-call-transcript.md` (~30:48–32:11, Mike Kai's "70 install / lose 30" + drop-off causes). No test suite applies. Confidence high on the transcript facts; the denominator caveat is the one genuinely open item, and only SpotOn can close it.
-<!-- agent:boundary:41e61567 -->
+<!-- agent:boundary:8c7fa73e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-I was told in [2026-06-11 12-31-50-compressed.mp4](../../../../../Videos/2026-06-11%2012-31-50-compressed.mp4) that there is a 30% dropoff between the contract and install. Does that revise your earlier assessment?
+- Please redraft the more refined questions about Hub + Salesforce. 
 <!-- /agent:queue -->
 
 ## Backlog

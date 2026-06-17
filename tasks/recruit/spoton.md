@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -414,13 +414,51 @@ Here's a tightened set. I cut the compound phrasing, made each question probe ex
 Keep the email bullet as the one polite compact version; this set is for the live conversation or a follow-up call, where the messy integration answer is the most valuable thing you can learn.
 
 Closeout: changed path is the session document only; no code, transcript, or email changed. Grounding from the prior Hub/Salesforce analysis in this doc and `transcripts/2026-06-16-14-00-36-transcript.md` (Calvin on Hub vs Salesforce) plus the 30% figure in `spoton-2026-06-11-call-transcript.md`. No test suite applies. Confidence high. (Session exchange is large — 9 sections — but the queue was active so I drained it rather than pausing to compact.)
-<!-- agent:boundary:716d53e2 -->
+
+### Re: Redrafted Dustin follow-up email — opus-4-8
+
+> **Queue prompt:**
+>
+> Please redraft the entire email.
+
+Full redraft below. It's tighter than the first version, folds in the two things we've sharpened since (the ~30% signed-to-install leak as Mike framed it, and a cleaner single Hub/Salesforce question instead of the stapled-together one), and keeps it short enough that a recruiter will actually read it end to end.
+
+**To:** dwasko@spoton.com
+**Subject:** Following up on Tuesday's interview
+
+> Hi Dustin,
+>
+> Thanks again for setting up Tuesday's session with Calvin and Rafa. It was a genuinely good design conversation, and the role has stuck with me since. Turning the signed-contract-to-install path into a measurable, higher-converting product is exactly the kind of problem I like to work on.
+>
+> Calvin and Mike framed the core of it well: roughly a third of signed merchants never make it to install, and every point of that you recover flows straight to the bottom line. The pattern they described... deals stalling in underwriting, owners going cold after signing, four scheduling calls being too many for a busy restaurant... is how I think about activation funnels, and I came away with a few concrete product directions I'd be glad to walk through.
+>
+> A few things I'd love to understand better as the process continues:
+>
+> - How the team measures install conversion today, and where signed merchants most often fall off... underwriting delay, scheduling, menu readiness, hardware, or just going dark.
+> - Whether the install funnel lives in Hub, in Salesforce, or somewhere between them, and how much latitude the role has to change what the merchant experiences after signing versus internal tooling only.
+> - What the next steps and rough timeline look like on your end.
+>
+> Happy to send along anything that would help. Looking forward to hearing what's next.
+>
+> Best,
+> Brian
+
+#### What changed from the first draft
+
+- **Opens on the problem, not the pleasantries.** Same warm first line, but the second paragraph now leads with *their* number (the ~30% / "every point hits the bottom line" framing Mike gave). That shows you absorbed the actual business case, not just that you enjoyed the chat.
+- **One Hub/Salesforce question instead of two stapled together.** The old bullet asked about lifecycle ownership *and* workflow latitude in one breath; this collapses to a single clean question that still gets at both ("where the funnel lives" + "how much you can touch the merchant-facing side").
+- **Trimmed the financing-deposits aside.** It was a good engagement signal but made the email longer and waded into pricing territory that Calvin said is "out of our realm." Cut it so the email stays on the engineering charter (core install friction) and on inviting a next conversation.
+- **Voice:** kept your `...` pause style, no spaced em dashes, no hedging filler. Subject line dropped the dash too.
+
+**Per your no-auto-send rule, I did not send this or create a Gmail draft.** Say the word and I'll push it to Gmail Drafts to `dwasko@spoton.com` as a new thread (the old "SpotOn Interview Availability" thread is stale for a post-interview follow-up), or tweak wording first. If you'd rather keep the deposits/acquisition-deposit thread in, I can add one sentence back.
+
+Closeout: changed path is the session document only; no email sent or drafted to Gmail. Grounding from the prior Dustin draft and Hub/Salesforce analysis in this doc, the 30% figure in `spoton-2026-06-11-call-transcript.md`, and `dwasko@spoton.com` from the earlier mail-thread lookup. No code changed, so no test suite applies. Confidence high on the facts. (Exchange is large at 11 sections, but the queue was active so I drained it rather than pausing to compact.)
+<!-- agent:boundary:782a5294 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Please redraft the entire email.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -138,7 +138,44 @@ The remaining drain items (a keyboard-send shortcut across message boxes, and a 
 **Tests:** `tests/msg-send-shortcut.test.ts` — matcher truth table (Ctrl/Cmd+Enter, plain Enter, Shift, Alt, non-Enter keys), hint label, and source guards confirming every box wires the helper and the old plain-Enter chat send is gone.
 
 The last drain item (shipping these changes to production) remains.
-<!-- agent:boundary:196c110b -->
+
+### Re: Ship the accumulated changes to production — glm-5.2
+
+> **Queue prompt:**
+>
+> deploy
+
+
+**Done.** Deployed the EFS Worker to production via `make deploy` (build → migrations → upload+activate).
+
+- **Version ID:** `86f338f7-0dc7-452c-898b-a63199493d62`
+- **Live at:** `https://equityfundingsource.brian-takita.workers.dev` (custom-domain cutover still intentionally deferred per `#next-steps`)
+- **Migrations:** none pending — `cf:d1:migrations:list:remote` reported "No migrations to apply" (the admin-provisioning work uses runtime SQL via `bin/ensure-admins.ts`, not a migration)
+- **Commit shipped:** `0408d77` (HEAD of `main`, already pushed)
+
+**What went live this deploy:**
+- `#admin-provisioning` — `ensure_admin_`, `BOOTSTRAP_ADMINS`, `bin/ensure-admins.ts`
+- Admin-provisioned welcome email (`admin_provisioned_email_` + signup wiring)
+- `POST /api/admin/bootstrap-admins` (admin-gated ensure + notify trigger)
+- `#msg-send-shortcut` — Ctrl/Cmd+Enter to send across every message box + the main-site contact form
+
+**Post-deploy verification (all green):**
+- `GET /` → `200`
+- `GET /contact` serves the new shortcut markup (`id="contact-form"`, `contact-send-shortcut`, `e.key==='Enter'`, `form.requestSubmit`)
+- `GET /portal-admin` → `303` (Cloudflare Access redirect, as expected)
+- `POST /api/admin/bootstrap-admins` → `401` without an admin session (correctly gated)
+
+**Production env confirms email delivery is wired:** `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true`, `CLOUDFLARE_EMAIL_ACCOUNT_ID` set, `MESSAGE_NOTIFICATION_FROM` configured — so the admin welcome email and borrower messaging round-trip send for real.
+
+**Operator follow-up to actually provision + email Robert** (now that the endpoint is live): an admin signed in via the portal runs
+```bash
+curl -X POST https://equityfundingsource.brian-takita.workers.dev/api/admin/bootstrap-admins?notify=all \
+  -H 'Cookie: <admin session cookie>'
+```
+That creates `rwaldman100+admin@gmail.com` if missing and sends the welcome email.
+
+The queue is fully drained.
+<!-- agent:boundary:5022ae9e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -146,11 +183,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Ensure rwaldman100+admin@gmail.com has an admin account.~~
-- ~~Ensure all added admins are sent an email about their account.~~
-- ~~Send rwaldman100+admin@gmail.com an email about his account.~~
-- ~~All message boxes, portal and main site, should support Ctrl+Enter (Windows, Linux) or Cmd+Enter (OSX) to send the message.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

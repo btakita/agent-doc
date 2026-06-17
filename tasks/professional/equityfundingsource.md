@@ -226,7 +226,23 @@ bun ./bin/rename-accounts.ts --remote            --password "$(passage btak/luca
 ```
 
 The next queue head (`test2@investor.com → btak.dev+lender2@gmail.com`) is `RENAME_ACCOUNTS[2]` and is likewise already covered — same operator command applies it. After both, `do [#rename-accounts-apply]` is the tracked operator step to actually run that command against production D1.
-<!-- agent:boundary:22671d8f -->
+
+### Re: test2@investor.com rename — already covered by the shipped tool — glm-5.2
+
+> **Queue prompt:**
+>
+> test2@investor.com to btak.dev+lender2@gmail.com
+
+
+**Already covered — no new repo work.** This is `RENAME_ACCOUNTS[2]` (`{ from: 'test2@investor.com', to: 'btak.dev+lender2@gmail.com' }`) in `lib/auth/rename_accounts.ts`, shipped at `385f7d8`. All three renames + the shared password are emitted by a single run of the operator CLI:
+
+```bash
+bun ./bin/rename-accounts.ts --remote --dry-run --password "$(passage btak/lucas-collab-password)"  # review
+bun ./bin/rename-accounts.ts --remote            --password "$(passage btak/lucas-collab-password)"  # apply all 3 + password
+```
+
+This drains the last rename prompt. The final queue head, `do [#rename-accounts-apply]`, is the operator step that actually runs that command against production D1.
+<!-- agent:boundary:d6624959 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -237,7 +253,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 Change user account emails:
 - ~~stormrunner06106@gmail.com to btak.dev+admin2@gmail.com~~
 - ~~test2@broker.com to btak.dev+broker2@gmail.com~~
-- test2@investor.com to btak.dev+lender2@gmail.com
+- ~~test2@investor.com to btak.dev+lender2@gmail.com~~
 All accounts with the base emails brian.takita@gmail.com and btak.dev@gmail.com should use the password defined in `passage btak/lucas-collab-password`. 
 - do [#rename-accounts-apply]
 <!-- /agent:queue -->

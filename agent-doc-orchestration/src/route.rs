@@ -2966,6 +2966,24 @@ fn busy_dispatch_only_should_wait_for_ready(
         && !pane_active_turn_busy
 }
 
+fn dispatch_only_should_probe_active_turn_cue(
+    dispatch_only: bool,
+    actor_state: crate::session_actor::ActorState,
+    prompt_context_present: bool,
+    has_existing_inactive_queue_fallback: bool,
+) -> bool {
+    if !dispatch_only {
+        return false;
+    }
+    match actor_state {
+        crate::session_actor::ActorState::Ready => true,
+        crate::session_actor::ActorState::Busy => {
+            !prompt_context_present && !has_existing_inactive_queue_fallback
+        }
+        _ => false,
+    }
+}
+
 /// Build the dispatch-only busy refusal message. When the live pane proved a
 /// genuine active turn (`active_turn_busy_cue`), the busy ready-wait was skipped
 /// (#jb-run-agent-doc-busy-active-turn-stall), so the "after waiting Ns" wording
@@ -3358,23 +3376,45 @@ fn route_via_authoritative_actor(
         false
     };
     // #jb-run-agent-doc-busy-active-turn-stall: probe the live pane once for a
-    // genuine active-turn busy cue (working spinner / `esc to interrupt`) when a
-    // bare dispatch-only reopen targets a busy actor with no queue/prompt
-    // fallback. A multi-minute active turn cannot reach a dispatch-ready prompt
-    // inside the busy ready-wait budget, so waiting only yields a silent stall
-    // before the inevitable refusal. Record the cue so the wait is skipped and
-    // the refusal message words it as an active turn (not a cold-start wait).
-    let active_turn_busy_cue: Option<String> = if dispatch_only
-        && actor_state == crate::session_actor::ActorState::Busy
-        && prompt_context.is_none()
-        && !has_existing_inactive_queue_fallback
-    {
+    // genuine active-turn busy cue (working spinner / `esc to interrupt`) before
+    // direct dispatch. A stale Busy projection skips the slow ready-wait; a stale
+    // Ready projection is downgraded to Busy so route cannot inject into a live
+    // turn just because the durable actor record lagged behind the pane.
+    let active_turn_busy_cue: Option<String> = if dispatch_only_should_probe_active_turn_cue(
+        dispatch_only,
+        actor_state,
+        prompt_context.is_some(),
+        has_existing_inactive_queue_fallback,
+    ) {
         tmux.capture_pane(&dispatch_pane, Some(80))
             .ok()
             .and_then(|content| harness.busy_proof_line(&content))
     } else {
         None
     };
+    if actor_state == crate::session_actor::ActorState::Ready
+        && let Some(cue) = active_turn_busy_cue.as_deref()
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_ready_actor_active_turn_blocked file={} pane={} harness={} generation={} cue={:?}",
+                file.display(),
+                dispatch_pane,
+                harness.binary,
+                actor.record.generation,
+                cue
+            ),
+        );
+        eprintln!(
+            "[route] authoritative actor for {} reported ready on pane {}, but the live pane is busy on an active {} turn ({}); treating the actor as busy before dispatch",
+            file.display(),
+            dispatch_pane,
+            harness.binary,
+            cue
+        );
+        actor_state = crate::session_actor::ActorState::Busy;
+    }
     if let Some(cue) = active_turn_busy_cue.as_deref() {
         crate::ops_log::log_op(
             file,
@@ -3550,8 +3590,9 @@ fn route_via_authoritative_actor(
         }
     }
 
-    let prompt_ready = actor_state == crate::session_actor::ActorState::Ready
-        || current_generation_ready_prompt_proven(tmux, &actor, harness);
+    let prompt_ready = active_turn_busy_cue.is_none()
+        && (actor_state == crate::session_actor::ActorState::Ready
+            || current_generation_ready_prompt_proven(tmux, &actor, harness));
 
     // Direct pane evidence repairs a stale busy projection (#snrun). The actor
     // was projected Busy, but the live pane proves a dispatch-ready prompt in the
@@ -6158,6 +6199,30 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             false,
             false
         ));
+    }
+    #[test]
+    fn dispatch_only_probes_active_turn_cue_for_stale_ready_actor() {
+        use crate::session_actor::ActorState;
+        assert!(
+            dispatch_only_should_probe_active_turn_cue(true, ActorState::Ready, false, false),
+            "ready actor records still need a live pane active-turn probe before direct dispatch"
+        );
+        assert!(
+            dispatch_only_should_probe_active_turn_cue(true, ActorState::Ready, true, true),
+            "prompt-bearing routes must also block stale-ready active turns before injection"
+        );
+        assert!(
+            dispatch_only_should_probe_active_turn_cue(true, ActorState::Busy, false, false),
+            "existing busy no-fallback path still probes for active-turn wording"
+        );
+        assert!(
+            !dispatch_only_should_probe_active_turn_cue(true, ActorState::Busy, true, false),
+            "busy prompt-bearing routes queue without the slow active-turn probe"
+        );
+        assert!(
+            !dispatch_only_should_probe_active_turn_cue(false, ActorState::Ready, false, false),
+            "managed reopen path keeps its existing supervisor queue behavior"
+        );
     }
     #[test]
     fn busy_dispatch_only_skips_ready_wait_on_proven_active_turn() {

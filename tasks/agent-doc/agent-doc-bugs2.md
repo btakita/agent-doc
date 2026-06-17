@@ -71,14 +71,29 @@ The route-attempt diagnostic fix is landed and pushed. `src/agent-doc` is at `e5
 I recovered the transient 3-way merge marker residue in this document through a narrow `agent-doc patch` exchange-component replacement from the clean committed component, then let preflight commit the queue additions. `agent-doc session-check` is OK; the remaining queue is still active.
 
 Remote check: latest Agent Doc workflow run `27665152710` failed before any job steps started because GitHub reported failed account payments or a spending limit that needs to be increased. There is no workflow named `CI` in this repository.
-<!-- agent:boundary:6bccb803 -->
+
+### Re: JB Run Agent Doc stall — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` to this document stalled. No message. Can we remove some of the guard logic?
+
+
+I would not remove the guard logic wholesale. The guards that prevent unproven editor writeback, stale snapshot commits, direct disk fallback, and missing response proof are doing useful work; removing those would turn a visible stall into silent document corruption or another File Cache Conflict path.
+
+The part to simplify is narrower: any Run Agent Doc guard that refuses to submit, waits on a stale supervisor, or suppresses dispatch should produce an immediate visible status line with the route attempt id, target pane, submit profile, and exact failing guard. A guard can fail closed, but it should not fail dark. That gives us a concrete invariant: every JB Run Agent Doc click either sends Return, records why it did not, or emits a bounded re-submit proof.
+
+For this live report, preflight identified a stale route-owned supervisor using an older agent-doc binary, which can keep producing IPC drift and File Cache Conflict symptoms. I scheduled `agent-doc admin recycle`, so that controller will recycle at the next idle boundary without discarding this turn.
+
+No repo code changed in this cycle. Commands run: `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc admin recycle`, and `git status --short`. Verification is the agent-doc finalize/session-check closeout for this response. Push is not applicable because there were no code changes.
+<!-- agent:boundary:f0fce667 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: JB `Run Agent Doc` on codex still does not send Enter. Should we stop using tmux-router to make this easier to debug? This has been very difficult to identify which path is causing the issue. Do we have sufficient logging?~~
-- JB `Clear Session Context` to Codex does not send Return. See equityfundingsource.md
+- ~~:pushpin: JB `Run Agent Doc` to this document stalled. No message. Can we remove some of the guard logic?~~
+- :pushpin: JB `Clear Session Context` and `Run Agent Doc` to Codex does not send Return. See equityfundingsource.md
 - 3-way merge artifacts are in the response in this document.
 - :pushpin: JB `Clear Session Context` does not send Return to opencode ![img_36.png](img_36.png)
 - Still getting JB `File Cache Conflict` dialogs.

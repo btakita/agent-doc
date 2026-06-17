@@ -247,7 +247,7 @@ Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-
 Verification: focused tests passed (`115 pass`); full `make check` passed (`757 pass`, app build, worker build). GitHub Actions CI could not be inspected because the EFS repo has no workflow named `CI`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:868c4822 -->
+<!-- agent:boundary:cf438e60 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -255,20 +255,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-In Available deal dialog + page:
-
-Hide "GoHighLevel adapter" section.
-Move "Borrower document requests" under "Lender communication".
-
-Rename "Borrower document requests" to "Borrower communication". Add a dropdown containing:
-
-The upload from the Request Document(s) email should send an email of receipt to the admin email. The upload should also be visible in the Borrower communication after the message sent by the admin. The message sent by the admin should remain visible after the borrower uploads the document(s).
-
-"Lender communication" should be an email message system like "Borrower communication"...on EFS letterhead with the Application info.
-
-Email responses by lender or borrower should be emailed to the admin and be visible in the Available deal dialog + page.
-
-deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -534,6 +534,60 @@ fn malformed_patchback_is_rejected_instead_of_appended_as_unmatched() {
 }
 
 #[test]
+fn template_flag_on_crdt_doc_routes_to_stream_merge_instead_of_diff3() {
+    let tmp = TempDir::new().unwrap();
+    for subdir in ["snapshots", "crdt", "locks", "pending"] {
+        fs::create_dir_all(tmp.path().join(".agent-doc").join(subdir)).unwrap();
+    }
+    let doc = tmp.path().join("session.md");
+    let base = concat!(
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ Please reply\n",
+        "<!-- agent:boundary:base1234 -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    let current = base.replace(
+        "<!-- agent:boundary:base1234 -->",
+        "while I was typing the next queue item\n<!-- agent:boundary:base1234 -->",
+    );
+    fs::write(&doc, base).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    fs::write(&doc, current).unwrap();
+    let baseline = write_baseline(tmp.path(), base);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--template",
+            "--commit",
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: crdt template route - gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(after.contains("### Re: crdt template route - gpt-5"));
+    assert!(after.contains("while I was typing the next queue item"));
+    assert!(
+        !after.contains("<<<<<<<") && !after.contains(">>>>>>>"),
+        "CRDT template route must not write diff3 conflict markers:\n{after}"
+    );
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(ops.contains("template_flag_crdt_routed_to_stream"));
+    assert!(ops.contains("recovery=retry_crdt_instead"));
+}
+
+#[test]
 fn bare_write_stream_on_session_doc_escalates_to_commit_when_response_placed() {
     // #bare-write-captured-uncommitted: a bare `agent-doc write` that places a
     // response body on a session document must not strand the visible response

@@ -1943,9 +1943,32 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     let current_content =
         std::fs::read_to_string(file).context("failed to read document for pre-write guards")?;
     guard_no_exchange_compaction_request_between(file, baseline.as_deref(), &current_content)?;
+    let current_resolved_mode = if options.is_template || (!options.is_ipc && !options.is_stream) {
+        let (fm, _) = frontmatter::parse(&current_content)?;
+        Some(fm.resolve_mode())
+    } else {
+        None
+    };
+    let template_flag_on_crdt_doc = options.is_template
+        && current_resolved_mode
+            .as_ref()
+            .is_some_and(|mode| mode.is_crdt());
+
     let write_result = if options.is_ipc {
         run_ipc(file, baseline.as_deref(), write_flags)
-    } else if options.is_stream {
+    } else if options.is_stream || template_flag_on_crdt_doc {
+        if template_flag_on_crdt_doc && !options.is_stream {
+            eprintln!(
+                "[write] CRDT document received --template; routing through stream/CRDT write path"
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "template_flag_crdt_routed_to_stream file={} recovery=retry_crdt_instead",
+                    file.display()
+                ),
+            );
+        }
         run_stream(
             file,
             baseline.as_deref(),
@@ -1961,10 +1984,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             write_flags,
         )
     } else {
-        let content =
-            std::fs::read_to_string(file).context("failed to read document for mode detection")?;
-        let (fm, _) = frontmatter::parse(&content)?;
-        if fm.resolve_mode().is_crdt() {
+        if current_resolved_mode.is_some_and(|mode| mode.is_crdt()) {
             run_stream(
                 file,
                 baseline.as_deref(),

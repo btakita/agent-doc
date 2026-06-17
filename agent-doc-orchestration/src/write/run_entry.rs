@@ -1324,12 +1324,59 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     );
 }
 
+fn content_uses_crdt_write(content: &str) -> bool {
+    frontmatter::parse(content)
+        .map(|(fm, _)| fm.resolve_mode().is_crdt())
+        .unwrap_or(false)
+}
+
+fn merge_recovery_content(
+    file: &Path,
+    base: &str,
+    content_ours: &str,
+    content_current: &str,
+    source: &str,
+) -> Result<String> {
+    if content_current == base {
+        return Ok(content_ours.to_string());
+    }
+
+    if content_uses_crdt_write(base) {
+        eprintln!("[write] File was modified during response recovery. CRDT merging...");
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "recovery_crdt_merge file={} source={} recovery=retry_crdt_instead",
+                file.display(),
+                source
+            ),
+        );
+        let base_state = snapshot::crdt_merge_base_state(file, base)?.state;
+        let (merged, _) =
+            merge::merge_contents_crdt(Some(&base_state), content_ours, content_current)
+                .with_context(|| format!("CRDT merge failed during {source}"))?;
+        Ok(merged)
+    } else {
+        merge::merge_contents(base, content_ours, content_current)
+    }
+}
+
+fn save_recovery_snapshot(file: &Path, content: &str, use_crdt: bool) -> Result<()> {
+    snapshot::save(file, content)?;
+    if use_crdt {
+        let doc = crate::crdt::CrdtDoc::from_text(content);
+        snapshot::save_document_crdt(file, &doc.encode_state(), content)?;
+    }
+    Ok(())
+}
+
 /// Apply an append-mode response from a string (not stdin).
 /// Used by `repair` to apply orphaned responses.
 pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
     let response = strip_assistant_heading(response);
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    let use_crdt = content_uses_crdt_write(&content);
 
     let mut content_ours = content.clone();
     if !content_ours.ends_with('\n') {
@@ -1347,16 +1394,18 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
-    let final_content = if content_current == content {
-        content_ours.clone()
-    } else {
-        merge::merge_contents(&content, &content_ours, &content_current)?
-    };
+    let final_content = merge_recovery_content(
+        file,
+        &content,
+        &content_ours,
+        &content_current,
+        "apply_append_from_string",
+    )?;
 
     guard_visible_write_idle_and_current(file, "apply_append_from_string", &content_current)?;
     atomic_write(file, &final_content)?;
     // Save snapshot as content_ours, not final_content
-    snapshot::save(file, &content_ours)?;
+    save_recovery_snapshot(file, &content_ours, use_crdt)?;
     drop(doc_lock);
     eprintln!("[write] Response appended to {}", file.display());
     Ok(())
@@ -1367,6 +1416,7 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
 pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    let use_crdt = content_uses_crdt_write(&content);
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let mut response = response.to_string();
     sanitize_template_patchback_response_for_write(&mut response)?;
@@ -1423,10 +1473,14 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
             "[write] response already present in current file; adopting normalized current content"
         );
         repaired_current
-    } else if content_current == content {
-        content_ours.clone()
     } else {
-        merge::merge_contents(&content, &content_ours, &content_current)?
+        merge_recovery_content(
+            file,
+            &content,
+            &content_ours,
+            &content_current,
+            "apply_template_from_string",
+        )?
     };
     let final_content = normalize_final_template_content(
         file,
@@ -1447,7 +1501,7 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
         atomic_write(file, &final_content)?;
     }
     // Save snapshot as the repaired/merged final content.
-    snapshot::save(file, &final_content)?;
+    save_recovery_snapshot(file, &final_content, use_crdt)?;
     drop(doc_lock);
     eprintln!("[write] Template patches applied to {}", file.display());
     Ok(())
@@ -1540,6 +1594,46 @@ mod tests {
         assert!(result.contains("❯ do #duppb. spec-test-build-install-commit-push"));
         assert!(!result.contains("\ndo #duppb. spec-test-build-install-commit-push\n"));
     }
+
+    #[test]
+    fn recovery_merge_uses_crdt_for_crdt_documents_without_diff3_markers() {
+        let dir = TempDir::new().unwrap();
+        for subdir in ["crdt", "logs", "snapshots"] {
+            fs::create_dir_all(dir.path().join(".agent-doc").join(subdir)).unwrap();
+        }
+        let doc = dir.path().join("test.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Please reply\n",
+            "<!-- agent:boundary:base1234 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let content_ours = base.replace(
+            "<!-- agent:boundary:base1234 -->",
+            "### Re: recovery crdt - gpt-5\n\nDone.\n<!-- agent:boundary:base1234 -->",
+        );
+        let content_current = base.replace(
+            "<!-- agent:boundary:base1234 -->",
+            "while I was typing\n<!-- agent:boundary:base1234 -->",
+        );
+        fs::write(&doc, content_current.as_str()).unwrap();
+
+        let merged =
+            merge_recovery_content(&doc, base, &content_ours, &content_current, "test_recovery")
+                .unwrap();
+
+        assert!(merged.contains("### Re: recovery crdt - gpt-5"));
+        assert!(merged.contains("while I was typing"));
+        assert!(
+            !merged.contains("<<<<<<<") && !merged.contains(">>>>>>>"),
+            "CRDT recovery merge must not emit diff3 markers:\n{merged}"
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("recovery_crdt_merge"));
+        assert!(ops.contains("recovery=retry_crdt_instead"));
+    }
+
     #[test]
     fn apply_template_from_string_strips_safe_progress_before_exchange_patch() {
         let dir = TempDir::new().unwrap();

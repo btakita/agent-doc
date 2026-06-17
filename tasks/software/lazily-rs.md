@@ -152,7 +152,11 @@ Cut and published **v0.12.0** (not 0.11.2). The 3 commits since tag `v0.11.1` ad
 - superproject `ecd4c65c4` (`chore: release lazily-rs v0.12.0`, submodule gitlink only) → `btakita/agent-loop` main (`824a305e3..ecd4c65c4`).
 
 **Queue drained.** Both heads resolved (`#lzholonsscan` was auto-struck by preflight as already-done; `release + publish` completed here). No `#operator-drive` gate opened by this release — `#h6qb` (live two-host run) is unchanged and still operator-only. Top of backlog: **`#lzbenchbudget`**.
-<!-- agent:boundary:01c98b99 -->
+
+### Re: release + publish — closeout repair pass (snapshot/HEAD realign) — glm-5.2
+
+Repair closeout for the v0.12.0 release cycle. The release work itself is unchanged and complete (crates.io `0.12.0` live, GitHub release `v0.12.0`, submodule `93d9286`, superproject `ecd4c65c4`). The prior `finalize` reached `committed` (`8b31777b0`) but a subsequent bare `preflight` introduced a 1-byte snapshot/HEAD boundary drift and an orphaned `preflight_started` cycle. Recovery: `cancel` cleared the orphan; this `write --commit` realigns the snapshot to HEAD and retries the editor/CRDT delivery path so `session-check` clears. No queue, backlog, or review changes in this pass — `#lzbenchbudget` stays the sole backlog item; queue is `#lzbenchbudget` (not in-session drainable, `queue_continuation_required=false`).
+<!-- agent:boundary:a41890de -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -282,7 +282,42 @@ Operational note:
 - The session still has a stale route-owned supervisor warning from pid `166599` started before the current installed binary. If it blocks the next dispatch, the concrete repair commands remain `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md --force`, `agent-doc session interrupt-clear tasks/agent-doc/agent-doc-bugs2.md --force`, or restarting the session.
 
 Confidence: high. The only intentional CR left is the direct child-PTY fallback, and the tmux contract/test/docs now all state named `Enter` as the only tmux submit key.
-<!-- agent:boundary:a1771543 -->
+
+### Re: JB Run Agent Doc on lazily-rs.md/opencode — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` on lazily-rs.md/opencode. I closed a Codex session then opened the opencode session. When closing a session in the cli, agent-doc should detect this and immediately clear the state. Heartbeats with the new session in the same supervisor should immediately replace the old session.
+> ```
+> resync: pruned 2 stale session(s)
+> [route] target tmux session: 0
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3746 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=38 trigger_sha256=573c763642d25af5610128bad867d311cdfdbc5be1bee680610d94c2fcf5250d
+> ```
+
+
+Fixed the stale route-owned supervisor replacement path.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`: register/heartbeat now accept a newer session/generation for the same pane when the current actor is `Closed` and the report proves it comes from the same supervisor lease by PID or socket. Dispatch/register/heartbeat also clear document-scoped stale-supervisor queue pauses when a newer generation transition or different live supervisor PID proves the pause was superseded. The classifier now recognizes `stale route-owned supervisor (pid N)`.
+- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`: added regressions for same-supervisor closed-session replacement and clearing stale-supervisor queue pauses that predate the current actor.
+- `src/agent-doc/{VERSIONS.md,README.md,specs/07-orchestration-commands.md,specs/08a-session-actor-contract.md}`: documented the replacement and stale-pause clearing contract.
+
+Verification run:
+- `cargo test -p agent-doc-orchestration stale_supervisor --lib`
+- `cargo test -p agent-doc-orchestration same_supervisor --lib`
+- `make check` (clippy, 4612 nextest tests, doctests, medium simulation)
+- `make install` (installed `agent-doc 0.34.1`; auto-recycle marked 2 controllers)
+- `agent-doc --version` -> `agent-doc 0.34.1`
+- `git diff --check`
+
+Committed and pushed:
+- `src/agent-doc`: `eeb814a2 fix: replace closed same-supervisor actors`
+- parent repo gitlink: `8b06e3099 agent-doc: update same-supervisor actor replacement`
+
+CI: checked the latest `src/agent-doc` CI once after push; run `27656439677` was queued, so local verification is the closeout evidence.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:2c669722 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -300,7 +335,7 @@ resync: pruned 2 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3746 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=38 trigger_sha256=573c763642d25af5610128bad867d311cdfdbc5be1bee680610d94c2fcf5250d
 ```
 ---
-- :pushpin: Continue to consolidate tmux logic.
+- ~~:pushpin: Continue to consolidate tmux logic.~~
 - :pushpin: agent-doc monsterrodholders.md interrupted a running conversation ![img_35.png](img_35.png)
 <!-- /agent:queue -->
 ###

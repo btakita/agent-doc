@@ -31,6 +31,16 @@ Add a provider-neutral local model layer and keep graph writes in tsift-native c
 - `tsift-cli`: expose `tsift kg extract`, `tsift kg status`, `tsift kg unload`, and smoke-test commands.
 - `tsift-agent-doc`: consume the same `tsift-kg` graph evidence so session planning and queue orchestration do not fork their own KG path.
 
+## Contract Anchors
+
+The normative contract now lives in `src/tsift/specs/local-kg-model.md` and is linked from `src/tsift/SPEC.md`.
+
+- Provider contract: `GpuProbe`, `ModelProfile`, `LocalModelLease`, and `LocalModelProvider`.
+- Model ranking: Qwen3-32B default, Qwen3-30B-A3B throughput fallback, Qwen3-Embedding companion profiles, Qwen3.5-35B-A3B benchmark-only.
+- Structured extraction: validated JSON entities/relations with stable source-derived ids, confidence bounds, source handles, and kind allowlists.
+- Run manifest: `run_id`, model/profile metadata, source and prompt hashes, accepted/rejected counts, and pre/post GPU probes.
+- Provenance: KG facts are normal `GraphProjection` rows with `tsift-kg` provenance, content hashes, run manifest references, and source-derived ids that survive repeated runs.
+
 ## Run Model
 
 Each KG run should write a manifest containing `run_id`, `model_id`, `model_quant`, `provider`, `source_watermark`, `prompt_hash`, `schema_version`, and `content_hash`. Graph nodes and edges must carry run provenance but stable source-derived ids, so repeated runs can be diffed, superseded, or compared without duplicating the same source fact.

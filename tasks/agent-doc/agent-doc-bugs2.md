@@ -135,12 +135,13 @@ Focused deterministic verification passed this cycle:
 - `cargo test -p agent-doc integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_back -- --nocapture`
 
 No code or plugin changes were needed, so no JB plugin install was requested. The backlog and queue are now drained.
-<!-- agent:boundary:8bbfec7e -->
+<!-- agent:boundary:2455099b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
+After closing the cod
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

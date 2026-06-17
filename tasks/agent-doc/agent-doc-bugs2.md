@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -81,12 +81,13 @@ No source change was needed in this cycle.
 This is the explicit free-text queue-head proof for the FCC response above. The queue head was intentionally consumed after diagnosing the stale route-owned supervisor, marking the project controller recycled, and avoiding a force restart while the active pane was busy.
 
 <!-- no-free-text-queue-head-guard -->
-<!-- agent:boundary:58efd666 -->
+<!-- agent:boundary:78e0b31e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- JB `Run Agent Doc` still does not submit to Codex.
 <!-- /agent:queue -->
 ###
 <!--

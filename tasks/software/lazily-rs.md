@@ -39,7 +39,21 @@ queue: stop
 Compacted content:
 - Archived 3 response topic(s): release + publish; LinkedIn scheduled post; LinkedIn post repair
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): Closeout repair; Lean status; Artifact cleanup; 4 more
-<!-- agent:boundary:f4b36063 -->
+
+### Re: Bug audit + fix — ipc dead-code warnings, SPEC drift — opus-4-6
+
+**Bug found and fixed:** `EncodeError` and `DecodeError` enums in `src/ipc.rs` were defined unconditionally whenever the `ipc` feature was enabled, but their variants are gated on `ffi`/`ipc-binary`. Building with `webrtc-str0m` (which enables `ipc` without `ffi`/`ipc-binary`) produced dead-code warnings. Fixed by gating the enum definitions on `#[cfg(any(feature = "ffi", feature = "ipc-binary"))]` to match their existing impl blocks (`1cee080`).
+
+**SPEC.md drift fixed:** `SlotNode`, `CellNode`, and `EffectNode` struct definitions in SPEC.md used `Box<dyn Any>` where the actual implementation uses `Rc<dyn Any>`, and were missing `type_id: TypeId`. Updated to match the code with proper type aliases (`ComputeFn`, `EqualsFn`, `EffectFn`).
+
+**Tests added:** `json_codec` module in `tests/ipc.rs` covering `encode_json`/`decode_json` round-trip, invalid-input rejection, and `Display` impl verification for both error types.
+
+**Audit notes:** Core reactive logic (dependency tracking, memo guard, effect scheduling, invalidation propagation, batch flush) is correct — all 300+ tests pass, clippy clean across all feature combos. No panics on edge cases found. The `ShmBlobArena` wraparound/generation logic is sound.
+
+### Re: #next-steps — follow-up backlog — opus-4-6
+
+Remaining items added to backlog (in priority order). Top of backlog: **#lz57by-close**.
+<!-- agent:boundary:ba7370ec -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -53,6 +67,9 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#jknk] #lz57by-close=Close review #57by (Shuttle async spike #shuttleeval concluded NO-GO; the spike is done and the decision is final — the review item should be --done not [/])
+- [ ] [#tf0k] #lzsid32=Harden SlotId.0 as usize casts in thread_safe.rs to usize::try_from for 32-bit safety parity with single-threaded Context
+- [ ] [#j1vw] #lzerrfrom=[recommended] Add From<serde_json::Error>/From<postcard::Error> impls for EncodeError/DecodeError ergonomics
 <!-- /agent:backlog -->
 
 ## Review

@@ -486,20 +486,24 @@ Pushed commits:
 - parent `00c63c1a6`, `6db142662`, `bbc7de811`
 
 Latest `agent-doc` CI run `27714361986` was still `in_progress` when checked.
-<!-- agent:boundary:1a7fb804 -->
+Closeout repair for the Codex context-threshold restart queue head.
+
+> **Queue prompt:**
+>
+> :pushpin: Restart when context threshold is reached is not working during this queue run on Codex.
+
+
+The implementation and verification are already recorded immediately above in this exchange: source `46f65cf4`, parent `be25c53f9`, focused Codex reset/handoff tests, `cargo fmt`, `git diff --check`, full `make check`, `make install`, and CI run `27715310832` checked once as `in_progress`.
+
+This forced closeout is only consuming the queue head after the editor IPC path placed the response body but failed to prove queue consumption.
+<!-- agent:boundary:afbccce8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~agent-doc on monsterrodholders.md keeps on deleting the `agent:queue` element.~~
-- ~~agent-doc on Codex outputs console messages that obscures the TUI ![img_38.png](img_38.png) after a turn after a `/clear`, and after a restart.~~
-- ~~agent-doc sent a prompt to Codex (does this with other models too) while a task was running ![img_39.png](img_39.png)~~
-- ~~On monsterrodholders.md, after a JB `Clear Session Context` was successful, JB `Run Agent Doc` added a duplicate prompt (one with the relative path and one with the absolute path), and did not submit the prompt ![img_41.png](img_41.png).~~
-- ~~:pushpin: JB `Run Agent Doc` and JB `Clear Session Context" should have less latency to submit the prompt...particularly on Codex.~~
-- ~~Codex JB `Run Agent Doc` after a JB `Clear Session Context` on monsterrodholders.md did not submit and displayed stderr ![img_43.png](img_43.png)~~
-- :pushpin: I typed in the queue item "JB `Run Agent Doc` should have less latency to submit the prompt.", and agent-doc immediately struck it out.
-- Restart when context threshold is reached is not working during this queue run on Codex.
+- ~~:pushpin: Restart when context threshold is reached is not working during this queue run on Codex.~~
+- In addition to checking the current CI run once, check the previous CI run once. If the previous run is red, fix the issues.
 ---
 :pushpin: After JB `Clear Session Context`, JB `Run Session Context` stalled on equityfundingsource.md
 ```
@@ -548,9 +552,10 @@ Error: dispatch-only codex reopen refused to inject into pane %75 for tasks/prof
 ```
 A prompt was sent but not submitted. This prompt may not be from the dispatch though...
 ---
-- Opencode agent-doc lazily-rs.md running JB `Clear Session Context` does not submit ![img_44.png](img_44.png). The loop should ensure the `/new` is submitted by reading the TUI.
-- agent-doc is spamming the same prompt as I type into the queue in Codex on monsterrodholders.md ![img_42.png](img_42.png)
-- Restart on equityfundingsource.md failed ![img_40.png](img_40.png)
+- :pushpin: Opencode agent-doc lazily-rs.md running JB `Clear Session Context` does not submit ![img_44.png](img_44.png). The loop should ensure the `/new` is submitted by reading the TUI.
+- :pushpin: agent-doc is spamming the same prompt as I type into the queue in Codex on monsterrodholders.md ![img_42.png](img_42.png)
+- :pushpin: Restart on equityfundingsource.md failed ![img_40.png](img_40.png)
+- :pushpin: I typed in the queue item "JB `Run Agent Doc` should have less latency to submit the prompt.", and agent-doc immediately struck it out.
 - :pushpin: Re: agent-doc on Codex outputs console messages that obscures the TUI: This should also apply to Claude Code...so all agent harnesses.
 <!-- /agent:queue -->
 ###

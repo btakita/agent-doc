@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -295,12 +295,13 @@ Commands/proof:
 - `corky --version`, `corky --help`, `corky gpu --help`, and `corky help transcribe`
 
 Changed paths: no repo source paths changed by me; the installed binary at `/home/brian/.cargo/bin/tsift` was replaced. Push: none, because there was no repo code commit to push. Escalation: force-disk was used after the editor IPC path repeatedly failed to prove delivery. Confidence: high for the installed tsift setup and GPU contention assessment; medium for Corky command naming because the installed binary and local source agree on GPU transcription being feature-gated, but neither exposes a literal `corky gpu` subcommand here. The linked `headroom` repo is a local-first context compression/proxy/MCP project, not a GPU model runtime: https://github.com/chopratejas/headroom
-<!-- agent:boundary:14db2118 -->
+<!-- agent:boundary:611dd233 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Should we have a control pane that manages the GPU resources. Reducing the model? Can the model be reduced in the middle of an agent-doc run or quickly switchout out between tsift calls?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

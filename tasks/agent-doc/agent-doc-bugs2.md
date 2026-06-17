@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -134,12 +134,14 @@ The merge-artifact cycle hit a captured-response recovery path. The document is 
 I am treating that as queue churn, not as completed work. I captured the skipped OpenCode Clear Session Context issue as backlog item `#opencode-enter`, and the remaining JetBrains File Cache Conflict issue as backlog item `#jb-fcc`. The existing Codex dispatch-proof follow-up is already captured as `#cdxproof`.
 
 For the merge-artifact item itself, the live document is clean: the search found no conflict markers or malformed patchback remnants. No repo code changed in this repair cycle. Commands run: `agent-doc write --commit`, `agent-doc session-check`, `sed`, `git log`, `agent-doc write --help`, and this repair write. Verification is the committed write plus session-check.
-<!-- agent:boundary:1d0967dd -->
+<!-- agent:boundary:fd2e3fb4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- JB `Clear Session Context` did not submit.
+- backlog with `queue` attribute is not adding items into the queue.
 <!-- /agent:queue -->
 ###
 <!--

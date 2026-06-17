@@ -121,7 +121,7 @@ Reviewed all 4 `[operator-drive]` review items. One ship-stopper found, one revi
 **Verification:** 58/58 tests pass, `ruff check` clean, `ty check` clean. `twine check` PASSED on both rebuilt dist artifacts. Fresh-venv install round-trip confirmed `Signal→Slot` works without recursion.
 
 SPEC + CHANGELOG updated to document the re-entrancy-safe invalidation semantics. Review #kb9b updated: ship-stopper cleared, dist artifacts rebuilt and verified.
-<!-- agent:boundary:d4ab34f0 -->
+<!-- agent:boundary:d3707bbf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,8 +135,8 @@ SPEC + CHANGELOG updated to document the re-entrancy-safe invalidation semantics
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzloomtimeout] #lzloomtimeout=Bound the Loom exhaustive model for inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish (tests/thread_safe_loom.rs:1451) — 2 writer/reader threads + main body blow up the state space and never complete (>5min confirmed), leaving the torn/stale-read invariant for the inline seqlock without an exhaustive proof. Use loom::model_g preemption bounds or factor the model to shrink interleavings. Verification-coverage gap, not a known runtime race (non-exhaustive stress tests pass).
 - [ ] [#lzrepourl] #lzrepourl=Fix stale Cargo.toml repository URL (line 7: points to https://github.com/btakita/lazily-rs; actual git remote origin is lazily-hub/lazily-rs). Publishes a wrong repo link to crates.io/docs.rs. One-line fix; land before any crates.io publish.
+- [ ] [#lzloomtimeout] #lzloomtimeout=Bound the Loom exhaustive model for inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish (tests/thread_safe_loom.rs:1451) — 2 writer/reader threads + main body blow up the state space and never complete (>5min confirmed), leaving the torn/stale-read invariant for the inline seqlock without an exhaustive proof. Use loom::model_g preemption bounds or factor the model to shrink interleavings. Verification-coverage gap, not a known runtime race (non-exhaustive stress tests pass).
 <!-- /agent:backlog -->
 
 ## Review

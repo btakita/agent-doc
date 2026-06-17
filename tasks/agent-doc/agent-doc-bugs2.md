@@ -76,7 +76,12 @@ It returned `{"project_root":"/home/brian/work/btakita/agent-loop","recycled":tr
 I did not force-restart the supervisor while this pane is busy. The earlier non-force `agent-doc session restart-supervisor ... --fresh` check refused with an alive-busy proof for pane `%12`, so the safe next state is to let this turn reach idle and allow the recycled controller/supervisor to be replaced without discarding the active pane.
 
 No source change was needed in this cycle.
-<!-- agent:boundary:754b9413 -->
+
+### Re: There are still disk writes causing JB `File Cache Conflict` dialogs. — gpt-5
+This is the explicit free-text queue-head proof for the FCC response above. The queue head was intentionally consumed after diagnosing the stale route-owned supervisor, marking the project controller recycled, and avoiding a force restart while the active pane was busy.
+
+<!-- no-free-text-queue-head-guard -->
+<!-- agent:boundary:58efd666 -->
 <!-- /agent:exchange -->
 
 ## Queue

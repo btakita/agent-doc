@@ -58,6 +58,19 @@ That is intentionally narrower than retry-until-submit. If pane input was accept
 Verification run for this head:
 - `cargo test -p agent-doc-orchestration direct_pane_resubmit -- --nocapture`
 - `cargo test -p agent-doc-orchestration route_submit_resubmit -- --nocapture`
+- Latest GitHub Actions CI on `main`: completed/success, run `27664844335`
+- `make install`; installed `agent-doc --version` reports `agent-doc 0.34.1`
+- `make check`
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `cargo test -p agent-doc-orchestration route::dispatch -- --nocapture`
+- `cargo check -p agent-doc-orchestration`
+- `cargo test -p agent-doc-orchestration route_submit_resubmit -- --nocapture`
+- `cargo test -p agent-doc-orchestration direct_pane_resubmit -- --nocapture`
+- `cargo test -p agent-doc-orchestration direct_pane_acceptance -- --nocapture`
+- specs, README, and `VERSIONS.md` now describe the stable-empty and late-retry behavior.
+- if Codex later has accepted-without-dispatch-start proof and the same prompt is visibly sitting in the composer, route sends one late `Enter` retry, logs `route_submit_late_resubmit ... cause=dispatch_start_unproven_prompt_visible`, and rechecks dispatch-start proof;
+- a visible drafted trigger still gets the bounded shared `Enter` submit-key retry;
+- direct-pane submit acceptance now requires empty input to remain stable before accepting, so a delayed Codex draft can still be observed;
 
 Both passed. The next queue item remains queued.
 ### Response — gpt-5
@@ -81,13 +94,30 @@ No source change was needed in this cycle.
 This is the explicit free-text queue-head proof for the FCC response above. The queue head was intentionally consumed after diagnosing the stale route-owned supervisor, marking the project controller recycled, and avoiding a force restart while the active pane was busy.
 
 <!-- no-free-text-queue-head-guard -->
-<!-- agent:boundary:78e0b31e -->
+The code fix is implemented, tested, installed, and locally committed:
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` still does not submit to Codex. There seems to be a delay for Codex to receive the prompt compared to Claude Code & Opencode. Is there a way to not be timing dependent? But to see if the prompt is in the input then ensure Return is sent with retries?
+
+
+- `src/agent-doc`: `970bcb53`
+- parent gitlink: `67c2ffeef`
+- `make check` passed
+- `make install` passed, installed `agent-doc 0.34.1`
+- latest CI on `main` is green
+
+Closeout is blocked on editor IPC: socket IPC and explicit file IPC both failed to prove the session response write, and non-force supervisor restart refused because this pane is busy. I have not pushed yet because the session document has not finalized.
+
+Approve `--force-disk` closeout, or leave the captured response/IPC patch for the editor to apply?
+<!-- agent:boundary:c728b686 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- JB `Run Agent Doc` still does not submit to Codex.
+- ~~:pushpin: JB `Run Agent Doc` still does not submit to Codex. There seems to be a delay for Codex to receive the prompt compared to Claude Code & Opencode. Is there a way to not be timing dependent? But to see if the prompt is in the input then ensure Return is sent with retries?~~
+- :pushpin: If I run JB `Run Agent Doc` with the prompt already in the input, only send Return.
 <!-- /agent:queue -->
 ###
 <!--

@@ -1573,6 +1573,17 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
         );
     }
     #[test]
+    fn ready_prompt_candidate_accepts_codex_context_use_footer_without_prompt() {
+        let harness = HarnessConfig::codex();
+        let content = "\
+gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+";
+        assert!(
+            ready_prompt_candidate(content, &harness).is_some(),
+            "Codex route startup readiness must accept the shorter `Context N% use` status footer"
+        );
+    }
+    #[test]
     fn ready_prompt_candidate_rejects_codex_busy_footer_without_prompt() {
         let harness = HarnessConfig::codex();
         let content = "\

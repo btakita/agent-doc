@@ -645,7 +645,7 @@ fn is_opencode_help_screen(output: &str) -> bool {
 
 fn is_context_usage_status_line(trimmed: &str) -> bool {
     let lower = trimmed.to_ascii_lowercase();
-    lower.contains("context ") && lower.contains("% used")
+    lower.contains("context ") && lower.contains("% use")
 }
 
 /// True for Claude Code's static model/context status line, e.g.
@@ -1616,6 +1616,16 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         let h = HarnessConfig::codex();
         let output = "\
 gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+";
+
+        assert!(h.is_idle_chrome_only_output(output));
+    }
+
+    #[test]
+    fn idle_chrome_only_output_accepts_codex_context_use_suffix() {
+        let h = HarnessConfig::codex();
+        let output = "\
+gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 ";
 
         assert!(h.is_idle_chrome_only_output(output));

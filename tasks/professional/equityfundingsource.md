@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -200,7 +200,41 @@ SELECT email, lender_account, accreditation_status FROM users WHERE email = '<le
 ```
 
 This is a data gap, not a code bug. The one thing that would make this less confusing is renaming the error message or the column — say the word and I'll add a backlog item for clearer messaging (e.g., "lender has no TMO account number on file — complete their lender request first").
-<!-- agent:boundary:4592648c -->
+
+### Re: TMO lender-account warning surfaced + deployed — glm-5.2
+
+> **Queue prompt:**
+>
+> The admin should see the current lender account as not being synced with TMO. Since there is no lender id on the account, the admin should be prompted to sync the lender with TMO in the admin Available deal dialog/page and the admin Lender dialog/page. The error message in the admin Available deal should be rendered above the "Select lender" button and be present in the toast message. deploy
+
+Shipped proactive TMO-account-missing warnings across the admin UI so the admin sees the problem *before* clicking "Select lender", plus a clearer toast error. Deployed.
+
+**Changes (EFS `13ae196`):**
+
+1. **Available Deals dialog — deal detail** (`lib/ui--browser--efs/portal/admin/deal_detail.tsx`):
+   - Amber warning banner above the "Select lender" button: "No TMO lender account on file — complete the lender request before selecting." (shown only when `investor.lender_account` is empty and the lender isn't already selected)
+   - "TMO account not linked" badge on each `InterestedLenderCard` header
+   - Lender account field reads "Not linked" (amber) instead of "—" when empty
+
+2. **Investor pipeline modal** (`lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`):
+   - Lender account `ModalRow` now shows "Not linked" with amber accent instead of "—" when no account and no pending request
+
+3. **API error message** (`lib/admin/investor_management/index.ts:1138`):
+   - Old: `"selected lender needs a TMO lender account before TMO sync"`
+   - New: `"No TMO lender account on file for this lender. Complete the lender request first to assign a TMO account number."` — surfaces in the toast on 409
+
+4. **Test** (`tests/admin-investor-pipeline.test.ts:531`): updated assertion to match new error message
+
+**Verification:** `make check` — **812 tests pass / 0 fail**, build + build:worker OK. No pending D1 migrations.
+
+**Deploy:**
+- EFS `13ae196` pushed `81e5fe4..13ae196`
+- Root `8b690b3ea` submodule pointer bump pushed
+- Worker deployed: **Version `8c43e5b7-370b-4fe2-b6c8-5d0071dde8ac`** at https://equityfundingsource.brian-takita.workers.dev
+- Smoke: `/`, `/funded-deals`, `/login` all 200
+
+Queue drained.
+<!-- agent:boundary:e3e2c5b7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -208,7 +242,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The admin should see the current lender account as not being synced with TMO. Since there is no lender id on the account, the admin should be prompted to sync the lender with TMO in the admin Available deal dialog/page and the admin Lender dialog/page. The error message in the admin Available deal should be rendered above the "Select lender" button and be present in the toast message. deploy
 <!-- /agent:queue -->
 
 ## Backlog

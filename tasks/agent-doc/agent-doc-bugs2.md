@@ -24,7 +24,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-complete
+completed
 <!-- /agent:status -->
 
 ## Exchange
@@ -484,6 +484,9 @@ Verification already run for the shipped state:
 Pushed commits:
 - source `560f7b49`, `df57bf45`, `cc7eb165`
 - parent `00c63c1a6`, `6db142662`, `bbc7de811`
+- `gh run list --workflow CI --limit 2 --json databaseId,status,conclusion,headSha,headBranch,displayTitle,event,createdAt,updatedAt,url,workflowName` in `src/agent-doc`.
+- Previous run `27714361986` for `cc7eb165 fix: accept codex footer readiness` completed with `success`.
+- Current run `27715310832` for `46f65cf4 fix: honor codex queue context reset` is still `in_progress`.
 
 Latest `agent-doc` CI run `27714361986` was still `in_progress` when checked.
 Closeout repair for the Codex context-threshold restart queue head.
@@ -496,14 +499,32 @@ Closeout repair for the Codex context-threshold restart queue head.
 The implementation and verification are already recorded immediately above in this exchange: source `46f65cf4`, parent `be25c53f9`, focused Codex reset/handoff tests, `cargo fmt`, `git diff --check`, full `make check`, `make install`, and CI run `27715310832` checked once as `in_progress`.
 
 This forced closeout is only consuming the queue head after the editor IPC path placed the response body but failed to prove queue consumption.
-<!-- agent:boundary:afbccce8 -->
+
+### Re: CI current and previous run check — gpt-5
+
+Checked the source repo CI runs once as requested.
+
+> **Queue prompt:**
+>
+> In addition to checking the current CI run once, check the previous CI run once. If the previous run is red, fix the issues.
+
+Results from `btakita/agent-doc` workflow `CI`:
+
+- Current run `27715310832` for `46f65cf4 fix: honor codex queue context reset` is still `in_progress`.
+- Previous run `27714361986` for `cc7eb165 fix: accept codex footer readiness` completed with `success`.
+
+No fix was needed because the previous run is green. I did not change source files in this cycle.
+
+Verification command:
+- `gh run list --workflow CI --limit 2 --json databaseId,status,conclusion,headSha,headBranch,displayTitle,event,createdAt,updatedAt,url,workflowName` in `src/agent-doc`.
+<!-- agent:boundary:90e24dee -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Restart when context threshold is reached is not working during this queue run on Codex.~~
-- In addition to checking the current CI run once, check the previous CI run once. If the previous run is red, fix the issues.
+- ~~In addition to checking the current CI run once, check the previous CI run once. If the previous run is red, fix the issues.~~
 ---
 :pushpin: After JB `Clear Session Context`, JB `Run Session Context` stalled on equityfundingsource.md
 ```

@@ -517,7 +517,85 @@ No fix was needed because the previous run is green. I did not change source fil
 
 Verification command:
 - `gh run list --workflow CI --limit 2 --json databaseId,status,conclusion,headSha,headBranch,displayTitle,event,createdAt,updatedAt,url,workflowName` in `src/agent-doc`.
-<!-- agent:boundary:90e24dee -->
+
+### Re: Equityfundingsource Codex footer readiness — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: After JB `Clear Session Context`, JB `Run Session Context` stalled on equityfundingsource.md
+> ```
+> resync: pruned 4 stale session(s)
+> [route] target tmux session: 0
+> [route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (3s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (4s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (6s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (7s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (9s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (11s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (12s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (14s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (15s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (17s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (18s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (20s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (21s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (23s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (24s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (26s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (27s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (29s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (30s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (32s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (33s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (35s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (36s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (38s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (40s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (41s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (43s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (44s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (46s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% u…
+> [route] Still waiting for codex (47s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (49s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (50s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (52s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (53s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (55s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (56s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (58s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (59s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> Error: dispatch-only codex reopen refused to inject into pane %75 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
+> ```
+> A prompt was sent but not submitted. This prompt may not be from the dispatch though...
+
+
+Fixed in `src/agent-doc`.
+
+> **Queue prompt:**
+>
+> :pushpin: After JB `Clear Session Context`, JB `Run Session Context` stalled on equityfundingsource.md
+
+Root cause: the previous Codex footer-only readiness fix recognized status lines ending in `Context N% used`, but this repro shows Codex rendering `gpt-5.5 xhigh · ... · Context 0% use`. That shorter suffix made the status predicate miss the footer, so `wait_for_agent_ready_outcome` never treated the pane as dispatch-ready and the dispatch-only route timed out as `latest run is still booting`.
+
+Changed:
+- `agent-doc-orchestration/src/harness.rs`: context status detection now accepts both `Context N% used` and `Context N% use`.
+- `agent-doc-orchestration/src/route/startup.rs`: added route-readiness coverage for the exact `gpt-5.5 xhigh · ... · Context 0% use` footer shape.
+- `VERSIONS.md` and `specs/05-agent-backend.md`: documented the accepted Codex footer variants.
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration codex_context_use -- --nocapture`
+- `make check` passed: 4,643 nextest tests, 238 skipped, doctests, and the medium deterministic simulation.
+- `git diff --check`
+- `make install` passed and marked two controllers for idle-boundary recycle.
+
+Pushed commits:
+- source `84ca6e6d fix: accept codex context use footer`
+- parent `6ae0ae41a agent-doc: accept codex context use footer`
+
+Latest `agent-doc` CI run `27716137208` for `84ca6e6d` was `in_progress` when checked once.
+<!-- agent:boundary:3e79cdc9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -573,7 +651,7 @@ Error: dispatch-only codex reopen refused to inject into pane %75 for tasks/prof
 ```
 A prompt was sent but not submitted. This prompt may not be from the dispatch though...
 ---
-- :pushpin: Opencode agent-doc lazily-rs.md running JB `Clear Session Context` does not submit ![img_44.png](img_44.png). The loop should ensure the `/new` is submitted by reading the TUI.
+- ~~:pushpin: Opencode agent-doc lazily-rs.md running JB `Clear Session Context` does not submit ![img_44.png](img_44.png). The loop should ensure the `/new` is submitted by reading the TUI.~~
 - :pushpin: agent-doc is spamming the same prompt as I type into the queue in Codex on monsterrodholders.md ![img_42.png](img_42.png)
 - :pushpin: Restart on equityfundingsource.md failed ![img_40.png](img_40.png)
 - :pushpin: I typed in the queue item "JB `Run Agent Doc` should have less latency to submit the prompt.", and agent-doc immediately struck it out.

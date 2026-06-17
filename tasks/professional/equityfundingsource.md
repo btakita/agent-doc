@@ -42,7 +42,35 @@ Compacted content:
 ### Re: Session recovery — gpt-5
 
 Recovered the session through the required `agent-doc finalize` closeout path so the visible document content is committed through the binary-owned workflow. The borrower secure-message email round-trip remains tracked as `#xcvg` / `#xcvg-prod-email`, and the active queue remains ready to start with the available-deals borrower-communication label/document attachment work.
-<!-- agent:boundary:41cf0338 -->
+
+### Re: Remove borrower communication type label — gpt-5
+
+> **Queue prompt:**
+>
+> Available deals page/dialog: "Borrower communication" "Communication type" label should be removed.
+
+
+Implemented and pushed the first queue item. The visible `Communication type` label is removed from the Borrower communication selector in both admin deal-detail surfaces, while the select keeps an accessible `aria-label="Borrower message mode"`.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+
+Commands / verification:
+- `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts` passed.
+- `bun run check` passed: 758 tests, 0 fail, browser build done, worker build done. The digest reported the expected logged `Error('d1 down')` from the non-fatal outbox failure test, but the command exited 0 and the test summary was 0 fail.
+- `gh run list --workflow CI --limit 1` found no workflow named `CI`; `gh workflow list` returned no workflows for this repo.
+
+Commits / push:
+- EFS repo: `27c6b2d` (`Remove borrower communication type label`) pushed to `origin/main`.
+- Parent repo: `c635974dd` (`Update EFS borrower communication label`) pushed to `origin/main`.
+
+Escalation: none. Confidence: high.
+
+Borrower portal messages note: the admin-side borrower communication UI exists; production email notification, inbound email reply-to-chat, and borrower email-on-admin-reply remain tracked under `#xcvg` / `#xcvg-prod-email` and are still gated on the decided production email/GHL path.
+<!-- agent:boundary:c8875734 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +78,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Available deals page/dialog: "Borrower communication" "Communication type" label should be removed.
+- ~~Available deals page/dialog: "Borrower communication" "Communication type" label should be removed.~~
 - Available deals page/dialog: If the borrower uploaded a file for a Request Document(s) email, the acutal document should appear 
 - next to the Borroewr communication message.
 - Lender communication should have a "Message" flow...just like the browser communication message flow. Remove "Last contact" and "Next follow-up" fields, db columns, and logic.

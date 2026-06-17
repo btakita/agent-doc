@@ -1535,7 +1535,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
         // Assert the exact shape the binary emits for bounded re-submit attempts on
         // harnesses that travel the text+Enter submit path.
         let file = std::path::Path::new("/tmp/plan.md");
-        for harness in ["codex", "claude"] {
+        for harness in ["codex", "claude", "opencode"] {
             // First re-submit consumed the drafted trigger ⇒ result=accepted.
             let accepted = route_submit_resubmit_proof_line(
                 file,

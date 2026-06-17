@@ -10,7 +10,7 @@ internal enum class EditorCommandDecision {
     DEDUPE_ACTIVE_RUN,
     DEDUPE_ACTIVE_CLEAR,
     QUEUE_RUN_AFTER_CLEAR,
-    REJECT_CLEAR_DURING_RUN,
+    PREEMPT_RUN_WITH_CLEAR,
     IGNORED,
 }
 
@@ -47,7 +47,8 @@ internal object EditorCommandStateMachine {
                 state.copy(queuedRunAfterClear = true) to EditorCommandDecision.QUEUE_RUN_AFTER_CLEAR
             active == EditorCommandKind.RUN_AGENT_DOC &&
                 requested == EditorCommandKind.CLEAR_SESSION_CONTEXT ->
-                state to EditorCommandDecision.REJECT_CLEAR_DURING_RUN
+                EditorCommandState(active = EditorCommandKind.CLEAR_SESSION_CONTEXT) to
+                    EditorCommandDecision.PREEMPT_RUN_WITH_CLEAR
             else -> state to EditorCommandDecision.IGNORED
         }
     }

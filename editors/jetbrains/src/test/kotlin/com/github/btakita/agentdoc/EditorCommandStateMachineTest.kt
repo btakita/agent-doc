@@ -29,7 +29,7 @@ class EditorCommandStateMachineTest {
     }
 
     @Test
-    fun `normal clear is rejected while run dispatch is active`() {
+    fun `normal clear preempts active run dispatch`() {
         val state = EditorCommandState(active = EditorCommandKind.RUN_AGENT_DOC)
 
         val (next, decision) = EditorCommandStateMachine.onRequest(
@@ -37,8 +37,22 @@ class EditorCommandStateMachineTest {
             EditorCommandKind.CLEAR_SESSION_CONTEXT,
         )
 
-        assertEquals(EditorCommandDecision.REJECT_CLEAR_DURING_RUN, decision)
-        assertEquals(state, next)
+        assertEquals(EditorCommandDecision.PREEMPT_RUN_WITH_CLEAR, decision)
+        assertEquals(EditorCommandKind.CLEAR_SESSION_CONTEXT, next.active)
+        assertEquals(false, next.queuedRunAfterClear)
+    }
+
+    @Test
+    fun `run completion after preempting clear is ignored`() {
+        val clearing = EditorCommandState(active = EditorCommandKind.CLEAR_SESSION_CONTEXT)
+
+        val (next, completion) = EditorCommandStateMachine.onComplete(
+            clearing,
+            EditorCommandKind.RUN_AGENT_DOC,
+        )
+
+        assertEquals(EditorCommandCompletion.IGNORED, completion)
+        assertEquals(clearing, next)
     }
 
     @Test

@@ -150,6 +150,14 @@ object TerminalUtil {
                 active.remove(key)
             }
         }
+
+        @Synchronized
+        fun cancel(key: String): Boolean {
+            val previous = active.remove(key)
+            val live = previous?.takeIf { it.isAlive() }
+            live?.cancelForReplacement()
+            return live != null
+        }
     }
 
     internal data class BusySessionClearRefusal(
@@ -355,7 +363,7 @@ object TerminalUtil {
                     onComplete?.invoke()
                     return
                 }
-                EditorCommandDecision.REJECT_CLEAR_DURING_RUN,
+                EditorCommandDecision.PREEMPT_RUN_WITH_CLEAR,
                 EditorCommandDecision.IGNORED -> {
                     attempt?.finishIfCurrent(
                         "route_state_rejected",
@@ -815,15 +823,12 @@ object TerminalUtil {
                 onComplete?.invoke()
                 return
             }
-            EditorCommandDecision.REJECT_CLEAR_DURING_RUN -> {
-                LOG.warn("[state] Clear Session Context blocked while Run Agent Doc is dispatching for $relativePath")
-                notifyWarning(
-                    project,
-                    "Clear Session Context is blocked while Run Agent Doc is dispatching for $relativePath.\n" +
-                        "Wait for dispatch to finish, or use Interrupt and Clear Session Context.",
+            EditorCommandDecision.PREEMPT_RUN_WITH_CLEAR -> {
+                val canceled = inFlightRouteRegistry.cancel(routeKey)
+                LOG.warn(
+                    "[state] Clear Session Context preempted Run Agent Doc dispatch for $relativePath; " +
+                        "routeCanceled=$canceled"
                 )
-                onComplete?.invoke()
-                return
             }
             EditorCommandDecision.DEDUPE_ACTIVE_RUN,
             EditorCommandDecision.QUEUE_RUN_AFTER_CLEAR,

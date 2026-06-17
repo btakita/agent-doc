@@ -84,6 +84,19 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `canceling active route removes and cancels current run`() {
+        val registry = TerminalUtil.InFlightRouteRegistry()
+        val active = FakeRouteHandle(alive = true)
+        val next = FakeRouteHandle(alive = true)
+
+        assertTrue(registry.startIfIdle("doc", active))
+        assertTrue(registry.cancel("doc"))
+        assertEquals(1, active.cancelCount)
+        assertTrue(registry.startIfIdle("doc", next))
+        assertFalse(next.wasCanceled())
+    }
+
+    @Test
     fun `route layout args preserve cross root split as absolute paths`() {
         val args = TerminalUtil.buildRouteLayoutArgs(
             visibleMdFiles = listOf(

@@ -86,7 +86,7 @@ bun ./bin/ensure-admins.ts --remote             # apply
 **Tests:** `tests/admin-provisioning-email.test.ts` (template render, no-prod-domain-leak, local capture, `SITE_URL` login link, batch created-only filter, signup wiring).
 **Spec:** `prds/admin-provisioning-spec.md` gains an Email-notification-on-provisioning section.
 
-**Next queue item** ("Send rwaldman100+admin@gmail.com an email about his account") is now unblocked and mechanical: run `bun ./bin/ensure-admins.ts --remote` to create Robert's row, then trigger `notify_admin_provisioned_` for it (e.g. via an admin-gated in-worker call) — the capability and production sender are both in place.
+**Final queue item** (email Robert about his new account) is now unblocked and mechanical: run `bun ./bin/ensure-admins.ts --remote` to create Robert's row, then trigger `notify_admin_provisioned_` for it (e.g. via an admin-gated in-worker call) — the capability and production sender are both in place.
 <!-- agent:boundary:3af77d7c -->
 <!-- /agent:exchange -->
 ###
@@ -98,6 +98,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - ~~Ensure rwaldman100+admin@gmail.com has an admin account.~~
 - ~~Ensure all added admins are sent an email about their account.~~
 - Send rwaldman100+admin@gmail.com an email about his account.
+- I sent a message "Here is my account statement." with an attachment on https://equityfundingsource.brian-takita.workers.dev/lenders/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3: But I don't see the email.
 - All message boxes, portal and main site, should support Ctrl+Enter (Windows, Linux) or Cmd+Enter (OSX) to send the message.
 - deploy
 <!-- /agent:queue -->

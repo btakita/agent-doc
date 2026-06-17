@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -172,7 +172,26 @@ Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-
 Verification: focused tests passed (`115 pass`); full check passed (`757 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:5850c66f -->
+Deployed the EFS Worker to Cloudflare and applied the pending remote D1 migrations.
+
+> **Queue prompt:**
+>
+> deploy...The fields are still there on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=interests
+
+
+Deployment:
+- Ran `make deploy` from `src/equityfundingsource-dev`.
+- Applied migrations `0074` through `0081`, including the deal-interest column drops from the recent cleanup.
+- Published Worker version `f70f4788-70c7-4839-b6d6-17cb0009e2d0` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Verification:
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` now reports `No migrations to apply!`.
+- The deployed browser asset `index.browser-3G2BPU4E.js` returns HTTP 200 and searching it for the removed labels/field keys returns no matches.
+- The live admin pipeline URL returns HTTP 303 from an unauthenticated shell, which is the expected auth redirect for that route.
+- Remote D1 schema for `investor_deal_interests` no longer includes the removed columns; it retains the intended date/workflow/GHL fields.
+
+I could not perform an authenticated browser check of the admin dialog from this shell, but the deployed bundle and production schema both reflect the removal.
+<!-- agent:boundary:e7fbacbd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -180,7 +199,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- deploy...The fields are still there on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=interests
 <!-- /agent:queue -->
 
 ## Backlog

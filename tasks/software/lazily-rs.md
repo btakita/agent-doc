@@ -70,7 +70,36 @@ Prior bug classes are closed: `#k03k` async race (covered by the `#ytp5` instrum
 **Top of backlog: `#lzstr0mframe`.**
 
 _(Closeout note: the live editor IPC path was wedged this cycle — the recurring `#ipcdrift` route-owned-supervisor self-race. Three `finalize`/`write --commit` attempts returned `IPC proof insufficient … invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle`. The response was reconstructed directly on disk + `agent-doc reset --from-current` to re-sync sidecars, then committed manually. Recommend `make install` in `src/agent-doc` + recycling the route-owned supervisor before the next managed cycle, as in prior sessions.)_
-<!-- agent:boundary:8ece7a78 -->
+
+### Re: do #lzstr0mframe — SCTP backpressure frame-loss fixed — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: [#lzstr0mframe]
+
+**Root cause was worse than the audit described.** str0m's `Channel::write` returns `Result<bool, RtcError>` — `Ok(true)` = accepted, `Ok(false)` = **SCTP send buffer full (backpressure)**, `Err` = channel broken. The driver's flush loop at `src/str0m_net.rs:382` was a bare `if ch.write(...).is_err() { break; }` that *ignored the `bool`*, so:
+
+- `Ok(false)` → the frame was already `pop_front`'d from `out_pending`, the `bool` was discarded, the loop continued → **every frame that hit SCTP backpressure was silently dropped**. Thee `Err` path dropped via `break`. Both violated the ordered/reliable DataChannel invariant `WebRtcSink`/`WebRtcSource` rely on. The single existing `tests/str0m_net.rs` test sent one small snapshot over a fresh channel, so it never exercised backpressure and the bug shipped.
+
+**Fix** (`src/str0m_net.rs`, +70/-9):
+
+1. **Handle all three `write` outcomes.** `Ok(true)` decrements `pending_frames` and continues; `Ok(false)` (backpressure) and `Err` (broken) both **re-queue the frame via `push_front` and `break`** so the next `poll_output`/`recv_from` cycle drains the SCTP window and accepts the frame on the following iteration. No frame is dropped.
+2. **Bound the queue.** New `Shared::pending_frames: AtomicUsize` + `MAX_PENDING_FRAMES = 1024`. `send_frame` checks the cap and returns a new `Str0mNetError::Backpressure` variant before enqueue, so a caller producing faster than the drain rate gets a documented flow-control signal instead of growing memory without bound. The counter is decremented only on actual `Ok(true)` acceptance and reset to 0 on driver exit (the queue will never drain after close).
+
+**Spec** (`SPEC.md`, +26 lines): new "Str0mNet outbound backpressure contract (#lzstr0mframe)" subsection under the str0m backends section documenting the two-layer backpressure design (Ok(false) re-queue + queue cap) and the regression test that exercises it.
+
+**Test** (`tests/str0m_net.rs`, +93 lines): `burst_of_frames_arrives_in_order_under_backpressure` — bursts **100 × 8 KiB frames** (800 KiB total, enough to overrun the SCTP send window before the driver can drain) through a single `Str0mNetChannel` over real UDP/DTLS/SCTP, asserts all 100 arrive in order at the remote peer, retrying on `Backpressure` as the documented flow-control response. Pre-fix this regression would lose frames silently; post-fix it passes.
+
+**Verification (full suite, local):**
+- `cargo test --all-features` → **223 passed, 0 failed** (was 165 default + 58 across feature gates; +1 new test, others unchanged). Includes the 82 s `thread_safe_loom` 15/15 model + the new burst test.
+- `cargo clippy --all-features --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+- `cargo publish --dry-run --allow-dirty` clean (73 files, ~235 KiB).
+- `make check` → all test suites green; only `benchmark-check` fails on **4 pre-existing** `thread_safe_contention_*` lock-acquisition budget overruns — **confirmed identical on `a04fd8e` (v0.11.1) WITHOUT my changes** (verified via `git stash` + re-check). Same reference-machine sensitivity called out in the v0.11.1 release notes; my change is perf-neutral to `ThreadSafeContext` (touches only `str0m_net.rs`/`tests/str0m_net.rs`/`SPEC.md`).
+
+**Commit + push:** lazily-rs submodule `fd49d4c` → `lazily-hub/lazily-rs` main (`a04fd8e..fd49d4c`); superproject gitlink `7997879a8` → `btakita/agent-loop` main (`be25c53f9..7997879a8`). CI run `27715847772` in progress at closeout — finishing from local evidence per the AGENTS.md "in-progress CI" rule; will validate on the next cycle.
+
+**Top of backlog: `#lzstr0mpolldrive`** (driver I/O best-effort — `socket.send_to` ignores errors, 15ms `set_read_timeout` cap starves str0m's `Output::Timeout` timing).
+<!-- agent:boundary:c7546e8d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,14 +108,13 @@ _(Closeout note: the live editor IPC path was wedged this cycle — the recurrin
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: [#lzstr0mframe]
+- ~~:pushpin: [#lzstr0mframe]~~
 - :pushpin: [#lzstr0mpolldrive]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzstr0mframe] #lzstr0mframe=src/str0m_net.rs silent frame loss on ch.write err (line 382: break without re-queue) AND unbounded out_pending growth (line 349/368) when send_frame is fired faster than the driver drains. Real correctness bug under sustained send rate or slow SCTP drain: a Snapshot/Delta is silently dropped and the remote graph silently diverges, violating the ordered/reliable DataChannel invariant WebRtcSink/WebRtcSource rely on. Loopback str0m_backend.rs:315 correctly bubbles write errors via .map_err; the networked version should match. Fix: re-queue on write err + bound out_pending + surface backpressure to send_frame + add a burst regression test that asserts in-order delivery over a contended channel.
 - [ ] [#lzstr0mpolldrive] [recommended] #lzstr0mpolldrive=src/str0m_net.rs run_driver I/O is best-effort: socket.send_to ignores its Result (line 403, "let _ = ...") silently losing ICE/DTLS packets on EAGAIN/ENOBUFS; set_read_timeout capped at 15ms (line 416) starves str0m Output::Timeout-driven timing under adverse NAT. Liveness/handshake-reliability gap, NOT regression-covered by tests/str0m_net.rs (single small snapshot over a fresh channel). Audit + tighten (surface socket errors; let str0m deadline drive the wait directly) before #h6qb gates a real two-host workload through this backend.
 <!-- /agent:backlog -->
 

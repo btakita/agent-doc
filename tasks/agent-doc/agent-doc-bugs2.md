@@ -103,7 +103,25 @@ The failing boundary is after pane input acceptance: `route_submit_observation` 
 There is a useful contrast in the same log: an earlier attempt at `2026-06-17T03:58:46Z` on pane `%32` reached `proof=submitted` in `606ms`. So the route path is capable of submitting; the intermittent failure is at readiness/acceptance/dispatch-proof, not basic command construction.
 
 No repo code changed in this cycle. Commands run: `agent-doc preflight`, `agent-doc plan`, `agent-doc read` on `equityfundingsource.md`, targeted `rg`, `tail`, and `sed` over `.agent-doc` route logs. Verification is the agent-doc finalize/session-check closeout for this response. Escalation was not needed.
-<!-- agent:boundary:cf868df5 -->
+
+### Re: Merge artifact check — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Clear Session Context` does not send Return to opencode ![img_36.png](img_36.png)
+
+
+> **Queue prompt:**
+>
+> 3-way merge artifacts are in the response in this document.
+
+
+I checked the live session document for the usual 3-way merge and patchback residue. `rg` found no `<<<<<<<`, `=======`, `>>>>>>>`, malformed `patch:exchange`, or template-patchback error text in `tasks/agent-doc/agent-doc-bugs2.md`.
+
+The current exchange also has a clean boundary and closing `&lt;!-- /agent:exchange --&gt;`. The artifact item appears to be stale: the prior closeout already says the transient merge marker residue was recovered through a narrow exchange-component replacement, and the current document no longer shows those markers.
+
+I did capture one concrete follow-up from the previous Codex Return proof cycle as backlog item `#cdxproof`, because that response identified an actionable dispatch-proof gap. No repo code changed for this merge-artifact check. Commands run: `agent-doc preflight`, `agent-doc plan`, `rg`, and `sed` on this document. Verification is the artifact search plus the agent-doc finalize/session-check closeout.
+<!-- agent:boundary:f05153ee -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -111,8 +129,8 @@ No repo code changed in this cycle. Commands run: `agent-doc preflight`, `agent-
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` to this document stalled. No message. Can we remove some of the guard logic?~~
 - ~~:pushpin: JB `Clear Session Context` and `Run Agent Doc` to Codex does not send Return. See equityfundingsource.md~~
-- 3-way merge artifacts are in the response in this document.
-- :pushpin: JB `Clear Session Context` does not send Return to opencode ![img_36.png](img_36.png)
+- ~~3-way merge artifacts are in the response in this document.~~
+- ~~:pushpin: JB `Clear Session Context` does not send Return to opencode ![img_36.png](img_36.png)~~
 - Still getting JB `File Cache Conflict` dialogs.
 <!-- /agent:queue -->
 ###
@@ -141,6 +159,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#cdxproof] Fix the Codex dispatch-start proof gap for JetBrains Run Agent Doc attempts that log `key=Enter` plus `accepted_without_dispatch_start_proof`: surface a visible blocked outcome with attempt id and route-submit snapshot, and add regression coverage for the accepted-only/no-start case.
 <!-- /agent:backlog -->
 
 ## Review

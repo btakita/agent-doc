@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -241,15 +241,55 @@ Commits:
 Install / activation:
 - CLI/cdylib installed with `make install`; 2 controllers were marked for idle-boundary recycle.
 - JetBrains plugin `0.2.169` is installed. Restart IntelliJ IDEA 2026.1 to activate the plugin bytecode.
+- parent commit `c815ce6a6` (`agent-doc: update vscode run clear parity`) pushed to `btakita/agent-loop main`
+- `src/agent-doc` commit `d71577d4` (`align vscode run clear behavior`) pushed to `btakita/agent-doc main`
+- `gh run list --workflow CI --limit 1`: latest CI run at `2026-06-17T17:40:27Z` was completed/success for `fix jetbrains clear preempts stalled dispatch`
+- `make check`: passed clippy, 4,635 nextest tests, doctests, and the ignored medium seed corpus check
+- `git diff --check`: passed
+- `agent-doc plugin install --local vscode`: installed `agent-doc-0.2.28.vsix` via `codium`
+- `npm run package` in `editors/vscode`: built `agent-doc-0.2.28.vsix` with `SPEC.md` and compiled extension output included
+- `npm test` in `editors/vscode`: 89 tests passed, including the new `editorCommandState` suite
+- `npm install --package-lock-only --ignore-scripts` in `editors/vscode`
+- Session status, restart, interrupt-clear, and diagnostics remain binary-owned; the plugin does not use stale local busy/status flags to block clear.
+- VS Code Run clicks during an active clear now queue the latest run intent and start only after clear and any chosen clear-refusal recovery action complete.
+- VS Code `Clear Session Context` now preempts a still-dispatching Run by aborting that route subprocess, waiting briefly for it to settle, then invoking the normal binary-owned `agent-doc session clear <relative-path>` path.
+- Repeated VS Code `Run Agent Doc` clicks for the same document now dedupe behind the first alive plugin-spawned route process.
+- parent submodule pointer `src/agent-doc`
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/editors/vscode/package-lock.json`
+- `src/agent-doc/editors/vscode/package.json`
+- `src/agent-doc/editors/vscode/README.md`
+- `src/agent-doc/editors/vscode/SPEC.md`
+- `src/agent-doc/editors/vscode/src/extension.ts`
+- `src/agent-doc/editors/vscode/src/editorCommandState.test.ts`
+- `src/agent-doc/editors/vscode/src/editorCommandState.ts`
 
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:9e343672 -->
+<!-- agent:boundary:b8848817 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- :pushpin: VSCode plugin should have the same specs + behavior as the JB plugin.
+---
+JB `Run Agent Doc` worked on this document. But on equityfundingsource.md, did not submit:
+```
+resync: pruned 4 stale session(s)
+[route] target tmux session: 0
+[route] codex ready after 0.2s (1 polls)
+[route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md → pane %63
+[route] latency budget exceeded: phase dispatch_start_proof took 10114ms (budget 10000ms, pane=%63, harness=codex, outcome=unproven_but_accepted)
+[route] preserved dispatch-start proof snapshot for tasks/professional/equityfundingsource.md pane %63 harness=codex phase=direct_pane_dispatch_start_unproven capture_len=1174 capture_hash=809fcf302ba3 snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1781718619383-direct_pane_dispatch_start_unproven-codex-_63-809fcf302ba3.txt editor_attempt_id=1781718607979-3
+[route] bare codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %63, but no routed submission proof appeared after 10s
+Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %63 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
+```
+
+Why did the observation loop not detect the unsubmitted prompt and not send Return?
+---
+- Still getting JB `File Cache Conflict`. Evaluate all paths in the codebase that can cause an external file write while the plugin is running. Make sure all paths only send the edit through the editor plugin while the editor plugin is running. VSCode should have the same behavior.
+- agent-doc on monsterrodholders.md keeps on deleting the `agent:queue` element.
 <!-- /agent:queue -->
 ###
 <!--

@@ -340,7 +340,34 @@ Commits:
 - parent `agent-loop` `42a229f84` (`agent-doc: accept codex dispatch-only delivery`) pushed.
 
 Escalation: none. Confidence: high for this policy fix; no live equityfundingsource reroute was forced after install.
-<!-- agent:boundary:0e3051ee -->
+
+### Re: JB File Cache Conflict / editor-active disk writes — gpt-5
+
+> **Queue prompt:**
+>
+> Still getting JB `File Cache Conflict`. Evaluate all paths in the codebase that can cause an external file write while the plugin is running. Make sure all paths only send the edit through the editor plugin while the editor plugin is running. VSCode should have the same behavior.
+
+
+This head is already implemented in the current `src/agent-doc` codebase; I did not need another source change in this cycle.
+
+Implemented behavior already present:
+- Direct document disk fallback is allowed only when no JetBrains/VS Code IPC listener is active.
+- Active-listener failures fail closed with `transport=blocked ... action=refuse_external_disk_write` instead of writing behind the editor and causing File Cache Conflict dialogs.
+- The shared rule covers document convergence, plain maintenance writes, queue consume, template apply, compact, pending/review/dedupe/preflight maintenance, and live-prompt auto-recovery paths.
+- VS Code is covered by the same no-listener-only disk fallback rule because this is enforced in Rust orchestration before plugin-specific delivery.
+
+Existing implementation proof:
+- `src/agent-doc` commit `59d2d9e5` (`block editor-active disk fallbacks`) landed the ban.
+- Root pointer commit `f5ed3a04c` landed that submodule update.
+- The exchange already recorded the implementation under `### Re: JB File Cache Conflict / external file edits`.
+
+Current verification still passing after later changes:
+- `make check`: passed clippy, 4,635 nextest tests, doctests, and the ignored medium simulator check.
+- The relevant focused coverage remains in `write::converge::core_tests`: `converge_document_or_disk_blocks_disk_fallback_with_active_listener_without_ack_content`, `converge_or_disk_write_blocks_plain_disk_fallback_with_active_listener_without_ack_content`, and `try_auto_recover_live_prompt_drift_blocks_disk_fallback_with_active_listener_without_ack_content`.
+- `make install` installed the current CLI/cdylib and marked 2 controllers for idle-boundary recycle.
+
+Escalation: none. Confidence: high for the repository behavior; I did not run a new live JetBrains File Cache Conflict repro in this cycle.
+<!-- agent:boundary:d6a8b1dd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -362,7 +389,7 @@ Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md 
 
 Why did the observation loop not detect the unsubmitted prompt and not send Return?
 ~~~
-- Still getting JB `File Cache Conflict`. Evaluate all paths in the codebase that can cause an external file write while the plugin is running. Make sure all paths only send the edit through the editor plugin while the editor plugin is running. VSCode should have the same behavior.
+- ~~Still getting JB `File Cache Conflict`. Evaluate all paths in the codebase that can cause an external file write while the plugin is running. Make sure all paths only send the edit through the editor plugin while the editor plugin is running. VSCode should have the same behavior.~~
 - agent-doc on monsterrodholders.md keeps on deleting the `agent:queue` element.
 - agent-doc on Codex outputs console messages that obscures the TUI ![img_38.png](img_38.png) after a turn after a `/clear`, and after a restart.
 - agent-doc sent a prompt to Codex (does this with other models too) while a task was running ![img_39.png](img_39.png)

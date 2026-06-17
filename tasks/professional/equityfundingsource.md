@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -105,7 +105,15 @@ Commits / push:
 - Parent repo: `df7742b0d` (`Update EFS borrower request documents`) pushed to `origin/main`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:2b6df39b -->
+
+### Re: Queue cleanup — gpt-5
+
+Removed the dangling wrapped queue line `next to the Borroewr communication message.` after completing it as part of the uploaded-request-document item. No additional code changes were needed in this repair cycle.
+
+Changed paths: `tasks/professional/equityfundingsource.md` only.
+
+Commands / verification: `agent-doc preflight`, `agent-doc plan`, and `agent-doc finalize` closeout. Confidence: high. Escalation: none.
+<!-- agent:boundary:037c7412 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -114,10 +122,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Available deals page/dialog: "Borrower communication" "Communication type" label should be removed.~~
-- ~~Available deals page/dialog: If the borrower uploaded a file for a Request Document(s) email, the acutal document should appear~~ 
-- next to the Borroewr communication message.
-- Lender communication should have a "Message" flow...just like the browser communication message flow. Remove "Last contact" and "Next follow-up" fields, db columns, and logic.
-- deploy
+- ~~Available deals page/dialog: If the borrower uploaded a file for a Request Document(s) email, the acutal document should appear~~
 <!-- /agent:queue -->
 
 ## Backlog

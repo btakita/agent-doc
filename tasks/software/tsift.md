@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -208,18 +208,46 @@ Verification:
 - `gh run list --workflow CI --limit 1` still reports `could not find any workflows named CI`.
 
 Workspace note: the unrelated pre-existing dirty files under `src/tsift` remain unstaged. The next queued item is `#kgm6` for multi-run verification.
-<!-- agent:boundary:377bd7ae -->
+
+### Re: #kgm6 multi-run verification - gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#kgm6]
+
+
+Completed the multi-run verification queue item for the local KG model work.
+
+Implemented in `src/tsift`:
+
+- Added `KgMultiRunVerificationReport` and `verify_projection_multi_run_stability` in `tsift-kg`.
+- Added a two-run KG extraction regression that verifies stable node/edge ids across repeated identical runs, then upserts both projections into one SQLite graph and confirms semantic entities/relations are not duplicated.
+- Added an interrupted-run cleanup regression in `tsift-local-model` proving an orphaned provider process blocks VRAM cleanup proof and produces a process-exit fallback action.
+- Documented the multi-run stability helper in the `tsift-kg` README.
+
+Commits:
+
+- `a012eeb` in `src/tsift`: `test: add kg multi-run verification`
+- `6d68cf5b6` in the parent repo: `tsift: add kg multi-run verification`
+
+Verification run:
+
+- `cargo test -p tsift-kg`
+- `cargo test -p tsift-local-model`
+- `cargo run -p tsift-cli -- graph stable_id . --json --no-tagpath --limit 1`
+- `cargo run -p tsift-cli -- memory status . --json`
+- `git -C src/tsift diff --check -- packages/tsift-kg packages/tsift-local-model/src/lib.rs`
+- `git -C src/tsift diff --cached --check`
+- `cargo test --workspace`
+- `make check`
+
+The CI lookup was attempted with `gh run list --workflow CI --limit 1`, but this repository still reports `could not find any workflows named CI`; local verification passed. The pre-existing unrelated dirty files under `src/tsift` remain unstaged.
+<!-- agent:boundary:8b6ebf26 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#kgm1]~~
-- ~~:pushpin: do [#kgm2]~~
-- ~~:pushpin: do [#kgm3]~~
-- ~~:pushpin: do [#kgm4]~~
-- ~~:pushpin: do [#kgm5]~~
-- :pushpin: do [#kgm6]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -228,7 +256,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgm6] [queue] Add multi-run verification from tasks/software/plan-tsift-local-kg-model-support.md: two sequential KG runs, interrupted-run cleanup, no duplicate/stale graph facts, no orphaned model processes, VRAM returns near baseline, make check, and tsift graph/memory smoke tests.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift-md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 

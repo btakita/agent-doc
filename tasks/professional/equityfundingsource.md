@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -175,7 +175,7 @@ curl -X POST https://equityfundingsource.brian-takita.workers.dev/api/admin/boot
 That creates `rwaldman100+admin@gmail.com` if missing and sends the welcome email.
 
 The queue is fully drained.
-<!-- agent:boundary:5022ae9e -->
+<!-- agent:boundary:397b201e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -183,6 +183,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+Change user account emails:
+- stormrunner06106@gmail.com to btak.dev+admin2@gmail.com
+- test2@broker.com to btak.dev+broker2@gmail.com
+- test2@investor.com to btak.dev+lender2@gmail.com
+
+All accounts with the base emails brian.takita@gmail.com and btak.dev@gmail.com should use the password defined in `passage btak/lucas-collab-password`. 
 <!-- /agent:queue -->
 
 ## Backlog

@@ -522,10 +522,7 @@ impl HarnessConfig {
             return Some("queued draft in composer".to_string());
         }
 
-        if recent.iter().any(|line| {
-            (line.starts_with("working (") || line.starts_with("• working ("))
-                && line.contains("esc to interrupt")
-        }) {
+        if codex_active_turn_busy(&recent) {
             return Some("active codex turn".to_string());
         }
 
@@ -681,6 +678,19 @@ fn opencode_active_turn_busy(recent_lower: &[String]) -> bool {
     recent_lower
         .iter()
         .any(|line| line.contains("esc to interrupt"))
+}
+
+/// True when any of the recent (already lower-cased, trimmed) Codex pane lines
+/// shows a live turn. Codex can expose an input prompt while a background
+/// terminal is still running; that prompt queues text instead of dispatching it.
+fn codex_active_turn_busy(recent_lower: &[String]) -> bool {
+    recent_lower.iter().any(|line| {
+        (line.starts_with("working (")
+            || line.starts_with("• working (")
+            || line.starts_with("waiting for background terminal")
+            || line.starts_with("• waiting for background terminal"))
+            && line.contains("esc to interrupt")
+    })
 }
 
 /// True when any of the recent (already lower-cased, trimmed) Claude pane lines
@@ -2088,6 +2098,29 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert_eq!(
             h.dispatch_blocker_reason(output).as_deref(),
             Some("active codex turn")
+        );
+        assert!(h.has_busy_cue(output));
+    }
+
+    #[test]
+    fn has_busy_cue_detects_codex_background_terminal_with_idle_prompt() {
+        let h = HarnessConfig::codex();
+        let output = "\
+• Waiting for background terminal (18m 36s • esc to interrupt) · 1 background terminal running. /ps to view
+  make install
+
+›
+29% context left
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("active codex turn")
+        );
+        assert_eq!(
+            h.busy_proof_line(output).as_deref(),
+            Some(
+                "• Waiting for background terminal (18m 36s • esc to interrupt) · 1 background terminal running. /ps to view"
+            )
         );
         assert!(h.has_busy_cue(output));
     }

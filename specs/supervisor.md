@@ -134,6 +134,11 @@ The supervisor is a single process that:
   stale-busy reconcile, and stale-binary hot-reload diagnostics must stay in the
   session log / ops log instead of painting over the foreground TUI after
   `/clear`, restart, or inter-queue-item recycle.
+- Codex background-terminal banners are active-turn evidence. If recent pane
+  output contains `Waiting for background terminal (... esc to interrupt)`, the
+  supervisor idle-queue watch and route readiness checks must treat the pane as
+  busy even when Codex also renders an input prompt; text typed into that prompt
+  would be queued, not dispatched.
 - Queue-dispatch progress follows the same foreground-safety contract. Dispatch
   attempts record redacted `queue_dispatch_progress` / `queue_dispatch_warning`
   events in `.agent-doc/logs/ops.log` with command byte counts and SHA-256, but

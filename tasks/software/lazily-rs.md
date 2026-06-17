@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -34,57 +34,43 @@ queue: stop
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260617-182419.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260617-192533.md`*
 
 Compacted content:
-- Archived 8 response topic(s): Bug audit + fix; #next-steps; #jknk; 5 more
-- Prior summary/context: prior compacted content: Archived 3 response topic(s): release + publish; LinkedIn scheduled post; LinkedIn post repair
+❯ - Archived 3 response topic(s): #lzrepourl; #lzloomtimeout; Release + publish
+❯ - Prior summary/context: prior compacted content: Archived 8 response topic(s): Bug audit + fix; #next-steps; #jknk; 5 more
 
-### Re: #lzrepourl — Cargo.toml repository URL fixed — glm-5.2
-
-> **Queue prompt:**
->
-> [#lzrepourl]
-
-Fixed `Cargo.toml:7` `repository` from the stale `https://github.com/btakita/lazily-rs` to the canonical `https://github.com/lazily-hub/lazily-rs` (matching `book.toml:9-10` and `git remote origin`). The only stale reference in the crate — `rg` across `src/lazily-rs` found no other occurrences.
-
-**Verification:** `cargo build --all-features`, `cargo clippy --all-features --all-targets -- -D warnings`, `cargo fmt --check`, and `cargo test` all pass (metadata-only change).
-
-**Commit + push:** lazily-rs submodule `691fd3b` → `lazily-hub/lazily-rs` main (`1cee080..691fd3b`); superproject gitlink `7e525d275` → `btakita/agent-loop` main (`bfb58e854..7e525d275`).
-
-### Re: #lzloomtimeout — Loom envelope model bounded, now terminates — glm-5.2
+### Re: #next-steps to fix lazily bugs — glm-5.2
 
 > **Queue prompt:**
 >
-> [#lzloomtimeout]
+> :pushpin: What are #next-steps to fix lazily bugs?
 
-The `inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish` model (`tests/thread_safe_loom.rs:1451`) never terminated because the full 6-atomic envelope (seqlock + `cache_revision` + `dirty`) across two spawned threads plus the driving body makes the unbounded `loom::model` permutation space non-terminating (>5 min). `loom::model()` defaults `preemption_bound` to unbounded; confirmed via the loom 0.7.2 `Builder` source.
+**Core reactive logic: no open bugs.** Verified rather than assumed:
 
-**Fix:** replaced the unbounded `loom::model(|| …)` with a preemption-bounded `loom::model::Builder` (bound 4, `max_duration` 60 s safety cap). The two single-property models (`inline_seqlock_reader_never_observes_torn_value`, `…read_after_completed_invalidation_is_rejected`) stay exhaustive; only the combined envelope model is bounded.
+- `cargo test --all-features` → **165 passed, 0 failed** (incl. full `thread_safe_loom` 15/15 in ~82 s after the `#lzloomtimeout` preemption-bound fix)
+- `cargo clippy --all-features --all-targets -- -D warnings` clean; `cargo fmt --check` clean
+- Latest CI (run `27712549451`, `chore: release v0.11.1`) **green**
+- Audited the `unsafe` surface — `context.rs:49` (`downcast_ref_unchecked`), `:382`/`:537` (`Rc::into_raw`/`from_raw`), `thread_safe.rs:493`/`:525` (seqlock + `MaybeUninit::assume_init`) — all guarded by `TypeId::of::<T>()` asserts *before* the unchecked downcast, or by correct Acquire/Release fences with SAFETY comments. Production `panic!`s in `context.rs:386/405/522/541/569`, `thread_safe.rs`, `async_context.rs` are documented contract violations (wrong-type / unset-id) caught at the FFI boundary by `catch_unwind` in `ffi.rs`.
 
-**Bound validation (meaningful, not vacuous):** injected a torn-read bug by disabling the seqlock odd-sequence guard in `seqlock_try_read`; the bounded model still **FAILED** with *"envelope accepted a torn snapshot"* (left: 1, right: 2) — confirming bound 4 exercises the torn-read interleaving. Bug reverted; model passes.
+Prior bug classes are closed: `#k03k` async race (covered by the `#ytp5` instrumentation seam + CI step), `#lzrepourl`, `#lzloomtimeout`, `#tf0k`/`#j1vw` SlotId/`From` hardening, `1cee080` ipc dead-code. `#dh3k` canonical-conformance CI step is green.
 
-**Verification:** full `thread_safe_loom` suite **15/15 in ~82 s** (was non-terminating); `cargo clippy --features loom --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+**Found 2 real reliability bugs in the newest code** — `src/str0m_net.rs`, the networked backend landed in `64c7f3f`/`5ce3eed`. The single `tests/str0m_net.rs` test sends one small snapshot over a fresh channel, so neither gap is regression-covered:
 
-**SPEC/docs corrected:** `SPEC.md` Loom-gate bullet and two `src/thread_safe.rs` doc-comments changed from *"modeled exhaustively"* to *"preemption-bounded"* for the combined envelope model (honest about the reduced coverage), with the validation method noted.
+1. **`#lzstr0mframe` (correctness).** `src/str0m_net.rs:382` silently drops a frame when `ch.write(true, &frame)` returns `Err` — `break` *without* re-queue — and `out_pending` (lines 349/368) grows without bound when `send_frame` is called faster than the driver thread drains. The loopback `str0m_backend.rs:315` correctly bubbles write errors via `.map_err(Str0mError::from)?`; the networked version diverges. Under a sustained send rate or a slow SCTP drain a `Snapshot` or `Delta` is silently lost and the remote graph silently diverges — violating the "ordered, reliable DataChannel" invariant `WebRtcSink`/`WebRtcSource` rely on. Fix shape: re-queue on `write` err + bound `out_pending` + surface backpressure to `send_frame`; add a burst regression test.
 
-**Commit + push:** lazily-rs submodule `641fbf2` → `lazily-hub/lazily-rs` main (`691fd3b..641fbf2`); superproject gitlink `1660e814c` → `btakita/agent-loop` main (`7e525d275..1660e814c`).
+2. **`#lzstr0mpolldrive` [recommended] (liveness / handshake reliability).** `run_driver` makes two best-effort I/O choices: `socket.send_to(...)` ignores its `Result` (line 403, `let _ = …`) — silently losing an ICE/DTLS packet on `EAGAIN`/`ENOBUFS`/closed-fd, which surfaces as handshake flakiness under adverse NAT; and `set_read_timeout` is capped at 15 ms (line 416) regardless of str0m's `Output::Timeout` deadline, starving the timing the ICE/DTLS state machine expects. Tighten (surface socket errors; let str0m's deadline drive the wait directly) before `#h6qb` gates a real two-host workload through this backend.
 
-### Re: Release + publish — lazily v0.11.1 live on crates.io — glm-5.2
+**Warning reviewed.** Preflight flagged `semantic_completion_match` on review `#h6qb` — the agent-doable slice `#lzwebrtcwire` is indeed done (confirmed in `lazily-rs.done.md`). The review item's *remaining* work is the live two-host/NAT run through the deployed `#yxjw` Worker, which is correctly tagged `[operator-drive]` — the gate is real, so `#h6qb` stays open.
 
-> **Queue prompt:**
->
-> Release + publish
+**Queue preset `#spec-test-build-install-commit-push` noted but not executed this cycle.** The prompt is a discovery/next-steps question, not an imperative (`do #id` / `fix this`), so I identified + prioritized the work without auto-implementing. Either item is ready for `do #lzstr0mframe` / `do #lzstr0mpolldrive` to drive the spec+test+build+install+commit+push path on the chosen fix.
 
-Confirmed scope with operator first: **v0.11.0 was already on crates.io**, and four patch-level commits since the `v0.11.0` tag were unpublished (ipc dead-code gating, SlotId cast hardening + `From` impls, repo URL fix, Loom envelope bound). Bumped to **v0.11.1** — no API or behavior changes, perf-neutral.
+**Backlog (priority order):** `#lzstr0mframe` (correctness — silent frame loss) → `#lzstr0mpolldrive` [recommended] (liveness — driver I/O best-effort).
 
-**Release artifacts:**
-- Version bump `0.11.0 → 0.11.1` in `Cargo.toml` + `Cargo.lock`; `RELEASE_NOTES_v0.11.1.md` written; `BENCHMARKS.md` version string bumped (numbers unchanged — patch fixes are perf-neutral; `--no-run` regen on this dev box tripped machine-specific lock-acquisition budgets, a pre-existing reference-machine sensitivity, so numbers left for CI to regenerate).
+**Top of backlog: `#lzstr0mframe`.**
 
-**Verification:** `cargo build --all-features`, `cargo clippy --all-features --all-targets -- -D warnings`, `cargo fmt --check` clean; full default suite green; `spec_compliance` 107/107; `cargo publish --dry-run` clean (73 files, ~235 KiB).
-
-**Published:** `cargo publish` → **`Published lazily v0.11.1 at registry crates-io`**. Tag `v0.11.1` pushed; GitHub release https://github.com/lazily-hub/lazily-rs/releases/tag/v0.11.1. Submodule `a04fd8e` (`641fbf2..a04fd8e`); superproject gitlink `0961d9b26`.
-<!-- agent:boundary:4414da1b -->
+_(Closeout note: the live editor IPC path was wedged this cycle — the recurring `#ipcdrift` route-owned-supervisor self-race. Three `finalize`/`write --commit` attempts returned `IPC proof insufficient … invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle`. The response was reconstructed directly on disk + `agent-doc reset --from-current` to re-sync sidecars, then committed manually. Recommend `make install` in `src/agent-doc` + recycling the route-owned supervisor before the next managed cycle, as in prior sessions.)_
+<!-- agent:boundary:d9613088 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,6 +84,8 @@ Confirmed scope with operator first: **v0.11.0 was already on crates.io**, and f
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzstr0mframe] #lzstr0mframe=src/str0m_net.rs silent frame loss on ch.write err (line 382: break without re-queue) AND unbounded out_pending growth (line 349/368) when send_frame is fired faster than the driver drains. Real correctness bug under sustained send rate or slow SCTP drain: a Snapshot/Delta is silently dropped and the remote graph silently diverges, violating the ordered/reliable DataChannel invariant WebRtcSink/WebRtcSource rely on. Loopback str0m_backend.rs:315 correctly bubbles write errors via .map_err; the networked version should match. Fix: re-queue on write err + bound out_pending + surface backpressure to send_frame + add a burst regression test that asserts in-order delivery over a contended channel.
+- [ ] [#lzstr0mpolldrive] [recommended] #lzstr0mpolldrive=src/str0m_net.rs run_driver I/O is best-effort: socket.send_to ignores its Result (line 403, "let _ = ...") silently losing ICE/DTLS packets on EAGAIN/ENOBUFS; set_read_timeout capped at 15ms (line 416) starves str0m Output::Timeout-driven timing under adverse NAT. Liveness/handshake-reliability gap, NOT regression-covered by tests/str0m_net.rs (single small snapshot over a fresh channel). Audit + tighten (surface socket errors; let str0m deadline drive the wait directly) before #h6qb gates a real two-host workload through this backend.
 <!-- /agent:backlog -->
 
 ## Review

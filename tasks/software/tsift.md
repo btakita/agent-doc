@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -427,16 +427,38 @@ Verification:
 Workspace note: the pre-existing unrelated dirty files under `src/tsift` (`session_cost.rs`, `session_review.rs`, `infra.rs`, `exit_code.rs`, `log_digest.rs`) remain unstaged as before.
 
 Confidence: high. `#gctrl3` done. Next queued: `#gctrlice` (icebox — revisit a full GPU control-pane daemon only when proven contention). Plan warning has flagged #gctrlice as semantically covered by #gctrl1; will reconcile when its turn comes.
-<!-- agent:boundary:2d916564 -->
+
+### Re: #gctrlice control-pane daemon — deferred (no implementation) — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#gctrlice]
+
+
+> **Queue prompt:**
+>
+> :pushpin: do [#gctrlice]
+
+
+`#gctrlice` is closed as **deferred-by-design** — no code changes this cycle. The backlog item itself was authored as an icebox recommendation in the response two cycles ago ("revisit a full GPU control-pane daemon only when proven need"), and that recommendation still holds. Re-confirming the three pre-conditions for reopening it:
+
+1. **Single-GPU reality unchanged.** `nvidia-smi` still reports one RTX 5090 (32,607 MiB total, ~31,971 MiB free at last probe). No second GPU has appeared.
+2. **Concurrent consumers still ≤ polite-handful.** The known GPU consumers are tsift, corky (no `gpu` subcommand exposed in the installed build), headroom (a context-compression MCP server, not a GPU runtime), and agent-doc itself. No proof of >3 simultaneous GPU consumers.
+3. **The cooperative registry already covers today's failure mode.** `#gctrl1` (`tsift local-model lease acquire|release|show` with pid-liveness + TTL pruning) plus `#gctrl3` (`tsift local-model swap --from --to` with the unload cleanup proof) give callers the right to fail-closed against a live holder and to downgrade mid-run without a daemon.
+
+The agent-doc plan-warning has flagged `#gctrlice` as semantically covered by `#gctrl1` (similarity 1.893) on every cycle since. Acting on `do [#gctrlice]` therefore means **recording the defer** rather than building new substrate.
+
+Reopen triggers (any one): a second GPU is installed; >3 concurrent GPU consumers are observed at the same time; a caller needs true preempt (today the registry is cooperative-yield only — a stuck holder blocks until its pid dies or TTL expires). If any of those fire, the right next step is a separate plan for an `tsift-orchestrator` crate owning: (a) a long-lived registry daemon with advisory locks, (b) preempt semantics with a configurable grace period, (c) multi-GPU profile placement. None of that is justified at current scale.
+
+Confidence: high (defer is the correct action; building the daemon now would be the over-engineering the original recommendation warned against). No source changes; no commit beyond the session-document closeout. The pre-existing unrelated dirty files under `src/tsift` remain unstaged as before.
+
+Queue drained: `#gctrl1` (lease registry), `#gctrl2` (profile preference), `#gctrl3` (swap action), `#gctrlice` (deferred) are all closed. The RTX 5090 / Qwen3 substrate now has a complete cooperative GPU resource story without a daemon.
+<!-- agent:boundary:b54a3d67 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#gctrl1]~~
-- ~~do [#gctrl2]~~
-- ~~do [#gctrl3]~~
-- do [#gctrlice]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -445,7 +467,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#gctrlice] [recommended] Icebox: revisit a full GPU control-pane daemon (with preempt and multi-GPU scheduling) only when proven need — more than 1 GPU, or more than 3 concurrent GPU consumers running at the same time. Until then the cooperative lease registry (#gctrl1) is the right-size answer.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 

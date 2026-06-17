@@ -268,7 +268,26 @@ Verification:
 Confidence: High. The code work was already committed, pushed, and verified in the previous response; this closeout only records the queue token drain.
 
 Escalation: None.
-<!-- agent:boundary:3b4a1db1 -->
+
+### Re: Restored queue residue — gpt-5
+
+No deploy was run in this cycle. Preflight reported the restored `deploy` text as inactive `agent:queue` residue, not an executable queue head.
+
+Changed paths:
+- `tasks/professional/equityfundingsource.md`
+
+Commands run:
+- `agent-doc preflight tasks/professional/equityfundingsource.md`
+
+Verification:
+- Preflight reported `queue_drainable_head_count: 0` and `queue_continuation_required: false`.
+- The `deploy` text is present inside the `agent:queue` body so the dropped user edit is preserved.
+- No code tests or deployment commands were run for this document-only preservation cycle.
+
+Confidence: Medium. This preserves the dropped queue edit exactly as document content, but agent-doc classifies it as inactive residue unless the queue is activated with `go`/`start`.
+
+Escalation: None.
+<!-- agent:boundary:1284de7b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -276,6 +295,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
+deploy
 <!-- /agent:queue -->
 
 ## Backlog

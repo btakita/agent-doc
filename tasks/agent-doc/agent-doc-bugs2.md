@@ -413,7 +413,31 @@ Changed files: `agent-doc-orchestration/src/harness.rs`, `specs/supervisor.md`, 
 Verification passed: `cargo fmt`; `cargo test -p agent-doc-orchestration has_busy_cue_detects_codex_background_terminal_with_idle_prompt -- --nocapture`; `git diff --check`; full `make check` with 4,637 nextest tests plus doctests and medium simulation; `make install` installed `agent-doc 0.34.1` and FFI library and marked two controllers for idle recycle. The related live tmux route regression `wait_for_agent_ready_rejects_codex_queue_message_footer` is still ignored outside `make tmux-ci`.
 
 Pushed: `btakita/agent-doc` `34248761` (`fix: block codex background terminal dispatch`) and parent repo `33b6ff57f` recording `src/agent-doc` at `34248761`. Agent-doc CI run `27711755486` is in progress; the parent repo has no workflow named `CI`.
-<!-- agent:boundary:15744008 -->
+
+### Re: Duplicate relative/absolute JB Run Agent Doc draft — gpt-5
+
+Fixed in `src/agent-doc`.
+
+The direct-pane pre-submit guard now recognizes a visible `agent-doc <relative-path>` draft as the same target when the routed trigger is an absolute path ending with that relative path. In the screenshot case, `agent-doc tasks/monsterrodholders.md` in the Codex composer will be submitted with Enter instead of appending `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` on a second line. The stale-scrollback guard still holds: if an idle prompt appears after that draft, route treats it as old output and will not press Enter.
+
+Changed:
+- `agent-doc-orchestration/src/route/dispatch.rs`
+- `specs/08a-session-actor-contract.md`
+- `VERSIONS.md`
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection`
+- `git diff --check`
+- `make check` (4,639 tests passed, 238 skipped, doctests passed, medium SimWorld passed)
+- `make install` (installed CLI/lib and marked 2 controllers for idle-boundary recycle)
+
+Commits pushed:
+- `btakita/agent-doc` `df57bf45` (`fix: submit relative agent-doc drafts`)
+- `btakita/agent-loop` `6db142662` (`agent-doc: submit relative drafts`)
+
+CI check: source CI run `27713493252` was in progress when checked; the parent repo has no workflow named `CI`. The existing stale-supervisor warning remains non-blocking; the install already requested idle-boundary recycle for controllers.
+<!-- agent:boundary:d247fc72 -->
 <!-- /agent:exchange -->
 
 ## Queue

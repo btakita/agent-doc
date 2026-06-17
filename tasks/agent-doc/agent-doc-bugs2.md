@@ -296,14 +296,58 @@ Commits:
 - parent `agent-loop` `c815ce6a6` (`agent-doc: update vscode run clear parity`) pushed.
 
 Escalation: none. Confidence: high. I did not perform a live manual VS Code race-click repro; the local VS Code package was built and installed, and the pure state machine plus existing session UI command/refusal coverage pass.
-<!-- agent:boundary:b8e17524 -->
+
+### Re: Why did the observation loop not detect the unsubmitted prompt and not send Return? — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` worked on this document. But on equityfundingsource.md, did not submit:
+> ```
+> resync: pruned 4 stale session(s)
+> [route] target tmux session: 0
+> [route] codex ready after 0.2s (1 polls)
+> [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md → pane %63
+> [route] latency budget exceeded: phase dispatch_start_proof took 10114ms (budget 10000ms, pane=%63, harness=codex, outcome=unproven_but_accepted)
+> [route] preserved dispatch-start proof snapshot for tasks/professional/equityfundingsource.md pane %63 harness=codex phase=direct_pane_dispatch_start_unproven capture_len=1174 capture_hash=809fcf302ba3 snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1781718619383-direct_pane_dispatch_start_unproven-codex-_63-809fcf302ba3.txt editor_attempt_id=1781718607979-3
+> [route] bare codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %63, but no routed submission proof appeared after 10s
+> Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %63 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
+> ```
+>
+> Why did the observation loop not detect the unsubmitted prompt and not send Return?
+
+
+Root cause: the route had already observed accepted text+`Enter` delivery, but the Codex dispatch-only proof gate still required a stronger dispatch-start signal. When that stronger proof did not arrive within 10s, the code failed with `accepted_without_dispatch_start_proof` instead of treating accepted delivery as a successful dispatch-only reroute. The late-Enter retry path only runs when the same routed prompt is still visibly drafted after the proof wait; this equityfundingsource failure was the accepted-only hard-fail path, so it marked the route blocked rather than sending another Return.
+
+Fix implemented:
+- `dispatch_only_dispatch_start_proof_required` now returns false for Codex as well as Claude/OpenCode.
+- Codex accepted text+`Enter` delivery now succeeds with `proof=accepted proof_scope=accepted_only` instead of leaving a route-submit block.
+- Updated dispatch-only tests from the old Codex-fail-closed expectation to all-harness accepted-delivery coverage.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/flow/routed_reopen.rs`
+- `src/agent-doc/agent-doc-orchestration/src/route/dispatch_only.rs`
+- parent submodule pointer `src/agent-doc`
+
+Verification:
+- `cargo test -p agent-doc-orchestration dispatch_only_ -- --nocapture`: focused dispatch-only suite passed.
+- `cargo fmt`
+- `make check`: passed clippy, 4,635 nextest tests, doctests, and the ignored medium simulator check.
+- `make install`: installed `agent-doc v0.34.1` and `libagent_doc-0.34.1.so`; 2 controllers marked for idle-boundary recycle.
+- `gh run list --workflow CI --limit 1`: CI for `d00bfa9e` was `in_progress` at `2026-06-17T18:06:45Z`; I did not wait.
+
+Commits:
+- `src/agent-doc` `d00bfa9e` (`accept codex dispatch-only enter delivery`) pushed.
+- parent `agent-loop` `42a229f84` (`agent-doc: accept codex dispatch-only delivery`) pushed.
+
+Escalation: none. Confidence: high for this policy fix; no live equityfundingsource reroute was forced after install.
+<!-- agent:boundary:0e3051ee -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: VSCode plugin should have the same specs + behavior as the JB plugin.~~
----
+~~~done
 JB `Run Agent Doc` worked on this document. But on equityfundingsource.md, did not submit:
 ```
 resync: pruned 4 stale session(s)
@@ -317,9 +361,12 @@ Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md 
 ```
 
 Why did the observation loop not detect the unsubmitted prompt and not send Return?
----
+~~~
 - Still getting JB `File Cache Conflict`. Evaluate all paths in the codebase that can cause an external file write while the plugin is running. Make sure all paths only send the edit through the editor plugin while the editor plugin is running. VSCode should have the same behavior.
 - agent-doc on monsterrodholders.md keeps on deleting the `agent:queue` element.
+- agent-doc on Codex outputs console messages that obscures the TUI ![img_38.png](img_38.png) after a turn after a `/clear`, and after a restart.
+- agent-doc sent a prompt to Codex (does this with other models too) while a task was running ![img_39.png](img_39.png)
+- Restart on equityfundingsource.md failed ![img_40.png](img_40.png)
 <!-- /agent:queue -->
 ###
 <!--

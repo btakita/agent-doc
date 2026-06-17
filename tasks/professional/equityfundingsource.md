@@ -245,14 +245,26 @@ Commands / verification:
 - `git status -sb` in `src/equityfundingsource-dev` remained clean after deploy.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:f6752151 -->
+
+### Re: Queue drained — gpt-5
+
+The deployment queue is drained. This cycle only absorbs the agent-doc queue bookkeeping after the deploy closeout: the queue activation token was stripped after the final `deploy` item completed.
+
+Changed paths:
+- `tasks/professional/equityfundingsource.md` session bookkeeping only.
+
+Verification:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` reported `queue_continuation_required: false` and no remaining drainable queue head.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:c397c9f7 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

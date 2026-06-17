@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -179,12 +179,12 @@ Verification passed:
 - `cargo install --path .`
 
 CI check: `src/agent-doc` CI run `27722089925` was `in_progress` immediately after the push. The top-level repo has no workflow named `CI`, so `gh run list --workflow CI --limit 1` returned no matching workflow there.
-<!-- agent:boundary:7bb83524 -->
+<!-- agent:boundary:762764ed -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 After closing the codex agent-doc session in my editor and opening opencode agent-doc session, then running JB `Run Agent Doc`
 ```
 resync: pruned 4 stale session(s)
@@ -192,6 +192,7 @@ resync: pruned 4 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/tsift.md: failed_stage=queue_paused reason=preset-token queue heads (#bugs-observed) un-drainable: consume rejects as id-backed, --done fails (no such backlog id); work committed to HEAD 9f363f77d. Halting go-mode flood pending operator clear / agent-doc fix. receipt_id=3860 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control blocked_head_bytes=186 blocked_head_sha256=d052a79f3ac087154352f94541982e5a35a8b5800827cfb2584e5adaca7b36e5 trigger_bytes=34 trigger_sha256=ff0717b425820af71d61b41790930db5c3cf99f1ab121973bfc2671bdfe0e070
 ```
 ---
+- In spoton.md (Claude Code), I added a queue item and ran Jb `Run Agent Doc`. The supervisor/tmux pane crashed, the queue item I added was deleted. When I selected the page in the editor, a new supervisor/tmux pane auto-started.
 - :pushpin: Still getting JB `File Cache Conflict` dialogs. JB plugin has been running for hours. It should not be possible to write to disk while JB plugin or VSCode plugin is running.
 ---
 How can we prevent the wedge conflict from occurring, as what happened in equityfundingsource.md.

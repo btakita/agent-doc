@@ -47,14 +47,26 @@ Verification passed:
 - Latest GitHub Actions CI on `main`: completed/success, run `27664844335`
 
 A new queue item about JB Run Agent Doc Enter retry behavior is still behind this item; I am not treating it as completed by this closeout.
-<!-- agent:boundary:f3efdde2 -->
+### Response — gpt-5
+I checked the current `src/agent-doc` route path against the Clear Session Context retry path. This item is already covered in the installed code; I did not make a new source change for it.
+
+For Run Agent Doc, `agent-doc-orchestration/src/route/dispatch.rs` has the bounded retry in `send_command_unchecked`: after the first direct-pane submit, `direct_pane_needs_enter_resubmit` allows exactly one bare submit-key retry when the harness is Codex, Claude, or OpenCode, the first submit window timed out, and the routed trigger is still visible in the active draft. It also handles the case where the routed command was already drafted before dispatch by calling the same submit-key path without appending another command. The proof line is `route_submit_resubmit ... action=submit_key key=Enter result=accepted|still_visible`.
+
+That is intentionally narrower than retry-until-submit. If pane input was accepted and the trigger is no longer visibly drafted, Run Agent Doc must not keep pressing Enter because that can duplicate a dispatch when only dispatch-start proof is stale. Those accepted-only cases remain blocked/diagnosed instead of resubmitted.
+
+Verification run for this head:
+- `cargo test -p agent-doc-orchestration direct_pane_resubmit -- --nocapture`
+- `cargo test -p agent-doc-orchestration route_submit_resubmit -- --nocapture`
+
+Both passed. The next queue item remains queued.
+<!-- agent:boundary:572b5fc3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: agent-doc CLI has misformatted help message ![img_37.png](img_37.png)~~
-- :pushpin: Resubmit Enter works with JB `Clear Session Context`. Resubmit Enter does not work with JB `Run Agent Doc`.
+- ~~:pushpin: Resubmit Enter works with JB `Clear Session Context`. Resubmit Enter does not work with JB `Run Agent Doc`.~~
 - There are still disk writes causing JB `File Cache Conflict` dialogs.
 <!-- /agent:queue -->
 ###

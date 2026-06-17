@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -51,7 +51,25 @@ Fixed `Cargo.toml:7` `repository` from the stale `https://github.com/btakita/laz
 **Verification:** `cargo build --all-features`, `cargo clippy --all-features --all-targets -- -D warnings`, `cargo fmt --check`, and `cargo test` all pass (metadata-only change).
 
 **Commit + push:** lazily-rs submodule `691fd3b` → `lazily-hub/lazily-rs` main (`1cee080..691fd3b`); superproject gitlink `7e525d275` → `btakita/agent-loop` main (`bfb58e854..7e525d275`).
-<!-- agent:boundary:4612128c -->
+
+### Re: #lzloomtimeout — Loom envelope model bounded, now terminates — glm-5.2
+
+> **Queue prompt:**
+>
+> [#lzloomtimeout]
+
+The `inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish` model (`tests/thread_safe_loom.rs:1451`) never terminated because the full 6-atomic envelope (seqlock + `cache_revision` + `dirty`) across two spawned threads plus the driving body makes the unbounded `loom::model` permutation space non-terminating (>5 min). `loom::model()` defaults `preemption_bound` to unbounded; confirmed via the loom 0.7.2 `Builder` source.
+
+**Fix:** replaced the unbounded `loom::model(|| …)` with a preemption-bounded `loom::model::Builder` (bound 4, `max_duration` 60 s safety cap). The two single-property models (`inline_seqlock_reader_never_observes_torn_value`, `…read_after_completed_invalidation_is_rejected`) stay exhaustive; only the combined envelope model is bounded.
+
+**Bound validation (meaningful, not vacuous):** injected a torn-read bug by disabling the seqlock odd-sequence guard in `seqlock_try_read`; the bounded model still **FAILED** with *"envelope accepted a torn snapshot"* (left: 1, right: 2) — confirming bound 4 exercises the torn-read interleaving. Bug reverted; model passes.
+
+**Verification:** full `thread_safe_loom` suite **15/15 in ~82 s** (was non-terminating); `cargo clippy --features loom --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+**SPEC/docs corrected:** `SPEC.md` Loom-gate bullet and two `src/thread_safe.rs` doc-comments changed from *"modeled exhaustively"* to *"preemption-bounded"* for the combined envelope model (honest about the reduced coverage), with the validation method noted.
+
+**Commit + push:** lazily-rs submodule `641fbf2` → `lazily-hub/lazily-rs` main (`691fd3b..641fbf2`); superproject gitlink `1660e814c` → `btakita/agent-loop` main (`7e525d275..1660e814c`).
+<!-- agent:boundary:d50f16d9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,14 +78,11 @@ Fixed `Cargo.toml:7` `repository` from the stale `https://github.com/btakita/laz
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~[#lzrepourl]~~
-- [#lzloomtimeout]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzloomtimeout] #lzloomtimeout=Bound the Loom exhaustive model for inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish (tests/thread_safe_loom.rs:1451) — 2 writer/reader threads + main body blow up the state space and never complete (>5min confirmed), leaving the torn/stale-read invariant for the inline seqlock without an exhaustive proof. Use loom::model_g preemption bounds or factor the model to shrink interleavings. Verification-coverage gap, not a known runtime race (non-exhaustive stress tests pass).
 <!-- /agent:backlog -->
 
 ## Review

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -61,7 +61,7 @@ Went through all four `[operator-drive]` review items. **Two have completed thei
 **Backlog (priority order):** `#lzwebrtcrunbook` (concrete operator-enablement for the next live gate) → `#lzholonsscan` [recommended] (sharpen #xccx questions for Steve). Both are ready for `do #id` dispatch; neither is auto-implemented here (the `#advance-review` preset's task is to identify work, not execute it).
 
 **Top of backlog: `#lzwebrtcrunbook`.**
-<!-- agent:boundary:6f68f868 -->
+<!-- agent:boundary:d732e9ff -->
 <!-- /agent:exchange -->
 ###
 <!--

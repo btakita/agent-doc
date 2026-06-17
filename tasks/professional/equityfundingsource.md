@@ -119,9 +119,18 @@ Commands / verification:
 Commits pushed:
 - EFS repo: `0d53ff6` (`Rename lender portal routes`)
 - Parent repo: `c6dda8865` (`Update EFS lender portal routes`)
+- EFS and parent relevant worktrees were clean after deploy.
+- Live smoke checks: `/` returned 200; `/portal-lender/dashboard` returned 303 to `/login?role=investor&next=%2Fportal-lender%2Fdashboard`; `/portal-investor/dashboard` returned 308 to `/portal-lender/dashboard`.
+- Post-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` again reported no migrations to apply.
+- Deployed URL: `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Worker Version ID: `a3235b14-547e-43b6-a132-24185c875474`.
+- `make deploy` succeeded: no D1 migrations to apply, 1 modified browser asset uploaded, and Worker `equityfundingsource` deployed.
+- `tsift digest-runner --kind test --path . --shell-command 'make check'` exited 0. The digest still flags the known non-fatal `error: d1 down` log from the outbox failure-path test, but the command passed.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` reported no remote D1 migrations before deploy.
+- `git status -sb` in `src/equityfundingsource-dev` showed clean `main...origin/main` before deploy.
 
-Deploy remains queued as the next item. Escalation: none. Confidence: high.
-<!-- agent:boundary:c20df83b -->
+Deploy completed after the route rename. Escalation: none. Confidence: high.
+<!-- agent:boundary:866c3cef -->
 <!-- /agent:exchange -->
 ###
 <!--

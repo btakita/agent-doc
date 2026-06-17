@@ -143,7 +143,38 @@ Verification:
 Workspace note: unrelated formatting-only dirty files inside `src/tsift` remain unstaged.
 
 Confidence: high. Escalation: force-disk approved for the stuck IPC closeout. The next backlog item is `#kgm4`, adding the shared `tsift-kg` extraction pipeline for tsift and agent-doc.
-<!-- agent:boundary:77226558 -->
+
+### Re: #kgm4 shared tsift-kg extraction pipeline - gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#kgm4]
+
+
+Implemented the shared `tsift-kg` pipeline for source, session, and memory inputs.
+
+What changed:
+- Added `packages/tsift-kg` with document chunking, a `KgExtractor` provider trait for local-model calls, deterministic `HashKgExtractor` fallback, JSON entity/relation validation, `GraphProjection` materialization, SQLite upsert support, and backend candidate metadata.
+- Wired `tsift-kg` into the tsift workspace and root `tsift::kg` export.
+- Re-exported the same crate through `tsift-agent-doc::kg` so agent-doc can use the shared library instead of duplicating extraction logic.
+- Added tests for mixed input chunking, relation endpoint validation, projection materialization, and SQLite upserts.
+
+Commits:
+- `b5c3132` in `src/tsift`: `feat: add shared kg extraction pipeline`
+- `92756bc16` in the parent repo: `tsift: add shared kg extraction pipeline`
+
+Verification:
+- `cargo test -p tsift-kg`
+- `cargo check -p tsift`
+- `cargo check -p tsift-agent-doc`
+- `cargo test --workspace`
+- `git -C src/tsift diff --check -- Cargo.toml Cargo.lock src/lib.rs packages/tsift-agent-doc/Cargo.toml packages/tsift-agent-doc/src/lib.rs packages/tsift-kg`
+- `git -C src/tsift diff --cached --check`
+- `make check`
+- `gh run list --workflow CI --limit 1` still reports `could not find any workflows named CI`, matching the earlier repo state.
+
+Workspace note: the pre-existing unrelated formatting-only dirty files under `src/tsift` remain unstaged. The next queued item is `#kgm5` for lifecycle and VRAM cleanup controls.
+<!-- agent:boundary:cbc1e796 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -152,7 +183,7 @@ Confidence: high. Escalation: force-disk approved for the stuck IPC closeout. Th
 - ~~do [#kgm1]~~
 - ~~:pushpin: do [#kgm2]~~
 - ~~:pushpin: do [#kgm3]~~
-- :pushpin: do [#kgm4]
+- ~~:pushpin: do [#kgm4]~~
 - :pushpin: do [#kgm5]
 - :pushpin: do [#kgm6]
 <!-- /agent:queue -->
@@ -163,7 +194,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgm4] [queue] Add the shared tsift-kg extraction pipeline from tasks/software/plan-tsift-local-kg-model-support.md for tsift and agent-doc: chunk source/session/memory inputs, call the local model, validate JSON entities/relations, and upsert GraphProjection rows into SQLite plus backend candidates.
 - [ ] [#kgm5] [queue] Add model lifecycle and VRAM cleanup controls from tasks/software/plan-tsift-local-kg-model-support.md: per-run lease, idle TTL, Ollama keep_alive=0, llama.cpp router unload, process-kill fallback, nvidia-smi before/after proof, and single-5090 concurrency guard.
 - [ ] [#kgm6] [queue] Add multi-run verification from tasks/software/plan-tsift-local-kg-model-support.md: two sequential KG runs, interrupted-run cleanup, no duplicate/stale graph facts, no orphaned model processes, VRAM returns near baseline, make check, and tsift graph/memory smoke tests.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift-md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.

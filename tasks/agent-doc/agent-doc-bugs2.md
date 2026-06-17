@@ -111,7 +111,12 @@ Verification passed locally:
 GitHub Actions latest `Agent Doc` run failed because the jobs were not started due billing/spending-limit status, not test failure.
 
 Blocked only on the session document closeout for the current queue head: `agent-doc finalize --stream` failed twice with `missing_response_probe` / `recovery=retry_without_disk_write`. I did not use `--force-disk`. The session doc remains dirty with partial editor-IPC materialization, and the queue head is still live.
-<!-- agent:boundary:84a9b5d6 -->
+Session closeout recovery complete.
+
+The code work for the active-editor IPC no-direct-disk policy and the monsterrodholders idle queue restart drain has already been implemented, verified locally, installed as `agent-doc 0.34.1`, committed, and pushed. I did not use `--force-disk` for the failed closeout retries.
+
+The remaining issue was the session document closeout state: editor prompt-marker lines had been materialized into the exchange tail, so session-check treated the tail as an unresolved prompt. This closeout records the recovery response through the MCP finalize path so the session can finish without treating that marked line as pending user input.
+<!-- agent:boundary:f26e2d72 -->
 <!-- /agent:exchange -->
 
 ## Queue

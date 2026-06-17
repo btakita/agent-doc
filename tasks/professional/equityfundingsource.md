@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -67,7 +67,29 @@ Verification:
 - `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows.
 
 Config note: the deployed code is ready, but actual email reply ingestion remains intentionally disabled until inbound email routing is configured with `MESSAGE_EMAIL_INBOUND_ENABLED`, `MESSAGE_EMAIL_INBOUND_SECRET`, and `MESSAGE_EMAIL_INBOUND_REPLY_TO`.
-<!-- agent:boundary:7c0ea7c8 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed the current clean EFS worker commit again for the remaining `deploy` queue item.
+
+Deployment:
+- Ran `make deploy` from `src/equityfundingsource-dev`.
+- Remote D1 migrations reported `No migrations to apply`.
+- Cloudflare uploaded/deployed `equityfundingsource` at `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Worker version: `a6386caf-17e0-4722-a36a-064ad5f7a1b6`.
+
+Verification:
+- `curl https://equityfundingsource.brian-takita.workers.dev/` returned `200`.
+- `POST /api/email/inbound` returned the expected disabled-state `501`.
+- `git -C src/equityfundingsource-dev status --short --branch` is clean on `main...origin/main`.
+
+Changed paths: no EFS source changes; only this agent-doc closeout is being committed. Escalation: none.
+<!-- agent:boundary:0e941588 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,8 +97,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~The message emails should be from the configured site email address.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

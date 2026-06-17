@@ -12,7 +12,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -373,13 +373,53 @@ So the 30% doesn't move the thesis; it loads it. The activation-funnel framing i
 > "The 30% you lose between signed and installed is exactly the funnel I'd treat as a product, not an ops queue — make every signed merchant's state and next blocker visible, automate the low-value follow-up that's losing deals at underwriting and call-three, and reserve humans for the high-intent saves. Before I'd size it, I'd want to know where in the funnel that 30% is actually measured from."
 
 Closeout: changed path is the session document only; no code, no transcript, no email changed. Grounding pulled directly from `spoton-2026-06-11-call-transcript.md` (~30:48–32:11, Mike Kai's "70 install / lose 30" + drop-off causes). No test suite applies. Confidence high on the transcript facts; the denominator caveat is the one genuinely open item, and only SpotOn can close it.
-<!-- agent:boundary:8c7fa73e -->
+
+### Re: Redrafted Hub + Salesforce questions — opus-4-8
+
+> **Queue prompt:**
+>
+> Please redraft the more refined questions about Hub + Salesforce.
+
+Here's a tightened set. I cut the compound phrasing, made each question probe exactly one thing, and anchored them to the **30%** leak so they read as "help me figure out if this conversion mandate is even reachable" rather than architecture trivia. They're ordered so you can stop after any one and still have asked something sharp.
+
+#### If you only get to ask one
+
+> "You said Salesforce is the source of truth but R&D still tracks merchant state in Hub — for the signed-to-install funnel specifically, which system is authoritative, and how much do the two drift in practice?"
+
+*Why this one:* it's the question that decides whether the 30% is even **visible in one place today**. If the answer is "they drift and people reconcile by hand," then step one of the job is making the funnel observable — and that's a very different role than "optimize an existing clean pipeline."
+
+#### The full refined set
+
+1. **Where I'd build.** "If I were building the activation experience meant to recover part of that 30%, would it live in Hub, in Salesforce, or a new surface on top — and who owns that call?"
+   *Probes: integration-and-data-modeling work vs. feature work, and who you'd negotiate with.*
+
+2. **Sales-context handoff.** "When a rep captures what a merchant needs at signing — go-live date, menu source, hardware, constraints — does that flow into the system implementation actually works from, or does implementation re-gather it?"
+   *Probes: a concrete cause of the leak. Re-gathering is exactly the friction that makes owners go cold.*
+
+3. **Scope of mandate.** "Is this role's charter the internal implementation tooling, the merchant-facing onboarding experience, or both? Most of the 30% looks like merchants going cold after signing, so I want to know whether I can change what the owner sees."
+   *Probes: your latitude — the single thing that most changes what the job actually is, and whether the conversion upside is reachable.*
+
+4. **Landing a concrete change.** "If I wanted to ship a merchant-facing launch checklist, whose system and whose roadmap would that land in — engineering's Hub, sales/ops' Salesforce, or a cross-team effort?"
+   *Probes: the org/political reality. A clean technical path means nothing if the surface lives on another team's roadmap.*
+
+5. **Migration gravity (optional, only if Hub keeps coming up).** "Is the direction to modernize or migrate off Hub, build net-new on top of it, or make Salesforce the unified truth?"
+   *Probes: legacy-system debt and how much of the role is paying it down vs. building forward.*
+
+#### What changed from the earlier draft
+
+- **De-stapled the compound question.** The original email bullet asked "how do Hub/Salesforce divide responsibility AND how much workflow latitude" in one breath; live, that's two separate beats (Q1/Q2 = system topology, Q3/Q4 = your latitude). Asking them apart gets you two clean answers instead of one hedged one.
+- **Anchored to the 30%.** Each question now ties back to the leak Mike quantified, so they land as conversion-focused, not curiosity about their stack.
+- **Made them concrete.** "Ship a launch checklist" and "the rep's signing notes" give the interviewer a specific scenario to react to, which surfaces the messy real answer (the one where Calvin trailed off with "every nook and cranny has its loss") far better than an abstract "how reconciled are the systems."
+
+Keep the email bullet as the one polite compact version; this set is for the live conversation or a follow-up call, where the messy integration answer is the most valuable thing you can learn.
+
+Closeout: changed path is the session document only; no code, transcript, or email changed. Grounding from the prior Hub/Salesforce analysis in this doc and `transcripts/2026-06-16-14-00-36-transcript.md` (Calvin on Hub vs Salesforce) plus the 30% figure in `spoton-2026-06-11-call-transcript.md`. No test suite applies. Confidence high. (Session exchange is large — 9 sections — but the queue was active so I drained it rather than pausing to compact.)
+<!-- agent:boundary:8fcc73a2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Please redraft the more refined questions about Hub + Salesforce. 
 <!-- /agent:queue -->
 
 ## Backlog

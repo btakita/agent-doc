@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -89,7 +89,49 @@ Verification:
 - `git -C src/equityfundingsource-dev status --short --branch` is clean on `main...origin/main`.
 
 Changed paths: no EFS source changes; only this agent-doc closeout is being committed. Escalation: none.
-<!-- agent:boundary:29c00b8c -->
+
+### Re: lender available deal website messaging + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> The lender "Available deal conversation" component on all pages it appears on should support the lender to send messages from the website in addition to email. deploy
+
+Implemented, pushed, and deployed the lender website message path for the Available deal conversation.
+
+What changed:
+- Added `POST /api/investor/deals/:id/lender-messages` for authenticated lender/investor users.
+- The endpoint reuses or creates the lender's `investor_deal_interests` row, writes a `deal_interest_lender_messages` row with `sender_role: 'lender'`, and emits the existing admin realtime event so the admin interested-lender workflow refreshes.
+- Updated the lender deal detail `Available deal conversation` component with a website message form. This covers the standalone `/lenders/deals/:id` page and the dashboard embedded deal-detail dialog, because both render `InvestorDealDetail`.
+- Updated the lending portal PRD and test guards for the lender/EFS conversation data model and acceptance criteria.
+- While rebasing onto the latest remote EFS commits, fixed two stale string guards for the new shared `PortalModal` ownership of dialog role/height.
+
+Commits / push:
+- EFS submodule commit pushed: `f6230aa` (`feat(investor): let lenders message EFS from deal pages`).
+- Parent repo submodule pointer pushed: `432b46ee3` (`chore: update EFS lender messaging submodule`).
+
+Deploy:
+- Ran `make deploy` from `src/equityfundingsource-dev`.
+- Remote D1 migrations reported `No migrations to apply`.
+- Deployed Worker: `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Worker version: `b576a4f3-dab4-4720-a123-034b8ba47804`.
+
+Verification:
+- Focused tests passed: `bun test tests/investor-portal-e2e.test.ts`, plus the two previously failing post-rebase guards.
+- Full local verification passed after rebase: `make check` with 767 tests, app build, and worker build.
+- Live smoke: `/` returned `200`; unauthenticated `POST /api/investor/deals/smoke/lender-messages` returned expected `401`.
+- GitHub Actions check: `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/investor/deal_marketplace/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/investor/routes.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/deal_detail.tsx`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+- parent submodule pointer `src/equityfundingsource-dev`
+
+Preflight warnings were unrelated semantic-completion candidates for existing review items `#dropbox-sync-adapter`, `#dzmm-writeback-replay`, and `#zwws-vestings-local`; I did not change those gates. Confidence: high. Escalation: none.
+<!-- agent:boundary:81dd763f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,7 +139,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The lender "Available deal conversation" component on all pages it appears on should support the lender to send messages from the website in addition to email. deploy
 <!-- /agent:queue -->
 
 ## Backlog

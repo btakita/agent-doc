@@ -114,7 +114,31 @@ This creates `rwaldman100+admin@gmail.com` if missing and sends the welcome emai
 **Spec:** `prds/admin-provisioning-spec.md` documents the endpoint + curl.
 
 The remaining drain items (a keyboard-send shortcut across message boxes, and a deploy) are next.
-<!-- agent:boundary:51116d86 -->
+
+### Re: Ctrl/Cmd+Enter to send across all message boxes — glm-5.2
+
+> **Queue prompt:**
+>
+> All message boxes, portal and main site, should support Ctrl+Enter (Windows, Linux) or Cmd+Enter (OSX) to send the message.
+
+
+**Done.** Adopted the Gmail-style send convention everywhere a message is composed: plain **Enter inserts a newline**, and **Ctrl+Enter (Windows/Linux) / Cmd+Enter (macOS)** is the explicit send trigger. Previously the portal chat sent on plain Enter (accidental sends while typing multi-line messages); Ctrl/Cmd+Enter already sent there too, so this makes the modifier the single deliberate trigger and applies it consistently.
+
+**Spec + impl** (`src/equityfundingsource-dev`, commit `0408d77`, pushed `main`):
+- Shared helper in `portal/shared/ui.tsx`: `message_send_shortcut_match_(e)` (Ctrl/Cmd+Enter; Shift benign, Alt blocks) + `send_shortcut_hint_label_()` + `<MessageSendHint/>`.
+- Wired into every message box:
+  - Borrower portal chat (`borrower/messages.tsx`)
+  - Admin portal chat (`admin/messages.tsx`)
+  - Investor deal-detail lender message (`investor/deal_detail.tsx`)
+  - Admin deal-detail lender + borrower messages (`admin/deal_detail.tsx`)
+  - Main-site contact form (`ui--server--efs/contact/index.ts`) — inline keydown → `form.requestSubmit`, platform-aware hint
+- Each composer now shows a small "Ctrl+Enter to send" / "⌘+Enter to send" hint.
+
+**Verify:** `bun run check` → **802 pass / 0 fail** (+9 new); worker build OK (browser bundle hash rotated, confirming the UI changes compiled in).
+**Tests:** `tests/msg-send-shortcut.test.ts` — matcher truth table (Ctrl/Cmd+Enter, plain Enter, Shift, Alt, non-Enter keys), hint label, and source guards confirming every box wires the helper and the old plain-Enter chat send is gone.
+
+The last drain item (shipping these changes to production) remains.
+<!-- agent:boundary:196c110b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,7 +149,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - ~~Ensure rwaldman100+admin@gmail.com has an admin account.~~
 - ~~Ensure all added admins are sent an email about their account.~~
 - ~~Send rwaldman100+admin@gmail.com an email about his account.~~
-- All message boxes, portal and main site, should support Ctrl+Enter (Windows, Linux) or Cmd+Enter (OSX) to send the message.
+- ~~All message boxes, portal and main site, should support Ctrl+Enter (Windows, Linux) or Cmd+Enter (OSX) to send the message.~~
 - deploy
 <!-- /agent:queue -->
 

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -103,6 +103,16 @@ Commands / verification:
 Commits / push:
 - EFS repo: `ee787ee` (`Show uploaded borrower request documents`) pushed to `origin/main`.
 - Parent repo: `df7742b0d` (`Update EFS borrower request documents`) pushed to `origin/main`.
+- Parent repo: `a73347b80` (`Update EFS lender communication messages`)
+- EFS: `4e1d612` (`Replace lender contact fields with messages`)
+- GitHub Actions check: `gh run list --workflow CI --limit 1` reports no workflow named CI, and `gh workflow list` returns no workflows.
+- `git diff --check` passed.
+- `bun run check` exited 0: 759 pass, 0 fail, builds completed. The digest runner still labels the known logged `error: d1 down` outbox-path message as a failure group, but the command exit code and test tail are clean.
+- `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts` passed.
+- Updated tests to assert the new message table/API/UI behavior and the removal of the old timestamp fields.
+- Replaced the Lender communication date fields in both admin UIs with a message list and `Message` composer, matching the borrower communication pattern.
+- Added `POST /api/admin/deal-interests/:id/lender-messages` and threaded `lender_messages` through workflow summaries, deal-interest admin responses, the lender pipeline, and deal detail.
+- Added `deal_interest_lender_messages` with migration `0082_deal_interest_lender_messages.sql`; it drops `lender_last_contact_at`, `lender_next_follow_up_at`, and the old follow-up index.
 
 Escalation: none. Confidence: high.
 
@@ -113,7 +123,7 @@ Removed the dangling wrapped queue line `next to the Borroewr communication mess
 Changed paths: `tasks/professional/equityfundingsource.md` only.
 
 Commands / verification: `agent-doc preflight`, `agent-doc plan`, and `agent-doc finalize` closeout. Confidence: high. Escalation: none.
-<!-- agent:boundary:037c7412 -->
+<!-- agent:boundary:507d6fc6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -123,6 +133,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Available deals page/dialog: "Borrower communication" "Communication type" label should be removed.~~
 - ~~Available deals page/dialog: If the borrower uploaded a file for a Request Document(s) email, the acutal document should appear~~
+- :pushpin: Lender communication should have a "Message" flow...just like the browser communication message flow. Remove "Last contact" and "Next follow-up" fields, db columns, and logic.
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

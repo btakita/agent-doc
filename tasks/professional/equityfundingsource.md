@@ -172,7 +172,7 @@ Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-
 Verification: focused tests passed (`115 pass`); full check passed (`757 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:bf4543e3 -->
+<!-- agent:boundary:5850c66f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -180,18 +180,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-In "Available Deal" -> "Interested Lenders" tab
-
-Delete fields, db records, and logic relating to:
-- ~~Mark Call Completed~~
-- ~~Start Underwriting~~
-- ~~Call scheduled~~
-- ~~Verbal amount~~
-- ~~Contact method~~
-- ~~Pre-doc conditions~~
-- ~~Pre-doc instructions~~
-- Lender contact summary
- <!-- /agent:queue -->
+- deploy...The fields are still there on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=interests
+<!-- /agent:queue -->
 
 ## Backlog
 

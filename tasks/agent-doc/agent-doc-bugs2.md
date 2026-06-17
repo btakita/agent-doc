@@ -440,7 +440,7 @@ Verification passed: `cargo fmt`; focused `agent-doc-orchestration` tests for ac
 Commits: `src/agent-doc` `b23c61d8 fix: simplify jetbrains codex route delivery` pushed to `agent-doc/main`; parent repo gitlink `07d612a3 agent-doc: simplify jetbrains codex route delivery`. Latest GitHub Actions `CI` run on `main` was completed/success at `2026-06-17T00:18:24Z`.
 
 Confidence: medium-high. This is intentionally a deletion/simplification: trust the shared Enter submit acceptance, and stop supervisor threshold clears from restarting Codex during normal queued work. No JetBrains plugin update is required because this behavior lives in the installed Rust CLI/supervisor path.
-<!-- agent:boundary:bb3080c1 -->
+<!-- agent:boundary:5d2b9f69 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -448,8 +448,9 @@ Confidence: medium-high. This is intentionally a deletion/simplification: trust 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` behavior is unchanged. Still broken. As I type, Codex restarts. Enter still does not work. I really just want to rip out the logic. The "fixes" havn't changed anything. Not sure what is going on. We need to drastically simplify this logic. You don't know what is going on. I don't know what is going on.~~
 - ~~The agent_doc_queue_context_reset=true should have a 50% threshold by default~~
-- Both Claude Code + Opencode have working JB `Run Agent Doc` behavior. Remove Codex-specific logic. 
-- [#jbproofrebind]
+- :pushpin: Both Claude Code + Opencode have working JB `Run Agent Doc` behavior. Remove Codex-specific logic. Can we unify all tmux-related logic across the 3 agent harnesses?
+- :pushpin: Changes to the editor buffer should always win. 0 External Disk Writes. If CRDT fails, try again. Do not fallback to external disk writes on the document. I lose work when this happens as I am typing.
+- ~~[#jbproofrebind]~~
 <!-- /agent:queue -->
 ###
 <!--

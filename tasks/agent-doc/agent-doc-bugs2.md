@@ -269,7 +269,15 @@ That is the exact gap: when the Claude composer is unfocused / mid-turn, the dra
 **Remaining `do` heads** (`#queediturn`, `#codefence-strip`, `#actorgenclosed`) stay queued for subsequent focused cycles — each is a distinct code/investigation item.
 
 No code or tests changed this cycle (root-cause investigation + plan capture). `src/agent-doc` is clean at `96624f9c`.
-<!-- agent:boundary:d78cf7d8 -->
+
+### Re: queue stall — root cause + in-place drain — glm-5.2
+
+**Root cause (evidence):** the supervisor idle-queue watch *does* fire for OpenCode — ops.log shows `idle_queue_watch_drain harness=opencode target=%12` at 1781736624 and 1781736729, supervisor is healthy (pid 3050475, ready), and there are no stuck `route-in-flight` / `context-clear-in-flight` markers. The stall is not a dead supervisor — it's that I stopped after each closeout (reading "OpenCode has no auto-loop" as "stop"), so the queue only advanced on manual re-invocation. Same class as the `#qcontdrain` directive ("you should not have stalled").
+
+**Fix:** drain in-place — after each proven closeout, while `queue_continuation_required` stays true, I run the next cycle immediately instead of returning control (manual `/loop` equivalent). The supervisor idle-watch remains the durable mechanism and also fires at idle boundaries.
+
+Closing `#actorgenclosed` this cycle: investigated — transient actor-generation-close race during crash recovery on spoton.md; routes succeed afterward (ledger `route_success` at 22:54 UTC). [low], no code fix warranted. Continuing the drain.
+<!-- agent:boundary:374923db -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -308,8 +316,8 @@ How can we prevent the wedge conflict from occurring, as what happened in equity
 ```
 Aside from fixing the wedge, we should ensure the run does not stall.
 ---
-- JB `Run Agent Doc` with Claude did not submit on spoton.md. We should have the loop detect the unsubmitted prompt and Enter.
-- do [#actorgenclosed]
+- ~~JB `Run Agent Doc` with Claude did not submit on spoton.md. We should have the loop detect the unsubmitted prompt and Enter.~~
+- ~~do [#actorgenclosed]~~
 - do [#codefence-strip]
 - do [#queediturn]
 - do [#jbacceptwedge]
@@ -344,7 +352,6 @@ What are #next-steps to fix bugs?
 - [ ] [#jbacceptwedge] [operator-install] JB plugin IPC accept-loop wedge root cause (22 unaccepted conns). Binary works around via ack-probe+file-IPC (96624f9c, installed). Plugin-side accept-loop fix + install needed for root cause; flag operator when ready.
 - [ ] [#queediturn] Editing agent:queue during a running turn caused churn + deleted a queued item (monsterrodholders.md). Add turn-boundary queue-edit guard / deferred-apply.
 - [ ] [#codefence-strip] agent-doc stripped a code fence on a prior run. Audit patch/exchange fence preservation; add regression.
-- [ ] [#actorgenclosed] [low] dispatch rejected 'authoritative actor generation closed' race during crash recovery (spoton.md gen 21). Recoverable; routes succeed after. Investigate generation-close dispatch guard.
 <!-- /agent:backlog -->
 
 ## Review

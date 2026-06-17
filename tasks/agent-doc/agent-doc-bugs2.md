@@ -63,13 +63,15 @@ Verification passed:
 - `make install`; `agent-doc --version` -> `0.34.1`
 
 The updated JetBrains plugin was installed into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ IDEA to activate it. The remaining queue items for OpenCode Clear Session Context and File Cache Conflict are still queued.
-<!-- agent:boundary:57b015cd -->
+<!-- agent:boundary:99ec4cd2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` on codex still does not send Enter. Should we stop using tmux-router to make this easier to debug? This has been very difficult to identify which path is causing the issue. Do we have sufficient logging?~~
+- JB `Clear Session Context` to Codex does not send Return. See equityfundingsource.md
+- 3-way merge artifacts are in the response in this document.
 - :pushpin: JB `Clear Session Context` does not send Return to opencode ![img_36.png](img_36.png)
 - Still getting JB `File Cache Conflict` dialogs.
 <!-- /agent:queue -->

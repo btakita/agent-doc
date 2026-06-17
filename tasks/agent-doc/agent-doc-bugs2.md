@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -84,18 +84,13 @@ Changed paths: session document only, through the agent-doc repair/finalize path
 Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc plan ...`, `agent-doc session-check ...`.
 Verification: the prior response was recovered and committed by preflight; this finalize is the closeout for the recovery cycle.
 Escalation: none.
-<!-- agent:boundary:fa624bc4 -->
+<!-- agent:boundary:32392245 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
----
-:pushpin: JB `Run Session Doc` did not submit. I then tried running JB `Clear Session Context`. It should be available to run. The supervisor should detect if the turn is running. If not, then send the `/clear`. If there is already text in the input, clear the input text and send `/clear` + Return.
-```
-Clear Session Context is blocked while Run Agent Doc is dispatching for tasks/professional/equityfundingsource.md. Wait for dispatch to finish, or use Interrupt and Clear Session Context.
-```
----
+- JB `Run Session Doc` did not submit to Codex on monsterrodholders.md. It was once working but now it is not. Do we have logging to isolate exactly why? Try polling Return until the submission occurs. I just want to see something work with Codex then we can refine the solution.
 <!-- /agent:queue -->
 ###
 <!--

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -280,7 +280,28 @@ Shipped a "Link TMO account" button directly on each `InterestedLenderCard` (vis
 - Smoke: `/`, `/funded-deals`, `/login` all 200
 
 Queue drained.
-<!-- agent:boundary:e1987bd9 -->
+
+### Re: TMO sync from Link button — gated on #dzmm — glm-5.2
+
+> **Queue prompt:**
+>
+> Can we have the "Link TMO Account" button perform a TMO sync of the lender account?
+
+**Not yet — it's blocked on the same #dzmm/#7a4d/#k2xg gates.** Here's the current state:
+
+1. **No TMO lender-entity API exists in the codebase.** The TMO API wrappers (`lib/tmo-api/index.ts`) handle loan-level operations only: `tmo_loan_update_direct_`, `tmo_loan_status_sync_`, `tmo_loan_funding_add_`. There's no `create_lender` or `sync_lender` endpoint — TMO's lender-entity API surface isn't documented for us yet (that's part of what #k2xg — the six-question TMO support email — would clarify).
+
+2. **The writeback outbox is gated.** The only lender-related outbox operation is `tmo_selected_lender_outbox_enqueue_` (`lib/tmo-api/index.ts:335`), which records a `select_lender` payload with `gated_by: ['#7a4d', '#dzmm']`. Even that is tied to deal selection (requires loan_number + deal_id + interest_id), not standalone lender creation. The outbox replay worker that would actually push to TMO isn't active yet (#dzmm).
+
+3. **What the Link button does now:** records the TMO-assigned account number in `users.lender_account`. This is the prerequisite — the account number must exist in EFS before any TMO sync or select-lender writeback can reference it.
+
+**To unblock TMO lender sync from this button:**
+- #k2xg — get TMO support answers on whether a lender-entity create/sync API exists
+- #7a4d — the field map for mapping EFS lender data to TMO fields
+- #dzmm — activate the `tmo_cache_outbox` replay worker
+
+Once those land, I can wire the Link button to enqueue a `link_lender` outbox operation (same pattern as `select_lender`). Want me to add a backlog item for that?
+<!-- agent:boundary:a4e10950 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -288,7 +309,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Can we have the "Link TMO Account" button perform a TMO sync of the lender account? 
 <!-- /agent:queue -->
 
 ## Backlog

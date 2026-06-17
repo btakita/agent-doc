@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -280,7 +280,7 @@ Shipped a "Link TMO account" button directly on each `InterestedLenderCard` (vis
 - Smoke: `/`, `/funded-deals`, `/login` all 200
 
 Queue drained.
-<!-- agent:boundary:cecc0210 -->
+<!-- agent:boundary:e1987bd9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -288,6 +288,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Can we have the "Link TMO Account" button perform a TMO sync of the lender account? 
 <!-- /agent:queue -->
 
 ## Backlog

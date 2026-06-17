@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -28,7 +28,7 @@ queue: stop
 completed
 <!-- /agent:status -->
 
-## Exchange
+## Exchahnge
 
 <!-- agent:exchange patch=append -->
 ### Session Summary
@@ -46,6 +46,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- The message emails should be from the configured site email address.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -37,14 +37,41 @@ complete
 Compacted content:
 ❯ - Archived 1 response topic(s): hook recovery closeout
 ❯ - Prior summary/context: prior compacted content: Archived 10 response topic(s): JB Run Agent Doc Enter submit; JB Run Agent Doc route submit ...
-<!-- agent:boundary:0ab6b5cf -->
+
+### Re: JetBrains Codex Run Agent Doc Enter diagnostics — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` on codex still does not send Enter. Should we stop using tmux-router to make this easier to debug? This has been very difficult to identify which path is causing the issue. Do we have sufficient logging?
+
+
+I would not stop using tmux-router for this. The route input boundary is already the centralized tmux submit profile: one `send-keys -t <pane> <text> Enter` operation for Codex, Claude, OpenCode, and default harnesses. Removing tmux-router would make ownership/session reconciliation harder without directly answering whether the final Enter key was sent.
+
+What was missing was enough correlation to prove the exact failing hop. I added an end-to-end JetBrains route attempt id: the plugin now passes its durable Run Agent Doc attempt id into `agent-doc route`, and the binary stamps that id on `tmux_input_event`, `route_submit_observation`, `route_submit_issue`, route latency, route pane snapshot, and bounded Enter re-submit proof lines. A live repro can now be traced from `.agent-doc/state/editor-route-attempts/` to `ops.log` and `.agent-doc/logs/route-submit/` without guessing which path handled the click.
+
+Implemented and pushed:
+- `src/agent-doc`: `e547bba5 fix: correlate jetbrains route submit diagnostics`
+- parent gitlink: `b5e0b45c2 agent-doc: correlate jetbrains route submit diagnostics`
+
+Verification passed:
+- `cargo fmt --check`
+- focused Rust route/input diagnostics tests
+- focused JetBrains route ledger tests
+- `cargo check -p agent-doc-orchestration`
+- `make check` (`4617 passed, 238 skipped`; doctests and ignored medium SimWorld budget test passed)
+- `./gradlew test buildPlugin`
+- `make install`; `agent-doc --version` -> `0.34.1`
+
+The updated JetBrains plugin was installed into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ IDEA to activate it. The remaining queue items for OpenCode Clear Session Context and File Cache Conflict are still queued.
+<!-- agent:boundary:8a130408 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: JB `Run Agent Doc` on codex still does not send Enter. Should we stop using tmux-router to make this easier to debug? This has been very difficult to identify which path is causing the issue. Do we have sufficient logging?
+- ~~:pushpin: JB `Run Agent Doc` on codex still does not send Enter. Should we stop using tmux-router to make this easier to debug? This has been very difficult to identify which path is causing the issue. Do we have sufficient logging?~~
 - :pushpin: JB `Clear Session Context` does not send Return to opencode ![img_36.png](img_36.png)
+- Still getting JB `File Cache Conflict` dialogs.
 <!-- /agent:queue -->
 ###
 <!--

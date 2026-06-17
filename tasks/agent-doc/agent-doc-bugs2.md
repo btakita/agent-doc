@@ -86,14 +86,31 @@ The part to simplify is narrower: any Run Agent Doc guard that refuses to submit
 For this live report, preflight identified a stale route-owned supervisor using an older agent-doc binary, which can keep producing IPC drift and File Cache Conflict symptoms. I scheduled `agent-doc admin recycle`, so that controller will recycle at the next idle boundary without discarding this turn.
 
 No repo code changed in this cycle. Commands run: `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc admin recycle`, and `git status --short`. Verification is the agent-doc finalize/session-check closeout for this response. Push is not applicable because there were no code changes.
-<!-- agent:boundary:f0fce667 -->
+
+### Re: Codex Clear Session / Run Agent Doc Return proof — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Clear Session Context` and `Run Agent Doc` to Codex does not send Return. See equityfundingsource.md
+
+
+The equityfundingsource evidence narrows this: the latest recorded JetBrains Run Agent Doc attempt did send Return to Codex, but did not get dispatch-start proof.
+
+For `tasks/professional/equityfundingsource.md`, JetBrains attempt `1781669561167-2` clicked at `2026-06-17T04:12:41.167Z`, built the expected route command, and ended `route_success` after `10420ms`. The ops log for that same attempt records `tmux_input_event` to pane `%32` for both `key=text` and `key=Enter`, tagged with `editor_attempt_id=1781669561167-2`.
+
+The failing boundary is after pane input acceptance: `route_submit_observation` reported direct pane acceptance, then `dispatch_start_proof` timed out after `10116ms` with `accepted_without_dispatch_start_proof`. The snapshot at `.agent-doc/logs/route-submit/1781669571585-direct_pane_dispatch_start_unproven-codex-_32-120bf5162d1b.txt` shows the submitted `agent-doc tasks/professional/equityfundingsource.md` text at the Codex prompt, but no proven run start. That means we should not label this specific latest attempt as “Return not sent”; the precise bug is “Return accepted by tmux/Codex pane, but Codex dispatch did not start or was not provable within the route proof window.”
+
+There is a useful contrast in the same log: an earlier attempt at `2026-06-17T03:58:46Z` on pane `%32` reached `proof=submitted` in `606ms`. So the route path is capable of submitting; the intermittent failure is at readiness/acceptance/dispatch-proof, not basic command construction.
+
+No repo code changed in this cycle. Commands run: `agent-doc preflight`, `agent-doc plan`, `agent-doc read` on `equityfundingsource.md`, targeted `rg`, `tail`, and `sed` over `.agent-doc` route logs. Verification is the agent-doc finalize/session-check closeout for this response. Escalation was not needed.
+<!-- agent:boundary:cf868df5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` to this document stalled. No message. Can we remove some of the guard logic?~~
-- :pushpin: JB `Clear Session Context` and `Run Agent Doc` to Codex does not send Return. See equityfundingsource.md
+- ~~:pushpin: JB `Clear Session Context` and `Run Agent Doc` to Codex does not send Return. See equityfundingsource.md~~
 - 3-way merge artifacts are in the response in this document.
 - :pushpin: JB `Clear Session Context` does not send Return to opencode ![img_36.png](img_36.png)
 - Still getting JB `File Cache Conflict` dialogs.

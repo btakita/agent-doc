@@ -11,6 +11,37 @@ pub(crate) struct DirectPaneAcceptance {
     trigger_visible: bool,
 }
 
+const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR: Duration = Duration::from_millis(900);
+
+#[derive(Debug, Default)]
+struct DirectPaneAcceptancePollState {
+    saw_trigger_visible: bool,
+    first_empty_capture_at: Option<Duration>,
+}
+
+fn direct_pane_acceptance_poll_status(
+    state: &mut DirectPaneAcceptancePollState,
+    elapsed: Duration,
+    trigger_visible: bool,
+) -> Option<CommandDispatchStatus> {
+    if trigger_visible {
+        state.saw_trigger_visible = true;
+        state.first_empty_capture_at = None;
+        return None;
+    }
+
+    if state.saw_trigger_visible {
+        return Some(CommandDispatchStatus::Accepted);
+    }
+
+    let first_empty_at = state.first_empty_capture_at.get_or_insert(elapsed);
+    if elapsed.saturating_sub(*first_empty_at) >= DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR {
+        Some(CommandDispatchStatus::Accepted)
+    } else {
+        None
+    }
+}
+
 /// Poll the pane capture until the trigger text is consumed or the acceptance
 /// window expires, logging the resulting submit observation. Pure detection —
 /// it never sends input — so callers can re-run it after a re-submit attempt.
@@ -30,17 +61,20 @@ pub(crate) fn poll_direct_pane_acceptance(
     // a tighter poll shortens the acceptance floor for slower panes.
     let poll_interval = DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL;
     let mut last_capture: Option<(bool, usize, String, String)> = None;
+    let mut poll_state = DirectPaneAcceptancePollState::default();
     let mut capture_failed = false;
     while start.elapsed() < timeout {
         match sessions::capture_pane(tmux, pane) {
             Ok(content) => {
+                let elapsed = start.elapsed();
                 let cmd_still_in_input = recent_lines_contain_trigger(&content, trigger);
                 let capture_hash = short_content_hash(&content);
                 let capture_len = content.len();
                 last_capture = Some((cmd_still_in_input, capture_len, capture_hash, content));
 
-                if !cmd_still_in_input {
-                    let elapsed = start.elapsed();
+                if direct_pane_acceptance_poll_status(&mut poll_state, elapsed, cmd_still_in_input)
+                    .is_some()
+                {
                     let capture_hash = last_capture.as_ref().map(|(_, _, hash, _)| hash.as_str());
                     log_route_submit_observation(RouteSubmitObservationFacts {
                         file,
@@ -846,6 +880,126 @@ pub(crate) fn send_command_checked(
     send_command_unchecked(tmux, pane, file_path, harness)
 }
 
+fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+    tracker: &RoutedDispatchStartTracker,
+    timeout: Duration,
+) -> Result<Option<RoutedDispatchStartProof>> {
+    let trigger = harness.trigger_command(file_path);
+    let visible = match sessions::capture_pane(tmux, pane) {
+        Ok(content) => {
+            let visible = direct_pane_existing_draft_visible(&content, &trigger, harness);
+            if visible {
+                preserve_route_pane_snapshot(
+                    file,
+                    pane,
+                    harness,
+                    "dispatch_start_unproven_late_draft_visible",
+                    &content,
+                );
+            }
+            visible
+        }
+        Err(err) => {
+            eprintln!(
+                "[route] warning: failed to capture pane {} before late direct-submit retry: {}",
+                pane, err
+            );
+            false
+        }
+    };
+    if !direct_pane_can_enter_existing_draft(&harness.binary, visible) {
+        return Ok(None);
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_submit_late_resubmit file={} pane={} harness={} cause=dispatch_start_unproven_prompt_visible",
+            file.display(),
+            pane,
+            harness.binary,
+        ),
+    );
+    let retry = send_direct_pane_enter_resubmit(
+        tmux,
+        pane,
+        file,
+        harness,
+        &trigger,
+        "dispatch_start_unproven_late_draft_acceptance",
+    );
+    let proof_start = Instant::now();
+    if let Some(proof) = wait_for_routed_dispatch_start(tmux, file, tracker, harness, timeout)? {
+        log_route_latency(
+            file,
+            "direct_pane_late_resubmit",
+            retry.elapsed,
+            direct_pane_submit_acceptance_budget(),
+            pane,
+            harness,
+            direct_pane_submit_outcome(retry.status, Some(proof)),
+        );
+        log_route_latency(
+            file,
+            "dispatch_start_proof_after_late_resubmit",
+            proof_start.elapsed(),
+            timeout,
+            pane,
+            harness,
+            proof.dispatch_stage_label(),
+        );
+        log_route_submit_observation(RouteSubmitObservationFacts {
+            file,
+            pane,
+            harness,
+            phase: "dispatch_start_proof_after_late_resubmit",
+            observation: RouteSubmitObservation::DispatchStartProven,
+            trigger_visible: None,
+            elapsed: proof_start.elapsed(),
+            capture_len: None,
+            capture_hash: None,
+            proof: Some(proof),
+        });
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_start_late_resubmit_proven file={} pane={} harness={} dispatch_stage={} timeout_secs={} retry=late_enter",
+                file.display(),
+                pane,
+                harness.binary,
+                proof.dispatch_stage_label(),
+                timeout.as_secs()
+            ),
+        );
+        return Ok(Some(proof));
+    }
+
+    log_route_latency(
+        file,
+        "direct_pane_late_resubmit",
+        retry.elapsed,
+        direct_pane_submit_acceptance_budget(),
+        pane,
+        harness,
+        direct_pane_submit_outcome(retry.status, None),
+    );
+    log_route_latency(
+        file,
+        "dispatch_start_proof_after_late_resubmit",
+        proof_start.elapsed(),
+        timeout,
+        pane,
+        harness,
+        "late_resubmit_unproven",
+    );
+    Ok(None)
+}
+
 pub(crate) fn dispatch_existing_managed_reopen(
     tmux: &Tmux,
     file: &Path,
@@ -951,6 +1105,11 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
     );
     match submit_result.status {
         CommandDispatchStatus::Accepted => {
+            if let Some(proof) = try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
+                tmux, file, pane, file_path, harness, &tracker, timeout,
+            )? {
+                return Ok(proof);
+            }
             log_route_latency(
                 file,
                 "dispatch_start_proof",
@@ -1110,6 +1269,46 @@ mod tests {
         assert_eq!(
             routed_trigger_submit_diagnostic("claude"),
             ("tmux_text_enter", "Enter")
+        );
+    }
+    #[test]
+    fn direct_pane_acceptance_waits_for_stable_empty_capture() {
+        let mut state = DirectPaneAcceptancePollState::default();
+        assert_eq!(
+            direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(0), false),
+            None
+        );
+        assert_eq!(
+            direct_pane_acceptance_poll_status(
+                &mut state,
+                DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR - Duration::from_millis(1),
+                false
+            ),
+            None
+        );
+        assert_eq!(
+            direct_pane_acceptance_poll_status(
+                &mut state,
+                DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR,
+                false
+            ),
+            Some(CommandDispatchStatus::Accepted)
+        );
+    }
+    #[test]
+    fn direct_pane_acceptance_accepts_after_visible_draft_disappears() {
+        let mut state = DirectPaneAcceptancePollState::default();
+        assert_eq!(
+            direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(0), false),
+            None
+        );
+        assert_eq!(
+            direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(150), true),
+            None
+        );
+        assert_eq!(
+            direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(300), false),
+            Some(CommandDispatchStatus::Accepted)
         );
     }
     #[test]

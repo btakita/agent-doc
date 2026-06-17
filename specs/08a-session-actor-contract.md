@@ -158,18 +158,23 @@ Later phases may refine caller values without changing the field names.
   issue=prompt_not_submitted`; when Codex hook tracking or OpenCode pane-state
   tracking requires dispatch proof but only acceptance is observed, it logs
   `route_submit_issue issue=accepted_without_dispatch_start_proof`.
-- Direct-pane submit profiles get one bare submit-key re-submit
-  (`#jbcodexsubmit` / `#jbclaudesubmit`). Codex, Claude, OpenCode, and default
-  tmux submits send normalized text plus a named `Enter` key in one
-  `send-keys -t <pane> <text> Enter` operation; when a submit still times out
-  with the trigger visibly drafted, route sends one separate named `Enter` key
-  and re-polls the acceptance window exactly once, recording
-  `route_submit_resubmit ... action=submit_key key=Enter result=accepted|still_visible`.
-  If the exact same routed trigger is already visible in the composer before
-  route sends anything, route takes that same one-submit-key path first instead of
-  appending another trigger; a later idle prompt below the trigger classifies it
-  as stale scrollback, not active draft input. This recovery never loops on a
-  genuinely stuck pane.
+- Direct-pane submit profiles get bounded bare submit-key re-submits
+(`#jbcodexsubmit` / `#jbclaudesubmit`). Codex, Claude, OpenCode, and default
+tmux submits send normalized text plus a named `Enter` key in one
+`send-keys -t <pane> <text> Enter` operation. An empty first capture is not
+itself acceptance proof: route waits for stable empty input so delayed Codex
+composer paint/input can still become visible. When a submit times out with the
+trigger visibly drafted, route sends one separate named `Enter` key and re-polls
+the acceptance window exactly once, recording `route_submit_resubmit ...
+action=submit_key key=Enter result=accepted|still_visible`. If Codex later has
+only accepted-without-dispatch-start proof and the same trigger is visibly
+drafted, route sends one late submit-key retry, records
+`route_submit_late_resubmit ... cause=dispatch_start_unproven_prompt_visible`,
+and rechecks dispatch-start proof. If the exact same routed trigger is already
+visible in the composer before route sends anything, route takes the same
+one-submit-key path first instead of appending another trigger; a later idle
+prompt below the trigger classifies it as stale scrollback, not active draft
+input. This recovery never loops on a genuinely stuck pane.
 - Repeated dispatches are queue-first once a document actor is already busy.
   Route must first try to drain an open binary-owned closeout (`repair` /
   strict commit / `session-check`) so an idle console can accept the reroute

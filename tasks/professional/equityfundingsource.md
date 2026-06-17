@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -200,7 +200,7 @@ SELECT email, lender_account, accreditation_status FROM users WHERE email = '<le
 ```
 
 This is a data gap, not a code bug. The one thing that would make this less confusing is renaming the error message or the column — say the word and I'll add a backlog item for clearer messaging (e.g., "lender has no TMO account number on file — complete their lender request first").
-<!-- agent:boundary:05947eb2 -->
+<!-- agent:boundary:4592648c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -208,6 +208,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- The admin should see the current lender account as not being synced with TMO. Since there is no lender id on the account, the admin should be prompted to sync the lender with TMO in the admin Available deal dialog/page and the admin Lender dialog/page. The error message in the admin Available deal should be rendered above the "Select lender" button and be present in the toast message. deploy
 <!-- /agent:queue -->
 
 ## Backlog

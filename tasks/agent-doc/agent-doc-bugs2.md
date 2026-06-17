@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -97,6 +97,11 @@ Verification from the implementation cycle passed: `make check`, focused queue t
 
 > **Queue prompt:**
 >
+> [#rtwbcastlogproof]
+
+
+> **Queue prompt:**
+>
 > [#jbpostclearcruft]
 
 
@@ -111,18 +116,17 @@ I also checked the route/run proof coverage. Focused verification passed:
 - `cargo test -p agent-doc-orchestration route_submit_resubmit_proof_line_is_operator_greppable_for_both_harnesses -- --nocapture`
 - `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection -- --nocapture`
 - `cargo test -p agent-doc simworld_jb_run_and_clear_share_codex_enter_submit_contract -- --nocapture`
+- `cargo test -p agent-doc integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_back -- --nocapture`
+- `cargo test -p agent-doc multi_editor_crdt_broadcast_converges_without_file_cache_conflict -- --nocapture`
+- `cargo test -p agent-doc simeditor -- --nocapture` (3 tests: unsaved buffer survives commit, save/close falls back to disk, JB/VS Code authority parity)
 
 No code edits were needed for this item, so I marked `#jbpostclearcruft` done.
-<!-- agent:boundary:9017c543 -->
+<!-- agent:boundary:abf0e312 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: backlog items added during a turn are not auto-added to the queue when the `queue` attribute is on `agent:backlog`~~
-- ~~:round_pushpin: do [#pendingaddqueuesync]~~
-- ~~[#jbpostclearcruft]~~
-- [#rtwbcastlogproof]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -149,7 +153,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rtwbcastlogproof] [clean-session] Replace cleared review gate #rtwbcast-verify with actionable log-backed realtime editor watcher proof: add or verify structured JB+VS Code convergence logging and SimWorld/log-review evidence so tasks/agent-doc/plan-realtime-editor-watcher.md can be completed without an `agent:review` live gate; ask for a JB plugin install only after code/logging changes land.
 <!-- /agent:backlog -->
 
 ## Review

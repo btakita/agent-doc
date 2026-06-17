@@ -2276,6 +2276,60 @@ fn queue_doc_content_with_dispatch() -> String {
 }
 
 #[test]
+fn finalize_pending_add_appends_to_active_go_backlog_queue_after_consuming_head() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\nqueue: start\n---\n\n<!-- agent:exchange -->\n❯ do [#head]\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue priority go -->\n- do [#head]\n- do [#tail]\n<!-- /agent:queue -->\n\n<!-- agent:backlog priority queue -->\n- [ ] [#head] current queue head\n- [ ] [#tail] next queue head\n<!-- /agent:backlog -->\n";
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    let baseline_content = fs::read_to_string(&doc).unwrap();
+    let baseline = write_baseline(tmp.path(), &baseline_content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--done",
+            "head",
+            "--pending-add",
+            "[#fresh] same-cycle follow-up",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nChanged paths: tests/finalize_integration.rs and agent-doc-orchestration/src/write.rs.\nCommands: cargo test finalize_pending_add_appends_to_active_go_backlog_queue_after_consuming_head.\nVerification: passed.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains(
+            "[write] queue: appended 1 same-cycle pending-add id(s)",
+        ));
+
+    let committed = head_blob(tmp.path());
+    assert!(
+        committed.contains("[#fresh] same-cycle follow-up"),
+        "pending add must be committed into backlog:\n{committed}"
+    );
+    let tail = committed.find("do [#tail]").unwrap();
+    let fresh = committed.find("do [#fresh]").unwrap();
+    assert!(
+        tail < fresh,
+        "same-cycle pending add must append behind existing live queue tail:\n{committed}"
+    );
+    assert!(
+        committed.contains("~~do [#head]~~"),
+        "current head should still be consumed before appending fresh work:\n{committed}"
+    );
+}
+
+#[test]
 fn finalize_consumes_first_queue_prompt_after_commit() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();

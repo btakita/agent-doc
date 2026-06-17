@@ -2085,6 +2085,159 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     })
 }
 
+/// Closeout-side repair for same-cycle backlog capture.
+///
+/// Preflight's normal backlog→queue sync runs before `finalize` / `write`
+/// applies `--pending-add*` mutations, so a go-mode document can commit a fresh
+/// backlog item without a matching queue head. This helper runs after closeout
+/// queue consumption, appending only ids that were explicitly recorded as
+/// same-cycle pending additions. It never applies a full priority/sync recompute,
+/// so it cannot move the head that the current response just consumed.
+pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<Vec<String>> {
+    let added_this_cycle = crate::cycle_state::pending_added_ids(file);
+    if added_this_cycle.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let components = match crate::component::parse(&content) {
+        Ok(cs) => cs,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let Some(queue_component) = components.iter().find(|c| c.name == "queue") else {
+        return Ok(Vec::new());
+    };
+    let queue_body = &content[queue_component.open_end..queue_component.close_start];
+    let entries = match crate::queue::parse(queue_body) {
+        Ok(entries) => entries,
+        Err(e) => {
+            eprintln!("[write] queue: same-cycle pending-add sync skipped — parse warning: {e}");
+            return Ok(Vec::new());
+        }
+    };
+
+    let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
+    let queue_control = fm
+        .queue
+        .as_deref()
+        .and_then(agent_doc_core::frontmatter::QueueControl::parse);
+    let marker_control = crate::queue::marker_control(&queue_component.attrs);
+    let queue_go_mode = matches!(
+        marker_control.or(queue_control),
+        Some(agent_doc_core::frontmatter::QueueControl::Start)
+    );
+    let queue_active = fm.queue_active.unwrap_or(false) || queue_go_mode;
+    if !queue_active || !queue_go_mode {
+        return Ok(Vec::new());
+    }
+
+    let backlog_has_queue_attr = components.iter().any(|comp| {
+        comp.name == "backlog"
+            && comp
+                .attrs
+                .get("queue")
+                .and_then(|value| crate::queue::BacklogQueueSyncMode::parse(value))
+                .is_some()
+    });
+    if !backlog_has_queue_attr {
+        return Ok(Vec::new());
+    }
+
+    let Some(sync_request) = collect_backlog_queue_sync(&components, &content) else {
+        return Ok(Vec::new());
+    };
+    let pending_norm: std::collections::HashSet<String> = added_this_cycle
+        .into_iter()
+        .map(|id| crate::pending::normalize_pending_id(&id))
+        .filter(|id| !id.is_empty())
+        .collect();
+    let mut backlog_ids: Vec<String> = sync_request
+        .ids
+        .into_iter()
+        .map(|id| crate::pending::normalize_pending_id(&id))
+        .filter(|id| pending_norm.contains(id))
+        .collect();
+    if backlog_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let project_root = file.canonicalize().ok().and_then(|canonical| {
+        snapshot::find_project_root(&canonical)
+            .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
+    });
+    let done_ids: std::collections::HashSet<String> =
+        collect_agent_done_ids_with_root(&content, project_root.as_deref())
+            .into_iter()
+            .map(|id| id.to_ascii_lowercase())
+            .collect();
+    if !done_ids.is_empty() {
+        backlog_ids.retain(|id| !done_ids.contains(&id.to_ascii_lowercase()));
+    }
+
+    let exec_ctxs = collect_backlog_execution_contexts(&components, &content);
+    if exec_ctxs.values().any(|ctx| ctx.is_deferred()) {
+        let (drainable, skipped) = partition_drainable_backlog_ids(&backlog_ids, &exec_ctxs);
+        for skip in skipped {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "closeout_queue_skip_same_cycle_pending_add id=#{} skip={}",
+                    skip.id, skip.reason
+                ),
+            );
+        }
+        backlog_ids = drainable;
+    }
+    if backlog_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let pre_sync_ids = entries
+        .iter()
+        .filter_map(queue_entry_do_id)
+        .collect::<std::collections::HashSet<String>>();
+    let Some(synced) = crate::queue::sync_backlog_into_queue(
+        &entries,
+        &backlog_ids,
+        crate::queue::BacklogQueueSyncMode::Append,
+    ) else {
+        return Ok(Vec::new());
+    };
+    let mut seen = std::collections::HashSet::new();
+    let synced_ids: Vec<String> = synced
+        .iter()
+        .filter_map(queue_entry_do_id)
+        .filter(|id| !pre_sync_ids.contains(id))
+        .filter(|id| seen.insert(id.clone()))
+        .collect();
+    if synced_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let new_body = crate::queue::render(&synced);
+    let current_content = {
+        let comps = crate::component::parse(&content)?;
+        let q = comps.iter().find(|c| c.name == "queue").unwrap();
+        q.replace_content(&content, &new_body)
+    };
+    std::fs::write(file, &current_content).with_context(|| {
+        format!(
+            "failed to write same-cycle pending-add queue sync to {}",
+            file.display()
+        )
+    })?;
+    adopt_edited_queue_head_into_snapshot(file, &current_content);
+    converge_live_buffer_queue_shape(file, &current_content, project_root.as_deref());
+    eprintln!(
+        "[write] queue: appended {} same-cycle pending-add id(s) into active go queue",
+        synced_ids.len()
+    );
+    Ok(synced_ids)
+}
+
 /// Converge a live route-owned editor buffer to the queue shape just written to
 /// `file` by queue maintenance.
 ///
@@ -2483,6 +2636,88 @@ mod tests {
             updated_state.synced_queue_ids.contains(&"beta".to_string()),
             "beta must be a newly-synced queue id under go-mode: {:?}",
             updated_state.synced_queue_ids
+        );
+    }
+    #[test]
+    fn closeout_sync_appends_same_cycle_pending_add_in_go_mode() {
+        // #pendingaddqueuesync: pending-add writes happen after preflight queue
+        // maintenance, so closeout appends recorded same-cycle ids once the
+        // current queue head has been consumed.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#head] already running\n",
+            "- [ ] [#fresh] same-cycle follow-up\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
+
+        let synced = sync_same_cycle_pending_adds_into_go_queue(&doc).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert_eq!(synced, vec!["fresh".to_string()]);
+        let head = updated.find("do [#head]").unwrap();
+        let fresh = updated.find("do [#fresh]").unwrap();
+        assert!(
+            head < fresh,
+            "same-cycle add must append behind the current queue head:\n{updated}"
+        );
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("- do [#fresh]"),
+            "snapshot queue region must include the appended closeout head:\n{snap}"
+        );
+    }
+    #[test]
+    fn closeout_sync_holds_same_cycle_pending_add_without_go_mode() {
+        // The old amplification guard still applies to a plain persisted-active
+        // queue: same-cycle captures wait for a later activation unless the
+        // operator opted into go/start continuous backlog drain.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:queue priority -->\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#head] already running\n",
+            "- [ ] [#fresh] same-cycle follow-up\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
+
+        let synced = sync_same_cycle_pending_adds_into_go_queue(&doc).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(synced.is_empty());
+        assert!(
+            !updated.contains("do [#fresh]"),
+            "non-go active queue must not append same-cycle pending add:\n{updated}"
         );
     }
     #[test]

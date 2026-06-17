@@ -2127,6 +2127,28 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         }
     }
 
+    // `#pendingaddqueuesync`: `--pending-add*` mutations are applied during
+    // write/finalize, after preflight's backlog→queue sync has already run.
+    // Once the current head has been consumed, append same-cycle pending adds
+    // into active go-mode backlog queues so captured follow-up work is not
+    // stranded outside the drain.
+    if write_result.is_ok() && commit_mode != CommitMode::None {
+        match commit_mode {
+            CommitMode::None => {}
+            CommitMode::BestEffort => {
+                if let Err(e) = crate::preflight::sync_same_cycle_pending_adds_into_go_queue(file) {
+                    eprintln!(
+                        "[queue] warning: same-cycle pending-add queue sync failed: {}",
+                        e
+                    );
+                }
+            }
+            CommitMode::Required => {
+                crate::preflight::sync_same_cycle_pending_adds_into_go_queue(file)?;
+            }
+        }
+    }
+
     let commit_result = if write_result.is_ok() {
         let primary = finalize_commit(file, commit_mode);
         if primary.is_ok() && !options.commit_sibling.is_empty() {

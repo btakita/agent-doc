@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -121,7 +121,71 @@ Notes:
 - Existing unrelated parent working-tree changes were left untouched.
 - Escalation: none.
 - Confidence: high.
-<!-- agent:boundary:2bb05af3 -->
+- Escalation: none.
+- Existing unrelated parent working-tree changes were left untouched.
+- Preflight warned the live session supervisor is stale; I left that as an operational warning because it is unrelated to the EFS deploy.
+- I did not push the parent superproject branch because it is ahead of `origin/main` by unrelated local commits (`agent-doc-bugs2` and `monsterrodholders`), and pushing it would include unrelated history. The EFS application code was pushed and deployed.
+- Worker deployed: `https://equityfundingsource.brian-takita.workers.dev`, version `22381466-3a91-4ba1-8417-ca199b3aeb69`.
+- Remote D1: no migrations to apply.
+- Deploy command: `bun run deploy:worker`.
+- Parent submodule-pointer commit: `1b80dec2d agent-doc(equityfundingsource): lender message drag uploads`.
+- EFS submodule commit: `0e2274f feat: support lender message drag uploads`, pushed to `origin/main`.
+- Live smoke check for `https://equityfundingsource.brian-takita.workers.dev/lenders/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3` returned HTTP 303 to `/login?role=investor&next=...`, which is the expected unauthenticated response.
+- `gh run list --workflow CI --limit 1` in both the superproject and EFS submodule reported no workflow named `CI`.
+- `make check` passed at the superproject root.
+- `bun run check` passed in `src/equityfundingsource-dev`: 768 tests passed plus app and worker builds.
+- `bun test tests/investor-portal-e2e.test.ts` passed: 42 passed, 0 failed.
+- `git -C src/equityfundingsource-dev diff --check` passed.
+- Investor portal test assertions now cover the drag/drop handlers and drop-active class.
+- The composer gets an active drop highlight while dragging files over it.
+- Dropped files use the same selected-file queue and five-file cap as the existing attach button.
+- The lender `Available deal conversation` composer now accepts file drops directly on the message area.
+- `tests/investor-portal-e2e.test.ts`
+- `lib/ui--server--efs/portal.ts`
+- `lib/ui--browser--efs/portal/investor/deal_detail.tsx`
+
+### Re: Lender Message Drag Uploads + Deploy — gpt-5
+
+> **Queue prompt:**
+>
+> https://equityfundingsource.brian-takita.workers.dev/lenders/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3 Message EFS has an attach link. It should also support dragging uploads into the message area. deploy
+
+
+Implemented and deployed drag-and-drop uploads for the lender-side `Message EFS` composer on the live lender deal page.
+
+Changed paths:
+- `lib/ui--browser--efs/portal/investor/deal_detail.tsx`
+- `lib/ui--server--efs/portal.ts`
+- `tests/investor-portal-e2e.test.ts`
+
+What changed:
+- The lender `Available deal conversation` composer now accepts file drops directly on the message area.
+- Dropped files use the same selected-file queue and five-file cap as the existing attach button.
+- The composer gets an active drop highlight while dragging files over it.
+- Investor portal test assertions now cover the drag/drop handlers and drop-active class.
+
+Verification:
+- `git -C src/equityfundingsource-dev diff --check` passed.
+- `bun test tests/investor-portal-e2e.test.ts` passed: 42 passed, 0 failed.
+- `bun run check` passed in `src/equityfundingsource-dev`: 768 tests passed plus app and worker builds.
+- `make check` passed at the superproject root.
+- `gh run list --workflow CI --limit 1` in both the superproject and EFS submodule reported no workflow named `CI`.
+- Live smoke check for `https://equityfundingsource.brian-takita.workers.dev/lenders/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3` returned HTTP 303 to `/login?role=investor&next=...`, which is the expected unauthenticated response.
+
+Commit / deploy:
+- EFS submodule commit: `0e2274f feat: support lender message drag uploads`, pushed to `origin/main`.
+- Parent submodule-pointer commit: `1b80dec2d agent-doc(equityfundingsource): lender message drag uploads`.
+- Deploy command: `bun run deploy:worker`.
+- Remote D1: no migrations to apply.
+- Worker deployed: `https://equityfundingsource.brian-takita.workers.dev`, version `22381466-3a91-4ba1-8417-ca199b3aeb69`.
+
+Notes:
+- I did not push the parent superproject branch because it is ahead of `origin/main` by unrelated local commits (`agent-doc-bugs2` and `monsterrodholders`), and pushing it would include unrelated history. The EFS application code was pushed and deployed.
+- Preflight warned the live session supervisor is stale; I left that as an operational warning because it is unrelated to the EFS deploy.
+- Existing unrelated parent working-tree changes were left untouched.
+- Escalation: none.
+- Confidence: high.
+<!-- agent:boundary:963070ce -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,7 +193,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- https://equityfundingsource.brian-takita.workers.dev/lenders/deals/7a0c1463-27bb-4d7c-82f7-2281b3c008d3 Message EFS has an attach link. It should also support dragging uploads into the message area. deploy
 <!-- /agent:queue -->
 
 ## Backlog

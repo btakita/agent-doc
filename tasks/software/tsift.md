@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -474,13 +474,63 @@ So the `#gctrl1`/`#gctrl2`/`#gctrl3` substrate is installed and ready — `tsift
 Practical check for "is a model loaded right now?" — the cheapest live signal is `nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits`: empty output means nothing is on the GPU. The tsift-owned check is `tsift local-model lease show` (empty `leases` = no tsift holder). Combine both to distinguish "no GPU consumer at all" from "a non-tsift consumer (Corky, JetBrains, training run) is using VRAM".
 
 Confidence: high (four orthogonal measurements agree). No source changes this cycle; no commit beyond the session-document closeout. Pre-existing unrelated dirty files under `src/tsift` remain unstaged as before.
-<!-- agent:boundary:45e8fdb6 -->
+
+### Re: WP/8080 port conflict — provider endpoints now configurable — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: Please setup an alternate port since WP is running on port 8080. Can the port be configured? If not make it configurable.
+
+
+> **Queue prompt:**
+>
+> Please setup an alternate port since WP is running on port 8080. Can the port be configured? If not make it configurable.
+
+
+Yes — the unload/sleep endpoints are now configurable via env vars, with the existing per-call `--provider-endpoint` flag still taking highest precedence.
+
+What changed:
+- `packages/tsift-local-model/src/lib.rs` exposes three public env var constants (`TSIFT_LLAMA_CPP_ENDPOINT`, `TSIFT_OLLAMA_ENDPOINT`, `TSIFT_VLLM_ENDPOINT`) and three matching compile-time defaults (`DEFAULT_LLAMA_CPP_ENDPOINT` = `http://127.0.0.1:8080/models/unload`, `DEFAULT_OLLAMA_ENDPOINT` = `http://127.0.0.1:11434/api/generate`, `DEFAULT_VLLM_ENDPOINT` = `http://127.0.0.1:8000/sleep`). New `resolve_provider_endpoint(strategy, explicit)` encodes the precedence: explicit `--provider-endpoint` → strategy-specific env var → compile-time default. Blank/whitespace env values fall through to the default so `TSIFT_LLAMA_CPP_ENDPOINT=` cannot break a run. `build_unload_actions` was updated to route all three HTTP strategies (llama.cpp router unload, Ollama `keep_alive: 0`, vLLM sleep) through the resolver, so `unload`, `swap`, and the lease lifecycle all inherit the override.
+- `packages/tsift-local-model/README.md` adds a "Provider endpoint configuration" section plus a copy-paste WordPress recipe: start `llama-server --port 8081`, `export TSIFT_LLAMA_CPP_ENDPOINT=http://127.0.0.1:8081/models/unload`, verify with `tsift local-model unload --json` reading back the resolved endpoint.
+
+Precedence verified end-to-end against the installed binary:
+- Default (no env, no override): `http://127.0.0.1:8080/models/unload`
+- `TSIFT_LLAMA_CPP_ENDPOINT=http://127.0.0.1:8081/models/unload`: picks up 8081
+- Same env + `--provider-endpoint http://127.0.0.1:9090/models/unload`: explicit flag wins → 9090
+- `tsift local-model swap` inherits the same env-derived endpoint in its unload report
+
+Recipe for this machine (WordPress on 8080):
+
+```sh
+export TSIFT_LLAMA_CPP_ENDPOINT="http://127.0.0.1:8081/models/unload"
+# Start llama-server on the matching port
+llama-server --port 8081 --model Qwen/Qwen3-32B-GGUF ...
+# Verify tsift now resolves the new endpoint
+tsift local-model unload --profile qwen3-32b-q4 --no-probe \
+  --pre-used-mib 200 --post-used-mib 200 --json | \
+  python3 -c "import json,sys; print(json.load(sys.stdin)['lease']['unload_actions'][0]['endpoint'])"
+```
+
+Commits:
+- `src/tsift`: `ad5d366 feat: configurable provider endpoints via env vars (#portconf)`
+- parent repo: `d910868a5 tsift: configurable provider endpoints via env vars (#portconf)`
+
+Verification:
+- `cargo test -p tsift-local-model` → 40 passed (5 new env-var tests + 35 prior).
+- `cargo clippy -p tsift-local-model --all-targets -- -D warnings` → clean.
+- `make check` → exit 0.
+- `cargo install --path . --force` → installed `tsift 0.1.70`.
+- Smoke: default → 8080, env → 8081, explicit `--provider-endpoint` → overrides env, `swap` inherits env override.
+- `git -C src/tsift diff --cached --check` and parent `git diff --cached --check` → clean.
+- `gh run list --workflow CI --limit 1` could not run because the root repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+
+Confidence: high. No source changes outside `src/tsift`; pre-existing unrelated dirty files under `src/tsift` remain unstaged.
+<!-- agent:boundary:04e060f1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Please setup an alternate port since WP is running on port 8080. Can the port be configured?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

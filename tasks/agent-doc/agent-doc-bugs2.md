@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -60,15 +60,28 @@ Verification run for this head:
 - `cargo test -p agent-doc-orchestration route_submit_resubmit -- --nocapture`
 
 Both passed. The next queue item remains queued.
-<!-- agent:boundary:ea7e5e12 -->
+### Response — gpt-5
+I traced this FCC cycle to stale-supervisor disk/IPC drift, not to a newly found unguarded raw disk write in the current installed build.
+
+The current preflight warning names route-owned host supervisor pid `1617257` serving this document from a stale binary. The ops log also shows repeated stale-supervisor guard proofs such as `content_ours_adoption_refused_stale_supervisor` and `ipc_proof_insufficient ... invariant=supervisor_binary_stale ... recovery=candidate_snapshot_kept`, which means the current write path is refusing stale live-buffer adoption instead of accepting content that would recreate File Cache Conflict drift.
+
+I ran the safe recycle path for this document's project:
+
+```sh
+agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --json
+```
+
+It returned `{"project_root":"/home/brian/work/btakita/agent-loop","recycled":true,"scope":"project"}`.
+
+I did not force-restart the supervisor while this pane is busy. The earlier non-force `agent-doc session restart-supervisor ... --fresh` check refused with an alive-busy proof for pane `%12`, so the safe next state is to let this turn reach idle and allow the recycled controller/supervisor to be replaced without discarding the active pane.
+
+No source change was needed in this cycle.
+<!-- agent:boundary:754b9413 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: agent-doc CLI has misformatted help message ![img_37.png](img_37.png)~~
-- ~~:pushpin: Resubmit Enter works with JB `Clear Session Context`. Resubmit Enter does not work with JB `Run Agent Doc`.~~
-- There are still disk writes causing JB `File Cache Conflict` dialogs.
 <!-- /agent:queue -->
 ###
 <!--

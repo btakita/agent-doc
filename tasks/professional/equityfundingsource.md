@@ -260,7 +260,7 @@ This drains the last rename prompt. The final queue head, `do [#rename-accounts-
 **Done.** Mirrored the `-c wrangler.toml` → `-c ../../wrangler.toml` fix into `bin/ensure-admins.ts` (commit `b1f2f89`, pushed `main`), so the admin-provisioning CLI will resolve its config correctly on its first real remote run. `cf-wrangler.ts` spawns wrangler with `cwd=app_dir`, which is why the bare `wrangler.toml` path ENOENT'd; the `../../` form matches cf-wrangler's own documented example pattern.
 
 **Verify:** `make check` → **812 pass / 0 fail**; build OK. No test asserted the old command string, so the change is clean. Both operator CLIs (`ensure-admins`, `rename-accounts`) now use the correct config path.
-<!-- agent:boundary:788745b3 -->
+<!-- agent:boundary:53e8fc69 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -268,8 +268,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-Change user account emails:
-All accounts with the base emails brian.takita@gmail.com and btak.dev@gmail.com should use the password defined in `passage btak/lucas-collab-password`. 
 <!-- /agent:queue -->
 
 ## Backlog

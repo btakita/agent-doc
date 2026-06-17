@@ -157,14 +157,11 @@ Verification: `make check`; `./gradlew test --tests com.github.btakita.agentdoc.
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Clear Session Context` did not submit.~~
 - :pushpin: JB `Run Agent Doc` Codex did not submit.
-- Should JB `Run Agent Doc` & `Clear Session Context` Codex retry `Return` until submit occurs
+- :pushpin: Should JB `Run Agent Doc` & `Clear Session Context` Codex retry `Return` until submit occurs? Same with JB `Clear Session Context` Opencode?
+- :pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.
 - :pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.
 - backlog with `queue` attribute is not adding items into the queue.
-- ~~:pushpin: do [#opencode-enter]~~
-- ~~:pushpin: do [#jb-fcc]~~
-- ~~:pushpin: do [#cdxproof]~~
 <!-- /agent:queue -->
 ###
 <!--

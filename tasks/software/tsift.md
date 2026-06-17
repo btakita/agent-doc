@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -315,7 +315,7 @@ Changed paths: no repo source paths changed by me; the installed binary at `/hom
 **Why not "reducing the model" via quantization tier steps**: that is also possible (treat `-q4`/`-q3`/`-q2` as separate profiles), but per-call profile pinning already covers the common case — you switch profile, you don't re-quantize mid-flight. Quantization tiers would just be more entries in `default_model_profiles()`; congestion-aware `status` can already rank them via `rank_profiles_for_role`. No new substrate needed.
 
 **Recommended path this cycle**: green-light `#gctrl1` (lease registry, the foundational piece), then `#gctrl2` (per-call `--profile`) and `#gctrl3` (`swap` action). Defer `#gctrlIce` (daemon + preempt + multi-GPU) until contention is proven. No code changed this turn — this is a design decision seeking your green-light before implementation.
-<!-- agent:boundary:b3b10fb2 -->
+<!-- agent:boundary:f61e77f7 -->
 <!-- /agent:exchange -->
 
 ## Queue

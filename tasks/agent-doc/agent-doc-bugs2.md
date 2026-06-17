@@ -248,7 +248,7 @@ I checked the route ledgers (`.agent-doc/state/editor-route-attempts/`) for ever
 **On gates / presets:** `agent:review` is already empty — no gated items to replace, no gates left this round. The queue preset is `#spec-test-build-install-commit-push`, but no spec/code changed this cycle (log analysis + backlog capture), so there is nothing to build/install. I did **not** sweep the large unrelated uncommitted changeset (other tasks/submodules/tsift command files) — only this session document is committed by finalize.
 
 Logging already present to prove/disprove the JB items: `live_buffer_classify`, `realtime_doc_resolve authority=… reason=… diverged=…`, `mps_baseline_pin`, `realtime_broadcast_queued file=… origin_editor_id=… target_editor_id=… patch_id=… merged_len=…`, `session_clear_submit_observation … issue=prompt_not_submitted`, `session_clear_submit_resubmit … result=accepted`, and `ipc_proof_insufficient … recovery=…`.
-<!-- agent:boundary:7fa866bd -->
+<!-- agent:boundary:e2388c70 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -319,11 +319,11 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#actorgenclosed] [low] dispatch rejected 'authoritative actor generation closed' race during crash recovery (spoton.md gen 21). Recoverable; routes succeed after. Investigate generation-close dispatch guard.
-- [ ] [#codefence-strip] agent-doc stripped a code fence on a prior run. Audit patch/exchange fence preservation; add regression.
-- [ ] [#queediturn] Editing agent:queue during a running turn caused churn + deleted a queued item (monsterrodholders.md). Add turn-boundary queue-edit guard / deferred-apply.
-- [ ] [#jbacceptwedge] [operator-install] JB plugin IPC accept-loop wedge root cause (22 unaccepted conns). Binary works around via ack-probe+file-IPC (96624f9c, installed). Plugin-side accept-loop fix + install needed for root cause; flag operator when ready.
 - [ ] [#claudesubmit] Claude harness initial-dispatch submit proof: route ledger shows route_success (spoton.md 22:54 UTC) but pane-level Enter submission unverified. Inspect ops.log submit markers; extend submit detection to Claude harness if gap.
+- [ ] [#jbacceptwedge] [operator-install] JB plugin IPC accept-loop wedge root cause (22 unaccepted conns). Binary works around via ack-probe+file-IPC (96624f9c, installed). Plugin-side accept-loop fix + install needed for root cause; flag operator when ready.
+- [ ] [#queediturn] Editing agent:queue during a running turn caused churn + deleted a queued item (monsterrodholders.md). Add turn-boundary queue-edit guard / deferred-apply.
+- [ ] [#codefence-strip] agent-doc stripped a code fence on a prior run. Audit patch/exchange fence preservation; add regression.
+- [ ] [#actorgenclosed] [low] dispatch rejected 'authoritative actor generation closed' race during crash recovery (spoton.md gen 21). Recoverable; routes succeed after. Investigate generation-close dispatch guard.
 <!-- /agent:backlog -->
 
 ## Review

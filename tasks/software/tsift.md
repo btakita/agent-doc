@@ -361,11 +361,27 @@ Verification:
 - Smoke: empty `show` → acquire by real shell pid → conflict attempt by dead pid 99999 returns `Conflict` with holder info and `--strict` exits 1 → human `show` displays the live lease → `release` returns `Released` with `remaining_holders: 0`.
 - `git -C src/tsift diff --cached --check` and parent `git diff --cached --check` → clean.
 - `gh run list --workflow CI --limit 1` could not run because the root repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+- `git -C src/tsift diff --cached --check` and parent `git diff --cached --check` → clean.
+- Smoke: `tsift local-model resolve` for Auto/Pinned-embed/Pinned-unknown/ForceHash/--no-probe all returned the expected `ProfileResolution` JSON with the right `source` and `reason`.
+- `cargo install --path . --force` → installed `tsift 0.1.70`.
+- `make check` → exit 0.
+- `cargo clippy -p tsift-local-model -p tsift-cli --all-targets -- -D warnings` → clean.
+- `cargo test -p tsift-cli --lib` → 378 passed, including 3 new CLI parse tests (resolve, semantic --profile, summarize --profile).
+- `cargo test -p tsift-local-model` → 30 passed (8 new preference tests + 22 prior).
+- parent repo: `7b342fc4f tsift: add per-call profile preference resolver (#gctrl2)`
+- `src/tsift`: `4882b55 feat: add per-call profile preference resolver (#gctrl2)`
+- `tsift semantic --profile X` and `tsift summarize --extract --profile X` record `profile preference <kind> -> <id> (<reason>)` as a warning/note so downstream readers and future provider integrations see what would have been used. Until that provider seam lands, calls still use the existing cached/hash code paths — the flag is documented as informational plumbing, not a no-op.
+- `tsift local-model resolve [--profile <id|hash>] [--role extract|embed|rerank] [--no-probe] [--json]` — the decision seam for callers (verified end-to-end against the live 5090 probe: Auto→qwen3-32b-q4, Pinned qwen3-embedding-0.6b for Embed→selectable, Pinned bogus-profile→hash fallback with reason, ForceHash→hash, Auto+no-probe→hash with reason).
+- `packages/tsift-local-model/README.md` documents the three preference variants, the fallback contract, and the CLI surface (`tsift local-model resolve` plus the `--profile` plumbing on `tsift semantic`/`tsift summarize`).
+- `packages/tsift-cli/src/commands/summarize.rs` takes the new `profile` arg and emits the same note before extraction runs.
+- `packages/tsift-cli/src/lib.rs` adds a `cmd_local_model` `Resolve` arm and `profile_preference_note(profile, role)` helper that resolves the preference against a live `nvidia-smi` probe and returns a one-line note. The note is appended to `Semantic` warnings and emitted to stderr by `Summarize --extract`, so the response envelope records caller intent.
+- `packages/tsift-cli/src/cli.rs` adds `LocalModelCommand::Resolve { --profile, --role, --no-probe, --json }`, the `ResolveRole` value enum (extract/embed/rerank), and `--profile Option<String>` flags on `Commands::Semantic` and `Commands::Summarize`.
+- `packages/tsift-local-model/src/lib.rs` adds `ProfilePreference { Auto, Pinned(id), ForceHash }` with `from_cli` parser (empty/Auto; literal `hash` or `tsift-local-hash-v1`/ForceHash; otherwise Pinned), `ProfileResolution` + `ProfileResolutionSource { auto_ranked, pinned, pinned_unselectable, forced_hash }`, and pure `resolve_profile_preference(preference, role, probe)`. The hash profile is always a guaranteed-selectable fallback so a bad pin never aborts the call. Also derived `Copy` for `ModelRole`.
 
 Workspace note: the pre-existing unrelated dirty files under `src/tsift` (`session_cost.rs`, `session_review.rs`, `infra.rs`, `exit_code.rs`, `log_digest.rs`) remain unstaged as before.
 
 Confidence: high. `#gctrl1` done. Next queued: `#gctrl2` (`--profile` pin on tsift KG/semantic commands).
-<!-- agent:boundary:21a361d7 -->
+<!-- agent:boundary:20764ac2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -383,7 +399,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#gctrl2] [recommended] Add `--profile <id>` flag to tsift KG/semantic commands so an agent-doc cycle can pin or downgrade the model per-call. When omitted, keep current behavior (rank by free VRAM). Allows a long agent-doc run to pick a small/hash profile during low-stakes phases without changing global state.
 - [ ] [#gctrl3] [recommended] Add `tsift local-model swap --to <profile>` lifecycle action distinct from `unload`: unload current profile, run the existing VRAM-cleanup proof, then load the target profile and emit a combined LocalModelLifecycleReport. Use it to implement mid-run downgrades (qwen3-32b-q4 -> qwen3-embedding-0.6b or hash fallback) without the caller orchestrating two commands.
 - [ ] [#gctrlice] [recommended] Icebox: revisit a full GPU control-pane daemon (with preempt and multi-GPU scheduling) only when proven need — more than 1 GPU, or more than 3 concurrent GPU consumers running at the same time. Until then the cooperative lease registry (#gctrl1) is the right-size answer.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.

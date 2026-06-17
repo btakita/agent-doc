@@ -249,7 +249,18 @@ bun ./bin/rename-accounts.ts --remote            --password "$(passage btak/luca
 ```
 
 This drains the last rename prompt. The final queue head, `do [#rename-accounts-apply]`, is the operator step that actually runs that command against production D1.
-<!-- agent:boundary:6187f544 -->
+
+### Re: do #ensure-admins-wrangler-path — fixed, pushed — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#ensure-admins-wrangler-path]
+
+
+**Done.** Mirrored the `-c wrangler.toml` → `-c ../../wrangler.toml` fix into `bin/ensure-admins.ts` (commit `b1f2f89`, pushed `main`), so the admin-provisioning CLI will resolve its config correctly on its first real remote run. `cf-wrangler.ts` spawns wrangler with `cwd=app_dir`, which is why the bare `wrangler.toml` path ENOENT'd; the `../../` form matches cf-wrangler's own documented example pattern.
+
+**Verify:** `make check` → **812 pass / 0 fail**; build OK. No test asserted the old command string, so the change is clean. Both operator CLIs (`ensure-admins`, `rename-accounts`) now use the correct config path.
+<!-- agent:boundary:788745b3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -264,7 +275,6 @@ All accounts with the base emails brian.takita@gmail.com and btak.dev@gmail.com 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ensure-admins-wrangler-path] Fix the same -c wrangler.toml -> -c ../../wrangler.toml bug in bin/ensure-admins.ts (cf-wrangler forces cwd=app_dir). Latent — ensure-admins has not yet been run against remote D1, so it would ENOENT on first remote use. Trivial 2-line change mirroring 768d52b.
 <!-- /agent:backlog -->
 
 2## Review

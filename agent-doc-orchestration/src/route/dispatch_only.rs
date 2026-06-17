@@ -302,6 +302,17 @@ pub(crate) fn require_dispatch_only_dispatch_start_proof(
         file,
         RoutedReopenGuardReason::AcceptedOnlyDispatchStartProof,
     );
+    if let Err(err) = crate::route_in_flight::mark_route_submit_blocked(
+        file,
+        pane,
+        &harness.binary,
+        "accepted_without_dispatch_start_proof",
+    ) {
+        eprintln!(
+            "[route] warning: failed to mark accepted-without-dispatch route block for {}: {err:#}",
+            file.display()
+        );
+    }
     crate::ops_log::log_op(file, &accepted_only_dispatch_start_log_message(facts));
     anyhow::bail!(accepted_only_dispatch_start_refusal_message(facts));
 }
@@ -805,6 +816,14 @@ mod tests {
             "{err}"
         );
         assert!(err.contains("treating this as not dispatched"), "{err}");
+        assert!(
+            crate::route_in_flight::route_submit_in_flight(&doc).unwrap(),
+            "accepted-only Codex proof failure must block immediate idle queue drain"
+        );
+        let marker = crate::route_in_flight::route_submit_blocked(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(marker.reason, "accepted_without_dispatch_start_proof");
 
         let message = route_dispatch_only_sent_log_message(
             &doc,

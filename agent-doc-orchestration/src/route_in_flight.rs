@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 
 const ROUTE_IN_FLIGHT_DIR: &str = ".agent-doc/route-in-flight";
 const ROUTE_IN_FLIGHT_TTL_SECS: u64 = 30;
+const ROUTE_BLOCKED_DIR: &str = ".agent-doc/route-submit-blocked";
+const ROUTE_BLOCKED_TTL_SECS: u64 = 120;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RouteSubmitInFlight {
@@ -25,6 +27,15 @@ pub struct RouteSubmitInFlight {
 
 pub struct RouteSubmitInFlightGuard {
     path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RouteSubmitBlocked {
+    pub file: String,
+    pub pane: String,
+    pub harness: String,
+    pub reason: String,
+    pub written_at: u64,
 }
 
 impl Drop for RouteSubmitInFlightGuard {
@@ -51,13 +62,19 @@ fn now_secs() -> u64 {
 }
 
 fn marker_path(file: &Path) -> Result<Option<PathBuf>> {
+    marker_path_in(file, ROUTE_IN_FLIGHT_DIR)
+}
+
+fn blocked_marker_path(file: &Path) -> Result<Option<PathBuf>> {
+    marker_path_in(file, ROUTE_BLOCKED_DIR)
+}
+
+fn marker_path_in(file: &Path, dir: &str) -> Result<Option<PathBuf>> {
     let Some(root) = crate::fs_util::find_project_root(file) else {
         return Ok(None);
     };
     let hash = crate::snapshot::doc_hash(file)?;
-    Ok(Some(
-        root.join(ROUTE_IN_FLIGHT_DIR).join(format!("{hash}.json")),
-    ))
+    Ok(Some(root.join(dir).join(format!("{hash}.json"))))
 }
 
 pub fn begin_route_submit(
@@ -86,7 +103,14 @@ pub fn route_submit_in_flight(file: &Path) -> Result<bool> {
     let Some(path) = marker_path(file)? else {
         return Ok(false);
     };
-    let content = match std::fs::read_to_string(&path) {
+    if active_in_flight_marker_at(&path)? {
+        return Ok(true);
+    }
+    route_submit_blocked(file).map(|marker| marker.is_some())
+}
+
+fn active_in_flight_marker_at(path: &Path) -> Result<bool> {
+    let content = match std::fs::read_to_string(path) {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(err) => return Err(err).with_context(|| format!("read {}", path.display())),
@@ -94,15 +118,74 @@ pub fn route_submit_in_flight(file: &Path) -> Result<bool> {
     let marker: RouteSubmitInFlight = match serde_json::from_str(&content) {
         Ok(marker) => marker,
         Err(_) => {
-            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_file(path);
             return Ok(false);
         }
     };
     if now_secs().saturating_sub(marker.written_at) <= ROUTE_IN_FLIGHT_TTL_SECS {
         return Ok(true);
     }
-    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path);
     Ok(false)
+}
+
+pub fn mark_route_submit_blocked(
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    reason: &str,
+) -> Result<()> {
+    let Some(path) = blocked_marker_path(file)? else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let marker = RouteSubmitBlocked {
+        file: file.to_string_lossy().into_owned(),
+        pane: pane.to_string(),
+        harness: harness.to_string(),
+        reason: reason.to_string(),
+        written_at: now_secs(),
+    };
+    let json =
+        serde_json::to_string_pretty(&marker).context("serialize route-submit blocked marker")?;
+    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_submit_blocked_marker_set file={} pane={} harness={} reason={} ttl_secs={}",
+            file.display(),
+            pane,
+            harness,
+            reason,
+            ROUTE_BLOCKED_TTL_SECS
+        ),
+    );
+    Ok(())
+}
+
+pub fn route_submit_blocked(file: &Path) -> Result<Option<RouteSubmitBlocked>> {
+    let Some(path) = blocked_marker_path(file)? else {
+        return Ok(None);
+    };
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).with_context(|| format!("read {}", path.display())),
+    };
+    let marker: RouteSubmitBlocked = match serde_json::from_str(&content) {
+        Ok(marker) => marker,
+        Err(_) => {
+            let _ = std::fs::remove_file(&path);
+            return Ok(None);
+        }
+    };
+    if now_secs().saturating_sub(marker.written_at) <= ROUTE_BLOCKED_TTL_SECS {
+        return Ok(Some(marker));
+    }
+    let _ = std::fs::remove_file(&path);
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -138,6 +221,32 @@ mod tests {
         };
         std::fs::write(&path, serde_json::to_string(&marker).unwrap()).unwrap();
 
+        assert!(!route_submit_in_flight(&doc).unwrap());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn route_submit_blocked_marker_blocks_idle_drain_until_stale() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "body").unwrap();
+
+        mark_route_submit_blocked(&doc, "%1", "codex", "accepted_without_dispatch_start_proof")
+            .unwrap();
+        assert!(route_submit_in_flight(&doc).unwrap());
+        let marker = route_submit_blocked(&doc).unwrap().unwrap();
+        assert_eq!(marker.reason, "accepted_without_dispatch_start_proof");
+
+        let path = blocked_marker_path(&doc).unwrap().unwrap();
+        let stale = RouteSubmitBlocked {
+            file: doc.display().to_string(),
+            pane: "%1".to_string(),
+            harness: "codex".to_string(),
+            reason: "accepted_without_dispatch_start_proof".to_string(),
+            written_at: now_secs().saturating_sub(ROUTE_BLOCKED_TTL_SECS + 1),
+        };
+        std::fs::write(&path, serde_json::to_string(&stale).unwrap()).unwrap();
         assert!(!route_submit_in_flight(&doc).unwrap());
         assert!(!path.exists());
     }

@@ -61,7 +61,7 @@ The error message preserves tagpath's CLI format — `<path>:<line>:<col> <sever
 
 When the IDE surfaces a File Cache Conflict dialog mid-IPC and the user cancels, `preflight` auto-recovers the wedge via the binary-owned commit boundary when the working tree still matches the snapshot. The cancel-branch contract, the auto-recovery preconditions, and the manual fallback for cases auto-recovery declines live in [jb-cache-conflict.md](jb-cache-conflict.md).
 
-Compact Exchange does not use the normal response IPC `fullContent` path. It closes through guarded direct disk write plus the standard compact commit/VCS refresh boundary; stale JetBrains live-buffer or file-cache proof must fail before document or snapshot replacement, then the operator resolves the IDE buffer and reruns compact. See [compact-exchange.md](compact-exchange.md) and the Compact Exchange section of [jb-cache-conflict.md](jb-cache-conflict.md).
+Compact Exchange does not use the normal response IPC `fullContent` path. With a live editor listener it closes through component `op:replace` editor IPC; the guarded direct disk write is only the no-listener fallback plus the standard compact commit/VCS refresh boundary. Stale JetBrains live-buffer/file-cache proof or unproven active-listener apply must fail before document or snapshot replacement, then the operator resolves the IDE buffer or listener and reruns compact. See [compact-exchange.md](compact-exchange.md) and the Compact Exchange section of [jb-cache-conflict.md](jb-cache-conflict.md).
 
 ## Baseline Drift After Manual Commits
 

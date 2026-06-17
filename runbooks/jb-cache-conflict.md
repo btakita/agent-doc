@@ -32,11 +32,11 @@ In those cases the documented manual repair is `agent-doc write --commit <FILE>`
 `agent-doc compact <FILE> --component exchange --commit` uses a different closeout path from normal response IPC:
 
 - Compact Exchange does not emit editor IPC `fullContent` or ask JetBrains to replace the whole visible buffer.
-- The binary computes the compacted document, then uses the guarded direct-write path (`source=compact_exchange_direct_write`) so the session document is replaced only when disk and the editor-visible proof still describe the same source content.
-- When the JetBrains sidecar reports a stale live buffer or stale file cache, compact fails closed before replacing the document or advancing the snapshot. The expected ops-log signature is `visible_write_deferred_live_buffer_changed source=compact_exchange_direct_write`.
+- The binary computes the compacted document, then tries component `op:replace` editor IPC when a listener is active. The guarded direct-write path (`source=compact_exchange_direct_write`) is only the no-listener fallback, so the session document is replaced behind the editor only when no plugin is running and disk still matches the expected source content.
+- When the JetBrains sidecar reports a stale live buffer/stale file cache, or an active listener cannot prove the editor patch via ack-content, compact fails closed before replacing the document or advancing the snapshot. Expected ops-log signatures include `visible_write_deferred_live_buffer_changed source=compact_exchange_direct_write` and `compact_writeback ... transport=blocked reason=... action=refuse_external_disk_write`.
 - Recovery is to resolve the IDE buffer first: save, discard, or reload the document so JetBrains and disk agree, then rerun `agent-doc compact <FILE> --component exchange --commit`.
 
-Do not use `agent-doc write --commit <FILE>` for this Compact Exchange guard failure unless there is also a normal response patch that already landed in the working tree. The stale-buffer compact guard is intentionally pre-write; the correct recovery is to make the visible editor state current and rerun compact.
+Do not use `agent-doc write --commit <FILE>` for this Compact Exchange guard failure unless there is also a normal response patch that already landed in the working tree. The stale-buffer / blocked-editor compact guard is intentionally pre-write; the correct recovery is to make the visible editor state current, let the plugin apply/prove the patch, and rerun compact.
 
 After a successful compact commit, the binary writes the VCS refresh signal when that channel exists. The JetBrains plugin should refresh VFS/VCS from that signal so gutter state and file cache match the committed document. If a later normal `finalize` still surfaces a File Cache Conflict dialog, use the Dialog Contract and Recovery sections above.
 

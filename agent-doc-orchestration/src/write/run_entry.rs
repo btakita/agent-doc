@@ -382,9 +382,10 @@ pub fn run_template(
 
     // `#fcc0`: template (non-CRDT) mode writes the merged document straight to
     // disk — the only response path with no prior IPC attempt. Converge through
-    // the editor when a JB listener is active (no `File Cache Conflict` dialog);
-    // the guard already ran above, so the no-listener fallback is the bare disk
-    // write rather than the double-guarded converger entry point.
+    // the editor when a JB listener is active (no `File Cache Conflict` dialog).
+    // If the listener cannot prove the mutation, `try_editor_converge` fails
+    // closed. The no-listener fallback is the bare disk write rather than the
+    // double-guarded converger entry point because the guard already ran above.
     if !try_editor_converge(file, &final_content, &content_current, "write_template")? {
         atomic_write(file, &final_content)?;
     }
@@ -1495,7 +1496,8 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     // `#fcc0`: this repair recovery applies template (component) patches straight
     // to disk with no prior IPC attempt — the same direct-disk-no-IPC class as
     // queue consume. Converge through the editor when a JB listener is active (no
-    // `File Cache Conflict` dialog); the guard already ran above, so the
+    // `File Cache Conflict` dialog). If the listener cannot prove the mutation,
+    // `try_editor_converge` fails closed. The guard already ran above, so the
     // no-listener fallback is the bare disk write.
     if !try_editor_converge(file, &final_content, &content_current, "apply_template")? {
         atomic_write(file, &final_content)?;

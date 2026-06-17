@@ -181,6 +181,24 @@ pub(crate) fn start_live_prompt_drift_ack_listener(
 }
 
 #[cfg(test)]
+pub(crate) fn start_ack_without_content_listener(
+    project_root: &Path,
+) -> std::thread::JoinHandle<()> {
+    let root = project_root.to_path_buf();
+    std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+    std::thread::spawn(move || {
+        let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+            let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+            let patch_id = v
+                .get("patch_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown");
+            Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+        });
+    })
+}
+
+#[cfg(test)]
 pub(crate) fn wait_for_live_prompt_drift_listener(project_root: &Path) {
     for _ in 0..100 {
         if crate::ipc_socket::is_listener_active(project_root) {

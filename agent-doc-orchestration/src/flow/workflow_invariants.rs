@@ -473,7 +473,7 @@ fn editor_convergence_invariant() -> WorkflowInvariant {
             ),
             fact(
                 FactSourceKind::OpsLog,
-                "transport=editor_ipc|disk_fallback|File Cache Conflict",
+                "transport=editor_ipc|disk_fallback|blocked|File Cache Conflict",
             ),
             fact(FactSourceKind::WorkflowStateKernel, "decide_live_buffer"),
             fact(FactSourceKind::GitState, "working tree hash"),

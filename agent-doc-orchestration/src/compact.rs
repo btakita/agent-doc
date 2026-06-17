@@ -495,7 +495,8 @@ fn apply_compacted_document(
     // `#w42v`: when a JB editor listener is active, converge the compacted
     // content through the editor (component `op:replace`) so it does not diverge
     // from the open buffer and raise a `File Cache Conflict`. The guarded disk
-    // write stays the fail-safe (no listener / unconfirmed convergence).
+    // write is only the no-listener fallback; active-listener convergence
+    // failures fail closed instead of writing behind the editor.
     if !crate::write::try_editor_converge(file, compacted, source_content, "compact")? {
         crate::write::atomic_write_if_current_pub(
             file,

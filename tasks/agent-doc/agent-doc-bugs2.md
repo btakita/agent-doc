@@ -149,6 +149,12 @@ Implemented and installed the proof fixes.
 - `JB Run Agent Doc Codex did not submit.` now treats accepted-only Codex dispatch as blocked unless dispatch-start proof appears; the route output includes `editor_attempt_id` and a preserved route-submit snapshot path, and the JB plugin surfaces that as a typed warning instead of generic failure.
 - File Cache Conflict diagnostics now include patch/conflict key plus document/file stamps, and stale live-buffer suppression logs write provenance actor/write id/timestamps.
 - Installed: `make install` updated the binary/cdylib and auto-marked 2 controllers for recycle; JetBrains plugin `0.2.168` installed to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`. Restart IntelliJ IDEA to activate it.
+- Latest GitHub Actions CI on `main`: success, run `27664844335`
+- `make install`; `agent-doc --version` reports `0.34.1`
+- `make check` (4621 nextest tests, doctests, and medium closeout sim passed)
+- `cargo test --test finalize_integration malformed_patchback_is_rejected_instead_of_appended_as_unmatched`
+- `cargo test -p agent-doc-orchestration recovery_merge_uses_crdt_for_crdt_documents_without_diff3_markers`
+- `cargo test --test finalize_integration template_flag_on_crdt_doc_routes_to_stream_merge_instead_of_diff3`
 
 Verification: `make check`; `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`; `./gradlew test buildPlugin`; `agent-doc --version`; latest GitHub Actions `CI` on `main` was completed/success. The separate monsterrodholders Sync Tmux Layout prompt is still queued; I did not implement that in this pass.
 
@@ -179,7 +185,7 @@ For `Clear Session Context`, the right behavior is what just landed: submit the 
 For `Run Agent Doc`, do not keep pressing `Return` after pane input was accepted. That risks duplicate dispatch when the pane accepted the command but dispatch-start proof is stale or delayed. The safer behavior is: if the routed trigger is still visibly drafted, one bounded re-submit is reasonable; if pane input was accepted but dispatch-start proof does not appear, fail closed with the attempt id and route snapshot. That is the behavior now in `dc7ddb88` for Codex accepted-only proof gaps.
 
 The broader CRDT-retry item from the typing/merge incident is still queued for implementation; I did not consume it here.
-<!-- agent:boundary:2205b112 -->
+<!-- agent:boundary:9e8f3236 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -187,9 +193,13 @@ The broader CRDT-retry item from the typing/merge incident is still queued for i
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` Codex did not submit.~~
 - ~~:pushpin: Should JB `Run Agent Doc` & `Clear Session Context` Codex retry `Return` until submit occurs? Same with JB `Clear Session Context` Opencode?~~
+- :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.
+- :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit even after I started a new tmux pane and installed the plugin.
+- As the queue is draining, 
 - :pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.
 - :pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.
 - backlog with `queue` attribute is not adding items into the queue.
+- :pushpin: agent-doc CLI has misformatted help message ![img_37.png](img_37.png)
 <!-- /agent:queue -->
 ###
 <!--

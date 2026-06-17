@@ -277,7 +277,15 @@ No code or tests changed this cycle (root-cause investigation + plan capture). `
 **Fix:** drain in-place — after each proven closeout, while `queue_continuation_required` stays true, I run the next cycle immediately instead of returning control (manual `/loop` equivalent). The supervisor idle-watch remains the durable mechanism and also fires at idle boundaries.
 
 Closing `#actorgenclosed` this cycle: investigated — transient actor-generation-close race during crash recovery on spoton.md; routes succeed afterward (ledger `route_success` at 22:54 UTC). [low], no code fix warranted. Continuing the drain.
-<!-- agent:boundary:374923db -->
+
+### Re: drain — classify operator-gated heads — glm-5.2
+
+Draining in-place. Classifying the two heads that genuinely need the operator so go-mode defers them (not done — deferred on real blockers):
+- `#jbacceptwedge` → `[operator-verify]`: needs a JB plugin-side fix + operator install (binary already works around it via `96624f9c`).
+- `#codefence-strip` → `[operator-verify: repro needed]`: "code fence stripped" needs a concrete repro (which document/run/fence) to fix definitively; I'll audit patch/template fence-preservation once reprovided.
+
+That leaves `#queediturn` (turn-boundary queue-edit guard) as the one agent-drainable code item — next cycle.
+<!-- agent:boundary:b66243be -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -318,9 +326,9 @@ Aside from fixing the wedge, we should ensure the run does not stall.
 ---
 - ~~JB `Run Agent Doc` with Claude did not submit on spoton.md. We should have the loop detect the unsubmitted prompt and Enter.~~
 - ~~do [#actorgenclosed]~~
-- do [#codefence-strip]
+- ~~do [#codefence-strip]~~
 - do [#queediturn]
-- do [#jbacceptwedge]
+- ~~do [#jbacceptwedge]~~
 - ~~do [#claudesubmit]~~
 <!-- /agent:queue -->
 <!--
@@ -349,9 +357,9 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#claudesubmit] Claude/OpenCode dispatch-only submit proof + bounded Enter retry. ROOT CAUSE FOUND: Claude/OpenCode have no prompt-submit hook, so require_dispatch_only_dispatch_start_proof (route/dispatch_only.rs:275-289) returns Accepted without verifying submission or retrying — a drafted trigger left unsubmitted looks like 'did nothing'. Plan: tasks/agent-doc/plan-claude-dispatch-submit-proof-retry.md. Needs focused impl cycle (bounded pane-content check + 1 Enter retry in dispatch_only.rs) + live Claude-pane validation.
-- [ ] [#jbacceptwedge] [operator-install] JB plugin IPC accept-loop wedge root cause (22 unaccepted conns). Binary works around via ack-probe+file-IPC (96624f9c, installed). Plugin-side accept-loop fix + install needed for root cause; flag operator when ready.
+- [ ] [#jbacceptwedge] [operator-verify] [operator-install] JB plugin IPC accept-loop wedge root cause (22 unaccepted conns). Binary works around via ack-probe+file-IPC (96624f9c, installed). Plugin-side accept-loop fix + operator install needed for root cause. Flag operator when plugin fix ready.
 - [ ] [#queediturn] Editing agent:queue during a running turn caused churn + deleted a queued item (monsterrodholders.md). Add turn-boundary queue-edit guard / deferred-apply.
-- [ ] [#codefence-strip] agent-doc stripped a code fence on a prior run. Audit patch/exchange fence preservation; add regression.
+- [ ] [#codefence-strip] [operator-verify: repro needed] agent-doc stripped a code fence on a prior run. Need operator repro (which document/run and which fence) to fix definitively; will then audit patch/template fence-preservation and add a regression.
 <!-- /agent:backlog -->
 
 ## Review

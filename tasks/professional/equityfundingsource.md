@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -135,7 +135,12 @@ Changed paths: `tasks/professional/equityfundingsource.md` only.
 
 Commands / verification: `agent-doc preflight`, `agent-doc plan`, and `agent-doc finalize` closeout. Confidence: high. Escalation: none.
 
-### Re: Replace lender contact fields with messages — gpt-5
+### Re: Replace lender contact fields with messages — gpt-5 (HEAD)
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
 
 > **Queue prompt:**
 >
@@ -162,9 +167,15 @@ Verification:
 Commits pushed:
 - EFS repo: `4e1d612` (`Replace lender contact fields with messages`)
 - Parent repo: `a73347b80` (`Update EFS lender communication messages`)
+- EFS git status is clean after deploy.
+- Current Worker Version ID: `58325af6-676e-4aa7-8cec-5bfa84379b5f`
+- Deployed URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker deploy succeeded for `equityfundingsource`.
+- Remote D1 migration `0082_deal_interest_lender_messages.sql` applied to `equityfundingsource` with status ✅.
+- `bun run deploy:worker` completed successfully.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:b1b2999d -->
+<!-- agent:boundary:79c57839 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -172,10 +183,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Available deals page/dialog: "Borrower communication" "Communication type" label should be removed.~~
-- ~~Available deals page/dialog: If the borrower uploaded a file for a Request Document(s) email, the acutal document should appear~~
-- ~~:pushpin: Lender communication should have a "Message" flow...just like the browser communication message flow. Remove "Last contact" and "Next follow-up" fields, db columns, and logic.~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

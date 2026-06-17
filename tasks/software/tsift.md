@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -295,13 +295,36 @@ Commands/proof:
 - `corky --version`, `corky --help`, `corky gpu --help`, and `corky help transcribe`
 
 Changed paths: no repo source paths changed by me; the installed binary at `/home/brian/.cargo/bin/tsift` was replaced. Push: none, because there was no repo code commit to push. Escalation: force-disk was used after the editor IPC path repeatedly failed to prove delivery. Confidence: high for the installed tsift setup and GPU contention assessment; medium for Corky command naming because the installed binary and local source agree on GPU transcription being feature-gated, but neither exposes a literal `corky gpu` subcommand here. The linked `headroom` repo is a local-first context compression/proxy/MCP project, not a GPU model runtime: https://github.com/chopratejas/headroom
-<!-- agent:boundary:611dd233 -->
+
+### Re: GPU control pane and mid-run model swap — glm-5.2
+
+> **Queue prompt:**
+>
+> Should we have a control pane that manages the GPU resources. Reducing the model? Can the model be reduced in the middle of an agent-doc run or quickly switchout out between tsift calls?
+
+**Short answer: not a control pane — a cooperative lease registry. And yes to per-call profile pinning + a `swap` action.**
+
+**On the control pane.** The substrate already declares the right vocabulary (`LeaseMode::Exclusive/Shared/CpuOrHash`, `ConcurrencyClass`, `LocalModelLease`) but the lease is currently descriptive only — nothing acquires, holds, or enforces it. So the gap is enforcement, not modeling. For this machine (1 RTX 5090, ~31.9 GiB free, a handful of polite consumers: tsift, corky, headroom, agent-doc), a full daemon control pane is over-engineered. Daemon cost (IPC contract, lifecycle, crash recovery, preempt semantics) outweighs benefit at this scale. Right-size answer: a **cooperative GPU lease registry** — one state file (`/run/tsift/gpu-lease.json` or `~/.tsift/gpu-lease.json`) keyed by `profile_id` with `{pid, acquired_at, lease_mode, vram_baseline_mib}`; producers check before probe, stale leases (pid gone or older than TTL) are reclaimable. Cheaper than a daemon, recovers cleanly on crash, fits the single-GPU reality. Reserve the real control pane (preempt + multi-GPU scheduling) for when there is proven contention — more than 1 GPU or more than 3 simultaneous consumers. Tracked as `#gctrl1` (do) and `#gctrlIce` (icebox).
+
+**On mid-run reduction.** Two distinct capabilities, both feasible:
+
+- **Profile downgrade inside an agent-doc run** — yes. Today the 32B extractor sits at ~28.7 GiB, leaving only ~3.3 GiB; if Corky or another job needs the GPU mid-run, the agent-doc cycle should be able to drop to the 0.6B embedding profile or to the hash fallback for low-stakes phases (digest/verify/diff), then reload later. The clean shape is `#gctrl2`: a `--profile <id>` flag on tsift commands that touch the model, so the caller pins/downgrades per call without mutating global state.
+
+- **Quick swap between tsift calls** — yes for small profiles, no for the 32B. Realistic load cost on the 5090: ~2 s for `qwen3-embedding-0.6b`, ~10–30 s for `qwen3-32b-q4`. So "quickly switch out" is genuinely quick at the small end and visibly slow at the big end. `#gctrl3` adds a `tsift local-model swap --to <profile>` action (unload + existing VRAM-cleanup proof + load) so a downgrade is one command instead of two, with the cleanup gate enforced between.
+
+**Why not "reducing the model" via quantization tier steps**: that is also possible (treat `-q4`/`-q3`/`-q2` as separate profiles), but per-call profile pinning already covers the common case — you switch profile, you don't re-quantize mid-flight. Quantization tiers would just be more entries in `default_model_profiles()`; congestion-aware `status` can already rank them via `rank_profiles_for_role`. No new substrate needed.
+
+**Recommended path this cycle**: green-light `#gctrl1` (lease registry, the foundational piece), then `#gctrl2` (per-call `--profile`) and `#gctrl3` (`swap` action). Defer `#gctrlIce` (daemon + preempt + multi-GPU) until contention is proven. No code changed this turn — this is a design decision seeking your green-light before implementation.
+<!-- agent:boundary:b3b10fb2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Should we have a control pane that manages the GPU resources. Reducing the model? Can the model be reduced in the middle of an agent-doc run or quickly switchout out between tsift calls?
+- do [#gctrl1]
+- do [#gctrl2]
+- do [#gctrl3]
+- do [#gctrlice]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -310,7 +333,11 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift-md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
+- [ ] [#gctrl1] [recommended] Implement cooperative GPU lease registry in tsift-local-model: a state file (~/.tsift/gpu-lease.json or /run/tsift/gpu-lease.json) keyed by profile_id with {pid, acquired_at, lease_mode, vram_baseline_mib}, plus acquire/release/stale-reclaim helpers. Expose `tsift local-model lease acquire|release|show`. Keep it cooperative (no daemon): producers check the file before probe and reclaim leases older than a TTL.
+- [ ] [#gctrl2] [recommended] Add `--profile <id>` flag to tsift KG/semantic commands so an agent-doc cycle can pin or downgrade the model per-call. When omitted, keep current behavior (rank by free VRAM). Allows a long agent-doc run to pick a small/hash profile during low-stakes phases without changing global state.
+- [ ] [#gctrl3] [recommended] Add `tsift local-model swap --to <profile>` lifecycle action distinct from `unload`: unload current profile, run the existing VRAM-cleanup proof, then load the target profile and emit a combined LocalModelLifecycleReport. Use it to implement mid-run downgrades (qwen3-32b-q4 -> qwen3-embedding-0.6b or hash fallback) without the caller orchestrating two commands.
+- [ ] [#gctrlice] [recommended] Icebox: revisit a full GPU control-pane daemon (with preempt and multi-GPU scheduling) only when proven need — more than 1 GPU, or more than 3 concurrent GPU consumers running at the same time. Until then the cooperative lease registry (#gctrl1) is the right-size answer.
+- [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 
 ## Review

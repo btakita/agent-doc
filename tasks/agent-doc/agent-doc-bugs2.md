@@ -626,7 +626,34 @@ Confidence: high.
 Escalation: none.
 
 Note: the session exchange is large, but the queue is active, so I did not compact or pause the drain.
-<!-- agent:boundary:4add73ce -->
+Closed the `Restart on equityfundingsource.md failed` item without a new source patch.
+
+The screenshot's `project controller command `start_session` failed: controller failed to start session actor` wall matches the restart-generation/recycle class that is already fixed in current `src/agent-doc`:
+- `0539ad4c fix(start): always bump generation so route-owned start clears the CAS (#startgencas)`
+- `902b70d3 fix(start): committed actor generation is sole CAS authority (#startgenlogdrift)`
+
+Both commits are ancestors of the current source HEAD `23454615`, and `make install` was already run after `23454615`, so the installed `agent-doc 0.34.1` includes those fixes.
+
+Live checks:
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` is ok with `queue_continuation_required=false`.
+- A non-forced `agent-doc session restart-supervisor /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` did not reproduce the `start_session` failure; it refused earlier because pane `%75` is alive-busy (`current_command=agent-doc`). I did not pass `--force`.
+- `agent-doc session status ...equityfundingsource.md` reports a healthy supervisor, actor generation `269`, active controller lease, and last event `idle_queue_watch_stale_busy_reconciled`.
+
+Verification:
+- `cargo test -p agent-doc-orchestration start_after_pane_move_against_up_to_date_actor_bumps_past_cas -- --nocapture`
+- `cargo test -p agent-doc-orchestration infer_latest_generation_ignores_optimistic_log_ahead_of_actor_record -- --nocapture`
+- `agent-doc --version` => `agent-doc 0.34.1`
+- `gh run list --workflow CI --limit 2 ...`: current CI run `27716913367` for `23454615` is `in_progress`; previous run `27716137208` succeeded.
+
+Changed paths:
+- Session document only. I also removed the stray generated `###` scaffold line after `&lt;!-- /agent:queue --&gt;` because it was causing finalize to report mixed duplicate scaffold tail.
+- No source changes.
+
+Confidence: medium-high. The installed code contains the known fixes and the current non-forced live restart does not hit `start_session`, but the pane is busy, so I did not force a full live restart.
+Escalation: none.
+
+Note: the session exchange is large, but the queue is active, so I did not compact or pause the drain.
+<!-- agent:boundary:552f3845 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -684,11 +711,10 @@ A prompt was sent but not submitted. This prompt may not be from the dispatch th
 ---
 - ~~:pushpin: Opencode agent-doc lazily-rs.md running JB `Clear Session Context` does not submit ![img_44.png](img_44.png). The loop should ensure the `/new` is submitted by reading the TUI.~~
 - ~~:pushpin: agent-doc is spamming the same prompt as I type into the queue in Codex on monsterrodholders.md ![img_42.png](img_42.png).~~
-- :pushpin: Restart on equityfundingsource.md failed ![img_40.png](img_40.png)
-- :pushpin: I typed in the queue item "JB `Run Agent Doc` should have less latency to submit the prompt.", and agent-doc immediately struck it out.
+- ~~:pushpin: Restart on equityfundingsource.md failed ![img_40.png](img_40.png)~~
+- ~~:pushpin: I typed in the queue item "JB `Run Agent Doc` should have less latency to submit the prompt.", and agent-doc immediately struck it out.~~
 - :pushpin: Re: agent-doc on Codex outputs console messages that obscures the TUI: This should also apply to Claude Code...so all agent harnesses.
 <!-- /agent:queue -->
-###
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
 ---

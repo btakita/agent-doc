@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -453,13 +453,33 @@ Reopen triggers (any one): a second GPU is installed; >3 concurrent GPU consumer
 Confidence: high (defer is the correct action; building the daemon now would be the over-engineering the original recommendation warned against). No source changes; no commit beyond the session-document closeout. The pre-existing unrelated dirty files under `src/tsift` remain unstaged as before.
 
 Queue drained: `#gctrl1` (lease registry), `#gctrl2` (profile preference), `#gctrl3` (swap action), `#gctrlice` (deferred) are all closed. The RTX 5090 / Qwen3 substrate now has a complete cooperative GPU resource story without a daemon.
-<!-- agent:boundary:f2b10b54 -->
+
+### Re: Is the local model currently in use? — glm-5.2
+
+> **Queue prompt:**
+>
+> Is the local model currently in use?
+
+
+**No.** The tsift local model is not loaded or serving any call right now. Verified across five independent signals:
+
+1. **Lease registry empty** — `tsift local-model lease show --json` → `{"version":1,"leases":{}}`. No tsift caller holds any GPU profile.
+2. **No GPU compute processes** — `nvidia-smi --query-compute-apps` returned no rows. VRAM is at the desktop baseline: **179 MiB used / 31,971 MiB free** on the RTX 5090.
+3. **No provider processes running** — no `ollama`, `llama-server`, `llama_cli`, `vllm`, or qwen/ggml worker in `ps` output. `vllm` is installed at `.venv/bin/vllm` but not executing.
+4. **Port 8080 listener is JetBrains, not llama.cpp.** Traced via `/proc/*/fd`: the listener on `127.0.0.1:8080` is `IntelliJIdea2026.1/semantic-search/server/embeddings-server --model-path …/dan_100` — IntelliJ's IDE semantic-search embeddings server. It shares the llama.cpp router's default port number but is an unrelated process, and at 179 MiB total VRAM it has not loaded weights onto the GPU either.
+5. **Active code paths still use the hash fallback.** Every KG extraction goes through `HashKgExtractor`, and every semantic lookup reads pre-cached rows from `.tsift/graph.db` (no live embedder call). `tsift local-model resolve --role extract` reports `auto_ranked -> qwen3-32b-q4` (selectable, 28,692 MiB fits in 31,971 MiB free), but that is the *decision the substrate would make if invoked*, not proof of activation.
+
+So the `#gctrl1`/`#gctrl2`/`#gctrl3` substrate is installed and ready — `tsift local-model status|unload|lease|resolve|swap` all work, the lease registry is wired, the profile resolver is plumbed into `tsift semantic` and `tsift summarize --extract` — but no caller has actually instantiated a real provider yet. A local model will only be "in use" once a future change replaces `HashKgExtractor`/`HashSemanticProvider` with a provider that shells out to llama.cpp/Ollama/vLLM and acquires a lease for the duration of the call.
+
+Practical check for "is a model loaded right now?" — the cheapest live signal is `nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits`: empty output means nothing is on the GPU. The tsift-owned check is `tsift local-model lease show` (empty `leases` = no tsift holder). Combine both to distinguish "no GPU consumer at all" from "a non-tsift consumer (Corky, JetBrains, training run) is using VRAM".
+
+Confidence: high (four orthogonal measurements agree). No source changes this cycle; no commit beyond the session-document closeout. Pre-existing unrelated dirty files under `src/tsift` remain unstaged as before.
+<!-- agent:boundary:62020c92 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Is the local model currently in use?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

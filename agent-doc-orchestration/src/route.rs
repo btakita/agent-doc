@@ -66,9 +66,8 @@
 //!   live-pane submit instead of a one-shot supervisor IPC inject. Startup-window reroutes,
 //!   including tracked Codex/OpenCode `/clear` restarts, remain prompt-gated and fail closed
 //!   before sending input while the harness is redrawing or busy.
-//!   Hook-visible Codex dispatch-only reroutes still require routed submit proof after the
-//!   pane accepts the reopen; acceptance without hook-backed dispatch-start proof is terminal
-//!   for ready actors as well as startup-window reroutes.
+//!   Hook-visible Codex and pane-state OpenCode proof remain stronger telemetry, but
+//!   dispatch-only success is the shared tmux text+`Enter` acceptance path for all harnesses.
 //! - **`await_idle(file, debounce)`**: Polls every 100ms. When an editor typing
 //!   indicator is present it is authoritative — an idle indicator dispatches
 //!   immediately (the editor already debounced; its pre-route save bumps mtime),
@@ -164,9 +163,9 @@ use crate::flow::routed_reopen::{
     AuthoritativePromptReadyBarrierFacts, AuthoritativeRuntimeFacts, BusyPaneAutoFixFacts,
     BusyPaneAutoFixOutcome, DegradedAuthoritativeActorDirectSubmit,
     DegradedAuthoritativeActorFacts, DirectPaneSubmitStatus as CommandDispatchStatus,
-    DispatchOnlyProofOutcomeFacts, DispatchOnlyProofPolicyFacts, DispatchOnlyReopenDelivery,
-    DispatchStartProofDecision, DispatchStartProofFacts, PromptReadyBarrierDecision, ReopenMode,
-    RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason, StartingActorLogFacts,
+    DispatchOnlyProofOutcomeFacts, DispatchOnlyReopenDelivery, DispatchStartProofDecision,
+    DispatchStartProofFacts, PromptReadyBarrierDecision, ReopenMode, RoutedDispatchStartProof,
+    RoutedReopenFacts, RoutedReopenGuardReason, StartingActorLogFacts,
     accepted_only_dispatch_start_log_message, accepted_only_dispatch_start_refusal_message,
     actor_dispatch_blocker_reason, actor_recovery_hint,
     authoritative_actor_dispatch_guard_reason as flow_authoritative_actor_dispatch_guard_reason,
@@ -6523,7 +6522,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         };
 
         let issue = route_submit_issue_message(facts)
-            .expect("accepted-only Codex proof should be an issue");
+            .expect("required dispatch-start proof absence should be an issue");
         assert!(
             issue.contains("issue=accepted_without_dispatch_start_proof"),
             "{issue}"

@@ -323,26 +323,12 @@ pub fn classify_dispatch_start_proof(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DispatchOnlyProofPolicyFacts<'a> {
-    pub harness_binary: &'a str,
-    pub codex_dispatch_start_tracking_enabled: bool,
+pub fn dispatch_only_dispatch_start_proof_required() -> bool {
+    false
 }
 
-pub fn dispatch_only_dispatch_start_proof_required(
-    facts: DispatchOnlyProofPolicyFacts<'_>,
-) -> bool {
-    match facts.harness_binary {
-        "codex" => false,
-        "opencode" => false,
-        _ => false,
-    }
-}
-
-pub fn should_print_dispatch_only_unproven_progress(
-    facts: DispatchOnlyProofPolicyFacts<'_>,
-) -> bool {
-    facts.harness_binary != "codex" || !facts.codex_dispatch_start_tracking_enabled
+pub fn should_print_dispatch_only_unproven_progress() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1432,30 +1418,8 @@ mod tests {
 
     #[test]
     fn dispatch_only_proof_policy_accepts_enter_delivery_for_all_harnesses() {
-        assert!(!dispatch_only_dispatch_start_proof_required(
-            DispatchOnlyProofPolicyFacts {
-                harness_binary: "codex",
-                codex_dispatch_start_tracking_enabled: true,
-            }
-        ));
-        assert!(!dispatch_only_dispatch_start_proof_required(
-            DispatchOnlyProofPolicyFacts {
-                harness_binary: "codex",
-                codex_dispatch_start_tracking_enabled: false,
-            }
-        ));
-        assert!(!dispatch_only_dispatch_start_proof_required(
-            DispatchOnlyProofPolicyFacts {
-                harness_binary: "opencode",
-                codex_dispatch_start_tracking_enabled: false,
-            }
-        ));
-        assert!(!dispatch_only_dispatch_start_proof_required(
-            DispatchOnlyProofPolicyFacts {
-                harness_binary: "claude",
-                codex_dispatch_start_tracking_enabled: false,
-            }
-        ));
+        assert!(!dispatch_only_dispatch_start_proof_required());
+        assert!(should_print_dispatch_only_unproven_progress());
     }
 
     #[test]

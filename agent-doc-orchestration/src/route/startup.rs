@@ -3031,8 +3031,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn resolve_or_create_pane_dispatch_only_fails_closed_when_live_submit_has_no_codex_hook_proof()
-    {
+    fn resolve_or_create_pane_dispatch_only_accepts_live_submit_without_codex_hook_proof() {
         use std::sync::{
             Arc, Mutex,
             atomic::{AtomicBool, Ordering},
@@ -3115,7 +3114,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         })
         .unwrap();
 
-        let err = resolve_or_create_pane_dispatch_only(
+        let pane = resolve_or_create_pane_dispatch_only(
             &iso,
             &doc,
             None,
@@ -3126,15 +3125,13 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect_err("dispatch-only reroute must fail closed when hooks are visible but Codex never proves consumption");
-        assert!(
-            err.to_string()
-                .contains("only pane-input acceptance proof was available"),
-            "unexpected error: {err:#}"
+        .expect(
+            "dispatch-only reroute should accept shared Enter delivery without Codex hook proof",
         );
+        assert_eq!(pane, actor_pane);
         assert!(
             injects.lock().unwrap().is_empty(),
-            "ready authoritative dispatch-only path should stay on direct pane submit even when it later fails closed"
+            "ready authoritative dispatch-only path should stay on direct pane submit"
         );
         assert!(
             !restart_called.load(Ordering::Relaxed),

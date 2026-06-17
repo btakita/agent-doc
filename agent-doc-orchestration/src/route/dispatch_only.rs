@@ -222,9 +222,7 @@ pub(crate) fn dispatch_only_send_reopen(
             harness,
             SupervisorIpcDispatchOptions {
                 await_start_proof: true,
-                print_unproven_progress: should_print_dispatch_only_unproven_progress(
-                    file, harness,
-                ),
+                print_unproven_progress: should_print_dispatch_only_unproven_progress(),
             },
         )?,
         DispatchOnlyReopenDelivery::DirectPaneSubmit => dispatch_routed_reopen_with_mode(
@@ -233,7 +231,7 @@ pub(crate) fn dispatch_only_send_reopen(
             &dispatch_pane,
             file_path,
             harness,
-            should_print_dispatch_only_unproven_progress(file, harness),
+            should_print_dispatch_only_unproven_progress(),
         )?,
     };
     require_dispatch_only_dispatch_start_proof(
@@ -266,24 +264,12 @@ pub(crate) fn dispatch_only_send_reopen(
     Ok(dispatch_pane)
 }
 
-pub(crate) fn should_print_dispatch_only_unproven_progress(
-    file: &Path,
-    harness: &HarnessConfig,
-) -> bool {
-    flow_should_print_dispatch_only_unproven_progress(DispatchOnlyProofPolicyFacts {
-        harness_binary: harness.binary.as_str(),
-        codex_dispatch_start_tracking_enabled: codex_dispatch_start_tracking_enabled(file),
-    })
+pub(crate) fn should_print_dispatch_only_unproven_progress() -> bool {
+    flow_should_print_dispatch_only_unproven_progress()
 }
 
-pub(crate) fn dispatch_only_dispatch_start_proof_required(
-    file: &Path,
-    harness: &HarnessConfig,
-) -> bool {
-    flow_dispatch_only_dispatch_start_proof_required(DispatchOnlyProofPolicyFacts {
-        harness_binary: harness.binary.as_str(),
-        codex_dispatch_start_tracking_enabled: codex_dispatch_start_tracking_enabled(file),
-    })
+pub(crate) fn dispatch_only_dispatch_start_proof_required() -> bool {
+    flow_dispatch_only_dispatch_start_proof_required()
 }
 
 pub(crate) fn require_dispatch_only_dispatch_start_proof(
@@ -293,7 +279,7 @@ pub(crate) fn require_dispatch_only_dispatch_start_proof(
     delivery: DispatchOnlyReopenDelivery,
     dispatch_start: RoutedDispatchStartProof,
 ) -> Result<()> {
-    let proof_required = dispatch_only_dispatch_start_proof_required(file, harness);
+    let proof_required = dispatch_only_dispatch_start_proof_required();
     let classification = classify_dispatch_start_proof(DispatchStartProofFacts {
         proof: dispatch_start,
         dispatch_start_proof_required: proof_required,
@@ -775,7 +761,7 @@ mod tests {
         assert!(message.contains("unblocker=wait_for_dispatch_ready_prompt"));
     }
     #[test]
-    fn dispatch_only_codex_with_visible_hooks_suppresses_optimistic_unproven_progress() {
+    fn dispatch_only_progress_policy_is_harness_neutral() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
 
@@ -786,16 +772,16 @@ mod tests {
         std::fs::write(&doc, "# Session\n").unwrap();
 
         assert!(
-            !should_print_dispatch_only_unproven_progress(&doc, &HarnessConfig::codex()),
-            "dispatch-only Codex reroutes with visible hooks should stay quiet unless stronger hook proof arrives"
+            should_print_dispatch_only_unproven_progress(),
+            "dispatch-only reroutes report accepted-delivery progress the same way for all harnesses"
         );
         assert!(
-            should_print_dispatch_only_unproven_progress(&doc, &HarnessConfig::claude()),
-            "non-Codex reroutes still may report command-accepted fallback progress"
+            should_print_dispatch_only_unproven_progress(),
+            "Codex hook visibility does not change the dispatch-only progress policy"
         );
     }
     #[test]
-    fn dispatch_only_codex_with_visible_hooks_accepts_enter_delivery() {
+    fn dispatch_only_codex_accepts_enter_delivery_even_with_visible_hooks() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
 
@@ -812,7 +798,7 @@ mod tests {
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
             RoutedDispatchStartProof::CommandAcceptedOnly,
         )
-        .expect("hook-visible Codex dispatch-only accepts the shared Enter delivery path");
+        .expect("Codex dispatch-only accepts the shared Enter delivery path");
 
         let message = route_dispatch_only_sent_log_message(
             &doc,
@@ -882,7 +868,7 @@ mod tests {
         );
     }
     #[test]
-    fn dispatch_only_submit_proof_gate_allows_non_codex_and_hook_proven_codex() {
+    fn dispatch_only_submit_proof_gate_accepts_enter_delivery_for_all_harnesses() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
 
@@ -892,23 +878,20 @@ mod tests {
         std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        require_dispatch_only_dispatch_start_proof(
-            &doc,
-            "%4",
-            &HarnessConfig::claude(),
-            DispatchOnlyReopenDelivery::DirectPaneSubmit,
-            RoutedDispatchStartProof::CommandAcceptedOnly,
-        )
-        .expect("Claude currently has accepted-only semantics");
-
-        require_dispatch_only_dispatch_start_proof(
-            &doc,
-            "%4",
-            &HarnessConfig::codex(),
-            DispatchOnlyReopenDelivery::DirectPaneSubmit,
-            RoutedDispatchStartProof::HookPromptMatched,
-        )
-        .expect("hook-proven Codex dispatch-only submit should pass");
+        for harness in [
+            HarnessConfig::codex(),
+            HarnessConfig::opencode(),
+            HarnessConfig::claude(),
+        ] {
+            require_dispatch_only_dispatch_start_proof(
+                &doc,
+                "%4",
+                &harness,
+                DispatchOnlyReopenDelivery::DirectPaneSubmit,
+                RoutedDispatchStartProof::CommandAcceptedOnly,
+            )
+            .expect("dispatch-only accepted delivery should pass for every harness");
+        }
     }
     #[test]
     fn dispatch_only_sent_log_marks_claude_accepted_only_scope() {

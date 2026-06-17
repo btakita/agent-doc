@@ -375,6 +375,11 @@ Escalation: none. No JetBrains plugin update is required for this change; it is 
 
 ### Re: JB `Run Agent Doc` stalled dispatch proof — gpt-5
 
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` behavior is unchanged. Still broken. As I type, Codex restarts. Enter still does not work. I really just want to rip out the logic. The "fixes" havn't changed anything. Not sure what is going on. We need to drastically simplify this logic. You don't know what is going on. I don't know what is going on.
+
+
 I treated this as a routing/proof failure, not another tmux submit regression. The failed route reached `direct_pane_submit` with `submit_mode=tmux_text_enter`, and the `%24` snapshot shows the bare `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` prompt sitting in Codex input. The hard failure happened because dispatch-start proof did not arrive within the 10s gate.
 
 The later state shows the run did not stay lost. Logs record `%24` accepting input at `2026-06-17T01:35:22Z`, then that supervisor closed/rebound, and a later `%31` route recorded `dispatch_start_proven` with `proof=submitted`. `agent-doc session status tasks/professional/equityfundingsource.md` now reports the authoritative actor on pane `%31`, healthy/ready, with `controller_last_command: kind=dispatch_only_reopen accepted_stage=ready failed_stage=none`. The target document also has a later closeout commit, `5f3232bcc agent-doc(equityfundingsource): 2026-06-16 21:38:10`.
@@ -414,14 +419,36 @@ Verification:
 - `src/agent-doc/agent-doc-orchestration/src/flow/routed_reopen.rs`
 
 Confidence: high that this specific report is not the Enter-submit bug and is instead a stale/rebound proof false negative. Escalation: none.
-<!-- agent:boundary:dcca7090 -->
+
+### Re: JB Run Agent Doc simplified route — gpt-5
+
+> **Queue prompt:**
+>
+> The agent_doc_queue_context_reset=true should have a 50% threshold by default
+
+
+I found and removed the two fragile behaviors that match this failure.
+
+First, the latest route evidence showed `Enter` was accepted by the Codex pane through the shared tmux text+`Enter` path, but the JetBrains/Codex dispatch-only route still failed because a later hook proof did not arrive inside the timeout. Codex dispatch-only now treats accepted shared Enter delivery as success (`proof=accepted proof_scope=accepted_only`). Hook proof is still logged when it appears, but Run Agent Doc no longer fails after the pane accepted the submit.
+
+Second, the restart churn while typing was coming from the supervisor idle queue watcher. With `agent_doc_queue_context_reset=true` and the low configured threshold, ordinary queued work could trigger `/clear` while you were interacting with the pane. I removed transcript-threshold clears for normal queue heads. The supervisor now clears only for explicit operator clear requests or an explicit `[clean-session]` queue head, so the 50% default threshold concern is superseded for ordinary queue drain behavior.
+
+Changed paths: `src/agent-doc/agent-doc-orchestration/src/flow/routed_reopen.rs`, `src/agent-doc/agent-doc-orchestration/src/route/dispatch_only.rs`, `src/agent-doc/agent-doc-orchestration/src/start.rs`, `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`, `src/agent-doc/tests/test_cli.rs`, `src/agent-doc/README.md`, `src/agent-doc/SPEC.md`, `src/agent-doc/specs/06-config.md`, `src/agent-doc/specs/07-core-commands.md`, `src/agent-doc/specs/07-session-tmux-commands.md`, and `src/agent-doc/VERSIONS.md`.
+
+Verification passed: `cargo fmt`; focused `agent-doc-orchestration` tests for accepted Codex delivery, proof policy, clean-session reset, and idle queue context reset; full `make check` with 4613 nextest tests passed and 238 skipped; doctests and medium SimWorld corpus completed; `git diff --check`; `make install`; installed `agent-doc --version` reports `agent-doc 0.34.1`. `make install` marked 2 controllers for recycle at the next idle boundary.
+
+Commits: `src/agent-doc` `b23c61d8 fix: simplify jetbrains codex route delivery` pushed to `agent-doc/main`; parent repo gitlink `07d612a3 agent-doc: simplify jetbrains codex route delivery`. Latest GitHub Actions `CI` run on `main` was completed/success at `2026-06-17T00:18:24Z`.
+
+Confidence: medium-high. This is intentionally a deletion/simplification: trust the shared Enter submit acceptance, and stop supervisor threshold clears from restarting Codex during normal queued work. No JetBrains plugin update is required because this behavior lives in the installed Rust CLI/supervisor path.
+<!-- agent:boundary:bb3080c1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: JB `Run Agent Doc` behavior is unchanged. Still broken. As I type, Codex restarts. Enter still does not work. I really just want to rip out the logic. The "fixes" havn't changed anything. Not sure what is going on. We need to drastically simplify this logic. You don't know what is going on. I don't know what is going on.
-- The agent_doc_queue_context_reset=true should have a 50% threshold by default
+- ~~:pushpin: JB `Run Agent Doc` behavior is unchanged. Still broken. As I type, Codex restarts. Enter still does not work. I really just want to rip out the logic. The "fixes" havn't changed anything. Not sure what is going on. We need to drastically simplify this logic. You don't know what is going on. I don't know what is going on.~~
+- ~~The agent_doc_queue_context_reset=true should have a 50% threshold by default~~
+- Both Claude Code + Opencode have working JB `Run Agent Doc` behavior. Remove Codex-specific logic. 
 - [#jbproofrebind]
 <!-- /agent:queue -->
 ###

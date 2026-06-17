@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,90 @@ completed
 Compacted content:
 - Archived 3 response topic(s): Secure Message Attachments + Deploy; Add rwaldman100+admin@gmail.com as an admin account on production.; Closeout Repair
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): email reply threading + deploy; deploy; lender available deal ...
-<!-- agent:boundary:b7ddf54c -->
+- Confidence: high.
+- Escalation: none.
+- Existing unrelated parent working-tree changes were left untouched.
+- I did not push the parent superproject branch because it was already ahead of `origin/main` by unrelated commits before this task, and pushing it would include that unrelated history. The EFS application code was pushed and deployed.
+- Worker deployed: `https://equityfundingsource.brian-takita.workers.dev`, version `141c0ed8-9a43-4b2d-85e2-ea36d3a355a1`.
+- Remote D1 migration applied: `0084_deal_interest_lender_message_attachments.sql`.
+- Deploy command: `bun run deploy:worker`.
+- Parent submodule-pointer commit: `ec5be47dc agent-doc(equityfundingsource): lender conversation uploads`.
+- EFS submodule commit: `aa572c4 feat: support lender conversation uploads`, pushed to `origin/main`.
+- Live smoke check passed: `curl -I 'https://equityfundingsource.brian-takita.workers.dev/login?role=investor'` returned HTTP 200.
+- `gh run list --workflow CI --limit 1` in both the superproject and EFS submodule reported no workflow named `CI`; `gh workflow list` in the EFS submodule returned no workflows.
+- `make check` passed at the superproject root.
+- `bun run check` passed in `src/equityfundingsource-dev`: 768 tests passed plus worker build.
+- `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts tests/borrower-messages.test.ts` passed: 128 passed, 0 failed.
+- Updated the PRD and tests to cover the backend, migration, document storage, routes, and UI hooks.
+- Updated investor and admin conversation UIs with file pickers, selected-file chips, attachment rendering, and attachment-capable sends.
+- Added the `deal_interest_lender_message_attachments` migration and updated message summaries to include attachments.
+- Mounted `/api/lender-message-attachments/:attachment_id/download` and updated investor/admin lender message POST handlers to accept JSON or multipart `FormData`.
+- Added shared D1/R2-backed lender-message attachment support with upload guards, document records, attachment rows, and guarded download links.
+- `tests/admin-investor-pipeline.test.ts`
+- `tests/investor-portal-e2e.test.ts`
+- `prds/equity-funding-source-lending-portal-prd.md`
+- `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `lib/ui--browser--efs/portal/admin/deal_detail.tsx`
+- `lib/ui--browser--efs/portal/investor/deal_detail.tsx`
+- `lib/ui--browser--efs/portal/investor/available_deals.tsx`
+- `app/equityfundingsource/lib/admin/repo.ts`
+- `app/equityfundingsource/lib/admin/investor_management/index.ts`
+- `app/equityfundingsource/lib/investor/routes.ts`
+- `app/equityfundingsource/lib/investor/deal_marketplace/index.ts`
+- `app/equityfundingsource/migrations/0084_deal_interest_lender_message_attachments.sql`
+- `app/equityfundingsource/lib/deal-interest-lender-messages.ts`
+
+### Re: Lender Conversation Uploads + Deploy — gpt-5
+
+> **Queue prompt:**
+>
+> The lender "Available deal conversation" component should support uploads ![img_27.png](img_27.png). deploy
+
+
+Implemented and deployed lender conversation uploads for the Available deal conversation surface.
+
+Changed paths:
+- `app/equityfundingsource/lib/deal-interest-lender-messages.ts`
+- `app/equityfundingsource/migrations/0084_deal_interest_lender_message_attachments.sql`
+- `app/equityfundingsource/lib/investor/deal_marketplace/index.ts`
+- `app/equityfundingsource/lib/investor/routes.ts`
+- `app/equityfundingsource/lib/admin/investor_management/index.ts`
+- `app/equityfundingsource/lib/admin/repo.ts`
+- `lib/ui--browser--efs/portal/investor/available_deals.tsx`
+- `lib/ui--browser--efs/portal/investor/deal_detail.tsx`
+- `lib/ui--browser--efs/portal/admin/deal_detail.tsx`
+- `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `prds/equity-funding-source-lending-portal-prd.md`
+- `tests/investor-portal-e2e.test.ts`
+- `tests/admin-investor-pipeline.test.ts`
+
+What changed:
+- Added shared D1/R2-backed lender-message attachment support with upload guards, document records, attachment rows, and guarded download links.
+- Mounted `/api/lender-message-attachments/:attachment_id/download` and updated investor/admin lender message POST handlers to accept JSON or multipart `FormData`.
+- Added the `deal_interest_lender_message_attachments` migration and updated message summaries to include attachments.
+- Updated investor and admin conversation UIs with file pickers, selected-file chips, attachment rendering, and attachment-capable sends.
+- Updated the PRD and tests to cover the backend, migration, document storage, routes, and UI hooks.
+
+Verification:
+- `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts tests/borrower-messages.test.ts` passed: 128 passed, 0 failed.
+- `bun run check` passed in `src/equityfundingsource-dev`: 768 tests passed plus worker build.
+- `make check` passed at the superproject root.
+- `gh run list --workflow CI --limit 1` in both the superproject and EFS submodule reported no workflow named `CI`; `gh workflow list` in the EFS submodule returned no workflows.
+- Live smoke check passed: `curl -I 'https://equityfundingsource.brian-takita.workers.dev/login?role=investor'` returned HTTP 200.
+
+Commit / deploy:
+- EFS submodule commit: `aa572c4 feat: support lender conversation uploads`, pushed to `origin/main`.
+- Parent submodule-pointer commit: `ec5be47dc agent-doc(equityfundingsource): lender conversation uploads`.
+- Deploy command: `bun run deploy:worker`.
+- Remote D1 migration applied: `0084_deal_interest_lender_message_attachments.sql`.
+- Worker deployed: `https://equityfundingsource.brian-takita.workers.dev`, version `141c0ed8-9a43-4b2d-85e2-ea36d3a355a1`.
+
+Notes:
+- I did not push the parent superproject branch because it was already ahead of `origin/main` by unrelated commits before this task, and pushing it would include that unrelated history. The EFS application code was pushed and deployed.
+- Existing unrelated parent working-tree changes were left untouched.
+- Escalation: none.
+- Confidence: high.
+<!-- agent:boundary:3470b5c9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +129,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The lender "Available deal conversation" component should support uploads ![img_27.png](img_27.png). deploy
 <!-- /agent:queue -->
 
 ## Backlog

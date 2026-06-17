@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -39,7 +39,29 @@ queue: start
 Compacted content:
 - Archived 3 response topic(s): #next-steps to fix lazily bugs; do #lzstr0mframe; do #lzstr0mpolldrive
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:2ffc24f1 -->
+
+### Re: #advance-review — review triage, 2 actionable advances filed — glm-5.2
+
+> **Queue prompt:**
+>
+> #advance-review
+
+Went through all four `[operator-drive]` review items. **Two have completed their agent-doable slices** (no new work to file — adding items just to add them would violate "complete over gate"); **two have genuine agent-doable advances** that move the operator gate closer to executable.
+
+**`#kb9b` (lazily-py v0.11.0 publish) — agent-doable slice complete, no new item.** The SHIP-STOPPER `#lzpysigfix` is fixed (commit `30907ea`), artifacts rebuilt in `src/lazily-py/dist/` (`lazily-0.11.0-{whl,tar.gz}`, confirmed present), twine check passed, fresh-venv install round-trip verified. Every remaining step (`tag v0.11.0 + push`, `gh release create`, `twine upload`) requires the PyPI token + browser/passkey 2FA — genuinely operator-only. lazily-py has no WebRTC/SCTP layer so the `#lzstr0mframe`/`#lzstr0mpolldrive` class doesn't apply. Nothing to file.
+
+**`#kabc` (LinkedIn post + first comment) — agent-doable slice complete, no new item.** Main post is published and repaired (Corky edit applied, mail commit `07a9ea1`, superproject gitlink `e7e0b08c1`). The remaining operator follow-up is a single `corky linkedin comment <published-file> <comment-body>` from the already-drafted `mail/drafts/linkedin/2026-06-16-lazily-architecture.md`. One operator command; no agent-doable advance.
+
+**`#h6qb` (live two-host WebRTC e2e) — agent-doable slice done; filed `#lzwebrtcrunbook` to advance the gate.** `#lzwebrtcwire` is DONE (localhost handshake covered by `tests/webrtc_signaling.rs`). With `#lzstr0mframe` (silent frame loss) and `#lzstr0mpolldrive` (send_to error surfacing) just landed this session, the networked backend is meaningfully more reliable for the live run. The remaining gate is a live two-host/NAT run through the deployed `#yxjw` Worker (operator-only). **`#lzwebrtcrunbook`** advances the gate by writing the operator runbook (two-host setup, exact commands, expected output, NAT troubleshooting, proof capture) so the live run is executable in one pass instead of improvised. `#h6qb` stays `[operator-drive]` — the runbook doesn't satisfy it.
+
+**`#xccx` (Holons integration) — gate real; filed `#lzholonsscan` to sharpen the questions.** Phase 0 is blocked on Steve Melville answering 7 OPEN QUESTIONS. **But the `evomimic/map-holons` repo has been actively evolving** since the original discovery phase (commits through 2026-06-15, 2 days ago): DanceV2 command ingress (PRs #547/#549/#545), inverse relationship persistence + HasInverse materialization, CollectionType schema, commit pass 2 relationship resolution, command contract alignment PRO1/PRO2. Several of these touch the same surface as the OPEN QUESTIONS (write/conflict model, holon↔node/edge mapping, holon identity). **`#lzholonsscan`** [recommended] re-scans the public commits and updates `plan-map-holons-integration.md` with a dated re-scan section, recording per-question: answered-by-code / sharpened / still-needs-Steve. Doesn't unblock `#xccx` alone, but shrinks the surface Steve has to answer.
+
+**Preflight warning reviewed:** `semantic_completion_match` on `#h6qb` flags that `#lzwebrtcwire` is done — true, but the review item's *remaining* work is the live two-host run, which is correctly `[operator-drive]`. Gate is real; `#h6qb` stays open. The `stale_install` warning (cdylib predates `cc79c412`) is the recurring IPC/supervisor staleness — explains the `IPC proof insufficient` recoveries this session. Recommend `make install` in `src/agent-doc` before the next managed cycle.
+
+**Backlog (priority order):** `#lzwebrtcrunbook` (concrete operator-enablement for the next live gate) → `#lzholonsscan` [recommended] (sharpen #xccx questions for Steve). Both are ready for `do #id` dispatch; neither is auto-implemented here (the `#advance-review` preset's task is to identify work, not execute it).
+
+**Top of backlog: `#lzwebrtcrunbook`.**
+<!-- agent:boundary:6f68f868 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,12 +70,14 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- #advance-review
+- do [#lzwebrtcrunbook]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzwebrtcrunbook] #lzwebrtcrunbook=Advance #h6qb: write operator runbook for the live two-host/NAT WebRTC e2e run against the deployed #yxjw signaling Worker. Cover (a) two-host setup (signaling Worker URL + two peers on different hosts/NATs), (b) exact commands using offer_to_peer/answer_next_offer against the live Worker (cite tests/webrtc_signaling.rs as the localhost template), (c) expected output + timing (wait_open deadline, burst frame expectations post-#lzstr0mframe), (d) troubleshooting for common NAT failures (ICE candidate exchange, symmetric NAT, firewall), (e) what to capture as proof of the live run. Output: tasks/software/runbook-lazily-webrtc-live-e2e.md. Reduces operator friction and makes the live gate executable in one pass. NOTE: #h6qb itself stays [operator-drive] gated — the runbook advances the gate, does not satisfy it.
+- [ ] [#lzholonsscan] [recommended] #lzholonsscan=Advance #xccx: re-scan evomimic/map-holons recent commits (active through 2026-06-15) to refine the 7 OPEN QUESTIONS in tasks/software/plan-map-holons-integration.md. Relevant recent themes that did not exist at the original #xccx discovery phase: DanceV2 command ingress (PRs #547/#549/#545 — addresses the write/conflict-model + transport questions), inverse relationship persistence + HasInverse materialization (addresses holon↔node/edge mapping), CollectionType schema (addresses holon identity), commit pass 2 relationship resolution, command contract alignment PRO1/PRO2 (wire-domain binding). For each question, record: answered-by-code / sharpened / still-needs-Steve. Output: update plan-map-holons-integration.md with a dated re-scan section. Does NOT unblock #xccx on its own (Steve input still needed for spec reference + preferred transport), but shrinks the surface he has to answer.
 <!-- /agent:backlog -->
 
 ## Review

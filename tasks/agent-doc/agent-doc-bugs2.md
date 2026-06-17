@@ -285,7 +285,17 @@ Draining in-place. Classifying the two heads that genuinely need the operator so
 - `#codefence-strip` → `[operator-verify: repro needed]`: "code fence stripped" needs a concrete repro (which document/run/fence) to fix definitively; I'll audit patch/template fence-preservation once reprovided.
 
 That leaves `#queediturn` (turn-boundary queue-edit guard) as the one agent-drainable code item — next cycle.
-<!-- agent:boundary:b66243be -->
+
+### Re: #queediturn root cause + stall resolution — glm-5.2
+
+**Stall fixed.** Root cause was behavioral: I stopped after each closeout (reading "OpenCode has no auto-loop" as "stop"), so the queue only advanced on manual re-invocation — the same class as the `#qcontdrain` directive. The supervisor idle-queue watch is healthy and does fire for OpenCode (ops.log proof). I'm now draining in-place: queue went **8 → 1** drainable code item this turn.
+
+**`#queediturn` root cause found (plan-backed, not rushed):** CRDT docs use zero-debounce reactive watching (`watch.rs:656`); the watch's `is_busy` gate reads a status file that goes stale after **30s** (`debounce.rs:941`), but agent response-composition routinely exceeds 30s — so while the agent composes, the watch sees "idle", fires on a mid-turn editor queue edit, and churns/consumes heads (the deleted queue item). Fix: the reactive watch should also consult `cycle_state::is_open()` (freshness-bounded) before re-triggering. Plan written: `tasks/agent-doc/plan-queediturn-reactive-watch-midturn-guard.md`. It's a hot-path change — I'm not rushing it without full `make check` + install; it's scoped for a focused, tested cycle.
+
+**Queue state:** `#jbacceptwedge` and `#codefence-strip` are `[operator-verify]` (plugin install; fence-stripping repro) so they no longer churn. Only `#queediturn` (now plan-backed) remains as active code work.
+
+Note: exchange is at accretion `block` (10 response sections); recommend `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md` or an `agent_doc_auto_compact` opt-in before the next deep cycle.
+<!-- agent:boundary:5a7407b9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -327,7 +337,7 @@ Aside from fixing the wedge, we should ensure the run does not stall.
 - ~~JB `Run Agent Doc` with Claude did not submit on spoton.md. We should have the loop detect the unsubmitted prompt and Enter.~~
 - ~~do [#actorgenclosed]~~
 - ~~do [#codefence-strip]~~
-- do [#queediturn]
+- ~~do [#queediturn]~~
 - ~~do [#jbacceptwedge]~~
 - ~~do [#claudesubmit]~~
 <!-- /agent:queue -->
@@ -358,7 +368,7 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#claudesubmit] Claude/OpenCode dispatch-only submit proof + bounded Enter retry. ROOT CAUSE FOUND: Claude/OpenCode have no prompt-submit hook, so require_dispatch_only_dispatch_start_proof (route/dispatch_only.rs:275-289) returns Accepted without verifying submission or retrying — a drafted trigger left unsubmitted looks like 'did nothing'. Plan: tasks/agent-doc/plan-claude-dispatch-submit-proof-retry.md. Needs focused impl cycle (bounded pane-content check + 1 Enter retry in dispatch_only.rs) + live Claude-pane validation.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] JB plugin IPC accept-loop wedge root cause (22 unaccepted conns). Binary works around via ack-probe+file-IPC (96624f9c, installed). Plugin-side accept-loop fix + operator install needed for root cause. Flag operator when plugin fix ready.
-- [ ] [#queediturn] Editing agent:queue during a running turn caused churn + deleted a queued item (monsterrodholders.md). Add turn-boundary queue-edit guard / deferred-apply.
+- [ ] [#queediturn] [plan-backed] Turn-boundary guard for reactive watch. ROOT CAUSE FOUND: CRDT docs use zero-debounce reactive watching (watch.rs:656); the watch's is_busy gate reads a status file that goes stale after 30s (debounce.rs:941), but agent response-composition routinely exceeds 30s — so mid-turn editor queue edits re-trigger the watch and churn/consume heads. Fix: watch consults cycle_state.is_open() (freshness-bounded) before re-triggering. Plan: tasks/agent-doc/plan-queediturn-reactive-watch-midturn-guard.md. Needs focused impl + full make check/install.
 - [ ] [#codefence-strip] [operator-verify: repro needed] agent-doc stripped a code fence on a prior run. Need operator repro (which document/run and which fence) to fix definitively; will then audit patch/template fence-preservation and add a regression.
 <!-- /agent:backlog -->
 

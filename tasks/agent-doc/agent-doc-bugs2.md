@@ -401,7 +401,19 @@ Changed files: `agent-doc-orchestration/src/harness.rs`, `agent-doc-orchestratio
 Verification passed: `cargo fmt`; focused `cargo test -p agent-doc-orchestration is_tui_harness -- --nocapture`; focused `cargo test -p agent-doc-orchestration route_owned_start_status_logs_without_printing_by_default -- --nocapture`; `git diff --check`; full `make check` with 4,636 nextest tests plus doctests and medium simulation; and `make install`, which installed `agent-doc 0.34.1` plus the FFI library and marked two controllers for idle recycle.
 
 Pushed: `btakita/agent-doc` `560f7b49` (`fix: redirect codex supervisor stderr`) and parent gitlink commit `00c63c1a6` (`agent-doc: redirect codex supervisor stderr`), with root HEAD now recording `src/agent-doc` at `560f7b49`. Agent-doc CI run `27711235635` is in progress; the parent repo has no workflow named `CI`.
-<!-- agent:boundary:22bc1c70 -->
+
+### Re: agent-doc sent a prompt to Codex (does this with other models too) while a task was running ![img_39.png](img_39.png) — gpt-5
+
+Fixed and shipped.
+
+The screenshot showed Codex’s `Waiting for background terminal (... esc to interrupt)` state while `agent-doc ...` had been typed into the composer. Codex can show an input prompt during a background terminal run, but text there is queued, not dispatched. The route and idle-queue paths already share `HarnessConfig::dispatch_blocker_reason`; I added that background-terminal banner as `active codex turn` evidence so both paths refuse injection until the background terminal finishes.
+
+Changed files: `agent-doc-orchestration/src/harness.rs`, `specs/supervisor.md`, `VERSIONS.md`.
+
+Verification passed: `cargo fmt`; `cargo test -p agent-doc-orchestration has_busy_cue_detects_codex_background_terminal_with_idle_prompt -- --nocapture`; `git diff --check`; full `make check` with 4,637 nextest tests plus doctests and medium simulation; `make install` installed `agent-doc 0.34.1` and FFI library and marked two controllers for idle recycle. The related live tmux route regression `wait_for_agent_ready_rejects_codex_queue_message_footer` is still ignored outside `make tmux-ci`.
+
+Pushed: `btakita/agent-doc` `34248761` (`fix: block codex background terminal dispatch`) and parent repo `33b6ff57f` recording `src/agent-doc` at `34248761`. Agent-doc CI run `27711755486` is in progress; the parent repo has no workflow named `CI`.
+<!-- agent:boundary:15744008 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -134,14 +134,37 @@ The merge-artifact cycle hit a captured-response recovery path. The document is 
 I am treating that as queue churn, not as completed work. I captured the skipped OpenCode Clear Session Context issue as backlog item `#opencode-enter`, and the remaining JetBrains File Cache Conflict issue as backlog item `#jb-fcc`. The existing Codex dispatch-proof follow-up is already captured as `#cdxproof`.
 
 For the merge-artifact item itself, the live document is clean: the search found no conflict markers or malformed patchback remnants. No repo code changed in this repair cycle. Commands run: `agent-doc write --commit`, `agent-doc session-check`, `sed`, `git log`, `agent-doc write --help`, and this repair write. Verification is the committed write plus session-check.
-<!-- agent:boundary:fd2e3fb4 -->
+
+### Re: JB Clear/Run Agent Doc proof and FCC diagnostics — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Clear Session Context` did not submit.
+
+
+Implemented and installed the proof fixes.
+
+- `src/agent-doc` is now `dc7ddb88 fix: prove JB route and clear outcomes`.
+- `JB Clear Session Context did not submit.` now fails closed when the clear command remains visible after submit/resubmit, including OpenCode `/new` palette rows, and supervisor-IPC clear uses the same proof verifier.
+- `JB Run Agent Doc Codex did not submit.` now treats accepted-only Codex dispatch as blocked unless dispatch-start proof appears; the route output includes `editor_attempt_id` and a preserved route-submit snapshot path, and the JB plugin surfaces that as a typed warning instead of generic failure.
+- File Cache Conflict diagnostics now include patch/conflict key plus document/file stamps, and stale live-buffer suppression logs write provenance actor/write id/timestamps.
+- Installed: `make install` updated the binary/cdylib and auto-marked 2 controllers for recycle; JetBrains plugin `0.2.168` installed to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`. Restart IntelliJ IDEA to activate it.
+
+Verification: `make check`; `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`; `./gradlew test buildPlugin`; `agent-doc --version`; latest GitHub Actions `CI` on `main` was completed/success. The separate monsterrodholders Sync Tmux Layout prompt is still queued; I did not implement that in this pass.
+<!-- agent:boundary:7c473122 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- JB `Clear Session Context` did not submit.
+- ~~JB `Clear Session Context` did not submit.~~
+- :pushpin: JB `Run Agent Doc` Codex did not submit.
+- Should JB `Run Agent Doc` & `Clear Session Context` Codex retry `Return` until submit occurs
+- :pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.
 - backlog with `queue` attribute is not adding items into the queue.
+- ~~:pushpin: do [#opencode-enter]~~
+- ~~:pushpin: do [#jb-fcc]~~
+- ~~:pushpin: do [#cdxproof]~~
 <!-- /agent:queue -->
 ###
 <!--
@@ -169,9 +192,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#opencode-enter] Investigate and fix JetBrains Clear Session Context to OpenCode not producing a proven Return/dispatch result. Use the img_36 repro plus route logs to distinguish text/Enter delivery, pane acceptance, and dispatch-start proof; add visible attempt-id diagnostics and regression coverage.
-- [ ] [#jb-fcc] Fix remaining JetBrains File Cache Conflict dialogs after stale supervisor / IPC drift symptoms. Verify supervisor version alignment, live-buffer refresh provenance, and editor writeback proof so conflicts become either resolved or logged with exact stale owner/attempt evidence.
-- [ ] [#cdxproof] Fix the Codex dispatch-start proof gap for JetBrains Run Agent Doc attempts that log `key=Enter` plus `accepted_without_dispatch_start_proof`: surface a visible blocked outcome with attempt id and route-submit snapshot, and add regression coverage for the accepted-only/no-start case.
 <!-- /agent:backlog -->
 
 ## Review

@@ -50,17 +50,37 @@ Commits pushed:
 Verification passed: focused dispatch-only tests, the ignored live-tmux parity regression, `make check` (4613 nextest tests, doctests, medium SimWorld), `make install`, `agent-doc --version`, `git diff --check`, and latest GitHub Actions CI was completed/success.
 
 Closeout note: the visible session document had already been compacted, so I rebuilt snapshot/CRDT sidecars from the current visible file before writing this response; I did not restore the stale pre-compaction snapshot over the editor buffer.
-<!-- agent:boundary:d6edfa3f -->
+Implemented the active-editor IPC fail-closed change for this queue head.
+
+> **Queue prompt:**
+>
+> :pushpin: Changes to the editor buffer should always win. 0 External Disk Writes. If CRDT fails, try again. Do not fallback to external disk writes on the document. I lose work when this happens as I am typing.
+
+
+Summary:
+- Stream/finalize/explicit IPC/flush no longer write the session document directly after an active editor IPC timeout or insufficient proof. The pending patch/response is retained for editor retry instead.
+- Sidecar normalization, IPC dedupe, partial materialization, and session-check proof labels now fail closed with retry_without_disk_write instead of falling back to disk writes.
+- Specs, reference docs, and regression tests were updated.
+
+Verification:
+- cargo test -p agent-doc-orchestration ipc -- --nocapture
+- cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture
+- cargo test -p agent-doc --test ipc_closeout_model --test finalize_integration --test equityfundingsource_ipc_replay -- --nocapture
+- make check
+- make install; agent-doc --version -> 0.34.1
+
+Commits:
+- agent-doc submodule: 0fe421f8
+- parent gitlink: d52a3f56c
+- GitHub Actions: workflow named CI is not present; latest Agent Doc run 27663436397 was in_progress when checked.
+<!-- agent:boundary:c5376204 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: JB `Run Agent Doc` behavior is unchanged. Still broken. As I type, Codex restarts. Enter still does not work. I really just want to rip out the logic. The "fixes" havn't changed anything. Not sure what is going on. We need to drastically simplify this logic. You don't know what is going on. I don't know what is going on.~~
-- ~~The agent_doc_queue_context_reset=true should have a 50% threshold by default~~
-- ~~:pushpin: Both Claude Code + Opencode have working JB `Run Agent Doc` behavior. Remove Codex-specific logic. Can we unify all tmux-related logic across the 3 agent harnesses?~~
-- :pushpin: Changes to the editor buffer should always win. 0 External Disk Writes. If CRDT fails, try again. Do not fallback to external disk writes on the document. I lose work when this happens as I am typing.
-- ~~[#jbproofrebind]~~
+- ~~:pushpin: Changes to the editor buffer should always win. 0 External Disk Writes. If CRDT fails, try again. Do not fallback to external disk writes on the document. I lose work when this happens as I am typing.~~
+- :pushpin: monsterrodholders.md JB `Run Agent Doc` dispatch stalled after a restart with `/clear` that should not have happened.
 <!-- /agent:queue -->
 ###
 <!--

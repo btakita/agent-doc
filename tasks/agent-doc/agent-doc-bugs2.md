@@ -175,6 +175,11 @@ I also removed the transient merge-marker artifact and the `(HEAD)` label from t
 
 > **Queue prompt:**
 >
+> backlog with `queue` attribute is not adding items into the queue.
+
+
+> **Queue prompt:**
+>
 > :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit yet again. I manually ran it. As the turn was running, `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md\n` was sent to the Codex input.
 
 
@@ -281,7 +286,21 @@ Verification: focused route tests for the stale-ready probe and active-turn refu
 Operational note: install marked 2 controllers for recycle at the next idle boundary. Until the stale live supervisor recycles, preflight can still warn that the currently running controller was launched from an older binary.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:3ab70bea -->
+### Response — gpt-5
+This queue item is already covered by the installed backlog-to-queue behavior; I did not make a new source change for it.
+
+The original `#backlog-queue-sync-no-populate` item was implemented on `2026-06-03` as the preflight warning/manual `agent-doc queue sync` path. The later continuous-loop behavior is now explicit in `preflight/maintenance.rs`: for a persisted-active queue without `go`, newly added backlog ids are held out to avoid mid-loop amplification; for `queue: go`/`start`, the backlog `queue` attribute is treated as a continuous-backlog-loop opt-in and fresh open backlog ids append immediately.
+
+Current proof from this document: the preflight for this queue head printed `go-mode active queue — appending fresh backlog queue-attr id(s) (continuous-backlog-loop; #backlog-queue-attr-populates-in-go-mode)`. That is the path the complaint asks for: a `queue`-attributed backlog does populate the active queue when the operator has opted into go-mode.
+
+Regression coverage already exists in `run_queue_maintenance_go_mode_repopulates_drained_active_queue` and `run_queue_maintenance_go_mode_appends_fresh_backlog_into_nondrained_queue`; the latter proves a fresh backlog `queue` item appends even while the queue is not drained under `queue: go`.
+
+Changed paths: this session document closeout only. The parent `src/agent-doc` source was already clean after `ba56b4bf`, and the unrelated dirty `src/boost-client` working tree remains untouched.
+
+Verification: current preflight proof above; `make check` already passed in this run with 4626 nextest tests plus doctests and the medium closeout simulation; `agent-doc --version` reports `agent-doc 0.34.1`; latest GitHub Actions CI on `main` is completed/success for run `27664844335`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:d08b0d99 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -295,7 +314,7 @@ Escalation: none. Confidence: high.
 - ~~:pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.~~
 - ~~:pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.~~
 - ~~:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit yet again. I manually ran it. As the turn was running, `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md\n` was sent to the Codex input.~~
-- backlog with `queue` attribute is not adding items into the queue.
+- ~~backlog with `queue` attribute is not adding items into the queue.~~
 - :pushpin: agent-doc CLI has misformatted help message ![img_37.png](img_37.png)
 <!-- /agent:queue -->
 ###

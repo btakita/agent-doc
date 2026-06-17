@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -76,7 +76,24 @@ Replaced all 12 `id.0 as usize` casts in `thread_safe.rs` with `usize::try_from(
 Added `From<serde_json::Error>` (cfg `ffi`) and `From<postcard::Error>` (cfg `ipc-binary`) for both `EncodeError` and `DecodeError` in `src/ipc.rs`, enabling ergonomic `?` propagation from serde/postcard call sites. Commit `8665e29`.
 
 **Verification:** fmt, clippy (`-D warnings`), build (all features), and 300+ tests pass across default/tokio/async feature combos. Loom exhaustive model tests: 14/15 passed; the last (`inline_seqlock_envelope_rejects_torn_and_stale`) timed out at 5min — a known resource-intensive exhaustive check, not a regression from these changes.
-<!-- agent:boundary:5d7cbf94 -->
+
+### Re: #advance-review — review audit + actionable backlog — glm-5.1
+
+> **Queue prompt:**
+>
+> Go through the review items. Add actionable backlog items to complete the review items.
+
+
+Reviewed all 4 `[operator-drive]` review items. One ship-stopper found, one review item updated, two confirmed purely operator-gated with no agent-doable slice.
+
+**#kb9b (#lzpypub011) — SHIP-STOPPER:** Validated the v0.11.0 dist artifacts (`twine check` PASSED for both whl + tar.gz). But install-in-venv round-trip revealed `Signal` reading a `Slot` dependency hits `RecursionError`. Root cause: `Slot.__call__` fires `self.touch(resolved)` immediately after computing (slot.py:98), which notifies subscribers → `_subscriber` calls `parent_slot.reset(ctx)` → `Slot.reset` calls `self.touch()` again before `_subscribers.clear()` runs (slot.py:115) → re-entrant cascade through the `_SignalSlot` ↔ source-`Slot` subscription cycle. `Cell` doesn't trigger this because it overrides `__call__` to skip `touch` on reads. The existing 8 signal tests only cover `Signal`→`Cell` dependencies, so this escaped. The fix + regression test is queued as **#lzpysigfix** — the publish MUST wait for this.
+
+**#kabc (#lipostlazilyarch):** Pure operator action — post a LinkedIn comment via `corky`. Comment body already drafted in `mail/drafts/linkedin/`. No agent-doable slice; stays operator-gated.
+
+**#h6qb (#lzwebrtcnet-e2e):** The agent-doable slice (**#lzwebrtcwire**) is already DONE — `src/webrtc_signaling.rs` wires `SignalingClient`↔`Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate}` and `tests/webrtc_signaling.rs` covers the localhost handshake. Review text updated to reflect completion; only the live two-host/NAT run remains (operator-only).
+
+**#xccx (#lzholons):** Blocked on Steve Melville answering 7 OPEN QUESTIONS. The plan (`tasks/software/plan-map-holons-integration.md`) explicitly says "use [the] direct line to resolve the OPEN QUESTIONS rather than guessing." No agent-doable slice until answers land; stays operator-gated.
+<!-- agent:boundary:6c1a0380 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,12 +102,12 @@ Added `From<serde_json::Error>` (cfg `ffi`) and `From<postcard::Error>` (cfg `ip
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Go through the review items. Add actionable backlog items to complete the review items.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#syej] #lzpysigfix=Fix Signal→Slot RecursionError in lazily-py v0.11.0: Slot.__call__ fires touch() during computation (slot.py:98) which cascades resets through the _SignalSlot↔source-Slot subscription cycle. Cell avoids this by not touching on read. Fix the re-entrant reset (defer touch past slot_stack pop, or clear subscribers before touch, or guard against re-entrant reset). Add test test_signal_depends_on_slot. Ship-stopper for #kb9b.
 <!-- /agent:backlog -->
 
 ## Review
@@ -98,7 +115,7 @@ Added `From<serde_json::Error>` (cfg `ffi`) and `From<postcard::Error>` (cfg `ip
 <!-- agent:review -->
 - [/] [#kb9b] #lzpypub011=[operator-drive] Publish lazily-py v0.11.0: build artifacts are ready in src/lazily-py/dist/ (lazily-0.11.0-{whl,tar.gz}). From src/lazily-py: tag v0.11.0 + push, gh release create v0.11.0 --generate-notes, then python -m twine upload dist/* (needs PyPI token + browser/passkey 2FA). Gated on the pre-publish live-test confirm per the testing-gate rule. Commit 28f23e4 + superproject gitlink 6339ab2e1 already pushed.
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] Main LinkedIn post is published and repaired: Corky edit updated mail/social/20260616-lazily-architecture-linkedin.md / https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848 with the full body after the public post truncated at "The core is small: three primitives". Local metadata is committed in mail commit 07a9ea1 and superproject gitlink e7e0b08c1. Remaining operator follow-up: post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>` if still desired.
-- [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet networked backend through the LIVE #yxjw signaling Worker (two real hosts / NAT, not localhost). The localhost two-socket round trip (tests/str0m_net.rs) already proves the real UDP/DTLS/SCTP/timer path in-process; this remaining slice needs two live endpoints + the deployed Worker so it cannot be agent-run headless. Wire SignalingClient offer/answer/ice to Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} and confirm a Snapshot crosses between hosts.
+- [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet backend through the LIVE #yxjw signaling Worker (two real hosts / NAT). Agent-doable slice (#lzwebrtcwire) is DONE: src/webrtc_signaling.rs wires SignalingClient↔Str0mNet and tests/webrtc_signaling.rs covers the localhost handshake. Remaining: live two-host/NAT run via deployed Worker — operator-only.
 - [/] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.
 <!-- /agent:review -->
 

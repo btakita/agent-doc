@@ -175,6 +175,11 @@ I also removed the transient merge-marker artifact and the `(HEAD)` label from t
 
 > **Queue prompt:**
 >
+> :pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.
+
+
+> **Queue prompt:**
+>
 > :pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.
 
 
@@ -241,8 +246,23 @@ The failing path was explicit `--template` on a CRDT-backed document falling int
 The regression coverage includes `template_flag_on_crdt_doc_routes_to_stream_merge_instead_of_diff3`, `recovery_merge_uses_crdt_for_crdt_documents_without_diff3_markers`, and the malformed patchback rejection test. Full `make check` and `make install` were completed after the fix, and the installed CLI is `agent-doc 0.34.1`.
 
 Exchange size remains high, but the go-mode queue is active, so I am continuing to drain rather than compacting.
+### Response — gpt-5
+Fixed the `monsterrodholders.md` Sync Tmux Layout no-op.
 
-<!-- agent:boundary:a1072f70 -->
+Root cause: `src/boost-client/tasks/monsterrodholders.md` had a leading space before the opening `---`. The shared frontmatter parser required the file to start exactly with `---\n`, so `agent-doc session status` reported no `agent_doc_session` and `agent-doc sync --exact-visible` classified the file as `non_managed=1`. JetBrains Sync Tmux Layout therefore had no managed session to start or focus.
+
+Implemented in `src/agent-doc` submodule commit `01ba4cb4`: `split_frontmatter` now tolerates a UTF-8 BOM and leading horizontal spaces or tabs before the opening marker, while preserving the old behavior that a leading blank line is body content, not frontmatter. I did not edit the `src/boost-client` session document.
+
+Functional proof after install: `agent-doc sync --col .../src/boost-client/tasks/monsterrodholders.md --focus .../src/boost-client/tasks/monsterrodholders.md --exact-visible` resolved the file as registered with `resolved=1`, `unresolved=0`, `non_managed=0`, and started/focused pane `%47`. `agent-doc session status .../monsterrodholders.md` then reported pane `%47`, live pane `alive-idle`, supervisor `healthy`, and controller lease `runtime_state=ready`.
+
+Changed paths: `src/agent-doc/agent-doc-core/src/frontmatter.rs`, parent gitlink `src/agent-doc`, and this session document closeout.
+
+Verification: focused parser regressions, full `agent-doc-core` frontmatter tests, `make check` with 4625 nextest tests plus doctests and the medium closeout simulation, `make install`, `agent-doc --version` reporting `agent-doc 0.34.1`, and latest GitHub Actions CI on `main` completed/success for run `27664844335`.
+
+Operational note: the exact one-file sync verification focused `monsterrodholders.md` and stashed the other live panes as part of the requested one-file layout. That was a verification side effect, not part of the parser fix.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:759652a9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -254,7 +274,8 @@ Exchange size remains high, but the go-mode queue is active, so I am continuing 
 - ~~:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit even after I started a new tmux pane and installed the plugin.~~
 - ~~:pushpin: As the queue is draining, `agent-doc tasks/agent-doc/agent-doc-bugs2.md` is added to the agent input. It should not be added.~~
 - ~~:pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.~~
-- :pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.
+- ~~:pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.~~
+- :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit yet again. I manually ran it. As the turn was running, `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md\n` was sent to the Codex input.
 - backlog with `queue` attribute is not adding items into the queue.
 - :pushpin: agent-doc CLI has misformatted help message ![img_37.png](img_37.png)
 <!-- /agent:queue -->

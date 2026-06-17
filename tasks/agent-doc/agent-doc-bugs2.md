@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -336,26 +336,48 @@ Committed and pushed:
 - parent repo `e043fca17 agent-doc: update stale supervisor refresh guidance`
 
 Latest agent-doc CI for the new submodule push was queued as run `27657005941` at closeout, so I did not wait on it; local verification is green.
-<!-- agent:boundary:7a87a305 -->
+
+### Re: JB Run Agent Doc tmux-router Return — gpt-5
+
+Yes, there was a lower-level `tmux-router` issue, but with an important boundary: current `agent-doc route --dispatch-only` for JB `Run Agent Doc` was already using the agent-doc direct-pane submit helper (`tmux_text_enter`), not `tmux_router::Tmux::send_keys()` for the main routed reopen. The problem was that the patched local `tmux-router` dependency had drifted: its public default `send_keys()` helper had started hex-encoding text plus a carriage-return byte. That violated the repo contract and left a regression path open for any caller that did use the router helper.
+
+Fixed in `src/tmux-router`: `Tmux::send_keys()` now keeps one tmux process invocation, but it sends literal text with `send-keys -l` and then sends a separate named `Enter` tmux command in that same invocation. Empty submits send only the named `Enter`. The explicit Kitty Return helper still uses the enhanced-keyboard hex path; the default helper no longer sends a hex CR payload.
+
+Changed paths:
+- `src/tmux-router/src/tmux.rs`
+- `src/tmux-router/src/hybrid.rs`
+- `src/tmux-router/README.md`
+- `src/tmux-router/docs/api-reference.md`
+- `src/tmux-router/VERSIONS.md`
+- parent gitlink `src/tmux-router`
+
+Commits pushed:
+- `src/tmux-router`: `c3162ef fix: submit text with named enter`
+- parent repo: `a31efeada tmux-router: use named enter submit`
+
+Verification passed:
+- `src/tmux-router`: `cargo test send_keys`
+- `src/tmux-router`: `cargo test` (113 unit tests plus doctests)
+- `src/tmux-router`: `cargo clippy -- -D warnings`
+- `src/agent-doc`: `cargo test -p agent-doc-orchestration submit --lib`
+- `src/agent-doc`: `cargo test -p agent-doc-orchestration dispatch_only --lib`
+- `src/agent-doc`: ignored live tmux checks `opencode_submit_uses_named_enter_key`, `dispatch_submit_text_to_tmux_uses_pane_submit_path`, and `dispatch_only_send_reopen_direct_pane_submit_avoids_extra_enter_retries`
+- `src/agent-doc`: full `make check` passed: clippy, 4,613 nextest tests, doctests, and medium closeout simulation
+- `src/agent-doc`: `make install` completed and installed `agent-doc 0.34.1`; it marked 2 controllers for idle-boundary recycle
+- `agent-doc --version` -> `agent-doc 0.34.1`
+- `git diff --check`
+
+CI: latest `tmux-router` GitHub Actions `CI` run `27657724212` was `in_progress` when checked once after push, so I recorded it and did not wait. The parent `agent-loop` repo has no workflow named `CI`.
+
+Non-gate note: `cargo clippy --all-targets -- -D warnings` in `tmux-router` still fails on pre-existing test-only lints in `src/sync.rs` / `src/registry.rs`; the repo CI runs `cargo clippy -- -D warnings`, and that passed.
+
+Escalation: none. No JetBrains plugin update is required for this change; it is in the Rust router dependency and the installed agent-doc binary now uses it. Confidence: high for removing the remaining default `tmux-router` CR-submit path and preserving `Run Agent Doc` direct-pane proof as `tmux_text_enter`.
+<!-- agent:boundary:30cfb84c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: JB `Clear Session Context` does not submit with Enter. JB `Run Agent Doc` sends a `/clear` and restart. After a couple restart JB `Run Agent Doc` still does not send Enter. Should we remove Codex-specific logic with JB commands and just use the same path as with Claude Code?~~
-- ~~:pushpin: JB `Run Agent Doc` still does not send Enter. Should we have more state machine logic to prevent race conditions?~~
-- ~~[#resprectail]~~
-- ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md still does not send Enter. Consolidate logic + simplify more. We should only send Enter, never CR or /n to tmux. Claude + Codex send-keys logic should be identical.~~
----
-:pushpin: JB `Run Agent Doc` on lazily-rs.md/opencode. I closed a Codex session then opened the opencode session. When closing a session in the cli, agent-doc should detect this and immediately clear the state. Heartbeats with the new session in the same supervisor should immediately replace the old session.
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/software/lazily-rs.md: failed_stage=queue_paused reason=stale route-owned supervisor (pid 968752) replaying already-answered/archived #advance-review queue item with go-mode; halting churn until supervisor recycled receipt_id=3746 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=38 trigger_sha256=573c763642d25af5610128bad867d311cdfdbc5be1bee680610d94c2fcf5250d
-```
----
-- ~~:pushpin: Continue to consolidate tmux logic.~~
-- ~~:pushpin: agent-doc monsterrodholders.md interrupted a running conversation ![img_35.png](img_35.png)~~
 <!-- /agent:queue -->
 ###
 <!--

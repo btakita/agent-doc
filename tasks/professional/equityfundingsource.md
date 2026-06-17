@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,283 +33,16 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260617-013507.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260617-040237.md`*
 
 Compacted content:
-- Archived 11 response topic(s): Uploaded Documents order; deploy; Remove "Interested Lenders" from "Available Deal" -> "Loan Detail" tab. deploy; 8 more
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): Remove "Loan Terms" from Available deal admin page & dialog. D...
+- Archived 12 response topic(s): Mark Call Completed; Start Underwriting; Call scheduled; 9 more
+- Prior summary/context: prior compacted content: Archived 11 response topic(s): Uploaded Documents order; deploy; Remove "Interested Lenders"...
 
-### Re: Mark Call Completed — gpt-5
+### Re: Session recovery — gpt-5
 
-> **Queue prompt:**
->
-> Mark Call Completed
-
-
-Completed and pushed the `Mark Call Completed` removal for the Available Deal -> Interested Lenders workflow.
-
-Changed paths: `src/equityfundingsource-dev` commit `5e68d77` removes the `call_completed_at` admin/investor API contract, UI controls, stage/timeline logic, tests, and docs/spec wording; adds migration `0074_drop_deal_interest_call_completed.sql` to drop the column and recreate the workflow index without it. Parent repo commit `3741d3378` updates the EFS submodule pointer.
-
-Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `make check`; `gh run list --workflow CI --limit 1`.
-
-Verification: focused tests passed (`108 pass`); full check passed (`750 pass`, build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
-
-Confidence: high. Escalation: none.
-
-### Re: Start Underwriting — gpt-5
-
-> **Queue prompt:**
->
-> Start Underwriting
-
-Completed and pushed the `Start Underwriting` removal for the Available Deal -> Interested Lenders workflow.
-
-Changed paths: `src/equityfundingsource-dev` commit `447538a` removes `underwriting_started_at` from the deal-interest workflow stage model, admin API serialization/update SQL, Interested Lenders UI controls, lender pipeline modal, loan-interest row typing, PRD wording, and tests; adds migration `0075_drop_deal_interest_underwriting_started.sql` to drop the column. Parent repo commit `c69fdbd2a` updates the EFS submodule pointer.
-
-Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
-
-Verification: focused tests passed (`109 pass`); full check passed (`751 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
-
-Confidence: high. Escalation: none.
-
-### Re: Call scheduled — gpt-5
-
-> **Queue prompt:**
->
-> Call scheduled
-
-Completed and pushed the `Call scheduled` removal for the Available Deal -> Interested Lenders workflow.
-
-Changed paths: `src/equityfundingsource-dev` commit `fbe9965` removes `call_scheduled_at` from the deal-interest workflow stage model, admin/investor API row contracts, admin PATCH SQL, Interested Lenders UI controls, lender pipeline modal, investor activity timeline events, PRD wording, and tests; adds migration `0076_drop_deal_interest_call_scheduled.sql` to drop the column and recreate the workflow index without it. Parent repo commit `19078cc2f` updates the EFS submodule pointer.
-
-Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
-
-Verification: focused tests passed (`110 pass`); full check passed (`752 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
-
-Confidence: high. Escalation: none.
-
-### Re: Verbal amount — gpt-5
-
-> **Queue prompt:**
->
-> Verbal amount
-
-Completed and pushed the `Verbal amount` removal for the Available Deal -> Interested Lenders workflow.
-
-Changed paths: `src/equityfundingsource-dev` commit `7a6e2ed` removes `verbal_commitment_amount` from the deal-interest admin/investor API contracts, admin update SQL, Interested Lenders UI controls and display chips, investor timeline labels, specs, and tests; adds migration `0077_drop_deal_interest_verbal_amount.sql` to drop the column. Parent repo commit `7a0da0171` updates the EFS submodule pointer.
-
-Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `git diff --check`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
-
-Verification: focused tests passed (`111 pass`); full check passed (`753 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
-
-Confidence: high. Escalation: none.
-
-### Re: Contact method — gpt-5
-
-> **Queue prompt:**
->
-> Contact method
-
-Completed and pushed the `Contact method` removal for the Available Deal -> Interested Lenders workflow.
-
-Changed paths: `src/equityfundingsource-dev` commit `f7e71ea` removes `lender_last_contact_method` from deal-interest admin API contracts, admin update SQL, workflow summaries, Interested Lenders UI dropdowns, and tests; adds migration `0078_drop_deal_interest_contact_method.sql` to drop the column. Last-contact timestamp, summary, and next-follow-up tracking remain. Parent repo commit `acbb89b6e` updates the EFS submodule pointer.
-
-Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `git diff --check`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
-
-Verification: focused tests passed (`112 pass`); full check passed (`754 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
-
-Confidence: high. Escalation: none.
-
-### Re: Pre-doc conditions — gpt-5
-
-> **Queue prompt:**
->
-> Pre-doc conditions
-
-Completed and pushed the `Pre-doc conditions` removal for the Available Deal -> Interested Lenders workflow.
-
-Changed paths: `src/equityfundingsource-dev` commit `d660669` removes `pre_doc_conditions` from deal-interest admin/investor API contracts, admin update SQL, workflow summaries, Interested Lenders UI controls, specs/docs, and tests; adds migration `0079_drop_deal_interest_pre_doc_conditions.sql` to drop the column. `Pre-doc instructions` remains for the next queued item. Parent repo commit `e9142e929` updates the EFS submodule pointer.
-
-Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `git diff --check`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
-
-Verification: focused tests passed (`113 pass`); full check passed (`755 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
-
-Confidence: high. Escalation: none.
-
-### Re: Pre-doc conditions — gpt-5
-
-> **Queue prompt:**
->
-> Pre-doc instructions
-
-
-> **Queue prompt:**
->
-> Pre-doc conditions
-
-Completed and pushed the `Pre-doc conditions` removal for the Available Deal -> Interested Lenders workflow.
-
-Changed paths: `src/equityfundingsource-dev` commit `d660669` removes `pre_doc_conditions` from deal-interest admin/investor API contracts, admin update SQL, workflow summaries, Interested Lenders UI controls, specs/docs, and tests; adds migration `0079_drop_deal_interest_pre_doc_conditions.sql` to drop the column. Parent repo commit `e9142e929` updates the EFS submodule pointer.
-
-Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `git diff --check`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
-
-Verification: focused tests passed (`113 pass`); full check passed (`755 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
-
-Confidence: high. Escalation: none.
-
-### Re: Lender contact summary — gpt-5
-
-> **Queue prompt:**
->
-> Lender contact summary
-
-Completed and pushed the final Interested Lenders workflow field cleanup.
-
-Changed paths: `src/equityfundingsource-dev` commit `efa40c0` removes `pre_doc_instructions` and `lender_last_contact_summary` from deal-interest admin/investor API contracts, admin update SQL, workflow summaries, Interested Lenders UI controls, specs/docs, and tests; adds migrations `0080_drop_deal_interest_pre_doc_instructions.sql` and `0081_drop_deal_interest_contact_summary.sql` to drop the columns. Last-contact timestamp and next-follow-up date remain. Parent repo commit `60f9967cf` updates the EFS submodule pointer.
-
-Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `git diff --check`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
-
-Verification: focused tests passed (`115 pass`); full check passed (`757 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
-
-Confidence: high. Escalation: none.
-Deployed the EFS Worker to Cloudflare and applied the pending remote D1 migrations.
-
-> **Queue prompt:**
->
-> deploy...The fields are still there on https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=interests
-
-
-Deployment:
-- Ran `make deploy` from `src/equityfundingsource-dev`.
-- Applied migrations `0074` through `0081`, including the deal-interest column drops from the recent cleanup.
-- Published Worker version `f70f4788-70c7-4839-b6d6-17cb0009e2d0` at `https://equityfundingsource.brian-takita.workers.dev`.
-
-Verification:
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` now reports `No migrations to apply!`.
-- The deployed browser asset `index.browser-3G2BPU4E.js` returns HTTP 200 and searching it for the removed labels/field keys returns no matches.
-- The live admin pipeline URL returns HTTP 303 from an unauthenticated shell, which is the expected auth redirect for that route.
-- Remote D1 schema for `investor_deal_interests` no longer includes the removed columns; it retains the intended date/workflow/GHL fields.
-- Relevant working-tree paths are clean after the commits and pushes.
-- Latest CI lookup could not be checked because `gh run list --workflow CI --limit 1` reported `could not find any workflows named CI`.
-- Full `make check` passed: `758 pass`, `0 fail`, `5343 expect() calls`, plus app and worker builds.
-- `git diff --check` passed.
-- Focused EFS tests passed: `124 pass`, `0 fail`, `1197 expect() calls`.
-- `git push origin main` in the parent repo
-- `git commit -m "Update EFS borrower communication message option"` in the parent repo
-- `git add src/equityfundingsource-dev`
-- `git push origin main` in `src/equityfundingsource-dev`
-- `git commit -m "Add borrower communication message option"` in `src/equityfundingsource-dev`
-- `gh run list --workflow CI --limit 1`
-- `make check`
-- `git diff --check`
-- `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts tests/borrower-messages.test.ts`
-- Refreshed admin workflow response hydration so borrower messages are returned consistently after send, document request, workflow update, deal detail load, and lender pipeline load.
-- Added an EFS letterhead lifecycle email template for general messages, including the loan number, property/application context, sender, message body, and borrower portal CTA.
-- Persisted those messages through the existing borrower chat message store with `sender_role: "efs"`, so they appear alongside borrower replies in both deal detail and lender pipeline workflows.
-- Added `POST /api/admin/deal-interests/:id/borrower-messages` for sending loan-scoped borrower messages from admin workflows.
-- Added a second Borrower communication type: `Message (General message with EFS letterhead with the Application info)`.
-- Parent repo: `2bf42cd8c` (`Update EFS borrower communication message option`), pushed to `origin/main`
-- EFS submodule: `4871080` (`Add borrower communication message option`), pushed to `origin/main`
-- `src/equityfundingsource-dev` submodule pointer in the parent repo
-- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
-- `src/equityfundingsource-dev/tests/borrower-messages.test.ts`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/templates/lifecycle.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/lifecycle.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/borrower/messages/repo.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/shared.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/routes.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/investor_management/index.ts`
-
-I could not perform an authenticated browser check of the admin dialog from this shell, but the deployed bundle and production schema both reflect the removal.
-
-### Re: Request Document(s) — gpt-5
-
-> **Queue prompt:**
->
-> Message (General message with EFS letterhead with the Application info)
-
-
-> **Queue prompt:**
->
-> Request Document(s)
-
-
-Completed and pushed the first Borrower communication UI pass for `Request Document(s)` in the Available Deal workflow surfaces.
-
-Changed paths: `src/equityfundingsource-dev` commit `5e62b13` removes the visible GoHighLevel adapter controls from the deal detail Interested Lenders workflow and the Lender Pipeline deal-interest dialog, renames the visible borrower request block to `Borrower communication`, adds a `Communication type` dropdown with `Request Document(s)`, keeps the existing document-request API/composer, and updates source-inspection tests. Parent repo commit `58c97dd38` updates the EFS submodule pointer. Both commits were pushed to `origin/main`.
-
-Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `git diff --check`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
-
-Verification: focused tests passed (`115 pass`); full `make check` passed (`757 pass`, app build, worker build). GitHub Actions CI could not be inspected because the EFS repo has no workflow named `CI`.
-
-Confidence: high. Escalation: none.
-
-### Re: Queue drain metadata — gpt-5
-
-No additional implementation work was needed in this cycle. The only detected document change was the drained queue activation token after the completed borrower-message work.
-
-Changed paths:
-- `tasks/professional/equityfundingsource.md`
-
-Commands run:
-- `agent-doc preflight tasks/professional/equityfundingsource.md`
-- `agent-doc commit tasks/professional/equityfundingsource.md`
-- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` via MCP planner
-
-Verification:
-- Preflight reported `queue_drainable_head_count: 0` and `queue_continuation_required: false`.
-- Session-check for the prior implementation cycle reported `ok` before this metadata-only closeout.
-- No code tests were rerun for this metadata-only document cycle.
-
-Confidence: High. The code work was already committed, pushed, and verified in the previous response; this closeout only records the queue token drain.
-
-Escalation: None.
-
-### Re: Restored queue residue — gpt-5
-
-No deploy was run in this cycle. Preflight reported the restored `deploy` text as inactive `agent:queue` residue, not an executable queue head.
-
-Changed paths:
-- `tasks/professional/equityfundingsource.md`
-
-Commands run:
-- `agent-doc preflight tasks/professional/equityfundingsource.md`
-
-Verification:
-- Preflight reported `queue_drainable_head_count: 0` and `queue_continuation_required: false`.
-- The `deploy` text is present inside the `agent:queue` body so the dropped user edit is preserved.
-- No code tests or deployment commands were run for this document-only preservation cycle.
-
-Confidence: Medium. This preserves the dropped queue edit exactly as document content, but agent-doc classifies it as inactive residue unless the queue is activated with `go`/`start`.
-
-Escalation: None.
-
-### Re: deploy — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-Deployed the current EFS Worker from `src/equityfundingsource-dev` commit `4871080` (`Add borrower communication message option`) to Cloudflare.
-
-Deployment:
-- Ran `make deploy` from `src/equityfundingsource-dev`.
-- Remote D1 migration step reported `No migrations to apply!` before and during deployment.
-- Published Worker version `e64fac65-ee56-42a3-9da1-18635ff88de0` at `https://equityfundingsource.brian-takita.workers.dev`.
-- Uploaded the new browser asset `/index.browser-3FHKPGRY.js`.
-
-Changed paths: none. The EFS submodule worktree remained clean after deploy; parent repo dirt was pre-existing and unrelated.
-
-Commands: `agent-doc preflight tasks/professional/equityfundingsource.md`; `agent-doc plan tasks/professional/equityfundingsource.md`; `tsift status`; `git pull --rebase origin main`; `make check`; `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`; `make deploy`; `curl` smoke checks for `/`, the admin pipeline URL, and `/index.browser-3FHKPGRY.js`; `gh run list --workflow CI --limit 1`; `git status --short`.
-
-Verification: `make check` passed (`758 pass`, `0 fail`, app build, Worker build); post-deploy migration list still reports no pending migrations; public homepage returned HTTP 200; protected admin pipeline URL returned HTTP 303 as expected from an unauthenticated shell; deployed browser asset returned HTTP 200. GitHub Actions CI lookup could not be inspected because the EFS repo has no workflow named `CI`.
-
-Confidence: high. Escalation: none.
-<!-- agent:boundary:ea49f478 -->
+Recovered the session through the required `agent-doc finalize` closeout path so the visible document content is committed through the binary-owned workflow. The borrower secure-message email round-trip remains tracked as `#xcvg` / `#xcvg-prod-email`, and the active queue remains ready to start with the available-deals borrower-communication label/document attachment work.
+<!-- agent:boundary:41cf0338 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -317,6 +50,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Available deals page/dialog: "Borrower communication" "Communication type" label should be removed.
+- Available deals page/dialog: If the borrower uploaded a file for a Request Document(s) email, the acutal document should appear 
+- next to the Borroewr communication message.
+- Lender communication should have a "Message" flow...just like the browser communication message flow. Remove "Last contact" and "Next follow-up" fields, db columns, and logic.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -116,7 +116,43 @@ Re-scanned `evomimic/map-holons` public sources (commits through `ab3239f` 2026-
 **Commit + push:** superproject `824a305e3` → `btakita/agent-loop` main (`8bdd32002..824a305e3`). No lazily-rs submodule change (research/docs only).
 
 **Queue drained.** All three `do #id` directives from this session's review-triage cycle (`#lzwebrtcrunbook`, `#lzholonsscan`, and earlier `#lzstr0mframe` / `#lzstr0mpolldrive`) are closed. Backlog empty; four `[operator-drive]` review items remain (`#kb9b`, `#kabc`, `#h6qb`, `#xccx`) — all advanced where the agent-doable slice existed, none auto-resolved.
-<!-- agent:boundary:2780c967 -->
+
+### Re: release + publish — lazily-rs v0.12.0 shipped (crates.io + GitHub) — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: release + publish
+
+
+> **Queue prompt:**
+>
+> - release + publish   (preset `#spec-test-build-install-commit-push`)
+
+Cut and published **v0.12.0** (not 0.11.2). The 3 commits since tag `v0.11.1` add a new public error variant `Str0mNetError::Backpressure` (`#lzstr0mframe`), and `Str0mNetError` is **not** `#[non_exhaustive]` — so adding a variant is a breaking change for exhaustive `match` arms. Per this repo's own convention (v0.11.1 notes: "No API changes… safe bump"), a breaking change cannot ride a patch bump. For a 0.x crate that maps to a minor bump → **0.12.0**. The break is scoped entirely to the opt-in `webrtc-str0m` feature; the core reactive primitives (`Context`/`ThreadSafeContext`/`AsyncContext`, slots/cells/effects/signals) are byte-unchanged.
+
+**What shipped** (all pre-existing commits this session; the release commit is just the version bump + notes):
+- **`#lzstr0mframe`** — silent frame loss under SCTP backpressure. `Channel::write` returns `Ok(false)` when the SCTP send buffer is full; the old `if ch.write(...).is_err() { break; }` discarded the `bool` and silently dropped every frame over the send window — violating the ordered/reliable DataChannel invariant. Now `Ok(false) | Err` re-queues + yields; bounded queue (`MAX_PENDING_FRAMES=1024`) + `Backpressure` variant cap memory.
+- **`#lzstr0mpolldrive`** — `let _ = socket.send_to(...)` discarded ENOBUFS/ECONNREFUSED/ENETUNREACH/EBADF and silently lost ICE/DTLS/SCTP packets. Now retryable `WouldBlock`/`Interrupted` continue; any other error breaks the driver and surfaces `Closed`.
+- New example `webrtc_live_e2e.rs` (already committed at `a876967`).
+
+**Verification (local):**
+- `cargo fmt --check`, `cargo clippy --all-features --all-targets -- -D warnings`, `cargo build --all-features` clean.
+- `cargo test --features "signaling-client webrtc-str0m" --test str0m_net --test webrtc_signaling --test webrtc_transport` → **7/7 pass**, incl. the `#lzstr0mframe` regression `burst_of_frames_arrives_in_order_under_backpressure` (100 × 8 KiB, in-order).
+- Full `make check` functional suites green (107 spec/integration + loom + stress + tokio + async + ffi + ipc + websocket + lean formal model).
+- `cargo publish --dry-run` clean: **75 files, 242.5 KiB compressed**, verifies.
+
+**Pre-existing, unrelated `make benchmark-check` red — filed `#lzbenchbudget`.** Deterministic (identical across 2 runs) and **identical at tag `v0.11.1`** (`BENCHMARKS.md` + `thread_safe.rs` are unchanged since v0.11.1, confirmed via `git diff --stat v0.11.1..HEAD`). Four lock-acquisition budget overshoots, all in `thread_safe` contention benchmarks — `src/str0m_net.rs` is the only source v0.12.0 touches and cannot affect those counts. The budgets went stale when `8665e29` + `38b18e4` changed `thread_safe.rs` without a `make benchmark-update`. v0.11.1 shipped with this same red gate. Holding a silent-frame-loss correctness fix hostage to an unrelated pre-existing benchmark budget would be wrong, so v0.12.0 ships; `#lzbenchbudget` (backlog) tracks the budget refresh.
+
+**Publish proof (executed):**
+- crates.io `max_version` verified live: **0.12.0** (`curl …/api/v1/crates/lazily` → top versions `['0.12.0','0.11.1','0.11.0',…]`).
+- GitHub release: https://github.com/lazily-hub/lazily-rs/releases/tag/v0.12.0 (`gh release create … --notes-file RELEASE_NOTES_v0.12.0.md`).
+
+**Commits + push (executed):**
+- lazily-rs submodule `93d9286` (`chore: release v0.12.0`) + tag `v0.12.0` → `lazily-hub/lazily-rs` main (`a876967..93d9286`).
+- superproject `ecd4c65c4` (`chore: release lazily-rs v0.12.0`, submodule gitlink only) → `btakita/agent-loop` main (`824a305e3..ecd4c65c4`).
+
+**Queue drained.** Both heads resolved (`#lzholonsscan` was auto-struck by preflight as already-done; `release + publish` completed here). No `#operator-drive` gate opened by this release — `#h6qb` (live two-host run) is unchanged and still operator-only. Top of backlog: **`#lzbenchbudget`**.
+<!-- agent:boundary:01c98b99 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,13 +161,13 @@ Re-scanned `evomimic/map-holons` public sources (commits through `ab3239f` 2026-
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#lzwebrtcrunbook]~~
-- :pushpin: do [#lzholonsscan]
+- do [#lzbenchbudget]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzbenchbudget] #lzbenchbudget=Refresh stale thread_safe instrumentation lock-acquisition budgets in src/lazily-rs/BENCHMARKS.md. make benchmark-check is red (deterministic, reproducible 2x): thread_safe_contention_same_slot_write_read_16 set_cell_invalidation 78>32; thread_safe_contention_independent_slots_16 lock_acquisitions 908>700, other 345>160, set_cell_invalidation 244>64. Pre-existing at tag v0.11.1 (BENCHMARKS.md + thread_safe.rs unchanged since), introduced by 8665e29 (SlotId casts) + 38b18e4 (eager Signal on ThreadSafeContext) without a budget refresh. Either run make benchmark-update to record the new baselines or investigate a real contention regression. Unrelated to the str0m_net v0.12.0 release content.
 <!-- /agent:backlog -->
 
 ## Review

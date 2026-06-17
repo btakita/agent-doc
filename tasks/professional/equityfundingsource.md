@@ -250,7 +250,37 @@ Shipped proactive TMO-account-missing warnings across the admin UI so the admin 
 - Accepts `{ lender_account }`, validates via `clean_account_`, calls `user__set_lender_account_`
 
 Queue drained.
-<!-- agent:boundary:0e0dbdfa -->
+
+### Re: Inline Link TMO account button + deployed — glm-5.2
+
+> **Queue prompt:**
+>
+> In the InterestedLenderCard where the TMO account is not linked, there should be a button under Show/Hide workflow to link the account to TMO. deploy
+
+Shipped a "Link TMO account" button directly on each `InterestedLenderCard` (visible when `lender_account` is empty) with an inline input that calls a new dedicated endpoint. Deployed.
+
+**New endpoint** — `PUT /api/admin/users/:id/lender-account` (`lib/admin/user_management/index.ts`):
+- Accepts `{ lender_account }`, validates via `clean_account_`, calls `user__set_lender_account_`
+- Admin-guarded, fires `notify_admin_event_`
+- Registered in routes.ts alongside the other user-management PUTs
+
+**UI** — `InterestedLenderCard` (`deal_detail.tsx`):
+- "Link TMO account" button appears under the Workflow toggle when the lender has no TMO account
+- Clicking reveals an inline monospace input ("TMO lender account #") with Link / Cancel buttons
+- Enter submits, Escape cancels
+- On success: card updates in place (badge + field flip to the account number), toast confirms
+- On failure: toast shows the error
+
+**Verification:** `make check` — **813 tests pass / 0 fail** (+1 new test for the endpoint), build + build:worker OK.
+
+**Deploy:**
+- EFS `80a7144` pushed `13ae196..80a7144`
+- Root `2ec612576` submodule pointer bump pushed
+- Worker deployed: **Version `fb14e2e4-6561-4654-8375-a6b1ab41f8e3`**
+- Smoke: `/`, `/funded-deals`, `/login` all 200
+
+Queue drained.
+<!-- agent:boundary:cecc0210 -->
 <!-- /agent:exchange -->
 ###
 <!--

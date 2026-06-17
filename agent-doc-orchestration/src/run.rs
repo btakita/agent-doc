@@ -236,10 +236,11 @@ fn run_stderr_redirect_needed() -> bool {
     {
         return false;
     }
-    matches!(
-        agent_doc_core::model_tier::detect_harness().as_str(),
-        "codex" | "opencode"
-    )
+    run_stderr_redirect_harness(agent_doc_core::model_tier::detect_harness().as_str())
+}
+
+fn run_stderr_redirect_harness(harness: &str) -> bool {
+    matches!(harness, "claude" | "codex" | "opencode")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1996,6 +1997,14 @@ mod tests {
     use crate::config::Config;
     use std::sync::{Arc, Barrier};
     use tempfile::TempDir;
+
+    #[test]
+    fn run_stderr_redirect_harnesses_include_claude_codex_and_opencode() {
+        assert!(run_stderr_redirect_harness("claude"));
+        assert!(run_stderr_redirect_harness("codex"));
+        assert!(run_stderr_redirect_harness("opencode"));
+        assert!(!run_stderr_redirect_harness("unknown"));
+    }
 
     #[test]
     fn owned_pane_queue_handoff_diagnostic_names_head_and_recovery() {

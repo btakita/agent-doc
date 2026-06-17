@@ -129,7 +129,7 @@ The supervisor is a single process that:
   (`AGENT_DOC_TMUX_INPUT_DIAG` / `AGENT_DOC_DEBUG_STDIN`) so normal supervisor
   filtering cannot print diagnostics into the managed TUI while the operator is
   typing.
-- Managed Codex/OpenCode supervisors redirect their own stderr to
+- Managed Claude/Codex/OpenCode supervisors redirect their own stderr to
   `.agent-doc/logs/supervisor-stderr.log` after startup. Routine idle-watch,
   stale-busy reconcile, and stale-binary hot-reload diagnostics must stay in the
   session log / ops log instead of painting over the foreground TUI after

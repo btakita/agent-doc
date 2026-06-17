@@ -61,7 +61,17 @@ Top backlog item: `#jbpostclearcruft`.
 I also replaced the remaining gated review item `#rtwbcast-verify` with backlog item `#rtwbcastlogproof`, then cleared the review entry. That keeps the realtime editor watcher work actionable and log-backed instead of parked in `agent:review` waiting for live verification. No JB plugin install is needed yet; the next implementation cycle should request that only after code or logging changes land.
 
 No code or tests were run in this cycle; this was a backlog/queue capture closeout.
-<!-- agent:boundary:584058d2 -->
+
+### Re: same-cycle pending-add queue sync — gpt-5
+
+I captured this as a distinct write/finalize ordering bug rather than a duplicate of the existing go-mode preflight queue-sync coverage.
+
+The relevant split is: `run_queue_maintenance` already appends fresh backlog ids when a go-mode queue sees them before preflight, but `--pending-add` mutations are applied later during finalize/write. That means a same-cycle follow-up can land in `agent:backlog priority queue` without being materialized into the active queue before commit.
+
+I added plan `tasks/agent-doc/plan-finalize-pending-add-queue-sync.md` and backlog item `#pendingaddqueuesync`. The plan targets a closeout-local convergence step for `cycle_state.pending_added_ids`, scoped to active go/start queues and backlog components with a recognized `queue` attribute, while preserving active queue-head consumption and the existing non-go amplification guard.
+
+No code or tests were changed in this cycle; this was plan/backlog capture for the queued bug report.
+<!-- agent:boundary:b15aa464 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -96,6 +106,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#pendingaddqueuesync] [clean-session] #spec-test-build-install-commit-push Implement tasks/agent-doc/plan-finalize-pending-add-queue-sync.md: make same-cycle finalize/write --pending-add items populate active go-mode agent:queue for agent:backlog ... queue documents while preserving current-head consumption and the non-go amplification guard.
 - [ ] [#jbpostclearcruft] [clean-session] #agent-doc-bug 2026-06-17: JB Run Agent Doc after `/clear`/restart leaves Codex composer prompt cruft instead of submitting the routed `agent-doc` command. Evidence: tasks/agent-doc/img_45.png. First inspect `.agent-doc/state/editor-route-attempts/` and ops.log attempt-id submit markers (`tmux_text_enter`, `route_submit_late_resubmit`, `route_dispatch_start_proven`); then update/fix the shared Codex submit path if tasks/agent-doc/plan-jb-codex-submit.md and tasks/agent-doc/plan-jb-clear-session-context-submit.md do not already cover the recurrence.
 - [ ] [#rtwbcastlogproof] [clean-session] Replace cleared review gate #rtwbcast-verify with actionable log-backed realtime editor watcher proof: add or verify structured JB+VS Code convergence logging and SimWorld/log-review evidence so tasks/agent-doc/plan-realtime-editor-watcher.md can be completed without an `agent:review` live gate; ask for a JB plugin install only after code/logging changes land.
 <!-- /agent:backlog -->

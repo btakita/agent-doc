@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -162,7 +162,7 @@ You'll almost certainly see `lender_account = NULL` and `latest_request_status` 
 **Fix:** complete a lender request for this investor via `PUT /api/admin/lender-requests/:id/done` with their real TMO account number (or set `users.lender_account` directly in D1). The select-lender action will then pass.
 
 No code change needed — the guard is correct; the `lender_account` column just isn't populated yet.
-<!-- agent:boundary:1012d9f5 -->
+<!-- agent:boundary:d883dede -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -170,6 +170,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- The lender logged into the lender portal so they should have a lender account. Is this due to the lender not being accredited?
 <!-- /agent:queue -->
 
 ## Backlog

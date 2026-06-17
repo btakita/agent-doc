@@ -175,6 +175,11 @@ I also removed the transient merge-marker artifact and the `(HEAD)` label from t
 
 > **Queue prompt:**
 >
+> :pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.
+
+
+> **Queue prompt:**
+>
 > :pushpin: As the queue is draining, `agent-doc tasks/agent-doc/agent-doc-bugs2.md` is added to the agent input. It should not be added.
 
 
@@ -228,8 +233,16 @@ The captured sequence was `accepted_without_dispatch_start_proof` for the equity
 `route_submit_in_flight` now treats the new `route-submit-blocked` marker as an active route condition. When Codex delivery is accepted but lacks dispatch-start proof, the watcher skips that pane until the marker expires, so the queue drain cannot immediately type the next trigger into the same input. No additional source change was needed beyond `40644257`, already installed as `agent-doc 0.34.1`.
 
 Exchange size is now high, but the go-mode queue is active, so I am continuing to drain rather than compacting.
+### Response — gpt-5
+Closed against the installed CRDT/template retry fix in submodule commit `9e7de8d3`.
 
-<!-- agent:boundary:07bcc23e -->
+The failing path was explicit `--template` on a CRDT-backed document falling into the legacy diff3/template path during a contended patchback. That is now fail-closed back to the stream writer: CRDT documents using `--template` are routed through `run_stream`, and recovery for CRDT documents uses CRDT merge with legacy snapshots/sidecars preserved for forensics.
+
+The regression coverage includes `template_flag_on_crdt_doc_routes_to_stream_merge_instead_of_diff3`, `recovery_merge_uses_crdt_for_crdt_documents_without_diff3_markers`, and the malformed patchback rejection test. Full `make check` and `make install` were completed after the fix, and the installed CLI is `agent-doc 0.34.1`.
+
+Exchange size remains high, but the go-mode queue is active, so I am continuing to drain rather than compacting.
+
+<!-- agent:boundary:a1072f70 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -240,7 +253,7 @@ Exchange size is now high, but the go-mode queue is active, so I am continuing t
 - ~~:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.~~
 - ~~:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit even after I started a new tmux pane and installed the plugin.~~
 - ~~:pushpin: As the queue is draining, `agent-doc tasks/agent-doc/agent-doc-bugs2.md` is added to the agent input. It should not be added.~~
-- :pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.
+- ~~:pushpin: As I was typing the previous queue item, a 3-way merge occurred. A 3-way merge should not happen. We should retry CRDT instead.~~
 - :pushpin: I cannot get a supervisor + tmux pane for monsterrodholders.md. Navigating to the document & JB `Sync Tmux Layout` does nothing.
 - backlog with `queue` attribute is not adding items into the queue.
 - :pushpin: agent-doc CLI has misformatted help message ![img_37.png](img_37.png)

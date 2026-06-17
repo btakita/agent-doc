@@ -98,11 +98,6 @@ Reviewed all 4 `[operator-drive]` review items. One ship-stopper found, one revi
 
 > **Queue prompt:**
 >
-> :pushpin: What are #next-steps to fix lazily-rs bugs?
-
-
-> **Queue prompt:**
->
 > [#syej]
 
 
@@ -113,15 +108,30 @@ Reviewed all 4 `[operator-drive]` review items. One ship-stopper found, one revi
 **Two-part fix** (`src/lazily/slot.py`):
 1. **Removed `touch()` from `Slot.__call__`** — computation must not cascade invalidation. Only explicit `reset` propagates (consistent with the SPEC, which never documented `__call__` touching).
 2. **`Slot.reset` clears subscribers before notification** — a subscriber that triggers a re-entrant reset finds an empty subscriber set, breaking the mutual recursion.
-2. **#lzloomtimeout (verification gap):** the Loom exhaustive model `inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish` (`tests/thread_safe_loom.rs:1451`) never completes — confirmed it runs >5min without finishing. The 2 writer/reader threads + main body blow up Loom's state space, so the torn/stale-read invariant for the inline seqlock is *not* exhaustively proven today. Non-exhaustive stress tests pass, so this is a proof-coverage gap, not a known runtime race. Fix by bounding preemptions (`loom::model_g`) or factoring the model to shrink interleavings.
-1. **#lzrepourl (metadata bug):** `Cargo.toml:7` `repository = "https://github.com/btakita/lazily-rs"` is stale — the actual remote is `lazily-hub/lazily-rs` (confirmed via `git remote -v`). Publishes a wrong repo link to crates.io/docs.rs. Trivial one-line fix; land before any crates.io publish.
 
 **Test added:** `test_signal_depends_on_slot` — constructs a `Signal` with a `@slot` dependency (the exact scenario that crashed), asserts the value, and verifies caching + slot reset behavior.
 
 **Verification:** 58/58 tests pass, `ruff check` clean, `ty check` clean. `twine check` PASSED on both rebuilt dist artifacts. Fresh-venv install round-trip confirmed `Signal→Slot` works without recursion.
 
 SPEC + CHANGELOG updated to document the re-entrancy-safe invalidation semantics. Review #kb9b updated: ship-stopper cleared, dist artifacts rebuilt and verified.
-<!-- agent:boundary:d3707bbf -->
+
+### Re: next-steps — lazily-rs bug audit — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: What are #next-steps to fix lazily-rs bugs?
+
+Audited lazily-rs for bugs. **Core reactive logic is healthy**: all default-feature tests pass, `cargo clippy --all-features --all-targets` is clean, no open issues on `lazily-hub/lazily-rs`. Recent fixes (#tf0k SlotId casts, #j1vw From impls, `1cee080` ipc dead-code, lazily-py #syej Signal→Slot recursion) are landed. FFI panic safety is correctly handled — every `extern "C"` entry in `src/ffi.rs` wraps its body in `catch_unwind` and returns `LazilyFfiStatus::Panic` instead of unwinding across the ABI.
+
+**Two real issues found** (added to backlog in priority order):
+
+1. **#lzrepourl (metadata bug):** `Cargo.toml:7` `repository = "https://github.com/btakita/lazily-rs"` is stale — the actual remote is `lazily-hub/lazily-rs` (confirmed via `git remote -v`). Publishes a wrong repo link to crates.io/docs.rs. Trivial one-line fix; land before any crates.io publish.
+2. **#lzloomtimeout (verification gap):** the Loom exhaustive model `inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish` (`tests/thread_safe_loom.rs:1451`) never completes — confirmed it runs >5min without finishing. The 2 writer/reader threads + main body blow up Loom's state space, so the torn/stale-read invariant for the inline seqlock is *not* exhaustively proven today. Non-exhaustive stress tests pass, so this is a proof-coverage gap, not a known runtime race. Fix by bounding preemptions (`loom::model_g`) or factoring the model to shrink interleavings.
+
+**Non-bugs checked and cleared:** production `panic!`s in `context.rs`/`thread_safe.rs`/`async_context.rs` are documented contract violations (wrong-type ID) and are caught at the FFI boundary; `.expect()`s in `ipc.rs` are length-checked invariants or astronomically-unlikely epoch overflow. `Cargo.toml` has no `panic=` override (default `unwind`), compatible with the `catch_unwind` strategy.
+
+**Top of backlog: #lzrepourl.**
+<!-- agent:boundary:58b6e674 -->
 <!-- /agent:exchange -->
 ###
 <!--

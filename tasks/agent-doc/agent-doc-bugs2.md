@@ -22,7 +22,7 @@ queue: stop
 
 ## Status
 
- <!-- agent:status patch=replace -->
+<!-- agent:status patch=replace -->
 
 complete
 <!-- /agent:status -->
@@ -169,9 +169,82 @@ Commits pushed:
 - `src/agent-doc`: `59d2d9e5 block editor-active disk fallbacks`
 - root pointer: `f5ed3a04c agent-doc: block editor-active disk fallbacks`
 - session closeout: `01e3cbbe4`, `d4502c96c`
+- JetBrains plugin `0.2.169` is installed. Restart IntelliJ IDEA 2026.1 to activate the plugin bytecode.
+- CLI/cdylib installed with `make install`; 2 controllers were marked for idle-boundary recycle.
+- root: `3839e1512 agent-doc: update jetbrains clear preemption` pushed to `origin/main`.
+- `src/agent-doc`: `4ea5f4b9 fix jetbrains clear preempts stalled dispatch` pushed to `origin/main`.
+- root `agent-loop` has no workflow named `CI`.
+- `src/agent-doc` latest CI for `4ea5f4b9` was `in_progress` when checked.
+- `agent-doc plugin install --local jetbrains` for `/home/brian/.config/JetBrains/IntelliJIdea2026.1` and `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
+- `make install`
+- `./gradlew test`
+- `make check` (`clippy`, 4635 Rust tests, doctests, medium simulator, version sync)
+- `make bump-plugin`
+- `./gradlew test --tests com.github.btakita.agentdoc.EditorCommandStateMachineTest --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `cargo test -p agent-doc-orchestration route_submit_resubmit_proof_line_is_operator_greppable_for_both_harnesses -- --nocapture`
+- `cargo fmt --check`
+- root `src/agent-doc` gitlink
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/editors/jetbrains/gradle.properties`
+- `src/agent-doc/editors/jetbrains/SPEC.md`
+- `src/agent-doc/agent-doc-orchestration/src/route/dispatch.rs`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/EditorCommandStateMachineTest.kt`
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt`
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorCommandStateMachine.kt`
+- JetBrains plugin version bumped to `0.2.169`, signed/unsigned plugin zips rebuilt, and `0.2.169` installed into both IntelliJ IDEA 2026.1 plugin locations found on this machine.
+- Route submit proof coverage now explicitly includes OpenCode alongside Codex and Claude.
+- Repeated Run clicks still dedupe behind the first alive route process. Run clicked during an active Clear still queues until synchronous Clear completion.
+- JetBrains `Clear Session Context` now preempts a still-dispatching `Run Agent Doc` route instead of blocking. The plugin cancels the active route handle and then runs the normal binary-owned `agent-doc session clear <FILE>` path, so prompt correction, Enter submit retries, and protected-input refusal stay in shared Rust behavior.
 
 `make install` installed the new CLI/cdylib and marked 2 controllers for idle-boundary recycle. No JetBrains plugin code update was needed. The only remaining warning is that the current route-owned supervisor is still mapping the stale binary until it reaches an idle recycle boundary; I did not force-restart the busy pane.
-<!-- agent:boundary:202bda5a -->
+
+### Re: JB Clear while Run dispatch is stalled — gpt-5
+
+Implemented, installed, committed, and pushed.
+
+What changed:
+- JetBrains `Clear Session Context` now preempts a still-dispatching `Run Agent Doc` route instead of blocking. The plugin cancels the active route handle and then runs the normal binary-owned `agent-doc session clear <FILE>` path, so prompt correction, Enter submit retries, and protected-input refusal stay in shared Rust behavior.
+- Repeated Run clicks still dedupe behind the first alive route process. Run clicked during an active Clear still queues until synchronous Clear completion.
+- Route submit proof coverage now explicitly includes OpenCode alongside Codex and Claude.
+- JetBrains plugin version bumped to `0.2.169`, signed/unsigned plugin zips rebuilt, and `0.2.169` installed into both IntelliJ IDEA 2026.1 plugin locations found on this machine.
+
+Changed paths:
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorCommandStateMachine.kt`
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/EditorCommandStateMachineTest.kt`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt`
+- `src/agent-doc/agent-doc-orchestration/src/route/dispatch.rs`
+- `src/agent-doc/editors/jetbrains/SPEC.md`
+- `src/agent-doc/editors/jetbrains/gradle.properties`
+- `src/agent-doc/VERSIONS.md`
+- root `src/agent-doc` gitlink
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p agent-doc-orchestration route_submit_resubmit_proof_line_is_operator_greppable_for_both_harnesses -- --nocapture`
+- `./gradlew test --tests com.github.btakita.agentdoc.EditorCommandStateMachineTest --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `make bump-plugin`
+- `make check` (`clippy`, 4635 Rust tests, doctests, medium simulator, version sync)
+- `./gradlew test`
+- `make install`
+- `agent-doc plugin install --local jetbrains` for `/home/brian/.config/JetBrains/IntelliJIdea2026.1` and `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
+
+CI:
+- `src/agent-doc` latest CI for `4ea5f4b9` was `in_progress` when checked.
+- root `agent-loop` has no workflow named `CI`.
+
+Commits:
+- `src/agent-doc`: `4ea5f4b9 fix jetbrains clear preempts stalled dispatch` pushed to `origin/main`.
+- root: `3839e1512 agent-doc: update jetbrains clear preemption` pushed to `origin/main`.
+
+Install / activation:
+- CLI/cdylib installed with `make install`; 2 controllers were marked for idle-boundary recycle.
+- JetBrains plugin `0.2.169` is installed. Restart IntelliJ IDEA 2026.1 to activate the plugin bytecode.
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:9e343672 -->
 <!-- /agent:exchange -->
 
 ## Queue

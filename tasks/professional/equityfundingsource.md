@@ -162,9 +162,53 @@ Verification reused from the route batch:
 Commits pushed:
 - EFS repo: `ce18d50` (`Rename portal roots`).
 - Parent repo: `64298af5a` (`Update EFS portal roots`).
+- Parent repo: `64298af5a` (`Update EFS portal roots`).
+- EFS repo: `ce18d50` (`Rename portal roots`).
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+- `git diff --check` passed.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` exited 0; the digest still flags the known non-fatal `error: d1 down` failure-path log.
+- Focused Bun suite passed: 243 tests, 0 fail.
+- Test coverage now asserts `/portal-investor/dashboard` returns 404 in the local Hono route mount, while `/portal-lender/dashboard`, `/portal-borrower/...`, and `/portal-broker/...` redirect to the new canonical roots.
+- `/portal-lender` now redirects to `/lenders` as the immediate previous lender route compatibility path.
+- The old `LEGACY_INVESTOR_PORTAL = '/portal-investor'` redirect and its route registrations were removed.
+- parent submodule pointer `src/equityfundingsource-dev`
+- `src/equityfundingsource-dev/app/equityfundingsource/dev-routes.test.ts`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/portal/investor/routes.ts`
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:6b8206cf -->
+
+### Re: Remove investor legacy redirect — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Remove 301 redirect for /portal-investor/
+
+Completed as part of the already-pushed portal root batch.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/portal/investor/routes.ts`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/dev-routes.test.ts`
+- parent submodule pointer `src/equityfundingsource-dev`
+
+Proof:
+- The old `LEGACY_INVESTOR_PORTAL = '/portal-investor'` redirect and its route registrations were removed.
+- `/portal-lender` now redirects to `/lenders` as the immediate previous lender route compatibility path.
+- Test coverage now asserts `/portal-investor/dashboard` returns 404 in the local Hono route mount, while `/portal-lender/dashboard`, `/portal-borrower/...`, and `/portal-broker/...` redirect to the new canonical roots.
+
+Verification reused from the route batch:
+- Focused Bun suite passed: 243 tests, 0 fail.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` exited 0; the digest still flags the known non-fatal `error: d1 down` failure-path log.
+- `git diff --check` passed.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+
+Commits pushed:
+- EFS repo: `ce18d50` (`Rename portal roots`).
+- Parent repo: `64298af5a` (`Update EFS portal roots`).
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:0970a450 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -175,7 +219,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - ~~:pushpin: Move routes /portal-lender/ to /lenders/~~
 - ~~:pushpin: Move routes /portal-borrower/ to /borrowers/~~
 - ~~:pushpin: Move routes /portal-broker/ to /brokers/~~
-- :pushpin: Remove 301 redirect for /portal-investor/
+- ~~:pushpin: Remove 301 redirect for /portal-investor/~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

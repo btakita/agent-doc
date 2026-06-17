@@ -5,6 +5,8 @@
 //!   the top of agent-doc documents.
 //! - `parse(content)` splits a document string into `(Frontmatter, body_str)`. Documents that do
 //!   not start with `---\n` return a default `Frontmatter` and the full content as body.
+//!   A UTF-8 BOM or horizontal whitespace before the opening marker is tolerated so
+//!   editor-created session docs do not silently become unmanaged.
 //!   Unterminated frontmatter (no closing `---`) returns `Err`.
 //! - `parse_for_file(content, file)` is the path-aware variant: it wraps YAML parse failures with
 //!   the document path, resolves project-local required SSH defaults from `.agent-doc/config.toml`,
@@ -1320,17 +1322,29 @@ pub fn ensure_session(content: &str) -> Result<(String, String)> {
 }
 
 fn split_frontmatter(content: &str) -> Result<Option<(&str, &str)>> {
-    if !content.starts_with("---\n") {
-        return Ok(None);
-    }
-    let rest = &content[4..]; // skip opening ---\n
+    let (opening_end, rest) = if let Some(rest) = content.strip_prefix("---\n") {
+        (4, rest)
+    } else {
+        let without_bom = content.strip_prefix('\u{feff}').unwrap_or(content);
+        let bom_len = content.len() - without_bom.len();
+        let horizontal_ws_len = without_bom
+            .bytes()
+            .take_while(|byte| matches!(byte, b' ' | b'\t'))
+            .count();
+        let marker_start = bom_len + horizontal_ws_len;
+        if (bom_len == 0 && horizontal_ws_len == 0) || !content[marker_start..].starts_with("---\n")
+        {
+            return Ok(None);
+        }
+        (marker_start + 4, &content[marker_start + 4..])
+    };
     let (end, closing_len) = rest
         .find("\n---\n")
         .map(|end| (end, 5))
         .or_else(|| rest.find("\n---").map(|end| (end, 4)))
         .ok_or_else(|| anyhow::anyhow!("Unterminated frontmatter block"))?;
     let yaml = &rest[..end];
-    let body_start = 4 + end + closing_len; // opening ---\n + yaml + closing marker
+    let body_start = opening_end + end + closing_len; // opening marker + yaml + closing marker
     let body = if body_start <= content.len() {
         &content[body_start..]
     } else {
@@ -1485,6 +1499,30 @@ mod tests {
         assert!(fm.agent.is_none());
         assert!(fm.model.is_none());
         assert!(fm.branch.is_none());
+        assert_eq!(body, content);
+    }
+
+    #[test]
+    fn parse_tolerates_leading_horizontal_space_before_frontmatter() {
+        let content = " ---\nagent_doc_session: abc-123\n---\nBody\n";
+        let (fm, body) = parse(content).unwrap();
+        assert_eq!(fm.session.as_deref(), Some("abc-123"));
+        assert_eq!(body, "Body\n");
+    }
+
+    #[test]
+    fn parse_tolerates_bom_before_frontmatter() {
+        let content = "\u{feff}---\nagent_doc_session: abc-123\n---\nBody\n";
+        let (fm, body) = parse(content).unwrap();
+        assert_eq!(fm.session.as_deref(), Some("abc-123"));
+        assert_eq!(body, "Body\n");
+    }
+
+    #[test]
+    fn parse_keeps_leading_blank_line_as_body_not_frontmatter() {
+        let content = "\n---\nagent_doc_session: abc-123\n---\nBody\n";
+        let (fm, body) = parse(content).unwrap();
+        assert!(fm.session.is_none());
         assert_eq!(body, content);
     }
 

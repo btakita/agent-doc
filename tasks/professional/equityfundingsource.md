@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -89,7 +89,7 @@ Verification:
 - `git -C src/equityfundingsource-dev status --short --branch` is clean on `main...origin/main`.
 
 Changed paths: no EFS source changes; only this agent-doc closeout is being committed. Escalation: none.
-<!-- agent:boundary:0e941588 -->
+<!-- agent:boundary:29c00b8c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,6 +97,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- The lender "Available deal conversation" component on all pages it appears on should support the lender to send messages from the website in addition to email. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -97,14 +97,58 @@ Deployed the EFS Worker with the "Urgent notifications" label removal. Pre-deplo
 - Smoke: `/` `/funded-deals` `/login` all 200
 
 Queue drained.
-<!-- agent:boundary:a2839ddf -->
+
+### Re: Lender-select error is a missing TMO account, not the email rename — glm-5.2
+
+> **Queue prompt:**
+>
+> Selecting the lender in …/dialog_deal_id=7a0c1463-…&deal_tab=interests had an error. Is this due to the email change o…
+>
+> ```
+> Select lender failed
+> selected lender needs a TMO lender account before TMO sync
+> ```
+
+**No — unrelated to the email rename.** The guard that fires is `admin_deal_interests_by_id_select_PUT_` at `lib/admin/investor_management/index.ts:1137-1138`:
+
+```ts
+const lender_account = existing.investor_lender_account?.trim() ?? ''
+if (!lender_account) return c.json({ error: 'selected lender needs a TMO lender account before TMO sync' }, 409)
+```
+
+`investor_lender_account` comes from `users.lender_account` via the JOIN at line 351. The rename-accounts CLI (`lib/auth/rename_accounts.ts:63`) only writes `email` + `updated_at`:
+
+```sql
+UPDATE users SET email = ?, updated_at = unixepoch() WHERE email = ?;
+```
+
+It does **not** touch `lender_account`, so the rename preserved whatever was already there — null, in this case. The renamed test account (`test2@investor.com` → `btak.dev+lender2@gmail.com`) never had a TMO lender account number assigned.
+
+**Root cause:** the selected lender's `users.lender_account` is null/empty. That field is set only when an admin completes a lender request via `PUT /api/admin/lender-requests/:id/done` (`admin_lender_requests_by_id_done_PUT_`, line 1628), which writes the TMO account number to both `lender_requests` and `users.lender_account`.
+
+**Fix (operational — no code change needed):**
+- Complete a lender request for this investor with the real TMO lender account number via the admin UI, **or**
+- Set it directly in D1 if you know the account number:
+  ```sql
+  UPDATE users SET lender_account = '<TMO-LENDER-ACCT>', updated_at = unixepoch()
+  WHERE email = 'btak.dev+lender2@gmail.com';
+  ```
+
+The guard is correct as designed — selecting a lender enqueues a gated TMO writeback (`tmo_selected_lender_outbox_enqueue_`) that needs a real account to sync to. No spec/test/code changes warranted, so `#spec-test-commit-push` doesn't apply this cycle. If you want a UI affordance to set `lender_account` on an existing investor without a lender-request round-trip, I can add that as a backlog item.
+<!-- agent:boundary:b0fbd08b -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
+Selecting the lender in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=interests had an error. Is this due to the email change o
+
+```
+Select lender failed
+selected lender needs a TMO lender account before TMO sync
+```
 <!-- /agent:queue -->
 
 ## Backlog

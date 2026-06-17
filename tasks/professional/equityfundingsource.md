@@ -131,7 +131,40 @@ Commits pushed:
 - Parent repo: `64298af5a` (`Update EFS portal roots`), pushed to `origin/main`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:e741883d -->
+
+### Re: Move broker portal routes — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Move routes /portal-broker/ to /brokers/
+
+Completed as part of the already-pushed portal root batch.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--server--efs/urls/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/portal/broker/routes.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/broker/**`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/broker/notify.ts`
+- broker route references in tests, docs, and PRDs
+- parent submodule pointer `src/equityfundingsource-dev`
+
+Proof:
+- Canonical broker root is now `/brokers`.
+- `/portal-broker` and `/portal-broker/:section` now 308-redirect to `/brokers` while preserving path suffix and query string.
+- Broker browser links, email notification links, docs, PRD references, and tests use `/brokers`.
+
+Verification reused from the route batch:
+- Focused Bun suite passed: 243 tests, 0 fail.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` exited 0; the digest still flags the known non-fatal `error: d1 down` failure-path log.
+- `git diff --check` passed.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+
+Commits pushed:
+- EFS repo: `ce18d50` (`Rename portal roots`).
+- Parent repo: `64298af5a` (`Update EFS portal roots`).
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:6b8206cf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,7 +174,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: Move routes /portal-lender/ to /lenders/~~
 - ~~:pushpin: Move routes /portal-borrower/ to /borrowers/~~
-- :pushpin: Move routes /portal-broker/ to /brokers/
+- ~~:pushpin: Move routes /portal-broker/ to /brokers/~~
 - :pushpin: Remove 301 redirect for /portal-investor/
 - :pushpin: deploy
 <!-- /agent:queue -->

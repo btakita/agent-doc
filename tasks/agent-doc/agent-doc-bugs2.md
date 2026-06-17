@@ -221,7 +221,34 @@ Commits pushed:
 
 - `agent-doc`: `96624f9c` (`fix: route queued reruns through editor ipc`)
 - `agent-loop`: `35a8df61d` (`chore: update agent-doc submodule for route ipc fixes`)
-<!-- agent:boundary:91b5c611 -->
+
+### Re: JB bug queue — log-backed verdicts and backlog capture — glm-5.2
+
+> **Queue prompt:**
+>
+> - ~~In spoton.md (Claude Code), I added a queue item and ran Jb `Run Agent Doc`. The supervisor/tmux pane crashed, the queue item I added was deleted. When I selected the page in the editor, a new supervisor/tmux pane auto-started.~~
+
+
+I checked the route ledgers (`.agent-doc/state/editor-route-attempts/`) for every file named in the queue. The core transport bugs reported here were fixed in `96624f9c` (`fix: route queued reruns through editor ipc`), which is installed (`agent-doc 0.34.1`). `src/agent-doc` is clean this cycle.
+
+**Already fixed — close:**
+- **tsift.md preset-token queue pause** (`queue_paused … preset-token queue heads (#bugs-observed) un-drainable`): fixed in `cc79c412` + `96624f9c`. This queue head is a stale paste — no action.
+- **lazily-rs "stalled with no action"**: route ledger shows attempt `1781735768677-24` reached `route_success` (1149ms) at 22:36 UTC. The stall was the 22:29 window — a `superseded` attempt (`1781735356187-19`) followed by `route_already_in_flight` (`1781735383872-20`) on the second click. It self-resolved; subsequent routes succeed.
+- **JB File Cache Conflict + wedged IPC accept-loop**: root cause fixed in `96624f9c` — no raw disk write while an editor owns the buffer, and degraded self-heal now ack-probes instead of trusting a bare `connect`, so a wedged accept-backlog (the "22 unaccepted connections" case) latches to file-IPC and runs converge instead of stalling or corrupting the cache. **Operator re-test**: re-run JB `Run Agent Doc`; the dialogs should stop. Grep `.agent-doc/logs` for `ipc_proof_insufficient` / `realtime_doc_resolve authority=` / `realtime_broadcast_queued … merged_len=` to confirm file-IPC convergence.
+
+**Operator-verify (no code change this cycle):**
+- **equityfundingsource "prevent the wedge"**: the binary now works around the wedged accept-loop, so runs will not stall even when the plugin's accept loop is wedged. The *root cause* is plugin-side (the accept loop wedging). That needs a JB plugin fix + install — captured as `#jbacceptwedge`. **No plugin install is needed right now** to stop the stalls; I'll flag when the plugin-side fix is ready to install.
+
+**New actionable backlog (not gated):**
+- `#claudesubmit` — "JB Run Agent Doc with Claude did not submit on spoton.md." Route ledger shows `route_success` (dispatch) at 22:54 UTC, but pane-level Enter submission for the Claude harness isn't proven from the route log alone. The `/clear`-resubmit machinery exists (`session_clear_submit_resubmit … action=submit_key key=Enter`); the initial-dispatch submit proof for Claude needs ops.log inspection and possibly extending submit detection.
+- `#actorgenclosed` [low] — spoton.md `dispatch rejected: authoritative actor generation 21 is closed`: a race where the actor generation closed (crash/restart) mid-dispatch. Recoverable; routes succeed after. Needs a generation-close dispatch guard.
+- `#queediturn` — editing `agent:queue` during a running turn caused churn and deleted a queued item (monsterrodholders.md). Needs a turn-boundary queue-edit guard / deferred-apply.
+- `#codefence-strip` — agent-doc stripped a code fence on a prior run. Audit patch/exchange fence preservation.
+
+**On gates / presets:** `agent:review` is already empty — no gated items to replace, no gates left this round. The queue preset is `#spec-test-build-install-commit-push`, but no spec/code changed this cycle (log analysis + backlog capture), so there is nothing to build/install. I did **not** sweep the large unrelated uncommitted changeset (other tasks/submodules/tsift command files) — only this session document is committed by finalize.
+
+Logging already present to prove/disprove the JB items: `live_buffer_classify`, `realtime_doc_resolve authority=… reason=… diverged=…`, `mps_baseline_pin`, `realtime_broadcast_queued file=… origin_editor_id=… target_editor_id=… patch_id=… merged_len=…`, `session_clear_submit_observation … issue=prompt_not_submitted`, `session_clear_submit_resubmit … result=accepted`, and `ipc_proof_insufficient … recovery=…`.
+<!-- agent:boundary:7fa866bd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -250,7 +277,7 @@ I ran JB `Run Agent Doc` on spoton.md runnnig Claude. The session crashed.
 Error: project controller command `dispatch` failed: dispatch rejected for tasks/recruit/spoton.md: authoritative actor generation 21 is closed receipt_id=3877
 ```
 ---
-- JB `Run Agent Doc` on lazily-rs stalled with no action.
+- ~~JB `Run Agent Doc` on lazily-rs stalled with no action.~~
 - :pushpin: Still getting JB `File Cache Conflict` dialogs. JB plugin has been running for hours. It should not be possible to write to disk while JB plugin or VSCode plugin is running.
 ---
 How can we prevent the wedge conflict from occurring, as what happened in equityfundingsource.md.
@@ -258,10 +285,14 @@ How can we prevent the wedge conflict from occurring, as what happened in equity
      Found the root cause: IntelliJ's agent-doc plugin owns the ipc.sock but has 22 unaccepted connections in the backlog — the plugin's accept loop is wedged. That's why every IPC attempt times                                            
      out. Activating the tab can't fix a wedged socket accept loop. 
 ```
-
 Aside from fixing the wedge, we should ensure the run does not stall.
 ---
 - JB `Run Agent Doc` with Claude did not submit on spoton.md. We should have the loop detect the unsubmitted prompt and Enter.
+- do [#actorgenclosed]
+- do [#codefence-strip]
+- do [#queediturn]
+- do [#jbacceptwedge]
+- do [#claudesubmit]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -288,6 +319,11 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#actorgenclosed] [low] dispatch rejected 'authoritative actor generation closed' race during crash recovery (spoton.md gen 21). Recoverable; routes succeed after. Investigate generation-close dispatch guard.
+- [ ] [#codefence-strip] agent-doc stripped a code fence on a prior run. Audit patch/exchange fence preservation; add regression.
+- [ ] [#queediturn] Editing agent:queue during a running turn caused churn + deleted a queued item (monsterrodholders.md). Add turn-boundary queue-edit guard / deferred-apply.
+- [ ] [#jbacceptwedge] [operator-install] JB plugin IPC accept-loop wedge root cause (22 unaccepted conns). Binary works around via ack-probe+file-IPC (96624f9c, installed). Plugin-side accept-loop fix + install needed for root cause; flag operator when ready.
+- [ ] [#claudesubmit] Claude harness initial-dispatch submit proof: route ledger shows route_success (spoton.md 22:54 UTC) but pane-level Enter submission unverified. Inspect ops.log submit markers; extend submit detection to Claude harness if gap.
 <!-- /agent:backlog -->
 
 ## Review

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -474,12 +474,13 @@ So the `#gctrl1`/`#gctrl2`/`#gctrl3` substrate is installed and ready — `tsift
 Practical check for "is a model loaded right now?" — the cheapest live signal is `nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits`: empty output means nothing is on the GPU. The tsift-owned check is `tsift local-model lease show` (empty `leases` = no tsift holder). Combine both to distinguish "no GPU consumer at all" from "a non-tsift consumer (Corky, JetBrains, training run) is using VRAM".
 
 Confidence: high (four orthogonal measurements agree). No source changes this cycle; no commit beyond the session-document closeout. Pre-existing unrelated dirty files under `src/tsift` remain unstaged as before.
-<!-- agent:boundary:62020c92 -->
+<!-- agent:boundary:45e8fdb6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Please setup an alternate port since WP is running on port 8080. Can the port be configured?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -37,12 +37,32 @@ completed
 Compacted content:
 - Archived 15 response topic(s): Existing drafted Run Agent Doc input; Queue drain state; Queue drain state; 12 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): There are still disk writes causing JB `File Cache Conflict` d...
-<!-- agent:boundary:b73356ed -->
+
+### Re: JB Run Agent Doc post-clear submit cruft — gpt-5
+
+I inspected `tasks/agent-doc/img_45.png`. The failure mode is a Codex pane after `/clear` where the follow-up `agent-doc tasks/agent-doc/agent-doc-bugs2.md` text is left in the composer instead of a clean submitted run. That should be tracked as a recurrence of the Codex submit-proof class, but with a post-clear/restart repro and attempt-ledger correlation.
+
+I added top backlog item `#jbpostclearcruft` for that exact repro. The first pass should inspect `.agent-doc/state/editor-route-attempts/` and `ops.log` for the durable attempt id and submit markers before changing code, then update the shared Codex submit path if the current `#jbcodexsubmit` work does not cover this recurrence.
+
+### Re: next steps / review cleanup — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` on this file stalled. A `/clear` with restart occurred. Then running JB `Run Agent Doc` did not submit and accumulated prompt cruft ![img_45.png](img_45.png)
+
+
+Top backlog item: `#jbpostclearcruft`.
+
+I also replaced the remaining gated review item `#rtwbcast-verify` with backlog item `#rtwbcastlogproof`, then cleared the review entry. That keeps the realtime editor watcher work actionable and log-backed instead of parked in `agent:review` waiting for live verification. No JB plugin install is needed yet; the next implementation cycle should request that only after code or logging changes land.
+
+No code or tests were run in this cycle; this was a backlog/queue capture closeout.
+<!-- agent:boundary:c997a401 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~:pushpin: JB `Run Agent Doc` on this file stalled. A `/clear` with restart occurred. Then running JB `Run Agent Doc` did not submit and accumulated prompt cruft ![img_45.png](img_45.png)~~
 - What are #next-steps to fix agent-doc bugs? Add to backlog and queue.
 <!-- /agent:queue -->
 <!--
@@ -70,12 +90,13 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#jbpostclearcruft] [clean-session] #agent-doc-bug 2026-06-17: JB Run Agent Doc after `/clear`/restart leaves Codex composer prompt cruft instead of submitting the routed `agent-doc` command. Evidence: tasks/agent-doc/img_45.png. First inspect `.agent-doc/state/editor-route-attempts/` and ops.log attempt-id submit markers (`tmux_text_enter`, `route_submit_late_resubmit`, `route_dispatch_start_proven`); then update/fix the shared Codex submit path if tasks/agent-doc/plan-jb-codex-submit.md and tasks/agent-doc/plan-jb-clear-session-context-submit.md do not already cover the recurrence.
+- [ ] [#rtwbcastlogproof] [clean-session] Replace cleared review gate #rtwbcast-verify with actionable log-backed realtime editor watcher proof: add or verify structured JB+VS Code convergence logging and SimWorld/log-review evidence so tasks/agent-doc/plan-realtime-editor-watcher.md can be completed without an `agent:review` live gate; ask for a JB plugin install only after code/logging changes land.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
-- [/] [#rtwbcast-verify] [operator-verify] rtwbcast rung 4 final proof remains gated: code is landed in agent-doc cddad87b and headless targeted-delivery proof exists via SimWorld, but agent closeout on 2026-06-16 found only JetBrains live broadcast queue markers and no JetBrains-plus-VS Code live convergence/ack proof. Acceptance still requires opening the same managed doc in JB and VS Code, editing both buffers, and confirming both converge with no clobber and zero File Cache Conflict. Plan: tasks/agent-doc/plan-realtime-editor-watcher.md
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

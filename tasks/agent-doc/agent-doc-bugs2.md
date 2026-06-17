@@ -390,14 +390,38 @@ Verification:
 - `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
 - `rg -a` over `.agent-doc/logs/ops.log` for `%24`, `dispatch_start_proof`, and accepted-only route events
 - `git log --oneline -5 -- tasks/professional/equityfundingsource.md`
+- Parent repo gitlink: `07d612a3 agent-doc: simplify jetbrains codex route delivery`.
+- Submodule `src/agent-doc`: `b23c61d8 fix: simplify jetbrains codex route delivery`, pushed to `agent-doc/main`.
+- Latest GitHub Actions `CI` run on `main` was already completed/success at `2026-06-17T00:18:24Z`.
+- `make install` completed and installed `agent-doc 0.34.1`; it marked 2 controllers for recycle at the next idle boundary.
+- `git diff --check` passed.
+- `make check` passed: 4613 nextest tests passed, 238 skipped, doctests and medium SimWorld corpus completed.
+- `cargo test -p agent-doc-orchestration idle_queue_context_reset --lib`
+- `cargo test -p agent-doc-orchestration clean_session_head_forces_context_reset_policy --lib`
+- `cargo test -p agent-doc-orchestration dispatch_only_proof_policy_accepts_enter_delivery_for_all_harnesses --lib`
+- `cargo test -p agent-doc-orchestration dispatch_only_codex_with_visible_hooks_accepts_enter_delivery --lib`
+- `cargo fmt`
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/specs/07-core-commands.md`
+- `src/agent-doc/specs/06-config.md`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/README.md`
+- `src/agent-doc/tests/test_cli.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start.rs`
+- `src/agent-doc/agent-doc-orchestration/src/route/dispatch_only.rs`
+- `src/agent-doc/agent-doc-orchestration/src/flow/routed_reopen.rs`
 
 Confidence: high that this specific report is not the Enter-submit bug and is instead a stale/rebound proof false negative. Escalation: none.
-<!-- agent:boundary:9c981289 -->
+<!-- agent:boundary:dcca7090 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- :pushpin: JB `Run Agent Doc` behavior is unchanged. Still broken. As I type, Codex restarts. Enter still does not work. I really just want to rip out the logic. The "fixes" havn't changed anything. Not sure what is going on. We need to drastically simplify this logic. You don't know what is going on. I don't know what is going on.
+- The agent_doc_queue_context_reset=true should have a 50% threshold by default
 - [#jbproofrebind]
 <!-- /agent:queue -->
 ###
@@ -428,7 +452,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jbproofrebind] Dispatch-only accepted-only proof timeout should re-query the controller authoritative actor and routed-submit proof after pane rebind/restart before returning a hard IDE failure; include rebound pane/generation in the diagnostic. Target: src/agent-doc/agent-doc-orchestration/src/route/dispatch.rs.
 <!-- /agent:backlog -->
 
 ## Review

@@ -175,7 +175,26 @@ Commits pushed:
 - `bun run deploy:worker` completed successfully.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:79c57839 -->
+
+### Re: Deploy — gpt-5
+
+> **Queue prompt:**
+>
+> Available deal dialog/page: Lender communication message from admin should email the lender with the EFS + deal template.
+
+
+Deployed the pushed EFS worker after the lender-message change.
+
+Commands / verification:
+- `bun run deploy:worker` completed successfully.
+- Remote D1 migration `0082_deal_interest_lender_messages.sql` applied to `equityfundingsource` with status ✅.
+- Worker deploy succeeded for `equityfundingsource`.
+- Deployed URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Current Worker Version ID: `58325af6-676e-4aa7-8cec-5bfa84379b5f`
+- EFS git status is clean after deploy.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:84ec678a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -183,7 +202,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Available deal dialog/page: Lender communication message from admin should email the lender with the EFS + deal template.
+- ~~Available deal dialog/page: Lender communication message from admin should email the lender with the EFS + deal template.~~
 - deploy
 <!-- /agent:queue -->
 

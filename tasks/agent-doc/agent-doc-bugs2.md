@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -73,14 +73,50 @@ Commits:
 - agent-doc submodule: 0fe421f8
 - parent gitlink: d52a3f56c
 - GitHub Actions: workflow named CI is not present; latest Agent Doc run 27663436397 was in_progress when checked.
-<!-- agent:boundary:c5376204 -->
+❯ - GitHub Actions: workflow named CI is not present; latest Agent Doc run 27663894728 was queued when checked.
+❯ - parent gitlink: 91be49cb0 agent-doc: lock idle queue restart drain
+❯ - agent-doc submodule: 2b0ff9d4 test: lock idle queue restart drain
+❯ - agent-doc submodule: d7dad15c docs: align ipc retry guidance
+❯ - make check passed on rerun: 4615 tests run, 4615 passed, 238 skipped; doctests passed; ignored simulation budget test passed. The first full run hit a sync test that passed on immediate targeted rerun before the full rerun passed.
+❯ - cargo test -p agent-doc-orchestration continuation_guidance_names_degraded_ipc_and_exhaustive_stop_list -- --nocapture
+❯ - cargo test -p agent-doc skill::tests::rendered_claude_skill_includes_queue_auto_loop_section -- --nocapture
+❯ - cargo test -p agent-doc-orchestration idle_queue_restart_drain_does_not_clear_ordinary_monsterrodholders_head -- --nocapture
+❯ - Also committed the generated IPC retry guidance sync so the bundled skill/runbook/queue-continuation wording matches the no-direct-disk editor retry policy from the previous head.
+❯ - Updated the supervisor spec to remove the stale threshold-clear description. Idle-watch clears are now documented as explicit operator clears or explicit [clean-session] heads only; ordinary queue heads drain as triggers.
+❯ - Added a regression for the ordinary monsterrodholders JetBrains Run Agent Doc head after restart: Codex idle-queue drain skips context reset, dispatches, and sends agent-doc tasks/monsterrodholders.md instead of /clear.
+Implemented and pushed the code work.
+
+> **Queue prompt:**
+>
+> :pushpin: monsterrodholders.md JB `Run Agent Doc` dispatch stalled after a restart with `/clear` that should not have happened.
+
+
+Submodule commits:
+- `0fe421f8` fail closed on active editor IPC fallback
+- `d7dad15c` align IPC retry guidance
+- `2b0ff9d4` lock idle queue restart drain
+
+Parent commits:
+- `d52a3f56c` gitlink for IPC fallback fix
+- `605a3d841` session closeout for first queue head
+- `91be49cb0` gitlink for idle queue restart drain
+- `2ff5cf73e` generated runbook mirror updates
+
+Verification passed locally:
+- focused IPC/idle-queue/skill tests
+- `make check` rerun: `4615 passed, 238 skipped`
+- `make install`
+- `agent-doc --version`: `0.34.1`
+
+GitHub Actions latest `Agent Doc` run failed because the jobs were not started due billing/spending-limit status, not test failure.
+
+Blocked only on the session document closeout for the current queue head: `agent-doc finalize --stream` failed twice with `missing_response_probe` / `recovery=retry_without_disk_write`. I did not use `--force-disk`. The session doc remains dirty with partial editor-IPC materialization, and the queue head is still live.
+<!-- agent:boundary:84a9b5d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: Changes to the editor buffer should always win. 0 External Disk Writes. If CRDT fails, try again. Do not fallback to external disk writes on the document. I lose work when this happens as I am typing.~~
-- :pushpin: monsterrodholders.md JB `Run Agent Doc` dispatch stalled after a restart with `/clear` that should not have happened.
 <!-- /agent:queue -->
 ###
 <!--

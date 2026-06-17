@@ -71,7 +71,23 @@ Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-
 Verification: focused tests passed (`109 pass`); full check passed (`751 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:443588b8 -->
+
+### Re: Call scheduled — gpt-5
+
+> **Queue prompt:**
+>
+> Call scheduled
+
+Completed and pushed the `Call scheduled` removal for the Available Deal -> Interested Lenders workflow.
+
+Changed paths: `src/equityfundingsource-dev` commit `fbe9965` removes `call_scheduled_at` from the deal-interest workflow stage model, admin/investor API row contracts, admin PATCH SQL, Interested Lenders UI controls, lender pipeline modal, investor activity timeline events, PRD wording, and tests; adds migration `0076_drop_deal_interest_call_scheduled.sql` to drop the column and recreate the workflow index without it. Parent repo commit `19078cc2f` updates the EFS submodule pointer.
+
+Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
+
+Verification: focused tests passed (`110 pass`); full check passed (`752 pass`, app build, worker build). CI check could not be inspected in the EFS repo because GitHub reported no workflow named `CI`.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:ba4a8ea5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,7 +100,7 @@ In "Available Deal" -> "Interested Lenders" tab
 Delete fields, db records, and logic relating to:
 - ~~Mark Call Completed~~
 - ~~Start Underwriting~~
-- Call scheduled
+- ~~Call scheduled~~
 - Verbal amount
 - Contact method
 - Pre-doc conditions

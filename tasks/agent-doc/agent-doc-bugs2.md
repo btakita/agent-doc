@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -37,7 +37,7 @@ complete
 Compacted content:
 - Archived 1 response topic(s): There are still disk writes causing JB `File Cache Conflict` dialogs.
 - Prior summary/context: ### Response — gpt-5 Fixed and installed the `agent-doc admin recycle` CLI path behind the screenshot. The clean-term...
-❯ - `cargo test -p agent-doc-orchestration direct_pane_existing_draft -- --nocapture`
+- `cargo test -p agent-doc-orchestration direct_pane_existing_draft -- --nocapture`
 
 ### Re: Existing drafted Run Agent Doc input — gpt-5
 
@@ -56,6 +56,14 @@ No JetBrains plugin update is needed for this head. The behavior is in the insta
 
 ### Re: Queue drain state — gpt-5
 
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Session Doc` did not submit. I then tried running JB `Clear Session Context`. It should be available to run. The supervisor should detect if the turn is running. If not, then send the `/clear`. If there is already text in the input, clear the input text and send `/clear` + Return.
+> ```
+> Clear Session Context is blocked while Run Agent Doc is dispatching for tasks/professional/equityfundingsource.md. Wait for dispatch to finish, or use Interrupt and Clear Session Context.
+> ```
+
+
 The recovered response for the existing drafted `Run Agent Doc` input is now committed. I did not make any source changes in this recovery closeout cycle.
 
 The active queue currently has no in-session drainable head according to preflight (`queue_continuation_required: false`). The remaining `Run Session Doc` / `Clear Session Context` report needs live editor or operator-side verification before it should be drained from this session.
@@ -65,13 +73,23 @@ Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-d
 Verification: the prior response was recovered and committed by preflight; this finalize is the closeout for the recovery cycle.
 Escalation: none.
 
-<!-- agent:boundary:16bcf6a4 -->
+
+### Re: Queue drain state — gpt-5
+
+The recovered response for the existing drafted `Run Agent Doc` input is now committed. I did not make any source changes in this recovery closeout cycle.
+
+The active queue currently has no in-session drainable head according to preflight (`queue_continuation_required: false`). The remaining `Run Session Doc` / `Clear Session Context` report needs live editor or operator-side verification before it should be drained from this session.
+
+Changed paths: session document only, through the agent-doc repair/finalize path.
+Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc plan ...`, `agent-doc session-check ...`.
+Verification: the prior response was recovered and committed by preflight; this finalize is the closeout for the recovery cycle.
+Escalation: none.
+<!-- agent:boundary:fa624bc4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: If I run JB `Run Agent Doc` with the prompt already in the input, only send Return.~~
 ---
 :pushpin: JB `Run Session Doc` did not submit. I then tried running JB `Clear Session Context`. It should be available to run. The supervisor should detect if the turn is running. If not, then send the `/clear`. If there is already text in the input, clear the input text and send `/clear` + Return.
 ```

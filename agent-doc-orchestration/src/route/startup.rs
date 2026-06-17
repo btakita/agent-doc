@@ -838,10 +838,13 @@ pub(crate) fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> 
     if harness.binary == "opencode" && harness.is_idle_chrome_only_output(content) {
         return Some("opencode idle status chrome".to_string());
     }
-    // OpenCode treats a bottom idle composer (including a bare status/footer
-    // splash) as dispatch-ready. Codex does not: its composer always renders an
-    // actual `›` dispatch-ready prompt when ready, so a status/footer line alone
-    // is not a dispatch-ready prompt and must not be accepted as one.
+    // OpenCode and Codex can both render an idle composer as bottom status/footer
+    // chrome only after startup, clear, or redraw. Busy/protected states are
+    // filtered above by the harness busy cue and prompt-input classifiers.
+    if harness.binary == "codex" && harness.is_bottom_idle_chrome(content, 12) {
+        return latest_dispatch_ready_prompt
+            .or_else(|| Some("codex idle status chrome".to_string()));
+    }
     if harness.binary == "opencode" && harness.is_bottom_idle_chrome(content, 12) {
         return latest_dispatch_ready_prompt.or_else(|| Some("bottom idle chrome".to_string()));
     }
@@ -1559,14 +1562,26 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
         );
     }
     #[test]
-    fn ready_prompt_candidate_rejects_codex_footer_without_prompt() {
+    fn ready_prompt_candidate_accepts_codex_footer_without_prompt() {
         let harness = HarnessConfig::codex();
         let content = "\
 gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
 ";
         assert!(
+            ready_prompt_candidate(content, &harness).is_some(),
+            "a bottom Codex status/footer line is idle dispatch-ready chrome when no busy cue or draft is visible"
+        );
+    }
+    #[test]
+    fn ready_prompt_candidate_rejects_codex_busy_footer_without_prompt() {
+        let harness = HarnessConfig::codex();
+        let content = "\
+Waiting for background terminal (esc to interrupt)
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
+";
+        assert!(
             ready_prompt_candidate(content, &harness).is_none(),
-            "a Codex status/footer line alone is not a dispatch-ready prompt"
+            "Codex footer-only idle recovery must still reject active-turn busy cues"
         );
     }
     #[test]
@@ -1610,14 +1625,24 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
             "a ready+dispatched fresh start with a no-op first cycle must be kept, not reaped"
         );
 
-        // No cycle and only a status footer (no dispatch-ready prompt) → genuine miss.
-        let not_ready = "\
+        // No cycle, but Codex is back at bottom idle status chrome → KEEP.
+        let footer_only_idle = "\
 gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
+";
+        assert_eq!(
+            fresh_start_ack_outcome(false, footer_only_idle, &harness),
+            FreshStartAckOutcome::IdleNoOpKeep,
+            "a ready+dispatched fresh start with only idle status chrome must be kept, not reaped"
+        );
+
+        // No cycle and no dispatch-ready evidence → genuine miss.
+        let not_ready = "\
+Starting codex...
 ";
         assert_eq!(
             fresh_start_ack_outcome(false, not_ready, &harness),
             FreshStartAckOutcome::GenuineMissReap,
-            "a fresh start with no cycle and no dispatch-ready prompt is a genuine miss to reap"
+            "a fresh start with no cycle and no dispatch-ready evidence is a genuine miss to reap"
         );
     }
     #[test]

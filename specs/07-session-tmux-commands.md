@@ -524,8 +524,8 @@ command into the authoritative session through the same canonical
   placeholders ending in `in @filename`, `for @filename`, or
   `on my current changes` are also prompt-ready evidence when the pane does not
   show an active `Working (... esc to interrupt)` cue. These idle forms must
-  override stale actor/supervisor busy projection even though route dispatch
-  still requires a real dispatch-ready prompt before injecting a reopen. A
+  override stale actor/supervisor busy projection and may prove route
+  dispatch-ready state when no protected prompt input or busy cue is visible. A
   `closed` actor generation must still accept this explicit clear operator
   command, because closed only blocks duplicate reopen dispatch; it must not
   prevent clearing the live harness context before the next run.

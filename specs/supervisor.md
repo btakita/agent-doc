@@ -435,29 +435,30 @@ distinct from the one-shot restart auto-trigger:
     cannot hot-loop the watch every idle tick.
   - `SkipNoActiveHead` clears the dedup so a later re-enqueue of the same prompt
     text fires again.
-- Before dispatching a head, the watch applies the same
-  `session_accretion::queue_context_reset_reason` policy as direct `agent-doc
-  run`. If the active queue should continue from fresh context and no manual
-  clear cooldown is pausing dispatch, the watch injects the harness-native
-context reset command at the idle gap (`/clear` for Claude/Codex, `/new` for
-OpenCode), records that clear for Codex/OpenCode hook state, latches the
-current head as reset, writes a short-lived
-`.agent-doc/context-clear-in-flight/<doc-hash>.json` marker, and waits for a
-later idle tick to drain the same head. The in-memory latch prevents a large
-exchange from clearing forever without dispatching; the marker survives
-supervisor recycle/restart so the replacement watcher blocks drains until the
-clear settles, or presses the shared submit key once when the clear command is
-still visible in the composer. Once the pane settles for
-`CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls the marker is cleared.
-After the head advances, another reset may be interleaved if the accretion
-policy still requires it. A manual clear cooldown remains authoritative for a
-plain operator clear with no active queue (it suppresses passive dispatch until
-  cleared by the existing operator route path) and for an operator-deferred clear
-  that explicitly paused the loop. But a manual clear cooldown must NOT suppress
-  an active go-mode queue drain forever (`#clearcontresume`): the cooldown only
-  exists to avoid dispatching a trigger into an in-flight `/clear`, so once the
-  cleared pane settles to a fresh idle prompt for
-  `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls AND a `queue_active: true`
+- Before dispatching a head, the watch only starts a context reset for explicit
+  operator clears or explicit `[clean-session]` heads (`#cleandrainsup`).
+  Ordinary queue heads, including JetBrains `Run Agent Doc` follow-ups after a
+  supervisor recycle/restart, drain as harness triggers and must not inherit the
+  direct `agent-doc run` accretion/threshold clear policy. When a clean-session
+  head requires reset and no manual clear cooldown is pausing dispatch, the watch
+  injects the harness-native context reset command at the idle gap (`/clear` for
+  Claude/Codex, `/new` for OpenCode), records that clear for Codex/OpenCode hook
+  state, latches the current head as reset, writes a short-lived
+  `.agent-doc/context-clear-in-flight/<doc-hash>.json` marker, and waits for a
+  later idle tick to drain the same head. The in-memory latch prevents a
+  clean-session head from clearing forever without dispatching; the marker
+  survives supervisor recycle/restart so the replacement watcher blocks drains
+  until the clear settles, or presses the shared submit key once when the clear
+  command is still visible in the composer. Once the pane settles for
+  `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls the marker is cleared. A
+  manual clear cooldown remains authoritative for a plain operator clear with no
+  active queue (it suppresses passive dispatch until cleared by the existing
+  operator route path) and for an operator-deferred clear that explicitly paused
+  the loop. But a manual clear cooldown must NOT suppress an active go-mode queue
+  drain forever (`#clearcontresume`): the cooldown only exists to avoid
+  dispatching a trigger into an in-flight `/clear`, so once the cleared pane
+  settles to a fresh idle prompt for `CLEAR_COOLDOWN_RESUME_IDLE_TICKS`
+  consecutive polls AND a `queue_active: true`
   head is waiting AND no operator-deferred clear is still pending delivery, the
   watch auto-expires the cooldown marker and resumes the drain. The recycle +
   clear is then a continuation *step*, not a stall. The decision is the pure,

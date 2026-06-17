@@ -3479,6 +3479,26 @@ Done.
         );
     }
     #[test]
+    fn idle_queue_restart_drain_does_not_clear_ordinary_monsterrodholders_head() {
+        let harness = crate::harness::HarnessConfig::codex();
+        let head = "JB Run Agent Doc on monsterrodholders.md stalled after a restart with /clear.";
+
+        assert!(!crate::start::decisions::clean_session_head_forces_context_reset(false, false,));
+        assert_eq!(
+            idle_queue_context_reset_decision(true, false, false, Some(head), None, false),
+            IdleQueueContextResetDecision::SkipNoResetNeeded
+        );
+        assert_eq!(
+            idle_queue_drain_decision(false, true, false, false, false, Some(head), None),
+            IdleQueueDrainDecision::Dispatch
+        );
+        assert_eq!(
+            idle_queue_drain_payload("tasks/monsterrodholders.md", &harness, head),
+            "agent-doc tasks/monsterrodholders.md"
+        );
+        assert_eq!(idle_queue_drain_payload_kind(&harness, head), "trigger");
+    }
+    #[test]
     fn idle_queue_drain_payload_submits_literal_clear_command() {
         for harness in [
             crate::harness::HarnessConfig::claude(),

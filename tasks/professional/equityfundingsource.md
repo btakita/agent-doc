@@ -191,7 +191,24 @@ Verification:
 - Remote D1 schema for `investor_deal_interests` no longer includes the removed columns; it retains the intended date/workflow/GHL fields.
 
 I could not perform an authenticated browser check of the admin dialog from this shell, but the deployed bundle and production schema both reflect the removal.
-<!-- agent:boundary:65759b1b -->
+
+### Re: Request Document(s) — gpt-5
+
+> **Queue prompt:**
+>
+> Request Document(s)
+
+
+Completed and pushed the first Borrower communication UI pass for `Request Document(s)` in the Available Deal workflow surfaces.
+
+Changed paths: `src/equityfundingsource-dev` commit `5e62b13` removes the visible GoHighLevel adapter controls from the deal detail Interested Lenders workflow and the Lender Pipeline deal-interest dialog, renames the visible borrower request block to `Borrower communication`, adds a `Communication type` dropdown with `Request Document(s)`, keeps the existing document-request API/composer, and updates source-inspection tests. Parent repo commit `58c97dd38` updates the EFS submodule pointer. Both commits were pushed to `origin/main`.
+
+Commands: `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts`; `git diff --check`; `make check`; `gh run list --workflow CI --limit 1`; `git push origin main` in `src/equityfundingsource-dev`; `git push origin main` in the parent repo.
+
+Verification: focused tests passed (`115 pass`); full `make check` passed (`757 pass`, app build, worker build). GitHub Actions CI could not be inspected because the EFS repo has no workflow named `CI`.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:b52911ee -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -205,7 +222,7 @@ Hide "GoHighLevel adapter" section.
 Move "Borrower document requests" under "Lender communication".
 
 Rename "Borrower document requests" to "Borrower communication". Add a dropdown containing:
-- Request Document(s)
+- ~~Request Document(s)~~
 - Message (General message with EFS letterhead with the Application info)
 
 The upload from the Request Document(s) email should send an email of receipt to the admin email. The upload should also be visible in the Borrower communication after the message sent by the admin. The message sent by the admin should remain visible after the borrower uploads the document(s).

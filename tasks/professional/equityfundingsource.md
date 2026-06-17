@@ -70,7 +70,42 @@ Commits / push:
 Escalation: none. Confidence: high.
 
 Borrower portal messages note: the admin-side borrower communication UI exists; production email notification, inbound email reply-to-chat, and borrower email-on-admin-reply remain tracked under `#xcvg` / `#xcvg-prod-email` and are still gated on the decided production email/GHL path.
-<!-- agent:boundary:c8875734 -->
+
+### Re: Show uploaded request documents — gpt-5
+
+> **Queue prompt:**
+>
+> Available deals page/dialog: If the borrower uploaded a file for a Request Document(s) email, the acutal document should appear 
+
+
+Implemented and pushed the borrower-uploaded document display for Request Document(s) borrower communication. I treated the wrapped queue line (`next to the Borroewr communication message.`) as part of this same item: when a request has a borrower-provided upload, the admin Borrower communication request row now shows an `Uploaded document:` link next to the request text in both admin deal-detail surfaces.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/deal-interest-document-requests.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/investor_management/index.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+
+What changed:
+- `provided_document_id` is now enriched in admin workflow payloads with the existing provided-document metadata and download URL.
+- The deal detail and lender pipeline borrower communication request rows render a `DocumentFileLink` for the uploaded file.
+- Tests cover metadata preservation, admin payload wiring, and both UI source surfaces.
+
+Commands / verification:
+- `bun test tests/admin-investor-pipeline.test.ts tests/investor-portal-e2e.test.ts` passed.
+- `bun run check` passed: 759 tests, 0 fail, browser build done, worker build done. The digest again reported the expected logged `Error('d1 down')` from the non-fatal outbox failure test, but the command exited 0 and the test summary was 0 fail.
+- `git diff --check` passed.
+- `gh run list --workflow CI --limit 1` found no workflow named `CI`; `gh workflow list` returned no workflows for this repo.
+
+Commits / push:
+- EFS repo: `ee787ee` (`Show uploaded borrower request documents`) pushed to `origin/main`.
+- Parent repo: `df7742b0d` (`Update EFS borrower request documents`) pushed to `origin/main`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:2b6df39b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,7 +114,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Available deals page/dialog: "Borrower communication" "Communication type" label should be removed.~~
-- Available deals page/dialog: If the borrower uploaded a file for a Request Document(s) email, the acutal document should appear 
+- ~~Available deals page/dialog: If the borrower uploaded a file for a Request Document(s) email, the acutal document should appear~~ 
 - next to the Borroewr communication message.
 - Lender communication should have a "Message" flow...just like the browser communication message flow. Remove "Last contact" and "Next follow-up" fields, db columns, and logic.
 - deploy

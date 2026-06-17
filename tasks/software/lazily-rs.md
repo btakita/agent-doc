@@ -70,7 +70,7 @@ Prior bug classes are closed: `#k03k` async race (covered by the `#ytp5` instrum
 **Top of backlog: `#lzstr0mframe`.**
 
 _(Closeout note: the live editor IPC path was wedged this cycle — the recurring `#ipcdrift` route-owned-supervisor self-race. Three `finalize`/`write --commit` attempts returned `IPC proof insufficient … invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle`. The response was reconstructed directly on disk + `agent-doc reset --from-current` to re-sync sidecars, then committed manually. Recommend `make install` in `src/agent-doc` + recycling the route-owned supervisor before the next managed cycle, as in prior sessions.)_
-<!-- agent:boundary:d9613088 -->
+<!-- agent:boundary:8ece7a78 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,6 +79,8 @@ _(Closeout note: the live editor IPC path was wedged this cycle — the recurrin
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- :pushpin: [#lzstr0mframe]
+- :pushpin: [#lzstr0mpolldrive]
 <!-- /agent:queue -->
 
 ## Backlog

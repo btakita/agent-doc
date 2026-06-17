@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -162,7 +162,6 @@ Verification reused from the route batch:
 Commits pushed:
 - EFS repo: `ce18d50` (`Rename portal roots`).
 - Parent repo: `64298af5a` (`Update EFS portal roots`).
-- Parent repo: `64298af5a` (`Update EFS portal roots`).
 - EFS repo: `ce18d50` (`Rename portal roots`).
 - `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
 - `git diff --check` passed.
@@ -175,10 +174,37 @@ Commits pushed:
 - `src/equityfundingsource-dev/app/equityfundingsource/dev-routes.test.ts`
 - `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
 - `src/equityfundingsource-dev/app/equityfundingsource/lib/portal/investor/routes.ts`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/dev-routes.test.ts`
+- parent submodule pointer `src/equityfundingsource-dev`
+- The old `LEGACY_INVESTOR_PORTAL = '/portal-investor'` redirect and its route registrations were removed.
+- `/portal-lender` now redirects to `/lenders` as the immediate previous lender route compatibility path.
+- Test coverage now asserts `/portal-investor/dashboard` returns 404 in the local Hono route mount, while `/portal-lender/dashboard`, `/portal-borrower/...`, and `/portal-broker/...` redirect to the new canonical roots.
+- Focused Bun suite passed: 243 tests, 0 fail.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` exited 0; the digest still flags the known non-fatal `error: d1 down` failure-path log.
+- `git diff --check` passed.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+- EFS repo: `ce18d50` (`Rename portal roots`).
+- Parent repo: `64298af5a` (`Update EFS portal roots`).
+- `git status -sb` in `src/equityfundingsource-dev` remained clean after deploy.
+- Legacy smoke checks: `/portal-lender/dashboard` returned `308` to `/lenders/dashboard`; `/portal-borrower/application-status/app-1?tab=docs` returned `308` to `/borrowers/application-status/app-1?tab=docs`; `/portal-broker/my-pipeline` returned `308` to `/brokers/my-pipeline`; `/portal-investor/dashboard` returned `404`.
+- Live smoke checks: `/` returned `200`; `/lenders/dashboard` returned `303` to `/login?role=investor&next=%2Flenders%2Fdashboard`; `/borrowers/dashboard` returned `303` to `/login?role=borrower&next=%2Fborrowers%2Fdashboard`; `/brokers/dashboard` returned `303` to `/login?role=broker&next=%2Fbrokers%2Fdashboard`.
+- Post-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` again reported no migrations to apply.
+- Current Worker Version ID: `fcbd6708-7840-4f75-a5be-592b213ea06e`.
+- Deployed URL: `https://equityfundingsource.brian-takita.workers.dev`.
+- `make deploy` succeeded: build + worker bundle completed, remote D1 migration apply reported no migrations, one updated browser asset uploaded, triggers deployed, and Worker `equityfundingsource` deployed.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before deploy reported no remote D1 migrations to apply.
+- `git status -sb` in `src/equityfundingsource-dev` showed clean `main...origin/main` at `ce18d50` before deploy.
+- None in `src/equityfundingsource-dev`; this cycle only deployed the already-pushed `ce18d50` build.
 
 Escalation: none. Confidence: high.
 
 ### Re: Remove investor legacy redirect — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
 
 > **Queue prompt:**
 >
@@ -187,28 +213,39 @@ Escalation: none. Confidence: high.
 Completed as part of the already-pushed portal root batch.
 
 Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/portal/investor/routes.ts`
-- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/dev-routes.test.ts`
-- parent submodule pointer `src/equityfundingsource-dev`
 
 Proof:
-- The old `LEGACY_INVESTOR_PORTAL = '/portal-investor'` redirect and its route registrations were removed.
-- `/portal-lender` now redirects to `/lenders` as the immediate previous lender route compatibility path.
-- Test coverage now asserts `/portal-investor/dashboard` returns 404 in the local Hono route mount, while `/portal-lender/dashboard`, `/portal-borrower/...`, and `/portal-broker/...` redirect to the new canonical roots.
 
 Verification reused from the route batch:
-- Focused Bun suite passed: 243 tests, 0 fail.
-- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` exited 0; the digest still flags the known non-fatal `error: d1 down` failure-path log.
-- `git diff --check` passed.
-- `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
 
 Commits pushed:
-- EFS repo: `ce18d50` (`Rename portal roots`).
-- Parent repo: `64298af5a` (`Update EFS portal roots`).
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:0970a450 -->
+
+### Re: Deploy portal root rename — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Deployed the pushed portal root rename to Cloudflare Workers.
+
+Changed paths:
+- None in `src/equityfundingsource-dev`; this cycle only deployed the already-pushed `ce18d50` build.
+
+Commands / verification:
+- `git status -sb` in `src/equityfundingsource-dev` showed clean `main...origin/main` at `ce18d50` before deploy.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before deploy reported no remote D1 migrations to apply.
+- `make deploy` succeeded: build + worker bundle completed, remote D1 migration apply reported no migrations, one updated browser asset uploaded, triggers deployed, and Worker `equityfundingsource` deployed.
+- Deployed URL: `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Worker Version ID: `fcbd6708-7840-4f75-a5be-592b213ea06e`.
+- Post-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` again reported no migrations to apply.
+- Live smoke checks: `/` returned `200`; `/lenders/dashboard` returned `303` to `/login?role=investor&next=%2Flenders%2Fdashboard`; `/borrowers/dashboard` returned `303` to `/login?role=borrower&next=%2Fborrowers%2Fdashboard`; `/brokers/dashboard` returned `303` to `/login?role=broker&next=%2Fbrokers%2Fdashboard`.
+- Legacy smoke checks: `/portal-lender/dashboard` returned `308` to `/lenders/dashboard`; `/portal-borrower/application-status/app-1?tab=docs` returned `308` to `/borrowers/application-status/app-1?tab=docs`; `/portal-broker/my-pipeline` returned `308` to `/brokers/my-pipeline`; `/portal-investor/dashboard` returned `404`.
+- `git status -sb` in `src/equityfundingsource-dev` remained clean after deploy.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:f6752151 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -216,11 +253,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Move routes /portal-lender/ to /lenders/~~
-- ~~:pushpin: Move routes /portal-borrower/ to /borrowers/~~
-- ~~:pushpin: Move routes /portal-broker/ to /brokers/~~
-- ~~:pushpin: Remove 301 redirect for /portal-investor/~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

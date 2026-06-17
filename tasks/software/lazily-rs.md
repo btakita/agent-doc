@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -53,7 +53,30 @@ Compacted content:
 ### Re: #next-steps — follow-up backlog — opus-4-6
 
 Remaining items added to backlog (in priority order). Top of backlog: **#lz57by-close**.
-<!-- agent:boundary:650398fa -->
+
+### Re: #jknk — close review #57by (Shuttle async spike NO-GO) — glm-5.1
+
+Review #57by resolved. The Shuttle async spike (#shuttleeval) concluded NO-GO — Shuttle can model async but is randomized-not-exhaustive, needs ~140 cfg-swaps + a custom notifier, and the two #k03k windows are already deterministically covered. The decision is final; no further work needed.
+
+### Re: #tf0k — harden SlotId casts for 32-bit safety — glm-5.1
+
+Replaced all 12 `id.0 as usize` casts in `thread_safe.rs` with `usize::try_from(id.0)` via a `node_index()` helper, matching the single-threaded `Context::node_index` pattern. Getters (`get_node`, `get_node_mut`, `slot_fast_path`, `cell_fast_path`) return `None` on overflow via `?`; setters use `.expect("SlotId does not fit usize")`. This prevents silent truncation on 32-bit targets. Commit `8665e29`.
+
+### Re: #j1vw — From impls for EncodeError/DecodeError — glm-5.1
+
+> **Queue prompt:**
+>
+> [#jknk]
+>
+> [#tf0k]
+>
+> [#j1vw]
+
+
+Added `From<serde_json::Error>` (cfg `ffi`) and `From<postcard::Error>` (cfg `ipc-binary`) for both `EncodeError` and `DecodeError` in `src/ipc.rs`, enabling ergonomic `?` propagation from serde/postcard call sites. Commit `8665e29`.
+
+**Verification:** fmt, clippy (`-D warnings`), build (all features), and 300+ tests pass across default/tokio/async feature combos. Loom exhaustive model tests: 14/15 passed; the last (`inline_seqlock_envelope_rejects_torn_and_stale`) timed out at 5min — a known resource-intensive exhaustive check, not a regression from these changes.
+<!-- agent:boundary:52e9c0ac -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,17 +85,11 @@ Remaining items added to backlog (in priority order). Top of backlog: **#lz57by-
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- [#jknk]
-- [#tf0k]
-- [#j1vw]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jknk] #lz57by-close=Close review #57by (Shuttle async spike #shuttleeval concluded NO-GO; the spike is done and the decision is final — the review item should be --done not [/])
-- [ ] [#tf0k] #lzsid32=Harden SlotId.0 as usize casts in thread_safe.rs to usize::try_from for 32-bit safety parity with single-threaded Context
-- [ ] [#j1vw] #lzerrfrom=[recommended] Add From<serde_json::Error>/From<postcard::Error> impls for EncodeError/DecodeError ergonomics
 <!-- /agent:backlog -->
 
 ## Review
@@ -82,7 +99,6 @@ Remaining items added to backlog (in priority order). Top of backlog: **#lz57by-
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] Main LinkedIn post is published and repaired: Corky edit updated mail/social/20260616-lazily-architecture-linkedin.md / https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848 with the full body after the public post truncated at "The core is small: three primitives". Local metadata is committed in mail commit 07a9ea1 and superproject gitlink e7e0b08c1. Remaining operator follow-up: post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>` if still desired.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet networked backend through the LIVE #yxjw signaling Worker (two real hosts / NAT, not localhost). The localhost two-socket round trip (tests/str0m_net.rs) already proves the real UDP/DTLS/SCTP/timer path in-process; this remaining slice needs two live endpoints + the deployed Worker so it cannot be agent-run headless. Wire SignalingClient offer/answer/ice to Str0mNet::{offer,answer,accept_answer,add_remote_candidate,local_candidate} and confirm a Snapshot crosses between hosts.
 - [/] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.
-- [/] [#57by] #lzasyncshuttle=[operator-gated, NO-GO for now per #shuttleeval] Exhaustive Shuttle async-resolve-loop model. Spike result: Shuttle can model async (has an executor, unlike Loom) but is randomized-not-exhaustive, needs ~140 cfg-swaps + a custom notifier (no tokio::watch equiv) in the hot path, and the two #k03k windows are already deterministically covered. Defer until the async graph grows more concurrency-critical paths. See tasks/software/plan-lazily-async-loom.md.
 <!-- /agent:review -->
 
 ## Icebox

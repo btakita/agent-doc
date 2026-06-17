@@ -155,7 +155,23 @@ No JetBrains plugin update is needed; this is Rust binary/orchestration behavior
 
 Changed paths: `src/agent-doc/agent-doc-orchestration/src/write/converge.rs`, `src/agent-doc/agent-doc-orchestration/src/test_support.rs`, `src/agent-doc/agent-doc-orchestration/src/write/run_entry.rs`, `src/agent-doc/agent-doc-orchestration/src/compact.rs`, `src/agent-doc/agent-doc-orchestration/src/flow/workflow_invariants.rs`, `src/agent-doc/tests/test_cli.rs`, `src/agent-doc/VERSIONS.md`, `src/agent-doc/specs/07-closeout-commands.md`, `src/agent-doc/specs/07-orchestration-commands.md`, `src/agent-doc/runbooks/commit.md`, `src/agent-doc/runbooks/compact-exchange.md`, `src/agent-doc/runbooks/jb-cache-conflict.md`, plus root `src/agent-doc` submodule pointer.
 Escalation: none.
-<!-- agent:boundary:3aef2477 -->
+Implemented, installed, committed, and pushed.
+
+The Rust orchestration now refuses direct disk fallback while an editor/plugin IPC listener is active. Active-listener failures now fail closed with `transport=blocked ... action=refuse_external_disk_write`; no-listener fallback still works. Live-prompt auto-recovery also blocks its adopted-snapshot disk write unless editor convergence is proven.
+
+Verification passed:
+- `cargo fmt --check`
+- focused convergence/recovery tests
+- `make check` with 4635 passed, 238 skipped
+- `src/agent-doc` GitHub Actions `CI` completed successfully for `59d2d9e5`
+
+Commits pushed:
+- `src/agent-doc`: `59d2d9e5 block editor-active disk fallbacks`
+- root pointer: `f5ed3a04c agent-doc: block editor-active disk fallbacks`
+- session closeout: `01e3cbbe4`, `d4502c96c`
+
+`make install` installed the new CLI/cdylib and marked 2 controllers for idle-boundary recycle. No JetBrains plugin code update was needed. The only remaining warning is that the current route-owned supervisor is still mapping the stale binary until it reaches an idle recycle boundary; I did not force-restart the busy pane.
+<!-- agent:boundary:202bda5a -->
 <!-- /agent:exchange -->
 
 ## Queue

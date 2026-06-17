@@ -37,7 +37,25 @@ complete
 Compacted content:
 ❯ - Archived 10 response topic(s): JB Run Agent Doc Enter submit; JB Run Agent Doc route submit race; JB clear/run submit restart race closeout; 7 more
 ❯ - Prior summary/context: prior compacted content: Archived 31 response topic(s): JB Run Agent Doc stale queue pause; binary logic for stale qu...
-<!-- agent:boundary:2c7dcca2 -->
+Implemented the JetBrains Run Agent Doc parity cleanup.
+
+> **Queue prompt:**
+>
+> :pushpin: Both Claude Code + Opencode have working JB `Run Agent Doc` behavior. Remove Codex-specific logic. Can we unify all tmux-related logic across the 3 agent harnesses?
+
+
+Dispatch-only reroutes now use one harness-neutral success policy: accepted shared tmux text+`Enter` delivery succeeds for Claude Code, Codex, and OpenCode, logging `proof=accepted proof_scope=accepted_only` when no stronger dispatch-start proof arrives. Codex hook proof and OpenCode pane-state proof still upgrade telemetry to `dispatch_start`, but Codex hook tracking no longer changes progress reporting or gates success differently.
+
+The common tmux submit boundary remains centralized; the remaining harness-specific logic is readiness/blocker detection and optional proof observation, not a different submit path.
+
+Commits pushed:
+- `src/agent-doc`: `d314ee59 fix: make dispatch-only route proof harness-neutral`
+- parent repo: `9f6725990 agent-doc: make dispatch-only route proof harness-neutral`
+
+Verification passed: focused dispatch-only tests, the ignored live-tmux parity regression, `make check` (4613 nextest tests, doctests, medium SimWorld), `make install`, `agent-doc --version`, `git diff --check`, and latest GitHub Actions CI was completed/success.
+
+Closeout note: the visible session document had already been compacted, so I rebuilt snapshot/CRDT sidecars from the current visible file before writing this response; I did not restore the stale pre-compaction snapshot over the editor buffer.
+<!-- agent:boundary:d6edfa3f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -45,7 +63,7 @@ Compacted content:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: JB `Run Agent Doc` behavior is unchanged. Still broken. As I type, Codex restarts. Enter still does not work. I really just want to rip out the logic. The "fixes" havn't changed anything. Not sure what is going on. We need to drastically simplify this logic. You don't know what is going on. I don't know what is going on.~~
 - ~~The agent_doc_queue_context_reset=true should have a 50% threshold by default~~
-- :pushpin: Both Claude Code + Opencode have working JB `Run Agent Doc` behavior. Remove Codex-specific logic. Can we unify all tmux-related logic across the 3 agent harnesses?
+- ~~:pushpin: Both Claude Code + Opencode have working JB `Run Agent Doc` behavior. Remove Codex-specific logic. Can we unify all tmux-related logic across the 3 agent harnesses?~~
 - :pushpin: Changes to the editor buffer should always win. 0 External Disk Writes. If CRDT fails, try again. Do not fallback to external disk writes on the document. I lose work when this happens as I am typing.
 - ~~[#jbproofrebind]~~
 <!-- /agent:queue -->

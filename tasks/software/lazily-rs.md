@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -98,6 +98,11 @@ Reviewed all 4 `[operator-drive]` review items. One ship-stopper found, one revi
 
 > **Queue prompt:**
 >
+> :pushpin: What are #next-steps to fix lazily-rs bugs?
+
+
+> **Queue prompt:**
+>
 > [#syej]
 
 
@@ -108,13 +113,15 @@ Reviewed all 4 `[operator-drive]` review items. One ship-stopper found, one revi
 **Two-part fix** (`src/lazily/slot.py`):
 1. **Removed `touch()` from `Slot.__call__`** — computation must not cascade invalidation. Only explicit `reset` propagates (consistent with the SPEC, which never documented `__call__` touching).
 2. **`Slot.reset` clears subscribers before notification** — a subscriber that triggers a re-entrant reset finds an empty subscriber set, breaking the mutual recursion.
+2. **#lzloomtimeout (verification gap):** the Loom exhaustive model `inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish` (`tests/thread_safe_loom.rs:1451`) never completes — confirmed it runs >5min without finishing. The 2 writer/reader threads + main body blow up Loom's state space, so the torn/stale-read invariant for the inline seqlock is *not* exhaustively proven today. Non-exhaustive stress tests pass, so this is a proof-coverage gap, not a known runtime race. Fix by bounding preemptions (`loom::model_g`) or factoring the model to shrink interleavings.
+1. **#lzrepourl (metadata bug):** `Cargo.toml:7` `repository = "https://github.com/btakita/lazily-rs"` is stale — the actual remote is `lazily-hub/lazily-rs` (confirmed via `git remote -v`). Publishes a wrong repo link to crates.io/docs.rs. Trivial one-line fix; land before any crates.io publish.
 
 **Test added:** `test_signal_depends_on_slot` — constructs a `Signal` with a `@slot` dependency (the exact scenario that crashed), asserts the value, and verifies caching + slot reset behavior.
 
 **Verification:** 58/58 tests pass, `ruff check` clean, `ty check` clean. `twine check` PASSED on both rebuilt dist artifacts. Fresh-venv install round-trip confirmed `Signal→Slot` works without recursion.
 
 SPEC + CHANGELOG updated to document the re-entrancy-safe invalidation semantics. Review #kb9b updated: ship-stopper cleared, dist artifacts rebuilt and verified.
-<!-- agent:boundary:fa69aed9 -->
+<!-- agent:boundary:d4ab34f0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -123,12 +130,13 @@ SPEC + CHANGELOG updated to document the re-entrancy-safe invalidation semantics
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzloomtimeout] #lzloomtimeout=Bound the Loom exhaustive model for inline_seqlock_envelope_rejects_torn_and_stale_under_concurrent_publish (tests/thread_safe_loom.rs:1451) — 2 writer/reader threads + main body blow up the state space and never complete (>5min confirmed), leaving the torn/stale-read invariant for the inline seqlock without an exhaustive proof. Use loom::model_g preemption bounds or factor the model to shrink interleavings. Verification-coverage gap, not a known runtime race (non-exhaustive stress tests pass).
+- [ ] [#lzrepourl] #lzrepourl=Fix stale Cargo.toml repository URL (line 7: points to https://github.com/btakita/lazily-rs; actual git remote origin is lazily-hub/lazily-rs). Publishes a wrong repo link to crates.io/docs.rs. One-line fix; land before any crates.io publish.
 <!-- /agent:backlog -->
 
 ## Review

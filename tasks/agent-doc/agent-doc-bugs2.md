@@ -116,12 +116,13 @@ Session closeout recovery complete.
 The code work for the active-editor IPC no-direct-disk policy and the monsterrodholders idle queue restart drain has already been implemented, verified locally, installed as `agent-doc 0.34.1`, committed, and pushed. I did not use `--force-disk` for the failed closeout retries.
 
 The remaining issue was the session document closeout state: editor prompt-marker lines had been materialized into the exchange tail, so session-check treated the tail as an unresolved prompt. This closeout records the recovery response through the MCP finalize path so the session can finish without treating that marked line as pending user input.
-<!-- agent:boundary:f26e2d72 -->
+Final hook recovery closeout: the malformed exchange tail has been repaired, the drained queue marker has converged, and this response closes the active hook-recovery turn.
+<!-- agent:boundary:38307e89 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 ###
 <!--

@@ -317,7 +317,26 @@ Committed and pushed:
 CI: checked the latest `src/agent-doc` CI once after push; run `27656439677` was queued, so local verification is the closeout evidence.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:2c669722 -->
+I traced the interruption to stale-supervisor recovery guidance, not to the lower-level restart machinery itself. The screenshot shows the prior agent following a stale-binary warning and forcing a supervisor restart while the monsterrodholders Codex turn was still active; the ops log has the matching `session_restart_force_used` event. That force path intentionally interrupts busy owners, so it was the wrong recommendation for routine stale-binary refresh.
+
+I changed the agent-doc submodule so stale route-owned host supervisor warnings now recommend only non-destructive refresh paths: `agent-doc admin recycle` at an idle boundary or normal `agent-doc session restart-supervisor <FILE>`, which refuses busy panes. I also aligned the compaction stale-supervisor recovery hints, route comments, README/specs, and release notes so routine stale-binary refresh no longer points agents at force/discard recovery. Regression coverage now asserts the stale-refresh messages do not contain `--force` or `interrupt-clear`.
+
+Verification passed:
+- `cargo test -p agent-doc-orchestration host_supervisor_stale_warning --lib`
+- `cargo test -p agent-doc-orchestration supervisor_stale_warning --lib`
+- `cargo test -p agent-doc-orchestration assert_non_exchange_items_preserved_fails_closed_on_dropped_backlog_item --lib`
+- `cargo test -p agent-doc-orchestration marker_guard_fires_when_queue_attributes_dropped --lib`
+- `make check` (clippy, 4613 nextest tests, doctests, medium simulation)
+- `make install` installed `agent-doc 0.34.1` and marked 2 controllers for idle-boundary recycle
+- `agent-doc --version` -> `agent-doc 0.34.1`
+- `git diff --check`
+
+Committed and pushed:
+- `src/agent-doc` `13e7bf74 fix: keep stale supervisor refresh non-destructive`
+- parent repo `e043fca17 agent-doc: update stale supervisor refresh guidance`
+
+Latest agent-doc CI for the new submodule push was queued as run `27657005941` at closeout, so I did not wait on it; local verification is green.
+<!-- agent:boundary:7a87a305 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -336,7 +355,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 ---
 - ~~:pushpin: Continue to consolidate tmux logic.~~
-- :pushpin: agent-doc monsterrodholders.md interrupted a running conversation ![img_35.png](img_35.png)
+- ~~:pushpin: agent-doc monsterrodholders.md interrupted a running conversation ![img_35.png](img_35.png)~~
 <!-- /agent:queue -->
 ###
 <!--

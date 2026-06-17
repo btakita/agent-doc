@@ -250,10 +250,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let path = PathBuf::from(&file);
             let mut last_dispatched: Option<String> = None;
             let mut last_context_reset_head: Option<String> = None;
+            let mut last_context_clear_at: Option<u64> = None;
             let mut context_reset_in_flight = false;
             let mut last_pending_enter_resubmitted: Option<String> = None;
             let mut clear_cooldown_logged = false;
             let mut route_submit_in_flight_logged = false;
+            let mut context_reset_policy_error_logged = false;
             let mut idle_busy_ticks: u32 = 0;
             // `#clearcontresume`: consecutive idle-prompt polls observed while a
             // manual clear cooldown is active and a go-mode head is waiting.
@@ -452,9 +454,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let context_clear_pending = context_clear_marker.as_ref().and_then(|marker| {
                 supervisor_pane_payload_already_pending(&shared, &marker.command)
             });
-            if context_clear_marker.is_some() {
+            if let Some(marker) = context_clear_marker.as_ref() {
                 context_reset_in_flight = true;
                 awaiting_clear_settle = true;
+                last_context_clear_at = Some(marker.written_at);
             }
             // `#qflood2`: advance the post-`/clear` settle debounce. Require
             // consecutive fresh-idle polls (reset on any busy/non-idle tick)
@@ -1115,21 +1118,22 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 if let Some(head) = active_head.clone() {
                                     last_context_reset_head = Some(head);
                                 }
-                        record_context_clear_prompt_for_hooks(
-                            &shared,
-                            &path,
-                            &harness,
-                            &clear_cmd,
-                        );
-                        record_context_clear_in_flight_marker(
-                            &path,
-                            &shared,
-                            &harness,
-                            &clear_cmd,
-                            active_head.as_deref(),
-                        );
-                        clear_cooldown_logged = false;
-                        log_event(
+                                last_context_clear_at = Some(current_epoch_secs());
+                                record_context_clear_prompt_for_hooks(
+                                    &shared,
+                                    &path,
+                                    &harness,
+                                    &clear_cmd,
+                                );
+                                record_context_clear_in_flight_marker(
+                                    &path,
+                                    &shared,
+                                    &harness,
+                                    &clear_cmd,
+                                    active_head.as_deref(),
+                                );
+                                clear_cooldown_logged = false;
+                                log_event(
                                     &mut session_log,
                                     &format!(
                                         "idle_queue_watch_deferred_clear_delivered harness={} cmd=\"{}\"",
@@ -1156,13 +1160,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 }
 
                 // `#cleandrainsup`: a `[clean-session]` head asks for a fresh agent
-                // context. The supervisor provides it by force-`/clear`ing before
-                // dispatch. Ordinary queue heads no longer trigger transcript
-                // threshold clears here: that path caused the supervisor to churn
-                // `/clear` while an operator was editing a live queue prompt. Keep
-                // the supervisor policy simple: explicit operator clears and
-                // explicit `[clean-session]` heads are the only idle-watch context
-                // reset sources.
+                // context regardless of the global opt-in. Ordinary Codex heads may
+                // also clear here when the project opted into queue context reset and
+                // the Codex transcript/accretion decision requires fresh context.
+                // The reset decision still runs through prompt/turn/route gates
+                // below, so a live queue edit or in-flight route cannot churn clears.
                 let active_head_is_clean_session = active_head
                     .as_deref()
                     .map(|head| crate::queue_continuation::head_requires_clean_session(&path, head))
@@ -1171,8 +1173,39 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     active_head_is_clean_session,
                     clear_cooldown_active,
                 ) {
+                    context_reset_policy_error_logged = false;
                     Some(CLEAN_SESSION_CONTEXT_RESET_REASON.to_string())
+                } else if harness.binary == "codex" {
+                    match crate::codex_hook::codex_queue_context_reset_reason(
+                        &path,
+                        last_context_clear_at,
+                    ) {
+                        Ok(reason) => {
+                            context_reset_policy_error_logged = false;
+                            reason
+                        }
+                        Err(err) => {
+                            if !context_reset_policy_error_logged {
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "idle_queue_watch_context_reset_policy_failed harness={} file={} error={:?}",
+                                        harness.binary,
+                                        path.display(),
+                                        err.to_string()
+                                    ),
+                                );
+                                eprintln!(
+                                    "[agent-doc] idle-queue watch: failed to resolve Codex queue context reset for {}: {err:#}",
+                                    path.display()
+                                );
+                                context_reset_policy_error_logged = true;
+                            }
+                            None
+                        }
+                    }
                 } else {
+                    context_reset_policy_error_logged = false;
                     None
                 };
                 let reset_already_sent_for_active_slot = context_reset_dedupe_head(
@@ -1213,22 +1246,23 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 head,
                                 clear_cmd,
                             ) {
-                        AutoTriggerOutcome::Sent => {
-                            last_pending_enter_resubmitted = Some(resubmit_key);
-                            last_context_reset_head = active_head.clone();
-                            context_reset_in_flight = true;
-                            awaiting_clear_settle = true;
-                            clear_settle_idle_ticks = 0;
-                            record_context_clear_in_flight_marker(
-                                &path,
-                                &shared,
-                                &harness,
-                                clear_cmd,
-                                Some(head),
-                            );
-                            log_event(
-                                &mut session_log,
-                                &format!(
+                                AutoTriggerOutcome::Sent => {
+                                    last_pending_enter_resubmitted = Some(resubmit_key);
+                                    last_context_reset_head = active_head.clone();
+                                    last_context_clear_at = Some(current_epoch_secs());
+                                    context_reset_in_flight = true;
+                                    awaiting_clear_settle = true;
+                                    clear_settle_idle_ticks = 0;
+                                    record_context_clear_in_flight_marker(
+                                        &path,
+                                        &shared,
+                                        &harness,
+                                        clear_cmd,
+                                        Some(head),
+                                    );
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
                                             "idle_queue_watch_context_reset_resubmit harness={} reason=clear_already_pending head={:?}",
                                             harness.binary, head
                                         ),
@@ -1275,6 +1309,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             AutoTriggerOutcome::Cancelled => return,
                             AutoTriggerOutcome::Sent => {
                                 last_context_reset_head = active_head.clone();
+                                last_context_clear_at = Some(current_epoch_secs());
                                 context_reset_in_flight = true;
                                 last_dispatched = None;
                                 awaiting_clear_settle = true;
@@ -1287,22 +1322,22 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 // clean-session head (`#cleandrainsup`) still happens
                                 // above (`active_head_is_clean_session`); it just no
                                 // longer records a grant sidecar.
-                        record_context_clear_prompt_for_hooks(
-                            &shared,
-                            &path,
-                            &harness,
-                            clear_cmd,
-                        );
-                        record_context_clear_in_flight_marker(
-                            &path,
-                            &shared,
-                            &harness,
-                            clear_cmd,
-                            Some(head),
-                        );
-                        log_idle_queue_context_reset_submit(
-                            &path,
-                            &shared,
+                                record_context_clear_prompt_for_hooks(
+                                    &shared,
+                                    &path,
+                                    &harness,
+                                    clear_cmd,
+                                );
+                                record_context_clear_in_flight_marker(
+                                    &path,
+                                    &shared,
+                                    &harness,
+                                    clear_cmd,
+                                    Some(head),
+                                );
+                                log_idle_queue_context_reset_submit(
+                                    &path,
+                                    &shared,
                                     &harness,
                                     clear_cmd,
                                     head,
@@ -1496,6 +1531,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     );
                                     if crate::queue_command::is_context_clear_command(command) {
                                         last_context_reset_head = Some(head.clone());
+                                        last_context_clear_at = Some(current_epoch_secs());
                                         context_reset_in_flight = true;
                                         // `#qflood2`: a dispatched `/clear` head
                                         // must settle before the next head's
@@ -1503,20 +1539,20 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         // path, so they cannot concatenate.
                                         awaiting_clear_settle = true;
                                         clear_settle_idle_ticks = 0;
-                            record_context_clear_prompt_for_hooks(
-                                &shared,
-                                &path,
-                                &harness,
-                                command,
-                            );
-                            record_context_clear_in_flight_marker(
-                                &path,
-                                &shared,
-                                &harness,
-                                command,
-                                Some(&head),
-                            );
-                        }
+                                        record_context_clear_prompt_for_hooks(
+                                            &shared,
+                                            &path,
+                                            &harness,
+                                            command,
+                                        );
+                                        record_context_clear_in_flight_marker(
+                                            &path,
+                                            &shared,
+                                            &harness,
+                                            command,
+                                            Some(&head),
+                                        );
+                                    }
                                     last_dispatched = if completed { None } else { Some(head) };
                                 } else {
                                     last_dispatched = Some(head);
@@ -1653,6 +1689,59 @@ mod tests {
                 true,
             ),
             IdleQueueContextResetDecision::Reset
+        );
+    }
+
+    #[test]
+    fn codex_opted_in_context_reset_dispatches_for_ordinary_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "agent_doc_queue_context_reset = true\n",
+        )
+        .unwrap();
+        std::fs::write(&doc, "doc\n").unwrap();
+        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+
+        let head = "ordinary queue head";
+        let reason = crate::codex_hook::codex_queue_context_reset_reason(&doc, None)
+            .unwrap()
+            .expect("opted-in compaction should require fresh Codex context");
+        assert!(
+            reason.contains("exchange was compacted"),
+            "unexpected reset reason: {reason}"
+        );
+        assert_eq!(
+            crate::start::decisions::idle_queue_context_reset_decision(
+                true,
+                false,
+                false,
+                Some(head),
+                None,
+                true,
+            ),
+            IdleQueueContextResetDecision::Reset
+        );
+
+        let harness = crate::harness::HarnessConfig::codex();
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            "codex",
+            None,
+            None,
+            Some("%25".to_string()),
+        );
+        log_idle_queue_context_reset_submit(&doc, &shared, &harness, "/clear", head, &reason);
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("idle_queue_watch_context_reset")
+                && ops_log.contains("head_sha256=")
+                && ops_log.contains("exchange was compacted"),
+            "ordinary opted-in reset should leave context-reset proof:\n{ops_log}"
         );
     }
 

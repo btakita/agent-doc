@@ -392,14 +392,34 @@ fn codex_live_context_pct(file: &Path) -> Option<f64> {
     )
 }
 
+pub(crate) fn codex_queue_context_reset_reason(
+    file: &Path,
+    last_context_clear_at: Option<u64>,
+) -> Result<Option<String>> {
+    let mut reason = crate::session_accretion::queue_context_reset_reason_if_opted_in(
+        file,
+        last_context_clear_at,
+    )?;
+    if crate::session_accretion::queue_context_reset_opted_in(file) {
+        let threshold = crate::session_accretion::clear_threshold_for_doc(file);
+        let pct = codex_live_context_pct(file);
+        let decision = crate::context_pct::clear_decision(true, pct, threshold);
+        if reason.is_none() && decision.clear {
+            reason = Some(format!(
+                "transcript context {:.1}% >= clear threshold {}% (#clearcodex)",
+                pct.unwrap_or_default(),
+                threshold
+            ));
+        }
+    }
+    Ok(reason)
+}
+
 fn codex_continuation_clear_reason(
     file: &Path,
     last_context_clear_at: Option<u64>,
 ) -> Option<String> {
-    let mut reason = match crate::session_accretion::queue_context_reset_reason_if_opted_in(
-        file,
-        last_context_clear_at,
-    ) {
+    let reason = match codex_queue_context_reset_reason(file, last_context_clear_at) {
         Ok(reason) => reason,
         Err(err) => {
             eprintln!(
@@ -413,13 +433,6 @@ fn codex_continuation_clear_reason(
         let threshold = crate::session_accretion::clear_threshold_for_doc(file);
         let pct = codex_live_context_pct(file);
         let decision = crate::context_pct::clear_decision(true, pct, threshold);
-        if reason.is_none() && decision.clear {
-            reason = Some(format!(
-                "transcript context {:.1}% >= clear threshold {}% (#clearcodex)",
-                pct.unwrap_or_default(),
-                threshold
-            ));
-        }
         crate::ops_log::log_op(file, &decision.diagnostic);
         crate::ops_log::log_op(
             file,

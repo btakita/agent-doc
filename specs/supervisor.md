@@ -445,15 +445,16 @@ distinct from the one-shot restart auto-trigger:
     cannot hot-loop the watch every idle tick.
   - `SkipNoActiveHead` clears the dedup so a later re-enqueue of the same prompt
     text fires again.
-- Before dispatching a head, the watch only starts a context reset for explicit
-  operator clears or explicit `[clean-session]` heads (`#cleandrainsup`).
-  Ordinary queue heads, including JetBrains `Run Agent Doc` follow-ups after a
-  supervisor recycle/restart, drain as harness triggers and must not inherit the
-  direct `agent-doc run` accretion/threshold clear policy. When a clean-session
-  head requires reset and no manual clear cooldown is pausing dispatch, the watch
-  injects the harness-native context reset command at the idle gap (`/clear` for
-  Claude/Codex, `/new` for OpenCode), records that clear for Codex/OpenCode hook
-  state, latches the current head as reset, writes a short-lived
+- Before dispatching a head, the watch starts a context reset for explicit
+  operator clears, explicit `[clean-session]` heads (`#cleandrainsup`), or an
+  ordinary Codex head whose project/document opted into queue context reset and
+  still has an active accretion/threshold reset reason. Ordinary heads with no
+  reset reason, including JetBrains `Run Agent Doc` follow-ups after a supervisor
+  recycle/restart, drain as harness triggers. When a reset is required and no
+  manual clear cooldown is pausing dispatch, the watch injects the harness-native
+  context reset command at the idle gap (`/clear` for Claude/Codex, `/new` for
+  OpenCode), records that clear for Codex/OpenCode hook state, latches the
+  current head as reset, writes a short-lived
   `.agent-doc/context-clear-in-flight/<doc-hash>.json` marker, and waits for a
   later idle tick to drain the same head. The in-memory latch prevents a
   clean-session head from clearing forever without dispatching; the marker

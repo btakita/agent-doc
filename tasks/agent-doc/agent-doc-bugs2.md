@@ -437,7 +437,29 @@ Commits pushed:
 - `btakita/agent-loop` `6db142662` (`agent-doc: submit relative drafts`)
 
 CI check: source CI run `27713493252` was in progress when checked; the parent repo has no workflow named `CI`. The existing stale-supervisor warning remains non-blocking; the install already requested idle-boundary recycle for controllers.
-<!-- agent:boundary:b36dbe1b -->
+Fixed the Codex latency path for `Run Agent Doc` / `Clear Session Context`.
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` and JB `Clear Session Context" should have less latency to submit the prompt...particularly on Codex.
+
+
+Codex route startup readiness now treats a bottom model/cwd/context footer as dispatch-ready idle chrome after the busy/protected-input checks pass. That means a freshly cleared or autostarted Codex pane no longer has to sit through the full startup wait just because it is showing only the footer/status chrome instead of a standalone prompt glyph.
+
+The guardrails remain in place: background-terminal wait text, hook review/protected prompts, and existing drafted input still prevent dispatch.
+
+Changed and pushed:
+- `src/agent-doc` commit `cc7eb165 fix: accept codex footer readiness`
+- parent repo commit `bbc7de811 agent-doc: accept codex footer readiness`
+
+Verification:
+- `cargo test -p agent-doc-orchestration ready_prompt_candidate_`
+- `cargo test -p agent-doc-orchestration fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss`
+- `git diff --check`
+- `make check` passed: 4,640 tests, doctests, and medium simulation
+- `make install` passed and marked one controller for idle-boundary recycle
+- Latest `agent-doc` CI run `27714361986` was `in_progress` when checked once.
+<!-- agent:boundary:8494c538 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -447,7 +469,7 @@ CI check: source CI run `27713493252` was in progress when checked; the parent r
 - ~~agent-doc on Codex outputs console messages that obscures the TUI ![img_38.png](img_38.png) after a turn after a `/clear`, and after a restart.~~
 - ~~agent-doc sent a prompt to Codex (does this with other models too) while a task was running ![img_39.png](img_39.png)~~
 - ~~On monsterrodholders.md, after a JB `Clear Session Context` was successful, JB `Run Agent Doc` added a duplicate prompt (one with the relative path and one with the absolute path), and did not submit the prompt ![img_41.png](img_41.png).~~
-- :pushpin: JB `Run Agent Doc` and JB `Clear Session Context" should have less latency to submit the prompt...particularly on Codex.
+- ~~:pushpin: JB `Run Agent Doc` and JB `Clear Session Context" should have less latency to submit the prompt...particularly on Codex.~~
 - Codex JB `Run Agent Doc` after a JB `Clear Session Context` on monsterrodholders.md did not submit and displayed stderr ![img_43.png](img_43.png)
 - :pushpin: I typed in the queue item "JB `Run Agent Doc` should have less latency to submit the prompt.", and agent-doc immediately struck it out.
 ---
@@ -498,6 +520,7 @@ Error: dispatch-only codex reopen refused to inject into pane %75 for tasks/prof
 ```
 A prompt was sent but not submitted. This prompt may not be from the dispatch though...
 ---
+- Opencode agent-doc lazily-rs.md running JB `Clear Session Context` does not submit ![img_44.png](img_44.png). The loop should ensure the `/new` is submitted by reading the TUI.
 - agent-doc is spamming the same prompt as I type into the queue in Codex on monsterrodholders.md ![img_42.png](img_42.png)
 - Restart on equityfundingsource.md failed ![img_40.png](img_40.png)
 - :pushpin: Re: agent-doc on Codex outputs console messages that obscures the TUI: This should also apply to Claude Code...so all agent harnesses.

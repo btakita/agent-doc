@@ -45,6 +45,12 @@ import {
     shouldScheduleDeferredTabSyncRetry,
     type TabSyncState,
 } from './tabSync';
+import {
+    EditorCommandCompletion,
+    EditorCommandDecision,
+    EditorCommandKind,
+    EditorCommandRegistry,
+} from './editorCommandState';
 
 // ---------------------------------------------------------------------------
 // CLI Resolution (Feature 9)
@@ -53,7 +59,15 @@ import {
 let resolvedAgentDoc: string | null = null;
 const SYNC_CLI_TIMEOUT_MS = 30_000;
 const FOCUS_CLI_TIMEOUT_MS = 750;
+const ROUTE_CANCEL_WAIT_MS = 5_000;
 const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
+
+class CliCancelledError extends Error {
+    constructor() {
+        super('cancelled');
+        this.name = 'CliCancelledError';
+    }
+}
 
 function resolveAgentDoc(): string {
     if (resolvedAgentDoc) return resolvedAgentDoc;
@@ -129,16 +143,43 @@ function resolveProject(
     return { cwd: workspaceRoot, relativePath: path.relative(workspaceRoot, filePath) };
 }
 
+interface RunCliOptions {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+}
+
+function isCliCancelled(err: unknown): boolean {
+    return err instanceof CliCancelledError;
+}
+
 /** Run an agent-doc CLI command. Returns stdout on success. */
-function runCli(args: string[], cwd: string, options?: { timeoutMs?: number }): Promise<string> {
+function runCli(args: string[], cwd: string, options?: RunCliOptions): Promise<string> {
     const bin = resolveAgentDoc();
     return new Promise((resolve, reject) => {
-        execFile(bin, args, {
+        if (options?.signal?.aborted) {
+            reject(new CliCancelledError());
+            return;
+        }
+
+        let settled = false;
+        let child: ReturnType<typeof execFile> | undefined;
+        const abortHandler = () => {
+            child?.kill('SIGTERM');
+        };
+
+        child = execFile(bin, args, {
             cwd,
             maxBuffer: 1024 * 1024,
             timeout: options?.timeoutMs,
             killSignal: 'SIGTERM',
         }, (err, stdout, stderr) => {
+            if (settled) return;
+            settled = true;
+            options?.signal?.removeEventListener('abort', abortHandler);
+            if (options?.signal?.aborted) {
+                reject(new CliCancelledError());
+                return;
+            }
             if (err) {
                 if ((err as any).killed && options?.timeoutMs) {
                     reject(new Error(`timed out after ${Math.ceil(options.timeoutMs / 1000)}s\n${stdout.trim()}`.trim()));
@@ -149,6 +190,7 @@ function runCli(args: string[], cwd: string, options?: { timeoutMs?: number }): 
                 resolve(stdout.trim());
             }
         });
+        options?.signal?.addEventListener('abort', abortHandler, { once: true });
     });
 }
 
@@ -561,6 +603,12 @@ function buildSyncLayoutCommand(
 // ---------------------------------------------------------------------------
 
 const trackedFiles = new Set<string>();
+const editorCommandRegistry = new EditorCommandRegistry();
+interface ActiveRoute {
+    controller: AbortController;
+    settled: Promise<void>;
+}
+const activeRoutes = new Map<string, ActiveRoute>();
 
 async function submitAction(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
@@ -572,20 +620,87 @@ async function submitAction(): Promise<void> {
         return;
     }
 
+    const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
+    await startRunForDocument(cwd, rel, editor.document.uri.fsPath);
+}
+
+function buildEditorCommandRouteKey(cwd: string, relativePath: string): string {
+    return `${cwd}\0${relativePath}`;
+}
+
+async function saveMarkdownDocument(filePath: string): Promise<void> {
+    const document = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === filePath)
+        ?? await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+    await document.save();
+}
+
+async function startRunForDocument(cwd: string, rel: string, filePath: string): Promise<void> {
+    const routeKey = buildEditorCommandRouteKey(cwd, rel);
+    const decision = editorCommandRegistry.request(routeKey, EditorCommandKind.RunAgentDoc);
+    switch (decision) {
+        case EditorCommandDecision.StartNow:
+            await executeRunForDocument(cwd, rel, filePath, routeKey);
+            return;
+        case EditorCommandDecision.DedupeActiveRun:
+            showHint(`Run already dispatching for ${rel}`);
+            return;
+        case EditorCommandDecision.QueueRunAfterClear:
+            showHint(`Run queued until Clear Session Context finishes for ${rel}`);
+            return;
+        default:
+            showHint(`Run ignored while another command owns ${rel}`);
+            return;
+    }
+}
+
+async function executeRunForDocument(
+    cwd: string,
+    rel: string,
+    filePath: string,
+    routeKey: string,
+): Promise<void> {
+    const abortController = new AbortController();
+    let resolveSettled: () => void = () => {};
+    const settled = new Promise<void>((resolve) => {
+        resolveSettled = resolve;
+    });
+    activeRoutes.set(routeKey, {
+        controller: abortController,
+        settled,
+    });
     try {
-        await editor.document.save();
-        const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
-        const output = await runCli(['route', '--dispatch-only', rel], cwd);
+        await saveMarkdownDocument(filePath);
+        const output = await runCli(['route', '--dispatch-only', rel], cwd, {
+            signal: abortController.signal,
+        });
         showHint(output || `Routed ${rel}`);
-        // Track file for prompt polling
-        trackedFiles.add(editor.document.uri.fsPath);
+        trackedFiles.add(filePath);
         ensurePromptPolling(cwd);
     } catch (err: any) {
-        const { relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
+        if (isCliCancelled(err)) {
+            showHint(`Run cancelled before Clear Session Context for ${rel}`);
+            return;
+        }
         const failure = buildRouteFailurePresentation(rel, err.message);
         showRouteFailureOutput(failure.title, failure.body);
         showError(failure.toast);
+    } finally {
+        if (activeRoutes.get(routeKey)?.controller === abortController) {
+            activeRoutes.delete(routeKey);
+        }
+        editorCommandRegistry.complete(routeKey, EditorCommandKind.RunAgentDoc);
+        resolveSettled();
     }
+}
+
+async function cancelActiveRoute(routeKey: string): Promise<void> {
+    const route = activeRoutes.get(routeKey);
+    if (!route) return;
+    route.controller.abort();
+    await Promise.race([
+        route.settled,
+        new Promise<void>((resolve) => setTimeout(resolve, ROUTE_CANCEL_WAIT_MS)),
+    ]);
 }
 
 async function runSessionCommandForActiveFile(
@@ -769,38 +884,88 @@ async function runWithJunieAction(): Promise<void> {
 }
 
 async function clearSessionContextAction(): Promise<void> {
-    await runSessionCommandForActiveFile(
-        'clear',
-        (output, rel) => {
-            showHint(buildSessionSuccessHint('clear', rel, output));
-        },
-        'session clear failed',
-        async (errorMessage, rel, cwd) => {
-            const refusal = parseBusySessionClearRefusal(errorMessage);
-            if (!refusal) {
-                showError(`session clear failed: ${errorMessage}`);
-                return;
-            }
-            const action = await vscode.window.showWarningMessage(
-                buildBusySessionClearBlockedMessage(rel, refusal),
-                { modal: false },
-                ...(refusal.protectedReason ? [] : ['Refresh and retry']),
-                'Interrupt and clear',
-                'Show status',
-                'Copy details',
-            );
-            if (action === 'Refresh and retry') {
-                await refreshAndRetryClearSessionContext(cwd, rel);
-            } else if (action === 'Interrupt and clear') {
-                await interruptAndClearSessionContext(cwd, rel);
-            } else if (action === 'Show status') {
-                await showSessionStatusFor(cwd, rel);
-            } else if (action === 'Copy details') {
-                await vscode.env.clipboard.writeText(errorMessage);
-                showHint(`Copied busy session details for ${rel}`);
-            }
-        },
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isMarkdown(editor)) return;
+
+    const root = getWorkspaceRoot(editor.document.uri);
+    if (!root) {
+        showError('File is not in a workspace');
+        return;
+    }
+
+    const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
+    const filePath = editor.document.uri.fsPath;
+    const routeKey = buildEditorCommandRouteKey(cwd, rel);
+    const decision = editorCommandRegistry.request(routeKey, EditorCommandKind.ClearSessionContext);
+    switch (decision) {
+        case EditorCommandDecision.StartNow:
+            break;
+        case EditorCommandDecision.PreemptRunWithClear:
+            showHint(`Cancelling Run before Clear Session Context for ${rel}`);
+            await cancelActiveRoute(routeKey);
+            break;
+        case EditorCommandDecision.DedupeActiveClear:
+            showHint(`Clear Session Context already running for ${rel}`);
+            return;
+        default:
+            showHint(`Clear Session Context ignored while another command owns ${rel}`);
+            return;
+    }
+
+    await executeClearSessionContext(cwd, rel, filePath, routeKey);
+}
+
+async function executeClearSessionContext(
+    cwd: string,
+    rel: string,
+    filePath: string,
+    routeKey: string,
+): Promise<void> {
+    try {
+        await saveMarkdownDocument(filePath);
+        const output = await runCli(buildSessionCommandArgs('clear', rel), cwd);
+        showHint(buildSessionSuccessHint('clear', rel, output));
+    } catch (err: any) {
+        await handleClearSessionContextFailure(err.message, rel, cwd);
+    } finally {
+        const completion = editorCommandRegistry.complete(
+            routeKey,
+            EditorCommandKind.ClearSessionContext,
+        );
+        if (completion === EditorCommandCompletion.StartQueuedRun) {
+            void executeRunForDocument(cwd, rel, filePath, routeKey);
+        }
+    }
+}
+
+async function handleClearSessionContextFailure(
+    errorMessage: string,
+    rel: string,
+    cwd: string,
+): Promise<void> {
+    const refusal = parseBusySessionClearRefusal(errorMessage);
+    if (!refusal) {
+        showError(`session clear failed: ${errorMessage}`);
+        return;
+    }
+    const action = await vscode.window.showWarningMessage(
+        buildBusySessionClearBlockedMessage(rel, refusal),
+        { modal: false },
+        ...(refusal.protectedReason ? [] : ['Refresh and retry']),
+        'Interrupt and clear',
+        'Show status',
+        'Copy details',
     );
+    if (action === 'Refresh and retry') {
+        await refreshAndRetryClearSessionContext(cwd, rel);
+    } else if (action === 'Interrupt and clear') {
+        await interruptAndClearSessionContext(cwd, rel);
+    } else if (action === 'Show status') {
+        await showSessionStatusFor(cwd, rel);
+    } else if (action === 'Copy details') {
+        await vscode.env.clipboard.writeText(errorMessage);
+        showHint(`Copied busy session details for ${rel}`);
+    }
 }
 
 async function showSessionStatusFor(cwd: string, rel: string): Promise<string> {
@@ -2391,4 +2556,9 @@ export function deactivate(): void {
     lastTabSyncState = undefined;
     resolvedAgentDoc = null;
     commandRunning = false;
+    editorCommandRegistry.resetForTest();
+    for (const route of activeRoutes.values()) {
+        route.controller.abort();
+    }
+    activeRoutes.clear();
 }

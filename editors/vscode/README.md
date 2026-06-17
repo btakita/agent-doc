@@ -7,6 +7,7 @@ Interactive document sessions with AI agents. Edit markdown documents in your ed
 - **Submit documents** to Claude Code sessions via tmux routing
 - **Claim documents** to assign them to specific Claude sessions
 - **Sync tmux layout** to mirror your editor's tab arrangement without auto-starting replacement sessions from passive editor churn
+- **Run/Clear coordination** matching the JetBrains plugin: repeated Run clicks dedupe, Clear Session Context cancels only the plugin-spawned route process before invoking binary-owned clear, and Run waits behind an active Clear
 - **Preserve split columns** by sending one `--col` per visible editor group instead of flattening every visible markdown tab into one stack
 - **Highlight agent-doc markdown structures** including component comments, boundaries, prompts, `### Re:` headings, tracked ids, and scratch HTML comments
 - **Answer active permission prompts** from flat `agent-doc prompt --all` JSON, preserving the owning cwd and TUI-selected option state while sending the one-based option position required by `agent-doc prompt --answer`; OpenCode horizontal prompts use the CLI-normalized `Permission required` label when no explicit question line is present
@@ -26,6 +27,10 @@ Interactive document sessions with AI agents. Edit markdown documents in your ed
 | Agent Doc: Run (Submit) | `Ctrl+Shift+Alt+A` | Route `/agent-doc` command to the correct Claude session |
 | Agent Doc: Claim | `Ctrl+Shift+Alt+C` | Claim the current document for this tmux pane |
 | Agent Doc: Sync Layout | `Ctrl+Shift+Alt+L` | Sync tmux panes to match editor tab layout |
+| Agent Doc: Show Session Status | none | Show binary-owned session status for the current document |
+| Agent Doc: Clear Session Context | none | Clear the current document's session context through `agent-doc session clear` |
+| Agent Doc: Restart Supervisor Process | none | Restart the binary supervisor for the current document |
+| Agent Doc: Copy Session Diagnostics | none | Copy binary-owned session diagnostics |
 | Agent Doc: Menu | `Alt+Enter` | Show action menu |
 
 ## How It Works

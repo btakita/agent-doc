@@ -135,7 +135,7 @@ Changed paths: `tasks/professional/equityfundingsource.md` only.
 
 Commands / verification: `agent-doc preflight`, `agent-doc plan`, and `agent-doc finalize` closeout. Confidence: high. Escalation: none.
 
-### Re: Replace lender contact fields with messages — gpt-5 (HEAD)
+### Re: Replace lender contact fields with messages — gpt-5
 
 > **Queue prompt:**
 >

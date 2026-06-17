@@ -242,12 +242,75 @@ Notes on the draft:
 - **Per your no-auto-send rule, I did not send or create a Gmail draft.** Say the word and I'll push it to Gmail Drafts to `dwasko@spoton.com` (new thread; the prior "SpotOn Interview Availability" thread is stale for a post-interview followup), or tweak the wording first.
 
 Closeout: changed path is the session document only; no email was sent or drafted to Gmail. Commands were preflight, plan, transcript + mail-thread inspection, and this finalize. No code changed, so no test suite applied. Confidence high on the facts (pulled directly from the transcript and the mail thread for Dustin's address).
-<!-- agent:boundary:ae1474d1 -->
+
+### Re: Elaborating the Hub/Salesforce + workflow-latitude question — opus-4-8
+
+> **Queue prompt:**
+>
+> Please elaborate on
+> > How Hub and Salesforce divide responsibility for a merchant's lifecycle, and how much room the role has to change merchant-facing workflow versus internal tooling?
+
+This bullet is doing two jobs at once. It's really two questions stapled together, and it's worth pulling them apart because they probe different things and each has a different payoff in the interview.
+
+#### What the transcript actually told us
+
+Calvin (the principal engineer) gave a fairly precise picture, almost in passing, when you asked what their existing system looks like:
+
+- **Hub came first.** It was the *central* application, built to show "the whole life cycle of a merchant." So historically, Hub was the activation/lifecycle system — the place where merchant state lived end to end.
+- **Salesforce came later** and is "more geared toward sales and ops," and is now "the source of truth for a lot of things about a merchant."
+- **But R&D/engineering "still use mostly Hub, the legacy system, to keep track of the state of a merchant."**
+
+Then you asked the sharp follow-up — is the sales context (what the rep discussed, the merchant's specific needs, what they want in the install) integrated and synced across Hub, Salesforce, and the communication tooling? His answer trailed off ("every nook and cranny has its [loss]...") and time ran out. That non-answer is itself a signal: the integration story is messy enough that it didn't get a clean reply.
+
+So the real situation is a **classic split-brain / two-system-of-record problem**:
+
+- Salesforce = official source of truth, but oriented around the *sales and ops* view of the merchant.
+- Hub = legacy, but where *engineering* actually tracks lifecycle state — and it's where the lifecycle model originally lived.
+- Sync between them (plus the comms tooling) is the open question. Where two systems both claim a slice of "merchant state," the seams between them are exactly where signed-but-not-installed merchants get lost.
+
+#### Why the first half of the question matters (Hub vs Salesforce ownership)
+
+For a role whose entire mandate is **raising signed→install conversion**, the system-of-record question is not trivia — it determines whether the job is even tractable:
+
+1. **You can't fix a funnel you can't see in one place.** If install state is split across Hub and Salesforce with imperfect sync, then "where is every signed merchant at risk of not installing?" has no single answer today. Part of the role may be *making the funnel observable at all* before any clever automation.
+2. **It tells you where you'd build.** If the activation funnel logically belongs in Hub (engineering's lifecycle system) but the merchant/sales data lives in Salesforce, the work is partly an **integration / data-modeling** problem: defining one authoritative activation object and reconciling the two systems. That's very different from "add a feature to an existing clean pipeline."
+3. **It reveals organizational ownership.** Sales/ops own Salesforce; R&D owns Hub. Whoever owns the system that drives merchant-facing onboarding effectively owns the conversion lever. Asking this surfaces *who you'd actually be working with and negotiating with* to ship changes.
+4. **Legacy-system gravity is a real risk.** "We still mostly use the legacy system" usually means there's technical debt, partial migrations, and political sensitivity about which system wins. You want to know if the role includes modernizing/migrating Hub, or building net-new on top, or making Salesforce the unified truth.
+
+What good answers would sound like: "Salesforce owns the merchant record, Hub owns implementation state, and we sync via X" (tractable, integration-heavy) versus "honestly they drift and people reconcile by hand" (bigger, messier, but higher-leverage — and more candid about why conversion leaks).
+
+#### Why the second half matters (merchant-facing workflow vs internal tooling)
+
+This is the **scope-of-mandate** question, and it's the one that most changes what the job actually is day to day:
+
+- **Internal-tooling-only mandate:** you'd improve the implementation team's console, queues, risk scoring, and reporting — make the humans more efficient. Valuable, but you're optimizing the *back office* and conversion gains are capped by how much human follow-up can be sped up.
+- **Merchant-facing latitude:** you'd also get to change what the *owner* experiences after signing — a launch checklist, self-scheduling, async menu/document upload, financing-confidence content, automated nudges. This is where the bigger conversion upside lives, because most drop-off is the merchant going cold, not the rep being slow.
+- **Both (the ideal):** Mike's framing earlier in this doc — "make human outreach higher-intent and higher-value" — only works if you can change *both* sides: automate the low-value internal follow-up *and* give the merchant a product surface that keeps the deal warm.
+
+Asking this protects you from accepting a role that sounds like product-led activation work but is actually "build internal dashboards for the ops team." It also signals you think about **where the leverage is**, not just what you'd be allowed to touch.
+
+#### How the two halves connect
+
+They're linked: **your workflow latitude is constrained by the system topology.** If merchant-facing onboarding has to be driven from Salesforce (sales/ops territory) but engineering only controls Hub, then "change merchant-facing workflow" may require cross-team buy-in or a new surface entirely. Conversely, if Hub already owns lifecycle and can expose a merchant-facing layer, you have a cleaner path. So the first question's answer largely determines how realistic the second question's ambitions are — which is exactly why they belong together in the email.
+
+#### Suggested ways to ask it live (sharper than the email bullet)
+
+- "You mentioned Salesforce is the source of truth but R&D still tracks merchant state in Hub — for the install funnel specifically, which system would I be building the activation experience on, and how reconciled are the two today?"
+- "When a rep captures what a merchant needs at signing, does that context flow into the system implementation actually works from, or does it get re-gathered?"
+- "Does this role get to touch the merchant-facing onboarding experience, or is the charter internal implementation tooling? Where do you see the bigger conversion win?"
+- "If I wanted to ship a merchant-facing launch checklist, whose system and whose roadmap would that land in?"
+
+The email keeps it to one polite, compact bullet on purpose — these sharper versions are for the live conversation or a follow-up call, where the messy integration answer is the most useful thing you can learn about whether the conversion mandate is actually achievable.
+
+Closeout: changed path is the session document only; no email sent or drafted. Grounding pulled from `transcripts/2026-06-16-14-00-36-transcript.md` (Calvin's Hub/Salesforce explanation near 01:00) and the prior Dustin draft in this doc. No code changed, so no test suite applied. Confidence high on the transcript facts; the interpretation of role scope is my analysis, not confirmed by SpotOn.
+<!-- agent:boundary:ca7683d8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+Please elaborate on
+> How Hub and Salesforce divide responsibility for a merchant's lifecycle, and how much room the role has to change merchant-facing workflow versus internal tooling?
 <!-- /agent:queue -->
 
 ## Backlog

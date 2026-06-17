@@ -266,13 +266,43 @@ Install / activation:
 
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:b8848817 -->
+
+### Re: VS Code plugin parity with JetBrains Run/Clear — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: VSCode plugin should have the same specs + behavior as the JB plugin.
+
+
+Implemented and pushed the VS Code parity work for the active queue head.
+
+Summary:
+- Added a VS Code per-document Run/Clear state machine with unit tests.
+- Wired `Run Agent Doc` to dedupe repeated clicks behind the first alive route process.
+- Wired `Clear Session Context` to abort a still-dispatching plugin route process, wait briefly for it to settle, then invoke binary-owned `agent-doc session clear <relative-path>`.
+- Wired Run during active Clear to queue and start after clear and selected clear-refusal recovery finish.
+- Added `editors/vscode/SPEC.md`, updated the VS Code README/session-command docs, and bumped the local VS Code package to `0.2.28`.
+
+Verification:
+- `npm test` in `src/agent-doc/editors/vscode`: 89 passed.
+- `npm run package`: built `agent-doc-0.2.28.vsix`.
+- `agent-doc plugin install --local vscode`: installed via `codium`.
+- `git diff --check`: passed.
+- `make check`: passed clippy, 4,635 nextest tests, doctests, and the ignored medium simulator check.
+- `gh run list --workflow CI --limit 1`: latest CI was completed/success for the prior pushed `src/agent-doc` commit.
+
+Commits:
+- `src/agent-doc` `d71577d4` (`align vscode run clear behavior`) pushed.
+- parent `agent-loop` `c815ce6a6` (`agent-doc: update vscode run clear parity`) pushed.
+
+Escalation: none. Confidence: high. I did not perform a live manual VS Code race-click repro; the local VS Code package was built and installed, and the pure state machine plus existing session UI command/refusal coverage pass.
+<!-- agent:boundary:b8e17524 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: VSCode plugin should have the same specs + behavior as the JB plugin.
+- ~~:pushpin: VSCode plugin should have the same specs + behavior as the JB plugin.~~
 ---
 JB `Run Agent Doc` worked on this document. But on equityfundingsource.md, did not submit:
 ```

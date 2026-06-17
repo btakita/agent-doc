@@ -381,15 +381,61 @@ Verification:
 Workspace note: the pre-existing unrelated dirty files under `src/tsift` (`session_cost.rs`, `session_review.rs`, `infra.rs`, `exit_code.rs`, `log_digest.rs`) remain unstaged as before.
 
 Confidence: high. `#gctrl1` done. Next queued: `#gctrl2` (`--profile` pin on tsift KG/semantic commands).
-<!-- agent:boundary:20764ac2 -->
+
+### Re: #gctrl3 local-model swap lifecycle — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#gctrl3]
+
+
+> **Queue prompt:**
+>
+> :pushpin: do [#gctrl3]
+
+
+Implemented, installed, and committed the `tsift local-model swap --from <id> --to <id>` lifecycle action that combines a source unload cleanup proof with a target profile resolution against the post-unload probe.
+
+What changed:
+- `packages/tsift-local-model/src/lib.rs` adds `SwapStatus { Swapped, SwappedToHash, UnloadProvenTargetUnselectable, UnloadNotProven, NoOpSameProfile }`, `LocalModelSwapReport`, and `build_swap_report(from, to, pre_load_probe, post_unload_probe, provider_endpoint, provider_pid, idle_ttl_seconds, tolerance_mib)`. The function reuses `build_lifecycle_report` for the unload proof and `resolve_profile_preference` (#gctrl2) for the target, so semantics stay aligned. `UnloadNotProven` includes a `DO NOT load target — source unload did not prove VRAM cleanup` note so a caller script can fail closed on the JSON `notes` field alone.
+- `packages/tsift-cli/src/cli.rs` adds `LocalModelCommand::Swap { --from, --to, --provider-endpoint, --provider-pid, --idle-ttl-seconds, --no-probe, --pre-used-mib, --post-used-mib, --tolerance-mib, --strict, --json }` plus the `json_output()` match arm.
+- `packages/tsift-cli/src/lib.rs` adds the `Swap` dispatch in `cmd_local_model`. `--strict` exits non-zero on `UnloadNotProven` or `UnloadProvenTargetUnselectable` so caller scripts fail closed with a precise reason.
+- `packages/tsift-local-model/README.md` documents `SwapStatus`, the contract that lease coordination is the caller's job (`lease release --from` → `swap` → `lease acquire --to`), and the `--strict` failure modes.
+
+Behavior now available:
+- `tsift local-model swap --from qwen3-32b-q4 --to qwen3-embedding-0.6b` (real probe) → `swapped`, unload cleanup `Proven`, target resolution `pinned -> qwen3-embedding-0.6b`.
+- `tsift local-model swap --from qwen3-32b-q4 --to tsift-local-hash-v1` → `SwappedToHash`.
+- `tsift local-model swap --from X --to Y --strict` against an orphaned-provider post-unload probe → JSON still emitted with `swap_status: unload_not_proven`, exit 1, error names the cleanup reason.
+- Same-profile swap → `NoOpSameProfile`.
+
+Lease coordination is intentionally not bundled into `swap`: the caller holds the holder-pid context and can chain `tsift local-model lease release --profile <from>` → `swap` → `tsift local-model lease acquire --profile <to>` in a script, which keeps the swap action reusable for callers that do not use the registry.
+
+Commits:
+- `src/tsift`: `10fe454 feat: add local-model swap lifecycle action (#gctrl3)`
+- parent repo: `680d4851d tsift: add local-model swap lifecycle action (#gctrl3)`
+
+Verification:
+- `cargo test -p tsift-local-model` → 35 passed (5 new swap tests + 30 prior).
+- `cargo test -p tsift-cli --lib cli_local_model_swap` → 1 passed; full `--lib` suite → 381 passed.
+- `cargo clippy -p tsift-local-model -p tsift-cli --all-targets -- -D warnings` → clean.
+- `make check` → exit 0.
+- `cargo install --path . --force` → installed `tsift 0.1.70`.
+- Smoke: real-probe `swap --from qwen3-32b-q4 --to qwen3-embedding-0.6b --json` → `swapped`; synthetic `--to tsift-local-hash-v1` → `SwappedToHash`; orphaned-provider post-unload + `--strict` → exit 1 with cleanup-reason error; same-profile → `NoOpSameProfile`.
+- `git -C src/tsift diff --cached --check` and parent `git diff --cached --check` → clean.
+- `gh run list --workflow CI --limit 1` could not run because the root repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+
+Workspace note: the pre-existing unrelated dirty files under `src/tsift` (`session_cost.rs`, `session_review.rs`, `infra.rs`, `exit_code.rs`, `log_digest.rs`) remain unstaged as before.
+
+Confidence: high. `#gctrl3` done. Next queued: `#gctrlice` (icebox — revisit a full GPU control-pane daemon only when proven contention). Plan warning has flagged #gctrlice as semantically covered by #gctrl1; will reconcile when its turn comes.
+<!-- agent:boundary:2d916564 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#gctrl1]~~
-- do [#gctrl2]
-- do [#gctrl3]
+- ~~do [#gctrl2]~~
+- ~~do [#gctrl3]~~
 - do [#gctrlice]
 <!-- /agent:queue -->
 <!--
@@ -399,7 +445,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#gctrl3] [recommended] Add `tsift local-model swap --to <profile>` lifecycle action distinct from `unload`: unload current profile, run the existing VRAM-cleanup proof, then load the target profile and emit a combined LocalModelLifecycleReport. Use it to implement mid-run downgrades (qwen3-32b-q4 -> qwen3-embedding-0.6b or hash fallback) without the caller orchestrating two commands.
 - [ ] [#gctrlice] [recommended] Icebox: revisit a full GPU control-pane daemon (with preempt and multi-GPU scheduling) only when proven need — more than 1 GPU, or more than 3 concurrent GPU consumers running at the same time. Until then the cooperative lease registry (#gctrl1) is the right-size answer.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->

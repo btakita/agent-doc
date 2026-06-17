@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -38,7 +38,7 @@ committed
 Compacted content:
 - Archived 11 response topic(s): Uploaded Documents order; deploy; Remove "Interested Lenders" from "Available Deal" -> "Loan Detail" tab. deploy; 8 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): Remove "Loan Terms" from Available deal admin page & dialog. D...
-<!-- agent:boundary:2b48630a -->
+<!-- agent:boundary:8f644450 -->
 <!-- /agent:exchange -->
 ###
 <!--

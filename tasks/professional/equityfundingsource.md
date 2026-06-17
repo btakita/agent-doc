@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -135,20 +135,15 @@ It does **not** touch `lender_account`, so the rename preserved whatever was alr
   ```
 
 The guard is correct as designed — selecting a lender enqueues a gated TMO writeback (`tmo_selected_lender_outbox_enqueue_`) that needs a real account to sync to. No spec/test/code changes warranted, so `#spec-test-commit-push` doesn't apply this cycle. If you want a UI affordance to set `lender_account` on an existing investor without a lender-request round-trip, I can add that as a backlog item.
-<!-- agent:boundary:b0fbd08b -->
+<!-- agent:boundary:38402b69 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
-Selecting the lender in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=interests had an error. Is this due to the email change o
-
-```
-Select lender failed
-selected lender needs a TMO lender account before TMO sync
-```
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- The lender does have an account. I was just logged in. Why did we get the error?
 <!-- /agent:queue -->
 
 ## Backlog

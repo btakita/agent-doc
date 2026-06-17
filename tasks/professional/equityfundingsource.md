@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -68,7 +68,60 @@ Compacted content:
 - `src/equityfundingsource-dev/app/equityfundingsource/lib/email/lifecycle.ts`
 - `src/equityfundingsource-dev/app/equityfundingsource/lib/portal/investor/routes.ts`
 - `src/equityfundingsource-dev/lib/ui--server--efs/urls/index.ts`
-<!-- agent:boundary:ae1fed8c -->
+
+### Re: Rename investor routes to lender routes — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+> **Queue prompt:**
+>
+> Rename /portal-investor/ routes to /portal-lender/.
+
+Implemented and pushed the lender portal route rename. `/portal-lender` is now the canonical lender portal path, with legacy `/portal-investor...` requests redirected to the matching `/portal-lender...` path so old links do not hard-404.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--server--efs/urls/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/portal/investor/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/lifecycle.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/layout.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/dashboard.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/available_deals.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/deal_detail.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/accreditation.tsx`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-documents.test.ts`
+- `src/equityfundingsource-dev/tests/download-security.test.ts`
+- `src/equityfundingsource-dev/tests/lender-account-gate.test.ts`
+- `src/equityfundingsource-dev/tests/public-header.test.ts`
+- `src/equityfundingsource-dev/tests/investor-vestings.test.ts`
+- `src/equityfundingsource-dev/docs/deploy.md`
+- `src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md`
+- parent submodule pointer `src/equityfundingsource-dev`
+
+What changed:
+- Changed the shared lender portal base URL from `/portal-investor` to `/portal-lender`.
+- Updated browser links, server header/footer/not-found links via the shared URL map, email CTA URLs, tests, and deployment docs/spec references.
+- Added legacy 308 redirects for `/portal-investor`, `/portal-investor/:section`, and `/portal-investor/deals/:deal_id` to the equivalent `/portal-lender` paths.
+- Added drift coverage that pins `/portal-lender` as canonical and verifies legacy redirect registration.
+
+Commands / verification:
+- `rg "/portal-investor" -n app lib tests docs prds bin public` now finds only the intentional legacy redirect and tests for it.
+- `bun test tests/investor-portal-e2e.test.ts tests/admin-investor-pipeline.test.ts tests/admin-investor-documents.test.ts tests/download-security.test.ts tests/lender-account-gate.test.ts tests/public-header.test.ts tests/investor-vestings.test.ts` passed: 168 tests, 0 fail.
+- `git diff --check` passed.
+- `tsift digest-runner --kind test --path . --shell-command 'make check'` exited 0. The digest still flags the known non-fatal `error: d1 down` log from the outbox failure-path test, but the command passed.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no workflows.
+- EFS and parent relevant worktrees were clean after the commits.
+
+Commits pushed:
+- EFS repo: `0d53ff6` (`Rename lender portal routes`)
+- Parent repo: `c6dda8865` (`Update EFS lender portal routes`)
+
+Deploy remains queued as the next item. Escalation: none. Confidence: high.
+<!-- agent:boundary:0ad1ac24 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,8 +129,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Rename /portal-investor/ routes to /portal-lender/.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

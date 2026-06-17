@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -242,12 +242,13 @@ Verification run:
 - `make check`
 
 The CI lookup was attempted with `gh run list --workflow CI --limit 1`, but this repository still reports `could not find any workflows named CI`; local verification passed. The pre-existing unrelated dirty files under `src/tsift` remain unstaged.
-<!-- agent:boundary:8b6ebf26 -->
+<!-- agent:boundary:a8f67c0c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- What local model is setup to work with tsift? Is it being used now? 
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -1603,44 +1603,6 @@ fn clear_cooldown_blocks_auto_dispatch(
 /// - Dedups on the head text so a stuck/undrained head cannot hot-loop.
 /// - Respects the managed capability-proof gate, same as the auto-trigger.
 ///
-/// `#s760c`: live context-usage % for the pre-emptive `/clear` gate. Resolves the
-/// harness and active session transcript from the environment, then computes the
-/// real transcript-token ctx%. Claude uses `~/.claude/projects/...` usage plus
-/// the configured model context window; Codex uses `~/.codex/sessions/...`
-/// `token_count` events, which carry their own model context window. Returns
-/// `None` (caller never clears) on any unresolved input — unknown/unsupported
-/// harness, no model where needed, missing `$HOME`/cwd, or no transcript yet —
-/// per the destructive-`/clear` fail-safe invariant in `plan-s760`.
-fn live_transcript_context_pct(
-    file: &Path,
-    harness: &crate::harness::HarnessConfig,
-) -> Option<f64> {
-    let harness_kind = crate::context_pct::Harness::parse(&harness.binary)?;
-    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
-    let project_dir = std::env::current_dir().ok()?;
-    match harness_kind {
-        crate::context_pct::Harness::Claude => {
-            // Model from document frontmatter (generic `model:` falls back via
-            // the resolver). `claude` binary maps to the `claude-code` harness
-            // model key.
-            let content = std::fs::read_to_string(file).ok()?;
-            let (fm, _) = crate::frontmatter::parse(&content).ok()?;
-            let model = fm.resolve_harness_model("claude-code")?.to_string();
-            // Active transcript: newest `*.jsonl` under
-            // `~/.claude/projects/<hash(cwd)>/`.
-            let subdir = crate::context_pct::claude_projects_subdir(Path::new(&home), &project_dir);
-            let transcript = crate::context_pct::latest_claude_transcript(&subdir)?;
-            crate::context_pct::transcript_context_pct(harness_kind, &transcript, &model)
-        }
-        crate::context_pct::Harness::Codex => {
-            let transcript =
-                crate::context_pct::latest_codex_transcript(Path::new(&home), &project_dir)?;
-            crate::context_pct::transcript_context_pct(harness_kind, &transcript, "codex")
-        }
-        crate::context_pct::Harness::OpenCode => None,
-    }
-}
-
 /// `#ctlrecycle` R3 — replace this stale supervisor's process image with the
 /// freshly-installed binary IN PLACE (`execve`), preserving the live harness child
 /// and the tmux pane (`#ctlrecycle` R3, opt-in via `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`).

@@ -249,18 +249,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
         .spawn(move || {
             let path = PathBuf::from(&file);
             let mut last_dispatched: Option<String> = None;
-            let mut last_context_clear_at: Option<u64> = None;
             let mut last_context_reset_head: Option<String> = None;
             let mut context_reset_in_flight = false;
             let mut last_pending_enter_resubmitted: Option<String> = None;
             let mut clear_cooldown_logged = false;
-            // `#cleardecisionflood`: the `[s760] clear-decision …` diagnostic is
-            // recomputed on every idle poll while `agent_doc_queue_context_reset`
-            // is opted in. Logging it unconditionally floods ops.log (observed
-            // 126 MB, thousands of identical lines/sec on a steady-state idle
-            // queue). Only emit when the diagnostic string actually changes so the
-            // decision stays observable without the runaway.
-            let mut last_clear_decision_diagnostic: Option<String> = None;
             let mut route_submit_in_flight_logged = false;
             let mut idle_busy_ticks: u32 = 0;
             // `#clearcontresume`: consecutive idle-prompt polls observed while a
@@ -1117,7 +1109,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     );
                                 }
                                 last_dispatched = None;
-                                last_context_clear_at = Some(current_epoch_secs());
                                 awaiting_clear_settle = true;
                                 context_reset_in_flight = true;
                                 clear_settle_idle_ticks = 0;
@@ -1164,32 +1155,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                 }
 
-                // `#nm1x-no-preempt-clear`: the accretion-driven pre-emptive
-                // `/clear` interleave is opt-in. Without an explicit
-                // `agent_doc_queue_context_reset` opt-in (frontmatter or
-                // `.agent-doc/config.toml`), the idle-queue watch never fires a
-                // pre-emptive `/clear` before a queue head — so a manual
-                // `Run Agent Doc` or auto-loop drain does not churn the session
-                // or hit `/clear` rejected mid-turn. Deferred *operator* clears
-                // (an explicit `session clear`) are a separate path and stay live.
-                // `#s760c`: the real context-usage signal is the harness
-                // transcript token %, NOT exchange size (footers vary by
-                // harness, and document size is not loaded-context size). When
-                // opted in and idle, compute the live transcript ctx%, emit the
-                // canonical `[s760] clear-decision …` line to ops.log so the
-                // decision is observable in production, and fire the tracked
-                // `/clear` only when ctx% crosses the resolved threshold. The
-                // compaction-after-clear safety case is preserved separately: a
-                // compaction shrinks the document but not the already-loaded
-                // conversation, so it still warrants a reset. Everything stays
-                // behind the default-off `agent_doc_queue_context_reset` opt-in,
-                // and an unknown ctx% (`pct=None`) never clears (fail safe).
                 // `#cleandrainsup`: a `[clean-session]` head asks for a fresh agent
                 // context. The supervisor provides it by force-`/clear`ing before
-                // dispatch, independent of the `agent_doc_queue_context_reset`
-                // opt-in (which only governs accretion-driven pre-emptive clears).
-                // This is what lets the supervisor drain clean-session heads the
-                // in-session `/loop` defers (queue_continuation_required=false).
+                // dispatch. Ordinary queue heads no longer trigger transcript
+                // threshold clears here: that path caused the supervisor to churn
+                // `/clear` while an operator was editing a live queue prompt. Keep
+                // the supervisor policy simple: explicit operator clears and
+                // explicit `[clean-session]` heads are the only idle-watch context
+                // reset sources.
                 let active_head_is_clean_session = active_head
                     .as_deref()
                     .map(|head| crate::queue_continuation::head_requires_clean_session(&path, head))
@@ -1199,60 +1172,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     clear_cooldown_active,
                 ) {
                     Some(CLEAN_SESSION_CONTEXT_RESET_REASON.to_string())
-                } else if clear_cooldown_active
-                    || !crate::session_accretion::queue_context_reset_opted_in(&path)
-                {
-                    None
                 } else {
-                    let pct = live_transcript_context_pct(&path, &harness);
-                    let threshold = crate::session_accretion::clear_threshold_for_doc(&path);
-                    let decision = crate::context_pct::clear_decision(true, pct, threshold);
-                    // `#cleardecisionflood`: dedupe identical consecutive
-                    // decisions so a steady-state idle queue does not flood
-                    // ops.log every poll tick.
-                    if last_clear_decision_diagnostic.as_deref() != Some(decision.diagnostic.as_str())
-                    {
-                        crate::ops_log::log_op(&path, &decision.diagnostic);
-                        last_clear_decision_diagnostic = Some(decision.diagnostic.clone());
-                    }
-                    if crate::input_diag::verbose_enabled() {
-                        eprintln!("[agent-doc] idle-queue watch: {}", decision.diagnostic);
-                    }
-                    if decision.clear {
-                        Some(format!(
-                            "transcript context {:.1}% >= clear threshold {}% (#s760c)",
-                            pct.unwrap_or_default(),
-                            threshold
-                        ))
-                    } else {
-                        match crate::session_accretion::recent_exchange_compaction_timestamp(&path) {
-                            Ok(Some(compaction_ts))
-                                if last_context_clear_at.unwrap_or(0) < compaction_ts =>
-                            {
-                                Some(
-                                    "exchange was compacted after the last tracked context clear (#s760c)"
-                                        .to_string(),
-                                )
-                            }
-                            Ok(_) => None,
-                            Err(err) => {
-                                log_event(
-                                    &mut session_log,
-                                    &format!(
-                                        "idle_queue_watch_context_reset_policy_failed harness={} file={} error={:?}",
-                                        harness.binary,
-                                        path.display(),
-                                        err.to_string()
-                                    ),
-                                );
-                                eprintln!(
-                                    "[agent-doc] idle-queue watch: failed to inspect queue context reset policy for {}: {err:#}",
-                                    path.display()
-                                );
-                                None
-                            }
-                        }
-                    }
+                    None
                 };
                 let reset_already_sent_for_active_slot = context_reset_dedupe_head(
                     active_head.as_deref(),
@@ -1353,7 +1274,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         match auto_trigger_clear_command(&shared, &stop, clear_cmd) {
                             AutoTriggerOutcome::Cancelled => return,
                             AutoTriggerOutcome::Sent => {
-                                last_context_clear_at = Some(current_epoch_secs());
                                 last_context_reset_head = active_head.clone();
                                 context_reset_in_flight = true;
                                 last_dispatched = None;
@@ -1575,7 +1495,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         &mut session_log,
                                     );
                                     if crate::queue_command::is_context_clear_command(command) {
-                                        last_context_clear_at = Some(current_epoch_secs());
                                         last_context_reset_head = Some(head.clone());
                                         context_reset_in_flight = true;
                                         // `#qflood2`: a dispatched `/clear` head

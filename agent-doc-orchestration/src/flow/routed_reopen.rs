@@ -333,7 +333,7 @@ pub fn dispatch_only_dispatch_start_proof_required(
     facts: DispatchOnlyProofPolicyFacts<'_>,
 ) -> bool {
     match facts.harness_binary {
-        "codex" => facts.codex_dispatch_start_tracking_enabled,
+        "codex" => false,
         "opencode" => false,
         _ => false,
     }
@@ -1431,8 +1431,8 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_only_proof_policy_requires_hook_visible_codex_and_opencode() {
-        assert!(dispatch_only_dispatch_start_proof_required(
+    fn dispatch_only_proof_policy_accepts_enter_delivery_for_all_harnesses() {
+        assert!(!dispatch_only_dispatch_start_proof_required(
             DispatchOnlyProofPolicyFacts {
                 harness_binary: "codex",
                 codex_dispatch_start_tracking_enabled: true,

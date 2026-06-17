@@ -823,8 +823,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // history-search state, and goes straight to the Escape + C-c path.
         ("agent-doc-orchestration/src/route.rs", "reason=") => 8,
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "guard_") => 4,
-        ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof=") => 4,
-        ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof_scope=") => 4,
+        // +1/+1 (#jbsimpleroute): the Codex accepted-only delivery regression
+        // asserts the typed `proof=accepted proof_scope=accepted_only` log shape
+        // now that accepted Enter delivery is success instead of a hard route
+        // failure.
+        ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof=") => 5,
+        ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof_scope=") => 5,
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "reason=") => 2,
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "accepted_only") => 9,
         // +1 (`reason=in_flight_coalesce`): #qflood2 `route_dispatch_deduped_pane`

@@ -787,7 +787,7 @@ mod tests {
 
         assert!(
             !should_print_dispatch_only_unproven_progress(&doc, &HarnessConfig::codex()),
-            "dispatch-only Codex reroutes with visible hooks should let the final accepted-but-unproven error own the user-facing output"
+            "dispatch-only Codex reroutes with visible hooks should stay quiet unless stronger hook proof arrives"
         );
         assert!(
             should_print_dispatch_only_unproven_progress(&doc, &HarnessConfig::claude()),
@@ -795,7 +795,7 @@ mod tests {
         );
     }
     #[test]
-    fn dispatch_only_codex_with_visible_hooks_rejects_accepted_only_submit() {
+    fn dispatch_only_codex_with_visible_hooks_accepts_enter_delivery() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
 
@@ -805,20 +805,24 @@ mod tests {
         std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        let err = require_dispatch_only_dispatch_start_proof(
+        require_dispatch_only_dispatch_start_proof(
             &doc,
             "%4",
             &HarnessConfig::codex(),
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
             RoutedDispatchStartProof::CommandAcceptedOnly,
         )
-        .expect_err("hook-visible Codex dispatch-only acceptance must require routed submit proof");
+        .expect("hook-visible Codex dispatch-only accepts the shared Enter delivery path");
 
-        assert!(
-            err.to_string()
-                .contains("only pane-input acceptance proof was available"),
-            "unexpected error: {err:#}"
+        let message = route_dispatch_only_sent_log_message(
+            &doc,
+            "%4",
+            &HarnessConfig::codex(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
         );
+        assert!(message.contains("proof=accepted"), "{message}");
+        assert!(message.contains("proof_scope=accepted_only"), "{message}");
     }
     #[test]
     fn dispatch_blocker_recovery_hint_names_codex_hook_review_action() {

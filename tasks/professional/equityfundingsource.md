@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -212,7 +212,7 @@ The approve flow (`/approve` → `application_tmo_writeback_attempt_` → `tmo_w
 - **(b) associate + push an `UpdateLoan`** — also send EFS's current data onto the existing TMO record?
 
 Tell me **a** or **b** and I'll implement both parts (+ tests) on `#5q7z`. This is the same gated `#dzmm`/`#7a4d` TMO-writeback area as `#214f`, so I'm confirming intent rather than pushing a guess. No code changed this turn — diagnosis + reads only.
-<!-- agent:boundary:82b0e0b9 -->
+<!-- agent:boundary:7d4aca76 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -225,6 +225,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- We should strive to be in sync. Why did this deal get out of sync?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -186,12 +186,13 @@ The MonsterRodHolders content is sourced from the actual client work (the bot-at
 - **Profile source** → `resume/profiles/virtuousai.toml` (4.2 KB) — the VirtuousAI-tailored profile that selects/orders the `data.toml` entries and supplies the custom summary.
 
 Underlying content stores also modified (uncommitted): `resume/data.toml` (added MonsterRodHolders + Equity Funding Source accomplishments) and `resume/BrianTakita.md` (master template).
-<!-- agent:boundary:86165db7 -->
+<!-- agent:boundary:e0b7c028 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- The cover letter is overselling some parts. I'm wondering if we should even have the cover letter and just leave it as a message.
 <!-- /agent:queue -->
 
 ## Backlog

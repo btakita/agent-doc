@@ -273,7 +273,7 @@ It returns `{ merged_doc, outcomes, requires_ack }` — `merged_doc` reconstruct
 
 **Remaining `#semmerge` phases** — Phase 2 `#smconv` (`#aqhr`) is the next actionable: wire `semantic_merge` into `write/converge.rs`, replacing the fail-closed line-merge + `content_ours`-wins adoption. That edits the **safety-critical commit/convergence path** — it must run in a focused clean cycle with `make check` + `make tmux-ci`, **not** a degraded-session drain (this very session kept hitting the bug it fixes). Phases 3–5 (queue-node-strike, ack-turn, simworld) follow in the plan. No version bump/install — Phase 1 is unconsumed groundwork with no behavior change yet.
 
-### Re: investigate the task thrashing in virtuousai.md — already-tracked, no new fix — opus-4-8 (HEAD)
+### Re: investigate the task thrashing in virtuousai.md — already-tracked, no new fix — opus-4-8
 
 > **Queue prompt:**
 >
@@ -289,7 +289,7 @@ Investigated. `tasks/recruit/virtuousai.md` has an **empty queue** (`&lt;!-- age
 No new agent-fix from this head — virtuousai's thrash is the union of a fixed bug and a filed one; next concrete work is `#routedeadshell` in its own route cycle.
 
 NOTE (recovered via `--force-disk`): this answer was dropped twice by the live editor buffer's `content_ours` adoption (`live_prompt_drift_after_preflight`) — the IntelliJ buffer for this doc is stale/corrupt and overriding IPC writes. The session needs an editor buffer refresh / restart before further drains.
-<!-- agent:boundary:dd8a2bc0 -->
+<!-- agent:boundary:335a67b6 -->
 <!-- /agent:exchange -->
 
 ## Queue

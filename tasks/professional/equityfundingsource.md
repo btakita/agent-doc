@@ -73,7 +73,39 @@ Shipped. When a lender is selected via `PUT /api/admin/deal-interests/:id/select
 - Worker deployed: **Version `2a43620d-85d8-4737-9171-c215847f2f17`**
 
 Queue drained.
-<!-- agent:boundary:f5efc424 -->
+
+### Re: Activity History event on lender select + deployed — glm-5.2
+
+> **Queue prompt:**
+>
+> When the vendor is selected, an event in the Activity History should be created.
+
+
+> **Queue prompts:**
+>
+> When the vendor is selected, an event in the Activity History should be created.
+> deploy
+
+Shipped. The select-lender endpoint now writes two entries to `loan_activity_logs` (visible in the deal detail Activity tab):
+
+1. **`lender_selected`** — records who selected which lender (e.g. "Ada Investor selected as the lender (loan 1543).")
+2. **`loan_status`** — when the deal advances, records the Available Deals → Processing transition (e.g. "Status changed from Available Deals to Processing after lender selection.")
+
+Both entries include `admin_user_id` for attribution and `occurred_at` for timeline ordering.
+
+**Changes (EFS `2c6354b`):**
+- `lib/admin/investor_management/index.ts` — two `loan_activity_log_insert_` calls in `admin_deal_interests_by_id_select_PUT_`
+- `tests/admin-investor-pipeline.test.ts` — assertions for both activity log kinds
+
+**Verification:** `make check` — **813 tests pass / 0 fail**, build + build:worker OK.
+
+**Deploy:**
+- EFS `2c6354b` pushed `bc7d0de..2c6354b`
+- Root `16e318ca4` submodule pointer bump pushed
+- Worker deployed: **Version `d236a09d-38bb-46f6-975e-7edbf515c7d5`**
+
+Queue drained.
+<!-- agent:boundary:7055739a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,7 +119,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~I selected a vendor in an Available deal in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline. When the vendor is selected, the deal should move to the next step in the db and in the UI.~~
-- When the vendor is selected, an event in the Activity History should be created.
+- ~~When the vendor is selected, an event in the Activity History should be created.~~
 - deploy
 <!-- /agent:queue -->
 

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -123,7 +123,7 @@ Verification: `bun run check` green — **814 tests pass, 0 fail** (added a comp
 ### Re: deploy — opus-4.8
 
 Deployed to production. `bun run deploy:worker` shipped the current `main` (`5fd227e`) — both the AvailableDeal restructure and the thin Loan Status node-map refinement are now live. Remote D1 migrate ran (no new migrations). Worker version `6a4c2155`; `/` and `/admin/login` return 200.
-<!-- agent:boundary:63e19414 -->
+<!-- agent:boundary:20a2b3e9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -136,6 +136,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- The node labels of LoanStatusStepper should be rendered. Bring back the "Loan Status" title since the labels + nodes are wider than the title. deploy
 <!-- /agent:queue -->
 
 ## Backlog

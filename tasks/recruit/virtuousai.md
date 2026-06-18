@@ -61,6 +61,22 @@ Created all 8 profiles plus the merged recruiter-call transcript. Profiles follo
 
 Nothing was committed/pushed beyond this session doc's own finalize — these are content artifacts, not a spec/test change, so I left the repo working tree for you to review and commit when ready.
 <!-- agent:boundary:60981ce5 -->
+
+❯ Yes, do the cleaner manual re-attribution pass.
+
+### Re: cleaner manual re-attribution pass — opus-4-8
+
+Done. I rewrote [`transcripts/2026-06-17-virtuousai-g2i-recruiter-call-transcript.md`](transcripts/2026-06-17-virtuousai-g2i-recruiter-call-transcript.md) with correct per-segment speaker labels. Every line is now **Brian** (candidate) or **Laura** (G2i recruiter) — no more "Rory" (he was never on the call) and no more crossed attributions.
+
+What I did:
+- **Re-read every segment and assigned the real speaker by content**, not by the diarizer's track. The diarizer had alternated "Brian/Rory" roughly every segment, which was wrong — e.g. the opener ("I'm Laura, recruiter at G2i"), the whole VirtuousAI company pitch, and all the screening questions are Laura; the catfishing/monsterrodholders story and the long AgentDoc/TSIFT/Lazily monologue are Brian.
+- **Split the crossed segments** where one diarizer block actually contained a turn change (e.g. Laura's "any questions?" → Brian's "Okay, go over them"; Brian's industry question → Laura's "I don't know"; the closing farewells). Sub-turns from a split share or omit the precise timestamp since I can't compute sub-segment timings.
+- **Dropped the confidence scores** (they scored the wrong labels) and **updated the front-matter note** to say labels were manually re-attributed rather than just "read content, not labels."
+
+One genuinely garbled spot survives: the brief "I'm laggy / you're laggy" crosstalk near the compensation question is hard crosstalk in the audio — I made a best-effort split but that 2-3 line stretch is the one place I'd treat the labels as approximate. Also fixed an obvious mistranscription ("Thank you, Ryan" → "Thank you, Laura") in the sign-off.
+
+Still uncommitted to the repo beyond this session doc's finalize — it's a content artifact, so I left it for you to review and commit when ready.
+<!-- agent:boundary:3cd7a2f3 -->
 <!-- /agent:exchange -->
 
 ## Queue

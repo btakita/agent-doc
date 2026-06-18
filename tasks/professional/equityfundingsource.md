@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -188,6 +188,11 @@ For local dev, set `TMO_API_TOKEN` (and optionally `TMO_API_BASE_URL`) in `.env`
 
 > **Queue prompt:**
 >
+> do [#5q7z]
+
+
+> **Queue prompt:**
+>
 > https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application I clicked "Accept and Send to TMO" but got an error "Writeback: failed - TMO NewLoan failed with 400: {"Data":null,"ErrorMessage":"Unable to save record.\r\nDuplicate loan number.","ErrorNumber":400,"Status":-1}". The record should be associated with the TMO record in this case and the button should not be present.
 
 
@@ -207,7 +212,7 @@ The approve flow (`/approve` → `application_tmo_writeback_attempt_` → `tmo_w
 - **(b) associate + push an `UpdateLoan`** — also send EFS's current data onto the existing TMO record?
 
 Tell me **a** or **b** and I'll implement both parts (+ tests) on `#5q7z`. This is the same gated `#dzmm`/`#7a4d` TMO-writeback area as `#214f`, so I'm confirming intent rather than pushing a guess. No code changed this turn — diagnosis + reads only.
-<!-- agent:boundary:82ab3513 -->
+<!-- agent:boundary:82b0e0b9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -220,19 +225,17 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application I clicked "Accept and Send to TMO" but got an error "Writeback: failed - TMO NewLoan failed with 400: {"Data":null,"ErrorMessage":"Unable to save record.\r\nDuplicate loan number.","ErrorNumber":400,"Status":-1}". The record should be associated with the TMO record in this case and the button should not be present.~~
-- do [#5q7z]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#5q7z] [recommended] 'Accept and send to TMO' duplicate-loan bug: for a loan already associated with a TMO record (deal 7a0c1463 / loan 45ddae53 has tmo_loan_number=GQI751, tmo_loan_rec_id=3840D27B..., tmo_loan_application_rec_id=cda67748), the approve flow (admin/applications/index.ts application_tmo_writeback_attempt_ -> tmo_writeback.ts:308 LOS.svc/NewLoan) sends NewLoan with the existing GQI751 -> TMO 400 'Duplicate loan number. Unable to save record.' Fix (2 parts): (1) approve/writeback must detect an existing TMO association (tmo_loan_rec_id / writeback_status='sent') and associate+mark accepted locally instead of calling NewLoan (or call an UpdateLoan endpoint); (2) hide/disable the 'Accept and send to TMO' button in lib/ui--browser--efs/portal/admin/full_applications.tsx:424 when the app/loan is already in TMO. Design Q: on accept of an already-in-TMO loan, associate-only (no TMO call) or also push UpdateLoan? Relates to #dzmm/#37ah/#214f.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#5q7z] [recommended] 'Accept and send to TMO' duplicate-loan bug: for a loan already associated with a TMO record (deal 7a0c1463 / loan 45ddae53 has tmo_loan_number=GQI751, tmo_loan_rec_id=3840D27B..., tmo_loan_application_rec_id=cda67748), the approve flow (admin/applications/index.ts application_tmo_writeback_attempt_ -> tmo_writeback.ts:308 LOS.svc/NewLoan) sends NewLoan with the existing GQI751 -> TMO 400 'Duplicate loan number. Unable to save record.' Fix (2 parts): (1) approve/writeback must detect an existing TMO association (tmo_loan_rec_id / writeback_status='sent') and associate+mark accepted locally instead of calling NewLoan (or call an UpdateLoan endpoint); (2) hide/disable the 'Accept and send to TMO' button in lib/ui--browser--efs/portal/admin/full_applications.tsx:424 when the app/loan is already in TMO. Design Q: on accept of an already-in-TMO loan, associate-only (no TMO call) or also push UpdateLoan? Relates to #dzmm/#37ah/#214f.
 - [/] [#214f] [recommended] Gate investor deal publish on acceptance: admin_deal_publish_ (app/equityfundingsource/lib/admin/repo.ts:2054) + POST /api/admin/loans/:id/deal publish a loan to the investor marketplace with NO acceptance check (only 'if (!loan) throw'); any non-Funded loan becomes status='published'. So a deal can be an Available Deal while its application is not accepted (observed: investment_deal 7a0c1463 published from loan 45ddae53 status='submitted', tmo 'Application Received', with NO full_application row). Decide the business rule ('accepted before available') and add the gate before status='published' (and/or surface why a loan is ineligible to publish). Relates to the full_applications<->loans<->investment_deals decoupling.
 - [/] [#cftk] [blocked:operator-credential] Refresh CLOUDFLARE_API_TOKEN in src/equityfundingsource-dev/.env with a D1-Edit-scoped token on account 1e7e194ff8da4ad9e40ce041aea84f76 (DB 280e1539). No stored credential has D1 access (tested: 10000/wrong-acct/7403/malformed); operator must create the token in the Cloudflare dashboard. .env CLOUDFLARE_ACCOUNT_ID is a literal passage: placeholder (left intact).
 - [/] [#5eq8] Closing docs step (redesign): rebuild the closing-documents/notarization flow as its own step (replaces the removed Final Loan Documents section). This re-introduces a notarize control and SHOULD re-gate allocation wire status (Sent/Confirmed) on notarization — the UI gate + server 409 were removed in the 2026-06-18 AvailableDeal restructure so funding is not hard-blocked in the interim. Borrower-signature API + final_docs_* D1 columns are preserved.

@@ -60,14 +60,35 @@ Done. The `tsift-agent-doc` graph-evidence read seam was dormant — reachable o
 - `make check` green; 5 new tests; `cargo build --release` + `cargo install --path .` done.
 
 **`#kgoperatorrun` stays operator-gated** — it needs a real `tsift kg extract --profile qwen3-32b-q4-ollama` run (GPU + Ollama local model) to seed `kg_source` nodes, which an agent can't perform. The wiring above is what makes that seeded evidence visible once you run it; until then the section correctly reports the AST/index-derived graph.
-<!-- agent:boundary:24e6b273 -->
+
+### Re: do [#kgoperatorrun] — seed kg_source nodes via a real extract — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#kgoperatorrun]
+
+
+Done — and it turned out to be agent-runnable, not operator-gated: the environment was already set up. Ollama is serving `hf.co/Qwen/Qwen3-32B-GGUF:Q4_K_M` (19 GB, pulled ~3h ago) on the RTX 5090 (~32 GB), so I ran the extract directly.
+
+**Validation → extract → proof:**
+1. `tsift kg smoke --model hf.co/Qwen/Qwen3-32B-GGUF:Q4_K_M` → live end-to-end OK (1 chunk, 11 entities, 17 relations).
+2. **Before:** `tsift kg evidence --kind kg_source` → zero matches; `kg status` `nodes_by_kind` had no `kg_*` kinds (10,383 nodes).
+3. `tsift kg extract --profile qwen3-32b-q4-ollama --model hf.co/Qwen/Qwen3-32B-GGUF:Q4_K_M --input specs/local-kg-model.md --source-ref specs/local-kg-model.md --graph-db .tsift/graph.db` → 2 chunks, 29 entities, 46 relations, upserted.
+4. **After:** graph is now **10,412 nodes / 64,450 edges**; `nodes_by_kind` gained `kg_source: 1`, `kg_chunk: 2`, `semantic_entity: 26`. `tsift kg evidence --kind kg_source` →  `specs/local-kg-model.md [kg_source] [tsift-kg]`, and `--symbol tsift-kg --kind semantic_entity` returns the seeded `tsift-kg` entity with provenance `[tsift-kg]` / source_ref `specs/local-kg-model.md`.
+5. **VRAM hygiene:** `tsift kg unload` → provider-native `keep_alive=0` (HTTP 200 OK), model released.
+
+I seeded from `specs/local-kg-model.md` (the file that documents this contract). The two items now compose: the `#kgwiring` `graph_evidence` section will surface these `tsift-kg` `semantic_entity` / `kg_source` nodes on planning cycles that touch them. The `.tsift/graph.db` is a gitignored local artifact, so there's nothing to commit — this was a workspace-state seeding, and re-running over the same source preserves stable fact ids (per the spec's Run Manifest contract).
+
+Queue drained — both `do [#kgwiring]` and `do [#kgoperatorrun]` are complete.
+<!-- agent:boundary:4bf8f45b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#kgwiring]~~
-- do [#kgoperatorrun]
+- ~~do [#kgoperatorrun]~~
+- 
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -76,7 +97,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgoperatorrun] Operator: run 'tsift kg extract --profile qwen3-32b-q4-ollama --graph-db .tsift/graph.db' against a real source file in this workspace to seed kg_source nodes. Today the workspace graph.db has 418k nodes / 910k edges but ZERO kg_source kind (verified via 'tsift kg evidence --kind kg_source' → no matches) — every node is from the AST/index pipeline or memgraphrag's hash fallback. Until at least one real extract runs, the evidence/status/unload commands have nothing to report on.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 

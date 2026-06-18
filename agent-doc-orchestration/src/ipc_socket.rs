@@ -265,6 +265,46 @@ pub fn early_ack_ops_marker() -> &'static str {
     "[ipc-socket] early_ack_pending emitted before apply"
 }
 
+/// `#jbacceptwedge`: number of per-connection handler threads currently
+/// in flight. Under the old single-threaded accept loop this count could
+/// never exceed 1 — the loop blocked on the (potentially slow) apply
+/// handler before returning to `accept()`, so connections piled up in
+/// the socket backlog ("22 unaccepted connections"). Any live ops.log
+/// entry showing `ipc_accept_thread_spawned inflight>=2` proves the
+/// per-connection-thread fix is exercising concurrent connections
+/// without a backlog.
+static INFLIGHT_CONNECTION_HANDLERS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// RAII guard decrements [`INFLIGHT_CONNECTION_HANDLERS`] on drop so a
+/// panicking handler still releases its slot.
+struct InflightConnectionGuard;
+
+impl Drop for InflightConnectionGuard {
+    fn drop(&mut self) {
+        INFLIGHT_CONNECTION_HANDLERS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// `#jbacceptwedge`: ops.log marker emitted when a connection is accepted
+/// and handed to a fresh thread. Carries the `ipc_accept_thread_spawned`
+/// predicate token plus the live inflight count so a single grep both
+/// proves the per-connection-thread fix is live and bounds how many
+/// concurrent connections the listener is juggling.
+pub fn ipc_accept_thread_ops_marker(inflight: u64) -> String {
+    format!(
+        "[ipc-socket] ipc_accept_thread_spawned inflight={}",
+        inflight
+    )
+}
+
+/// `#jbacceptwedge`: current in-flight handler-thread count. Exposed for
+/// tests so the regression can assert the listener actually reached a
+/// concurrent state (rather than only asserting wall-clock timing).
+pub fn inflight_connection_handlers() -> u64 {
+    INFLIGHT_CONNECTION_HANDLERS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Classification of a plugin-sent IPC ack line.
 ///
 /// The plugin (JetBrains / VS Code) sends a JSON ack after applying a patch.
@@ -532,7 +572,18 @@ where
             Ok(stream) => {
                 let handler = std::sync::Arc::clone(&handler);
                 let root_buf = root_buf.clone();
+                // #jbacceptwedge: count and log the fresh handler thread
+                // BEFORE spawning, so the inflight count reported in the
+                // marker reflects the post-increment state of this accept.
+                let inflight = INFLIGHT_CONNECTION_HANDLERS
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    + 1;
+                crate::ops_log::log_op(
+                    &root_buf,
+                    &ipc_accept_thread_ops_marker(inflight),
+                );
                 std::thread::spawn(move || {
+                    let _inflight_guard = InflightConnectionGuard;
                     let (reader_half, mut writer_half) = stream.split();
                     let mut reader = BufReader::new(reader_half);
                     let mut line = String::new();
@@ -622,6 +673,19 @@ mod tests {
         thread::sleep(Duration::from_millis(120));
 
         let start = Instant::now();
+        let inflight_sampler = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let sampler_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sampler_inflight = inflight_sampler.clone();
+        let sampler_stop_clone = sampler_stop.clone();
+        let _sampler = thread::spawn(move || {
+            while !sampler_stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                let seen = inflight_connection_handlers();
+                if seen > sampler_inflight.load(std::sync::atomic::Ordering::Relaxed) {
+                    sampler_inflight.store(seen, std::sync::atomic::Ordering::Relaxed);
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+        });
         let handles: Vec<_> = (0..3)
             .map(|i| {
                 let root = root.clone();
@@ -634,12 +698,22 @@ mod tests {
             let r = h.join().unwrap().unwrap();
             assert!(r.is_some(), "concurrent send should still receive an ack");
         }
+        sampler_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = _sampler.join();
         let elapsed = start.elapsed();
         assert!(
             elapsed < Duration::from_millis(1500),
             "3 concurrent sends to a 600ms handler took {:?} (expected parallel < 1.5s; \
-             sequential would be ~1.8s+)",
+              sequential would be ~1.8s+)",
             elapsed
+        );
+        let peak_inflight = inflight_sampler.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            peak_inflight >= 2,
+            "#jbacceptwedge regression: expected the listener to reach inflight>=2 while \
+             servicing 3 concurrent slow sends (proves per-connection-thread path exercised; \
+             old single-threaded loop could never exceed 1), observed peak={}",
+            peak_inflight
         );
 
         let _ = std::fs::remove_file(socket_path(&root));

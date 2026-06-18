@@ -236,7 +236,24 @@ This landed under commit `ce339055` ("fix(queue): strikeable preset heads, **idl
 `cargo test -p agent-doc-orchestration queue_continuation:: ` → 33 passed; `start::decisions::tests::idle_queue_drain*` → 9 passed.
 
 No version bump / release — the behavior is in the installed 0.34.6 binary (submodule HEAD `5ce4e465`). Remaining drainable agent-actionable heads: `#733r` (qheadsync auto-strike remainder), `#routedeadshell`, `#semmerge` (the converge.rs CRDT root cause — its own focused cycle). Note: preflight's `semantic_completion_match` also flags the new "After JB Clear Session Context → Run Agent Doc stalled" queue line as likely already resolved by done `#7az7` (`#clear-auto-queue-stall`) — I'll confirm that when it reaches the head.
-<!-- agent:boundary:109b8e22 -->
+
+### Re: drain #semmerge — Phase 1 (#semmerge-owner) shipped, pure node-keyed merge — opus-4-8
+
+Took the `#semmerge` head. It's a **5-phase parent** (depends on the Phase-4 AST substrate), not a single-cycle item, so I shipped the first **pure, commit-path-safe** phase and decomposed the rest.
+
+**Shipped `#semmerge-owner` (submodule `c300eeec`, superproject `9fd1a1383`, pushed):** a pure `markdown_ast::semantic_merge(base, ours_agent, theirs_operator) -> SemanticMerge` in `agent-doc-markdown-ast`, built on the existing Phase-2 `overlay::Component { items }` node model. It implements the full 11-row operator↔agent transition table by node id:
+- node-disjoint change-sets (the common case) merge cleanly — both sides apply;
+- same-node conflict → operator wins + a typed `AckRequest`; operator-delete-of-agent-edited-node → deletion stands + `AckRequest`; agent-delete vs operator-edit → operator revives + ack;
+- frontmatter scalars merged per-key (operator-only edit applies — this session's `queue: stop` would have been honored), with a conservative whole-block operator-wins fallback for non-scalar blocks.
+
+It returns `{ merged_doc, outcomes, requires_ack }` — `merged_doc` reconstructed from the operator buffer as skeleton. **No agent-doc/IPC/commit coupling** (so it was safe to land even in this degraded session); `converge.rs` becomes its adapter in Phase 2.
+
+**Verification:** 19 new tests — one per transition row + the firsthand monsterrodholders repro (operator flips `queue: stop` + restructures the queue while the agent strikes a *different* head and appends a `### Re:` turn → both change-sets present, zero conflicts, re-parses cleanly) + delete-vs-edit/same-node-override/frontmatter rows. `cargo test -p agent-doc-markdown-ast` → 50/50; clippy clean; CI green. (One pre-existing `agent-doc-orchestration` test flakes under full-workspace parallelism — passes 2985/0 isolated and on re-run; not from this additive leaf-crate change.)
+
+**Found + filed a real substrate bug — `#mdastclose` (`#gszq`):** `overlay::Component::end_byte` is wrong for the standard `/agent:name` close spelling (only the `agent:/name` form is parsed → implicit close → wrong end span). Item parsing is unaffected (implicit-close still works), so it's latent, but byte-span consumers get a bad range. `semantic_merge` worked around it with a local marker scan; the overlay fix is queued.
+
+**Remaining `#semmerge` phases** — Phase 2 `#smconv` (`#aqhr`) is the next actionable: wire `semantic_merge` into `write/converge.rs`, replacing the fail-closed line-merge + `content_ours`-wins adoption. That edits the **safety-critical commit/convergence path** — it must run in a focused clean cycle with `make check` + `make tmux-ci`, **not** a degraded-session drain (this very session kept hitting the bug it fixes). Phases 3–5 (queue-node-strike, ack-turn, simworld) follow in the plan. No version bump/install — Phase 1 is unconsumed groundwork with no behavior change yet.
+<!-- agent:boundary:46783949 -->
 <!-- /agent:exchange -->
 
 ## Queue

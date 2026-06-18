@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -83,13 +83,16 @@ Marked `#lmlazy` `[x]` done. Follow-ups (not blocking): execute the unload actio
 **Bottom line:** local models are wired into the KG only through the standalone `tsift kg extract` command. The downstream consumers the spec names (`tsift-memgraphrag`, `tsift-agent-doc`) do not yet drive local-model inference, and the operational surface (`status`/`unload`/smoke) is incomplete.
 
 Did **not** apply the `#spec-test-build-install-commit-push` preset this cycle: the prompt was a state-assessment question, not a change request — no spec/test/code changes were made, so build/install/commit/push does not apply. Captured the four concrete gaps above as `#kgmrs`, `#kgcliext`, `#kgunloadpost`, `#kgaduse` in `agent:backlog`; `#kgmrs` is the top item (it is the largest spec-vs-reality delta).
-<!-- agent:boundary:1639c8ac -->
+<!-- agent:boundary:a6345b8c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - do [#kgmrs]
+- do [#kgcliext]
+- do [#kgunloadpost]
+- do [#kgaduse]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

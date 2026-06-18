@@ -18,7 +18,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -80,12 +80,13 @@ Both items were filed last cycle from ops.log evidence. Deep investigation confi
 **#dqjf:** duplicate of #6esm (same-cycle pending-add sync artifact). Removed.
 
 Queue drained. The two `[operator-verify]` items (#tsiftmdcrash, #jbacceptwedge) remain undrainable — both need operator action (crash reproduction / plugin 0.2.170 install + IntelliJ restart).
-<!-- agent:boundary:fd5d8d59 -->
+<!-- agent:boundary:e2eb48b8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- `agent:backlog` with `queue` attribute should have added the backlog items into the queue immediately when the items were added to the backlog.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

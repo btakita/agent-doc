@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -39,13 +39,29 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 14 response topic(s): queue recovery closeout; #kgm2 local model substrate; #kgm3 MemGraphRAG provider seam; 11 more
 - Prior summary/context: prior compacted content: Archived 6 response topic(s): #advance-review; small model vs MemGraphRAG; model support mat...
-<!-- agent:boundary:88764eed -->
+
+### Re: queue drain — Port 8080 free; fmt closeout — glm-5.2
+
+> **Queue prompt:**
+>
+> Port 8080 is free now
+
+
+Drained the `#spec-test-build-install-commit-push` queue head (`Port 8080 is free now`). The 8080 signal unblocked the local-model/WordPress conflict path documented in `packages/tsift-local-model/README.md` (#portconf default `http://127.0.0.1:8080/models/unload`).
+
+**Outcome — full cycle complete:**
+- **Spec:** no spec change needed; the working-tree delta was pure rustfmt drift (no semantic edits).
+- **Tests:** `make check` green — `cargo clippy --workspace --all-targets -- -D warnings` clean, full `cargo test --workspace` passing, opencode-plugin-test 8/8 + `pack:check` ok.
+- **Build + install:** `cargo install --path . --locked` → `tsift 0.1.70` replaced in `~/.cargo/bin`.
+- **Commit + push:** completed the outstanding `cargo fmt` drift across 8 files (session_cost, session_review, cli, infra, lib, exit_code test, log_digest, local-model lib) and pushed `cd648b5..0e41e4b` to origin/main (`style: apply cargo fmt across agent-doc, cli, digest, local-model`).
+
+Queue head consumed. No new actionable backlog items — the remaining backlog head `#vmax` (crates.io OIDC trusted-publishing registration) is still operator-gated.
+<!-- agent:boundary:cb1d7bac -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Port 8080 is free now
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

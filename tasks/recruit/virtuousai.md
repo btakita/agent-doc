@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -186,13 +186,40 @@ The MonsterRodHolders content is sourced from the actual client work (the bot-at
 - **Profile source** → `resume/profiles/virtuousai.toml` (4.2 KB) — the VirtuousAI-tailored profile that selects/orders the `data.toml` entries and supplies the custom summary.
 
 Underlying content stores also modified (uncommitted): `resume/data.toml` (added MonsterRodHolders + Equity Funding Source accomplishments) and `resume/BrianTakita.md` (master template).
-<!-- agent:boundary:e0b7c028 -->
+
+### Re: cover letter is overselling — drop it or tighten? — opus-4-8
+
+> **Queue prompt:**
+>
+> The cover letter is overselling some parts. I'm wondering if we should even have the cover letter and just leave it as a message.
+
+
+I agree it oversells, and I think your instinct is right. Two separate questions here — what's overselling, and whether to keep the cover-letter format at all.
+
+**Where it oversells (specific lines):**
+
+1. **"That's DS2O by hand."** — This appropriates *their* trademarked methodology and claims your ad-hoc incident debugging is equivalent to their platform. It reads as trying too hard to speak their language back at them. Cut it.
+2. **"I build the substrate BAIO runs on -- in the open."** — Literally not true; BAIO doesn't run on your OSS. A sharp CTO will catch the overreach immediately.
+3. **"My open-source ecosystem is your architecture in miniature."** — "in miniature" implies your side projects are a scaled-down BAIO. Strong claim that invites a skeptical "is it though?"
+4. **"tsift -- a Semantic Agent Interface over a graph + vector knowledge substrate: MemGraphRAG, a local-model knowledge graph, Graph DB + Vector DB..."** — dense buzzword stack. Even if every piece is real, listing them this way reads as keyword-stuffing rather than substance.
+
+The genuinely strong, *verifiable* material is the concrete stuff: the card-testing-bot diagnosis from order data, the "zero orders" debunk, and the plain fact that agent-doc is a white-box markdown control surface for agents. Those land because they're specific and checkable. The overselling is everywhere you *characterize* (DS2O by hand, the substrate BAIO runs on, architecture in miniature) rather than *show*.
+
+**On dropping the cover letter entirely — my recommendation: yes, mostly.** For a founding-engineer-#2 role at a ~3–10 person startup, the two-layer "note to Laura wrapping a formal forwardable pitch" is more corporate than the situation wants, and the formal frame is exactly what pressures you into the grand claims. I'd collapse it to **one short, direct message** that:
+
+- keeps the **two concrete MonsterRodHolders proofs** (bot attack + zero-orders debunk) stated plainly, no "DS2O by hand" label;
+- mentions **agent-doc** in one honest sentence (a white-box markdown control surface for AI agents — visible queue/backlog/reasoning, git-committed) and **tsift** in one (graph + vector code-intelligence over your own knowledge substrate) — without the buzzword列 or the "your architecture in miniature" equivalence;
+- lets the **tailored resume + call recording carry the rest**, which is what they're actually evaluating against.
+
+The white-box/explainability parallel to Rory's thesis is your best hook — but it's stronger as a quiet observation ("agent-doc happens to apply explainability at the human-agent layer") than as a claim that you've already built their stack.
+
+Want me to rewrite the draft as that single tightened message (cutting the "For Chris & Rory" cover-letter block), or would you rather keep the cover letter and I just surgically remove the four oversold lines? I'd recommend the former. No edits made yet — this is your call.
+<!-- agent:boundary:30b9287d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- The cover letter is overselling some parts. I'm wondering if we should even have the cover letter and just leave it as a message.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -446,7 +446,21 @@ Net: nothing new on the crash (operator-gated on scrollback), the lost-queue-ite
 Bumped `Cargo.toml`/`pyproject.toml` → 0.34.9 + a `VERSIONS.md` entry. `#gszq` queue head struck and backlog item reaped.
 
 Drain status: exchange is large (accretion `warn`) and the queue is active, so I'm continuing the drain rather than stopping to compact. The already-answered heads (`#1vhn`, "JB Run Agent Doc stalled") and the `[operator-verify]` heads (`#qpauseux`, `#tsiftmdcrash`, `#cyh0`, `#docdriftgrace`, `#8bfz`) are deferred; the next agent-drainable head is `#supselfheal` (binary-side, Phase 1 admin-recycle quick-win).
-<!-- agent:boundary:71494fec -->
+
+### Re: per-structural-part merge + "mention deleted structure in exchange" — that IS the shipped #semmerge design; your live corruption is the stale supervisor — opus-4-8
+
+Your directive is exactly the `#semmerge` design of record (`tasks/agent-doc/plan-semantic-ast-merge.md`) — and most of it is **already shipped**. Mapping each point:
+
+1. **"Constrain the merge to the structural part it applies to / do multiple merges per structural part."** That is the node-keyed `semantic_merge` over the component AST: each component (exchange / queue / backlog / review) and each item is keyed by a stable id, and concurrent edits to *different* nodes apply as a node-disjoint union instead of one whole-document line-merge that can splice or duplicate. Shipped: **`#semmerge-owner`** (`c300eeec`, the node-keyed `semantic_merge` primitive + transition table) and the converge adapter **`#smconv`/`#aqhr`** (`bd55c187`, 0.34.7 — converge now node-merges live editor drift instead of the old `content_ours`-wins drop). A node keyed by id is applied **once**, so this structurally removes the duplication you saw.
+
+2. **"If the operator deletes a structure that has new agent content, mention the fact in the exchange."** That is verbatim a row in the plan's transition table — *operator deleted the node the agent edited → the deletion stands and the agent emits an exchange turn acknowledging it* — implemented as **`#semmerge-ack-turn` (`#pk3f`)**, queued. The same-node-conflict case (operator wins + agent note in the exchange) is the adjacent row.
+
+**So why did you still get corruption while typing into virtuousai.md?** Not a design gap — a **stale running supervisor**. The route-owned supervisor hosting these sessions was started on a **pre-0.34.7** binary, so it is still doing the old line-merge `content_ours`-wins drop (the exact splice/duplication failure). `cargo install`/`lib-install` do **not** hot-swap an already-running supervisor. The fix is already on disk: I just installed **0.34.9** (which contains `#smconv`/`#semmerge-owner`), and `lib-install` marked the controllers to recycle at the next idle boundary. **Immediate unblock (operator-gated): recycle the route-owned supervisor so it adopts 0.34.9, then refresh the IntelliJ buffer to HEAD.** Until it recycles, the live buffer keeps drifting (this very cycle's `finalize` again hit `live_prompt_drift` → `content_ours` fallback and the post-commit editor refresh failed — HEAD is correct, the live buffer is the stale supervisor's).
+
+**Remaining `#semmerge` phases** (queued, complete the design — no new design needed): `#pk3f` ack-turn (the "mention in exchange" you asked for), `#smqstrike` (route the queue-head strike through the merged node tree so a drifted operator queue edit can't abort the strike), `#msn6` (turn-active gating — only surface a conflict inside the in-flight turn area), `#smsim` (SimWorld matrix locking the operator↔agent concurrent cases). Nothing in your directive is unaccounted for; the plan already carries it.
+
+Not auto-looping: this is a real design prompt (not a queue-drain item), and the live buffer is actively drifting on the stale supervisor — the right next action is the operator recycle, after which the drain resumes cleanly.
+<!-- agent:boundary:1fc79655 -->
 <!-- /agent:exchange -->
 
 ## Queue

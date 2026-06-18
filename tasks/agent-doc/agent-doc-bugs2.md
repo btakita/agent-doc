@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -30,6 +30,9 @@ completed
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+- Raised BLOCK thresholds (`agent-doc-orchestration/src/session_accretion.rs`): exchange `240→800`, sections `12→40`, committed-cycles `10→60`, no-op-closeouts `3→20`. `warn` still surfaces a heads-up; only genuine crash indicators (restart-churn + startup-miss) reach `block` by default.
+- `cargo test -p agent-doc-orchestration session_accretion` → 18 passed; `cargo install --path .` done (new binary live). Submodule commit `7addd9ee` pushed to `origin/main`.
+- Compacted the exchange (archived 265 lines) → accretion level now cleared. (Had to `agent-doc reset --from-current` to rebuild sidecars after the compact/consume left a stale snapshot.)
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260617-235513.md`*
@@ -37,7 +40,7 @@ completed
 Compacted content:
 ❯ - Archived 13 response topic(s): JB Run Agent Doc post-clear submit cruft; next steps / review cleanup; same-cycle pending-add queue sync; 10 more
 ❯ - Prior summary/context: prior compacted content: Archived 15 response topic(s): Existing drafted Run Agent Doc input; Queue drain state; Queu...
-<!-- agent:boundary:2dfb173d -->
+<!-- agent:boundary:f81bfa77 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -64,7 +67,6 @@ Error: project controller command `dispatch` failed: dispatch rejected for tasks
 ```
 ---
 :pushpin: - ~~JB `Run Agent Doc` on lazily-rs stalled with no action.~~
-- ~~:pushpin: Still getting JB `File Cache Conflict` dialogs. JB plugin has been running for hours. It should not be possible to write to disk while JB plugin or VSCode plugin is running.~~
 ---
 How can we prevent the wedge conflict from occurring, as what happened in equityfundingsource.md.
 ```
@@ -73,12 +75,6 @@ How can we prevent the wedge conflict from occurring, as what happened in equity
 ```
 Aside from fixing the wedge, we should ensure the run does not stall.
 ---
-- ~~JB `Run Agent Doc` with Claude did not submit on spoton.md. We should have the loop detect the unsubmitted prompt and Enter.~~
-- ~~do [#actorgenclosed]~~
-- ~~do [#codefence-strip]~~
-- ~~do [#queediturn]~~
-- ~~do [#jbacceptwedge]~~
-- ~~do [#claudesubmit]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

@@ -151,6 +151,11 @@ If you want this enforced by the binary rather than by convention (auto-bold the
 
 > **Queue prompt:**
 >
+> ~~:pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.~~ (filed #pcwcdiskfree)
+
+
+> **Queue prompt:**
+>
 > ~~:pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.~~ (filed #qheadsync)
 
 
@@ -163,7 +168,7 @@ Shipped agent-doc **0.34.5** (`e71b87df`, CI green). The backlog→queue sync no
 **Loop stays safe:** mirrored operator-verify heads are deferred by `head_is_drainable`, so `queue_drainable_head_count` excludes them — the in-session auto-drain loop is not re-armed by them (test asserts this). For non-agent-actionable items, the head surfaces your instructions via the item text (the bolded `**Operator action: …**` from last turn).
 
 **One required follow-up before you resume the queue (`#rz3a`, Phase 2):** the supervisor idle-watch (`start/idle_watch.rs`) must apply the same drainability defer, or operator-verify-only heads will re-injection-thrash the supervisor. Mirroring authorizes reversing that DO-NOT-IMPLEMENT gate. **Operator action: keep the queue paused (`receipt_id=64`) until I land the `#rz3a` supervisor defer; then resume.** I'll do that next.
-<!-- agent:boundary:34cbcf5c -->
+<!-- agent:boundary:9f1312e6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -172,7 +177,7 @@ Shipped agent-doc **0.34.5** (`e71b87df`, CI green). The backlog→queue sync no
 - ~~[#tsiftmdcrash]~~
 - ~~:pushpin: Any backlog, review, or icebox item that is blocked by some operation action should have the operator action with bold formatting.~~
 - ~~~~:pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.~~ (filed #qheadsync)~~
-- ~~:pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.~~ (filed #pcwcdiskfree)
+- ~~~~:pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.~~ (filed #pcwcdiskfree)~~
 - :pushpin: JB `Run Agent Doc` on virtuousai.com did not submit. Then it crashed. ![img_48.png](img_48.png)
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md
@@ -192,6 +197,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - do [#733r]
 - do [#semmerge]
 - do [#qpauseux]
+- do [#021p]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -218,6 +224,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#021p] #rz3afix Phase 2 of #mirrorall (now AUTHORIZED — supersedes the prior DO-NOT-IMPLEMENT gate): make the supervisor idle-watch (start/idle_watch.rs) defer dispatch using the same drainability filter the in-session loop uses, so a mirrored queue whose only un-struck heads are operator-verify (queue_drainable_head_count==0) does NOT re-inject agent-doc triggers. Required before resuming a mirrored queue from pause, else operator-verify heads re-injection-thrash. SimWorld + make tmux-ci. **Operator action: keep the queue paused until this lands, then resume.**
 - [ ] [#semmerge] #semmerge agent-doc-bug: closeout CRDT/IPC merge is fail-closed last-writer-wins — when the operator editor buffer drifts from the agent baseline, converge.rs refuses the disk write and adopts content_ours, DROPPING the agent changes (queue head strike + backlog→review gate + new `### Re:` turn) and forcing a manual `reset --from-current`+commit. Repro this session draining [#cf-txn-email] on monsterrodholders.md while the operator flipped frontmatter queue:start→stop + restructured the queue block (node-DISJOINT from the agent edits — both should have applied cleanly). Root cause: agent-doc-core/crdt.rs::merge is line-based LWW with no component/item model, so concurrent edits to DIFFERENT nodes look like a text conflict; converge.rs then fail-closes. Fix: semantic node-keyed 3-way merge over the EXISTING markdown-ast component overlay (exchange/queue/backlog/review/frontmatter = typed nodes w/ stable ids) consumed by converge BEFORE it fail-closes — apply BOTH change-sets when node-disjoint (the common case; "most CRDT merges should succeed"); operator-DELETE-of-agent-EDITED node → keep the deletion + emit an agent exchange turn acknowledging it; same-node concurrent edit → operator wins + agent note. Owner = a pure markdown_ast::semantic_merge returning a typed outcome; converge.rs is the adapter (no per-node text/error-string policy). Sibling of #docdriftgrace (unrelated-drift rebase; this is the overlapping/conflicting counterpart); hard-depends on #md-ast-document-model (Phase 4). Quick-win stopgap: auto-rebase + commit when the only drift is in components/frontmatter the agent did not touch this cycle. Plan: tasks/agent-doc/plan-semantic-ast-merge.md
 - [ ] [#733r] #qheadsync agent-doc-bug: answered/filed queue heads are not reliably reconciled to the queue (free-text reports left un-struck; done-reaping orphans the matching id-backed queue head; manual strikes do not persist through finalize content_ours; backlog-to-queue sync has no sweep for items missed in prior turns and items can be lost). Fix at closeout in the binary. Plan: tasks/agent-doc/plan-answered-queue-head-autostrike.md
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block as a raw red Error: toast instead of an actionable queue paused — resume notification. Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button rather than a dispatch error. **Operator action: install the updated JB plugin, then verify the paused-queue notification renders (live gate).**
@@ -230,7 +237,6 @@ What are #next-steps to fix bugs?
 <!-- agent:review -->
 - [/] [#restartagentmenu] Plan tasks/agent-doc/plan-restart-agent.md Phase 2 (after #agentreloadrestart). Add a Restart Agent JB plugin menu command: new RestartAgentAction.kt mirroring RestartSupervisorProcessAction.kt, registered in plugin.xml beside AgentDoc.RestartSupervisorProcess, wired through the TerminalUtil restart path. After Phase 1 re-resolves the harness on restart, this command brings up a changed agent. Bump pluginVersion (gradle.properties, currently 0.2.170), build unsigned + signed zips. Decide alongside vs replace the existing Restart Supervisor Process action (do not remove without operator confirmation). Operator-install live gate.
 - [/] [#agentreloadrestart] Plan tasks/agent-doc/plan-restart-agent.md Phase 1 (foundational). Make the supervisor restart path re-resolve the harness from current frontmatter so changing agent (claude to opencode) takes effect on restart, and auto-restart the agent at the next idle/turn boundary when the resolved harness differs from the running one. Today the restart loop reuses the harness resolved once at start (SharedSupervisorState.harness, start.rs:171) and never re-reads fm.agent, so restart-supervisor restarts the SAME harness. Re-resolve via HarnessConfig::from_context (harness.rs:116) before respawn, rebuild child_factory/harness_binary, then gate the boundary auto-restart exactly like the supselfheal auto-recycle (prompt_visible and not turn_active, debounced, never mid-turn) behind a new agent_doc_agent_change_restart knob (default ON). SimWorld tests + SPEC + VERSIONS. Live-supervisor-critical: needs a focused clean cycle with make check + make tmux-ci.
-- [/] [#rz3a] qflood-gated supervisor idle-watch re-injection: the supervisor idle-queue watch keeps re-injecting agent-doc FILE triggers on a queue whose only remaining head is gated / operator-blocked, causing repeated no-op agent-doc cycles. REPRO (equityfundingsource.md, 2026-06-18): a go-queue block was fully drained (all 7 free-text heads consumed via agent-doc queue consume); the lone remaining head (a do-reference to a now-gated review item) was gated via pending-gate and moved to agent:review. session-check then reported queue_continuation_required=false, queue_drainable_head_count=0, ui_outcome=no_drainable_work. After agent-doc admin queue resume, the supervisor idle-watch re-injected agent-doc FILE repeatedly: 4 consecutive no-op agent-doc cycles, each preflight no_changes=true. agent-doc admin queue pause stops it. EXPECTED: when queue_drainable_head_count==0 and queue_continuation_required==false (only gated or operator-verify heads remain), the supervisor idle-queue watch should DEFER instead of injecting, matching the in-session loop stop rule. ROOT-CAUSE HYPOTHESIS: the idle-watch dispatch gate keys off queue presence / queue:start frontmatter instead of the binary drainability filter; the in-session loop already honors queue_continuation_required=false but the supervisor idle-watch path does not. FIX DIRECTION (do not implement): make the supervisor idle-queue watch reuse the same drainability filter as the in-session loop and defer when queue_drainable_head_count==0. DO NOT IMPLEMENT THE FIX.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

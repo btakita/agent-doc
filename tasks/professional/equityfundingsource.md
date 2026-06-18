@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -174,7 +174,7 @@ Shipped. The admin portal is now at `/admin/*` instead of `/portal-admin/*`, wit
 - Worker deployed: **Version `21a62c1e-f72e-474f-8aa1-b6bfea1f939f`**
 
 Queue drained.
-<!-- agent:boundary:ee240acf -->
+<!-- agent:boundary:446e0109 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -187,6 +187,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- If the login fails on https://equityfundingsource.brian-takita.workers.dev/login?role=admin&next=%2Fadmin, the page is redirected to https://equityfundingsource.brian-takita.workers.dev/login?role=investor&next=%2Fadmin. role should remain the same. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -135,6 +135,7 @@ pub fn fire_post_commit(file: &Path, session_id: &str) {
             .map_err(|e| eprintln!("[hooks] post_commit fire failed: {}", e));
     }
     capture_tsift_memory_closeout(file);
+    let _ = reap_local_model_leases(file);
 }
 
 /// Fire a claim hook event.
@@ -256,6 +257,100 @@ fn capture_tsift_memory_closeout(file: &Path) {
         }
         Err(err) => {
             eprintln!("[hooks] tsift-memory closeout capture failed to spawn: {err}");
+        }
+    }
+}
+
+/// Relative default cooperative GPU lease registry path (matches
+/// tsift-local-model's `resolve_lease_file` default). Used as the project-root
+/// guard so the closeout reap only fires for projects that actually use tsift
+/// model leasing.
+const DEFAULT_LEASE_REGISTRY_RELATIVE: &str = ".tsift/gpu-lease.json";
+
+/// Outcome of one best-effort closeout lease reap. Returned for inspectability
+/// and unit testing; the runtime closeout path ignores it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ReapOutcome {
+    /// Reap ran and exited 0. Carries stdout (JSON) for diagnostics.
+    Reaped(String),
+    /// This file has no tsift project root — nothing to reap.
+    SkippedNoProjectRoot,
+    /// No `.tsift/gpu-lease.json` — tsift model leasing not in use here.
+    SkippedNoRegistry,
+    /// `tsift` binary could not be spawned (e.g. not on PATH).
+    SpawnFailed(String),
+    /// Reap exited non-zero. Carries stderr.
+    NonZeroExit(Option<i32>, String),
+}
+
+/// Build the `tsift local-model lease reap` arg vector. Pure and unit-tested;
+/// `build_reap_command` consumes it.
+fn reap_command_args(lease_file: Option<&str>, host: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "local-model".to_string(),
+        "lease".to_string(),
+        "reap".to_string(),
+        "--unload-empty".to_string(),
+    ];
+    if let Some(path) = lease_file {
+        args.push("--lease-file".to_string());
+        args.push(path.to_string());
+    }
+    if let Some(host) = host {
+        args.push("--host".to_string());
+        args.push(host.to_string());
+    }
+    args
+}
+
+/// #kgleasereap: best-effort automatic reclamation of crashed-session GPU
+/// leases from the closeout (post-commit) hook.
+///
+/// Runs `tsift local-model lease reap --unload-empty` under the resolved
+/// project root when a lease registry is present, so pid-dead holders left by
+/// crashed `tsift kg extract` runs are reclaimed and the now-unreferenced model
+/// is unloaded (Ollama `keep_alive:0`) without a manual CLI invocation. Mirrors
+/// [`capture_tsift_memory_closeout`]: spawn failures, non-zero exits, and a
+/// missing registry degrade to a logged warning — closeout must never fail
+/// because a lease reap could not run. Reap is safe during an active cycle:
+/// `#kgreflease` only reclaims pid-dead or TTL-expired holders, never a
+/// concurrent live extractor's lease.
+pub(crate) fn reap_local_model_leases(file: &Path) -> ReapOutcome {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(project_root) = crate::snapshot::find_project_root(&canonical) else {
+        return ReapOutcome::SkippedNoProjectRoot;
+    };
+    if !project_root
+        .join(DEFAULT_LEASE_REGISTRY_RELATIVE)
+        .exists()
+    {
+        return ReapOutcome::SkippedNoRegistry;
+    }
+    let args = reap_command_args(None, None);
+    let mut cmd = std::process::Command::new("tsift");
+    cmd.args(&args).current_dir(&project_root).arg("--json");
+    match cmd.output() {
+        Ok(output) if output.status.success() => {
+            eprintln!(
+                "[hooks] tsift lease reap ok for {}",
+                file.display()
+            );
+            ReapOutcome::Reaped(String::from_utf8_lossy(&output.stdout).to_string())
+        }
+        Ok(output) => {
+            eprintln!(
+                "[hooks] tsift lease reap exited with code {:?}: {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+            ReapOutcome::NonZeroExit(
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            )
+        }
+        Err(err) => {
+            eprintln!("[hooks] tsift lease reap failed to spawn: {err}");
+            ReapOutcome::SpawnFailed(err.to_string())
         }
     }
 }
@@ -415,5 +510,49 @@ mod tests {
         assert!(!summary.contains("patch:exchange"));
         assert!(summary.contains("[truncated]"));
         assert!(summary.starts_with("### Re: x"));
+    }
+
+    #[test]
+    fn reap_command_args_defaults_to_unload_empty_without_optional_flags() {
+        let args = reap_command_args(None, None);
+        assert_eq!(
+            args,
+            vec![
+                "local-model".to_string(),
+                "lease".to_string(),
+                "reap".to_string(),
+                "--unload-empty".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn reap_command_args_appends_lease_file_and_host_when_given() {
+        let args = reap_command_args(Some(".tsift/gpu-lease.json"), Some("http://gpu-box:11434"));
+        assert!(args.contains(&"--lease-file".to_string()));
+        assert!(args.contains(&".tsift/gpu-lease.json".to_string()));
+        assert!(args.contains(&"--host".to_string()));
+        assert!(args.contains(&"http://gpu-box:11434".to_string()));
+        // Order: --unload-empty precedes the optional overrides.
+        let unload_idx = args
+            .iter()
+            .position(|a| a == "--unload-empty")
+            .unwrap();
+        let host_idx = args.iter().position(|a| a == "--host").unwrap();
+        assert!(unload_idx < host_idx);
+    }
+
+    #[test]
+    fn reap_skips_without_project_root_and_never_spawns() {
+        // A path with no agent-doc project-root marker resolves to no project
+        // root, so the reap returns early without spawning `tsift`.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("orphan.md");
+        std::fs::write(&doc, "no frontmatter").unwrap();
+        let outcome = reap_local_model_leases(&doc);
+        assert!(
+            matches!(outcome, ReapOutcome::SkippedNoProjectRoot | ReapOutcome::SkippedNoRegistry),
+            "expected a skip outcome, got {outcome:?}"
+        );
     }
 }

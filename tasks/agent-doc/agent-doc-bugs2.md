@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -65,12 +65,15 @@ For the queue to terminate, the three remaining backlog items are all genuinely 
 ### Re: restore gated items to backlog — glm-5.2
 
 Moving the three operator-blocked items back into the live backlog (ungated) so the open-id validation passes. They retain their status tags so they read as deferred-but-actionable rather than self-driving the queue.
-<!-- agent:boundary:e506ae05 -->
+<!-- agent:boundary:45c9cf97 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- [#jbacceptwedge]: Do the plugin logic + build. I will install
+- [#codefence-strip] may have been due to a wedge issue or stale state. Can you detect when this issue occurred? I just added a queue item to monsterrodholders.md and agent-doc deleted it.
+- implement [#claudesubmit] so we can test. I will drive sessions and logging should determine if it failed or succeeded.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

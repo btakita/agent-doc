@@ -168,7 +168,7 @@ Phase 1 of GraphRAG context is done — a deterministic, bounded known-entity-pa
 **Verified:** 8 new context_pack tests (seed-match-over-connectivity, deterministic node-id tiebreak, confidence gate, max_entities cap, bounded-scan truncation, non-entity filtering, empty-seeds connectivity ranking, default-confidence-zero); `cargo test --workspace --lib` green across all crates; clippy clean. No CLI surface changed (library API only; the `tsift` binary is unaffected), so no reinstall was needed. CI run 27743665120 in progress at closeout (proceeding on local evidence).
 
 **Queue:** `#kgctxinject` (Phase 2 — inject the pack into the extractor prompt) and `#kgctxincremental` (Phase 3 — graph-aware re-extract) added as the next actionable phases.
-<!-- agent:boundary:271ad7e7 -->
+<!-- agent:boundary:98609d44 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -176,6 +176,7 @@ Phase 1 of GraphRAG context is done — a deterministic, bounded known-entity-pa
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - do [#kgctxincremental]
 - do [#kgctxinject]
+- do [#vmax]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -184,8 +185,8 @@ https://github.com/chopratejas/headroom
 ## Backlog
 n
 <!-- agent:backlog priority queue -->
-- [ ] [#kgctxincremental] Phase 3 GraphRAG: graph-aware re-extraction — changed-file re-extract reconciles against existing stable ids instead of duplicating (composes with #kgextractrefresh). Plan: tasks/software/plan-tsift-kg-graphrag-context.md. Built on shipped #kgctxretrieve / pending #kgctxinject.
 - [ ] [#kgctxinject] Phase 2 GraphRAG: thread the #kgctxretrieve context pack into OllamaKgExtractor::chat_request_body (context-aware prompt variant) so extract_documents_to_projection retrieves per chunk when a graph-db is supplied; confidence/recency gating + token budget. Plan: tasks/software/plan-tsift-kg-graphrag-context.md. Built on shipped #kgctxretrieve.
+- [ ] [#kgctxincremental] Phase 3 GraphRAG: graph-aware re-extraction — changed-file re-extract reconciles against existing stable ids instead of duplicating (composes with #kgextractrefresh). Plan: tasks/software/plan-tsift-kg-graphrag-context.md. Built on shipped #kgctxretrieve / pending #kgctxinject.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 

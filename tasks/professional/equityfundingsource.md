@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,30 @@ completed
 Compacted content:
 - Archived 7 response topic(s): Available Deal dialog full screen in Deal Pipeline; Application progress "Accepted" step never checked; #cftk; 4 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): AvailableDeal dialog + page restructure (#spec-test-commit-pus...
-<!-- agent:boundary:90dff3fd -->
+
+### Re: Why "Application progress" doesn't show the accepted step — opus-4-8
+
+> **Queue prompt:**
+>
+> How did the application get into the Available Deal step but not be accepted. It should be accepted before 
+
+
+Two layers: how the stepper works, and what I found for this specific deal.
+
+**1. How the stepper decides "accepted" (code).** `ApplicationProgress` (`lib/ui--browser--efs/portal/shared/full_application_detail.tsx:1058`) renders a fixed 4-step flow `draft → submitted → in_review → accepted` driven **only** by `full_applications.status`. The 4th step lights up solely when `status === 'accepted'`. So "accepted not showing" ≡ the backing application's status is **not** `accepted`.
+
+**2. The only thing that sets `status='accepted'`.** It's `application_writeback_accept_` (`lib/borrower/applications/repo.ts:398`) — the **approve / TMO-writeback** path, which per the code comment (`#approve-requires-full-app`, repo.ts:371) is "reached only through the writeback/approve path, which gates on a complete full application." The plain admin decision endpoint `application_admin_set_status_` only allows `in_review` / `declined` — it **cannot** set accepted. And the pipeline's "Application Received" Kanban column maps to `accepted` (`pipeline.tsx:46`), so moving a card there triggers that gated approve path, not a simple status flip.
+
+I verified this against prod D1 (`equityfundingsource`, the DB `wrangler.toml` binds): the **one** accepted application (`cda67748`) has exactly the approve-path signature — `writeback_status='sent'`, `tmo_loan_number='GQI751'`. Current status spread: **accepted 1, submitted 1, draft 18, in_review 0.** So the only way to reach the accepted step is the approve action, and almost everything is still a draft.
+
+**3. For THIS deal (`7a0c1463-27bb-4d7c-82f7-2281b3c008d3`):** I could not find it in prod D1 at all — no row in `full_applications`, `loans`, `applications`, `borrower_loan_applications`, `application_leads`, `broker_deals`, or `tmo_cache_entities`. That means one of:
+- **(a)** the card you opened isn't a full-application deal (it's a loan / TMO / sim card), so the Application tab has **no `full_applications` row** to drive the stepper → it can't show accepted (or any real progress); or
+- **(b)** `equityfundingsource.brian-takita.workers.dev` is serving from a **different D1** than the production DB (`280e1539-…`) I queried — in which case I'm looking at the wrong database.
+
+**Bottom line:** the accepted step is gated behind the **approve** action (complete full application → writeback path), which is exactly the TMO-writeback area this session has gated (`#dzmm` / `#7a4d` / `#k2xg`). For your specific deal it's most likely **(a)** — it isn't a backed full-application — but I can't rule out **(b)**.
+
+To pin it exactly, tell me: is `brian-takita.workers.dev` on the prod D1 (`280e1539`) or a separate preview DB? Or give me the borrower name/email on that deal and I'll trace its real `full_applications.status` and whether it's eligible to be approved. I made **no** data changes — all reads.
+<!-- agent:boundary:bcbbc860 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +74,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application, why is "Application progress" not show the accepted step?
 <!-- /agent:queue -->
 
 ## Backlog

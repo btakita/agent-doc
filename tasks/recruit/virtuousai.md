@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -119,6 +119,11 @@ The graph/vector/KG angle turned out to be the strongest single hook — your ts
 
 > **Queue prompt:**
 >
+> Build a custom resume for VirtuousAI.
+
+
+> **Queue prompt:**
+>
 > Update my resume data with recent monsterrodholders achievements and expience. Same with equityfundingsource.
 
 
@@ -129,34 +134,20 @@ Done. Updated both resume content stores in the `resume/` submodule:
 **`data.toml`** (structured "resume data" for the agent-resume CLI) — this store was missing *both* recent engagements, so I added two accomplishment entries at the top:
 - **MonsterRodHolders** — mid-market WooCommerce e-commerce ops: database-driven revenue diagnostics (traced a sales dip from order data to a 170+ charge card-testing bot attack → Cloudflare Turnstile fix), Stripe/PayPal checkout hardening, Cloudflare WAF + Imunify360/ModSecurity tuning, GTM analytics, SEO + traffic RCA.
 - **Equity Funding Source** — the full Cloudflare Workers + D1 + Hono loan-platform entry (admin/borrower portals, Stripe billing, 741+ Bun tests, 74 D1 migrations).
+- **Skills bolded** for AI/agents/graph/full-stack: Agents, Agentic Systems, Rust, Python, TypeScript, React, Next.js, GraphQL, Node.js, PostgreSQL, Claude, Context Engineering, etc.
+- **Experience reordered for relevance** — Presence AI (production AI) → Open Source (agent-doc + tsift; the tsift bullet already reads *"BM25 + vector search … provider-neutral graph-store layer"*, i.e. their Neo4j/graph stack in miniature) → Brian Takita (MonsterRodHolders e-commerce + EFS Cloudflare/D1, both now at the top) → CrystalCommerce (e-commerce platform) → Censible (ESG analytics) → SocialChorus → TrueCar → Milyoni → Pivotal Labs. Older/less-relevant roles filtered for a tight read.
+- **Custom summary** (swapped in via the profile) — leads with *"builds explainable, graph-backed AI systems — and has run the mid-market e-commerce execution that platforms like this serve,"* then names agent-doc (white-box human+agent interaction surface) and tsift (graph + vector knowledge substrate), the MonsterRodHolders / Equity Funding Source work, and the Python/TS/React/LLM + control-plane depth. Every hook maps to VirtuousAI's BAIO/DS2O + explainability thesis.
 
 Also refreshed that entry's `end = "present"`, `duration = "7+ yrs"`, and added e-commerce / Cloudflare Workers / D1 / Hono / WooCommerce / Stripe / PayPal to its `skills`/`domains`. `data.toml` validated (parses cleanly, Brian Takita now has 9 accomplishments).
 
 The MonsterRodHolders content is sourced from the actual client work (the bot-attack sales analysis & traffic RCA), so the achievements are concrete and verifiable rather than generic. Resume-repo changes are left **uncommitted** in the submodule for your review (same as the transcript & message draft). Next up in the queue: building the custom VirtuousAI resume.
-
-### Re: build a custom resume for VirtuousAI — opus-4-8
-
-> **Queue prompt:**
->
-> Build a custom resume for VirtuousAI.
-
-
-Done — **`resume/BrianTakita-virtuousai.pdf`** is built (42 KB, via `make PROFILE=virtuousai`). I created a new profile **`resume/profiles/virtuousai.toml`** and tailored it specifically for the founding-engineer #2 role:
-
-**How it's tailored**
-- **Custom summary** (swapped in via the profile) — leads with *"builds explainable, graph-backed AI systems — and has run the mid-market e-commerce execution that platforms like this serve,"* then names agent-doc (white-box human+agent interaction surface) and tsift (graph + vector knowledge substrate), the MonsterRodHolders / Equity Funding Source work, and the Python/TS/React/LLM + control-plane depth. Every hook maps to VirtuousAI's BAIO/DS2O + explainability thesis.
-- **Experience reordered for relevance** — Presence AI (production AI) → Open Source (agent-doc + tsift; the tsift bullet already reads *"BM25 + vector search … provider-neutral graph-store layer"*, i.e. their Neo4j/graph stack in miniature) → Brian Takita (MonsterRodHolders e-commerce + EFS Cloudflare/D1, both now at the top) → CrystalCommerce (e-commerce platform) → Censible (ESG analytics) → SocialChorus → TrueCar → Milyoni → Pivotal Labs. Older/less-relevant roles filtered for a tight read.
-- **Skills bolded** for AI/agents/graph/full-stack: Agents, Agentic Systems, Rust, Python, TypeScript, React, Next.js, GraphQL, Node.js, PostgreSQL, Claude, Context Engineering, etc.
-
-**One thing worth knowing about the build system:** `build.py` generates from **`data.toml` via the `agent-resume` CLI** (not `BrianTakita.md`) when agent-resume is installed — which it is. So the resume data update from the previous item (MonsterRodHolders + EFS in `data.toml`) is what actually drives this PDF, and the tailoring lives in the profile's skills/experience filters + the summary override. `highlight.phrases` are only applied by the no-agent-resume fallback path, so I leaned on what agent-resume honors.
-
-I also **rebuilt the default `BrianTakita.pdf`** so it stays consistent with the master-template MonsterRodHolders edit. All resume-repo changes (`BrianTakita.md`, `data.toml`, both PDFs, the new `profiles/virtuousai.toml`) are left **uncommitted** in the submodule for your review — same as the transcript and message draft. Queue's now drained.
-<!-- agent:boundary:7d274ad4 -->
+<!-- agent:boundary:d41d98b8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- Please show me the draft linkedin message to laura-rondon-de-barros and the resume path.
 <!-- /agent:queue -->
 
 ## Backlog

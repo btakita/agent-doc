@@ -4256,6 +4256,59 @@ pub fn atomic_write_if_current_pub(
     atomic_write(path, content)
 }
 
+/// `#codefence-strip`: best-effort detection log for code-fence loss during
+/// agent-doc document writes. Reads the existing file before the write, counts
+/// opening fence lines (``` or ~~~ at line start after optional whitespace),
+/// and logs an `ops.log` marker when the new content carries strictly fewer
+/// fence openings than the old content. The marker is a detection signal for
+/// the operator, not a hard assertion — a deliberate edit that removes a code
+/// block also fires it. Fails open silently on any IO error.
+fn log_fence_count_drop_if_any(path: &Path, new_content: &str) {
+    let Some(old_content) = std::fs::read_to_string(path).ok() else {
+        return;
+    };
+    let old_fences = count_code_fence_openings(&old_content);
+    let new_fences = count_code_fence_openings(new_content);
+    if new_fences < old_fences {
+        crate::ops_log::log_op(
+            path,
+            &format!(
+                "fence_count_dropped file={} old_fences={} new_fences={} old_len={} new_len={}",
+                path.display(),
+                old_fences,
+                new_fences,
+                old_content.len(),
+                new_content.len(),
+            ),
+        );
+    }
+}
+
+/// Count lines that open a fenced code block: a line whose first non-whitespace
+/// run starts with three or more backticks or three or more tildies. Mirrors
+/// CommonMark's fence-open recognition loosely — it intentionally over-counts
+/// (no info-string / closing-fence discrimination) so the drop detector never
+/// under-reports a real fence loss.
+fn count_code_fence_openings(content: &str) -> usize {
+    content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim_start();
+            if let Some(rest) = trimmed.strip_prefix("```") {
+                rest.is_empty()
+                    || rest.starts_with(|c: char| !c.is_whitespace() && c != '`')
+                    || rest.starts_with(char::is_whitespace)
+            } else if let Some(rest) = trimmed.strip_prefix("~~~") {
+                rest.is_empty()
+                    || rest.starts_with(|c: char| !c.is_whitespace() && c != '~')
+                    || rest.starts_with(char::is_whitespace)
+            } else {
+                false
+            }
+        })
+        .count()
+}
+
 /// Atomic write through the 08b document write-authority end state
 /// ([`crate::write_authority`]). Every editor-visible document `.md` write
 /// serializes through the session actor's single ordered write queue
@@ -4272,6 +4325,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
     if crate::write_authority::is_visible_document(path)
         && !crate::write_authority::within_owner_scope()
     {
+        log_fence_count_drop_if_any(path, content);
         let base_dir = crate::fs_util::find_project_root(path)
             .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
         let file = path.to_string_lossy().to_string();
@@ -4392,6 +4446,50 @@ mod tests {
             "an .agent-doc/ sidecar write must not record document provenance"
         );
     }
+    /// `#codefence-strip`: detection-log regression — a write that drops a
+    /// triple-backtick fence opening must surface a `fence_count_dropped`
+    /// ops.log marker so the operator can grep for the incident.
+    #[test]
+    fn fence_count_drop_is_logged_for_visible_document_write() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc").join("logs")).unwrap();
+        let doc = tmp.path().join("fence-doc.md");
+        let fenced = "intro\n```js\nconst x = 1;\n```\ntail\n";
+        atomic_write(&doc, fenced).unwrap();
+        // First write has no prior file, so no drop log expected.
+        let log_path = tmp.path().join(".agent-doc").join("logs").join("ops.log");
+        let log_before = fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(
+            !log_before.contains("fence_count_dropped"),
+            "first write (no prior file) must not log a fence drop"
+        );
+        // Second write removes the fence — must log the drop.
+        fs::write(&log_path, "").unwrap();
+        atomic_write(&doc, "intro\nconst x = 1;\ntail\n").unwrap();
+        let log_after = fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(
+            log_after.contains("fence_count_dropped") && log_after.contains("old_fences=2"),
+            "a write that drops a fence must log fence_count_dropped; got: {}",
+            log_after
+        );
+    }
+
+    /// `#codefence-strip`: the fence-opening counter recognizes both backtick
+    /// and tilde fences, ignores longer backtick runs that are not fence
+    /// openings (e.g. inline ``````), and treats indented fences as openings.
+    #[test]
+    fn count_code_fence_openings_handles_backtick_and_tilde() {
+        assert_eq!(count_code_fence_openings("```\ncode\n```\n"), 2);
+        assert_eq!(count_code_fence_openings("~~~\ncode\n~~~\n"), 2);
+        assert_eq!(count_code_fence_openings("  ```js\nconst x = 1;\n  ```\n"), 2);
+        assert_eq!(count_code_fence_openings("no fences here"), 0);
+        assert_eq!(count_code_fence_openings("```python\nprint('hi')\n```"), 2);
+        assert_eq!(
+            count_code_fence_openings("``````\nnot a fence open by CommonMark\n``````\n"),
+            0
+        );
+    }
+
     /// 08b end state: a routed visible-document write still records write
     /// provenance, because the queue job runs `atomic_write` on the owner thread
     /// where the owner-scope guard takes the raw path (`atomic_write_raw`), and

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -56,12 +56,13 @@ Drained the `#spec-test-build-install-commit-push` queue head (`Port 8080 is fre
 - **Commit + push:** completed the outstanding `cargo fmt` drift across 8 files (session_cost, session_review, cli, infra, lib, exit_code test, log_digest, local-model lib) and pushed `cd648b5..0e41e4b` to origin/main (`style: apply cargo fmt across agent-doc, cli, digest, local-model`).
 
 Queue head consumed. No new actionable backlog items — the remaining backlog head `#vmax` (crates.io OIDC trusted-publishing registration) is still operator-gated.
-<!-- agent:boundary:cb1d7bac -->
+<!-- agent:boundary:787bfdd3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Is the tsift local model running now? If not, let's start it. Should it be a service or should we make this a lazy instance?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

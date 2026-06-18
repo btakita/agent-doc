@@ -724,6 +724,25 @@ fn run_event_loop(
                 continue;
             }
 
+            // Also skip when an agent-doc cycle is freshly in flight. The
+            // cross-process status file used by `is_busy` goes stale after 30s,
+            // but agent response-composition routinely takes longer — without
+            // this guard a zero-debounce reactive watch re-triggers mid-turn and
+            // churns the queue (#queediturn). Bound by freshness so a
+            // crashed/stuck cycle still lets the watch proceed to preflight
+            // (which repairs stale cycles).
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if cycle_freshly_in_flight(&path, now_secs) {
+                eprintln!(
+                    "[watch] skipping {} — agent-doc cycle in flight",
+                    path.display()
+                );
+                continue;
+            }
+
             // Submit
             eprintln!("Change detected: {}", path.display());
             let ac = actor_contexts
@@ -881,10 +900,63 @@ pub fn status() -> Result<()> {
     Ok(())
 }
 
+/// Whether the reactive watch should skip re-triggering for `path` because a
+/// fresh agent-doc cycle is in flight.
+///
+/// The cross-process busy-status file used by `is_busy` goes stale after 30s
+/// (`debounce::get_status_via_file`), but agent response-composition routinely
+/// takes longer — so without this check a zero-debounce reactive watch would
+/// re-trigger on a mid-turn editor edit and churn the queue (`#queediturn`).
+/// `cycle_state` is the durable, whole-turn source of truth. Bound by
+/// freshness (`WATCH_CYCLE_IN_FLIGHT_MAX_SECS`) so a crashed/stuck cycle still
+/// lets the watch proceed to preflight, which repairs stale cycles.
+pub(crate) const WATCH_CYCLE_IN_FLIGHT_MAX_SECS: u64 = 600;
+
+pub(crate) fn cycle_freshly_in_flight(path: &std::path::Path, now_secs: u64) -> bool {
+    match crate::cycle_state::load(path) {
+        Ok(Some(cs)) if cs.is_open() => {
+            now_secs.saturating_sub(cs.updated_at) < WATCH_CYCLE_IN_FLIGHT_MAX_SECS
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    }
+
+    #[test]
+    fn cycle_freshly_in_flight_skips_open_fresh_cycle_only() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "body").unwrap();
+
+        let now = now_secs();
+        // No cycle state -> watch proceeds.
+        assert!(!cycle_freshly_in_flight(&doc, now));
+
+        // Open, fresh cycle -> watch skips (agent composing response).
+        let cs = crate::cycle_state::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        assert!(cs.is_open());
+        assert!(cycle_freshly_in_flight(&doc, now));
+        assert!(cycle_freshly_in_flight(&doc, now + 60));
+
+        // Open but stale beyond the freshness bound -> watch proceeds so
+        // preflight can repair the stuck cycle.
+        assert!(!cycle_freshly_in_flight(
+            &doc,
+            now + WATCH_CYCLE_IN_FLIGHT_MAX_SECS + 1
+        ));
+    }
 
     #[test]
     fn pid_file_roundtrip() {

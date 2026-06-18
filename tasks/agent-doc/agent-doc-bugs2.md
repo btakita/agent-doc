@@ -437,13 +437,32 @@ Two separate things in this report; one is already filed, one is genuinely new.
 **The second head — "JB Run Agent Doc stalled" with `failed_stage=queue_paused reason=broken editor IPC (content_ours / live_prompt_drift, #semmerge)`** — is not a new bug: that pause came from a **stale supervisor** running a pre-0.34.7 binary that still did the `content_ours`-wins drop. The installed binary is now **0.34.8** (`e27b3c39`) with `#smconv`/`#semmerge-owner`. Recycle the route-owned supervisor (so it adopts 0.34.8) and resume — the deliberate pause clears. No agent fix needed beyond the recycle.
 
 Net: nothing new on the crash (operator-gated on scrollback), the lost-queue-item is now a durable actionable item (`#qdurcrash`), and the stall is the known stale-supervisor pause that 0.34.8 + recycle resolves.
-<!-- agent:boundary:f8930957 -->
+
+### Re: equityfundingsource route paste is `ok` (cross-doc), and I cleared the gated review items per your standing directive — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: - I added a queue item and ran JB `Run Agent Doc` on virtuousai.md, the turn started. I navigated away. When I navigated back, supervisor/tmux pane crashed and restarted. My queue item was deleted.
+
+
+**The equityfundingsource `Run Agent Doc` paste is not a failure — nothing to do here.** Its outcome is `ui_outcome_class=ok ui_outcome=queued_behind_owner next_action=wait_for_owner_turn_to_drain`: the route reached the harness, saw an active closeout already owns that document, and correctly **queued behind the owner** (the "Accepted not checked?" head waits its turn). That is the designed behavior, it is cross-document (equityfundingsource.md), and it is informational drift re-pasted into this doc's exchange — I am not acting on it from this session (scope discipline). The earlier `queue_paused`/`qflood` paste below it is the already-explained stale-supervisor pause that 0.34.8 + recycle clears.
+
+**Executed your standing directive: "make backlog replacements for all gated review items … no more gates … clear the review items."** I removed all three gated `agent:review` items and ensured every one is now tracked as an **actionable** backlog item (no gates):
+
+- **`#semmerge` (parent)** — Phase 1 (`#semmerge-owner`) and Phase 2 (`#aqhr`/`#smconv`) are shipped/in `done.md`. The remaining phases are now all actionable backlog: `#msn6` (Ph6 turn-active) and `#pk3f` (Ph4 ack-turn) already existed; I added **`#smqstrike`** (Ph3 queue-node-strike) and **`#smsim`** (Ph5 SimWorld matrix). Parent review entry removed.
+- **`#agentreloadrestart`** → actionable backlog (restart-agent Phase 1, foundational). Converted with explicit **logging requirements** (`harness_change_detected`, `agent_restart_boundary_gate`, `agent_restart_performed` → ops.log) so the live supervisor gate can be proven/disproven from logs.
+- **`#restartagentmenu`** → actionable backlog (restart-agent Phase 2). Converted with the operator-install live-gate **logging requirement** (action invocation + resolved harness).
+
+`agent:review` is now **empty**. Per your "make sure all JB live gate items have adequate logging" note, both restart-agent items carry concrete ops.log signals to prove/disprove. I will tell you when JB plugin builds are needed: **`#restartagentmenu`, `#8bfz`, and `#qpauseux`** are the plugin-side items that will require an install + live gate when implemented — none are built this cycle (this cycle was the review/backlog restructure only).
+
+Note: session accretion is at `warn` (exchange ~393 lines / 22 sections); the queue is active so I am not stopping to compact — flagging the size in one line per the guidance.
+<!-- agent:boundary:2b9ca9fc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: - I added a queue item and ran JB `Run Agent Doc` on virtuousai.md, the turn started. I navigated away. When I navigated back, supervisor/tmux pane crashed and restarted. My queue item was deleted.
+- ~~:pushpin: - I added a queue item and ran JB `Run Agent Doc` on virtuousai.md, the turn started. I navigated away. When I navigated back, supervisor/tmux pane crashed and restarted. My queue item was deleted.~~
 - :pushpin: [#1vhn]
 - :pushpin: JB `Run Agent Doc` stalled on this document.
 ```
@@ -479,6 +498,8 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - do [#docdriftgrace]
 - do [#8bfz]
 - do [#qdurcrash]
+- do [#smqstrike]
+- do [#smsim]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -519,6 +540,8 @@ What are #next-steps to fix bugs?
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block as a raw red Error: toast instead of an actionable queue paused — resume notification. Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button rather than a dispatch error. **Operator action: install the updated JB plugin, then verify the paused-queue notification renders (live gate).**
 - [ ] [#docdriftgrace] [operator-verify] agent-doc thrashes when the session doc changes mid/between turn in ways unrelated to the current prompt: snapshot>visible drift (operator trimmed old committed Re: blocks + harness switch + queue edits) made preflight refuse commit (looks like a manual cleanup with stale snapshot) and forced a manual reset --from-current. Binary should classify drift by component and silently auto-rebase snapshot/CRDT for unrelated changes, surfacing ONLY structural conflicts on the in-flight prompt/response. **Operator action: watch one live re-baseline cycle to verify the silent auto-rebase.** Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported that a tsift.md agent-doc turn crashed and killed the session process while the tmux pane stayed active. Supervisor pid 1742954 is alive; pane %78 OpenCode TUI shows Thinking normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe deleted) as a crash. Not reproducible from logs alone. **Operator action: paste the exact crash error text / pane capture from the crash moment, or the specific cycle id, so it can be root-caused.**
+- [ ] [#agentreloadrestart] restart-agent Phase 1 (foundational): make the supervisor restart path re-resolve the harness from current frontmatter so changing agent (claude->opencode) takes effect on restart, and auto-restart the agent at the next idle/turn boundary when the resolved harness differs from the running one. Today the restart loop reuses the harness resolved once at start (SharedSupervisorState.harness, start.rs:171) and never re-reads fm.agent. Re-resolve via HarnessConfig::from_context (harness.rs:116) before respawn, rebuild child_factory/harness_binary, then gate the boundary auto-restart like the supselfheal auto-recycle (prompt_visible and not turn_active, debounced, never mid-turn) behind a new agent_doc_agent_change_restart knob (default ON). LOGGING (live-gate prove/disprove): emit harness_change_detected old/new, agent_restart_boundary_gate reason, agent_restart_performed to ops.log. SimWorld tests + SPEC + VERSIONS. Live-supervisor-critical: focused clean cycle with make check + make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md
+- [ ] [#restartagentmenu] restart-agent Phase 2 (after #agentreloadrestart): add a Restart Agent JB plugin menu command — new RestartAgentAction.kt mirroring RestartSupervisorProcessAction.kt, registered in plugin.xml beside AgentDoc.RestartSupervisorProcess, wired through the TerminalUtil restart path; after Phase 1 re-resolves the harness on restart this brings up a changed agent. Decide alongside-vs-replace the existing Restart Supervisor Process action (do not remove without operator confirmation). Bump pluginVersion (gradle.properties, currently 0.2.170), build unsigned + signed zips. LOGGING (operator-install live-gate prove/disprove): log the action invocation + resolved harness. Plan: tasks/agent-doc/plan-restart-agent.md
 <!-- /agent:backlog -->
 
 ## Review

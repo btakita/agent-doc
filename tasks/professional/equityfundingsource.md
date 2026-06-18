@@ -183,7 +183,31 @@ Tweak the wording if you like, then send from Gmail. Want me to adjust tone/leng
 For local dev, set `TMO_API_TOKEN` (and optionally `TMO_API_BASE_URL`) in `.env` / `.dev.vars` — both are stubbed blank in `.env.example`.
 
 **Reconciles with last turn:** since `TMO_API_TOKEN` is already deployed and read-sync is live, the sandbox key is **already provisioned** — so the draft email to Judith asking for it may be unnecessary (or only needed if you want a *fresh/rotated* key, or a separate write-scoped one for the gated `#dzmm` writeback). Worth confirming with Lucas which token is in `TMO_API_TOKEN` before sending. I left that email in Drafts, unsent. No changes made this turn — all reads.
-<!-- agent:boundary:87ed777d -->
+
+### Re: "Accept and send to TMO" → duplicate loan number — opus-4-8
+
+> **Queue prompt:**
+>
+> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application I clicked "Accept and Send to TMO" but got an error "Writeback: failed - TMO NewLoan failed with 400: {"Data":null,"ErrorMessage":"Unable to save record.\r\nDuplicate loan number.","ErrorNumber":400,"Status":-1}". The record should be associated with the TMO record in this case and the button should not be present.
+
+
+You're right on both counts — this is a real bug. Filed as **`#5q7z`**.
+
+**Why it fails.** This loan already lives in TMO (it was synced *from* TMO). I confirmed in prod D1 — loan `45ddae53` carries a full TMO association already:
+- `tmo_loan_number = GQI751`, `tmo_loan_rec_id = 3840D27B…`, `tmo_loan_application_rec_id = cda67748`, `tmo_loan_application_status = Application Received`.
+
+The approve flow (`/approve` → `application_tmo_writeback_attempt_` → `tmo_writeback.ts:308` `POST LOS.svc/NewLoan`) sends a **NewLoan (create)** using that existing `GQI751`. TMO already has GQI751, so it returns `400 — Duplicate loan number. Unable to save record.` It's trying to create a record that's already there.
+
+**The two fixes (both match what you said):**
+1. **Don't NewLoan an existing TMO loan.** `application_tmo_writeback_attempt_` should detect an existing association (`tmo_loan_rec_id` present, or `writeback_status='sent'`) and **associate + mark accepted locally** instead of calling NewLoan — so the record links to the existing TMO loan rather than duplicating it.
+2. **Hide the button when already in TMO.** `full_applications.tsx:424` gates "Accept and send to TMO" only on completeness (`can_approve`); it should also be hidden/disabled once the app/loan already has a TMO record.
+
+**One design call before I implement** (so I don't guess in the gated writeback flow): on accepting a loan that's *already* in TMO, do you want it to be —
+- **(a) associate-only** — link to the existing TMO record, mark accepted locally, make no TMO API call (simplest, fixes the error), or
+- **(b) associate + push an `UpdateLoan`** — also send EFS's current data onto the existing TMO record?
+
+Tell me **a** or **b** and I'll implement both parts (+ tests) on `#5q7z`. This is the same gated `#dzmm`/`#7a4d` TMO-writeback area as `#214f`, so I'm confirming intent rather than pushing a guess. No code changed this turn — diagnosis + reads only.
+<!-- agent:boundary:82ab3513 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -196,7 +220,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application I clicked "Accept and Send to TMO" but got an error "Writeback: failed - TMO NewLoan failed with 400: {"Data":null,"ErrorMessage":"Unable to save record.\r\nDuplicate loan number.","ErrorNumber":400,"Status":-1}". The record should be associated with the TMO record in this case and the button should not be present.
+- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application I clicked "Accept and Send to TMO" but got an error "Writeback: failed - TMO NewLoan failed with 400: {"Data":null,"ErrorMessage":"Unable to save record.\r\nDuplicate loan number.","ErrorNumber":400,"Status":-1}". The record should be associated with the TMO record in this case and the button should not be present.~~
 - do [#5q7z]
 <!-- /agent:queue -->
 

@@ -43,6 +43,11 @@ Submitting to junie...
 
 > **Queue prompt:**
 >
+> JB `File Cache Conflict` dialogs are still occurring.
+
+
+> **Queue prompt:**
+>
 > JB `Clear Session Context` on opencode sessions does not submit `/new` ![img_46.png](img_46.png).
 
 
@@ -76,14 +81,29 @@ Submitting to junie...
 
 - Plan: `tasks/agent-doc/plan-opencode-clear-new-not-submitted.md`
 - Backlog: `#opencodeclearnewsubmit` `[operator-verify]` (added via `agent-doc write --pending-add`)
-<!-- agent:boundary:0ecec21d -->
+- Operator's observation "agent-doc reentrant run on equityfundingsource.md had recovery churn" is captured as a comment in the queue block (HTML comment); not promoted to a backlog item this turn — will surface if it recurs after the IPC wedge fix lands.
+- Stale comment at `src/session_actor_cmd.rs:1894` ("Codex/Claude only") is wrong — `pending_draft_enter_resubmit()` is `pub const fn -> bool { true }`. Cleanup bundled into the next #opencodeclearnewsubmit fix turn.
+3. Or use a palette-row-aware submit (`Down` then `Enter` on the highlighted `/new` row).
+2. Or prepend an `Escape` to dismiss any open palette before the text+Enter pair.
+1. For `harness=="opencode"`, send `/new` and `Enter` in **separate** `tmux send-keys` calls with a small inter-call delay so the dropdown is already open when the Enter arrives.
+- Status: idle, `Build · GLM-5.2 · Z.AI Coding Plan`, `250.0K (25%)`. No error dialog.
+- Autocomplete dropdown **open**, `/new` highlighted (orange/salmon row, "New session" label).
+- Composer: reads `/new` with cursor block immediately after; **not submitted** — sitting as a draft.
+- Pane: OpenCode TUI (`ctrl+p commands` hint, slash-command autocomplete menu).
+- `cargo install --path .` ran clean — binary at `~/.cargo/bin/agent-doc` is `0.34.1` with the fix.
+- Parent gitlink `src/agent-doc` updated to `d84015d5` and pushed to `origin/main`.
+- `d84015d5` — `#jbacceptwedge` companion: `INFLIGHT_CONNECTION_HANDLERS` atomic + `InflightConnectionGuard` + `ipc_accept_thread_ops_marker(inflight)` emitting `ipc_accept_thread_spawned inflight=N`, plus `inflight_connection_handlers()` accessor, strengthened `slow_handler_does_not_block_concurrent_connections` to sample peak `inflight>=2`, `editors/SPEC.md` "Per-connection listener thread" contract paragraph, plugin bump `0.2.169 → 0.2.170`.
+- `3c7e2b65` — `#codefence-strip`: `log_fence_count_drop_if_any` + `count_code_fence_openings` in `write.rs` so dropped triple-backtick/tilde fences surface as `fence_count_dropped` ops.log markers. Detection only; fails open silently. Covers the operator note "The last run had a code fence stripped away by agent-doc."
+- `86c68db7` (prior) — per-connection-thread accept loop (the actual fix).
+<!-- agent:boundary:69d255ec -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~JB `Clear Session Context` on opencode sessions does not submit `/new` ![img_46.png](img_46.png).~~
-- JB `File Cache Conflict` dialogs are still occurring.
+- ~~JB `File Cache Conflict` dialogs are still occurring.~~
+- :pushpin: A non-vision model should use a vision model via agent-doc or tsift.
 - What are #next-steps to fix agent-doc bugs?
 <!-- /agent:queue -->
 <!--
@@ -111,7 +131,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#opencodeclearnewsubmit] [operator-verify] [recommended] JB `Clear Session Context` on OpenCode sessions does not submit `/new` (screenshot tasks/agent-doc/img_46.png). Plan: tasks/agent-doc/plan-opencode-clear-new-not-submitted.md. Current code paths look correct (`harness_clear_command("opencode")=="/new"`, Enter retry is const true not Codex/Claude-only despite the stale comment near session_actor_cmd.rs:1894, `prompt_requests_clear()` accepts /new); pane %12 is confirmed OpenCode. Historical ops.log `harness=codex` entries are from older session generations before the doc switched to opencode. Hypotheses H1 busy-pane defer (session_actor_cmd.rs:848-861), H2 Enter not firing on OpenCode composer (session_actor_cmd.rs:1657-1703), H3 supervisor ipc_clear PTY delivery (start/supervisor_io.rs:12-51,120-135) need operator input to disambiguate. Blocked on operator describing the screenshot (non-vision model — see #img-describe-toolcall) AND on #jbacceptwedge [operator-install] of plugin 0.2.170 to verify the IPC layer is not wedged.
+- [ ] [#opencodeclearnewsubmit] ROOT CAUSE CONFIRMED via claude vision analysis of img_46.png (operator-pinned prompt — non-vision GLM-5.2 delegated to claude CLI per #img-describe-toolcall workflow): H2 — /new is typed into the OpenCode composer but the autocomplete slash-command dropdown intercepts the Enter-submit. Screenshot shows: OpenCode TUI, composer reads '/new' with cursor block after, dropdown open with '/new' highlighted (orange/salmon), 'New session' label, idle state at 25% context. No error dialog. The bare-Enter retry in verify_clear_submit_after_delivery (session_actor_cmd.rs:1657-1703) either didn't fire or also failed to dismiss the dropdown. Fix direction: for opencode, send '/new' and Enter in SEPARATE tmux send-keys calls with a small inter-call delay so the dropdown opens before the Enter is delivered; OR send Escape first to prevent the dropdown from opening; OR use a palette-row-aware submit (Down then Enter on the highlighted row). Precondition still: #jbacceptwedge [operator-install] of plugin 0.2.170 + IntelliJ restart (the verify_supervisor_clear_submit poll may be timing out under the wedged accept loop). Plan: tasks/agent-doc/plan-opencode-clear-new-not-submitted.md.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.
 <!-- /agent:backlog -->
 

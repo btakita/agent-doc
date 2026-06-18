@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -80,15 +80,63 @@ Done — and it turned out to be agent-runnable, not operator-gated: the environ
 I seeded from `specs/local-kg-model.md` (the file that documents this contract). The two items now compose: the `#kgwiring` `graph_evidence` section will surface these `tsift-kg` `semantic_entity` / `kg_source` nodes on planning cycles that touch them. The `.tsift/graph.db` is a gitignored local artifact, so there's nothing to commit — this was a workspace-state seeding, and re-running over the same source preserves stable fact ids (per the spec's Run Manifest contract).
 
 Queue drained — both `do [#kgwiring]` and `do [#kgoperatorrun]` are complete.
-<!-- agent:boundary:011eb0cc -->
+
+### Re: tsift kg multi-session reference lifetime — keep loaded while referenced, reclaim on crash — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: tsift kg should handle multiple sessions. Where it remains loaded if at least one session cla
+
+
+> **Queue prompt:**
+>
+> :pushpin: tsift kg should handle multiple sessions. Where it remains loaded if at least one session has a reference. Make sure the system is robust so crashed sessions can be unclaimed. Use a heartbeat or a timeout. agent-doc will use deterministic binary to manage references. Are there any libraries that robustly handle this effectively?
+
+This is a **reference-counted lease over a shared local resource with crash-safe reclamation** — not a distributed-consensus problem. One host, several processes, one expensive thing to keep warm (the `graph.db` working set and, far more costly, the Qwen3-32B model resident in Ollama VRAM). The deterministic binary you described is exactly the right shape: make `tsift`/`agent-doc` the **single writer** to a reference registry so there are no multi-writer races.
+
+**The linked `chopratejas/headroom` is not the right tool here** — it's a context/token compression layer (it TTL-caches *original* content for on-demand retrieval); it has no model/VRAM lifetime or refcount mechanism. Useful idea, wrong layer for this.
+
+#### Robust mechanism: OS advisory locks as primary, heartbeat as backstop
+
+The key insight: **don't lean on a heartbeat as your primary liveness signal — lean on an OS advisory file lock.** The kernel releases an `flock`/`LockFile` the instant the holder dies, including `SIGKILL` and hard crashes, with **zero false positives**. A heartbeat/TTL always has a false-reclaim window (a GC pause or load spike can look like death). So:
+
+1. **Primary — advisory file locks (kernel-backed liveness).** Each session takes a **shared** lock on `.tsift/kg-refs/<resource>.lock`. To decide *"refcount == 0, safe to unload,"* the manager tries a **non-blocking exclusive** lock on the same file — it succeeds **only** when no shared locks remain. That's a kernel-backed refcount-zero detector that auto-reclaims on crash, with no manual counter to corrupt. For enumeration/diagnostics, also keep one per-session exclusive lock file and sweep by non-blocking try-lock (acquire success ⇒ owner is dead ⇒ reap the row). This is the pattern cargo/rustup use for their caches.
+2. **Backstop — heartbeat + TTL.** A registry row carries `last_heartbeat`; a sweep reclaims rows older than ~3× the heartbeat interval. This only matters where flock is unreliable (NFS-backed state, a future cross-host case, or a stuck-but-alive holder). Secondary, not primary.
+3. **Cross-check — PID + process start-time** (`kill(pid, 0)` / `/proc/<pid>`), pairing PID with its start-time so PID reuse can't resurrect a dead reference.
+4. **Resource-side safety net — Ollama `keep_alive`.** Keep a long `keep_alive` while refs > 0; send `keep_alive=0` on last-release (already what `tsift kg unload` does). If the *manager itself* dies, Ollama's own timeout still frees VRAM eventually.
+
+#### Libraries (Rust, since tsift/agent-doc are Rust)
+
+- **`fs4`** (maintained fork of `fs2`) or **`fd-lock`** (the crate rustup uses) — cross-platform shared/exclusive advisory locks with non-blocking try-lock. This is the load-bearing primitive.
+- **`named-lock`** — cross-platform named mutex (POSIX named semaphore / Windows named mutex) if you'd rather a path-free named primitive.
+- **`sysinfo`** / **`nix::sys::signal::kill`** — PID liveness + start-time cross-check.
+- **SQLite** (already in-tree via libsql/rusqlite), WAL mode, for the `kg_refs` registry — the binary is the single logical writer.
+
+**Heavier distributed analogues — recognizable but overkill for one host, do not pull in:** etcd leases, Consul sessions + health checks, ZooKeeper ephemeral znodes, Redis TTL keys / Redlock. They all implement the same "auto-expire on holder death" idea you're after; the local equivalent of an "ephemeral node" is simply a held `flock`.
+
+#### Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unloaded
+    Unloaded --> Loaded: ref acquire (0 to 1) load graph.db / warm model
+    Loaded --> Loaded: ref acquire / release (count stays >= 1)
+    Loaded --> Loaded: heartbeat renew
+    Loaded --> Unloaded: last release (1 to 0) Ollama keep_alive=0
+    Loaded --> Unloaded: reaper flock free / TTL expired / pid dead
+```
+
+#### Recommendation
+
+Single-host, Rust: **`fs4`/`fd-lock` advisory locks as the primary liveness + refcount-zero signal, a SQLite `kg_refs` registry (WAL) written only through `tsift kg ref acquire|release|reap`, a heartbeat+TTL sweep and PID/start-time check as backstop, and Ollama `keep_alive` as the resource-side safety net.** That gives crash-safe reclamation without trusting a heartbeat as the sole signal, and keeps the deterministic-binary-as-arbiter property you specified.
+
+I've written the full multi-phase design to **`tasks/software/plan-tsift-kg-multisession-refcount.md`** and queued **`#kgreflease`** in the backlog to implement it.
+<!-- agent:boundary:9931bce0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#kgwiring]~~
-- ~~do [#kgoperatorrun]~~
-- :pushpin: tsift kg should handle multiple sessions. Where it remains loaded if at least one session cla
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

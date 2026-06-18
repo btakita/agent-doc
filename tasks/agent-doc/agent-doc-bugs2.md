@@ -106,7 +106,13 @@ Done — the wedge now self-clears. Shipped agent-doc **0.34.4** (`08f026c0`, su
 **The fix:** the guard now also clears when the dropped prompt's `[#id]` is present in the committed/visible `agent:queue` in **any** form, including struck/consumed lines — new `queue_ids_including_struck` strips the strike wrapper before id extraction. A struck head visibly reached the document, so its id is preserved, not silently lost. Genuinely lost ids (absent from the queue entirely) still fail closed. **Proven on this doc:** `session-check` now returns `ok — committed` instead of the `[#qpauseux]; [#docdriftgrace]` interruption.
 
 **Your new report — "an equityfundingsource.md turn deleted what I wrote in the queue"** — is this same `#queue-user-edit-overwrite` drop. 0.34.4 makes `session-check` auto-**recover** from it (no more wedge / manual restart). But the deeper **prevention** is still open under `#qheadsync` (plan `plan-answered-queue-head-autostrike.md`): stop recording the false drop in the first place, strike the `[#id]` head on `--done`, and link filed free-text heads to their backlog id so they defer instead of re-presenting. The queue stays **paused** (`receipt_id=62`) until that prevention lands or you add new work; resume with `agent-doc admin queue resume tasks/agent-doc/agent-doc-bugs2.md`.
-<!-- agent:boundary:41a39ca9 -->
+
+### Re: wedge-clear fully live + thrash re-pause — opus-4-8
+
+No new prompt this cycle — preflight flagged a `stale_install` (the `~/.cargo/bin` cdylib predated fix commit `08f026c0`), so live tmux/JB sessions were still running pre-fix FFI. Ran `agent-doc lib-install`: cdylib refreshed to `libagent_doc-0.34.4.so`, 2 controllers marked to auto-recycle at the next idle boundary. The `#qheadsync` wedge-clear is now fully live in **both** the binary and the FFI/cdylib.
+
+The queue re-presented the same `[#tsiftmdcrash]` + File Cache Conflict + cross-doc drift heads (no `user_intent` change — pure re-injection thrash). The wedge-clear stopped `session-check` from *wedging* on these, but the *re-injection* itself is the **prevention** half of `#qheadsync` (drainability must dereference a bare `[#id]` head to its operator-verify backlog tag and defer it; free-text heads filed as operator-verify items must be linked so they defer; `--done` must strike the matching `[#id]` head) — still open. Re-paused the queue (`receipt_id=63`) to halt the flood until that lands. Stopping — no agent-drainable work (all heads operator-verify/cross-doc, `#tsiftmdcrash` still needs your crash text).
+<!-- agent:boundary:7c35b177 -->
 <!-- /agent:exchange -->
 
 ## Queue

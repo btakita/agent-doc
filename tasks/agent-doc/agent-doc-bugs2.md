@@ -296,7 +296,30 @@ session needs an editor buffer refresh / restart before further drains.
 This crash head is **already captured** — `#routedeadshell` (`#1vhn`) records the exact repro you gave: Run Agent Doc on virtuousai.md → supervisor + tmux pane crashed 2× → 3rd attempt stalled → you ran `agent-doc` manually. The agent-actionable half (route must detect a harness dispatch-ready prompt and fail closed on a bare shell instead of typing into a dead pane) is planned in `plan-route-dispatch-into-crashed-harness.md`; the crash *root-cause* (why the harness exits to a shell — the `/model opus` restart is the lead) stays **operator-gated** on the `supervisor-stderr.log` + pane scrollback capture.
 
 It re-presented because the `#qheadsync` answered-head auto-strike isn't reaping it. I **paused this queue** (receipt_id=66) because the live editor buffer's `content_ours` adoption (`#semmerge`) was dropping every exchange-finalize response and consuming heads — the remaining heads are all already-answered/filed here, cross-document (equityfundingsource), or operator-gated. Next real work is `#smconv` (the converge.rs fix) in a clean session.
-<!-- agent:boundary:e36c51b7 -->
+
+### Re: continue the fix + fix the root cause of the transition issue — shipped 0.34.7 — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: I ran JB `Run Agent Doc` on virtuousai.md and the supervisor + tmux pane crashed 2 times. The 3rd attempt stalled and I manually ran the `agent-doc .../virtuousai.md` command...and the turn is in progress.
+
+
+Done. Shipped **`#smconv` (Phase 2)** plus the **`### Re:` heading-prose extension** that makes it actually work for real sessions — the root-cause fix for the `live_prompt_drift_after_preflight` → `content_ours`-adoption transition that dropped every agent response this session. Installed (0.34.7), pushed (submodule `bd55c187`, superproject `9e6da3833`).
+
+**Root cause (two layers):**
+1. **The drop:** at closeout, when the operator's editor buffer drifted from the agent baseline, `guard_ipc_snapshot_adoption_against_live_prompt_drift` fail-closed by adopting `content_ours` (the editor buffer), **dropping the agent's new `### Re:` turn + queue strike + backlog edits**. That's `#semmerge`.
+2. **Why even Phase-1 didn't help:** the shipped `semantic_merge` modeled exchange turns as list-items (`- re [#id]`), but real turns are `### Re:` **heading-prose** — invisible to the node model, so a merge would still drop the response. (Found mid-implementation; this was the real blocker.)
+
+**The fix:**
+- `write/ipc.rs` now calls node-keyed `semantic_merge(base, agent, content_ours)` **before** the fail-close. Node-disjoint operator+agent edits (the common case — operator flips `queue: stop` + edits the queue while the agent strikes a *different* head and appends a turn) now apply **both** in one clean commit. A conservative gate (AST applies, clean re-parse, zero dropped agent content) falls through to the old `content_ours` path only when the merge can't be represented.
+- `semantic_merge` now models `### Re:` heading-prose turns as append-only nodes (keyed ignoring `(HEAD)`/strike, appended before the boundary), so the agent's response is preserved through the merge.
+
+**Transport diagnosis (the trigger):** the session accumulated **20 dead `jetbrains-<pid>` IPC client patch files** from prior IntelliJ instances/restarts; a stale instance answered on the socket with its old buffer as `content_ours`, and once IntelliJ fully died the socket/file IPC just timed out (`retry_without_disk_write`). I cleaned the dead artifacts. The deeper transport hardening (reap dead-PID editor-IPC registrations instead of adopting their stale `content_ours` / blocking on their acks) is worth a follow-up, but `#smconv` removes the data-loss consequence: even on drift, the response now merges instead of dropping.
+
+**Verification:** `agent-doc-markdown-ast` 53/53, `agent-doc-orchestration write::ipc` 117/117, full workspace green, clippy clean, FlowCore budget audited. Built + installed (`~/.cargo/bin` 0.34.7, cdylib refreshed, 2 controllers marked to recycle onto the fix at the next idle boundary).
+
+**Remaining `#semmerge` phases:** `#smqstrike` (P3 — route queue_consume strike through the merged node tree), `#smackturn` (P4 — turn the `semantic_merge_ack_pending` outcomes into an exchange ack turn), `#smsim` (P5 — SimWorld matrix). Plus `#mdastclose` (the overlay `end_byte` close-marker bug found Phase 1).
+<!-- agent:boundary:c73b6f52 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -307,7 +330,7 @@ It re-presented because the `#qheadsync` answered-head auto-strike isn't reaping
 - ~~:pushpin: Investigate the task thrashing in virtuousai.md session. Please fix.~~
 - ~~:pushpin: After JB `Clear Session Context` on this document then JB `Run Agent Doc` stalled.~~
 - ~~:pushpin: The agent defined a task id #rz3afix, but agent-doc redefined the task id to [#021p]. If an agent defines a task id, agent-doc should be able to parse the task id and use the agent defined task id. Note that if the agent's defined task id does not pass the id validation logic such as malformed or duplicate of a prompt_preset or another entity, resolve and create a new task id if necessary.~~
-- :pushpin: I ran JB `Run Agent Doc` on virtuousai.md and the supervisor + tmux pane crashed 2 times. The 3rd attempt stalled and I manually ran the `agent-doc .../virtuousai.md` command...and the turn is in progress.
+- ~~:pushpin: I ran JB `Run Agent Doc` on virtuousai.md and the supervisor + tmux pane crashed 2 times. The 3rd attempt stalled and I manually ran the `agent-doc .../virtuousai.md` command...and the turn is in progress.~~
 - :pushpin: Ensure we have a semantic structure merge. Where the agent doc is strutured and the agent-doc binary understand what parts of the structure are affected. What parts of the document are active in the turn. And whether or no the active area is changed by the merge.
 - :pushpin: Still getting JB `File Cache Conflict` dialogs. Absolute 0 is the target. Only emergency cases should write to the disk. Everything else should use the editor plugin. We also need to handle conflicts with the editor plugin path.
 ---

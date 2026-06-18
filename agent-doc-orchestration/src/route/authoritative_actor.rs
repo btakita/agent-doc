@@ -294,10 +294,25 @@ pub(crate) fn current_generation_ready_prompt_proven(
         return true;
     }
 
+    // Fallback: trust a current-generation transition whose reason already proves
+    // dispatch readiness. `idle_pane_reconcile` (`#monster60stimeout`) is gated in
+    // `start/idle_watch.rs` on `supervisor_pane_has_busy_cue == Some(false)` — the
+    // supervisor captured the pane and found no busy cue before promoting the actor
+    // to `Ready`. That direct pane evidence is as strong as the footer-shape proof
+    // above, so accepting it here keeps the route from waiting the full 60s timeout
+    // when the edge-triggered pty redraw missed re-emitting a recognized prompt shape.
+    transition_proves_current_generation_ready(target)
+}
+
+/// Pure check: does the actor's last transition already prove current-generation
+/// dispatch readiness without needing a fresh capture?
+fn transition_proves_current_generation_ready(
+    target: &AuthoritativeActorDispatchTarget,
+) -> bool {
     target.record.last_transition.new_generation == target.record.generation
         && matches!(
             target.record.last_transition.reason.as_str(),
-            "prompt_ready" | "dispatch_ready_prompt"
+            "prompt_ready" | "dispatch_ready_prompt" | "idle_pane_reconcile"
         )
         && target.actor_state() == crate::session_actor::ActorState::Ready
 }
@@ -830,6 +845,81 @@ mod tests {
                 crate::session_actor::ActorState::Ready,
             ),
             "an unreachable supervisor cannot prove live cross-harness ownership"
+        );
+    }
+
+    fn ready_target_with_reason(reason: &str) -> AuthoritativeActorDispatchTarget {
+        AuthoritativeActorDispatchTarget {
+            record: crate::session_actor::ActorRecord {
+                document_id: "test-doc".to_string(),
+                session_id: "test-session".to_string(),
+                generation: 5,
+                pane_id: "%7".to_string(),
+                window_id: "@1".to_string(),
+                harness: "codex".to_string(),
+                state: crate::session_actor::ActorState::Ready,
+                last_transition: crate::session_actor::ActorLastTransition {
+                    caller: "supervisor".to_string(),
+                    reason: reason.to_string(),
+                    timestamp: 0,
+                    prior_generation: 4,
+                    new_generation: 5,
+                },
+            },
+            runtime: SupervisorRuntime {
+                health: SupervisorHealth::Healthy,
+                actor_state: Some(crate::session_actor::ActorState::Ready),
+            },
+        }
+    }
+
+    #[test]
+    fn transition_proves_ready_accepts_idle_pane_reconcile() {
+        let target = ready_target_with_reason("idle_pane_reconcile");
+        assert!(
+            transition_proves_current_generation_ready(&target),
+            "idle_pane_reconcile is supervisor-proven direct pane evidence and must satisfy the route ready barrier"
+        );
+    }
+
+    #[test]
+    fn transition_proves_ready_accepts_prompt_ready_and_dispatch_ready_prompt() {
+        for reason in ["prompt_ready", "dispatch_ready_prompt"] {
+            let target = ready_target_with_reason(reason);
+            assert!(
+                transition_proves_current_generation_ready(&target),
+                "{reason} must remain a valid ready-proof reason"
+            );
+        }
+    }
+
+    #[test]
+    fn transition_proves_ready_rejects_unmatched_reason() {
+        let target = ready_target_with_reason("starting_actor_timeout");
+        assert!(
+            !transition_proves_current_generation_ready(&target),
+            "an unmatched transition reason must not satisfy the ready barrier"
+        );
+    }
+
+    #[test]
+    fn transition_proves_ready_rejects_stale_generation() {
+        let mut target = ready_target_with_reason("idle_pane_reconcile");
+        target.record.last_transition.new_generation = 3;
+        assert!(
+            !transition_proves_current_generation_ready(&target),
+            "a prior-generation transition must not satisfy the current-generation ready barrier"
+        );
+    }
+
+    #[test]
+    fn transition_proves_ready_rejects_non_ready_actor() {
+        let mut target = ready_target_with_reason("idle_pane_reconcile");
+        target.record.state = crate::session_actor::ActorState::Busy;
+        target.runtime.actor_state = Some(crate::session_actor::ActorState::Busy);
+        assert!(
+            !transition_proves_current_generation_ready(&target),
+            "a non-Ready actor must not satisfy the ready barrier even with a matching reason"
         );
     }
 }

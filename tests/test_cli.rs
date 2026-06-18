@@ -792,7 +792,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // backlog→queue sync skips agent-undrainable heads and logs
         // `go_queue_skip_undrainable id=#<id> reason=<reason> session=<...>`
         // (#goqueuestall).
-        ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 2,
+        // 2 -> 3 (`reason=plugin_listener_active`): `persist_queue_maintenance_doc`
+        // logs `write_authority action=routed reason=plugin_listener_active
+        // surface=queue_maintenance` when it routes a queue-maintenance mutation
+        // through the editor IPC instead of a raw disk write (#fccqueue).
+        ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 3,
         ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/route.rs", "accepted_only") => 2,

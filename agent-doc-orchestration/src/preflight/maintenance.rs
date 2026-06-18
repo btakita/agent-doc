@@ -1655,10 +1655,14 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             if persisted_active {
                 current_content = frontmatter::merge_queue_state(&current_content, false)?;
             }
-            // Persist to file + snapshot
-            std::fs::write(file, &current_content)
-                .with_context(|| format!("queue halt: failed to write {}", file.display()))?;
-            converge_live_buffer_queue_shape(file, &current_content, project_root.as_deref());
+            // Persist to file + snapshot (skip the raw disk write behind a live
+            // editor; #fccqueue routes the queue shape through IPC convergence).
+            persist_queue_maintenance_doc(
+                file,
+                &current_content,
+                project_root.as_deref(),
+                "queue_halt",
+            )?;
             if let Ok(Some(snap)) = snapshot::load(file) {
                 let mut new_snap = snap.clone();
                 if let Ok(sc) = crate::component::parse(&new_snap)
@@ -1797,14 +1801,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     if persisted_active {
                         current_content = frontmatter::merge_queue_state(&current_content, false)?;
                     }
-                    std::fs::write(file, &current_content).with_context(|| {
-                        format!("queue halt: failed to write {}", file.display())
-                    })?;
-                    converge_live_buffer_queue_shape(
+                    persist_queue_maintenance_doc(
                         file,
                         &current_content,
                         project_root.as_deref(),
-                    );
+                        "queue_pause",
+                    )?;
                     // Update snapshot
                     if let Ok(Some(snap2)) = snapshot::load(file) {
                         let mut ns = snap2.clone();
@@ -1939,9 +1941,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
 
     // Persist file mutations.
     if mutated {
-        std::fs::write(file, &current_content)
-            .with_context(|| format!("failed to write queue updates to {}", file.display()))?;
-        converge_live_buffer_queue_shape(file, &current_content, project_root.as_deref());
+        persist_queue_maintenance_doc(
+            file,
+            &current_content,
+            project_root.as_deref(),
+            "queue_maintenance",
+        )?;
     }
 
     // Persist snapshot mutations. For newly activated queues, sync the queue
@@ -2223,19 +2228,65 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
         let q = comps.iter().find(|c| c.name == "queue").unwrap();
         q.replace_content(&content, &new_body)
     };
-    std::fs::write(file, &current_content).with_context(|| {
-        format!(
-            "failed to write same-cycle pending-add queue sync to {}",
-            file.display()
-        )
-    })?;
+    persist_queue_maintenance_doc(
+        file,
+        &current_content,
+        project_root.as_deref(),
+        "pending_add_sync",
+    )?;
     adopt_edited_queue_head_into_snapshot(file, &current_content);
-    converge_live_buffer_queue_shape(file, &current_content, project_root.as_deref());
     eprintln!(
         "[write] queue: appended {} same-cycle pending-add id(s) into active go queue",
         synced_ids.len()
     );
     Ok(synced_ids)
+}
+
+/// `#fccqueue`: persist a queue-maintenance document mutation without provoking
+/// an IntelliJ `File Cache Conflict`.
+///
+/// When a live JB editor listener owns the document, the queue shape is converged
+/// through the editor IPC (`converge_live_buffer_queue_shape` → plugin Document
+/// API `setText` + `saveDocument`, no external-modification dialog) and the raw
+/// disk write is **skipped**. The prior unconditional `std::fs::write(file, …)`
+/// at these queue-maintenance sites bypassed the 08b write-authority routing
+/// (`write::atomic_write` → ordered write queue / editor convergence) that the
+/// finalize/response path already uses, so every preflight queue-maintenance
+/// cycle touched disk behind the open editor buffer and fired the conflict
+/// dialog. The pending/review maintenance sites already route through the
+/// `#fcc0` converge-or-disk gate; this brings the queue path to the same
+/// discipline. With no live listener it writes to disk exactly as before, so
+/// non-IDE behavior is byte-identical.
+///
+/// The caller still owns the private snapshot write (a `.agent-doc/` file, never
+/// open in the IDE, so it cannot conflict). Like the convergence it wraps this is
+/// best-effort: an active-listener send failure leaves the correct content in the
+/// snapshot and the next preflight re-converges — it never falls back to a disk
+/// write behind the editor.
+pub(crate) fn persist_queue_maintenance_doc(
+    file: &Path,
+    content: &str,
+    project_root: Option<&Path>,
+    source: &str,
+) -> Result<()> {
+    let listener_active = project_root
+        .map(crate::ipc_socket::is_listener_active)
+        .unwrap_or(false);
+    if listener_active {
+        converge_live_buffer_queue_shape(file, content, project_root);
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "write_authority action=routed reason=plugin_listener_active \
+                 surface=queue_maintenance source={source} len={}",
+                content.len()
+            ),
+        );
+    } else {
+        std::fs::write(file, content)
+            .with_context(|| format!("{source}: failed to write {}", file.display()))?;
+    }
+    Ok(())
 }
 
 /// Converge a live route-owned editor buffer to the queue shape just written to
@@ -2636,6 +2687,66 @@ mod tests {
             updated_state.synced_queue_ids.contains(&"beta".to_string()),
             "beta must be a newly-synced queue id under go-mode: {:?}",
             updated_state.synced_queue_ids
+        );
+    }
+    #[test]
+    fn run_queue_maintenance_routes_through_ipc_without_disk_write_when_listener_active() {
+        // #fccqueue: with a live JB editor listener owning the document, queue
+        // maintenance must NOT raw-write the session doc to disk (the every-cycle
+        // source of the IntelliJ `File Cache Conflict`). It routes the queue shape
+        // through the editor IPC convergence instead and records the routed
+        // write-authority decision in ops.log.
+        let dir = setup_project();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#alpha] already running\n",
+            "- [ ] [#beta] freshly added mid-loop\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        // Fake editor listener that acks patches but never writes the file, so any
+        // change to the on-disk doc could only have come from the binary itself.
+        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        // The mutation still happened logically (beta synced into the queue) ...
+        assert!(
+            state.synced_queue_ids.contains(&"beta".to_string()),
+            "beta must still be synced under go-mode with a listener active: {:?}",
+            state.synced_queue_ids
+        );
+        // ... but the binary must NOT have raw-written the doc to disk behind the
+        // editor: the fake listener never writes the file, so disk stays as-is.
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            content,
+            "queue maintenance must not raw-write the session doc while a JB listener is active"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            log.contains("write_authority action=routed")
+                && log.contains("surface=queue_maintenance"),
+            "active-listener queue maintenance must record the routed write-authority decision:\n{log}"
         );
     }
     #[test]
@@ -3394,6 +3505,50 @@ mod tests {
         let server = std::thread::spawn(move || {
             crate::ipc_socket::start_listener(&listener_root, move |msg| {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(msg) {
+                    // #fccqueue: under the editor-safe contract the binary no longer
+                    // raw-writes the converged queue shape to disk while a listener is
+                    // active — it routes the convergence through us. Mirror the real JB
+                    // plugin (`setText` + `saveDocument`) so disk catches up to the
+                    // converged shape synchronously (before this ack), which is what
+                    // makes the next preflight idempotent. A content-only patch cannot
+                    // change the opening-tag `auto` token or frontmatter, so we apply
+                    // the queue body + `queue_auto` strip + `frontmatter` here just like
+                    // the plugin's convergence handler does.
+                    if v.get("queue_auto").is_some()
+                        && let Some(file_str) = v.get("file").and_then(|x| x.as_str())
+                        && let Ok(mut doc) = std::fs::read_to_string(file_str)
+                    {
+                        if let Some(body) = v
+                            .get("patches")
+                            .and_then(|p| p.get(0))
+                            .and_then(|p| p.get("content"))
+                            .and_then(|c| c.as_str())
+                            && let Ok(comps) = crate::component::parse(&doc)
+                            && let Some(q) = comps.iter().find(|c| c.name == "queue")
+                        {
+                            doc = q.replace_content(&doc, body);
+                        }
+                        if v["queue_auto"] == serde_json::json!(false)
+                            && let Ok(comps) = crate::component::parse(&doc)
+                            && let Some(q) = comps.iter().find(|c| c.name == "queue")
+                        {
+                            let raw = doc[q.open_start..q.open_end].to_string();
+                            let new_tag = crate::queue::strip_auto_from_tag(&raw);
+                            if new_tag != raw {
+                                let mut rebuilt = String::with_capacity(doc.len());
+                                rebuilt.push_str(&doc[..q.open_start]);
+                                rebuilt.push_str(&new_tag);
+                                rebuilt.push_str(&doc[q.open_end..]);
+                                doc = rebuilt;
+                            }
+                        }
+                        if v.get("frontmatter") == Some(&serde_json::json!("queue: stop"))
+                            && let Ok(merged) = frontmatter::merge_queue_state(&doc, false)
+                        {
+                            doc = merged;
+                        }
+                        let _ = std::fs::write(file_str, &doc);
+                    }
                     received_clone.lock().unwrap().push(v);
                 }
                 Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())

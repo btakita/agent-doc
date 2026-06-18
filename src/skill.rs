@@ -215,6 +215,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         "persist-closeout.md",
         include_str!("../runbooks/persist-closeout.md"),
     ),
+    (
+        "describe-image.md",
+        include_str!("../runbooks/describe-image.md"),
+    ),
 ];
 
 /// Current binary version (from Cargo.toml).

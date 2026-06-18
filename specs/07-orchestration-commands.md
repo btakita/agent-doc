@@ -348,6 +348,20 @@ Semantics:
   populates/maintains the queue; it does **not** itself start the loop.
 - The sync is idempotent: when the queue already matches the requested shape it
   mutates nothing, so it is safe to run on every preflight cycle.
+- **Editor-safe persistence (`#fccqueue`).** When queue maintenance mutates the
+  document (queue body sync, opening-tag activation-token strip, `queue:`
+  frontmatter state), it must not raw-write the session document to disk behind a
+  live editor. With a JB editor IPC listener active it routes the queue shape
+  through the editor convergence (`converge_live_buffer_queue_shape` → plugin
+  `setText` + `saveDocument`, no IntelliJ `File Cache Conflict` dialog) and skips
+  the `std::fs::write`, recording `write_authority action=routed
+  surface=queue_maintenance` in `ops.log`. With no listener it writes to disk as
+  before, so non-IDE behavior is byte-identical. This brings queue maintenance to
+  the same `#fcc0` converge-or-disk discipline the pending/review maintenance
+  sites already use, and closes the 08b gap where preflight queue maintenance
+  bypassed the write-authority routing the finalize/response path uses. The
+  private `.agent-doc/` snapshot is still written directly (never open in the
+  IDE, so it cannot conflict).
 - **Active-loop population (`#backlog-queue-sync-pending-add-amplification` /
   `#backlog-queue-attr-populates-in-go-mode`).** While a queue is *persisted-active*
   (`queue_active: true`) the population rule depends on the loop mode:

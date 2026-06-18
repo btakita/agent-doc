@@ -184,18 +184,26 @@ Two issues, filed as **`#routedeadshell`** (plan `tasks/agent-doc/plan-route-dis
 2. **Harness crash root-cause — needs you.** Why Claude exited to a shell on `recruit/virtuousai.md` isn't in this document's logs (it's a different session's logs / the dead pane's scrollback). Like `#tsiftmdcrash`. **Operator action: paste the `recruit/virtuousai.md` crash error text / pane scrollback from the crash moment (or the cycle id)** — the `/model opus` restart context is the lead to chase.
 
 This was the leading queue head; remaining drainable agent-doc work now queued: `#733r` (qheadsync), `#021p`/`#rz3afix` (the mirror-all Phase 2 supervisor defer), `#semmerge` (closeout CRDT/IPC merge — likely the root of the IPC drift this session keeps hitting), plus `#routedeadshell`. Queue stays paused; tell me which to take next, or I'll start with `#rz3afix` (unblocks resuming the queue) then `#semmerge`.
-<!-- agent:boundary:85b8b102 -->
+
+### Re: drain the queue — #qheadsync orphan-shadow wedge fixed (0.34.6) — opus-4-8
+
+Took the next agent-actionable item. Fixed the **orphan-shadow wedge** — the precise bug that's forced the manual `Edit`+`reset --from-current`+`commit` dance after every `--done` this session.
+
+**Root cause:** `pending::detect_shadow_open_items` excluded tracked-work + `exchange` components from its scan but **not `agent:queue`**. So a queue head referencing an id absent from the live backlog — a reaped id's lingering `[#id]: note` head (`[#jbacceptwedge]: 0.2.170 installed`), or a `#mirrorall`-mirrored `do [#id]` whose item is reaped — was misread as an "open backlog item that exists only outside the live backlog," and `enforce_no_shadow_open_backlog` `bail!`ed in the preflight **repair** step, *before* the done-strike maintenance pass could clear the head. Queue `[#id]` heads are legitimate references, not shadow backlog items in commented-out prose, so the queue is now excluded from the scan like `exchange`/tracked-work already are (genuine shadow items in HTML comments are still caught). This matters more post-`#mirrorall`, which puts many `[#id]` heads in the queue.
+
+Shipped **0.34.6** (`5ce4e465`, CI green, installed). Verified: preflight on this doc now runs clean — no shadow `bail!`. Test: `detect_shadow_open_items_ignores_agent_queue_id_heads`.
+
+This is the **orphan-shadow half of `#733r`/`#qheadsync`**; the answered-free-text auto-strike half remains (its `--done`-strike path already largely works now that the shadow guard doesn't pre-empt it). Remaining agent-actionable backlog: `#021p`/`#rz3afix` (supervisor defer, needs tmux-ci), `#semmerge` (the converge.rs CRDT-merge root cause behind the worktree drift — full fix needs the Phase-4 AST model; a node-disjoint auto-rebase stopgap is the tractable slice), `#routedeadshell`, the `#qheadsync` auto-strike remainder. Queue stays paused; I'll keep taking the safe/contained ones — `#semmerge` stopgap next unless you redirect.
+<!-- agent:boundary:bd0d0219 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~[#tsiftmdcrash]~~
-- ~~:pushpin: Any backlog, review, or icebox item that is blocked by some operation action should have the operator action with bold formatting.~~
-- ~~~~:pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.~~ (filed #qheadsync)~~
-- ~~~~:pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.~~ (filed #pcwcdiskfree)~~
-- ~~Any free text that is processed and struck should have a response in the agent:exchange.~~
-- ~~:pushpin: JB `Run Agent Doc` on virtuousai.com did not submit. Then it crashed. ![img_48.png](img_48.png)~~ (filed #routedeadshell)
+- [#021p]
+- #semmerge
+- Investigate the task thrashing in virtuousai.md session. Please fix.
+- The agent defined a task id #rz3afix, but agent-doc redefined the task id to [#021p]. If an agent defines a task id, agent-doc should be able to parse the task id and use the agent defined task id. Note that if the agent's defined task id does not pass the id validation logic such as malformed or duplicate of a prompt_preset or another entity, resolve and create a new task id if necessary.
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md
 ```

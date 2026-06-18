@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,26 @@ completed
 Compacted content:
 - Archived 5 response topic(s): AvailableDeal dialog + page restructure (#spec-test-commit-push, deploy); queue cleanup; Loan Status thin node map in a single row; 2 more
 - Prior summary/context: prior compacted content: Archived 6 response topic(s): Selecting a lender advances deal to Processing; Activity Histo...
-<!-- agent:boundary:1528cdd5 -->
+
+### Re: Available Deal dialog full screen in Deal Pipeline — glm-5.2
+
+> **Queue prompt:**
+>
+> Make the Available Deal dialog full screen in Deal Pipeline. deploy
+
+
+Made the published-deal (Available Deal) dialog in `/admin/pipeline` full screen and shipped it through the spec-test-commit-push + deploy preset.
+
+**Change** (`src/equityfundingsource-dev` @ ba2c0a8, pushed to `origin/main`):
+- `lib/ui--browser--efs/portal/admin/pipeline.tsx`: the `deal_id` branch of `PipelineCardModal` now uses `max_width="max-w-[calc(100vw-40px)]"` + `panel_style="height:calc(100dvh - 40px);overflow:hidden;"` instead of the prior `max-w-[80rem]` × `min(88dvh,900px)`. That fills PortalModal's 20px-padded viewport so `AdminDealDetail` tabs (overview / lender interests / documents) get maximum room on wide screens. The non-deal loan dialog (`max-w-[72rem]` × `min(88dvh,900px)`) is unchanged — loans in the Available Deals column that haven't been published as deals keep the bounded panel.
+- `tests/portal-table-dialog.test.ts`: new test `Available Deal dialog renders full screen in the Deal Pipeline (#available-deal-fullscreen)` locks in both the full-screen deal style and the still-bounded loan style.
+
+**Verification**: `make check` green — 815 tests pass / 0 fail / 5833 expect() calls (incl. the new test and all 15 `portal-table-dialog` cases); worker bundle builds clean.
+
+**Deploy** (`make deploy`): migrations list remote = none pending; Worker uploaded + activated. Version ID `5ed228fb-a817-454f-9789-96566079a9c3` on `https://equityfundingsource.brian-takita.workers.dev`. Smoke: `/` → 200, `/admin/pipeline` → 303 (Cloudflare Access redirect, expected). The full-screen dialog is live behind admin auth.
+
+Did not touch the loan/lead/application dialogs — those stay bounded per the existing `#pipeline-dialog-controls-scope` test. If you want the loan dialog to also go full screen (e.g. for consistency on Available-Deals-column loans without a published deal), say the word and I'll mirror the change.
+<!-- agent:boundary:939307ce -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +70,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Make the Available Deal dialog full screen in Deal Pipeline. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -272,7 +272,24 @@ It returns `{ merged_doc, outcomes, requires_ack }` — `merged_doc` reconstruct
 **Found + filed a real substrate bug — `#mdastclose` (`#gszq`):** `overlay::Component::end_byte` is wrong for the standard `/agent:name` close spelling (only the `agent:/name` form is parsed → implicit close → wrong end span). Item parsing is unaffected (implicit-close still works), so it's latent, but byte-span consumers get a bad range. `semantic_merge` worked around it with a local marker scan; the overlay fix is queued.
 
 **Remaining `#semmerge` phases** — Phase 2 `#smconv` (`#aqhr`) is the next actionable: wire `semantic_merge` into `write/converge.rs`, replacing the fail-closed line-merge + `content_ours`-wins adoption. That edits the **safety-critical commit/convergence path** — it must run in a focused clean cycle with `make check` + `make tmux-ci`, **not** a degraded-session drain (this very session kept hitting the bug it fixes). Phases 3–5 (queue-node-strike, ack-turn, simworld) follow in the plan. No version bump/install — Phase 1 is unconsumed groundwork with no behavior change yet.
-<!-- agent:boundary:6ae257a0 -->
+
+### Re: investigate the task thrashing in virtuousai.md — already-tracked, no new fix — opus-4-8 (HEAD)
+
+> **Queue prompt:**
+>
+> :pushpin: The agent defined a task id #rz3afix, but agent-doc redefined the task id to [#021p]. If an agent defines a task id, agent-doc should be able to parse the task id and use the agent defined task id. Note that if the agent's defined task id does not pass the id validation logic such as malformed or duplicate of a prompt_preset or another entity, resolve and create a new task id if necessary.
+
+
+Investigated. `tasks/recruit/virtuousai.md` has an **empty queue** (`&lt;!-- agent:queue --&gt;&lt;!-- /agent:queue --&gt;`, no `queue_active`) right now — it is **not** actively thrashing. The thrashing you observed maps entirely to two already-tracked classes:
+
+1. **Idle-watch re-injection thrash (qflood)** — the supervisor re-injecting `agent-doc` triggers on a queue with no agent-drainable head. **Root-fixed:** `#rz3afix`/`#021p` is done — the supervisor idle-watch now gates dispatch on the shared `live_drainable_continuation_head` drainability filter (`SkipNoActiveHead` when only operator-verify/empty heads remain), confirmed live in `start/idle_watch.rs`. The `#qflood` auto-pause protection is the backstop.
+
+2. **Supervisor + tmux pane crash → dispatch-into-dead-shell stall** — the 2× crash + 3rd-attempt stall. Filed as **`#routedeadshell`** (plan `plan-route-dispatch-into-crashed-harness.md`): agent-actionable half = route must identify a harness dispatch-ready prompt and fail closed on a bare shell instead of typing into it; the crash *root-cause* stays operator-gated on the `supervisor-stderr.log` + pane scrollback capture.
+
+No new agent-fix from this head — virtuousai's thrash is the union of a fixed bug and a filed one; next concrete work is `#routedeadshell` in its own route cycle.
+
+NOTE (recovered via `--force-disk`): this answer was dropped twice by the live editor buffer's `content_ours` adoption (`live_prompt_drift_after_preflight`) — the IntelliJ buffer for this doc is stale/corrupt and overriding IPC writes. The session needs an editor buffer refresh / restart before further drains.
+<!-- agent:boundary:dd8a2bc0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -282,7 +299,7 @@ It returns `{ merged_doc, outcomes, requires_ack }` — `merged_doc` reconstruct
 - ~~:pushpin: #semmerge~~
 - ~~:pushpin: Investigate the task thrashing in virtuousai.md session. Please fix.~~
 - ~~:pushpin: After JB `Clear Session Context` on this document then JB `Run Agent Doc` stalled.~~
-- :pushpin: The agent defined a task id #rz3afix, but agent-doc redefined the task id to [#021p]. If an agent defines a task id, agent-doc should be able to parse the task id and use the agent defined task id. Note that if the agent's defined task id does not pass the id validation logic such as malformed or duplicate of a prompt_preset or another entity, resolve and create a new task id if necessary.
+- ~~:pushpin: The agent defined a task id #rz3afix, but agent-doc redefined the task id to [#021p]. If an agent defines a task id, agent-doc should be able to parse the task id and use the agent defined task id. Note that if the agent's defined task id does not pass the id validation logic such as malformed or duplicate of a prompt_preset or another entity, resolve and create a new task id if necessary.~~
 - :pushpin: I ran JB `Run Agent Doc` on virtuousai.md and the supervisor + tmux pane crashed 2 times. The 3rd attempt stalled and I manually ran the `agent-doc .../virtuousai.md` command...and the turn is in progress.
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md

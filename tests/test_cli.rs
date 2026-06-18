@@ -1039,8 +1039,17 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // when `ipc.sock` is connectable but the plugin does not ack, keeping
         // the session on file-IPC instead of clearing the latch from connect-only
         // evidence.
-        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 12,
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 17,
+        // 12 -> 16 (#smconv): +4 `guard_` are test-assertion calls to
+        // `guard_ipc_snapshot_adoption_against_live_prompt_drift(` in the new
+        // `#smconv` semantic-merge convergence tests — not production hot-path
+        // guards (the production guard count is unchanged).
+        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 16,
+        // 17 -> 18 (#smconv): +1 production `reason=node_keyed_semantic_merge` on
+        // the new `live_prompt_drift_semantic_merged` ops_log — the node-keyed
+        // merge success path, mirroring the sibling `#fintol2`
+        // `reason=independent_concurrent_edit` forward-merge log (an ops_log
+        // human-reason, not a new flow-enum outcome).
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 18,
         // +1 `guard_` (#fcc0-degraded-file-ipc): `IpcPollOptions::convergence`
         // centralizes the existing committed-cycle file-IPC poll guard for
         // convergence callers; this is a constructor for the existing guard, not

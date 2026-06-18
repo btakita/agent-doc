@@ -175,6 +175,7 @@ pub fn semantic_merge(base: &str, ours_agent: &str, theirs_operator: &str) -> Se
         &theirs_comps,
         &base_comps,
         &ours_comps,
+        ours_agent,
         &mut outcomes,
         &mut requires_ack,
     );
@@ -589,6 +590,237 @@ fn merge_component_items(
     lines
 }
 
+/// The exchange component name (response-turn component).
+const EXCHANGE_COMPONENT: &str = "exchange";
+
+/// One `### ` heading-block from an exchange body: the heading line plus the
+/// following prose/blockquote lines up to (but not including) the next `### `
+/// heading or end of buffer.
+struct HeadingBlock {
+    /// Normalized identity key (strike wrapper + trailing ` (HEAD)` stripped).
+    key: String,
+    /// The verbatim lines of the block (heading line first, then its body),
+    /// each retaining its trailing newline as captured.
+    lines: Vec<String>,
+}
+
+/// Is `trimmed` an h3 heading line (`### …`)? Mirrors the exchange turn shape.
+fn is_h3_heading(trimmed: &str) -> bool {
+    trimmed.starts_with("### ") || trimmed == "###"
+}
+
+/// Normalize a `### ` heading line into a stable turn-identity key: strip the
+/// leading `### ` prefix, a surrounding `~~…~~` strike wrapper, and a trailing
+/// ` (HEAD)` boundary annotation (transient — must not affect identity).
+fn normalize_heading_key(trimmed: &str) -> String {
+    let body = trimmed.strip_prefix("###").unwrap_or(trimmed).trim();
+    let mut t = body.trim();
+    // Strip a surrounding strike wrapper.
+    if t.len() >= 4 && t.starts_with("~~") && t.ends_with("~~") {
+        t = t[2..t.len() - 2].trim();
+    }
+    // Strip a trailing ` (HEAD)` boundary annotation.
+    if let Some(stripped) = t.strip_suffix("(HEAD)") {
+        t = stripped.trim_end();
+    }
+    t.to_string()
+}
+
+/// Split a sequence of exchange inner lines into `(leading_lines, blocks)` where
+/// `leading_lines` is any content before the first `### ` heading and `blocks` is
+/// the ordered list of heading-keyed turn blocks.
+fn split_heading_blocks(lines: &[String]) -> (Vec<String>, Vec<HeadingBlock>) {
+    let mut leading: Vec<String> = Vec::new();
+    let mut blocks: Vec<HeadingBlock> = Vec::new();
+    let mut current: Option<HeadingBlock> = None;
+
+    for line in lines {
+        let trimmed = line.trim_end_matches(['\n', '\r']).trim();
+        if is_h3_heading(trimmed) {
+            if let Some(b) = current.take() {
+                blocks.push(b);
+            }
+            current = Some(HeadingBlock {
+                key: normalize_heading_key(trimmed),
+                lines: vec![line.clone()],
+            });
+        } else if let Some(b) = current.as_mut() {
+            b.lines.push(line.clone());
+        } else {
+            leading.push(line.clone());
+        }
+    }
+    if let Some(b) = current.take() {
+        blocks.push(b);
+    }
+    (leading, blocks)
+}
+
+/// Merge the `exchange` component's inner body.
+///
+/// Exchange response turns are append-only `### Re:` heading-prose blocks, not
+/// list items, so the standard item merge cannot reconstruct them. This function
+/// preserves theirs' inner content verbatim (its skeleton) and appends any
+/// `### ` heading-blocks present in `ours_agent` but absent in `theirs_operator`
+/// (keyed by [`normalize_heading_key`]), inserted before a trailing
+/// `<!-- agent:boundary:… -->` marker if one is present. When neither side uses
+/// heading-prose turns it falls back to the standard list-item merge so the
+/// existing bullet-based exchange behavior is unchanged.
+#[allow(clippy::too_many_arguments)]
+fn merge_exchange_inner(
+    theirs_inner: &[String],
+    base_comp: Option<&Component>,
+    ours_comp: Option<&Component>,
+    theirs_comp: Option<&Component>,
+    ours_source: &str,
+    outcomes: &mut Vec<NodeOutcome>,
+    acks: &mut Vec<AckRequest>,
+) -> String {
+    let (theirs_leading, theirs_blocks) = split_heading_blocks(theirs_inner);
+
+    // The overlay only models bullet items, so heading-prose `### Re:` turns are
+    // invisible to it (and the overlay's `end_byte` is unreliable for an
+    // item-less component). Recover ours' raw inner lines with a direct line scan
+    // of the agent source between the exchange open and close markers. (`ours_comp`
+    // is still used below for the bullet-only fallback path.)
+    let ours_inner: Vec<String> = component_inner_lines(EXCHANGE_COMPONENT, ours_source);
+    let (_ours_leading, ours_blocks) = split_heading_blocks(&ours_inner);
+
+    let uses_heading_turns = !theirs_blocks.is_empty() || !ours_blocks.is_empty();
+
+    if !uses_heading_turns {
+        // No heading-prose turns on either side — delegate to the list-item merge
+        // so the existing bullet-based exchange behavior is preserved exactly.
+        let mut out = String::new();
+        if let Some(tc) = theirs_comp {
+            let merged = merge_component_items(
+                EXCHANGE_COMPONENT,
+                base_comp,
+                ours_comp,
+                tc,
+                outcomes,
+                acks,
+            );
+            for ml in &merged {
+                out.push_str(ml);
+                out.push('\n');
+            }
+        }
+        return out;
+    }
+
+    // Heading-prose regime. Preserve theirs' inner verbatim, then append agent-new
+    // heading-blocks before a trailing boundary marker (if present), else at end.
+    let theirs_keys: std::collections::HashSet<&str> =
+        theirs_blocks.iter().map(|b| b.key.as_str()).collect();
+
+    // Determine the insertion point: theirs' inner is `leading` + each block's
+    // lines. A trailing `<!-- agent:boundary:… -->` marker line lives at the very
+    // end (in theirs' leading lines if there are no blocks, or in the last
+    // block's trailing lines). We rebuild the inner explicitly to control where
+    // the boundary marker sits relative to the appended blocks.
+    let agent_new: Vec<&HeadingBlock> = ours_blocks
+        .iter()
+        .filter(|b| !theirs_keys.contains(b.key.as_str()))
+        .collect();
+
+    // Flatten theirs' inner back to its line vector, then split off a trailing
+    // boundary marker line (and any trailing blank lines that follow it) so the
+    // appended turns land before it.
+    let mut flat: Vec<String> = Vec::new();
+    flat.extend(theirs_leading.iter().cloned());
+    for b in &theirs_blocks {
+        flat.extend(b.lines.iter().cloned());
+    }
+
+    // Find the last boundary-marker line index, if any.
+    let boundary_idx = flat.iter().rposition(|l| {
+        is_boundary_marker(l.trim_end_matches(['\n', '\r']).trim())
+    });
+
+    // Build the appended-turns text once, recording an `AppliedAgentAdd` per turn.
+    // A trailing boundary-marker line that the block scan swept into the agent's
+    // last turn belongs to the structural skeleton (theirs already carries it),
+    // so it is stripped here to avoid emitting a duplicate boundary marker.
+    let mut appended = String::new();
+    for b in &agent_new {
+        record(outcomes, EXCHANGE_COMPONENT, &b.key, OutcomeKind::AppliedAgentAdd);
+        let mut block_lines: &[String] = &b.lines;
+        while let Some(last) = block_lines.last() {
+            let t = last.trim_end_matches(['\n', '\r']).trim();
+            if t.is_empty() || is_boundary_marker(t) {
+                block_lines = &block_lines[..block_lines.len() - 1];
+            } else {
+                break;
+            }
+        }
+        for l in block_lines {
+            appended.push_str(l);
+            if !l.ends_with('\n') {
+                appended.push('\n');
+            }
+        }
+    }
+
+    let mut out = String::new();
+    match boundary_idx {
+        Some(idx) => {
+            // Emit everything before the boundary line, then the appended turns,
+            // then the boundary line and any trailing content verbatim.
+            for l in &flat[..idx] {
+                out.push_str(l);
+            }
+            out.push_str(&appended);
+            for l in &flat[idx..] {
+                out.push_str(l);
+            }
+        }
+        None => {
+            for l in &flat {
+                out.push_str(l);
+            }
+            out.push_str(&appended);
+        }
+    }
+    out
+}
+
+/// Recognize an `<!-- agent:boundary:HASH -->` marker line.
+fn is_boundary_marker(trimmed: &str) -> bool {
+    let Some(inner) = trimmed.strip_prefix("<!--").and_then(|s| s.strip_suffix("-->")) else {
+        return false;
+    };
+    inner.trim().starts_with("agent:boundary:")
+}
+
+/// Reconstruct a named component's inner raw lines (everything between its open
+/// and close markers, exclusive) with a direct line scan of `source`.
+///
+/// This deliberately does not use the overlay's `Component` byte span: the
+/// overlay only parses bullet items into nodes, so an exchange component made of
+/// heading-prose turns (no items) records an unreliable `end_byte`. A line scan
+/// recovers the verbatim inner content the heading-block append needs. Markers
+/// inside fenced code are not a concern for the exchange (responses are prose),
+/// and the open/close grammar mirrors the overlay's marker recognizers.
+fn component_inner_lines(name: &str, source: &str) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut inside = false;
+    for line in source.split_inclusive('\n') {
+        let trimmed = line.trim_end_matches(['\n', '\r']).trim();
+        if !inside {
+            if open_marker_name(trimmed).as_deref() == Some(name) {
+                inside = true;
+            }
+            continue;
+        }
+        if close_marker_name(trimmed).as_deref() == Some(name) {
+            break;
+        }
+        lines.push(line.to_string());
+    }
+    lines
+}
+
 fn record(outcomes: &mut Vec<NodeOutcome>, comp: &str, id: &str, kind: OutcomeKind) {
     outcomes.push(NodeOutcome {
         component: comp.to_string(),
@@ -628,16 +860,23 @@ fn close_marker_name(trimmed: &str) -> Option<String> {
 /// Line-scanning: the operator body is the layout skeleton. Non-component lines
 /// pass through verbatim. When an open marker is seen, all lines up to the close
 /// marker are dropped and replaced by the merged item lines for that component.
+#[allow(clippy::too_many_arguments)]
 fn merge_components_into_body(
     theirs_body: &str,
     theirs_comps: &[Component],
     base_comps: &[Component],
     ours_comps: &[Component],
+    ours_source: &str,
     outcomes: &mut Vec<NodeOutcome>,
     acks: &mut Vec<AckRequest>,
 ) -> String {
     let mut out = String::new();
     let mut open: Option<String> = None; // currently-open component name
+    // While inside the `exchange` component, the inner lines are buffered verbatim
+    // (heading-prose `### Re:` turns are not list items, so the item merge cannot
+    // reconstruct them; they must be preserved as-is). At the close marker the
+    // buffer is rewritten by [`merge_exchange_inner`] to append agent-new turns.
+    let mut exchange_inner: Vec<String> = Vec::new();
 
     for line in theirs_body.split_inclusive('\n') {
         let content = line.trim_end_matches('\n');
@@ -651,7 +890,21 @@ fn merge_components_into_body(
                 let theirs_comp = find_comp(theirs_comps, name);
                 let base_comp = find_comp(base_comps, name);
                 let ours_comp = find_comp(ours_comps, name);
-                if let Some(tc) = theirs_comp {
+                if name == EXCHANGE_COMPONENT {
+                    // Exchange: preserve theirs' inner lines verbatim, then append
+                    // any `### Re:` heading-blocks that exist only in the agent body.
+                    let merged_inner = merge_exchange_inner(
+                        &exchange_inner,
+                        base_comp,
+                        ours_comp,
+                        theirs_comp,
+                        ours_source,
+                        outcomes,
+                        acks,
+                    );
+                    out.push_str(&merged_inner);
+                    exchange_inner.clear();
+                } else if let Some(tc) = theirs_comp {
                     let merged = merge_component_items(
                         name, base_comp, ours_comp, tc, outcomes, acks,
                     );
@@ -662,6 +915,9 @@ fn merge_components_into_body(
                 }
                 out.push_str(line); // close marker line, verbatim
                 open = None;
+            } else if name == EXCHANGE_COMPONENT {
+                // Buffer the exchange inner line verbatim for the append pass.
+                exchange_inner.push(line.to_string());
             }
             // else: drop the original inner line (replaced by merged items above)
             continue;
@@ -678,18 +934,33 @@ fn merge_components_into_body(
     }
 
     // An unterminated operator component (no recognized close) — flush its items.
-    if let Some(name) = open.take()
-        && let Some(tc) = find_comp(theirs_comps, &name)
-    {
+    if let Some(name) = open.take() {
         let base_comp = find_comp(base_comps, &name);
         let ours_comp = find_comp(ours_comps, &name);
-        let merged = merge_component_items(&name, base_comp, ours_comp, tc, outcomes, acks);
-        if !out.ends_with('\n') && !out.is_empty() {
-            out.push('\n');
-        }
-        for ml in &merged {
-            out.push_str(ml);
-            out.push('\n');
+        if name == EXCHANGE_COMPONENT {
+            let theirs_comp = find_comp(theirs_comps, &name);
+            let merged_inner = merge_exchange_inner(
+                &exchange_inner,
+                base_comp,
+                ours_comp,
+                theirs_comp,
+                ours_source,
+                outcomes,
+                acks,
+            );
+            if !out.ends_with('\n') && !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&merged_inner);
+        } else if let Some(tc) = find_comp(theirs_comps, &name) {
+            let merged = merge_component_items(&name, base_comp, ours_comp, tc, outcomes, acks);
+            if !out.ends_with('\n') && !out.is_empty() {
+                out.push('\n');
+            }
+            for ml in &merged {
+                out.push_str(ml);
+                out.push('\n');
+            }
         }
     }
 
@@ -1135,5 +1406,184 @@ queue: stop
         let m = semantic_merge(base, ours, theirs);
         assert!(m.merged_doc.contains("OPERATOR-PROSE"));
         assert!(!m.merged_doc.contains("AGENT-PROSE"));
+    }
+
+    // ----- exchange heading-prose turns (`#semmerge` real format) ----------
+
+    #[test]
+    fn exchange_appends_agent_new_heading_prose_turn() {
+        // base + theirs: exchange has `### Re: A` and `### Re: B` heading-prose
+        // turns. ours: A, B, plus a NEW `### Re: C — opus-4-8` turn with prose.
+        // theirs additionally flips a frontmatter scalar and adds a queue item.
+        let base = "\
+---
+queue: start
+---
+<!-- agent:queue -->
+- do [#a] task
+<!-- /agent:queue -->
+
+<!-- agent:exchange -->
+### Re: A — opus-4-8
+
+Answer to A.
+
+### Re: B — opus-4-8
+
+Answer to B.
+<!-- /agent:exchange -->
+";
+        let ours = "\
+---
+queue: start
+---
+<!-- agent:queue -->
+- do [#a] task
+<!-- /agent:queue -->
+
+<!-- agent:exchange -->
+### Re: A — opus-4-8
+
+Answer to A.
+
+### Re: B — opus-4-8
+
+Answer to B.
+
+### Re: C — opus-4-8
+
+Brand new agent turn for C.
+<!-- /agent:exchange -->
+";
+        let theirs = "\
+---
+queue: stop
+---
+<!-- agent:queue -->
+- do [#a] task
+- do [#opadd] operator queue item
+<!-- /agent:queue -->
+
+<!-- agent:exchange -->
+### Re: A — opus-4-8
+
+Answer to A.
+
+### Re: B — opus-4-8
+
+Answer to B.
+<!-- /agent:exchange -->
+";
+        let m = semantic_merge(base, ours, theirs);
+
+        // Agent's new heading + prose appended.
+        assert!(
+            m.merged_doc.contains("### Re: C — opus-4-8"),
+            "agent's new C heading present: {}",
+            m.merged_doc
+        );
+        assert!(
+            m.merged_doc.contains("Brand new agent turn for C."),
+            "agent's new C prose present: {}",
+            m.merged_doc
+        );
+        // Operator's disjoint changes applied.
+        assert!(m.merged_doc.contains("queue: stop"), "operator fm flip: {}", m.merged_doc);
+        assert!(m.merged_doc.contains("[#opadd]"), "operator queue add: {}", m.merged_doc);
+        // Existing turns kept, not duplicated.
+        assert_eq!(m.merged_doc.matches("### Re: A — opus-4-8").count(), 1);
+        assert_eq!(m.merged_doc.matches("### Re: B — opus-4-8").count(), 1);
+
+        // C yields an AppliedAgentAdd outcome on the exchange component.
+        let c_outcome = m
+            .outcomes
+            .iter()
+            .find(|o| o.component == "exchange" && o.id == "Re: C — opus-4-8")
+            .expect("C turn outcome present");
+        assert_eq!(c_outcome.kind, OutcomeKind::AppliedAgentAdd);
+
+        // Re-parses cleanly (queue still recognizable).
+        let queue_ids = reparses_to_ids(&m.merged_doc, "queue");
+        assert!(queue_ids.contains(&"a".to_string()));
+        assert!(queue_ids.contains(&"opadd".to_string()));
+    }
+
+    #[test]
+    fn exchange_head_marker_does_not_split_turn_identity() {
+        // ours has the `(HEAD)` boundary annotation; base/theirs do not. The turn
+        // must be treated as the SAME (not re-appended / duplicated).
+        let base = "\
+<!-- agent:exchange -->
+### Re: X — opus-4-8
+
+Answer to X.
+<!-- /agent:exchange -->
+";
+        let ours = "\
+<!-- agent:exchange -->
+### Re: X — opus-4-8 (HEAD)
+
+Answer to X.
+<!-- /agent:exchange -->
+";
+        let theirs = base.to_string();
+        let m = semantic_merge(base, ours, &theirs);
+
+        // Exactly one X turn — the `(HEAD)` variant must NOT be appended as new.
+        let count = m.merged_doc.matches("### Re: X — opus-4-8").count();
+        assert_eq!(count, 1, "X not duplicated: {}", m.merged_doc);
+        // No AppliedAgentAdd for X on exchange.
+        assert!(
+            !m.outcomes
+                .iter()
+                .any(|o| o.component == "exchange" && o.kind == OutcomeKind::AppliedAgentAdd),
+            "no agent-add for the HEAD-annotated same turn: {:?}",
+            m.outcomes
+        );
+    }
+
+    #[test]
+    fn exchange_boundary_marker_preserved_and_new_turn_before_it() {
+        // theirs' exchange ends with a boundary marker; ours appends a new turn.
+        let base = "\
+<!-- agent:exchange -->
+### Re: A — opus-4-8
+
+Answer to A.
+<!-- agent:boundary:abc123 -->
+<!-- /agent:exchange -->
+";
+        let ours = "\
+<!-- agent:exchange -->
+### Re: A — opus-4-8
+
+Answer to A.
+
+### Re: B — opus-4-8
+
+New turn B.
+<!-- agent:boundary:abc123 -->
+<!-- /agent:exchange -->
+";
+        let theirs = base.to_string();
+        let m = semantic_merge(base, ours, &theirs);
+
+        // New turn appended.
+        assert!(m.merged_doc.contains("### Re: B — opus-4-8"), "B present: {}", m.merged_doc);
+        // Exactly one boundary marker.
+        assert_eq!(
+            m.merged_doc.matches("<!-- agent:boundary:abc123 -->").count(),
+            1,
+            "single boundary marker: {}",
+            m.merged_doc
+        );
+        // New turn lands BEFORE the boundary marker.
+        let b_idx = m.merged_doc.find("### Re: B — opus-4-8").unwrap();
+        let boundary_idx = m.merged_doc.find("<!-- agent:boundary:abc123 -->").unwrap();
+        assert!(
+            b_idx < boundary_idx,
+            "new turn must precede the boundary marker: {}",
+            m.merged_doc
+        );
     }
 }

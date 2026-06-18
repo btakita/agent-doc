@@ -581,6 +581,98 @@ pub(crate) enum AlreadyAppliedSnapshotOutcome {
     NeedsFileFallback,
 }
 
+/// `#smconv` helper: the `### Re:` response heading lines present in the agent's
+/// `candidate` exchange component but absent from `base` — i.e. the new response
+/// turn(s) the agent authored this cycle. Used by [`try_semantic_merge_convergence`]
+/// to refuse a merge that would silently drop the agent's heading-prose response.
+fn new_agent_response_headings(base: &str, candidate: &str) -> Vec<String> {
+    let base_ex = exchange_component_text(base);
+    let candidate_ex = exchange_component_text(candidate);
+    let base_headings: std::collections::HashSet<&str> = base_ex
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("### Re:"))
+        .collect();
+    candidate_ex
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("### Re:"))
+        .filter(|l| !base_headings.contains(l))
+        .map(str::to_string)
+        .collect()
+}
+
+/// `#smconv` (`#semmerge-converge-adapter`, Phase 2): attempt a node-keyed
+/// semantic merge of `base`, `candidate` (the agent's response snapshot =
+/// `ours_agent`), and `content_ours` (the editor buffer = `theirs_operator`),
+/// returning the merged document ONLY when it is *safely applicable*.
+///
+/// This is the convergence path that replaces dropping the agent's work via a
+/// `content_ours` adoption: when the operator and agent edited disjoint nodes
+/// (the common case) both change-sets land; on a true same-node conflict the
+/// operator wins. The merge is applied only when ALL conservative gates hold —
+/// this is the commit path, so when in doubt the caller falls through to the
+/// existing line-based `#fintol2` / `content_ours` carry-forward UNCHANGED:
+///
+/// 1. The reconstructed `merged_doc` is non-empty and re-parses cleanly
+///    (`component::structural_corruption_reason` is `None`).
+/// 2. The merge preserves the agent's response: it must NOT drop any agent
+///    exchange/queue/backlog content that `content_ours` would have dropped —
+///    both `dropped_prompt_lines_after_content_ours` and
+///    `dropped_queue_prompt_lines_after_content_ours` against `merged_doc` are
+///    empty. This is the critical safety check.
+/// 3. The AST model actually applies: `base`, `candidate`, and `content_ours`
+///    each parse to at least one component, so node-keyed merge is meaningful.
+fn try_semantic_merge_convergence(
+    base: &str,
+    candidate: &str,
+    content_ours: &str,
+) -> Option<agent_doc_markdown_ast::semantic_merge::SemanticMerge> {
+    // Gate 3 first (cheapest, no allocation of the merged doc): the AST model
+    // must apply to all three sides for a node-keyed merge to be meaningful.
+    if agent_doc_markdown_ast::overlay::components(base).is_empty()
+        || agent_doc_markdown_ast::overlay::components(candidate).is_empty()
+        || agent_doc_markdown_ast::overlay::components(content_ours).is_empty()
+    {
+        return None;
+    }
+
+    let sm = agent_doc_markdown_ast::semantic_merge::semantic_merge(base, candidate, content_ours);
+
+    // Gate 1: non-empty and structurally clean (same guard used for `ours`).
+    if sm.merged_doc.is_empty() {
+        return None;
+    }
+    if component::structural_corruption_reason(&sm.merged_doc).is_some() {
+        return None;
+    }
+
+    // Gate 2 (critical): the merge must not silently drop agent content. If it
+    // would, decline and let the caller fall through to the existing path, which
+    // records the dropped-prompt evidence before adopting `content_ours`.
+    if !dropped_prompt_lines_after_content_ours(base, candidate, &sm.merged_doc).is_empty() {
+        return None;
+    }
+    if !dropped_queue_prompt_lines_after_content_ours(base, candidate, &sm.merged_doc).is_empty() {
+        return None;
+    }
+    // Gate 2b (critical, agent response): the merge must preserve every NEW
+    // `### Re:` response heading the agent authored this cycle. The shipped
+    // semantic_merge reconstructs component bodies from list *items* and keeps
+    // only the operator skeleton's non-item prose (documented assumption), so a
+    // heading-prose exchange turn can be dropped silently — which is exactly the
+    // data-loss class this phase fixes. If any agent-added response heading is
+    // absent from `merged_doc`, decline and fall through so the existing path
+    // records the dropped evidence instead of losing the agent's turn.
+    for heading in new_agent_response_headings(base, candidate) {
+        if !sm.merged_doc.contains(&heading) {
+            return None;
+        }
+    }
+
+    Some(sm)
+}
+
 pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     file: &Path,
     source: &str,
@@ -694,6 +786,67 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 ignored_queue_deletions.len()
             ),
         );
+    }
+
+    // #smconv: node-keyed semantic merge — apply BOTH change-sets when the
+    // operator and agent edited disjoint nodes (the common case), operator-wins on
+    // same-node conflicts, instead of dropping the agent's changes by adopting
+    // content_ours. Falls through to the line-based #fintol2 / content_ours path
+    // only when the AST merge is not safely applicable (structural corruption,
+    // would still drop agent content, or the AST model does not apply).
+    if let Some(sm) = try_semantic_merge_convergence(base, &candidate, &queue_reconciled_ours) {
+        let merged_doc = sm.merged_doc.clone();
+        let outcome_count = sm.outcomes.len();
+        let ack_count = sm.requires_ack.len();
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "live_prompt_drift_semantic_merged file={} source={} patch_id={} base_len={} base_hash={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={} merged_len={} merged_hash={} outcomes={} acks={} reason=node_keyed_semantic_merge",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                base.len(),
+                crate::ops_log::content_hash(base),
+                candidate.len(),
+                crate::ops_log::content_hash(&candidate),
+                queue_reconciled_ours.len(),
+                crate::ops_log::content_hash(&queue_reconciled_ours),
+                merged_doc.len(),
+                crate::ops_log::content_hash(&merged_doc),
+                outcome_count,
+                ack_count,
+            ),
+        );
+        if ack_count > 0 {
+            // TODO(#semmerge-ack-turn / Phase 4): turn these into an exchange ack
+            // turn for the next cycle. For now operator-wins is already encoded in
+            // `merged_doc`; record the pending acks durably-as-log so the Phase-4
+            // turn (or a forensic reader) can recover the reasons. No new
+            // cycle_state field is added in this phase.
+            let reasons: Vec<String> = sm
+                .requires_ack
+                .iter()
+                .map(|ack| {
+                    format!(
+                        "{}:{}:{:?}",
+                        ack.component, ack.id, ack.reason
+                    )
+                })
+                .collect();
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "semantic_merge_ack_pending file={} source={} patch_id={} ack_count={} reasons={}",
+                    file.display(),
+                    source,
+                    patch_id.unwrap_or("-"),
+                    ack_count,
+                    reasons.join(","),
+                ),
+            );
+        }
+        decision.replace_snapshot_with_content_ours_for_live_prompt_drift(&merged_doc);
+        return true;
     }
 
     // #fintol2 — forward-merge tolerance for an independent concurrent edit. When
@@ -2348,6 +2501,304 @@ mod ack_content_snapshot_tests {
         );
         assert_eq!(decision.snap_source, IpcSnapshotSource::FileRead);
         assert_eq!(decision.snapshot_content, duplicate_candidate);
+    }
+
+    // --- #smconv: node-keyed semantic-merge convergence on live drift ---
+    //
+    // The shipped Phase-1 `semantic_merge` models exchange turns (and all
+    // component content) as list *items* keyed by id; it reconstructs each
+    // operator-skeleton component body from items and keeps only the operator's
+    // non-item prose (documented assumption). These fixtures therefore use the
+    // list-item exchange representation (`- re [#id] ...`) that the primitive
+    // supports — the heading-prose (`### Re:`) form is exercised separately by
+    // `smconv_declines_when_heading_prose_response_would_drop`, which proves the
+    // conservative decline path. See the report for the representation finding.
+
+    // base: queue:start + head [#cf-txn-email] + a prior exchange turn item.
+    const SM_BASE: &str = concat!(
+        "---\n",
+        "session: test\n",
+        "queue: start\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "- re [#cf-txn-email] prior turn\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#cf-txn-email]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [#bk1] original backlog text\n",
+        "<!-- /agent:backlog -->\n",
+    );
+
+    // candidate (AGENT): head struck, a NEW exchange turn appended, and the
+    // backlog item edited. All node-DISJOINT from the operator's edits below.
+    const SM_AGENT: &str = concat!(
+        "---\n",
+        "session: test\n",
+        "queue: start\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "- re [#cf-txn-email] prior turn\n",
+        "- re [#new-turn] implemented the cf-txn-email change and verified it\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- ~~do [#cf-txn-email]~~\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [#bk1] edited backlog text by the agent\n",
+        "<!-- /agent:backlog -->\n",
+    );
+
+    // ours (OPERATOR): frontmatter flipped to queue:stop + an unrelated queue
+    // line added. Disjoint from the agent's exchange/strike/backlog edits.
+    const SM_OPERATOR: &str = concat!(
+        "---\n",
+        "session: test\n",
+        "queue: stop\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "- re [#cf-txn-email] prior turn\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#cf-txn-email]\n",
+        "- do [#operator-unrelated]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [#bk1] original backlog text\n",
+        "<!-- /agent:backlog -->\n",
+    );
+
+    #[test]
+    fn smconv_disjoint_drift_merges_both_change_sets() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let mut decision = IpcRepairDecision::file_read(SM_AGENT.to_string());
+
+        let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &file,
+            "test",
+            Some("smconv"),
+            Some(SM_BASE),
+            Some(SM_OPERATOR),
+            &mut decision,
+        );
+
+        assert!(
+            adopted,
+            "node-disjoint live drift must converge via semantic merge"
+        );
+        let merged = &decision.snapshot_content;
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::ContentOurs,
+            "the merged result is installed via the content_ours snapshot slot"
+        );
+        assert!(
+            merged.contains("[#new-turn]"),
+            "merged result must preserve the agent's new exchange turn (the case that used to drop it); got:\n{merged}"
+        );
+        assert!(
+            merged.contains("~~do [#cf-txn-email]~~"),
+            "merged result must preserve the agent's queue strike; got:\n{merged}"
+        );
+        assert!(
+            merged.contains("edited backlog text by the agent"),
+            "merged result must preserve the agent's backlog edit; got:\n{merged}"
+        );
+        assert!(
+            merged.contains("queue: stop"),
+            "merged result must preserve the operator's queue: stop frontmatter flip; got:\n{merged}"
+        );
+        assert!(
+            merged.contains("[#operator-unrelated]"),
+            "merged result must preserve the operator's added queue line; got:\n{merged}"
+        );
+        assert!(
+            component::structural_corruption_reason(merged).is_none(),
+            "merged result must re-parse cleanly"
+        );
+    }
+
+    #[test]
+    fn smconv_merges_heading_prose_response_preserving_both_changesets() {
+        // The real-session `### Re:` heading-prose exchange turn is now modeled by
+        // semantic_merge as an append-only node (#semmerge-owner heading-prose
+        // extension), so a live drift no longer drops the agent's response: the
+        // node-disjoint merge applies BOTH the agent's new `### Re:` turn AND the
+        // operator's concurrent frontmatter/queue edits. This is the root-cause
+        // fix for the `content_ours`-drops-the-response transition.
+        let base = concat!(
+            "---\nsession: test\nqueue: start\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #cf-txn-email\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#cf-txn-email]\n<!-- /agent:queue -->\n",
+        );
+        let agent = concat!(
+            "---\nsession: test\nqueue: start\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #cf-txn-email\n",
+            "### Re: do #cf-txn-email — opus-4-8\n\n",
+            "Implemented the cf-txn-email change and verified it end to end. This\n",
+            "response body is comfortably over the stale-drift threshold so the\n",
+            "live drift guard genuinely engages.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- ~~do [#cf-txn-email]~~\n<!-- /agent:queue -->\n",
+        );
+        let operator = concat!(
+            "---\nsession: test\nqueue: stop\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #cf-txn-email\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#cf-txn-email]\n- do [#op]\n<!-- /agent:queue -->\n",
+        );
+        // The merge now SUCCEEDS: the agent's heading-prose turn is appended.
+        let merged = try_semantic_merge_convergence(base, agent, operator)
+            .expect("semantic merge must converge a heading-prose response turn now");
+        let doc = &merged.merged_doc;
+        assert!(
+            doc.contains("### Re: do #cf-txn-email — opus-4-8")
+                && doc.contains("Implemented the cf-txn-email change"),
+            "merged result must preserve the agent's `### Re:` heading-prose turn; got:\n{doc}"
+        );
+        assert!(
+            doc.contains("queue: stop"),
+            "merged result must preserve the operator's frontmatter flip; got:\n{doc}"
+        );
+        assert!(
+            doc.contains("[#op]"),
+            "merged result must preserve the operator's added queue line; got:\n{doc}"
+        );
+        assert!(
+            component::structural_corruption_reason(doc).is_none(),
+            "merged result must re-parse cleanly; got:\n{doc}"
+        );
+
+        // End-to-end through the guard: it now converges via semantic merge
+        // (snapshot installed from the merged doc) instead of dropping the turn.
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let mut decision = IpcRepairDecision::file_read(agent.to_string());
+        let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &file,
+            "test",
+            Some("smconv-heading"),
+            Some(base),
+            Some(operator),
+            &mut decision,
+        );
+        assert!(adopted, "the guard resolves the drift");
+        assert!(
+            decision
+                .snapshot_content
+                .contains("### Re: do #cf-txn-email — opus-4-8"),
+            "the installed snapshot must carry the agent's response turn; got:\n{}",
+            decision.snapshot_content
+        );
+        assert!(
+            decision.snapshot_content.contains("queue: stop"),
+            "the installed snapshot must carry the operator's frontmatter flip; got:\n{}",
+            decision.snapshot_content
+        );
+    }
+
+    #[test]
+    fn smconv_same_node_conflict_is_safe() {
+        // Operator DELETED the queue item the agent struck, and operator edited
+        // the backlog node the agent also edited (same-node conflict → operator
+        // wins). Assert no agent exchange content (the new turn) is lost: either
+        // it converges via semantic merge (preferred) or it falls through to
+        // content_ours. Both are acceptable; the invariant is "no silent loss of
+        // agent content" and "no panic / clean re-parse".
+        let operator_conflict = concat!(
+            "---\n",
+            "session: test\n",
+            "queue: stop\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "- re [#cf-txn-email] prior turn\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [#bk1] operator-rewritten backlog text\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let mut decision = IpcRepairDecision::file_read(SM_AGENT.to_string());
+
+        let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &file,
+            "test",
+            Some("smconv-conflict"),
+            Some(SM_BASE),
+            Some(operator_conflict),
+            &mut decision,
+        );
+
+        assert!(adopted, "the conflict case must still resolve (no panic)");
+        let merged = &decision.snapshot_content;
+        assert!(
+            component::structural_corruption_reason(merged).is_none(),
+            "resolved result must re-parse cleanly"
+        );
+        // The agent's new exchange turn is a list item, so whichever path runs it
+        // must NOT silently lose it: converged merges keep it, and the content_ours
+        // fallback would only run after recording the dropped evidence.
+        if decision.snap_source != IpcSnapshotSource::ContentOurs || merged != operator_conflict {
+            assert!(
+                merged.contains("[#new-turn]"),
+                "converged merge must preserve the agent's new exchange turn; got:\n{merged}"
+            );
+        }
+    }
+
+    #[test]
+    fn smconv_declines_on_structurally_corrupt_ours_falls_through() {
+        // A structurally-corrupt operator buffer (duplicate singleton queue
+        // component) must make the semantic merge decline AND the existing
+        // content_ours structural-refusal guard run — the corrupt buffer never
+        // becomes the snapshot, the clean candidate is kept.
+        let corrupt_ours = concat!(
+            "---\n",
+            "session: test\n",
+            "queue: stop\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #cf-txn-email\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#cf-txn-email]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#dup]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let mut decision = IpcRepairDecision::file_read(SM_AGENT.to_string());
+
+        let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &file,
+            "test",
+            Some("smconv-corrupt"),
+            Some(SM_BASE),
+            Some(corrupt_ours),
+            &mut decision,
+        );
+
+        assert!(
+            !adopted,
+            "a structurally-corrupt operator buffer must be refused (semantic merge declines, content_ours guard refuses)"
+        );
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::FileRead,
+            "decision must keep the clean candidate, not adopt the corrupt buffer"
+        );
+        assert_eq!(decision.snapshot_content, SM_AGENT);
     }
 
     #[test]

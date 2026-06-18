@@ -114,7 +114,26 @@ Done — rewrote the draft ([`mail/drafts/2026-06-18-laura-virtuousai-value-forw
 3. **The fit** — 20+ yrs full-stack, Python/TS/React/LLMs, CrystalCommerce e-commerce lineage, control-plane production AI (Presence AI), ships Rust across crates.io/PyPI/npm.
 
 The graph/vector/KG angle turned out to be the strongest single hook — your tsift ecosystem is architecturally the *same shape* as their BAIO/DS2O stack, so it reads as "I've already built this substrate" rather than just "I can learn it." Still in your voice, still a **draft (not sent)**, resume referenced as coming separately. Tweak and send via LinkedIn or email when you're ready.
-<!-- agent:boundary:344d2cae -->
+
+### Re: update resume data — MonsterRodHolders + EquityFundingSource — opus-4-8
+
+> **Queue prompt:**
+>
+> Update my resume data with recent monsterrodholders achievements and expience. Same with equityfundingsource.
+
+
+Done. Updated both resume content stores in the `resume/` submodule:
+
+**`BrianTakita.md`** (master template) — added **MonsterRodHolders** as the top (most-recent) bullet under *Brian Takita — Full-Stack Engineer*, bumped the date range to **"January 2019 – Present (7+ years)"**, and added Stripe billing to the existing **Equity Funding Source** bullet.
+
+**`data.toml`** (structured "resume data" for the agent-resume CLI) — this store was missing *both* recent engagements, so I added two accomplishment entries at the top:
+- **MonsterRodHolders** — mid-market WooCommerce e-commerce ops: database-driven revenue diagnostics (traced a sales dip from order data to a 170+ charge card-testing bot attack → Cloudflare Turnstile fix), Stripe/PayPal checkout hardening, Cloudflare WAF + Imunify360/ModSecurity tuning, GTM analytics, SEO + traffic RCA.
+- **Equity Funding Source** — the full Cloudflare Workers + D1 + Hono loan-platform entry (admin/borrower portals, Stripe billing, 741+ Bun tests, 74 D1 migrations).
+
+Also refreshed that entry's `end = "present"`, `duration = "7+ yrs"`, and added e-commerce / Cloudflare Workers / D1 / Hono / WooCommerce / Stripe / PayPal to its `skills`/`domains`. `data.toml` validated (parses cleanly, Brian Takita now has 9 accomplishments).
+
+The MonsterRodHolders content is sourced from the actual client work (the bot-attack sales analysis & traffic RCA), so the achievements are concrete and verifiable rather than generic. Resume-repo changes are left **uncommitted** in the submodule for your review (same as the transcript & message draft). Next up in the queue: building the custom VirtuousAI resume.
+<!-- agent:boundary:97f1eb12 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -122,7 +141,7 @@ The graph/vector/KG angle turned out to be the strongest single hook — your ts
 <!-- agent:queue go -->
 - ~~Research https://www.virtuousai.com/ and https://www.virtuousai.com/resources. Get the transcript from https://www.youtube.com/watch?v=Tmb3CJS07Nk. I will be creating a custom resume for my services for Virtuous AI. Emphasize my monsterrodholders work. Create a message for laura-rondon-de-barros, who will forward to chris-happ, to demonstrate what value I can bring to VirtuousAI and how I am the best candidate for their company.~~
 - ~~Also emphasize my open source ecosystem, agent-doc + tsift. Real-time white box interaction with AI agents with queue management, backlog, exchange, MemGraphRag, local model KG, Graph DB, Vector DB, Semantic Agent Interface, etc. Keep the message short but demonstrating real value for VirtuousAI.~~
-- Update my resume data with recent monsterrodholders achievements and expience. Same with equityfundingsource.
+- ~~Update my resume data with recent monsterrodholders achievements and expience. Same with equityfundingsource.~~
 - Build a custom resume for VirtuousAI.
 <!-- /agent:queue -->
 

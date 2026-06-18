@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -301,14 +301,21 @@ Queue drained.
 - #dzmm — activate the `tmo_cache_outbox` replay worker
 
 Once those land, I can wire the Link button to enqueue a `link_lender` outbox operation (same pattern as `select_lender`). Want me to add a backlog item for that?
-<!-- agent:boundary:a4e10950 -->
+<!-- agent:boundary:9a7e2490 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
+---
+After 20:30
+- login to TMO. Make sure we are using the correct credentials.
+- TMO Sync
+---
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- login to TMO. Make sure we are using the correct credentials.
+- TMO Sync
 <!-- /agent:queue -->
 
 ## Backlog

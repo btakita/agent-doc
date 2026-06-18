@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -174,7 +174,31 @@ Shipped. The admin portal is now at `/admin/*` instead of `/portal-admin/*`, wit
 - Worker deployed: **Version `21a62c1e-f72e-474f-8aa1-b6bfea1f939f`**
 
 Queue drained.
-<!-- agent:boundary:446e0109 -->
+
+### Re: Login role=admin preserved on failure + deployed — glm-5.2
+
+> **Queue prompt:**
+>
+> If the login fails on https://equityfundingsource.brian-takita.workers.dev/login?role=admin&next=%2Fadmin, the page is redirected to https://equityfundingsource.brian-takita.workers.dev/login?role=investor&next=%2Fadmin. role should remain the same. deploy
+
+
+> **Queue prompt:**
+>
+> If the login fails on /login?role=admin&next=/admin, the page is redirected to /login?role=investor&next=/admin. role should remain the same. deploy
+
+**Root cause:** `safe_role` in `login_page_` (`lib/ui--server--efs/auth/login.ts:21`) only allowed `['investor', 'borrower', 'broker']` — `admin` fell back to `'investor'`, so the form action URL became `/login?role=investor&next=/admin`. Same bug in `signup_page_`.
+
+**Fix (EFS `d36e83e`):** Added `'admin'` to the allowed roles array and `ROLE_LABELS` in both `login.ts` and `signup.ts`. The form action now preserves `?role=admin` on re-render after a failed login.
+
+**Verification:** `make check` — **813 tests pass / 0 fail**, build + build:worker OK.
+
+**Deploy:**
+- EFS `d36e83e` pushed `ae558d0..d36e83e`
+- Root `144867679` submodule pointer bump pushed
+- Worker deployed: **Version `e2f63adc-9689-4b5d-a895-01fb5bd0a395`**
+
+Queue drained.
+<!-- agent:boundary:416b37f4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -187,7 +211,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- If the login fails on https://equityfundingsource.brian-takita.workers.dev/login?role=admin&next=%2Fadmin, the page is redirected to https://equityfundingsource.brian-takita.workers.dev/login?role=investor&next=%2Fadmin. role should remain the same. deploy
 <!-- /agent:queue -->
 
 ## Backlog

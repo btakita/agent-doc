@@ -184,7 +184,7 @@ Two issues, filed as **`#routedeadshell`** (plan `tasks/agent-doc/plan-route-dis
 2. **Harness crash root-cause — needs you.** Why Claude exited to a shell on `recruit/virtuousai.md` isn't in this document's logs (it's a different session's logs / the dead pane's scrollback). Like `#tsiftmdcrash`. **Operator action: paste the `recruit/virtuousai.md` crash error text / pane scrollback from the crash moment (or the cycle id)** — the `/model opus` restart context is the lead to chase.
 
 This was the leading queue head; remaining drainable agent-doc work now queued: `#733r` (qheadsync), `#021p`/`#rz3afix` (the mirror-all Phase 2 supervisor defer), `#semmerge` (closeout CRDT/IPC merge — likely the root of the IPC drift this session keeps hitting), plus `#routedeadshell`. Queue stays paused; tell me which to take next, or I'll start with `#rz3afix` (unblocks resuming the queue) then `#semmerge`.
-<!-- agent:boundary:3e20fbfa -->
+<!-- agent:boundary:85b8b102 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -195,7 +195,7 @@ This was the leading queue head; remaining drainable agent-doc work now queued: 
 - ~~~~:pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.~~ (filed #qheadsync)~~
 - ~~~~:pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.~~ (filed #pcwcdiskfree)~~
 - ~~Any free text that is processed and struck should have a response in the agent:exchange.~~
-- :pushpin: JB `Run Agent Doc` on virtuousai.com did not submit. Then it crashed. ![img_48.png](img_48.png)
+- ~~:pushpin: JB `Run Agent Doc` on virtuousai.com did not submit. Then it crashed. ![img_48.png](img_48.png)~~ (filed #routedeadshell)
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md
 ```

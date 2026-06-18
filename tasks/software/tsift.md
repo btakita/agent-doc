@@ -110,14 +110,43 @@ Done. `tsift-memgraphrag` now drives real model-backed KG extraction via `tsift-
 - `do [#kgcliext]` — `tsift kg status` / `unload` / `smoke` subcommands (spec line 31-32).
 - `do [#kgunloadpost]` — `build_unload_actions` actually POSTs `keep_alive:0`.
 - `do [#kgaduse]` — activate or drop `tsift-agent-doc`'s dead `tsift-kg` re-export.
-<!-- agent:boundary:5e3265ce -->
+
+### Re: #kgcliext — tsift kg status / unload / smoke — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#kgcliext]
+
+
+> **Queue prompt:** do [#kgcliext]
+
+Done. `tsift-cli` now exposes the full operational surface required by `specs/local-kg-model.md` line 31-32: `extract`, `status`, `unload`, `smoke`. `tsift kg --help` lists all four.
+
+**What landed (tsift commit `665b5a0`, pushed `d159838..665b5a0`):**
+- **`tsift kg status`** — opens `.tsift/graph.db` read-only via `SqliteGraphStore::open_read_only_resilient`, reports total node/edge counts and a top-10 breakdown by kind. Returns `exists: false` cleanly when the db is missing instead of erroring. `--json` emits a `KgStatusReport` envelope.
+- **`tsift kg unload`** — resolves the KG profile, calls `tsift_local_model::build_unload_actions` for the plan, and **actually POSTs** the ollama `keep_alive:0` to `/api/generate` (closing the operator-facing side of `#kgunloadpost` — no more manual `ollama stop`). Falls back to the `ollama stop` subprocess if the HTTP call fails. The `--json` envelope reports per-action execution status.
+- **`tsift kg smoke`** — runs a small built-in sample through `extract_documents_to_projection` against a live Ollama server, prints chunk/entity/relation counts, and optionally `--unload`s after. Exits non-zero with a clear error if the server is down or the model is missing.
+
+**Files:** `packages/tsift-cli/src/cli.rs` (`KgCommand` enum extended), `packages/tsift-cli/src/commands/kg.rs` (three new `cmd_kg_*` fns + helpers + tests), `packages/tsift-cli/src/lib.rs` (dispatch arms).
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- `make check` green (clippy `-D warnings` + full suite + opencode-plugin-test).
+- `cargo test -p tsift-cli --lib commands::kg` → 5 passed (status missing-db, status populated-db with kind counts, host override resolution blank/non-blank, truncate helper).
+- `cargo install --path . --locked` → installed.
+- Live spot-check: `tsift kg status --graph-db /tmp/nonexistent.db` prints the missing-db message in both human and `--json` modes.
+- Submodule pointer bumped in agent-loop (`4fc99362e`).
+
+**Note on `#kgunloadpost`:** the operator-facing gap (manual `ollama stop`) is closed — `tsift kg unload` POSTs. The architectural side remains open: `build_unload_actions` in `tsift-local-model` is still a plan-only function; the new POST execution lives in `tsift-cli`. Leaving `#kgunloadpost` open with its original scope (refactor the planner to own execution so lease-drop can also POST without a CLI call).
+
+**Queue still active (2 heads):** `do [#kgunloadpost]`, `do [#kgaduse]`. Re-invoke `/agent-doc` to drain the next.
+<!-- agent:boundary:2cfc0450 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#kgmrs]~~
-- do [#kgcliext]
+- ~~do [#kgcliext]~~
 - do [#kgunloadpost]
 - do [#kgaduse]
 <!-- /agent:queue -->
@@ -128,7 +157,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgcliext] Add tsift kg status / tsift kg unload / tsift kg smoke subcommands per local-kg-model.md spec line 31-32 (today KgCommand only has Extract). Plan: packages/tsift-cli/src/cli.rs + packages/tsift-cli/src/commands/kg.rs
 - [ ] [#kgunloadpost] Make tsift-local-model build_unload_actions actually POST the ollama keep_alive:0 (today it plans but does not POST — operator ran ollama stop manually). Plan: packages/tsift-local-model/src/lib.rs
 - [ ] [#kgaduse] Activate or drop tsift-agent-doc's tsift-kg Cargo dep (today only 'pub use tsift_kg as kg;' re-export, no call site — dead dep per local-kg-model.md spec line 29-30). Plan: packages/tsift-agent-doc/src/lib.rs
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.

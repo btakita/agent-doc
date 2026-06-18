@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -33,6 +33,8 @@ completed
 - Raised BLOCK thresholds (`agent-doc-orchestration/src/session_accretion.rs`): exchange `240→800`, sections `12→40`, committed-cycles `10→60`, no-op-closeouts `3→20`. `warn` still surfaces a heads-up; only genuine crash indicators (restart-churn + startup-miss) reach `block` by default.
 - `cargo test -p agent-doc-orchestration session_accretion` → 18 passed; `cargo install --path .` done (new binary live). Submodule commit `7addd9ee` pushed to `origin/main`.
 - Compacted the exchange (archived 265 lines) → accretion level now cleared. (Had to `agent-doc reset --from-current` to rebuild sidecars after the compact/consume left a stale snapshot.)
+- Reactive-watch mid-turn guard — the zero-debounce watch no longer re-triggers while an agent-doc cycle is freshly in flight, ending the queue-edit churn (commit `454f935a`).
+- Accretion block default-off — raised thresholds so it never blocks a normal queue drain (commit `7addd9ee`).
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260617-235513.md`*
@@ -59,7 +61,7 @@ Compacted content:
 Two real fixes shipped this session and installed: accretion default-off (`7addd9ee`) and the reactive-watch mid-turn guard (`454f935a`) — both verified, pushed, and live via `make install`. The IPC ack_mismatch also cleared after the cdylib rebuild, so `queue consume` now persists again.
 
 For the queue to terminate, the three remaining backlog items are all genuinely operator-gated: one needs a live Claude pane to validate a dispatch retry, one needs a JB plugin-side fix + install, and one needs an operator repro of fence-stripping. I've retagged all three cleanly so go-mode defers them instead of re-amplifying every cycle — that stops the self-driving churn and lets the queue reach drainable=0.
-<!-- agent:boundary:a4db3eb6 -->
+<!-- agent:boundary:257f6376 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -94,12 +96,6 @@ How can we prevent the wedge conflict from occurring, as what happened in equity
 ```
 Aside from fixing the wedge, we should ensure the run does not stall.
 ---
-- ~~do [#claudesubmit]~~
-- ~~do [#queediturn]~~
-- ~~do [#codefence-strip]~~
-- ~~:pushpin: [#jbacceptwedge]~~
-- ~~:pushpin: re: [#claudesubmit]. Since a focused session was mentioned, agent-doc should oblige and automatically restart the ression and run the task. Please fix this mechanism.~~
-- ~~:pushpin: [#claudesubmit]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

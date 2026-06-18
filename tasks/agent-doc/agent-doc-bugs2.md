@@ -38,20 +38,39 @@ completed
 Compacted content:
 - Archived 7 response topic(s): JB Clear Session Context on OpenCode does not submit `/new`; OpenCode /new fix shipped + tsift.md crash needs clarification; 60s route timeout + describe-image workflow already exists; 4 more
 - Prior summary/context: prior compacted content: Archived 8 response topic(s): #queediturn implemented + accretion default-off shipped; queue...
-<!-- agent:boundary:6e39cb8c -->
+
+### Re: #monster60stimeout route ready-prompt barrier — glm-5.2
+
+Root cause confirmed and **shipped**. `current_generation_ready_prompt_proven` (authoritative_actor.rs:283) already does a fresh `capture_pane` + `ready_prompt_candidate` check as the primary proof, but the fallback arm only matched `prompt_ready`/`dispatch_ready_prompt` reasons. After `idle_pane_reconcile`, the supervisor had already proven the pane idle (`supervisor_pane_has_busy_cue == Some(false)` in idle_watch.rs:336-356) and transitioned the actor to `Ready` — yet the route still saw `prompt_ready=false` and waited the full 60s because the edge-triggered pty redraw missed re-emitting a recognized prompt shape.
+
+Fix: extracted `transition_proves_current_generation_ready` and added `idle_pane_reconcile` to the accepted ready-proof reasons (authoritative_actor.rs). The capture-pane check stays primary; the fallback only fires when the supervisor already proved the pane idle. 5 unit tests cover accept/reject paths. SPEC.md §127 and VERSIONS.md updated. `make check` clean, binary installed 0.34.1.
+
+### Re: #describe-image-workflow — glm-5.2
+
+**Already complete.** The `## Vision workflow for non-vision models` section existed in `src/agent-doc/SKILL.md` documenting `agent-doc describe-image` as the canonical path. It had pushed the SKILL.md past the 140-line compact budget (both `bundled_skill_hot_path_stays_compact` and `rendered_harness_content_stays_compact` were red on HEAD). Moved the detail into a new `runbooks/describe-image.md`, registered it in `BUNDLED_RUNBOOKS`, and slimmed the SKILL.md section to a 2-line reference — both compact tests now green. Skill reinstalled to Claude + OpenCode surfaces.
+
+### Re: IPC drift root causes + restart-supervisor directive — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: `agent-doc restart-supervisor tasks/agent-doc/agent-doc-bugs2.md` should be called by the PCP/Supervisor if there is IPC drift. Also, add items to the backlog and queue to fix the underlying issues that caused the IPC drift.
+
+
+Investigated ops.log for the drift cascade. The dominant trigger is `supervisor_binary_stale` → `ipc_proof_insufficient invariant=supervisor_binary_stale recovery=candidate_snapshot_kept`, which cascades into `missing_response_probe recovery=direct_write_fallback` (the content-stripping path) and `live_prompt_drift_after_preflight`. Filed two backlog items referencing the existing plans: `#supstaleipcproof` (proactive recycle / stale-supervisor proof acceptance) and `#streamipcdirwrite` (stream IPC timeout → direct_write_fallback content loss). The `agent-doc restart-supervisor` directive is already wired in the supervisor idle-watch stale-binary self-recycle path; these backlog items target the proof-rejection window that remains.
+
+No JB plugin install needed this round — all changes are binary + skill surface. `make check` clean (4663 tests). Binary installed.
+<!-- agent:boundary:8bfa79f3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Clear Session Context` on opencode sessions does not submit `/new` ![img_46.png](img_46.png).~~
-- ~~JB `File Cache Conflict` dialogs are still occurring.~~
-- ~~:pushpin: The tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.~~
-- ~~After closing the session for monsterrodholders.md, then running JB `Run Agent Doc`, I had to wait for the 60s timeout before the dispatch completed.~~
-- ~~:pushpin: do [#opencodeclearnewsubmit]~~
-- :pushpin: do [#monster60stimeout]
-- `agent-doc restart-supervisor tasks/agent-doc/agent-doc-bugs2.md` should be called by the PCP/Supervisor if there is IPC drift. Also, add items to the backlog and queue to fix the underlying issues that caused the IPC drift.
-- :pushpin: do [#describe-image-workflow]
+- ~~:pushpin: `agent-doc restart-supervisor tasks/agent-doc/agent-doc-bugs2.md` should be called by the PCP/Supervisor if there is IPC drift. Also, add items to the backlog and queue to fix the underlying issues that caused the IPC drift.~~
+- ~~:pushpin: do [#monster60stimeout]~~
+- ~~:pushpin: do [#describe-image-workflow]~~
+- do [#6esm]
+- do [#3vn9]
+- do [#dqjf]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -78,9 +97,10 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#6esm] supstaleipcproof=[recommended] #agent-doc-bug Stale supervisor binary rejects IPC ACK proof on every cargo/make install, cascading into direct_write_fallback and live_prompt_drift_after_preflight. ops.log signature: ipc_proof_insufficient invariant=supervisor_binary_stale recovery=candidate_snapshot_kept, then missing_response_probe recovery=direct_write_fallback. The supervisor_binary_stale_self_recycled mechanism exists but the proof path still rejects ACK content during the transition window. Plan: tasks/agent-doc/plan-proactive-recycle-on-install.md + tasks/agent-doc/plan-jb-run-restart-stale-supervisor.md.
+- [ ] [#3vn9] streamipcdirwrite=[recommended] #agent-doc-bug Stream IPC timeout falls back to direct_write_fallback (write_mode=stream_ipc_timeout_disk), which strips content — the operator reported a code fence stripped by agent-doc and a queue item deleted during monsterrodholders.md churn. ops.log signature: run_stream_ipc_timeout → recovery=direct_write_fallback → out_of_band_write drift=N. Fix direction: on stream IPC timeout, retry the editor/CRDT path and preserve unmatched content through the fallback instead of direct disk write. Plan: tasks/agent-doc/plan-finalize-visible-buffer-ipc-timeout-race.md + tasks/agent-doc/plan-queue-edit-lost-during-finalize-crdt.md.
+- [ ] [#dqjf] supstaleipcproof=[recommended] #agent-doc-bug Stale supervisor binary rejects IPC ACK proof on every cargo/make install, cascading into direct_write_fallback and live_prompt_drift_after_preflight. ops.log signature: ipc_proof_insufficient invariant=supervisor_binary_stale recovery=candidate_snapshot_kept, followed by missing_response_probe recovery=direct_write_fallback. The supervisor_binary_stale_self_recycled mechanism exists but the proof path still rejects ACK content during the transition window. Plan: tasks/agent-doc/plan-proactive-recycle-on-install.md + tasks/agent-doc/plan-jb-run-restart-stale-supervisor.md.
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported 'tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.' Supervisor pid 1742954 is alive now; pane %78 OpenCode TUI shows 'Thinking' normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from my cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe=(deleted)) as a crash. NEED operator to paste exact error text or the pane capture from the crash moment, or the specific cycle id, to root-cause. Not currently reproducible from logs alone.
-- [ ] [#monster60stimeout] [recommended] Recurring route readiness gap (matches done #startroute / #r313 / #rtbr). Operator: 'After closing the session for monsterrodholders.md, then running JB Run Agent Doc, I had to wait for the 60s timeout before the dispatch completed.' ops.log signature: route_authoritative_actor_starting_not_ready timeout_ms=60000 elapsed_ms=~60100 actor_state=ready runtime_state=ready supervisor_health=healthy prompt_ready=false last_transition_reason=idle_pane_reconcile. The supervisor self-heals busy→ready via idle_pane_reconcile but the prompt_ready flag stays false, so route waits the full 60s and fails. Recent occurrences: 1781508488 (lazily-rs.md %91), 1781559935 + 1781582168 (equityfundingsource.md %101/%111). Root fix path: current-generation ready-prompt barrier driven by fresh tmux capture-pane prompt-shape proof (not the edge-triggered pty->stdout transition that missed the redraw). Plan: tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md.
-- [ ] [#describe-image-workflow] [recommended] The #img-describe-toolcall workflow demonstrated this session IS already shipped: agent-doc describe-image <FILE> [--provider openai|anthropic] [--prompt <text>] shells out to a vision-capable model and returns text to stdout. Validated on tasks/agent-doc/img_46.png — returned an accurate structured description matching the claude -p @img analysis. Source: src/describe_image.rs (746 lines) + CLI wired through main.rs. Skill should document this as the canonical path for non-vision models (glm-5.2, etc.) to analyze images — add a runbook note to SKILL.md so future agents know to call this instead of writing per-session claude -p invocations.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.
 <!-- /agent:backlog -->
 

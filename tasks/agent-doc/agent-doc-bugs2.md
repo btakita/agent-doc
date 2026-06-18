@@ -206,7 +206,17 @@ Split text+Enter tmux send shipped last turn in `cc766e0c` (parent gitlink `e1fb
 #### Session-accretion
 
 Still at `warn` (now 153 exchange lines, 7 cycles / 30 min). Per `#no-compact-prompt-during-queue-drain`, not compacting mid-queue. Operator: when the queue empties, consider `/agent-doc compact exchange tasks/agent-doc/agent-doc-bugs2.md` or setting `agent_doc_auto_compact: true` in frontmatter.
-<!-- agent:boundary:1f7dd0cd -->
+
+### Re: queue prose items removed — glm-5.2
+
+Removed the two `agent:queue` lines that session-check flagged as response-prose contamination (`#jb-run-agent-doc-response-queue-contamination`):
+- `:pushpin: A non-vision model should use a vision model via agent-doc or tsift.` — functionally resolved by `agent-doc describe-image` (validated last turn on `img_46.png`).
+- `What are #next-steps to fix agent-doc bugs?` — answers are in the backlog items filed this drain.
+
+`do [#opencodeclearnewsubmit]` retained as the next drainable head — the fix shipped last turn (`cc766e0c`), `[operator-verify]` gate on `#jbacceptwedge` plugin 0.2.170 install remains. `do [#monster60stimeout]` and `do [#describe-image-workflow]` stay in queue as auto-added from the freshly-filed backlog items.
+
+Using `--force-disk` this turn to bypass the IPC race that reverted the prior strike attempt (postcommit_worktree_check auto-reconciled to HEAD).
+<!-- agent:boundary:3010fd4d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -216,8 +226,6 @@ Still at `warn` (now 153 exchange lines, 7 cycles / 30 min). Per `#no-compact-pr
 - ~~JB `File Cache Conflict` dialogs are still occurring.~~
 - ~~:pushpin: The tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.~~
 - ~~After closing the session for monsterrodholders.md, then running JB `Run Agent Doc`, I had to wait for the 60s timeout before the dispatch completed.~~
-- :pushpin: A non-vision model should use a vision model via agent-doc or tsift.
-- What are #next-steps to fix agent-doc bugs?
 - :pushpin: do [#opencodeclearnewsubmit]
 - do [#monster60stimeout]
 - do [#describe-image-workflow]

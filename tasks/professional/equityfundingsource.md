@@ -61,7 +61,32 @@ I verified this against prod D1 (`equityfundingsource`, the DB `wrangler.toml` b
 **Bottom line:** the accepted step is gated behind the **approve** action (complete full application → writeback path), which is exactly the TMO-writeback area this session has gated (`#dzmm` / `#7a4d` / `#k2xg`). For your specific deal it's most likely **(a)** — it isn't a backed full-application — but I can't rule out **(b)**.
 
 To pin it exactly, tell me: is `brian-takita.workers.dev` on the prod D1 (`280e1539`) or a separate preview DB? Or give me the borrower name/email on that deal and I'll trace its real `full_applications.status` and whether it's eligible to be approved. I made **no** data changes — all reads.
-<!-- agent:boundary:79666247 -->
+
+### Re: How is it an Available Deal but not accepted? — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: How did the application get into the Available Deal step but not be accepted. It should be accepted before being available.
+
+
+Good catch — this is a real workflow gap, not a display glitch. I traced the deal end to end in prod D1.
+
+**What the deal actually is.** `7a0c1463` is an `investment_deals` row, `status='published'` (that's exactly the "Available Deal" / investor-marketplace state), linked to `loan_id = 45ddae53`. That loan: `status='submitted'`, `tmo_loan_application_status='Application Received'`, borrower `brian.takita+borrower6`. And critically — there is **no `full_applications` row** for that borrower at all.
+
+**Why "accepted" and "Available" are disconnected.** They track two different entities:
+- **"Available Deal"** = an `investment_deals` row, keyed to the **loan**.
+- **"accepted"** (the Application-progress 4th step) = `full_applications.status='accepted'`, a borrower **application** record.
+
+This loan came in via **TMO sync** (it's "Application Received" in TMO) and has no EFS full application, so the Application-progress stepper has nothing to mark accepted — there's no application record behind it.
+
+**How it got published without acceptance.** The publish action `admin_deal_publish_` (`app/equityfundingsource/lib/admin/repo.ts:2054`, via `POST /api/admin/loans/:id/deal`) has exactly **one** guard: `if (!loan) throw`. It then sets `status = loan.tmo_loan_status === 'Funded' ? 'funded' : 'published'` and inserts the deal. **There is no check that the loan is accepted, nor that any `full_applications` row exists or is `accepted`.** So an admin publishing any non-Funded loan makes it an Available Deal immediately — which is precisely how this `submitted` loan with no application became available.
+
+**So, directly answering you:** your expectation ("accepted before available") is **correct as a rule but is not enforced anywhere in code.** Publishing gates only on the loan existing. That's the bug.
+
+I filed it as an actionable backlog item (top of `agent:backlog`): gate `admin_deal_publish_` / the publish route on an acceptance state before `status='published'` (and decide the rule for TMO-sourced loans that have no EFS full application — those can't be "accepted" in the EFS sense, so the gate likely keys off loan/TMO state, not `full_applications`). I made **no** data changes this turn — all reads.
+
+One thing to decide for the fix: for **TMO-originated** loans (like this one — no EFS application), what counts as "accepted enough to publish"? An EFS-originated borrower app would gate on `full_applications.status='accepted'`; a TMO loan would need a loan/TMO-status equivalent. Tell me the rule and I'll implement the gate.
+<!-- agent:boundary:4d821001 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,7 +99,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: How did the application get into the Available Deal step but not be accepted. It should be accepted before being available.
+- ~~:pushpin: How did the application get into the Available Deal step but not be accepted. It should be accepted before being available.~~
 - do [#214f]
 <!-- /agent:queue -->
 

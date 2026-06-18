@@ -288,8 +288,15 @@ Investigated. `tasks/recruit/virtuousai.md` has an **empty queue** (`&lt;!-- age
 
 No new agent-fix from this head — virtuousai's thrash is the union of a fixed bug and a filed one; next concrete work is `#routedeadshell` in its own route cycle.
 
-NOTE (recovered via `--force-disk`): this answer was dropped twice by the live editor buffer's `content_ours` adoption (`live_prompt_drift_after_preflight`) — the IntelliJ buffer for this doc is stale/corrupt and overriding IPC writes. The session needs an editor buffer refresh / restart before further drains.
-<!-- agent:boundary:335a67b6 -->
+NOTE (recovered via `--force-disk`): this answer was dropped twice by the live editor buffer's `content_ours` adoption (`live_prompt_drift_after_preflight`) — the IntelliJ buffer for this doc is stale/corrupt and overriding IPC writes. The 
+session needs an editor buffer refresh / restart before further drains.
+
+### Re: virtuousai supervisor+pane crash (re-presented) — already filed #routedeadshell, queue paused — opus-4-8
+
+This crash head is **already captured** — `#routedeadshell` (`#1vhn`) records the exact repro you gave: Run Agent Doc on virtuousai.md → supervisor + tmux pane crashed 2× → 3rd attempt stalled → you ran `agent-doc` manually. The agent-actionable half (route must detect a harness dispatch-ready prompt and fail closed on a bare shell instead of typing into a dead pane) is planned in `plan-route-dispatch-into-crashed-harness.md`; the crash *root-cause* (why the harness exits to a shell — the `/model opus` restart is the lead) stays **operator-gated** on the `supervisor-stderr.log` + pane scrollback capture.
+
+It re-presented because the `#qheadsync` answered-head auto-strike isn't reaping it. I **paused this queue** (receipt_id=66) because the live editor buffer's `content_ours` adoption (`#semmerge`) was dropping every exchange-finalize response and consuming heads — the remaining heads are all already-answered/filed here, cross-document (equityfundingsource), or operator-gated. Next real work is `#smconv` (the converge.rs fix) in a clean session.
+<!-- agent:boundary:90d3703d -->
 <!-- /agent:exchange -->
 
 ## Queue

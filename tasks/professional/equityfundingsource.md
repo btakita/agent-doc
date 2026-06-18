@@ -183,7 +183,7 @@ Tweak the wording if you like, then send from Gmail. Want me to adjust tone/leng
 For local dev, set `TMO_API_TOKEN` (and optionally `TMO_API_BASE_URL`) in `.env` / `.dev.vars` — both are stubbed blank in `.env.example`.
 
 **Reconciles with last turn:** since `TMO_API_TOKEN` is already deployed and read-sync is live, the sandbox key is **already provisioned** — so the draft email to Judith asking for it may be unnecessary (or only needed if you want a *fresh/rotated* key, or a separate write-scoped one for the gated `#dzmm` writeback). Worth confirming with Lucas which token is in `TMO_API_TOKEN` before sending. I left that email in Drafts, unsent. No changes made this turn — all reads.
-<!-- agent:boundary:065599e9 -->
+<!-- agent:boundary:87ed777d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -197,11 +197,13 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application I clicked "Accept and Send to TMO" but got an error "Writeback: failed - TMO NewLoan failed with 400: {"Data":null,"ErrorMessage":"Unable to save record.\r\nDuplicate loan number.","ErrorNumber":400,"Status":-1}". The record should be associated with the TMO record in this case and the button should not be present.
+- do [#5q7z]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#5q7z] [recommended] 'Accept and send to TMO' duplicate-loan bug: for a loan already associated with a TMO record (deal 7a0c1463 / loan 45ddae53 has tmo_loan_number=GQI751, tmo_loan_rec_id=3840D27B..., tmo_loan_application_rec_id=cda67748), the approve flow (admin/applications/index.ts application_tmo_writeback_attempt_ -> tmo_writeback.ts:308 LOS.svc/NewLoan) sends NewLoan with the existing GQI751 -> TMO 400 'Duplicate loan number. Unable to save record.' Fix (2 parts): (1) approve/writeback must detect an existing TMO association (tmo_loan_rec_id / writeback_status='sent') and associate+mark accepted locally instead of calling NewLoan (or call an UpdateLoan endpoint); (2) hide/disable the 'Accept and send to TMO' button in lib/ui--browser--efs/portal/admin/full_applications.tsx:424 when the app/loan is already in TMO. Design Q: on accept of an already-in-TMO loan, associate-only (no TMO call) or also push UpdateLoan? Relates to #dzmm/#37ah/#214f.
 <!-- /agent:backlog -->
 
 ## Review

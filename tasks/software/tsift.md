@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -202,7 +202,7 @@ Done — chose **drop**, not activate. Full activation is a larger design pass (
 **Captured follow-up:** `#kgadactivate` now sits at the top of `agent:backlog` as the actionable next step — implement the real `GraphStore`-backed evidence lookup helper, add `tsift-sqlite` + `tsift-core` deps, wire it into `session_digest` or planning. Flagged as needing a dedicated design pass on consumer call sites.
 
 **Queue drained.** This was the last head — `queue_active` should clear on the next preflight.
-<!-- agent:boundary:1f47accb -->
+<!-- agent:boundary:46bd6b5c -->
 <!-- /agent:exchange -->
 
 ## Queue

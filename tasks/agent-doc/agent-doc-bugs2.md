@@ -131,16 +131,34 @@ The accept-loop wedge (`#jbacceptwedge`) lived in the socket listener's `start_l
 **The only JB-only advantage is socket transport** (lower latency via early-ack). If you want VSCode to also start the FFI socket listener for latency parity, I've added `#vscode-socket-parity` as a `[recommended]` backlog item — non-trivial (koffi callback registration + Node.js socket lifecycle) and only worth doing if file-watch latency becomes a bottleneck.
 
 **No code changes this cycle** — VSCode parity is already present for every shipped feature.
-<!-- agent:boundary:28fc9e29 -->
+
+### Re: do [#vscode-socket-parity] — evaluated, not worth implementing now — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: do [#vscode-socket-parity]
+
+**Evaluation complete: closing `#vscode-socket-parity` as "not worth implementing now."** File-watch IPC is adequate for VSCode; adding the FFI socket listener would import complexity without measurable benefit.
+
+**Rationale:**
+1. File-watch IPC works correctly for every shipped feature (patch application, `save_document`, reposition, `vcs-refresh`, generation fence) — all have VSCode parity via file-signal transport.
+2. The socket's only advantage is early-ack (lower latency for the liveness probe). But agent-doc cycles take seconds — the marginal latency improvement is negligible.
+3. Non-trivial implementation cost: koffi callback registration, cross-thread dispatch to VS Code's main thread, socket lifecycle management, thread-safety between listener and Node's event loop.
+4. Risk transfer: `#jbacceptwedge` lived in the socket listener. Adding it to VSCode imports that complexity surface for no current gain.
+5. **Revisit trigger**: if an operator reports visible finalize→patch delay in VS Code (file-poll latency over ~200ms), that would justify the socket investment.
+
+**No code changes.** `#vscode-socket-parity` marked done via `--done`.
+<!-- agent:boundary:04274d0f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#jbacceptwedge]: Do the plugin logic + build. I will install~~
-- :round_pushpin: VSCode Plugin logic should match JB Plugin logic
+- ~~:round_pushpin: VSCode Plugin logic should match JB Plugin logic~~
 - [#codefence-strip] may have been due to a wedge issue or stale state. Can you detect when this issue occurred? I just added a queue item to monsterrodholders.md and agent-doc deleted it.
 - implement [#claudesubmit] so we can test. I will drive sessions and logging should determine if it failed or succeeded.
+- ~~:pushpin: do [#vscode-socket-parity]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -167,7 +185,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#vscode-socket-parity] [recommended] VSCode extension currently uses file-watch IPC (.agent-doc/patches/ + save-document.signal). Evaluate adding FFI socket listener startup (koffi callback registration for agent_doc_start_ipc_listener_v2) so VSCode gets the same low-latency early-ack path JB has. Non-trivial: Node.js socket lifecycle + koffi callback management. Only worth doing if file-watch latency becomes a measurable bottleneck.
 - [ ] [#codefence-strip] [operator-verify] agent-doc stripped a code fence on a prior run. Needs operator repro (which document/run/fence) to fix definitively; will then audit patch/template fence-preservation and add a regression.
 - [ ] [#claudesubmit] [operator-verify: live Claude-pane validation] Claude/OpenCode dispatch-only submit proof + bounded Enter retry. Root cause found (no prompt-submit hook → accepted-only without retry). Plan ready: tasks/agent-doc/plan-claude-dispatch-submit-proof-retry.md. Code impl is planned; validating the retry genuinely needs a live Claude pane (operator), so deferring until operator can validate.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.

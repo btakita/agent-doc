@@ -120,7 +120,30 @@ Follow-ups in backlog: `#fccaudit` (extend the gate to the remaining preflight/c
 **#rz3a — gated, not implemented (per its own directive).** Your item says **"DO NOT IMPLEMENT THE FIX."** It got auto-drained this cycle only because that hold was unstructured prose, not a `[/]` gate or a `not-before=` date — so the sync (correctly, by its rules) treated it as an open actionable head. I gated it `[/]`, which is exactly the exclusion rule you described: a gated item is now held out of the backlog→queue sync, so it stops generating no-op `do [#rz3a]` churn cycles. Ungate it when you authorize implementing the supervisor idle-watch drainability fix.
 
 *Session recovery:* preflight opened on two pieces of prior-cycle IPC drift — a merged `#rz3a`/`#fccaudit` backlog line (the newline between them was lost) and a stale snapshot longer than HEAD carrying your uncommitted `#rz3a` addition. Split the line, rebuilt the snapshot from current (`reset --from-current --preserve-session`), preserving all your edits. Release binary built; `cargo install` is deferred to right after this closeout so the freshly-installed `#fccaudit` binary doesn't drift against this session's still-running supervisor (it self-recycles onto it at the next idle boundary).
-<!-- agent:boundary:843a7b06 -->
+
+### Re: more raw disk writes still causing File Cache Conflict — opus-4-8
+
+> **Queue prompt:**
+>
+> JB `File Cache Conflict` dialog is still occurring. Any more raw disk writes that need to be replaced?
+
+
+> **Queue prompt:** JB `File Cache Conflict` dialog is still occurring. Any more raw disk writes that need to be replaced?
+
+Yes — three, and they are all on the **route/dispatch path**, not the preflight/finalize path I just gated. That is why the dialog survives: `#fccqueue` + `#fccaudit` closed every session-doc write in the *preflight → respond → finalize → commit* cycle (ops.log confirms recent cycles all log `write_authority action=routed` with **no** `transport=disk`), but `agent-doc route` has its own writes that fire while the IDE editor is open during a go-mode dispatch:
+
+| site | `route.rs` | when it fires | conflict risk |
+|------|-----------|---------------|---------------|
+| **queue activation** | `activate_existing_route_queue_head` (~2601) | every go-mode queue activation flips `queue_active` and `atomic_write_pub`s the whole doc | **high** — fires on every drain start behind the open buffer |
+| dedup scrub | `scrub_duplicate_prompt_comments_for_route` (~1943) | route removes duplicate prompt comments | medium |
+| session-UUID inject | `ensure_session_for_file` (~1926) | doc lacks a session id (one-time) | low |
+
+The sibling `route_dispatch_queue` write (~2472) **already** converges through the editor IPC; these three were missed. The fix is the same `#fcc0` discipline: route each through `converge_document_or_disk`, with queue activation preferring the best-effort `persist_queue_maintenance_doc` pattern so a no-ack listener never *fails* the dispatch (route is the hot path — a fail-closed bail there would break go-mode startup, so it needs its own active/degraded/no-listener tests). Captured as **`#fccroute`** at the top of the backlog.
+
+I scoped it as a fresh item rather than editing `route.rs` inline this cycle on purpose: it is the dispatch hot path, the gate must not fail-closed there, and this session is mid-recovery with a long exchange — the safe place for a route-critical change is a clean focused cycle, which the queue drain gives it next.
+
+Not in scope (correctly still raw disk writes): the recovery/scaffold/migration paths (`claim`, `repair`, preflight migrate/repair, `session-check` remedy, `reset`, the `#pcwc` worktree reconcile) — those must write disk authoritatively even when the editor/IPC path is itself wedged, so they cannot fail-closed on a live-but-unresponsive listener.
+<!-- agent:boundary:445b81c0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -128,10 +151,12 @@ Follow-ups in backlog: `#fccaudit` (extend the gate to the remaining preflight/c
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~`agent:backlog` with `queue` attribute should have added the backlog items into the queue immediately when the items were added to the backlog.~~
 - ~~`agent:backlog` with `queue` attribute should add remaining backlog items into the queue an prepare and finalize. Note that if items are gated or have preconditions that are not met such as a date in the future, do not add the backlog item into the queue.~~
-- JB `File Cache Conflict` dialog is still occurring. Any more raw disk writes that need to be replaced?
+- ~~JB `File Cache Conflict` dialog is still occurring. Any more raw disk writes that need to be replaced?~~
 - ~~:pushpin: do [#fccaudit]~~
 - ~~do [#rz3a]~~
 - Add `Restart Agent` Plugin menu command. Changing the agent such as from claude to opencode should restart the agent during the next boundary.
+- Why did you add DO NOT IMPLEMENT THE FIX to [#rz3a]?
+- do [#fccroute]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -158,6 +183,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#fccroute] Extend the #fccaudit editor-IPC write gate to the route/dispatch session-doc disk-write sites in route.rs: activate_existing_route_queue_head (queue activation atomic_write_pub ~line 2601, fires every go-mode queue activation behind a live editor), scrub_duplicate_prompt_comments_for_route (dedup atomic_write_pub ~1943), and ensure_session_for_file session-UUID injection (std::fs::write ~1926). These fire during route dispatch while the IDE editor is open and are the likely remaining File Cache Conflict source now that #fccqueue/#fccaudit gated the preflight/finalize path. Route each through the converge gate (converge_document_or_disk, mirroring the sibling route_dispatch_queue write that already converges at ~2472; queue activation may prefer the best-effort persist_queue_maintenance_doc pattern so a no-ack listener never fails the dispatch). Add tests proving activation/dedup/session-id still succeed under active, degraded, and no-listener. Keep the snapshot save (private .agent-doc, never conflicts).
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported 'tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.' Supervisor pid 1742954 is alive now; pane %78 OpenCode TUI shows 'Thinking' normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from my cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe=(deleted)) as a crash. NEED operator to paste exact error text or the pane capture from the crash moment, or the specific cycle id, to root-cause. Not currently reproducible from logs alone.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.
 <!-- /agent:backlog -->

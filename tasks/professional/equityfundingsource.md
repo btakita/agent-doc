@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -115,7 +115,34 @@ Queue drained.
 Already deployed in the previous cycle. The activity-log changes (EFS `2c6354b`) shipped as **Version `d236a09d-38bb-46f6-975e-7edbf515c7d5`**. No new code changes since that deploy — re-deploying would only re-ship the same Worker.
 
 Queue drained.
-<!-- agent:boundary:8e2496ee -->
+
+### Re: /portal-admin → /admin rename — one real conflict — glm-5.2
+
+> **Queue prompt:**
+>
+> Please change /portal-admin to /admin. Are there any issues of conflict with doing this?
+
+**Yes — one route conflict plus a cleanup pass.** Here's the analysis:
+
+**1. Route conflict (the blocker):** The admin portal has a catch-all route at `portal/admin/routes.ts:204`:
+```ts
+app.get(`${URLS.portal_admin}/:section`, ...)
+```
+If `ADMIN` changes from `/portal-admin` to `/admin`, this becomes `/admin/:section`, which **shadows the existing auth routes** `/admin/login` and `/admin/signup` (`URLS.admin_login` / `URLS.admin_signup` at `urls/index.ts:33-34`). Whether it breaks depends on Hono route registration order — fragile.
+
+**2. Hardcoded paths (cleanup):** The `URLS` constant (`ADMIN = '/portal-admin'`) is the single source of truth for route definitions, but **~15+ UI components have hardcoded `/portal-admin/...` hrefs** that bypass it — `funding_detail.tsx`, `pipeline.tsx`, `loan_detail.tsx`, `upload_detail.tsx`, etc. These would all need updating.
+
+**3. External concerns:**
+- Browser bookmarks pointing to `/portal-admin/*` would break without redirect rules
+- Cloudflare Access policies (if any protect `/portal-admin/*`) would need updating — though the current config uses `ACCESS_TEAM_DOMAIN` + `ACCESS_AUD` for OAuth callback only, not path-scoped policies
+
+**Options to proceed safely:**
+- **(A) Move admin auth first** — relocate `admin_login` / `admin_signup` to `/login?role=admin` (unify with other roles) or `/auth/admin`, then rename the portal prefix. Cleanest but touches auth flows.
+- **(B) Exclude in the catch-all** — add `login` and `signup` to a skip-list in the `:section` handler. Works but fragile.
+- **(C) Keep `/portal-admin`** — no conflict, no migration. The prefix is internal-facing only.
+
+If you want to proceed, I recommend **(A)**: unify admin login into the existing role-based `/login?role=admin` flow (which already exists for borrower/investor/broker), remove the separate `/admin/login` + `/admin/signup` routes, then change `ADMIN = '/admin'` and add `/portal-admin/* → /admin/*` redirects. Want me to do that?
+<!-- agent:boundary:90c263d6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,7 +155,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Please change /portal-admin to /admin. Are there any issues of conflict with doing this?
 <!-- /agent:queue -->
 
 ## Backlog

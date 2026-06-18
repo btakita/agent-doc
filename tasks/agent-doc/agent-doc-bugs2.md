@@ -58,7 +58,7 @@ That error is the **qflood pause protection working as intended on `equityfundin
 **Real UX gap — filed `#qpauseux` [recommended].** A `queue_paused`/qflood dispatch block surfaces in JB "Run Agent Doc" as a raw red `Error:` toast rather than an actionable "queue paused — resume to continue" state. The unblocker token is in the text, but the framing reads as a crash. The plugin should render a paused-queue block as an info/action notification (with a Resume button) keyed off `ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control`.
 
 **`#routedrainnextaction` is now live.** The supervisor you restarted came up on the pre-fix binary (preflight flagged `stale_install`), so I ran `make install`: binary + cdylib rebuilt at `a24ff990` (CI green on that push), and `lib-install` marked 2 controllers to auto-recycle at the next idle boundary. After this turn the fixed route-closeout diagnostic (`recovery_command=agent-doc reset --from-current ... / write --commit ...` instead of the misleading `wait_for_owner_turn_to_drain`) is running.
-<!-- agent:boundary:1f64db68 -->
+<!-- agent:boundary:323b123a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -93,6 +93,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 - [#jbacceptwedge]: 0.2.170 installed
 - :pushpin: equityfundingsource.md & monsterrodholders.md keeps on drifting with edits.
+- do [#qpauseux]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -119,6 +120,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qpauseux] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block as a raw red Error: toast instead of an actionable queue paused — resume notification. Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button rather than a dispatch error.
 - [ ] [#docdriftgrace] agent-doc thrashes when the session doc changes mid/between turn in ways unrelated to the current prompt: snapshot>visible drift (operator trimmed old committed Re: blocks + harness switch + queue edits) made preflight refuse commit (looks like a manual cleanup with stale snapshot) and forced a manual reset --from-current. Binary should classify drift by component and silently auto-rebase snapshot/CRDT for unrelated changes (historical exchange trims, frontmatter agent switch, queue/backlog bookkeeping), surfacing ONLY structural conflicts on the in-flight prompt/response. Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported 'tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.' Supervisor pid 1742954 is alive now; pane %78 OpenCode TUI shows 'Thinking' normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from my cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe=(deleted)) as a crash. NEED operator to paste exact error text or the pane capture from the crash moment, or the specific cycle id, to root-cause. Not currently reproducible from logs alone.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.

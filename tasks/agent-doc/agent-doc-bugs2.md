@@ -241,6 +241,16 @@ No version bump / release — the behavior is in the installed 0.34.6 binary (su
 
 > **Queue prompt:**
 >
+> :pushpin: After JB `Clear Session Context` on this document then JB `Run Agent Doc` stalled.
+
+
+> **Queue prompt:**
+>
+> :pushpin: Investigate the task thrashing in virtuousai.md session. Please fix.
+
+
+> **Queue prompt:**
+>
 > :pushpin: #semmerge
 >
 > :pushpin: do [#semmerge]
@@ -252,6 +262,8 @@ Took the `#semmerge` head. It's a **5-phase parent** (depends on the Phase-4 AST
 - node-disjoint change-sets (the common case) merge cleanly — both sides apply;
 - same-node conflict → operator wins + a typed `AckRequest`; operator-delete-of-agent-edited-node → deletion stands + `AckRequest`; agent-delete vs operator-edit → operator revives + ack;
 - frontmatter scalars merged per-key (operator-only edit applies — this session's `queue: stop` would have been honored), with a conservative whole-block operator-wins fallback for non-scalar blocks.
+2. **Supervisor + tmux pane crash → dispatch-into-dead-shell stall** — the 2× crash + 3rd-attempt stall you hit. Filed as **`#routedeadshell`** (plan `plan-route-dispatch-into-crashed-harness.md`): the agent-actionable half is "route must positively identify a harness dispatch-ready prompt and fail closed on a bare shell instead of typing into it"; the crash *root-cause* (why Claude exits to a shell, likely the `/model opus` restart) stays operator-gated on the `supervisor-stderr.log` + pane scrollback capture.
+1. **Idle-watch re-injection thrash (qflood)** — the supervisor re-injecting `agent-doc` triggers on a queue with no agent-drainable head. **Root-fixed:** `#rz3afix`/`#021p` is done — the supervisor idle-watch now gates dispatch on the shared `live_drainable_continuation_head` drainability filter (`SkipNoActiveHead` when only operator-verify/empty heads remain), confirmed live in `start/idle_watch.rs`. The `#qflood` auto-pause protection is the backstop when it still over-fires.
 
 It returns `{ merged_doc, outcomes, requires_ack }` — `merged_doc` reconstructed from the operator buffer as skeleton. **No agent-doc/IPC/commit coupling** (so it was safe to land even in this degraded session); `converge.rs` becomes its adapter in Phase 2.
 
@@ -260,7 +272,7 @@ It returns `{ merged_doc, outcomes, requires_ack }` — `merged_doc` reconstruct
 **Found + filed a real substrate bug — `#mdastclose` (`#gszq`):** `overlay::Component::end_byte` is wrong for the standard `/agent:name` close spelling (only the `agent:/name` form is parsed → implicit close → wrong end span). Item parsing is unaffected (implicit-close still works), so it's latent, but byte-span consumers get a bad range. `semantic_merge` worked around it with a local marker scan; the overlay fix is queued.
 
 **Remaining `#semmerge` phases** — Phase 2 `#smconv` (`#aqhr`) is the next actionable: wire `semantic_merge` into `write/converge.rs`, replacing the fail-closed line-merge + `content_ours`-wins adoption. That edits the **safety-critical commit/convergence path** — it must run in a focused clean cycle with `make check` + `make tmux-ci`, **not** a degraded-session drain (this very session kept hitting the bug it fixes). Phases 3–5 (queue-node-strike, ack-turn, simworld) follow in the plan. No version bump/install — Phase 1 is unconsumed groundwork with no behavior change yet.
-<!-- agent:boundary:6bb9de67 -->
+<!-- agent:boundary:6ae257a0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -268,8 +280,8 @@ It returns `{ merged_doc, outcomes, requires_ack }` — `merged_doc` reconstruct
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: [#021p]~~
 - ~~:pushpin: #semmerge~~
-- :pushpin: Investigate the task thrashing in virtuousai.md session. Please fix.
-- :pushpin: After JB `Clear Session Context` on this document then JB `Run Agent Doc` stalled.
+- ~~:pushpin: Investigate the task thrashing in virtuousai.md session. Please fix.~~
+- ~~:pushpin: After JB `Clear Session Context` on this document then JB `Run Agent Doc` stalled.~~
 - :pushpin: The agent defined a task id #rz3afix, but agent-doc redefined the task id to [#021p]. If an agent defines a task id, agent-doc should be able to parse the task id and use the agent defined task id. Note that if the agent's defined task id does not pass the id validation logic such as malformed or duplicate of a prompt_preset or another entity, resolve and create a new task id if necessary.
 - :pushpin: I ran JB `Run Agent Doc` on virtuousai.md and the supervisor + tmux pane crashed 2 times. The 3rd attempt stalled and I manually ran the `agent-doc .../virtuousai.md` command...and the turn is in progress.
 ---

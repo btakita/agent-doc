@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -245,13 +245,44 @@ Cargo deps corrected: `tsift-agent-doc` now depends on `tsift-core` + `tsift-sql
 | VRAM unload POST | ✅ Planner-owned (since `#kgunloadpost`) |
 
 **Queue drained.** This was the last head.
-<!-- agent:boundary:4149e88b -->
+
+### Re: is `tsift kg` in current active use? — glm-5.2
+
+> **Queue prompt:**
+>
+> Is `tsift kg` in current active use?
+
+
+> **Queue prompt:** Is `tsift kg` in current active use?
+
+**No — shipped, tested, and installed, but dormant in every active workflow.** Three angles checked:
+
+**1. Code state (active).** All five subcommands (`extract`, `status`, `evidence`, `unload`, `smoke`) are implemented, unit-tested, and installed via `cargo install`. The library seams (`KgSemanticProvider` in memgraphrag, `graph_evidence` in agent-doc, `execute_unload_actions` + `unload_model_at` in local-model) are public API. `tsift kg --help` lists all five.
+
+**2. Workspace state (dormant).** `.tsift/graph.db` exists and is large (2.4 GB, 418 330 nodes / 910 234 edges) — but it is entirely AST/index content:
+```
+tsift kg status
+Nodes by kind (top 10): symbol: 362051, ast_span: 27874, file: 24869, source_handle: 659, memory_event: 600, semantic_concept: 600, …
+tsift kg evidence --kind kg_source
+Matched: 0  (no matches)
+```
+Zero `kg_source` nodes → `tsift kg extract` has **never been run** against this workspace. The 600 `semantic_concept` nodes are memgraphrag's hash fallback over memory events, not KG extraction.
+
+**3. Workflow integration (zero).** `rg 'tsift kg|tsift_kg|kg extract|kg evidence|kg unload|kg smoke'` across `.github/workflows/`, `runbooks/`, `.claude/`, `.codex/hooks.json`, `.opencode/`, `Makefile`, `AGENTS.md`, `CLAUDE.md`, `RTK.md` → **no matches**. Every `tsift kg` mention in the repo is in source code, specs, READMEs, plan docs, or this session doc.
+
+**Operational proof to date:** only one-off smokes — the original `#lmlazy` live RTX 5090 run, my `#kgcliext`/`#kgunloadpost` spot-checks against `127.0.0.1:11434`, and the missing-db CLI verifications.
+
+**Bottom line:** the capability is real and reachable, but no hook, runbook, CI job, agent instruction, or operator workflow actually drives it. Captured two follow-ups in `agent:backlog`: `#kgwiring` (wire `tsift kg extract` into a post-index hook + a `session_digest`/planning call site for `graph_evidence`) and `#kgoperatorrun` (operator-run a real `tsift kg extract` against this workspace so the commands have data to act on). `#kgoperatorrun` is the smaller unblock — until it runs once, status/evidence/unload are exercising the plumbing with nothing to report.
+
+Did **not** apply `#spec-test-build-install-commit-push`: prompt was a state-assessment question, no code changes made.
+<!-- agent:boundary:82268407 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Is `tsift kg` in current active use?
+- do [#kgwiring]
+- do [#kgoperatorrun]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -260,6 +291,8 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#kgwiring] Wire tsift kg into an active workflow so it stops being dormant code. Two candidate seams: (1) a post-index hook/script that runs 'tsift kg extract --graph-db .tsift/graph.db' over high-value source files (e.g. SPEC.md, AGENTS.md, README.md per package) so KG evidence accumulates alongside AST data; (2) a session_digest or agent-doc planning call site that invokes tsift_agent_doc::graph_evidence::read_graph_evidence to surface relevant entities into the digest. Today: zero tsift kg invocations in any hook, runbook, .github/workflows, .codex/hooks.json, .opencode/, Makefile, AGENTS.md, or RTK.md — every mention is source/spec/doc.
+- [ ] [#kgoperatorrun] Operator: run 'tsift kg extract --profile qwen3-32b-q4-ollama --graph-db .tsift/graph.db' against a real source file in this workspace to seed kg_source nodes. Today the workspace graph.db has 418k nodes / 910k edges but ZERO kg_source kind (verified via 'tsift kg evidence --kind kg_source' → no matches) — every node is from the AST/index pipeline or memgraphrag's hash fallback. Until at least one real extract runs, the evidence/status/unload commands have nothing to report on.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 

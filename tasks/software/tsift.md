@@ -119,13 +119,34 @@ I chose **on-demand** (vs. scheduled) as the trigger: it's deterministic, needs 
 **Verified live:** `tsift kg refresh --graph-db .tsift/graph.db` against the existing graph correctly reported the one `kg_source` (`specs/local-kg-model.md` from `#kgoperatorrun`) as `NoRecordedHash` (it predates the hash) and emitted its re-extract command. `make check` green (clippy clean; cli 389→391 tests — 2 new for `plan_refresh`); installed. Spec + VERSIONS updated. CI run 27740735657 queued at closeout (proceeding on local evidence).
 
 **Queue now:** `#kggraphscope` (the GraphRAG-context feature — the big one, plan written) is next, then `#kgleasereap` (deferred — needs clean `src/agent-doc`), plus new `#kgrefreshapply` and operator-gated `#vmax`.
-<!-- agent:boundary:2dad4b6a -->
+
+### Re: do [#kgrefreshapply] → `tsift kg refresh --apply` shipped — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#kgrefreshapply]
+
+
+Done — staleness is now not just visible but **auto-fixable on demand** (tsift `80dfc92`, pushed; superproject `16bd62f84`).
+
+`tsift kg refresh --apply` re-extracts every stale / `no_recorded_hash` source the `#kgextractrefresh` plan identifies, reusing the **same lease-aware `run_kg_extract` core** as `kg extract` — so concurrent refresh-extracts still serialize on one GPU and the reference-counted unload still fires on the last release. Operator-gated (loads the model: needs GPU + Ollama). Sources whose `source_ref` is no longer a readable file are **skipped**, not failed.
+
+To keep a single lease-aware path instead of two, I refactored `cmd_kg_extract` into `run_kg_extract` (returns `KgExtractOutcome`) + a shared printer, and the apply loop collects outcomes into a **unified summary** — one JSON document (`results` / `errors` / `skipped`) in `--json`, a readable per-source block in human mode — rather than interleaving per-source stdout. New `refresh` flags: `--apply` plus the extract pass-throughs (`--profile` / `--model` / `--host` / `--no-lease` / `--idle-ttl-seconds` / `--keep-loaded` / `--lease-file`). The pure `RefreshPlan::apply_targets` selector (needs-refresh AND file currently readable) has unit coverage.
+
+**Verified live:** the read-only plan still reports the one `kg_source` (`specs/local-kg-model.md`) as `NoRecordedHash` and now also hints `tsift kg refresh --apply`. The apply-loop plumbing is verified end-to-end **without a GPU** by pointing at a closed port — the readable source became an apply target, `run_kg_extract` was invoked, and the connection error was captured per-source into a single valid JSON (`applied: 0, failed: 1, skipped: []`) instead of aborting the run. The actual model-extract success path is the unchanged `run_kg_extract` core that `#kgleasewire` already shipped green. `make check` green (clippy clean; cli 391→393 tests — 2 new for `apply_targets`); installed. CI run 27741788987 in progress at closeout (proceeding on local evidence).
+
+**On the `#kgextractrefresh` false-positive:** the semantic-completion warning matched `#kgrefreshapply` → `#kgextractrefresh` (1.776) because the candidate text literally says "Foundation shipped in #kgextractrefresh" — but the foundation (staleness detection + plan) and the `--apply` auto-refresh were always distinct work items; `--apply` is exactly what this cycle added, so the item was genuinely open.
+
+**Queue now:** `#kgleasereap` (deferred — needs a clean `src/agent-doc` working tree; design-unblocked now that `#kgleasewire` makes leases exist to reap) and `#kggraphscope` (GraphRAG-context — the big feature, plan written) remain. Neither was agent-drainable this cycle. Heads-up: skill-version drift (`0.34.1` declared vs `0.34.3` binary) — run `agent-doc skill install --harness opencode --reload restart` after the queue drains (the active drain forbids a restart mid-loop).
+<!-- agent:boundary:d57f465b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#kgrefreshapply]
+- ~~do [#kgrefreshapply]~~
+- do [#kgleasereap]
+- do [#kggraphscope]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -134,7 +155,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgrefreshapply] [recommended] Add `tsift kg refresh --apply` to auto re-extract the stale/no_recorded_hash sources the plan identifies (operator-gated: needs GPU + Ollama), reusing the lease-aware kg extract path. Foundation (staleness detection + plan + per-source extract commands) shipped in #kgextractrefresh.
 - [ ] [#kgleasereap] [deferred — needs a clean src/agent-doc working tree; that submodule currently has unrelated uncommitted changes. Foundational #kgleasewire is now live (kg extract consumes the lease), so this is unblocked once agent-doc is clean] Invoke lease reap + renew automatically: wire `tsift local-model lease reap --unload-empty` into the agent-doc supervisor idle-watch (and renew long-lived holders) so crashed-session leases are reclaimed and unreferenced models unloaded without manual CLI.
 - [ ] [#kggraphscope] GraphRAG context for the local KG model (Phase 1: bounded, deterministic kg context-pack retrieval — chunk/seeds to a ranked known-entity pack from graph.db, reusing semantic/related neighborhoods + memgraphrag ranking, capped by token budget). Today extract_documents_to_projection extracts each chunk in isolation (no graph context), causing duplicate/variant entities + missed cross-chunk relations. Subsumes the prior evidence-cap concern (same bounded-scan discipline). Phases 2-3 (inject into extractor prompt; graph-aware incremental re-extract) in plan. Plan: tasks/software/plan-tsift-kg-graphrag-context.md
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.

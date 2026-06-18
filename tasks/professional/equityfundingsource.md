@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -28,7 +28,7 @@ queue: start
 completed
 <!-- /agent:status -->
 
-## Exchahnge
+## Exchange
 
 <!-- agent:exchange patch=append -->
 ### Session Summary
@@ -38,7 +38,32 @@ completed
 Compacted content:
 - Archived 6 response topic(s): Selecting a lender advances deal to Processing; Activity History event on lender select + deployed; deploy; 3 more
 - Prior summary/context: prior compacted content: Archived 12 response topic(s): Video-corpus task + deploy do not apply to EFS this cycle; de...
-<!-- agent:boundary:3f56b089 -->
+
+### Re: AvailableDeal dialog + page restructure (#spec-test-commit-push, deploy) — opus-4.8
+
+> **Queue prompt:**
+>
+> Remove "Final Loan Documents" and all data + logic associated with it. The closing docs will be its own step defined later.
+
+
+> **Queue prompt:**
+>
+> In "Loan Status", add Lender Selected step after Application Received
+
+
+Done, verified, and deployed. Reworked the admin AvailableDeal view (`portal/admin/loan_detail.tsx`, reused embedded in the pipeline dialog and as the full page):
+
+- **Lender Selected step** added after "Application Received" (in `LOAN_STATUS_STEPS`, the stepper, and as a `lender-selected` board column). Selecting the funding lender now advances the loan to **Lender Selected** (was Processing).
+- **Final Loan Documents removed** (full removal, per your call). Because it held the only notarize control — which gated wire disbursement — I also removed the dashboard final-docs attention item and relaxed the wire-status gate (UI + server 409) so funding isn't hard-blocked. The borrower-signature API + `final_docs_*` D1 columns are preserved for the future closing-docs step (queued in backlog).
+- **Payment Schedule removed** (EFS does not collect borrower payments).
+- **Borrower Onboarding Data removed**; `proposed_loan_amount`, `loan_purpose`, `occupancy`, `property_value`, and `Property Address` lifted into the **Application** card via `onboarding_fields_`.
+- **"Application Record" → "Application"**.
+- **Layout**: Loan Status is now a thin full-width bar with Borrower Info between it and Application; the secure Wire Links card is retained.
+
+Also fixed two build-breaks left in the working tree from a prior interrupted cycle (`onboarding_fields_` and `ADMIN_LOAN_INFO_COPY_VALUE_STYLE` were referenced but undefined) and restored `LoanWireLinks`, which that cycle had over-removed.
+
+Verification: `bun run check` green — **813 tests pass, 0 fail**, app + worker builds clean. Committed (`c9aa3a6`) + pushed to `origin/main`, deployed to production (version `fb99f394`); home and `/admin/login` return 200.
+<!-- agent:boundary:bed85366 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,8 +77,8 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 In AvailableDeal dialog + page
-- In "Loan Status", add Lender Selected step after Application Received
-- Remove "Final Loan Documents" and all data + logic associated with it. The closing docs will be its own step defined later.
+- ~~In "Loan Status", add Lender Selected step after Application Received~~
+- ~~Remove "Final Loan Documents" and all data + logic associated with it. The closing docs will be its own step defined later.~~
 - Remove "Payment Schedule" and all data + logic associated with it. EFS does not collect borrower payments.
 - Move "Property Address" from "Borrower Info" to "Application Record"
 - Move "proposed loan amount", "loan purpose", "occupancy", "property value", "tmo loan number" from "Borrower Onboarding Data" to "Application Record"
@@ -61,11 +86,13 @@ In AvailableDeal dialog + page
 - Rename "Application Record" to "Application"
 - Make "Loan Status" thin and move "Borrower Info" in between "Loan Status" and "Application"
 - deploy
+- do [#5eq8]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#5eq8] Closing docs step (redesign): rebuild the closing-documents/notarization flow as its own step (replaces the removed Final Loan Documents section). This re-introduces a notarize control and SHOULD re-gate allocation wire status (Sent/Confirmed) on notarization — the UI gate + server 409 were removed in the 2026-06-18 AvailableDeal restructure so funding is not hard-blocked in the interim. Borrower-signature API + final_docs_* D1 columns are preserved.
 <!-- /agent:backlog -->
 
 ## Review

@@ -38,7 +38,42 @@ completed
 Compacted content:
 - Archived 12 response topic(s): Video-corpus task + deploy do not apply to EFS this cycle; deploy; Remove "Urgent notifications" label; 9 more
 - Prior summary/context: prior compacted content: Archived 10 response topic(s): Ensure rwaldman100+admin@gmail.com has an admin account; Ensu...
-<!-- agent:boundary:dc5674a3 -->
+
+### Re: Selecting a lender advances deal to Processing — glm-5.2
+
+> **Queue prompt:**
+>
+> I selected a vendor in an Available deal in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline. When the vendor is selected, the deal should move to the next step in the db and in the UI.
+
+
+> **Queue prompt:**
+>
+> I selected a vendor in an Available deal in …/portal-admin/pipeline. When the vendor is selected, the deal should move to the next step in the db and in the UI. deploy
+
+Shipped. When a lender is selected via `PUT /api/admin/deal-interests/:id/select`, the endpoint now checks the loan's `tmo_loan_status` and advances it from `'Application Received'` (Available Deals column) to `'Processing'` (Processing column) — but only if the loan hasn't already advanced past that stage. Deployed.
+
+**Changes (EFS `bc7d0de`):**
+
+1. **`admin_deal_interests_by_id_select_PUT_`** (`lib/admin/investor_management/index.ts`):
+   - After the selection + TMO outbox enqueue succeed, fetches the loan via `admin_loan_R_`
+   - If `tmo_loan_status === 'Application Received'`, calls `admin_loan_status_update_(auth.db, loan_id, 'Processing')`
+   - Returns `loan_status_changed: boolean` in the response
+   - Fires a `loan_status_changed` admin event so the pipeline board can refresh
+
+2. **UI** (`deal_detail.tsx`):
+   - Toast now says `"selected — deal moved to Processing."` when the status changed, vs. `"selected and queued for TMO sync."` when it didn't
+
+3. **Test**: updated the select-lender test to assert the `'Application Received' → 'Processing'` advance code and `loan_status_changed` response field
+
+**Verification:** `make check` — **813 tests pass / 0 fail**, build + build:worker OK. No pending D1 migrations.
+
+**Deploy:**
+- EFS `bc7d0de` pushed `80a7144..bc7d0de`
+- Root `15cde68ac` submodule pointer bump pushed
+- Worker deployed: **Version `2a43620d-85d8-4737-9171-c215847f2f17`**
+
+Queue drained.
+<!-- agent:boundary:f5efc424 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +86,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- I selected a vendor in an Available deal in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline. When the vendor is selected, the deal should move to the next step in the db and in the UI. deploy
+- ~~I selected a vendor in an Available deal in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline. When the vendor is selected, the deal should move to the next step in the db and in the UI.~~
+- When the vendor is selected, an event in the Activity History should be created.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

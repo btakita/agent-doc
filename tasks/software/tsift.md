@@ -44,6 +44,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> do [#kgleasewire]
+
+
+> **Queue prompt:**
+>
 > do [#kggraphscope]: Should we integrate the memgraphrag, semantic neighborhoods, and graphdb to determine the context for the local model?
 
 **Yes — this is the GraphRAG pattern, and it's the single highest-leverage quality improvement for the local KG model.** The pieces already exist; the extractor just doesn't consume them yet.
@@ -78,13 +83,13 @@ Per chunk: seed salient terms → expand top-K neighbors by connectivity + recen
 **Backlog:** I reframed **`#kggraphscope`** as Phase 1 — a bounded deterministic `kg context-pack` retrieval API (it subsumes the evidence-cap item). Phases 2 (inject into the extractor prompt) and 3 (graph-aware incremental re-extract) are in the plan: `tasks/software/plan-tsift-kg-graphrag-context.md`. This composes with `#kgleasewire` — graph-aware extraction runs the local model more, so the reference-counted load/unload lifecycle matters more.
 
 **Recommendation:** do `#kgleasewire` first (small, closes the loop on the lease lifecycle just shipped), then this — it's the bigger feature but the one that actually makes the local KG model good.
-<!-- agent:boundary:a5151860 -->
+<!-- agent:boundary:5d75abab -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#kgleasewire]
+- ~~do [#kgleasewire]~~
 - do [#kgleasereap]
 - do [#kgextractrefresh]
 - ~~:pushpin: do [#kggraphscope]: Should we integrate the memgraphrag, semantic neighborhoods, and graphdb to determine the context for the local model?~~
@@ -96,7 +101,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgleasewire] Wire the #kgreflease lease lifecycle into kg extract: acquire_lease (profile, holder pid) before model load in cmd_kg_extract/extract pipeline, release_lease --unload-on-last-release after, so concurrent extracts serialize on the GPU and VRAM auto-frees. Closes the loop on #kgreflease (registry currently has zero callers outside CLI/tests).
+- [ ] [#kgleasewire] [queued — not started this cycle; this cycle answered the #kggraphscope design question] Wire the #kgreflease lease lifecycle into kg extract: acquire_lease (profile, holder pid) before model load in cmd_kg_extract/extract pipeline, release_lease --unload-on-last-release after, so concurrent extracts serialize on the GPU and VRAM auto-frees. Closes the loop on #kgreflease (registry currently has zero callers outside CLI/tests).
 - [ ] [#kgleasereap] Invoke lease reap + renew automatically: wire `tsift local-model lease reap --unload-empty` into the agent-doc supervisor idle-watch (and renew long-lived holders) so crashed-session leases are reclaimed and unreferenced models unloaded without manual CLI.
 - [ ] [#kgextractrefresh] Define a kg extract refresh trigger (on-demand re-extract of changed files, or scheduled) so .tsift/graph.db is not a stale manual snapshot; current graph.db is a Jun-14 one-shot.
 - [ ] [#kggraphscope] GraphRAG context for the local KG model (Phase 1: bounded, deterministic kg context-pack retrieval — chunk/seeds to a ranked known-entity pack from graph.db, reusing semantic/related neighborhoods + memgraphrag ranking, capped by token budget). Today extract_documents_to_projection extracts each chunk in isolation (no graph context), causing duplicate/variant entities + missed cross-chunk relations. Subsumes the prior evidence-cap concern (same bounded-scan discipline). Phases 2-3 (inject into extractor prompt; graph-aware incremental re-extract) in plan. Plan: tasks/software/plan-tsift-kg-graphrag-context.md

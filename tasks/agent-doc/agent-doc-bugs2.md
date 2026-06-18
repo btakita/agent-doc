@@ -115,6 +115,11 @@ The queue re-presented the same `[#tsiftmdcrash]` + File Cache Conflict + cross-
 
 ### Re: free-text heads = question-or-actionable, strike when filed — opus-4-8
 
+> **Queue prompt:**
+>
+> [#tsiftmdcrash]
+
+
 Got it — applied your rule to the live queue (conservatively, not over-eager). A free-text head is either a **question** (answer it → consumed) or an **actionable item** (a backlog item is created; per the `queue` attr it auto-populates right below the struck free-text head; then the free-text head is struck). I struck the three free-text heads that are already-filed actionable reports:
 
 - ~~"…wedge and deleted what I wrote in the queue"~~ → `#qheadsync`
@@ -124,24 +129,14 @@ Got it — applied your rule to the live queue (conservatively, not over-eager).
 Each already had its tracked backlog item (all `[operator-verify]`), so I struck the duplicate reports rather than creating new ones. Left untouched: `[#tsiftmdcrash]` (id-backed, already deferred as operator-verify) and the two cross-doc `JB Run Agent Doc on equityfundingsource.md` route-diagnostic dumps (informational, already explained as qflood-working-as-intended; cross-doc, so out of scope to act on here — clear them when convenient).
 
 **Remaining `#qheadsync` work (the durable automation of exactly this rule):** make the binary do this at closeout instead of by-hand — when a free-text head is answered by a committed response *or* filed as a backlog item, auto-strike it (past id-backed heads, not just the leading one), and have auto-populate place the new backlog id's queue entry immediately below the struck head rather than appending. That ends the thrash without manual striking. It's a focused implementation cycle; I've kept the plan (`plan-answered-queue-head-autostrike.md`) and `#qheadsync` open for it.
-<!-- agent:boundary:033c1bde -->
+<!-- agent:boundary:a19a1189 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-~~~done
-:pushpin: After a JB `Restart Supervisor Process` which surfaced a `Interrupt and Clear`...JB `Run Agent Doc` error
-```
-resync: pruned 5 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3933 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
-```
-~~~
-- ~~do [#docdriftgrace]~~
-- ~~:pushpin: do [#routedrainnextaction]~~
-- ~~:pushpin: agent-doc should not thrash when the document changes during a turn...when the current document does not match the snapshot. The binary should gracefully resolve the difference without the agent knowing about it. Only structural conflicts based on the current work should be surfaced...such as editing the current prompt. Unrelated changes should be gracefully handled by the agent-doc binary without the agent needed to intervene.~~
-- [#tsiftmdcrash]
+- ~~[#tsiftmdcrash]~~
+- :pushpin: Any backlog, review, or icebox item that is blocked by some operation action should have the operator action with bold formatting.
 - :pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.
 - :pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.
 ---
@@ -158,9 +153,7 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
-- ~~[#jbacceptwedge]: 0.2.170 installed~~
 - :pushpin: equityfundingsource.md & monsterrodholders.md keeps on drifting with edits.
-- ~~do [#qpauseux]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -189,7 +182,7 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block as a raw red Error: toast instead of an actionable queue paused — resume notification. Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button rather than a dispatch error. **Operator action: install the updated JB plugin, then verify the paused-queue notification renders (live gate).**
 - [ ] [#docdriftgrace] [operator-verify] agent-doc thrashes when the session doc changes mid/between turn in ways unrelated to the current prompt: snapshot>visible drift (operator trimmed old committed Re: blocks + harness switch + queue edits) made preflight refuse commit (looks like a manual cleanup with stale snapshot) and forced a manual reset --from-current. Binary should classify drift by component and silently auto-rebase snapshot/CRDT for unrelated changes, surfacing ONLY structural conflicts on the in-flight prompt/response. **Operator action: watch one live re-baseline cycle to verify the silent auto-rebase.** Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md
-- [ ] [#tsiftmdcrash] [operator-verify] Operator reported 'tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.' Supervisor pid 1742954 is alive now; pane %78 OpenCode TUI shows 'Thinking' normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from my cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe=(deleted)) as a crash. NEED operator to paste exact error text or the pane capture from the crash moment, or the specific cycle id, to root-cause. Not currently reproducible from logs alone.
+- [ ] [#tsiftmdcrash] [operator-verify] Operator reported that a tsift.md agent-doc turn crashed and killed the session process while the tmux pane stayed active. Supervisor pid 1742954 is alive; pane %78 OpenCode TUI shows Thinking normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe deleted) as a crash. Not reproducible from logs alone. **Operator action: paste the exact crash error text / pane capture from the crash moment, or the specific cycle id, so it can be root-caused.**
 <!-- /agent:backlog -->
 
 ## Review

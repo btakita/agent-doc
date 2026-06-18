@@ -59,7 +59,7 @@ Compacted content:
 Two real fixes shipped this session and installed: accretion default-off (`7addd9ee`) and the reactive-watch mid-turn guard (`454f935a`) — both verified, pushed, and live via `make install`. The IPC ack_mismatch also cleared after the cdylib rebuild, so `queue consume` now persists again.
 
 For the queue to terminate, the three remaining backlog items are all genuinely operator-gated: one needs a live Claude pane to validate a dispatch retry, one needs a JB plugin-side fix + install, and one needs an operator repro of fence-stripping. I've retagged all three cleanly so go-mode defers them instead of re-amplifying every cycle — that stops the self-driving churn and lets the queue reach drainable=0.
-<!-- agent:boundary:de1fb08d -->
+<!-- agent:boundary:a4db3eb6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -126,14 +126,14 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#claudesubmit] [operator-verify: live Claude-pane validation] Claude/OpenCode dispatch-only submit proof + bounded Enter retry. Root cause found (no prompt-submit hook → accepted-only without retry). Plan ready: tasks/agent-doc/plan-claude-dispatch-submit-proof-retry.md. Code impl is planned; validating the retry genuinely needs a live Claude pane (operator), so deferring until operator can validate.
-- [ ] [#jbacceptwedge] [operator-verify] [operator-install] JB plugin IPC accept-loop wedge root cause (22 unaccepted conns). Binary works around via ack-probe+file-IPC (96624f9c, installed). Plugin-side accept-loop fix + operator install needed for root cause. Flag operator when plugin fix ready.
-- [ ] [#codefence-strip] [operator-verify] agent-doc stripped a code fence on a prior run. Needs operator repro (which document/run/fence) to fix definitively; will then audit patch/template fence-preservation and add a regression.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#codefence-strip] [operator-verify] agent-doc stripped a code fence on a prior run. Needs operator repro (which document/run/fence) to fix definitively; will then audit patch/template fence-preservation and add a regression.
+- [/] [#claudesubmit] [operator-verify: live Claude-pane validation] Claude/OpenCode dispatch-only submit proof + bounded Enter retry. Root cause found (no prompt-submit hook → accepted-only without retry). Plan ready: tasks/agent-doc/plan-claude-dispatch-submit-proof-retry.md. Code impl is planned; validating the retry genuinely needs a live Claude pane (operator), so deferring until operator can validate.
+- [/] [#jbacceptwedge] [operator-verify] [operator-install] JB plugin IPC accept-loop wedge root cause (22 unaccepted conns). Binary works around via ack-probe+file-IPC (96624f9c, installed). Plugin-side accept-loop fix + operator install needed for root cause. Flag operator when plugin fix ready.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

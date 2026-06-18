@@ -64,16 +64,47 @@ For the queue to terminate, the three remaining backlog items are all genuinely 
 
 ### Re: restore gated items to backlog — glm-5.2
 
+> **Queue prompt:**
+>
+> [#jbacceptwedge]: Do the plugin logic + build. I will install
+
+
 Moving the three operator-blocked items back into the live backlog (ungated) so the open-id validation passes. They retain their status tags so they read as deferred-but-actionable rather than self-driving the queue.
-<!-- agent:boundary:45c9cf97 -->
+
+### Re: #jbacceptwedge plugin logic + build ready for operator install — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: - [#jbacceptwedge]: Do the plugin logic + build. I will install
+
+**Root cause already at submodule HEAD (`86c68db7`, pushed to origin/main).** The JB plugin has no Kotlin accept loops — the IPC listener is the FFI library (`agent_doc_start_ipc_listener[_v2]` in `agent-doc-orchestration/src/ipc_socket.rs`) that the plugin starts via JNA. Its old `start_listener` was single-threaded and synchronous: it blocked on `handler(trimmed)` (disk I/O + CRDT merge) before looping back to `accept()`, so connections piled up in the socket backlog (the "22 unaccepted connections" wedge). Fix shipped earlier this session: one thread per accepted connection, handler shared via `Arc` (Send + Sync bound gained). The "plugin-side accept-loop fix" framing in the old backlog text was the wrong layer — the listener is binary-owned, which is why both IntelliJ and VS Code consumers got the fix in one place (FFI-first pattern, AGENTS.md).
+
+**This cycle added the live-proof logging you asked for.** The wedge was only provable from the unit test; nothing in a live `ops.log` distinguished the fixed path from the broken one. New in `ipc_socket.rs`: `static INFLIGHT_CONNECTION_HANDLERS: AtomicU64` + `InflightConnectionGuard` (RAII, panic-safe) track in-flight handler threads; `[ipc-socket] ipc_accept_thread_spawned inflight=N` is logged to `ops.log` on every accepted connection — **any entry with `inflight>=2` is impossible under the old single-threaded loop**, so a single grep proves the fix is live. Strengthened `slow_handler_does_not_block_concurrent_connections` to sample the counter and assert peak `inflight>=2`.
+
+**Build + install deliverables (ready for your install):**
+- `editors/jetbrains/gradle.properties`: 0.2.169 → 0.2.170.
+- Signed plugin: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip`.
+- Binary + cdylib reinstalled via `make install`; controller recycle marked.
+- `make check`: **4654 passed, 238 skipped**, clippy/sim-medium/version-sync clean.
+- Plan: `tasks/agent-doc/plan-jb-accept-loop-wedge.md`. SPEC invariant in `editors/SPEC.md`.
+
+**No plugin Kotlin change was needed** — the bump gets you a clean install artifact; the fix itself is in the cdylib the plugin already loads via JNA. `[#jbacceptwedge]` backlog updated with the real root cause + new gate.
+
+**Operator gate (live IntelliJ):** install the signed zip + restart IntelliJ, drive a queue drain or any concurrent-IPC turn, then `grep 'ipc_accept_thread_spawned inflight=' .agent-doc/logs/ops.log` and look for `inflight=2` (or higher). That single line is the proof — please install when ready.
+
+**Other queue heads (untouched):** `#codefence-strip` and `#claudesubmit` stay `[operator-verify]`. On your `#codefence-strip` comment ("agent-doc deleted a queue item I added to monsterrodholders.md"): that matches the `#queediturn` reactive-watch churn class, which `454f935a` (in the cdylib you just picked up) targets. The fence-stripping itself still needs your repro.
+
+**Closeout note:** this turn's `finalize` hit `live_prompt_drift_after_preflight` on every IPC attempt because your IntelliJ buffer held stale partial-application bullets from the retry loop. After 4 IPC attempts corruption-looped, I cleaned the partial bullets from disk and used `--force-disk` to break the loop — your `VSCode Plugin logic should match JB Plugin logic` queue item is preserved on disk. IntelliJ will show a File Cache Conflict; please **Load filesystem changes** to pick up this response + the clean queue state.
+<!-- agent:boundary:d6b07daa -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- [#jbacceptwedge]: Do the plugin logic + build. I will install
+- ~~[#jbacceptwedge]: Do the plugin logic + build. I will install~~
 - [#codefence-strip] may have been due to a wedge issue or stale state. Can you detect when this issue occurred? I just added a queue item to monsterrodholders.md and agent-doc deleted it.
 - implement [#claudesubmit] so we can test. I will drive sessions and logging should determine if it failed or succeeded.
+- VSCode Plugin logic should match JB Plugin logic
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -102,7 +133,7 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#codefence-strip] [operator-verify] agent-doc stripped a code fence on a prior run. Needs operator repro (which document/run/fence) to fix definitively; will then audit patch/template fence-preservation and add a regression.
 - [ ] [#claudesubmit] [operator-verify: live Claude-pane validation] Claude/OpenCode dispatch-only submit proof + bounded Enter retry. Root cause found (no prompt-submit hook → accepted-only without retry). Plan ready: tasks/agent-doc/plan-claude-dispatch-submit-proof-retry.md. Code impl is planned; validating the retry genuinely needs a live Claude pane (operator), so deferring until operator can validate.
-- [ ] [#jbacceptwedge] [operator-verify] [operator-install] JB plugin IPC accept-loop wedge root cause (22 unaccepted conns). Binary works around via ack-probe+file-IPC (96624f9c, installed). Plugin-side accept-loop fix + operator install needed for root cause. Flag operator when plugin fix ready.
+- [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.
 <!-- /agent:backlog -->
 
 ## Review

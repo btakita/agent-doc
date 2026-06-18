@@ -434,7 +434,19 @@ Two separate things in this report; one is already filed, one is genuinely new.
 **The second head — "JB Run Agent Doc stalled" with `failed_stage=queue_paused reason=broken editor IPC (content_ours / live_prompt_drift, #semmerge)`** — is not a new bug: that pause came from a **stale supervisor** running a pre-0.34.7 binary that still did the `content_ours`-wins drop. The installed binary is now **0.34.8** (`e27b3c39`) with `#smconv`/`#semmerge-owner`. Recycle the route-owned supervisor (so it adopts 0.34.8) and resume — the deliberate pause clears. No agent fix needed beyond the recycle.
 
 Net: nothing new on the crash (operator-gated on scrollback), the lost-queue-item is now a durable actionable item (`#qdurcrash`), and the stall is the known stale-supervisor pause that 0.34.8 + recycle resolves.
-<!-- agent:boundary:a673ff9a -->
+
+### Re: drained #gszq — markdown-ast close-marker `end_byte` fix shipped (0.34.9) — opus-4-8
+
+**`#gszq` (`#mdastclose`) — fixed, tested, built, installed, pushed.** In `agent-doc-markdown-ast` `overlay.rs`, `parse_close_marker` only recognized the legacy `<!-- agent:/name -->` (`agent:`-then-slash) spelling. For the **standard** `&lt;!-- /agent:name --&gt;` form — the spelling every session document and the crate's own test fixtures actually use — it returned `None`, so the component never matched its explicit close and was only *implicitly* closed by the next open marker (or EOF). `components()`/`items()` still parsed correctly via implicit-close (item parsing unaffected), but `Component.end_byte` pointed just past the **open** marker instead of through the close line, so any consumer slicing a component by its `start_byte..end_byte` byte span got a truncated range. Fix: `parse_close_marker` now accepts both spellings (`/agent:name` and `agent:/name`); added `end_byte_spans_full_component_for_both_close_spellings` asserting the span reaches the close line for each form.
+
+- `make check` green — clippy `-D warnings` + full workspace suite, exit 0; the 7 `overlay` tests pass including the new one.
+- Built `cargo build --release`, `cargo install --path .` → **0.34.9**, `agent-doc lib-install` (cdylib refreshed; auto-recycle marked 2 controllers to adopt 0.34.9 at the next idle boundary).
+- Pushed: submodule `8bcbe499`, superproject pointer `4b4f33a6c`. CI was `in_progress` at push (head `8bcbe499`) — local `make check` is the green evidence; not blocking the drain on CI completion.
+
+Bumped `Cargo.toml`/`pyproject.toml` → 0.34.9 + a `VERSIONS.md` entry. `#gszq` queue head struck and backlog item reaped.
+
+Drain status: exchange is large (accretion `warn`) and the queue is active, so I'm continuing the drain rather than stopping to compact. The already-answered heads (`#1vhn`, "JB Run Agent Doc stalled") and the `[operator-verify]` heads (`#qpauseux`, `#tsiftmdcrash`, `#cyh0`, `#docdriftgrace`, `#8bfz`) are deferred; the next agent-drainable head is `#supselfheal` (binary-side, Phase 1 admin-recycle quick-win).
+<!-- agent:boundary:71494fec -->
 <!-- /agent:exchange -->
 
 ## Queue

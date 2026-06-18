@@ -236,16 +236,16 @@ This landed under commit `ce339055` ("fix(queue): strikeable preset heads, **idl
 `cargo test -p agent-doc-orchestration queue_continuation:: ` → 33 passed; `start::decisions::tests::idle_queue_drain*` → 9 passed.
 
 No version bump / release — the behavior is in the installed 0.34.6 binary (submodule HEAD `5ce4e465`). Remaining drainable agent-actionable heads: `#733r` (qheadsync auto-strike remainder), `#routedeadshell`, `#semmerge` (the converge.rs CRDT root cause — its own focused cycle). Note: preflight's `semantic_completion_match` also flags the new "After JB Clear Session Context → Run Agent Doc stalled" queue line as likely already resolved by done `#7az7` (`#clear-auto-queue-stall`) — I'll confirm that when it reaches the head.
-<!-- agent:boundary:349bc91b -->
+<!-- agent:boundary:109b8e22 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: [#021p]
+- ~~:pushpin: [#021p]~~
 - :pushpin: #semmerge
 - :pushpin: Investigate the task thrashing in virtuousai.md session. Please fix.
-- After JB `Clear Session Context` on this document then JB `Run Agent Doc` stalled.
+- :pushpin: After JB `Clear Session Context` on this document then JB `Run Agent Doc` stalled.
 - :pushpin: The agent defined a task id #rz3afix, but agent-doc redefined the task id to [#021p]. If an agent defines a task id, agent-doc should be able to parse the task id and use the agent defined task id. Note that if the agent's defined task id does not pass the id validation logic such as malformed or duplicate of a prompt_preset or another entity, resolve and create a new task id if necessary.
 - :pushpin: I ran JB `Run Agent Doc` on virtuousai.md and the supervisor + tmux pane crashed 2 times. The 3rd attempt stalled and I manually ran the `agent-doc .../virtuousai.md` command...and the turn is in progress.
 ---
@@ -262,13 +262,15 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
-- ~~:pushpin: equityfundingsource.md & monsterrodholders.md keeps on drifting with edits.~~ (filed #docdriftgrace)
-- do [#733r]
-- do [#semmerge]
-- do [#qpauseux]
-- do [#021p]
+- ~~:round_pushpin: do [#021p]~~
+- :pushpin: ~~:pushpin: equityfundingsource.md & monsterrodholders.md keeps on drifting with edits.~~ (filed #docdriftgrace)
+- :pushpin: do [#733r]
+- :pushpin: do [#semmerge]
+- :pushpin: do [#qpauseux]
 - ~~do [#1vhn]~~
 - :pushpin: do [#tsiftmdcrash]
+- do [#aqhr]
+- do [#gszq]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -295,6 +297,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#aqhr] #smconv #semmerge Phase 2 (converge-adapter): replace the fail-closed line-merge in agent-doc-orchestration write/converge.rs::try_editor_converge with: parse base/agent/operator trees -> call markdown_ast::semantic_merge (shipped #semmerge-owner c300eeec) -> apply merged_doc; fall back to crdt.rs::merge ONLY on AST parse failure. Delete the content_ours-wins adoption for the node-disjoint case; keep fail-closed only on an unrepresentable conflict. SAFETY-CRITICAL commit-path change -> needs a focused clean cycle + make check + make tmux-ci, NOT a degraded-session drain. Then phases 3-5 (queue-node-strike, ack-turn, simworld). Plan: tasks/agent-doc/plan-semantic-ast-merge.md
+- [ ] [#gszq] #mdastclose #agent-doc-bug agent-doc-markdown-ast overlay::Component::end_byte is wrong for the standard close-marker spelling (slash-then agent:name): parse_close_marker only recognizes the agent:slash-name form, so for the real spelling the component implicitly closes and end_byte points just past the open marker. components()/items still parse via implicit-close so item parsing is unaffected, but consumers relying on Component.end_byte byte-span slicing get a wrong range. Fix parse_close_marker in overlay.rs to accept the slash-then-name form; add a test asserting end_byte spans the full component for both spellings. Found during #semmerge-owner (worked around with a local marker scan).
 - [ ] [#1vhn] #routedeadshell agent-doc-bug: JB Run Agent Doc dispatched the agent-doc FILE trigger into a bare zsh % shell on recruit/virtuousai.md (harness had crashed/exited to a shell), so it did not submit (screenshot img_48.png, ~14:03, during a /model opus switch). REPRO (operator 2026-06-18): Run Agent Doc on virtuousai.md -> supervisor + tmux pane CRASHED 2 times -> 3rd attempt stalled -> operator manually ran agent-doc. So the supervisor/pane crash on this dispatch path is REPRODUCIBLE, not a one-off. Route must positively identify a HARNESS dispatch-ready prompt and treat a bare shell prompt as NOT-ready -> fail closed with claim/restart guidance (or auto-restart) instead of typing into the shell; re-verify the harness prompt immediately before send to close the crash-mid-dispatch race; add a dead-harness route diagnostic + SimWorld coverage. Separately root-cause WHY the supervisor+pane crash repeats (the /model opus switch/restart is the lead). **Operator action: if it recurs, capture .agent-doc/logs/supervisor-stderr.log + the pane scrollback at the crash moment.** Plan: tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md
 - [ ] [#semmerge] #semmerge agent-doc-bug: closeout CRDT/IPC merge is fail-closed last-writer-wins — when the operator editor buffer drifts from the agent baseline, converge.rs refuses the disk write and adopts content_ours, DROPPING the agent changes (queue head strike + backlog→review gate + new `### Re:` turn) and forcing a manual `reset --from-current`+commit. Repro this session draining [#cf-txn-email] on monsterrodholders.md while the operator flipped frontmatter queue:start→stop + restructured the queue block (node-DISJOINT from the agent edits — both should have applied cleanly). Root cause: agent-doc-core/crdt.rs::merge is line-based LWW with no component/item model, so concurrent edits to DIFFERENT nodes look like a text conflict; converge.rs then fail-closes. Fix: semantic node-keyed 3-way merge over the EXISTING markdown-ast component overlay (exchange/queue/backlog/review/frontmatter = typed nodes w/ stable ids) consumed by converge BEFORE it fail-closes — apply BOTH change-sets when node-disjoint (the common case; "most CRDT merges should succeed"); operator-DELETE-of-agent-EDITED node → keep the deletion + emit an agent exchange turn acknowledging it; same-node concurrent edit → operator wins + agent note. Owner = a pure markdown_ast::semantic_merge returning a typed outcome; converge.rs is the adapter (no per-node text/error-string policy). Sibling of #docdriftgrace (unrelated-drift rebase; this is the overlapping/conflicting counterpart); hard-depends on #md-ast-document-model (Phase 4). Quick-win stopgap: auto-rebase + commit when the only drift is in components/frontmatter the agent did not touch this cycle. Plan: tasks/agent-doc/plan-semantic-ast-merge.md
 - [ ] [#733r] #qheadsync agent-doc-bug: answered/filed queue heads are not reliably reconciled to the queue (free-text reports left un-struck; done-reaping orphans the matching id-backed queue head; manual strikes do not persist through finalize content_ours; backlog-to-queue sync has no sweep for items missed in prior turns and items can be lost). Fix at closeout in the binary. Plan: tasks/agent-doc/plan-answered-queue-head-autostrike.md

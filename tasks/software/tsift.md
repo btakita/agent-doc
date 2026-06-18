@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -232,14 +232,30 @@ After all of that, **no `.tsift/graph.db` was created** — the core path never 
 **Follow-up filed (`[recommended]`):** an *explicit* hermetic guard test that asserts core commands succeed with no graph.db + unreachable Ollama and create no graph.db — to lock the invariant by name rather than rely on implicit coverage.
 
 **Two preflight warnings, neither blocking this task:** (1) `harness_mismatch` — the doc still declares `agent: opencode` but this ran on claude-code; I used the active-harness attribution. (2) `stale_install` — the **agent-doc** binary/cdylib predate source `a24ff990` (run `make install` in `src/agent-doc`); that's an agent-doc concern, out of scope for this tsift session, and not safe to install mid-session against the live supervisor.
-<!-- agent:boundary:56ed96ef -->
+
+### Re: do [#5hed] → hermetic "works without tsift kg" guard test shipped — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#5hed]
+
+
+`#5hed` is done. The "tsift works without `tsift kg`" invariant — previously only covered *implicitly* by the hermetic suite running with no graph.db and no Ollama — is now locked **by name** with an explicit regression test (tsift `b465979`, pushed; submodule pointer `a4dbcdb0a`).
+
+**New test:** `packages/tsift-cli/tests/kg_independence.rs` → `core_commands_work_without_tsift_kg_and_create_no_graph_db`. In a scratch workspace with **no `.tsift/graph.db`** and `OLLAMA_HOST` pointed at a closed port (`127.0.0.1:1`, so any accidental model contact fails fast rather than passing against a developer's running daemon), it runs each core code-RAG command and asserts:
+
+- **All succeed (exit 0):** `index`, `status`, `search greet`, `explain greet`, `graph greet --callees`, `source-read main.rs`, `session-review notes.md` (with a scratch `HOME` so it never scans real session history).
+- **No `.tsift/graph.db` is created** — checked after `index` and again after the full command sweep. A regression that wired the KG substrate into any core command now fails here with a named diagnostic instead of silently.
+
+**Verified:** `make check` green (workspace tests + clippy clean, exit 0, 0 failures); the new test passes. No CLI surface changed (test-only addition), so no reinstall was needed. No spec change required — the invariant is a code-RAG/KG separation property, now test-enforced. tsift CI run 27749140409 was pending at closeout (proceeding on local evidence).
+
+**Queue now:** only `#vmax` remains — `[operator-verify]` crates.io OIDC publishing (needs a crates.io account + browser 2FA; agent cannot perform).
+<!-- agent:boundary:39ebfb4f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: Ensure that tsift works without `tsift kg`~~
-- do [#5hed]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -248,7 +264,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#5hed] [recommended] Add an explicit hermetic regression test asserting core commands (search/explain/graph/source-read/session-review) succeed in a workspace with NO .tsift/graph.db and an unreachable Ollama, and that none of them create a graph.db — locks the 'tsift works without tsift kg' invariant the whole suite currently only covers implicitly.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -245,12 +245,13 @@ Cargo deps corrected: `tsift-agent-doc` now depends on `tsift-core` + `tsift-sql
 | VRAM unload POST | ✅ Planner-owned (since `#kgunloadpost`) |
 
 **Queue drained.** This was the last head.
-<!-- agent:boundary:d4ca3bd6 -->
+<!-- agent:boundary:4149e88b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Is `tsift kg` in current active use?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

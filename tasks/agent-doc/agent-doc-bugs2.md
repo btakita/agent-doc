@@ -235,7 +235,22 @@ So changing the agent today **evicts the live turn** instead of restarting at a 
 **Why I gated `#agentreloadrestart` + `#restartagentmenu` rather than auto-implementing them here:** this bug proves the change governs **cross-session turn lifecycle** — getting the kill-guard or boundary timing wrong kills live turns in *other* sessions (it just did). It is genuinely blocked on `make tmux-ci` multi-pane live verification (two panes, one mid-turn, proving the switch waits for the boundary and never evicts a running turn) — a live-pane proof this saturated, non-`/clear`ing autonomous loop cannot safely provide. The plan + exact hooks (`start.rs:171` harness resolution, `harness.rs:116` re-resolve, the route/sync cold-start path) are captured so a dedicated focused session implements it correctly with you able to watch the live restart. `#restartagentmenu` stays gated behind it (and behind operator plugin-install).
 
 Both feature heads are now gated → the queue has no agent-drainable work left; the remaining backlog (`#tsiftmdcrash`, `#jbacceptwedge`, `#rz3a`) is all operator-gated. The loop stops here.
-<!-- agent:boundary:d7a63afe -->
+
+### Re: do [#routedrainnextaction] + "agent-doc should not thrash on mid-turn doc changes" — opus-4-8
+
+**Session recovery first.** This session opened with snapshot/visible drift: the visible file (36858 bytes) had two old committed `opencode/glm-5.2` `### Re:` blocks trimmed, the harness was switched `opencode → claude`, and a new queue prompt was added — but the snapshot/CRDT still held the 41468-byte HEAD. Preflight refused to commit (`looks like a manual cleanup with stale snapshot/CRDT state`). I confirmed HEAD already contained both trimmed blocks (so they were an intentional operator trim, not a response loss), then ran `agent-doc reset --from-current --preserve-session` to rebase the sidecars onto the visible file. Second preflight reached `committed: true`. (This drift is exactly the next item below.)
+
+**`#routedrainnextaction` — shipped (DONE).** The fix was already partly written but sitting **uncommitted and broken**: the three regression tests had been spliced into the *middle* of `wait_for_authoritative_actor_ready`, mangling its brace structure so the crate would not compile. Two logic bugs also defeated the fix:
+
+- `UserFacingOutcome::with_unblocker` validates `unblocker` as a single space-free token, so stuffing the full `agent-doc finalize /path` command (with spaces) into it always errored → silent fallback to the misleading `queued_behind_owner` / `wait_for_owner_turn_to_drain`.
+- `extract_recovery_command` required an exact `agent-doc` word, but real recovery prose wraps it in backticks, so the leading backtick blocked the match.
+
+Fix: a `Blocked` closeout-block decision now surfaces `ui_outcome=blocked_with_exact_unblocker next_action=follow_unblocker unblocker=run_recovery_command` plus a trailing free-text `recovery_command=agent-doc reset --from-current --preserve-session FILE` (or `... write --commit FILE`) — line-end safe for `key=value` parsing. Backticks are stripped before scanning. Tests relocated into `route::tests`. `make check` clean (full suite green); committed (`a24ff990`), pushed to `origin/main`, superproject pointer bumped (`423d128bf`). **`cargo install` deferred** — installing a newer binary against this live route-owned supervisor (pid 1535801, this pane) risks an exit-75 finalize race; the fix is test-verified and goes live on the next supervisor restart.
+
+**"agent-doc should not thrash on unrelated mid-turn doc changes" — filed as `#docdriftgrace` (plan-backed).** This is a real architecture request, and I hit it live this very turn (the manual `reset --from-current` above *is* the thrash). The binary's `snapshot > visible` guard size-gates on byte delta and surfaces a blocking warning the **agent** must resolve, instead of the **binary** silently rebasing. Fix direction (in the plan): classify drift by component — auto-rebase for unrelated changes (historical `exchange` trims, `frontmatter` `agent:` switch, queue/backlog bookkeeping) and surface **only** structural conflicts on the in-flight prompt/response. It needs SimWorld coverage for both the intentional-trim and genuine-response-loss cases plus an operator-watched live re-baseline, so I scoped it rather than half-implementing it in this saturated session. Plan: `tasks/agent-doc/plan-graceful-doc-drift-resolution.md`.
+
+The remaining queue heads are operator-gated: `#tsiftmdcrash` / `#jbacceptwedge` (operator-verify/install), the `#pcwcdiskfree` File-Cache-Conflict ask (already shipped — that response was one of the trimmed blocks), and the equityfundingsource/monsterrodholders routing notes.
+<!-- agent:boundary:4a2b1613 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -253,6 +268,20 @@ Both feature heads are now gated → the queue has no agent-drainable work left;
 [route] target tmux session: 0
 [preflight] review: 14 item(s), 14 gated
 [route] active closeout for tasks/professional/equityfundingsource.md could not be drained before reroute; existing queue head "Why is the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application > Available deal > Application > Application progress > Accepted not checked?" remains queued behind the closeout ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
+```
+---
+JB `Run Agent Doc` on equityfundingsource.md
+```
+resync: pruned 5 stale session(s)
+[route] target tmux session: 0
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
+```
+---
+After a JB `Restart Supervisor Process` which surfaced a `Interrupt and Clear`...JB `Run Agent Doc` error
+```
+resync: pruned 5 stale session(s)
+[route] target tmux session: 0
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3933 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
 ---
 - :pushpin: equityfundingsource.md & monsterrodholders.md keeps on drifting with edits.

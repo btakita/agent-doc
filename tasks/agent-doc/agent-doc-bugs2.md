@@ -216,7 +216,30 @@ Removed the two `agent:queue` lines that session-check flagged as response-prose
 `do [#opencodeclearnewsubmit]` retained as the next drainable head — the fix shipped last turn (`cc766e0c`), `[operator-verify]` gate on `#jbacceptwedge` plugin 0.2.170 install remains. `do [#monster60stimeout]` and `do [#describe-image-workflow]` stay in queue as auto-added from the freshly-filed backlog items.
 
 Using `--force-disk` this turn to bypass the IPC race that reverted the prior strike attempt (postcommit_worktree_check auto-reconciled to HEAD).
-<!-- agent:boundary:3010fd4d -->
+
+### Re: describe-image SKILL.md doc shipped; IPC degraded — glm-5.2
+
+#### `#describe-image-workflow` — done (code shipped, pending-done blocked by IPC)
+
+Code shipped: added "Vision workflow for non-vision models" section to `src/agent-doc/SKILL.md` (commit `86534e3e`, parent gitlink `77468cfd5` on `origin/main`). Documents `agent-doc describe-image <IMAGE> [--provider openai|anthropic] [--prompt <text>]` as the canonical path for non-vision models to analyze image evidence. **The `--done describe-image-workflow` flag failed with `pending_write: refused direct disk write ... while editor IPC listener is active (reason=send_failed)`** — the cdylib swap from `make install` wedged the IPC listener (supervisor hasn't recycled yet). Will reap on the next clean cycle once the supervisor restarts on the new cdylib. The code work itself is verifiably complete in `86534e3e`.
+
+#### IPC degraded — root cause + recovery
+
+`make install` swapped `/home/brian/.cargo/bin/libagent_doc-0.34.1.so` under the live supervisor. The supervisor was marked for recycle at the next idle boundary but hasn't reached one yet (this in-flight turn keeps it busy). The IPC listener is now calling into a mix of old in-memory symbol bindings + new on-disk cdylib → `send_failed`. This is the `#jbacceptwedge` territory and the accept-loop fix IS in the new cdylib — once the supervisor recycles (or the operator clicks Clear Session Context and the auto-restart path fires), the IPC layer should converge.
+
+Recovery options for the operator (in order of disruption):
+1. **Wait** — the supervisor will execve onto the fresh cdylib at the next idle boundary. The next cycle should not see this IPC failure.
+2. **Restart supervisor manually** — `agent-doc restart-supervisor tasks/agent-doc/agent-doc-bugs2.md` to force the recycle now.
+3. **Force-disk this cycle** — already using `--force-disk` to land this response. The editor buffer will need a refresh (File → Reload from Disk in IntelliJ) since the IPC patch path was bypassed.
+
+#### `#monster60stimeout` — backlog, needs clean session
+
+Stays in the backlog as the next drainable head. Substantial fix (current-generation ready-prompt barrier from fresh `tmux capture-pane` prompt-shape proof). Plan: `tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md`. **Strong recommendation:** compact before continuing — session-accretion is at `warn` (187+ exchange lines, 9 cycles / 30 min) AND the IPC layer needs the supervisor recycle before further finalize cycles will be reliable. `/agent-doc compact exchange tasks/agent-doc/agent-doc-bugs2.md` or set `agent_doc_auto_compact: true`.
+
+#### Drain summary (this queue run, 10 cycles)
+
+Shipped: JB OpenCode `/new` split-send (`cc766e0c`), `#jbacceptwedge` per-connection IPC accept thread (`86c68db7` + companion `d84015d5`), `#codefence-strip` detection (`3c7e2b65`), describe-image SKILL.md doc (`86534e3e`). Binary + cdylib installed (`make install`). Filed: `#tsiftmdcrash`, `#monster60stimeout`, `#describe-image-workflow` (done).
+<!-- agent:boundary:86978ee7 -->
 <!-- /agent:exchange -->
 
 ## Queue

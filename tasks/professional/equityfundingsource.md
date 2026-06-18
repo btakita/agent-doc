@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -133,7 +133,31 @@ Checked the live sandbox via chromium-bridge (your tab [0], already logged in as
 **Housekeeping:** I navigated your TMO tab (Settings → Integrations → Marketplace) and then back toward Trust Accounts — read-only, nothing saved. If the tab looks parked on Marketplace, the hash-nav "timeout" is just the SPA not firing a load event; click Trust Accounts to refresh.
 
 Want me to dig further into a specific area (e.g., **Apps**, **Online Portals**, or the **Profile/Account** pages), or is the takeaway — "API access must come from TMO support (`#k2xg`)" — enough? No data changed.
-<!-- agent:boundary:4c3b5224 -->
+
+### Re: Draft email to Judith + Robert for the TMO sandbox API key — opus-4-8
+
+> **Queue prompt:**
+>
+> Please draft an email to judith-krug and robert-waldman for me to get the sandbox API key. This happens through the TMO admin portal where judith-krug is the admin. Keep it short and simple.
+
+
+Drafted and pushed to your **Gmail Drafts** (not sent — yours to review/send). **To:** Judith (judithkrug@gmail.com), **CC:** Robert Waldman (rwaldman100@gmail.com). File: `mail/drafts/2026-06-18-mortgage-office-sandbox-api-key.md`.
+
+**Subject:** Mortgage Office sandbox API key
+
+> Hi Judith,
+>
+> I'm connecting the new system to your Mortgage Office sandbox and need its API key to finish the link. It's generated in the TMO admin portal under your admin login, so it isn't something I can pull from a regular login on my end.
+>
+> Could you generate that sandbox API key and send it over? Robert is cc'd in case he can grab it faster. Happy to hop on a quick call and point to exactly where it lives if that's easier.
+>
+> Thanks,
+> Brian
+
+Kept it short per your note and Judith's tone (busy, gentle, no pressure, no call-duration). It frames the key as admin-portal-only (matching what I found in the sandbox UI) so the ask lands as "you're the one who can get this," and gives Robert an easy on-ramp to help.
+
+Tweak the wording if you like, then send from Gmail. Want me to adjust tone/length, thread it onto an existing Judith email, or leave as-is?
+<!-- agent:boundary:b2e47b95 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -146,7 +170,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Please draft an email to judith-krug and robert-waldman for me to get the sandbox API key. This happens through the TMO admin portal where judith-krug is the admin. Keep it short and simple.
 <!-- /agent:queue -->
 
 ## Backlog

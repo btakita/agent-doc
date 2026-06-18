@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -113,7 +113,27 @@ Gate `admin_deal_publish_` (and `POST /api/admin/loans/:id/deal`) to **refuse pu
 **What I need from you (one answer unblocks the whole thing):** for TMO loans, which `tmo_loan_status` values are "approved enough to be an Available Deal"? Give me that list (or say "use EFS full_application acceptance only, and TMO loans shouldn't be publishable at all") and I'll implement the gate, add tests, and commit+push.
 
 No code or data changed this turn.
-<!-- agent:boundary:3d6bf52d -->
+
+### Re: chromium-bridge — retrieve TMO sandbox API key? — opus-4-8
+
+> **Queue prompt:**
+>
+> Use chromium-bridge to see if we can retrieve the API key for the sandbox https://app2.themortgageoffice.com/default#TrustAccounts/TrustAccounts?viewrecid=All
+
+
+Checked the live sandbox via chromium-bridge (your tab [0], already logged in as **Equity Funding - Sandbox**). Short answer: **no self-serve API key is exposed in the TMO sandbox UI.** I changed no data and read no secret (the one token field was empty).
+
+**Where I looked and what's there:**
+- **Settings → Options → Integrations** is the only credentials area, and it's all **outbound** integrations (TMO → other services): Text Messages, GeoMap, E-Signature, Accounting System Integration, Insurance, Lightning Docs, Export.
+- The only token field is **"Authorization Token"** (`id=teAuth`) under *Accounting System Integration* — and it's **empty** (`value_len=0`). That's a slot for *you* to paste an accounting-system token, not a TMO API key for EFS to consume.
+- A full-page text scan for `API Key` / `Web API` / `Client ID` / `Client Secret` / `REST` / `Developer` / `Webhook` returned **nothing** anywhere in the rendered UI. No developer/Web-API panel, no inbound API-credential generator.
+
+**Conclusion:** TMO's sandbox doesn't let you self-generate or read a partner API key from the UI. The integration tokens it exposes are outbound-only and unset. This matches what we already knew: **TMO REST/partner API access is provisioned by The Mortgage Office (sales/support), not self-serve** — which is exactly what **`#k2xg`** (the six-question TMO support email) and **`#dzmm`** (TMO webhooks unavailable per operator) are gated on. So this confirms the gate rather than opening it: getting EFS↔TMO API credentials (`#7a4d` writeback) still requires TMO to issue them.
+
+**Housekeeping:** I navigated your TMO tab (Settings → Integrations → Marketplace) and then back toward Trust Accounts — read-only, nothing saved. If the tab looks parked on Marketplace, the hash-nav "timeout" is just the SPA not firing a load event; click Trust Accounts to refresh.
+
+Want me to dig further into a specific area (e.g., **Apps**, **Online Portals**, or the **Profile/Account** pages), or is the takeaway — "API access must come from TMO support (`#k2xg`)" — enough? No data changed.
+<!-- agent:boundary:41c04309 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -126,7 +146,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Use chromium-bridge to see if we can retrieve the API key for the sandbox https://app2.themortgageoffice.com/default#TrustAccounts/TrustAccounts?viewrecid=All
 <!-- /agent:queue -->
 
 ## Backlog

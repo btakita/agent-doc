@@ -165,7 +165,7 @@ The accept-loop wedge (`#jbacceptwedge`) lived in the socket listener's `start_l
 **`#codefence-strip` done** (detection shipped). `#fence-strip-fix [operator-verify: repro needed]` already in backlog for the definitive preservation fix — needs your repro (which document/run/fence). Parsing path already masks fences (`#0kjc`/`#lintfence`).
 
 **Not installed mid-session** — detection live after next `make install` + recycle. **Companion source uncommitted**: say the word and I'll commit + push.
-<!-- agent:boundary:42b3d243 -->
+<!-- agent:boundary:f5c40802 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -173,9 +173,10 @@ The accept-loop wedge (`#jbacceptwedge`) lived in the socket listener's `start_l
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#jbacceptwedge]: Do the plugin logic + build. I will install~~
 - ~~:round_pushpin: VSCode Plugin logic should match JB Plugin logic~~
-- [#codefence-strip] may have been due to a wedge issue or stale state. Can you detect when this issue occurred? I just added a queue item to monsterrodholders.md and agent-doc deleted it.
-- implement [#claudesubmit] so we can test. I will drive sessions and logging should determine if it failed or succeeded.
+- ~~[#codefence-strip] may have been due to a wedge issue or stale state. Can you detect when this issue occurred? I just added a queue item to monsterrodholders.md and agent-doc deleted it.~~
+- :pushpin: implement [#claudesubmit] so we can test. I will drive sessions and logging should determine if it failed or succeeded.
 - ~~:pushpin: do [#vscode-socket-parity]~~
+- do [#fence-strip-fix]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

@@ -136,6 +136,22 @@ pub fn fire_post_commit(file: &Path, session_id: &str) {
     }
     capture_tsift_memory_closeout(file);
     let _ = reap_local_model_leases(file);
+    reap_stale_jetbrains_consumers_closeout(file);
+}
+
+/// `#fccreap`: closeout wrapper that resolves the project root from the session
+/// document and reaps stale dead-PID IntelliJ plugin consumer patch files.
+/// Best-effort: a missing project root is a silent no-op, and a reap of zero
+/// files logs nothing. Logs a one-line ops summary only when it reaps > 0.
+fn reap_stale_jetbrains_consumers_closeout(file: &Path) {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(project_root) = crate::snapshot::find_project_root(&canonical) else {
+        return;
+    };
+    let reaped = reap_stale_jetbrains_consumers(&project_root);
+    if reaped > 0 {
+        eprintln!("[hooks] reaped {reaped} stale jetbrains consumer patch file(s)");
+    }
 }
 
 /// Fire a claim hook event.
@@ -355,6 +371,132 @@ pub(crate) fn reap_local_model_leases(file: &Path) -> ReapOutcome {
     }
 }
 
+/// `#fccreap`: parse the IntelliJ-plugin consumer pid out of a per-instance
+/// patch filename.
+///
+/// The JetBrains plugin registers a per-instance consumer id
+/// `jetbrains-<pid>-<uuid>` (see
+/// `editors/jetbrains/.../TypingTracker.kt`), and per-instance patch files land
+/// in `.agent-doc/patches/` named `<doc_hash>.jetbrains-<pid>-<uuid>.json`.
+///
+/// Returns `Some(pid)` only for filenames that contain the literal `.jetbrains-`
+/// marker followed by a run of ASCII digits (the pid). Returns `None` for the
+/// base `<hash>.json`, `.vscode` variants, or any name where the pid cannot be
+/// parsed — callers must treat `None` as "do not reap".
+fn jetbrains_consumer_pid(filename: &str) -> Option<u32> {
+    if !filename.ends_with(".json") {
+        return None;
+    }
+    // The marker is `.jetbrains-` so the base `<hash>.json` (no per-instance
+    // suffix) and `.vscode` variants never match.
+    let after_marker = filename.split(".jetbrains-").nth(1)?;
+    let digits: String = after_marker
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    if digits.is_empty() {
+        return None;
+    }
+    // The pid must be followed by `-<uuid>` (a hyphen), never the file extension
+    // or end-of-string — otherwise the name is malformed.
+    let rest = &after_marker[digits.len()..];
+    if !rest.starts_with('-') {
+        return None;
+    }
+    digits.parse::<u32>().ok()
+}
+
+/// `#fccreap`: best-effort reap of stale dead-PID IntelliJ plugin consumer patch
+/// files from `<project_root>/.agent-doc/patches/`.
+///
+/// When an IntelliJ instance dies/restarts (or multiple windows are open), its
+/// per-instance `<hash>.jetbrains-<pid>-<uuid>.json` patch files accumulate and
+/// are never reaped, bloating the patches dir and contributing to multi-instance
+/// IPC confusion. This removes only files whose pid is provably dead.
+///
+/// Best-effort: directory/read/remove errors degrade to a logged stderr warning;
+/// closeout must never fail because a reap could not run. On non-Unix this is a
+/// no-op (returns 0). Returns the number of files reaped.
+pub fn reap_stale_jetbrains_consumers(project_root: &Path) -> usize {
+    let patches_dir = project_root.join(".agent-doc").join("patches");
+    reap_stale_jetbrains_consumers_with(&patches_dir, pid_is_live)
+}
+
+/// `#fccreap`: testable core of [`reap_stale_jetbrains_consumers`]. Takes an
+/// injectable liveness predicate so unit tests can avoid real processes.
+///
+/// Only files matching `*.jetbrains-<digits>-<uuid>.json` whose pid is NOT live
+/// (and is not this process's own pid) are removed. Non-matching names (base
+/// `<hash>.json`, `.vscode` variants, unrelated files) and unparseable pids are
+/// always skipped.
+fn reap_stale_jetbrains_consumers_with(
+    patches_dir: &Path,
+    is_pid_live: impl Fn(u32) -> bool,
+) -> usize {
+    let entries = match std::fs::read_dir(patches_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return 0,
+        Err(err) => {
+            eprintln!(
+                "[hooks] jetbrains consumer reap: cannot read {}: {err}",
+                patches_dir.display()
+            );
+            return 0;
+        }
+    };
+    let self_pid = std::process::id();
+    let mut reaped = 0usize;
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                eprintln!("[hooks] jetbrains consumer reap: dir entry error: {err}");
+                continue;
+            }
+        };
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        // Conservative: only consider files whose pid we can parse; never reap a
+        // non-`jetbrains-` patch file or this process's own pid.
+        let Some(pid) = jetbrains_consumer_pid(name) else {
+            continue;
+        };
+        if pid == self_pid || is_pid_live(pid) {
+            continue;
+        }
+        let path = entry.path();
+        match std::fs::remove_file(&path) {
+            Ok(()) => reaped += 1,
+            Err(err) => {
+                eprintln!(
+                    "[hooks] jetbrains consumer reap: failed to remove {}: {err}",
+                    path.display()
+                );
+            }
+        }
+    }
+    reaped
+}
+
+/// `#fccreap`: real liveness check used by [`reap_stale_jetbrains_consumers`].
+///
+/// On Unix, `kill(pid, 0)` returning 0 (process exists) or erroring with `EPERM`
+/// (process exists, not permitted) both mean ALIVE; only `ESRCH` (no such
+/// process) means dead. On non-Unix this conservatively reports every pid as
+/// live so nothing is reaped.
+#[cfg(unix)]
+fn pid_is_live(pid: u32) -> bool {
+    let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+fn pid_is_live(_pid: u32) -> bool {
+    true
+}
+
 fn git_head(project_root: &Path) -> Option<String> {
     let output = std::process::Command::new("git")
         .arg("-C")
@@ -540,6 +682,71 @@ mod tests {
             .unwrap();
         let host_idx = args.iter().position(|a| a == "--host").unwrap();
         assert!(unload_idx < host_idx);
+    }
+
+    #[test]
+    fn jetbrains_consumer_pid_parses_pid_and_rejects_non_matching() {
+        assert_eq!(
+            jetbrains_consumer_pid("abc123.jetbrains-12345-1f2e3d4c-uuid.json"),
+            Some(12345)
+        );
+        // Base patch file (no per-instance suffix) → None.
+        assert_eq!(jetbrains_consumer_pid("abc123.json"), None);
+        // VS Code variant → None.
+        assert_eq!(jetbrains_consumer_pid("abc123.vscode-99-uuid.json"), None);
+        // Malformed: pid not followed by `-<uuid>`.
+        assert_eq!(jetbrains_consumer_pid("abc123.jetbrains-12345.json"), None);
+        // Malformed: no digits after the marker.
+        assert_eq!(jetbrains_consumer_pid("abc123.jetbrains--uuid.json"), None);
+        // Not a json file.
+        assert_eq!(jetbrains_consumer_pid("abc123.jetbrains-12345-uuid.txt"), None);
+    }
+
+    #[test]
+    fn reap_removes_only_dead_pid_consumer_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let patches = tmp.path().join("patches");
+        std::fs::create_dir_all(&patches).unwrap();
+
+        // Dead-pid jetbrains consumer files (should be reaped).
+        let dead_a = patches.join("h1.jetbrains-111-aaaa.json");
+        let dead_b = patches.join("h2.jetbrains-222-bbbb.json");
+        // Alive-pid jetbrains consumer file (should survive).
+        let alive = patches.join("h3.jetbrains-333-cccc.json");
+        // Base patch file + unrelated file (should survive).
+        let base = patches.join("h4.json");
+        let unrelated = patches.join("notes.txt");
+        for p in [&dead_a, &dead_b, &alive, &base, &unrelated] {
+            std::fs::write(p, "{}").unwrap();
+        }
+
+        // Fake predicate: only pid 333 is "alive".
+        let reaped = reap_stale_jetbrains_consumers_with(&patches, |pid| pid == 333);
+
+        assert_eq!(reaped, 2);
+        assert!(!dead_a.exists(), "dead-pid file A should be reaped");
+        assert!(!dead_b.exists(), "dead-pid file B should be reaped");
+        assert!(alive.exists(), "alive-pid file should survive");
+        assert!(base.exists(), "base patch file should survive");
+        assert!(unrelated.exists(), "unrelated file should survive");
+    }
+
+    #[test]
+    fn reap_is_noop_on_empty_or_missing_dir() {
+        // Missing dir.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let missing = tmp.path().join("patches");
+        assert_eq!(
+            reap_stale_jetbrains_consumers_with(&missing, |_| false),
+            0
+        );
+
+        // Empty dir.
+        std::fs::create_dir_all(&missing).unwrap();
+        assert_eq!(
+            reap_stale_jetbrains_consumers_with(&missing, |_| false),
+            0
+        );
     }
 
     #[test]

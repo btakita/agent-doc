@@ -61,7 +61,6 @@ Created all 8 profiles plus the merged recruiter-call transcript. Profiles follo
 ⚠️ One accuracy caveat worth knowing: the `--diarize` pass labeled the two speakers as "Brian/Rory," but this was a two-person call between **Brian (candidate)** and **Laura Rondón de Barros (G2i recruiter)** — Rory was *not* on the call, and the diarizer crossed attributions (e.g., the "Brian"-labeled opener says "I'm Laura, recruiter at G2i"). I added a header note saying to read content over labels rather than silently re-attributing every segment and risking errors. If you want, I can do a cleaner manual re-attribution pass to fix the per-segment speaker labels.
 
 Nothing was committed/pushed beyond this session doc's own finalize — these are content artifacts, not a spec/test change, so I left the repo working tree for you to review and commit when ready.
-<!-- agent:boundary:60981ce5 -->
 
 ❯ Yes, do the cleaner manual re-attribution pass.
 
@@ -77,7 +76,7 @@ What I did:
 One genuinely garbled spot survives: the brief "I'm laggy / you're laggy" crosstalk near the compensation question is hard crosstalk in the audio — I made a best-effort split but that 2-3 line stretch is the one place I'd treat the labels as approximate. Also fixed an obvious mistranscription ("Thank you, Ryan" → "Thank you, Laura") in the sign-off.
 
 Still uncommitted to the repo beyond this session doc's finalize — it's a content artifact, so I left it for you to review and commit when ready.
-<!-- agent:boundary:3cd7a2f3 -->
+<!-- agent:boundary:8d1267d0 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -219,13 +219,51 @@ The MonsterRodHolders content is sourced from the actual client work (the bot-at
 - cut **"That's DS2O by hand"** (appropriated their trademark);
 
 Underlying content stores also modified (uncommitted): `resume/data.toml` (added MonsterRodHolders + Equity Funding Source accomplishments) and `resume/BrianTakita.md` (master template).
-<!-- agent:boundary:51b3112d -->
+
+### Re: keep it simple — value message to Laura, focus on building AI systems — opus-4-8
+
+Read the white paper. The draft is done and aligned — [`mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md`](../../mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md) (status: **draft, not sent**). It's short, leads with what you focus on (building AI systems), and maps cleanly onto the white paper's thesis without overclaiming.
+
+How it tracks the white paper:
+- The paper's spine is **The Execution Gap** — the gulf between strategy and delivery — closed by a system that **ingests signals → classifies them → drives outcomes** (DS2O), *prescriptive and explainable*, "beyond BI and co-pilots." The message answers that directly: "the gap is between strategy and execution, and closing it takes a system that ingests signals, makes sense of them, and acts with explainability. That's exactly the kind of system I build."
+- **agent-doc** → the explainability/white-box angle (Rory's thesis at the human-agent layer).
+- **tsift** → the graph + vector knowledge substrate that "turns raw signals into outcomes" — the paper's own language.
+- MonsterRodHolders is framed as a **small** WooCommerce business (not mid-market — the paper pegs mid-market at $10M–$250M), so it reads as "I've felt the execution gap from the inside," not a category claim.
+
+No "DS2O by hand," no "your architecture in miniature," no buzzword run — those overreaches stay cut.
+
+**Full text:**
+
+> Hi Laura,
+>
+> Thanks again for the conversation. Here's a short note to send along with my resume and the call recording. Feel free to forward it to the VirtuousAI team.
+>
+> What I focus on is building AI systems, and that's where I'd bring value to VirtuousAI. I read your "AI Execution Gap" white paper, and the core idea resonates: the gap is between strategy and execution, and closing it takes a system that ingests signals, makes sense of them, and acts with explainability. That's exactly the kind of system I build.
+>
+> Two of mine, both shipped in the open:
+>
+> - **agent-doc** is a white-box way to work with AI agents. A plain markdown document is the live control surface, so the queue, backlog, and the agent's own reasoning are all visible, editable, and version-controlled. It makes the human/agent loop explainable, which is the same principle VirtuousAI applies to its models.
+> - **tsift** is a knowledge layer over a graph and vector store, with a local knowledge graph, graph + vector retrieval, and AST-aware code intelligence. It's the kind of graph-backed substrate that turns raw signals into outcomes.
+>
+> I've also run the operations side end to end (engineering and ops for a small WooCommerce business, wired into the order data, payments, and Cloudflare), so I've felt the execution gap from the inside. Twenty years full-stack, with Python, TypeScript, React, and LLM integrations day to day.
+>
+> I'd love to talk with Rory about the architecture.
+>
+> Thanks,
+> Brian
+
+**Resume path** (in the `resume/` submodule, both **uncommitted** for your review):
+- PDF to send → `resume/BrianTakita-virtuousai.pdf` (42 KB)
+- Profile source → `resume/profiles/virtuousai.toml` (4.2 KB)
+
+Message and resume are left as drafts — nothing sent, nothing committed beyond this session doc. Send via LinkedIn or email when you're ready.
+
+<!-- agent:boundary:329d90e1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Let's keep this simple. Read /home/brian/work/btakita/agent-loop/tasks/recruit/virtuousai/The-AI-Execution-Gap_VAI_WhitePaper.md. I need to deliver value with what I focus on. Building AI systems. Draft a message to laura-rondon-de-barros
 <!-- /agent:queue -->
 
 ## Backlog

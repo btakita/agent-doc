@@ -53,7 +53,7 @@ Compacted content:
 **Accretion default-off — shipped last cycle:** raised BLOCK thresholds (exchange 240→800, sections 12→40, cycles 10→60, no-op 3→20), committed `7addd9ee`. Accretion is now cleared (level `None`) and won't reach `block` during normal queue drains.
 
 **Queue state:** `#jbacceptwedge` stays operator-verify (plugin install). `#codefence-strip` needs its `[operator-verify]` tag reformatted (the `: repro needed` colon broke matching) — will fix next. `#claudesubmit` remains plan-backed. Installing the watch fix (`make install`) next so the running supervisor picks it up.
-<!-- agent:boundary:95870346 -->
+<!-- agent:boundary:9c46accd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -78,9 +78,9 @@ I ran JB `Run Agent Doc` on spoton.md runnnig Claude. The session crashed.
 [route] Pane %84 is in session '', not target '0' — skipping stash rescue
 Error: project controller command `dispatch` failed: dispatch rejected for tasks/recruit/spoton.md: authoritative actor generation 21 is closed receipt_id=3877
 ```
----
+~~~done
 :pushpin: - ~~JB `Run Agent Doc` on lazily-rs stalled with no action.~~
----
+~~~
 How can we prevent the wedge conflict from occurring, as what happened in equityfundingsource.md.
 ```
      Found the root cause: IntelliJ's agent-doc plugin owns the ipc.sock but has 22 unaccepted connections in the backlog — the plugin's accept loop is wedged. That's why every IPC attempt times                                            
@@ -91,6 +91,9 @@ Aside from fixing the wedge, we should ensure the run does not stall.
 - ~~do [#claudesubmit]~~
 - ~~do [#queediturn]~~
 - do [#codefence-strip]
+- :pushpin: [#jbacceptwedge]
+- :pushpin: re: [#claudesubmit]. Since a focused session was mentioned, agent-doc should oblige and automatically restart the ression and run the task. Please fix this mechanism.
+- :pushpin: [#claudesubmit]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

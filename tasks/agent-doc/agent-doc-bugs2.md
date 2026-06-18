@@ -18,7 +18,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -211,23 +211,12 @@ So changing the agent today **evicts the live turn** instead of restarting at a 
 **Why I gated `#agentreloadrestart` + `#restartagentmenu` rather than auto-implementing them here:** this bug proves the change governs **cross-session turn lifecycle** — getting the kill-guard or boundary timing wrong kills live turns in *other* sessions (it just did). It is genuinely blocked on `make tmux-ci` multi-pane live verification (two panes, one mid-turn, proving the switch waits for the boundary and never evicts a running turn) — a live-pane proof this saturated, non-`/clear`ing autonomous loop cannot safely provide. The plan + exact hooks (`start.rs:171` harness resolution, `harness.rs:116` re-resolve, the route/sync cold-start path) are captured so a dedicated focused session implements it correctly with you able to watch the live restart. `#restartagentmenu` stays gated behind it (and behind operator plugin-install).
 
 Both feature heads are now gated → the queue has no agent-drainable work left; the remaining backlog (`#tsiftmdcrash`, `#jbacceptwedge`, `#rz3a`) is all operator-gated. The loop stops here.
-<!-- agent:boundary:7da173bb -->
+<!-- agent:boundary:3f0a804a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~`agent:backlog` with `queue` attribute should have added the backlog items into the queue immediately when the items were added to the backlog.~~
-- ~~`agent:backlog` with `queue` attribute should add remaining backlog items into the queue an prepare and finalize. Note that if items are gated or have preconditions that are not met such as a date in the future, do not add the backlog item into the queue.~~
-- ~~JB `File Cache Conflict` dialog is still occurring. Any more raw disk writes that need to be replaced?~~
-- ~~:pushpin: do [#fccaudit]~~
-- ~~do [#rz3a]~~
-- ~~Add `Restart Agent` Plugin menu command. Changing the agent such as from claude to opencode should restart the agent during the next boundary.~~
-- ~~Why did you add DO NOT IMPLEMENT THE FIX to [#rz3a]?~~
-- ~~do [#fccroute]~~
-- ~~do [#agentreloadrestart]~~
-- :pushpin: agent-doc killed equityfundingsource.md turn mid-run.
-- ~~do [#restartagentmenu]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

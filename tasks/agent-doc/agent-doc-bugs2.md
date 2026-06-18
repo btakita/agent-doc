@@ -129,14 +129,31 @@ Got it — applied your rule to the live queue (conservatively, not over-eager).
 Each already had its tracked backlog item (all `[operator-verify]`), so I struck the duplicate reports rather than creating new ones. Left untouched: `[#tsiftmdcrash]` (id-backed, already deferred as operator-verify) and the two cross-doc `JB Run Agent Doc on equityfundingsource.md` route-diagnostic dumps (informational, already explained as qflood-working-as-intended; cross-doc, so out of scope to act on here — clear them when convenient).
 
 **Remaining `#qheadsync` work (the durable automation of exactly this rule):** make the binary do this at closeout instead of by-hand — when a free-text head is answered by a committed response *or* filed as a backlog item, auto-strike it (past id-backed heads, not just the leading one), and have auto-populate place the new backlog id's queue entry immediately below the struck head rather than appending. That ends the thrash without manual striking. It's a focused implementation cycle; I've kept the plan (`plan-answered-queue-head-autostrike.md`) and `#qheadsync` open for it.
-<!-- agent:boundary:a19a1189 -->
+
+### Re: bold the operator action on blocked items — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Any backlog, review, or icebox item that is blocked by some operation action should have the operator action with bold formatting.
+
+
+Applied. Each backlog/review/icebox item that is **blocked by an operator action** now ends with a bolded `**Operator action: …**` sentence naming exactly what you need to do to unblock it. Done for the three items that are genuinely operator-gated right now:
+
+- `#qpauseux` → **install the updated JB plugin, then verify the paused-queue notification renders**
+- `#docdriftgrace` → **watch one live re-baseline cycle to verify the silent auto-rebase**
+- `#tsiftmdcrash` → **paste the exact crash error text / pane capture / cycle id so it can be root-caused**
+
+Left unbolded (conservative — not over-eager): `#agentreloadrestart` (blocked on agent implementation, not on you), `#restartagentmenu` (blocked on `#agentreloadrestart` first — the operator-install only comes after the build), and `#rz3a` (a DO-NOT-IMPLEMENT design gate, not an action you perform). I'll add the `**Operator action:**` bold to those if/when they become genuinely operator-gated, and I'll follow this convention on every new operator-blocked item going forward.
+
+If you want this enforced by the binary rather than by convention (auto-bold the operator action during backlog/review maintenance), say so and I'll scope it — though reliable auto-detection of "the operator action" span in free prose is the hard part, so the convention may be the cleaner path. Queue stays paused (`receipt_id=64`).
+<!-- agent:boundary:ae2c7cea -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#tsiftmdcrash]~~
-- :pushpin: Any backlog, review, or icebox item that is blocked by some operation action should have the operator action with bold formatting.
+- ~~:pushpin: Any backlog, review, or icebox item that is blocked by some operation action should have the operator action with bold formatting.~~
 - :pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.
 - :pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.
 ---

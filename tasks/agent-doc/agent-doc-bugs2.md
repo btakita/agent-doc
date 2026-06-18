@@ -95,7 +95,45 @@ Submitting to junie...
 - `d84015d5` — `#jbacceptwedge` companion: `INFLIGHT_CONNECTION_HANDLERS` atomic + `InflightConnectionGuard` + `ipc_accept_thread_ops_marker(inflight)` emitting `ipc_accept_thread_spawned inflight=N`, plus `inflight_connection_handlers()` accessor, strengthened `slow_handler_does_not_block_concurrent_connections` to sample peak `inflight>=2`, `editors/SPEC.md` "Per-connection listener thread" contract paragraph, plugin bump `0.2.169 → 0.2.170`.
 - `3c7e2b65` — `#codefence-strip`: `log_fence_count_drop_if_any` + `count_code_fence_openings` in `write.rs` so dropped triple-backtick/tilde fences surface as `fence_count_dropped` ops.log markers. Detection only; fails open silently. Covers the operator note "The last run had a code fence stripped away by agent-doc."
 - `86c68db7` (prior) — per-connection-thread accept loop (the actual fix).
-<!-- agent:boundary:69d255ec -->
+
+### Re: OpenCode /new fix shipped + tsift.md crash needs clarification — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: The tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.
+
+
+#### OpenCode `/new` not submitted — fix shipped (`#opencodeclearnewsubmit`)
+
+Implemented the H2 fix from the claude vision analysis of `img_46.png`:
+
+- **Commit `cc766e0c`** (`src/agent-doc/agent-doc-orchestration/src/sessions.rs`): `TmuxSubmitProfile` now carries `split_text_and_submit_delay_ms`; `tmux_submit_profile_for_harness("opencode")` returns `80ms`, every other harness keeps `0`. `send_text_with_submit_key`, when delay > 0, emits two separate `tmux send-keys` calls — text-only, sleep, Enter-only — so the OpenCode slash-command palette has time to settle before the Enter confirms the highlighted `/new` row and submits. Both code paths inherit the fix because they share the choke point: supervisor IPC Clear (`deliver_ipc_inject` → `dispatch_submit_text_to_pane` → `send_submitted_text_for_harness`) and direct pane Clear (`send_clear_to_pane`).
+- **Tests**: `tmux_submit_profile_splits_text_and_enter_only_for_opencode`, `text_only_command_args_omits_submit_key_for_split_send`. agent-doc-orchestration lib suite **2966/2966 green**.
+- **Install**: `cargo install --path .` + `make install` ran — both the binary at `~/.cargo/bin/agent-doc` AND the cdylib at `~/.cargo/bin/libagent_doc-0.34.1.so` now bundle the fix. `[lib-install] auto-recycle: 2 controller(s) marked to recycle at next idle boundary` — the live supervisors will execve onto the fresh binary at the next idle boundary (#supkill-bg).
+- **Pushed**: submodule `d84015d5..cc766e0c main -> main` + parent gitlink `16e318ca4..e1fb44e22 main -> main`.
+
+Live gate still `[operator-verify]`: operator clicks JB `Clear Session Context` on this opencode session at the next idle boundary (after the supervisor recycles), confirms `/new` submits, and (separately) installs plugin `0.2.170` for `#jbacceptwedge`. If `/new` still does not submit, the next layer is a palette-row-aware path (`Down` then `Enter` on the highlighted row).
+
+#### tsift.md agent-doc turn "crashed and killed the session process" — needs clarification
+
+**State captured:**
+- `tasks/software/tsift.md` supervisor process **is currently alive** (pid `1742954`, `agent-doc start --route-owned tasks/software/tsift.md`).
+- Pane `%78` **is alive**, OpenCode TUI showing `⠇ Thinking`, `Build · GLM-5.2 · Z.AI Coding Plan`, `60.2K (6%)  ctrl+p commands` — i.e. a turn is in progress, not crashed.
+- Supervisor log `.agent-doc/logs/tsift-v0.1.log` (994 KB) shows **no panic/fatal/abort/crash signatures**. The only process lifecycle events near the report are **two intentional** `supervisor_binary_stale_self_recycled via=execve_preserve_child boundary=next_queue_item pane=%78 child_pid=1743237` entries (timestamps `[1781751662]` and `[1781751838]`) — these are the `#supkill-bg` blue/green drain-and-supersede path firing because I ran `cargo install` + `make install` and the supervisor detected the binary was stale (`current_exe=Some("/home/brian/.cargo/bin/agent-doc (deleted)")`). The supervisor execve'd onto the fresh binary, **preserving the same PID and the live OpenCode child**. That is not a crash.
+- Last cycle in the log: `cycle-1781751545282` reached `commit_success` at `[1781751911]`, followed by `route_owned_reap_decision policy=auto decision=keep_alive reason=live_pane_busy_no_idle_prompt`. Healthy closeout.
+
+**Cannot root-cause without more information.** The log does not contain a crash signature matching the report. The most plausible explanations, in order:
+
+1. The operator saw the supervisor's execve-recycle window (the old binary's `current_exe` was marked `(deleted)` for a moment) and interpreted the brief worker churn as a crash. This is expected on `cargo install` / `make install` and is not a bug.
+2. A specific agent-doc CLI invocation (separate from the supervisor) errored out and printed a panic to stderr that did not reach `.agent-doc/logs/tsift-v0.1.log`. Need the stderr scrollback or the tmux pane capture from the moment of the crash.
+3. The OpenCode child process briefly crashed and the supervisor restarted it via the auto-restart path. Need the supervisor log segment from the crash timestamp.
+
+**Filed** `#tsiftmdcrash` `[operator-verify]` (added below) — needs operator to paste the exact error text, the tmux capture from the crash moment, or the specific cycle id. The supervisor is healthy as of this cycle, so the crash is not currently reproducible from logs alone.
+
+#### Notes
+
+- I did NOT implement `agent-doc describe-image` (`#img-describe-toolcall`) this cycle — the operator's pinned item was a workflow statement, and I demonstrated the workflow by shelling out to `claude -p @img_46.png`. Filing a separate backlog item for the formal subcommand so it's tracked.
+<!-- agent:boundary:3f0e9966 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -103,8 +141,11 @@ Submitting to junie...
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~JB `Clear Session Context` on opencode sessions does not submit `/new` ![img_46.png](img_46.png).~~
 - ~~JB `File Cache Conflict` dialogs are still occurring.~~
+- ~~:pushpin: The tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.~~
+- After closing the session for monsterrodholders.md, then running JB `Run Agent Doc`, I had to wait for the 60s timeout before the dispatch completed.
 - :pushpin: A non-vision model should use a vision model via agent-doc or tsift.
 - What are #next-steps to fix agent-doc bugs?
+- :pushpin: do [#opencodeclearnewsubmit]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

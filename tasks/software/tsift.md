@@ -196,13 +196,13 @@ Both drained this cycle through **one shared seam** (tsift `b7d161a`, pushed; su
 **Verified:** `make check` green (workspace + clippy clean); targeted `tsift-kg` 31 + `tsift-cli` 678 tests pass, including new coverage for the context-aware prompt builder (incl. byte-identity with no pack), `derive_seeds`, `ChunkContextSource` per-chunk retrieval, and the `extract_documents_to_projection_with_context` threading seam; `cargo install` done and `--no-context` is live on both `kg extract` and `kg refresh`. Spec (`specs/local-kg-model.md` § GraphRAG Context Retrieval) + VERSIONS updated. tsift CI run 27745965173 in progress at closeout (proceeding on local evidence).
 
 **Queue now:** only `#vmax` remains — `[operator-verify]` crates.io OIDC publishing (needs a crates.io account + browser 2FA; agent cannot perform). The `#kggraphscope` GraphRAG arc (Phases 1–3) is now complete.
-<!-- agent:boundary:1db08aba -->
+<!-- agent:boundary:8f7ef6a4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: Ensure that tsift works without `ts`
+- :pushpin: Ensure that tsift works without `tsift kg`
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

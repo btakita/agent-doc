@@ -87,6 +87,16 @@ Moving the three operator-blocked items back into the live backlog (ungated) so 
 - Binary + cdylib reinstalled via `make install`; controller recycle marked.
 - `make check`: **4654 passed, 238 skipped**, clippy/sim-medium/version-sync clean.
 - Plan: `tasks/agent-doc/plan-jb-accept-loop-wedge.md`. SPEC invariant in `editors/SPEC.md`.
+- ✅ Cross-session claim rejection (`crossSession.test.ts`)
+- ✅ `vcs-refresh.signal` file-signal watcher
+- ✅ Typing debounce guard before visible mutation
+- ✅ Editor apply proof (generation check before `setText`/`WorkspaceEdit`)
+- ✅ Full-content IPC disabled — both editors reject legacy `fullContent` payloads
+- ✅ Patch generation fence (baseline-hash + cycle-id supersession) — `PatchWatcher` parses and applies
+- ✅ `save_document` parity — VSCode watches `save-document.signal` and flushes via `TextDocument.save()` (`extension.ts:1720-1776`), mirroring JB's `saveDocumentViaDocument`
+- ✅ Patch application (component patches, reposition-boundary, preserve-head) — via file-watch
+- **VSCode extension** watches `.agent-doc/patches/` for JSON patch files (`PatchWatcher` in `extension.ts:1589`) — file-based IPC, slightly higher latency, no early-ack.
+- **JB plugin** starts the FFI socket listener (`agent_doc_start_ipc_listener_v2` via JNA in `PatchWatcher.kt`) — Unix domain socket, low-latency, supports early-ack.
 
 **No plugin Kotlin change was needed** — the bump gets you a clean install artifact; the fix itself is in the cdylib the plugin already loads via JNA. `[#jbacceptwedge]` backlog updated with the real root cause + new gate.
 
@@ -95,16 +105,42 @@ Moving the three operator-blocked items back into the live backlog (ungated) so 
 **Other queue heads (untouched):** `#codefence-strip` and `#claudesubmit` stay `[operator-verify]`. On your `#codefence-strip` comment ("agent-doc deleted a queue item I added to monsterrodholders.md"): that matches the `#queediturn` reactive-watch churn class, which `454f935a` (in the cdylib you just picked up) targets. The fence-stripping itself still needs your repro.
 
 **Closeout note:** this turn's `finalize` hit `live_prompt_drift_after_preflight` on every IPC attempt because your IntelliJ buffer held stale partial-application bullets from the retry loop. After 4 IPC attempts corruption-looped, I cleaned the partial bullets from disk and used `--force-disk` to break the loop — your `VSCode Plugin logic should match JB Plugin logic` queue item is preserved on disk. IntelliJ will show a File Cache Conflict; please **Load filesystem changes** to pick up this response + the clean queue state.
-<!-- agent:boundary:d6b07daa -->
+
+### Re: VSCode parity with JB plugin logic — glm-5.2
+
+> **Queue prompt:**
+>
+> :round_pushpin: VSCode Plugin logic should match JB Plugin logic
+
+**Short answer: VSCode already has functional parity for every shipped feature. The `#jbacceptwedge` fix is irrelevant to VSCode.**
+
+**Architectural difference (by design, FFI-first pattern):** Both editors load the same `libagent_doc` cdylib, but choose different IPC transports:
+- **JB plugin** starts the FFI socket listener (`agent_doc_start_ipc_listener_v2` via JNA in `PatchWatcher.kt`) — Unix domain socket, low-latency, supports early-ack.
+- **VSCode extension** watches `.agent-doc/patches/` for JSON patch files (`PatchWatcher` in `extension.ts:1589`) — file-based IPC, slightly higher latency, no early-ack.
+
+The accept-loop wedge (`#jbacceptwedge`) lived in the socket listener's `start_listener` (`ipc_socket.rs`). VSCode never starts that listener, so it never had the wedge. The per-connection-thread fix (`86c68db7`) + the new `ipc_accept_thread_spawned inflight=N` ops.log marker apply only to the socket path.
+
+**Feature parity audit (VSCode has all of these):**
+- Patch application (component patches, reposition-boundary, preserve-head) via file-watch
+- `save_document` parity — VSCode watches `save-document.signal` and flushes via `TextDocument.save()` (`extension.ts:1720-1776`), mirroring JB's `saveDocumentViaDocument`
+- Patch generation fence (baseline-hash + cycle-id supersession)
+- Full-content IPC disabled (both editors reject legacy `fullContent`)
+- Editor apply proof (generation check before `setText`/`WorkspaceEdit`)
+- Typing debounce guard, `vcs-refresh.signal` watcher, cross-session claim rejection
+
+**The only JB-only advantage is socket transport** (lower latency via early-ack). If you want VSCode to also start the FFI socket listener for latency parity, I've added `#vscode-socket-parity` as a `[recommended]` backlog item — non-trivial (koffi callback registration + Node.js socket lifecycle) and only worth doing if file-watch latency becomes a bottleneck.
+
+**No code changes this cycle** — VSCode parity is already present for every shipped feature.
+<!-- agent:boundary:28fc9e29 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#jbacceptwedge]: Do the plugin logic + build. I will install~~
+- :round_pushpin: VSCode Plugin logic should match JB Plugin logic
 - [#codefence-strip] may have been due to a wedge issue or stale state. Can you detect when this issue occurred? I just added a queue item to monsterrodholders.md and agent-doc deleted it.
 - implement [#claudesubmit] so we can test. I will drive sessions and logging should determine if it failed or succeeded.
-- VSCode Plugin logic should match JB Plugin logic
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -131,6 +167,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#vscode-socket-parity] [recommended] VSCode extension currently uses file-watch IPC (.agent-doc/patches/ + save-document.signal). Evaluate adding FFI socket listener startup (koffi callback registration for agent_doc_start_ipc_listener_v2) so VSCode gets the same low-latency early-ack path JB has. Non-trivial: Node.js socket lifecycle + koffi callback management. Only worth doing if file-watch latency becomes a measurable bottleneck.
 - [ ] [#codefence-strip] [operator-verify] agent-doc stripped a code fence on a prior run. Needs operator repro (which document/run/fence) to fix definitively; will then audit patch/template fence-preservation and add a regression.
 - [ ] [#claudesubmit] [operator-verify: live Claude-pane validation] Claude/OpenCode dispatch-only submit proof + bounded Enter retry. Root cause found (no prompt-submit hook → accepted-only without retry). Plan ready: tasks/agent-doc/plan-claude-dispatch-submit-proof-retry.md. Code impl is planned; validating the retry genuinely needs a live Claude pane (operator), so deferring until operator can validate.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.

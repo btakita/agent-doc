@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -257,13 +257,33 @@ No "DS2O by hand," no "your architecture in miniature," no buzzword run — thos
 - Profile source → `resume/profiles/virtuousai.toml` (4.2 KB)
 
 Message and resume are left as drafts — nothing sent, nothing committed beyond this session doc. Send via LinkedIn or email when you're ready.
-<!-- agent:boundary:6e5c4816 -->
+
+### Re: less salesy — frame value around the integration role — opus-4-8
+
+> **Queue prompt:**
+>
+> The phrasing is too salesy. Explain how I will provide value to VirtuousAI. I need it to resonate with what the company does. Imagine the role itself of integration and how my work can augment their business.
+
+
+Rewrote the draft ([`mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md`](../../mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md), status: **draft, not sent**) to stop pitching the projects and instead frame the value around the actual job: **the integration engineer who wires a business's disconnected systems into something BAIO can reason over.**
+
+What changed and why it reads less salesy:
+
+- **Leads with the role, not the résumé.** The opening is now "what I do is build and integrate AI systems" → the part of the work where you'd be useful. The pitch ("that's exactly the kind of system I build") is gone.
+- **Names the real bottleneck from the white paper.** The paper's own "mid-market paradox" section lists *Integration Complexity* and *Data Silos / Legacy Systems* as the things that stall mid-market AI. The message now says the hardest part of closing the execution gap is the integration — connecting order data, payments, CRM, ops into one model BAIO can act on — "where a founding engineer earns their keep." That's value framed as *the role itself*, not as a claim about your projects.
+- **MonsterRodHolders is now proof of the integration work**, not a "DS2O by hand" equivalence. It reads as "I've already done signal→outcome on real, connected systems" (the bot-attack trace through the order DB).
+- **OSS demoted to "tooling I build for this kind of work,"** not "your architecture in miniature." agent-doc = explainability at the working layer; tsift = a graph+vector substrate that turns scattered signals into something actionable. Both stated factually, no overreach.
+- **Closes on augmentation:** "I can sit at the integration seam where BAIO meets a customer's systems and make it hold together. That's how I'd augment what you're building." — directly answers your ask about how my work augments their business.
+
+Still short, still your voice, still a draft. The resume path is unchanged — `resume/BrianTakita-virtuousai.pdf` and `resume/profiles/virtuousai.toml`, both uncommitted in the `resume/` submodule for your review.
+
+(Session note: the exchange is large — 7 sections — but the queue is active, so I kept draining rather than pausing to compact.)
+<!-- agent:boundary:c5c08f7c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- The phrasing is too salesy. Explain how I will provide value to VirtuousAI. I need it to resonate with what the company does. Imagine the role itself of integration and how my work can augment their business.
 <!-- /agent:queue -->
 
 ## Backlog

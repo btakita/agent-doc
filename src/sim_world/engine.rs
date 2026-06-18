@@ -817,11 +817,18 @@ impl SimWorld {
         // (3) Recycle policy. The operator `admin recycle` mark forces a recycle at
         // the next idle boundary regardless of staleness; the auto path uses the
         // production `supervisor_recycle_action` predicate (stale binary + opt-in).
+        // `explicit_admin=false` here: this model keeps the operator `admin recycle`
+        // mark as the separate `operator_recycle_marked` OR below (it forces a recycle
+        // regardless of staleness), so the policy predicate runs the auto path only.
+        // The `#supselfheal` Phase 1 explicit-admin override is unit-tested in
+        // `decisions.rs`; its SimWorld integration lands with the admin→supervisor IPC
+        // adapter (`#supselfheal-adminwire`).
         let recycle_action = supervisor_recycle_action(
             self.recycle_clear.binary_stale,
             self.recycle_clear.auto_recycle,
             turn_boundary,
             head_pending,
+            false,
         );
         // RecycleImmediate fires at once (the next-queue-item boundary bypasses the
         // grace debounce); RecycleDebounced fires after the idle-grace elapses, which

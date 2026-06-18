@@ -395,14 +395,28 @@ pub enum SupervisorRecycleAction {
 /// point, so we recycle promptly (`RecycleImmediate`); when none is, we keep the
 /// idle-grace debounce (`RecycleDebounced`, applied by the caller via
 /// `recycle_debounce_decision`).
+///
+/// `#supselfheal` Phase 1 (`#supselfheal-adminrecycle`): `explicit_admin` is set
+/// when an operator/agent explicitly requested `agent-doc admin recycle` for this
+/// supervisor. Explicit intent **overrides the default-OFF opt-out** — a stale
+/// supervisor recycles immediately at the next turn boundary even when
+/// `auto_recycle` is false, so `admin recycle` (the gentle fix the closeout path
+/// itself recommends) can actually clear a stale-binary supervisor wedge. It still
+/// respects `turn_boundary` (never drops a live turn) and is a no-op when not stale.
 pub fn supervisor_recycle_action(
     stale: bool,
     auto_recycle: bool,
     turn_boundary: bool,
     head_pending: bool,
+    explicit_admin: bool,
 ) -> SupervisorRecycleAction {
     if !stale || !turn_boundary {
         return SupervisorRecycleAction::None;
+    }
+    if explicit_admin {
+        // Operator/agent explicit `admin recycle` — recycle now, overriding the
+        // default-OFF opt-out. The next turn boundary is the deliberate restart point.
+        return SupervisorRecycleAction::RecycleImmediate;
     }
     if !auto_recycle {
         return SupervisorRecycleAction::Detect;
@@ -739,27 +753,66 @@ mod tests {
     fn supervisor_recycle_action_policy() {
         use SupervisorRecycleAction::*;
         // `#ctlrecycle` R3 / `#suprecyclequeue` policy truth table.
-        // (stale, auto_recycle, turn_boundary, head_pending)
+        // (stale, auto_recycle, turn_boundary, head_pending, explicit_admin)
         // Fresh binary → never act.
-        assert_eq!(supervisor_recycle_action(false, true, true, true), None);
-        assert_eq!(supervisor_recycle_action(false, true, true, false), None);
+        assert_eq!(supervisor_recycle_action(false, true, true, true, false), None);
+        assert_eq!(supervisor_recycle_action(false, true, true, false, false), None);
         // Stale but mid-turn (not at a boundary) → never act, even with the flag on.
-        assert_eq!(supervisor_recycle_action(true, true, false, true), None);
-        assert_eq!(supervisor_recycle_action(true, true, false, false), None);
+        assert_eq!(supervisor_recycle_action(true, true, false, true, false), None);
+        assert_eq!(supervisor_recycle_action(true, true, false, false, false), None);
         // Stale at a turn boundary, auto-recycle OFF → surface only, regardless of
         // whether a queue head is pending.
-        assert_eq!(supervisor_recycle_action(true, false, true, false), Detect);
-        assert_eq!(supervisor_recycle_action(true, false, true, true), Detect);
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, false, false),
+            Detect
+        );
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, true, false),
+            Detect
+        );
         // Stale + boundary + opt-in ON, a queue head waiting → recycle NOW so the next
         // queue item runs on the fresh binary (debounce bypassed).
         assert_eq!(
-            supervisor_recycle_action(true, true, true, true),
+            supervisor_recycle_action(true, true, true, true, false),
             RecycleImmediate
         );
         // Stale + boundary + opt-in ON, no head waiting → debounced recycle.
         assert_eq!(
-            supervisor_recycle_action(true, true, true, false),
+            supervisor_recycle_action(true, true, true, false, false),
             RecycleDebounced
+        );
+    }
+
+    #[test]
+    fn supervisor_recycle_action_explicit_admin_overrides_opt_out() {
+        use SupervisorRecycleAction::*;
+        // `#supselfheal` Phase 1: an explicit `admin recycle` overrides the
+        // default-OFF opt-out and recycles a stale supervisor immediately at the
+        // next turn boundary — the gentle, non-disruptive supervisor-recycle path.
+        // Auto-recycle OFF + explicit admin → RecycleImmediate (overrides Detect),
+        // regardless of whether a head is pending.
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, false, true),
+            RecycleImmediate
+        );
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, true, true),
+            RecycleImmediate
+        );
+        // Auto-recycle ON + explicit admin → still immediate (no debounce wait).
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, false, true),
+            RecycleImmediate
+        );
+        // Explicit admin NEVER drops a live turn: mid-turn (no boundary) stays None.
+        assert_eq!(
+            supervisor_recycle_action(true, false, false, false, true),
+            None
+        );
+        // Explicit admin on a FRESH binary → nothing to recycle.
+        assert_eq!(
+            supervisor_recycle_action(false, false, true, false, true),
+            None
         );
     }
 

@@ -920,11 +920,19 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         shared.restart_reexec.store(false, Ordering::Relaxed);
                     }
                 }
+                // `#supselfheal` Phase 1: the policy owner now accepts an
+                // `explicit_admin` override (an `agent-doc admin recycle` request
+                // recycles a stale supervisor even when auto-recycle is opted OUT).
+                // The `admin recycle` → route-owned-supervisor IPC adapter that flips
+                // this to `true` is the queued follow-up (`#supselfheal-adminwire`);
+                // until it lands the idle path keeps its current behavior.
+                let explicit_admin_recycle = false;
                 let recycle_action = supervisor_recycle_action(
                     supervisor_stale,
                     recycle_auto_enabled,
                     turn_boundary,
                     head_pending,
+                    explicit_admin_recycle,
                 );
                 // The idle-grace debounce only gates the no-head-pending path; an
                 // inter-queue-item recycle bypasses it.

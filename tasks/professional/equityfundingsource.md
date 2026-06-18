@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -142,7 +142,7 @@ If `ADMIN` changes from `/portal-admin` to `/admin`, this becomes `/admin/:secti
 - **(C) Keep `/portal-admin`** — no conflict, no migration. The prefix is internal-facing only.
 
 If you want to proceed, I recommend **(A)**: unify admin login into the existing role-based `/login?role=admin` flow (which already exists for borrower/investor/broker), remove the separate `/admin/login` + `/admin/signup` routes, then change `ADMIN = '/admin'` and add `/portal-admin/* → /admin/*` redirects. Want me to do that?
-<!-- agent:boundary:90c263d6 -->
+<!-- agent:boundary:94a93031 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -155,6 +155,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Do option A. Unified /login
 <!-- /agent:queue -->
 
 ## Backlog

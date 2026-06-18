@@ -39,13 +39,34 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 8 response topic(s): #lmlazy; active local-model KG usage; #kgmrs; 5 more
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): queue drain; local-model runtime + service-vs-lazy
-<!-- agent:boundary:f72692b9 -->
+
+### Re: do [#kgwiring] — wire kg into an active workflow — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#kgwiring]
+
+
+Done. The `tsift-agent-doc` graph-evidence read seam was dormant — reachable only from the `tsift kg evidence` CLI, called from no hook/runbook/planning cycle. I took **seam (2)**: wired it into `session_digest::compute`, which is the digest behind `tsift session-digest`, `session-review`, and `context-pack` — surfaces that run on real planning cycles.
+
+**What changed (tsift `ec55260`, pushed to origin/main):**
+- `session-digest` now emits a bounded `graph_evidence` section when the workspace has a `.tsift/graph.db`: graph node/edge totals plus the most-connected KG entities, scoped to the session's **top touched symbol** (its `incident_edge_count` is the connectivity rank). Missing graph.db → no section (no clutter); KG read errors degrade to a digest `warnings` entry (a digest never fails on KG state).
+- New `graph_evidence::read_graph_evidence_bounded(db, query, max_scan_nodes)` guards cost. The existing reader loads **all** nodes/edges to rank by connectivity — fine for a 10k-node graph, a regression for the 418k-node one here. The bounded reader checks the cheap `graph_counts()` (`COUNT(*)`) first and returns `scanned: false` with totals only when the store exceeds `DEFAULT_EVIDENCE_MAX_SCAN_NODES` (50k). Added a `scanned` flag to `GraphEvidenceReport` (additive in `kg evidence` JSON).
+- CLI rendering in compact + human `session-digest` output; spec § *Evidence Surfacing in Session Digest* in `specs/local-kg-model.md`; `VERSIONS.md` Unreleased entry.
+
+**Verified live (not just unit tests):**
+- Small graph (tsift submodule, 10,383 nodes) → full scan, surfaced `graph_evidence` matched to the touched symbol.
+- Oversized graph (superproject, **418,330 nodes / 910,234 edges**) → `scanned: false`, totals only, *"too large for inline scan"* note — no 418k-node load.
+- `make check` green; 5 new tests; `cargo build --release` + `cargo install --path .` done.
+
+**`#kgoperatorrun` stays operator-gated** — it needs a real `tsift kg extract --profile qwen3-32b-q4-ollama` run (GPU + Ollama local model) to seed `kg_source` nodes, which an agent can't perform. The wiring above is what makes that seeded evidence visible once you run it; until then the section correctly reports the AST/index-derived graph.
+<!-- agent:boundary:24e6b273 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#kgwiring]
+- ~~do [#kgwiring]~~
 - do [#kgoperatorrun]
 <!-- /agent:queue -->
 <!--
@@ -55,7 +76,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgwiring] Wire tsift kg into an active workflow so it stops being dormant code. Two candidate seams: (1) a post-index hook/script that runs 'tsift kg extract --graph-db .tsift/graph.db' over high-value source files (e.g. SPEC.md, AGENTS.md, README.md per package) so KG evidence accumulates alongside AST data; (2) a session_digest or agent-doc planning call site that invokes tsift_agent_doc::graph_evidence::read_graph_evidence to surface relevant entities into the digest. Today: zero tsift kg invocations in any hook, runbook, .github/workflows, .codex/hooks.json, .opencode/, Makefile, AGENTS.md, or RTK.md — every mention is source/spec/doc.
 - [ ] [#kgoperatorrun] Operator: run 'tsift kg extract --profile qwen3-32b-q4-ollama --graph-db .tsift/graph.db' against a real source file in this workspace to seed kg_source nodes. Today the workspace graph.db has 418k nodes / 910k edges but ZERO kg_source kind (verified via 'tsift kg evidence --kind kg_source' → no matches) — every node is from the AST/index pipeline or memgraphrag's hash fallback. Until at least one real extract runs, the evidence/status/unload commands have nothing to report on.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->

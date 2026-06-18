@@ -784,7 +784,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // #jbeditorsavedrift-vscode adds a file-based `save-document.signal` fallback
         // in the same `flush_editor_buffer_to_clear_drift` flow for editors that watch
         // `.agent-doc/patches/` (VS Code) instead of the socket (JetBrains).
-        ("agent-doc-orchestration/src/git.rs", "reason=") => 11,
+        // +2 (#pcwcdiskfree): post-commit auto-reconcile now logs which
+        // transport it used (`transport=editor_ipc_skipped_disk_write` when a JB
+        // listener is active vs `transport=disk` headless), so a hot editor
+        // buffer no longer triggers `File Cache Conflict`. Each branch keeps its
+        // own `reason=committed_content_lost transport=…` log line, replacing
+        // the prior single unconditional `reason=committed_content_lost`.
+        ("agent-doc-orchestration/src/git.rs", "reason=") => 13,
         ("src/orchestrate.rs", "guard_") => 0,
         ("src/orchestrate/dag.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it

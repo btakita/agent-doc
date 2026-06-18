@@ -380,9 +380,13 @@ Semantics:
   - *Already editor-safe:* exchange compaction (`#w42v`), the post-commit
     boundary reposition (skips the working-tree write while a listener is active
     and lets the IPC reposition signal own the buffer), and the `#pcwc`
-    post-commit worktree reconcile (disk write is the HEAD-authoritative repair
-    of a working tree that *lost* committed content, immediately followed by an
-    editor-buffer IPC refresh with a stale-buffer hash guard).
+    post-commit worktree reconcile. The `#pcwc` reconcile was promoted to
+    listener-aware in `#pcwcdiskfree`: with a JB editor listener active it
+    converges HEAD content through the editor-buffer IPC refresh *only* —
+    skipping the working-tree disk write that produced the recurring
+    `File Cache Conflict` dialog. With no listener (headless / CI), it still
+    writes HEAD to disk authoritatively so committed content is restored even
+    when no editor is attached.
   - *Authoritative must-hit-disk by design:* the recovery / scaffold / migration
     writes (`claim` scaffold before any editor attaches, `repair` orphan
     recovery, preflight format migration/repair, `session-check`

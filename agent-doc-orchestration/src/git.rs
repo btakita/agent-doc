@@ -2532,26 +2532,59 @@ fn emit_postcommit_worktree_check(file: &Path) {
         // repairing disk, push the committed blob back through editor IPC with a
         // stale-buffer hash guard so the IDE stops writing the stale content back.
         if postcommit_worktree_lost_committed_content(&head_norm, &tree_norm) {
-            match std::fs::write(file, &head_doc) {
-                Ok(()) => {
-                    crate::ops_log::log_op(
-                        file,
-                        &format!(
-                            "postcommit_worktree_auto_reconciled file={} head={} tree_before={} reason=committed_content_lost",
-                            file.display(),
-                            &head_sha[..head_sha.len().min(12)],
-                            &tree_sha[..tree_sha.len().min(12)],
-                        ),
-                    );
-                    eprintln!(
-                        "[commit] postcommit_worktree_check match=false for {} — working tree lost committed content; auto-reconciled to HEAD (#pcwc)",
-                        file.display()
-                    );
-                    send_postcommit_editor_refresh(file, &head_doc, &working);
+            // #pcwcdiskfree: when a JB editor listener is active, skip the disk
+            // write — `send_postcommit_editor_refresh` below pushes HEAD content
+            // through the editor IPC (`refresh_content`), letting the live buffer
+            // become authoritative and the disk catch up on the editor's next
+            // save. Writing to disk here while the IDE holds the file open is the
+            // documented source of the recurring `File Cache Conflict` dialog.
+            // With no listener, fall back to the authoritative disk write so a
+            // headless/CI run still restores committed content.
+            let listener_active = file
+                .canonicalize()
+                .ok()
+                .map(|canonical| {
+                    let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
+                    crate::ipc_socket::is_listener_active(&project_root)
+                })
+                .unwrap_or(false);
+            if listener_active {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "postcommit_worktree_auto_reconciled file={} head={} tree_before={} reason=committed_content_lost transport=editor_ipc_skipped_disk_write",
+                        file.display(),
+                        &head_sha[..head_sha.len().min(12)],
+                        &tree_sha[..tree_sha.len().min(12)],
+                    ),
+                );
+                eprintln!(
+                    "[commit] postcommit_worktree_check match=false for {} — working tree lost committed content; converging HEAD through editor IPC, skipping disk write (#pcwcdiskfree)",
+                    file.display()
+                );
+                send_postcommit_editor_refresh(file, &head_doc, &working);
+            } else {
+                match std::fs::write(file, &head_doc) {
+                    Ok(()) => {
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "postcommit_worktree_auto_reconciled file={} head={} tree_before={} reason=committed_content_lost transport=disk",
+                                file.display(),
+                                &head_sha[..head_sha.len().min(12)],
+                                &tree_sha[..tree_sha.len().min(12)],
+                            ),
+                        );
+                        eprintln!(
+                            "[commit] postcommit_worktree_check match=false for {} — working tree lost committed content; auto-reconciled to HEAD via disk (#pcwc, no editor listener)",
+                            file.display()
+                        );
+                        send_postcommit_editor_refresh(file, &head_doc, &working);
+                    }
+                    Err(e) => eprintln!(
+                        "[commit] postcommit worktree auto-reconcile write failed (non-fatal): {e}"
+                    ),
                 }
-                Err(e) => eprintln!(
-                    "[commit] postcommit worktree auto-reconcile write failed (non-fatal): {e}"
-                ),
             }
             return;
         }
@@ -3186,11 +3219,19 @@ mod th {
                     .unwrap_or("unknown");
                 let ack_dir = root_clone.join(".agent-doc/ack-content");
                 let _ = std::fs::create_dir_all(&ack_dir);
-                let file_path = v.get("file").and_then(|f| f.as_str()).unwrap_or("");
-                let content = if !file_path.is_empty() {
-                    std::fs::read_to_string(file_path).unwrap_or_default()
+                // Model the JB plugin's behavior: refresh_content messages carry
+                // the new content in the message body (the IDE applies it to its
+                // in-memory buffer without reading disk). Other message types
+                // fall back to disk (patch files, etc.).
+                let content = if v.get("type").and_then(|t| t.as_str()) == Some("refresh_content") {
+                    v.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string()
                 } else {
-                    String::new()
+                    let file_path = v.get("file").and_then(|f| f.as_str()).unwrap_or("");
+                    if !file_path.is_empty() {
+                        std::fs::read_to_string(file_path).unwrap_or_default()
+                    } else {
+                        String::new()
+                    }
                 };
                 let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
                 Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
@@ -5652,6 +5693,120 @@ Duplicate replay should stay live.
             fs::read_to_string(root.join(".agent-doc/ack-content/unknown.md")).unwrap(),
             head_doc,
             "fake listener should observe the repaired HEAD content"
+        );
+    }
+    #[test]
+    fn postcommit_worktree_auto_reconcile_skips_disk_write_with_active_listener() {
+        // #pcwcdiskfree: with a JB editor listener active, the postcommit
+        // lost-content recovery must NOT touch the working-tree file — the
+        // recurring `File Cache Conflict` dialog came from this disk write
+        // firing behind the IDE's open buffer. Editor IPC refresh carries HEAD
+        // content back to the live buffer instead; disk catches up on save.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        let _listener = start_fake_listener(root);
+        wait_for_listener(root);
+
+        let head_doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\n\
+            ### Re: second\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+        let doc = root.join("session.md");
+
+        let corrupted = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        fs::write(&doc, corrupted).unwrap();
+
+        emit_postcommit_worktree_check(&doc);
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("postcommit_worktree_auto_reconciled")
+                && log.contains("transport=editor_ipc_skipped_disk_write"),
+            "active-listener recovery must log the editor-IPC transport, not disk:\n{log}"
+        );
+        assert!(
+            !log.contains("reason=committed_content_lost transport=disk"),
+            "active-listener recovery must not fall through to a disk write:\n{log}"
+        );
+        assert!(
+            log.contains("postcommit_editor_refresh_sent"),
+            "active-listener recovery must still push HEAD content to the editor:\n{log}"
+        );
+        // The disk file stays as the corrupted working tree — the editor buffer
+        // owns the recovery until the IDE saves. This is the direct proof that
+        // no `File Cache Conflict` will be triggered by this path.
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            corrupted,
+            "with an active listener the disk file must NOT be rewritten to HEAD"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(".agent-doc/ack-content/unknown.md")).unwrap(),
+            head_doc,
+            "fake listener should still observe HEAD content via the editor refresh"
+        );
+    }
+    #[test]
+    fn postcommit_worktree_auto_reconcile_writes_disk_without_listener() {
+        // #pcwcdiskfree no-listener branch: a headless / CI run still restores
+        // committed content to the working tree via the authoritative disk
+        // write, matching the pre-fix behavior.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let head_doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\n\
+            ### Re: second\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+        let doc = root.join("session.md");
+
+        let corrupted = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        fs::write(&doc, corrupted).unwrap();
+
+        emit_postcommit_worktree_check(&doc);
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("postcommit_worktree_auto_reconciled")
+                && log.contains("transport=disk"),
+            "no-listener recovery must log the disk transport:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=editor_ipc_skipped_disk_write"),
+            "no-listener recovery must not claim editor-IPC transport:\n{log}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            head_doc,
+            "with no listener the disk file must be restored to HEAD"
         );
     }
     #[test]

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -329,7 +329,17 @@ bunx wrangler secret put TMO_DATABASE
 Then I can verify connectivity via `GET /LOS.svc/GetLoans` and `POST /api/admin/tmo-sync`. The cron sync (`0 * * * *`) will start polling automatically once credentials are live.
 
 I need the TMO API token and database name from you or Robert/Judith to proceed.
-<!-- agent:boundary:3edcac77 -->
+
+### Re: TMO Sync — same root cause — glm-5.2
+
+> **Queue prompt:**
+>
+> TMO Sync
+
+Same answer as the previous item: TMO Sync can't run because `TMO_API_TOKEN` and `TMO_DATABASE` are not configured. Once you provide those credentials, the cron sync (`0 * * * *`) will start polling loans automatically, and `POST /api/admin/tmo-sync` will work for manual triggers.
+
+Waiting on the TMO API token + database name from you or Robert/Judith.
+<!-- agent:boundary:58406930 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -342,8 +352,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~login to TMO. Make sure we are using the correct credentials.~~
-- TMO Sync
 <!-- /agent:queue -->
 
 ## Backlog

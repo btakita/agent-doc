@@ -1,7 +1,22 @@
 ---
 agent_doc_session: 9342c5f7-a651-49a3-bb81-4c87be5988ca
+agent: claude
 agent_doc_format: template
 agent_doc_write: crdt
+claude_model: opus
+claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
+agent_doc_model_tier: high
+pending_done_guard: warn
+prompt_presets:
+  '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
+  '#corky-bug': Please create a plan for corky to fix this issue. Add to the backlog of agent-loop/tasks/software/corky.md
+  '#mermaid': Include explanatory mermaid diagram(s).
+  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+  '#spec-test-commit': update spec + tests. commit
+  '#spec-test-commit-push': update spec + tests. commit + push
+  '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
 ---
 
 ## Status
@@ -35,7 +50,7 @@ Created all 8 profiles plus the merged recruiter-call transcript. Profiles follo
 ⚠️ One accuracy caveat worth knowing: the `--diarize` pass labeled the two speakers as "Brian/Rory," but this was a two-person call between **Brian (candidate)** and **Laura Rondón de Barros (G2i recruiter)** — Rory was *not* on the call, and the diarizer crossed attributions (e.g., the "Brian"-labeled opener says "I'm Laura, recruiter at G2i"). I added a header note saying to read content over labels rather than silently re-attributing every segment and risking errors. If you want, I can do a cleaner manual re-attribution pass to fix the per-segment speaker labels.
 
 Nothing was committed/pushed beyond this session doc's own finalize — these are content artifacts, not a spec/test change, so I left the repo working tree for you to review and commit when ready.
-<!-- agent:boundary:41fbb685 -->
+<!-- agent:boundary:d6247ea2 -->
 <!-- /agent:exchange -->
 
 ## Queue

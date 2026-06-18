@@ -96,7 +96,17 @@ So nothing here is new agent-drainable work — it's the documented qflood re-pr
 The fix (in the plan): `--done`/`--pending-gate` strikes the matching `[#id]` head in-write; filed free-text heads get linked to their backlog id so they defer like the item; drainability dereferences bare `[#id]` heads to their operator-verify tag.
 
 **Halting the flood.** Until `#qheadsync` lands, every `/agent-doc` here is a no-op churn cycle. I'm pausing this queue and **stopping** — not auto-looping. Resume when you have new work, the `#tsiftmdcrash` crash text, or after `#qheadsync` is implemented. Note: editor IPC was degraded this whole session (commit refused twice, buffer mangled) so this response was written via `--force-disk`; your IntelliJ buffer will reload from disk on next focus.
-<!-- agent:boundary:c5878581 -->
+
+### Re: automate the wedge clear — shipped (0.34.4) — opus-4-8
+
+Done — the wedge now self-clears. Shipped agent-doc **0.34.4** (`08f026c0`, superproject `c47c89f71`, installed + CI green).
+
+**What the wedge was:** after an IPC `content_ours` merge, `session-check` stayed `INTERRUPTED` forever on dropped queue edits `[#qpauseux]`/`[#docdriftgrace]` even though both were preserved in HEAD as struck `~~do [#id]~~` heads from a prior cycle. No `reset` variant cleared it — the only escape was a manual supervisor restart / patch surgery. Root cause: `check_dropped_queue_prompt_guard` proved preservation only by normalized **text identity** (which can't bridge the recorded bare `[#id]` against HEAD's `do [#id]`/struck spelling) and by a consumed-check scoped to **this cycle's** resolved ids (the strike happened earlier).
+
+**The fix:** the guard now also clears when the dropped prompt's `[#id]` is present in the committed/visible `agent:queue` in **any** form, including struck/consumed lines — new `queue_ids_including_struck` strips the strike wrapper before id extraction. A struck head visibly reached the document, so its id is preserved, not silently lost. Genuinely lost ids (absent from the queue entirely) still fail closed. **Proven on this doc:** `session-check` now returns `ok — committed` instead of the `[#qpauseux]; [#docdriftgrace]` interruption.
+
+**Your new report — "an equityfundingsource.md turn deleted what I wrote in the queue"** — is this same `#queue-user-edit-overwrite` drop. 0.34.4 makes `session-check` auto-**recover** from it (no more wedge / manual restart). But the deeper **prevention** is still open under `#qheadsync` (plan `plan-answered-queue-head-autostrike.md`): stop recording the false drop in the first place, strike the `[#id]` head on `--done`, and link filed free-text heads to their backlog id so they defer instead of re-presenting. The queue stays **paused** (`receipt_id=62`) until that prevention lands or you add new work; resume with `agent-doc admin queue resume tasks/agent-doc/agent-doc-bugs2.md`.
+<!-- agent:boundary:41a39ca9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -114,6 +124,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - ~~:pushpin: do [#routedrainnextaction]~~
 - ~~:pushpin: agent-doc should not thrash when the document changes during a turn...when the current document does not match the snapshot. The binary should gracefully resolve the difference without the agent knowing about it. Only structural conflicts based on the current work should be surfaced...such as editing the current prompt. Unrelated changes should be gracefully handled by the agent-doc binary without the agent needed to intervene.~~
 - [#tsiftmdcrash]
+- :pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.
 - :pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md

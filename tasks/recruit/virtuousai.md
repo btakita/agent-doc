@@ -27,7 +27,17 @@ prompt_presets:
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+❯ Create profiles for:
+❯ - recruiter laura-rondon-de-barros https://www.linkedin.com/in/laura-rondon-de-barros-67999813011/
+❯ - CTO & hiring manager rory-donovan https://www.linkedin.com/in/rory-donovan/
+❯   - Note his description "Responsible for both the Virtuous AI platform for Fair and Explainable ML Tools and "white box" foundational models for businesses large and small. He is engaged in first-hand operations, development, and execution of that technology.". Commentary for this session (not his profile), is that agent-doc provides a "white box" UX to agents.
+❯ - CEO chris-happ https://www.linkedin.com/in/clhapp/
+❯ - CRO jeff-mehalek https://www.linkedin.com/in/jeff-mehalek/
+❯ - Director of Data Science matthew-paff https://www.linkedin.com/in/matthew-paff/
+❯ - Full-Stack Engineer leonardo-roese https://www.linkedin.com/in/leonardo-roese/
+❯ - Graph Neural Networks Engineer alan-salimov https://www.linkedin.com/in/alan-s-8154ab71/
 
+❯ Create a profile for virtuousai.com. Corky GPU transcribe + diarize part 1 [2026-06-17 11-01-37-compressed.mp4](../../../../../Videos/2026-06-17%2011-01-37-compressed.mp4) and part 2 [2026-06-17 11-16-36-compressed.mp4](../../../../../Videos/2026-06-17%2011-16-36-compressed.mp4) into a single transcript.
 
 ### Re: VirtuousAI profiles + merged call transcript — opus-4-8
 
@@ -50,7 +60,7 @@ Created all 8 profiles plus the merged recruiter-call transcript. Profiles follo
 ⚠️ One accuracy caveat worth knowing: the `--diarize` pass labeled the two speakers as "Brian/Rory," but this was a two-person call between **Brian (candidate)** and **Laura Rondón de Barros (G2i recruiter)** — Rory was *not* on the call, and the diarizer crossed attributions (e.g., the "Brian"-labeled opener says "I'm Laura, recruiter at G2i"). I added a header note saying to read content over labels rather than silently re-attributing every segment and risking errors. If you want, I can do a cleaner manual re-attribution pass to fix the per-segment speaker labels.
 
 Nothing was committed/pushed beyond this session doc's own finalize — these are content artifacts, not a spec/test change, so I left the repo working tree for you to review and commit when ready.
-<!-- agent:boundary:d6247ea2 -->
+<!-- agent:boundary:60981ce5 -->
 <!-- /agent:exchange -->
 
 ## Queue

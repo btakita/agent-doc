@@ -37,13 +37,15 @@ completed
 Compacted content:
 - Archived 8 response topic(s): #queediturn implemented + accretion default-off shipped; queue termination; restore gated items to backlog; 5 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:ae2a08d9 -->
+Submitting to junie...
+<!-- agent:boundary:7522252f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - JB `Clear Session Context` on opencode sessions does not submit `/new` ![img_46.png](img_46.png).
+- 
 - What are #next-steps to fix agent-doc bugs?
 <!-- /agent:queue -->
 <!--

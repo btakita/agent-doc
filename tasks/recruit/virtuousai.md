@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -208,13 +208,37 @@ The MonsterRodHolders content is sourced from the actual client work (the bot-at
 - **`resume/data.toml`** — MRH accomplishment: "mid-market WooCommerce e-commerce store" → "**small** WooCommerce e-commerce store".
 
 Underlying content stores also modified (uncommitted): `resume/data.toml` (added MonsterRodHolders + Equity Funding Source accomplishments) and `resume/BrianTakita.md` (master template).
-<!-- agent:boundary:ba4a3dee -->
+
+### Re: simpler message to Laura — focus on building AI systems — opus-4-8
+
+> **Queue prompt:**
+>
+> Let's keep this simple. Read /home/brian/work/btakita/agent-loop/tasks/recruit/virtuousai/The-AI-Execution-Gap_VAI_WhitePaper.md. I need to deliver value with what I focus on. Building AI systems. Draft a message to laura-rondon-de-barros
+
+
+
+Read [`The-AI-Execution-Gap_VAI_WhitePaper.md`](virtuousai/The-AI-Execution-Gap_VAI_WhitePaper.md) and rewrote the draft → [`mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md`](../../mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md) (status: **draft, not sent**).
+
+**What changed — kept it simple, led with what you focus on.** The message now opens on *"What I focus on is building AI systems, and that's where I'd bring value to VirtuousAI,"* and everything else serves that one line. I dropped the parts you (and the earlier critique in the doc) flagged as overselling:
+
+- cut **"That's DS2O by hand"** (appropriated their trademark);
+- cut **"I build the substrate BAIO runs on"** (literally untrue — BAIO doesn't run on your OSS);
+- cut **"your architecture in miniature"** (overreach);
+- de-stuffed the **tsift** line (no more "Semantic Agent Interface / MemGraphRAG / Neo4j / PyTorch-Geometric" keyword run — just what it actually is: a knowledge layer over a graph + vector store).
+
+**The whitepaper tie-in** is now one honest sentence: the execution gap is strategy-vs-execution, and closing it needs a system that *ingests signals → makes sense of them → acts with explainability* — which is exactly the kind of system you build. That maps to the paper's own BAIO loop without claiming to be BAIO.
+
+**The two AI systems** carry the value, stated plainly:
+- **agent-doc** — white-box human/agent interaction; markdown as the live control surface (queue, backlog, agent reasoning all visible/editable/versioned) = explainability at the human-agent layer.
+- **tsift** — a graph + vector knowledge layer (local KG, graph/vector retrieval, AST code intelligence) = the kind of graph-backed substrate that turns signals into outcomes.
+
+The MonsterRodHolders ops experience is now a single supporting line ("felt the execution gap from the inside"), not the headline. It's one message to Laura, forwardable to the VirtuousAI team — no separate two-part "For Chris & Rory" block. Still a draft for you to review and send via LinkedIn or email; resume + call recording carry the rest. Uncommitted content artifact, same as before.
+<!-- agent:boundary:3d30b354 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Let's keep this simple. Read /home/brian/work/btakita/agent-loop/tasks/recruit/virtuousai/The-AI-Execution-Gap_VAI_WhitePaper.md. I need to deliver value with what I focus on. Building AI systems. Draft a message to laura-rondon-de-barros
 <!-- /agent:queue -->
 
 ## Backlog

@@ -202,7 +202,7 @@ That's the crash-repro detail I needed — thank you. Captured it into `#routede
 Note: your queue edit with this detail was itself dropped by the `content_ours` merge this cycle — that's `#semmerge` (the CRDT-merge fail-closed last-writer-wins) biting in real time. I recovered the text from the dropped-edit guard and folded it into `#routedeadshell` so it's durable. `#semmerge` is high on the list precisely because it keeps eating concurrent edits like this.
 
 Two threads in `#routedeadshell` now: (1) agent-actionable — route must not type into a dead shell + must restart a crashed harness; (2) the reproducible supervisor+pane crash root-cause (capture `supervisor-stderr.log` + scrollback if it recurs).
-<!-- agent:boundary:11725d60 -->
+<!-- agent:boundary:ab3de215 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -211,6 +211,7 @@ Two threads in `#routedeadshell` now: (1) agent-actionable — route must not ty
 - :pushpin: [#021p]
 - :pushpin: #semmerge
 - :pushpin: Investigate the task thrashing in virtuousai.md session. Please fix.
+- After JB `Clear Session Context` on this document then JB `Run Agent Doc` stalled.
 - :pushpin: The agent defined a task id #rz3afix, but agent-doc redefined the task id to [#021p]. If an agent defines a task id, agent-doc should be able to parse the task id and use the agent defined task id. Note that if the agent's defined task id does not pass the id validation logic such as malformed or duplicate of a prompt_preset or another entity, resolve and create a new task id if necessary.
 - :pushpin: I ran JB `Run Agent Doc` on virtuousai.md and the supervisor + tmux pane crashed 2 times. The 3rd attempt stalled and I manually ran the `agent-doc .../virtuousai.md` command...and the turn is in progress.
 ---

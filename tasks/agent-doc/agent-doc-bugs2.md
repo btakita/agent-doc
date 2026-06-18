@@ -112,7 +112,19 @@ Done — the wedge now self-clears. Shipped agent-doc **0.34.4** (`08f026c0`, su
 No new prompt this cycle — preflight flagged a `stale_install` (the `~/.cargo/bin` cdylib predated fix commit `08f026c0`), so live tmux/JB sessions were still running pre-fix FFI. Ran `agent-doc lib-install`: cdylib refreshed to `libagent_doc-0.34.4.so`, 2 controllers marked to auto-recycle at the next idle boundary. The `#qheadsync` wedge-clear is now fully live in **both** the binary and the FFI/cdylib.
 
 The queue re-presented the same `[#tsiftmdcrash]` + File Cache Conflict + cross-doc drift heads (no `user_intent` change — pure re-injection thrash). The wedge-clear stopped `session-check` from *wedging* on these, but the *re-injection* itself is the **prevention** half of `#qheadsync` (drainability must dereference a bare `[#id]` head to its operator-verify backlog tag and defer it; free-text heads filed as operator-verify items must be linked so they defer; `--done` must strike the matching `[#id]` head) — still open. Re-paused the queue (`receipt_id=63`) to halt the flood until that lands. Stopping — no agent-drainable work (all heads operator-verify/cross-doc, `#tsiftmdcrash` still needs your crash text).
-<!-- agent:boundary:7c35b177 -->
+
+### Re: free-text heads = question-or-actionable, strike when filed — opus-4-8
+
+Got it — applied your rule to the live queue (conservatively, not over-eager). A free-text head is either a **question** (answer it → consumed) or an **actionable item** (a backlog item is created; per the `queue` attr it auto-populates right below the struck free-text head; then the free-text head is struck). I struck the three free-text heads that are already-filed actionable reports:
+
+- ~~"…wedge and deleted what I wrote in the queue"~~ → `#qheadsync`
+- ~~"File Cache Conflict … replace all direct file writes"~~ → `#pcwcdiskfree`
+- ~~"equityfundingsource.md & monsterrodholders.md keeps on drifting"~~ → `#docdriftgrace`
+
+Each already had its tracked backlog item (all `[operator-verify]`), so I struck the duplicate reports rather than creating new ones. Left untouched: `[#tsiftmdcrash]` (id-backed, already deferred as operator-verify) and the two cross-doc `JB Run Agent Doc on equityfundingsource.md` route-diagnostic dumps (informational, already explained as qflood-working-as-intended; cross-doc, so out of scope to act on here — clear them when convenient).
+
+**Remaining `#qheadsync` work (the durable automation of exactly this rule):** make the binary do this at closeout instead of by-hand — when a free-text head is answered by a committed response *or* filed as a backlog item, auto-strike it (past id-backed heads, not just the leading one), and have auto-populate place the new backlog id's queue entry immediately below the struck head rather than appending. That ends the thrash without manual striking. It's a focused implementation cycle; I've kept the plan (`plan-answered-queue-head-autostrike.md`) and `#qheadsync` open for it.
+<!-- agent:boundary:d700b4e7 -->
 <!-- /agent:exchange -->
 
 ## Queue

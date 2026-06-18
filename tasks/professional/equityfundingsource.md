@@ -43,6 +43,41 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> deploy
+
+
+> **Queue prompt:**
+>
+> Make "Loan Status" thin and move "Borrower Info" in between "Loan Status" and "Application"
+
+
+> **Queue prompt:**
+>
+> Rename "Application Record" to "Application"
+
+
+> **Queue prompt:**
+>
+> Remove "Borrower Onboarding Data"
+
+
+> **Queue prompt:**
+>
+> Move "proposed loan amount", "loan purpose", "occupancy", "property value", "tmo loan number" from "Borrower Onboarding Data" to "Application Record"
+
+
+> **Queue prompt:**
+>
+> Move "Property Address" from "Borrower Info" to "Application Record"
+
+
+> **Queue prompt:**
+>
+> Remove "Payment Schedule" and all data + logic associated with it. EFS does not collect borrower payments.
+
+
+> **Queue prompt:**
+>
 > Remove "Final Loan Documents" and all data + logic associated with it. The closing docs will be its own step defined later.
 
 
@@ -63,7 +98,13 @@ Done, verified, and deployed. Reworked the admin AvailableDeal view (`portal/adm
 Also fixed two build-breaks left in the working tree from a prior interrupted cycle (`onboarding_fields_` and `ADMIN_LOAN_INFO_COPY_VALUE_STYLE` were referenced but undefined) and restored `LoanWireLinks`, which that cycle had over-removed.
 
 Verification: `bun run check` green — **813 tests pass, 0 fail**, app + worker builds clean. Committed (`c9aa3a6`) + pushed to `origin/main`, deployed to production (version `fb99f394`); home and `/admin/login` return 200.
-<!-- agent:boundary:bed85366 -->
+
+### Re: queue cleanup — AvailableDeal block already shipped — opus-4.8
+
+The AvailableDeal restructure (entire queue block) was completed, verified, committed (`c9aa3a6`), pushed, and deployed last cycle (worker `fb99f394`). The queue had re-served the remaining bullets as stragglers because the per-finalize strike heuristic only consumes one head at a time — so this cycle I struck the 7 answered free-text heads (Payment Schedule removal, the field moves, the rename, the layout, and deploy) via `queue consume`. They were all already satisfied by `c9aa3a6`; nothing new was implemented.
+
+The only remaining head, `do [#5eq8]` (closing-docs/notarization redesign), is **gated** — it's blocked on design + your decision on re-gating wires on notarization (that gate is relaxed in the interim). It should not auto-implement; it now lives as a gated review item rather than an auto-drained backlog/queue head.
+<!-- agent:boundary:eb443445 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,25 +120,25 @@ After 20:30
 In AvailableDeal dialog + page
 - ~~In "Loan Status", add Lender Selected step after Application Received~~
 - ~~Remove "Final Loan Documents" and all data + logic associated with it. The closing docs will be its own step defined later.~~
-- Remove "Payment Schedule" and all data + logic associated with it. EFS does not collect borrower payments.
-- Move "Property Address" from "Borrower Info" to "Application Record"
-- Move "proposed loan amount", "loan purpose", "occupancy", "property value", "tmo loan number" from "Borrower Onboarding Data" to "Application Record"
-- Remove "Borrower Onboarding Data"
-- Rename "Application Record" to "Application"
-- Make "Loan Status" thin and move "Borrower Info" in between "Loan Status" and "Application"
-- deploy
+- ~~Remove "Payment Schedule" and all data + logic associated with it. EFS does not collect borrower payments.~~
+- ~~Move "Property Address" from "Borrower Info" to "Application Record"~~
+- ~~Move "proposed loan amount", "loan purpose", "occupancy", "property value", "tmo loan number" from "Borrower Onboarding Data" to "Application Record"~~
+- ~~Remove "Borrower Onboarding Data"~~
+- ~~Rename "Application Record" to "Application"~~
+- ~~Make "Loan Status" thin and move "Borrower Info" in between "Loan Status" and "Application"~~
+- ~~deploy~~
 - do [#5eq8]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#5eq8] Closing docs step (redesign): rebuild the closing-documents/notarization flow as its own step (replaces the removed Final Loan Documents section). This re-introduces a notarize control and SHOULD re-gate allocation wire status (Sent/Confirmed) on notarization — the UI gate + server 409 were removed in the 2026-06-18 AvailableDeal restructure so funding is not hard-blocked in the interim. Borrower-signature API + final_docs_* D1 columns are preserved.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#5eq8] Closing docs step (redesign): rebuild the closing-documents/notarization flow as its own step (replaces the removed Final Loan Documents section). This re-introduces a notarize control and SHOULD re-gate allocation wire status (Sent/Confirmed) on notarization — the UI gate + server 409 were removed in the 2026-06-18 AvailableDeal restructure so funding is not hard-blocked in the interim. Borrower-signature API + final_docs_* D1 columns are preserved.
 - [/] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
 - [/] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
 - [/] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.

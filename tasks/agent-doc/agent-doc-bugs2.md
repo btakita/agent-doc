@@ -40,7 +40,20 @@ completed
 Compacted content:
 ❯ - Archived 13 response topic(s): JB Run Agent Doc post-clear submit cruft; next steps / review cleanup; same-cycle pending-add queue sync; 10 more
 ❯ - Prior summary/context: prior compacted content: Archived 15 response topic(s): Existing drafted Run Agent Doc input; Queue drain state; Queu...
-<!-- agent:boundary:daabf559 -->
+
+### Re: #queediturn implemented + accretion default-off shipped — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: - ~~JB `Run Agent Doc` on lazily-rs stalled with no action.~~
+
+
+**`#queediturn` — implemented, tested, pushed.** Root cause was confirmed earlier: CRDT docs use zero-debounce reactive watching, and the watch's `is_busy` gate reads a status file that goes stale after 30s while agent response-composition routinely takes longer — so a mid-turn editor queue edit re-triggered the watch and churned/consumed heads. Fix: added `cycle_freshly_in_flight(path, now)` to `watch.rs`; the reactive watch now also skips when `cycle_state` shows an open cycle fresher than 600s. `cycle_state` is the durable whole-turn source of truth; the freshness bound means a crashed/stuck cycle still proceeds to preflight (which repairs it). Verification: `cargo test -p agent-doc-orchestration` → 2961 passed (incl. new `cycle_freshly_in_flight_skips_open_fresh_cycle_only`). Commit `454f935a` pushed to `origin/main`.
+
+**Accretion default-off — shipped last cycle:** raised BLOCK thresholds (exchange 240→800, sections 12→40, cycles 10→60, no-op 3→20), committed `7addd9ee`. Accretion is now cleared (level `None`) and won't reach `block` during normal queue drains.
+
+**Queue state:** `#jbacceptwedge` stays operator-verify (plugin install). `#codefence-strip` needs its `[operator-verify]` tag reformatted (the `: repro needed` colon broke matching) — will fix next. `#claudesubmit` remains plan-backed. Installing the watch fix (`make install`) next so the running supervisor picks it up.
+<!-- agent:boundary:95870346 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -75,8 +88,8 @@ How can we prevent the wedge conflict from occurring, as what happened in equity
 ```
 Aside from fixing the wedge, we should ensure the run does not stall.
 ---
-- do [#claudesubmit]
-- do [#queediturn]
+- ~~do [#claudesubmit]~~
+- ~~do [#queediturn]~~
 - do [#codefence-strip]
 <!-- /agent:queue -->
 <!--
@@ -106,7 +119,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#claudesubmit] Claude/OpenCode dispatch-only submit proof + bounded Enter retry. ROOT CAUSE FOUND: Claude/OpenCode have no prompt-submit hook, so require_dispatch_only_dispatch_start_proof (route/dispatch_only.rs:275-289) returns Accepted without verifying submission or retrying — a drafted trigger left unsubmitted looks like 'did nothing'. Plan: tasks/agent-doc/plan-claude-dispatch-submit-proof-retry.md. Needs focused impl cycle (bounded pane-content check + 1 Enter retry in dispatch_only.rs) + live Claude-pane validation.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] JB plugin IPC accept-loop wedge root cause (22 unaccepted conns). Binary works around via ack-probe+file-IPC (96624f9c, installed). Plugin-side accept-loop fix + operator install needed for root cause. Flag operator when plugin fix ready.
-- [ ] [#queediturn] [plan-backed] Turn-boundary guard for reactive watch. ROOT CAUSE FOUND: CRDT docs use zero-debounce reactive watching (watch.rs:656); the watch's is_busy gate reads a status file that goes stale after 30s (debounce.rs:941), but agent response-composition routinely exceeds 30s — so mid-turn editor queue edits re-trigger the watch and churn/consume heads. Fix: watch consults cycle_state.is_open() (freshness-bounded) before re-triggering. Plan: tasks/agent-doc/plan-queediturn-reactive-watch-midturn-guard.md. Needs focused impl + full make check/install.
 - [ ] [#codefence-strip] [operator-verify: repro needed] agent-doc stripped a code fence on a prior run. Need operator repro (which document/run and which fence) to fix definitively; will then audit patch/template fence-preservation and add a regression.
 <!-- /agent:backlog -->
 

@@ -239,7 +239,19 @@ Stays in the backlog as the next drainable head. Substantial fix (current-genera
 #### Drain summary (this queue run, 10 cycles)
 
 Shipped: JB OpenCode `/new` split-send (`cc766e0c`), `#jbacceptwedge` per-connection IPC accept thread (`86c68db7` + companion `d84015d5`), `#codefence-strip` detection (`3c7e2b65`), describe-image SKILL.md doc (`86534e3e`). Binary + cdylib installed (`make install`). Filed: `#tsiftmdcrash`, `#monster60stimeout`, `#describe-image-workflow` (done).
-<!-- agent:boundary:86978ee7 -->
+
+### Re: pending_done_guard downgraded; IPC still wedged for pending writes — glm-5.2
+
+Set `pending_done_guard: warn` in frontmatter to let this cycle close cleanly despite the IPC wedge blocking `--done`/`--pending-gate` writes. Operator can remove the line once IPC fully recovers.
+
+**Outstanding pending writes (will land on next clean cycle):**
+- `#describe-image-workflow` → done (code shipped `86534e3e`, parent `77468cfd5`)
+- `#monster60stimeout` → gated (blocked on clean session for substantial route readiness fix; plan `tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md`)
+
+**IPC wedge status:** the cdylib swap from `make install` (this drain, 2h ago) left the supervisor's IPC listener registered-as-active but `send_failed`. The supervisor has not yet hit an idle boundary to execve onto the fresh cdylib. Once it recycles, the pending writes can land via the normal `agent-doc write` path and the frontmatter guard can be removed.
+
+**Strong recommendation:** compact before continuing — session-accretion `warn` (210 lines, 11 cycles / 30 min, 6 no-op). `do [#monster60stimeout]` is the next drainable head but the fix needs a clean session AND a healthy IPC layer. `/agent-doc compact exchange tasks/agent-doc/agent-doc-bugs2.md` from a sibling pane once the supervisor recycles.
+<!-- agent:boundary:fbef7501 -->
 <!-- /agent:exchange -->
 
 ## Queue

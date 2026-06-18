@@ -301,7 +301,35 @@ Queue drained.
 - #dzmm — activate the `tmo_cache_outbox` replay worker
 
 Once those land, I can wire the Link button to enqueue a `link_lender` outbox operation (same pattern as `select_lender`). Want me to add a backlog item for that?
-<!-- agent:boundary:9a7e2490 -->
+
+### Re: TMO login + TMO Sync — no credentials configured — glm-5.2
+
+> **Queue prompt:**
+>
+> login to TMO. Make sure we are using the correct credentials.
+
+
+> **Queue prompts:**
+>
+> login to TMO. Make sure we are using the correct credentials.
+> TMO Sync
+
+**TMO credentials are not configured anywhere.** I checked `wrangler.toml [vars]`, `.dev.vars`, and Worker secrets — `TMO_API_TOKEN` and `TMO_DATABASE` are absent from all three. The `tmo_config_()` function (`lib/tmo-api/index.ts:74`) returns `null`, so every TMO API call fails closed with `'TMO not configured'`. This is why `POST /api/admin/tmo-sync` errors and no writeback or live read can happen.
+
+**What TMO needs** (from The Mortgage Office admin → API settings):
+- `TMO_API_TOKEN` — sent as the `Token` header
+- `TMO_DATABASE` — sent as the `Database` header
+- Base URL defaults to `https://api.themortgageoffice.com` (`TMO_API_BASE_URL` to override)
+
+**To configure** (I'll set them once you provide the values):
+```
+bunx wrangler secret put TMO_API_TOKEN
+bunx wrangler secret put TMO_DATABASE
+```
+Then I can verify connectivity via `GET /LOS.svc/GetLoans` and `POST /api/admin/tmo-sync`. The cron sync (`0 * * * *`) will start polling automatically once credentials are live.
+
+I need the TMO API token and database name from you or Robert/Judith to proceed.
+<!-- agent:boundary:3edcac77 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -314,7 +342,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- login to TMO. Make sure we are using the correct credentials.
+- ~~login to TMO. Make sure we are using the correct credentials.~~
 - TMO Sync
 <!-- /agent:queue -->
 

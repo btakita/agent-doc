@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -235,46 +235,7 @@ So changing the agent today **evicts the live turn** instead of restarting at a 
 **Why I gated `#agentreloadrestart` + `#restartagentmenu` rather than auto-implementing them here:** this bug proves the change governs **cross-session turn lifecycle** — getting the kill-guard or boundary timing wrong kills live turns in *other* sessions (it just did). It is genuinely blocked on `make tmux-ci` multi-pane live verification (two panes, one mid-turn, proving the switch waits for the boundary and never evicts a running turn) — a live-pane proof this saturated, non-`/clear`ing autonomous loop cannot safely provide. The plan + exact hooks (`start.rs:171` harness resolution, `harness.rs:116` re-resolve, the route/sync cold-start path) are captured so a dedicated focused session implements it correctly with you able to watch the live restart. `#restartagentmenu` stays gated behind it (and behind operator plugin-install).
 
 Both feature heads are now gated → the queue has no agent-drainable work left; the remaining backlog (`#tsiftmdcrash`, `#jbacceptwedge`, `#rz3a`) is all operator-gated. The loop stops here.
-
-### Re: :pushpin: JB File Cache Conflict — root cause + fix shipped (#pcwcdiskfree) — glm-5.2
-
-> **Queue prompt:**
->
-> :pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.
-
-**Root cause (ops.log).** Every recent `write_authority` event already showed `action=routed reason=plugin_listener_active` — `#fccqueue` / `#fccaudit` / `#fccroute` closed the preflight, finalize, status, guard-marker, and route-dispatch hot paths. The remaining disk write behind the editor was in **`emit_postcommit_worktree_check`** (`git.rs:2535`): when `postcommit_worktree_lost_committed_content` returned true it ran `std::fs::write(file, &head_doc)` *unconditionally*, then called `send_postcommit_editor_refresh` to push HEAD through editor IPC. The disk write was the conflict source — it fired behind IntelliJ's open buffer on every detected lost-committed-content drift, which during normal go-mode drains is usually unsaved-editor divergence rather than real corruption.
-
-Evidence trail (last 30 min): `postcommit_worktree_auto_reconciled reason=committed_content_lost` fired at ts 1781763350, 1781764321, 1781765051 — each one a direct disk write against the live JB buffer.
-
-**Fix shipped — listener-aware reconcile (`#pcwcdiskfree`, submodule `0f393296`, parent pointer pending closeout).** The reconcile is now listener-aware:
-
-- **JB/VS Code IPC listener active → skip the disk write entirely.** `send_postcommit_editor_refresh` carries HEAD content back through `refresh_content`; the editor buffer becomes authoritative and the disk catches up on the IDE's next save. Logged `postcommit_worktree_auto_reconciled ... transport=editor_ipc_skipped_disk_write`.
-- **No listener (headless / CI) → still write HEAD to disk authoritatively.** Committed content is restored even when no editor is attached. Logged `transport=disk`.
-
-This closes the last normal-operation session-doc disk write on the post-commit hot path. The remaining raw disk writes are the authoritative recovery/scaffold/migration paths (`claim` scaffold, `repair` orphan recovery, preflight migration/repair, `session-check` remedy, `reset` resume-clear) — those must hit disk even when the editor/IPC path is itself wedged.
-
-**Tests** (`make check` 4676 passed, clippy clean on touched files):
-- New: `postcommit_worktree_auto_reconcile_skips_disk_write_with_active_listener` — proves the disk file is NOT rewritten when a listener is active (the direct no-`File Cache Conflict` proof), while the editor refresh still observes HEAD content.
-- New: `postcommit_worktree_auto_reconcile_writes_disk_without_listener` — proves the no-listener branch still restores HEAD to disk (no regression for headless / CI runs).
-- Existing: `postcommit_worktree_auto_reconcile_refreshes_live_editor_buffer` and `postcommit_worktree_check_logs_match_false_for_real_corruption` continue to pass.
-- `start_fake_listener` corrected to model `refresh_content` messages properly (applies the message's `content` field, not reads from disk) — the prior test was indirectly asserting the disk write, not the editor IPC refresh.
-- FlowCore `reason=` token budget bumped 11 → 13 in `tests/test_cli.rs` for the two new transport-specific log lines.
-
-SPEC §07 and VERSIONS.md updated. Binary built + installed (`0.34.3`). Live proof from this very closeout: `[commit] postcommit_worktree_check match=false for ... — working tree lost committed content; converging HEAD through editor IPC, skipping disk write (#pcwcdiskfree)` — the new path fired instead of the disk write.
-
-**Operator action:** nothing required — the next go-mode drain should not produce `File Cache Conflict` from this path. If you still see the dialog, capture the timestamp and grep `ops.log` for `transport=disk` lines on the session doc — those will identify any remaining hot-path disk write.
-
-### Re: equityfundingsource.md stuck cycle — recovery still pending — glm-5.2
-
-The captured response (`### Re: Application progress "Accepted" step never checked`, fix `c10310f` in `src/equityfundingsource-dev`) is still stuck at `response_captured` for cycle `cycle-1781763952349`. Recovery (run one):
-
-- **From pane `%90`** (preferred — owns session `62fe1f41`): `agent-doc finalize tasks/professional/equityfundingsource.md`
-- **From this pane `%92`:** `agent-doc claim tasks/professional/equityfundingsource.md && agent-doc write --commit tasks/professional/equityfundingsource.md`
-
-I did not auto-drain from here because `%90` is a live `agent-doc` process that may be mid-its-own work — hijacking the session from `%92` would race it.
-
-Filed related UX gap as **`#routedrainnextaction`** at the top of the backlog: the route's `wait_for_owner_turn_to_drain` next_action hid the actual recovery command (`agent-doc reset --from-current --preserve-session` / `agent-doc write --commit`) that was already logged in `ops.log`. The route should surface the specific recovery command when the underlying blocker is a stuck captured cycle, not a live owner turn.
-<!-- agent:boundary:ec535425 -->
+<!-- agent:boundary:4bb33763 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -282,6 +243,8 @@ Filed related UX gap as **`#routedrainnextaction`** at the top of the backlog: t
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#advance-review~~
 - [#tsiftmdcrash]
+- :pushpin: do [#routedrainnextaction]
+- :pushpin: agent-doc should not thrash when the document changes during a turn...when the current document does not match the snapshot. The binary should gracefully resolve the difference without the agent knowing about it. Only structural conflicts based on the current work should be surfaced...such as editing the current prompt. Unrelated changes should be gracefully handled by the agent-doc binary without the agent needed to intervene.
 - [#jbacceptwedge]: 0.2.170 installed
 - :pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.
 ---
@@ -293,7 +256,6 @@ Filed related UX gap as **`#routedrainnextaction`** at the top of the backlog: t
 ```
 ---
 - :pushpin: equityfundingsource.md & monsterrodholders.md keeps on drifting with edits.
-- do [#routedrainnextaction]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

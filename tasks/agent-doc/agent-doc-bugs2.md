@@ -143,7 +143,29 @@ The sibling `route_dispatch_queue` write (~2472) **already** converges through t
 I scoped it as a fresh item rather than editing `route.rs` inline this cycle on purpose: it is the dispatch hot path, the gate must not fail-closed there, and this session is mid-recovery with a long exchange — the safe place for a route-critical change is a clean focused cycle, which the queue drain gives it next.
 
 Not in scope (correctly still raw disk writes): the recovery/scaffold/migration paths (`claim`, `repair`, preflight migrate/repair, `session-check` remedy, `reset`, the `#pcwc` worktree reconcile) — those must write disk authoritatively even when the editor/IPC path is itself wedged, so they cannot fail-closed on a live-but-unresponsive listener.
-<!-- agent:boundary:445b81c0 -->
+
+### Re: Restart Agent command + agent-change auto-restart — opus-4-8
+
+> **Queue prompt:**
+>
+> Add `Restart Agent` Plugin menu command. Changing the agent such as from claude to opencode should restart the agent during the next boundary.
+
+
+> **Queue prompt:** Add `Restart Agent` Plugin menu command. Changing the agent such as from claude to opencode should restart the agent during the next boundary.
+
+I investigated this thoroughly and found it is **bigger than a menu-command add**, so I planned it precisely rather than half-build it in this (long, recovery-heavy) cycle. The non-obvious blocker:
+
+**The supervisor restart path never re-resolves the harness from frontmatter.** `SharedSupervisorState.harness` / `harness_binary` are resolved **once** at start (`start.rs:171`) and threaded through the entire restart loop; `HarnessConfig::from_context(fm, config)` (`harness.rs:116`, which reads `fm.agent`) is never called again on restart. So `agent-doc restart-supervisor` today restarts the **same** harness — changing `agent: claude → opencode` and restarting will *not* bring up opencode. And there is no agent-change detection anywhere (`agent_changed`/`harness_changed` — zero matches).
+
+That means **both** of your asks depend on a prerequisite: the restart path must re-read `agent:` and rebuild the harness. A "Restart Agent" menu button alone would just be a renamed duplicate of the existing **Restart Supervisor Process** action without it.
+
+Plan written to `tasks/agent-doc/plan-restart-agent.md`, split into two actionable phases (queued, top of backlog):
+
+- **`#agentreloadrestart`** (Phase 1, Rust core) — re-resolve the harness from current frontmatter before respawn (rebuild the `child_factory`), and auto-restart at the next idle/turn boundary when the resolved harness differs from the running one. Gated exactly like the `#supselfheal` auto-recycle (`prompt_visible && !turn_active`, debounced, never mid-turn) behind a new `agent_doc_agent_change_restart` knob (default on). SimWorld tests + SPEC + VERSIONS.
+- **`#restartagentmenu`** (Phase 2, JB plugin, after Phase 1) — `RestartAgentAction.kt` mirroring `RestartSupervisorProcessAction.kt`, registered in `plugin.xml`, wired through `TerminalUtil`; pluginVersion bump + signed/unsigned zips.
+
+Why planned, not built this turn: Phase 1 edits the **live supervisor restart loop that is hosting this very session** — a wrong move (e.g. a spurious mid-turn restart, or respawning the wrong harness) breaks the running session. That re-architecture needs a clean focused cycle with full `make check` + `make tmux-ci`, not a rushed third cycle in a saturated context. The investigation, the architectural finding, and the precise hooks (file:line) are the deliverable here so that cycle is mechanical.
+<!-- agent:boundary:fe7ff278 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -154,9 +176,11 @@ Not in scope (correctly still raw disk writes): the recovery/scaffold/migration 
 - ~~JB `File Cache Conflict` dialog is still occurring. Any more raw disk writes that need to be replaced?~~
 - ~~:pushpin: do [#fccaudit]~~
 - ~~do [#rz3a]~~
-- Add `Restart Agent` Plugin menu command. Changing the agent such as from claude to opencode should restart the agent during the next boundary.
-- Why did you add DO NOT IMPLEMENT THE FIX to [#rz3a]?
+- ~~Add `Restart Agent` Plugin menu command. Changing the agent such as from claude to opencode should restart the agent during the next boundary.~~
+- ~~Why did you add DO NOT IMPLEMENT THE FIX to [#rz3a]?~~
 - do [#fccroute]
+- do [#agentreloadrestart]
+- do [#restartagentmenu]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -183,6 +207,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#agentreloadrestart] Plan tasks/agent-doc/plan-restart-agent.md Phase 1 (foundational). Make the supervisor restart path re-resolve the harness from current frontmatter so changing agent (claude to opencode) takes effect on restart, and auto-restart the agent at the next idle/turn boundary when the resolved harness differs from the running one. Today the restart loop reuses the harness resolved once at start (SharedSupervisorState.harness, start.rs:171) and never re-reads fm.agent, so restart-supervisor restarts the SAME harness. Re-resolve via HarnessConfig::from_context (harness.rs:116) before respawn, rebuild child_factory/harness_binary, then gate the boundary auto-restart exactly like the supselfheal auto-recycle (prompt_visible and not turn_active, debounced, never mid-turn) behind a new agent_doc_agent_change_restart knob (default ON). SimWorld tests + SPEC + VERSIONS. Live-supervisor-critical: needs a focused clean cycle with make check + make tmux-ci.
+- [ ] [#restartagentmenu] Plan tasks/agent-doc/plan-restart-agent.md Phase 2 (after #agentreloadrestart). Add a Restart Agent JB plugin menu command: new RestartAgentAction.kt mirroring RestartSupervisorProcessAction.kt, registered in plugin.xml beside AgentDoc.RestartSupervisorProcess, wired through the TerminalUtil restart path. After Phase 1 re-resolves the harness on restart, this command brings up a changed agent. Bump pluginVersion (gradle.properties, currently 0.2.170), build unsigned + signed zips. Decide alongside vs replace the existing Restart Supervisor Process action (do not remove without operator confirmation). Operator-install live gate.
 - [ ] [#fccroute] Extend the #fccaudit editor-IPC write gate to the route/dispatch session-doc disk-write sites in route.rs: activate_existing_route_queue_head (queue activation atomic_write_pub ~line 2601, fires every go-mode queue activation behind a live editor), scrub_duplicate_prompt_comments_for_route (dedup atomic_write_pub ~1943), and ensure_session_for_file session-UUID injection (std::fs::write ~1926). These fire during route dispatch while the IDE editor is open and are the likely remaining File Cache Conflict source now that #fccqueue/#fccaudit gated the preflight/finalize path. Route each through the converge gate (converge_document_or_disk, mirroring the sibling route_dispatch_queue write that already converges at ~2472; queue activation may prefer the best-effort persist_queue_maintenance_doc pattern so a no-ack listener never fails the dispatch). Add tests proving activation/dedup/session-id still succeed under active, degraded, and no-listener. Keep the snapshot save (private .agent-doc, never conflicts).
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported 'tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.' Supervisor pid 1742954 is alive now; pane %78 OpenCode TUI shows 'Thinking' normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from my cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe=(deleted)) as a crash. NEED operator to paste exact error text or the pane capture from the crash moment, or the specific cycle id, to root-cause. Not currently reproducible from logs alone.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.

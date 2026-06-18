@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -104,7 +104,22 @@ Verification: `bun run check` green — **813 tests pass, 0 fail**, app + worker
 The AvailableDeal restructure (entire queue block) was completed, verified, committed (`c9aa3a6`), pushed, and deployed last cycle (worker `fb99f394`). The queue had re-served the remaining bullets as stragglers because the per-finalize strike heuristic only consumes one head at a time — so this cycle I struck the 7 answered free-text heads (Payment Schedule removal, the field moves, the rename, the layout, and deploy) via `queue consume`. They were all already satisfied by `c9aa3a6`; nothing new was implemented.
 
 The only remaining head, `do [#5eq8]` (closing-docs/notarization redesign), is **gated** — it's blocked on design + your decision on re-gating wires on notarization (that gate is relaxed in the interim). It should not auto-implement; it now lives as a gated review item rather than an auto-drained backlog/queue head.
-<!-- agent:boundary:8f8e01b4 -->
+
+### Re: Loan Status thin node map in a single row — opus-4.8
+
+> **Queue prompt:**
+>
+> "Loan Status", "Borrower Info", "Application" should fit into a single row in desktop width. Make "Loan Status" thin to only encapsulate the width of the content. Remove "Loan Status" title so only the vertical node map is visible. The title can remain "Loan Status" so a hover event surfaces "Loan Status".
+
+
+Done (spec + tests + commit + push; no deploy per the preset). The three cards now share one desktop row in the AvailableDeal view.
+
+- **`LoanStatusStepper` compact mode** (`portal/shared/loan_status_stepper.tsx`): renders only the vertical node map — status circles + connectors — at `width:fit-content`. Each step name surfaces on a hover tooltip (the active node reads "… (current)"); the name/badge column is dropped in compact mode.
+- **Title → hover:** the visible "Loan Status" heading is gone; "Loan Status" now surfaces as a hover tooltip (`title`/`aria-label`) on the node map.
+- **Single row:** `loan_detail.tsx` lays out Loan Status, Borrower Info, and Application in one wrapping flex row — Loan Status is `flex:0 0 auto` (content width, thin), the two info cards are `flex:1 1 300px`. Wraps on narrow viewports.
+
+Verification: `bun run check` green — **814 tests pass, 0 fail** (added a compact-stepper test), app + worker builds clean. Committed (`5fd227e`) + pushed to `origin/main`. Not deployed (the preset is `#spec-test-commit-push`; say the word and I'll `deploy:worker`).
+<!-- agent:boundary:ba9bbf20 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,7 +132,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- "Loan Status", "Borrower Info", "Application" should fit into a single row in desktop width. Make "Loan Status" thin to only encapsulate the width of the content. Remove "Loan Status" title so only the vertical node map is visible. The title can remain "Loan Status" so a hover event surfaces "Loan Status".
 <!-- /agent:queue -->
 
 ## Backlog

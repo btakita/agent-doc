@@ -86,7 +86,29 @@ This loan came in via **TMO sync** (it's "Application Received" in TMO) and has 
 I filed it as an actionable backlog item (top of `agent:backlog`): gate `admin_deal_publish_` / the publish route on an acceptance state before `status='published'` (and decide the rule for TMO-sourced loans that have no EFS full application — those can't be "accepted" in the EFS sense, so the gate likely keys off loan/TMO state, not `full_applications`). I made **no** data changes this turn — all reads.
 
 One thing to decide for the fix: for **TMO-originated** loans (like this one — no EFS application), what counts as "accepted enough to publish"? An EFS-originated borrower app would gate on `full_applications.status='accepted'`; a TMO loan would need a loan/TMO-status equivalent. Tell me the rule and I'll implement the gate.
-<!-- agent:boundary:4d821001 -->
+
+### Re: do #214f (gate publish on acceptance) — one decision needed first — opus-4-8
+
+
+I want to implement this, but I'm **holding on the commit+push** because the fix turns on a business rule I can't safely guess — and I'd be pushing investor-facing logic to the prod repo. `#214f` is the item I just filed this turn; `do [#214f]` got auto-queued by go-mode before that rule is settled. **#214f stays OPEN — I am not completing it this turn.**
+
+**The ambiguity (why I won't guess):** "accepted before available" needs a concrete gate field, and this deal exposes that there are several, not one:
+- `full_applications.status='accepted'` — but TMO-origin loans (like this one) have **no** full_application, so this can't be the gate for them.
+- `loans.status` — for this loan it's `submitted`, which isn't even in the admin pipeline's loan-status vocabulary (`application-received, processing, documents, underwriting, funded, …`). So `loans.status` and the pipeline stages are themselves out of sync.
+- `loans.tmo_loan_application_status` (`Application Received`) / `loans.tmo_loan_status` — the TMO-side state.
+
+So "is this loan accepted enough to publish?" has no single obvious field, and the answer differs for EFS-origin vs TMO-origin loans.
+
+**My recommended default (confirm and I'll implement + test + commit):**
+Gate `admin_deal_publish_` (and `POST /api/admin/loans/:id/deal`) to **refuse publish (409) unless the loan is in an accepted/approved state**, resolved per origin:
+- **EFS-origin** (has a linked `full_applications` row): require `full_applications.status='accepted'`.
+- **TMO-origin** (no full_application): require `tmo_loan_status` to be at/after an approved stage — **and you tell me which TMO statuses count as "approved to publish"** (is `Application Received` too early? what's the first publishable TMO status?).
+- Surface the reason in the admin UI ("loan not accepted — cannot publish") instead of silently allowing it.
+
+**What I need from you (one answer unblocks the whole thing):** for TMO loans, which `tmo_loan_status` values are "approved enough to be an Available Deal"? Give me that list (or say "use EFS full_application acceptance only, and TMO loans shouldn't be publishable at all") and I'll implement the gate, add tests, and commit+push.
+
+No code or data changed this turn.
+<!-- agent:boundary:a1951abd -->
 <!-- /agent:exchange -->
 ###
 <!--

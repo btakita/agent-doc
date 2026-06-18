@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -212,7 +212,33 @@ The approve flow (`/approve` → `application_tmo_writeback_attempt_` → `tmo_w
 - **(b) associate + push an `UpdateLoan`** — also send EFS's current data onto the existing TMO record?
 
 Tell me **a** or **b** and I'll implement both parts (+ tests) on `#5q7z`. This is the same gated `#dzmm`/`#7a4d` TMO-writeback area as `#214f`, so I'm confirming intent rather than pushing a guess. No code changed this turn — diagnosis + reads only.
-<!-- agent:boundary:7d4aca76 -->
+
+### Re: Why did this deal get out of sync? — opus-4-8
+
+> **Queue prompt:**
+>
+> We should strive to be in sync. Why did this deal get out of sync?
+
+
+Short version: **this loan has two origin stories the system treats as mutually exclusive — TMO created it, but EFS's write path assumes EFS creates it — and nothing reconciles them.** "Out of sync" isn't drift over time; it's that the two halves of the integration never shared a source of truth for deal `7a0c1463` / loan `45ddae53` / `GQI751`.
+
+**The two data flows, and where they diverge:**
+
+1. **Reads flow TMO → EFS, but thin.** This loan was pulled in by read-sync. `application_tmo_loan_persist_` (`admin/applications/index.ts:1148`) writes a `loans` row with the TMO keys (`tmo_loan_number=GQI751`, `tmo_loan_rec_id=3840D27B…`, `tmo_loan_application_rec_id=cda67748`), `tmo_loan_status='Application Received'`, and hard-codes `status='submitted'`. Note `'submitted'` isn't one of the admin pipeline stages — so in EFS the loan exists but its *application/pipeline* state is incomplete. There's **no `full_applications` row**, which is why the dashboard couldn't show it as accepted.
+
+2. **Writes flow EFS → TMO, create-only.** The "Accept and send to TMO" approve path (`application_tmo_writeback_attempt_` → `tmo_writeback.ts:308` `POST LOS.svc/NewLoan`) always sends a **NewLoan (create)**. It never checks `tmo_loan_rec_id` first. So it tries to create a loan TMO already owns → `400 Duplicate loan number`. The error is the *symptom* of the divergence: EFS thinks it's the originator; TMO already is.
+
+3. **Publish was decoupled from acceptance.** `admin_deal_publish_` (`lib/admin/repo.ts:2054`) published the investor deal off this loan with no acceptance gate (only `if (!loan) throw`). So you get an Available Deal whose application side never went through acceptance — `full_applications ↔ loans ↔ investment_deals` are three loosely-joined tables, and this loan only ever populated two of them.
+
+**So the root cause is architectural, not a one-off corruption:** there is no single system of record and no bidirectional reconciliation. TMO-originated loans land in EFS in a hybrid/partial shape (loan row only, non-pipeline status, no application), and the EFS write path can't recognize them as already-synced because it never keys on `tmo_loan_rec_id`.
+
+**To "strive to be in sync" durably, three things close the gap — all already tracked:**
+- **`#5q7z`** — writeback must detect an existing association (`tmo_loan_rec_id` / `writeback_status='sent'`) and *associate + UpdateLoan* instead of NewLoan. (Still needs your **a vs b** call: associate-only, or associate + push UpdateLoan.)
+- **`#214f`** — gate publish on acceptance so a deal can't go Available while its application side is unsynced.
+- **`#dzmm`/`#7a4d`/`#37ah`** — the broader EFS→TMO writeback-replay + field-map work, so EFS-side edits actually flow back keyed by `tmo_loan_rec_id`.
+
+No code changed this turn — diagnosis + reads only. The fix is gated on your `#5q7z` a/b decision.
+<!-- agent:boundary:36aa1789 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -225,7 +251,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- We should strive to be in sync. Why did this deal get out of sync?
 <!-- /agent:queue -->
 
 ## Backlog

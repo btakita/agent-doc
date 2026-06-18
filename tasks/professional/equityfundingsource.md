@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -57,7 +57,7 @@ Made the published-deal (Available Deal) dialog in `/admin/pipeline` full screen
 **Deploy** (`make deploy`): migrations list remote = none pending; Worker uploaded + activated. Version ID `5ed228fb-a817-454f-9789-96566079a9c3` on `https://equityfundingsource.brian-takita.workers.dev`. Smoke: `/` → 200, `/admin/pipeline` → 303 (Cloudflare Access redirect, expected). The full-screen dialog is live behind admin auth.
 
 Did not touch the loan/lead/application dialogs — those stay bounded per the existing `#pipeline-dialog-controls-scope` test. If you want the loan dialog to also go full screen (e.g. for consistency on Available-Deals-column loans without a published deal), say the word and I'll mirror the change.
-<!-- agent:boundary:939307ce -->
+<!-- agent:boundary:b387bd3e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,6 +70,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Why is the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application > Available deal > Application > Application progress > Accepted not checked?
 <!-- /agent:queue -->
 
 ## Backlog

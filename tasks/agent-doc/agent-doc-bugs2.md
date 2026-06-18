@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -97,7 +97,7 @@ Both queue items trace to one surface — preflight writing the session document
 Verification: `make check` 4664 passed, clippy clean; binary built + installed 0.34.2 (`.bin` + `~/.cargo/bin`); pushed to origin/main. CI 27738315509 in progress at closeout — recorded, finishing from local evidence.
 
 Follow-ups in backlog: `#fccaudit` (extend the gate to the remaining preflight/closeout disk-write sites so "no external disk writes while the editor runs" is fully closed) and `#editsync` [recommended] (sub-cycle keystroke-level sync if next-cycle latency proves insufficient).
-<!-- agent:boundary:619f8d6e -->
+<!-- agent:boundary:7cb9bf78 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -132,6 +132,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rz3a] qflood-gated supervisor idle-watch re-injection: the supervisor idle-queue watch keeps re-injecting agent-doc FILE triggers on a queue whose only remaining head is gated / operator-blocked, causing repeated no-op agent-doc cycles. REPRO (equityfundingsource.md, 2026-06-18): a go-queue block was fully drained (all 7 free-text heads consumed via agent-doc queue consume); the lone remaining head (a do-reference to a now-gated review item) was gated via pending-gate and moved to agent:review. session-check then reported queue_continuation_required=false, queue_drainable_head_count=0, ui_outcome=no_drainable_work. After agent-doc admin queue resume, the supervisor idle-watch re-injected agent-doc FILE repeatedly: 4 consecutive no-op agent-doc cycles, each preflight no_changes=true. agent-doc admin queue pause stops it. EXPECTED: when queue_drainable_head_count==0 and queue_continuation_required==false (only gated or operator-verify heads remain), the supervisor idle-queue watch should DEFER instead of injecting, matching the in-session loop stop rule. ROOT-CAUSE HYPOTHESIS: the idle-watch dispatch gate keys off queue presence / queue:start frontmatter instead of the binary drainability filter; the in-session loop already honors queue_continuation_required=false but the supervisor idle-watch path does not. FIX DIRECTION (do not implement): make the supervisor idle-queue watch reuse the same drainability filter as the in-session loop and defer when queue_drainable_head_count==0. DO NOT IMPLEMENT THE FIX.
 - [ ] [#fccaudit] Extend the #fccqueue editor-IPC write gate to the remaining preflight/closeout session-doc disk-write sites (boundary cleanup, compact, git checkout/commit working-tree writes) so NO agent-doc disk write touches the session doc while a JB editor listener is active. Audit every std::fs::write/atomic_write(file) call site against is_listener_active and route each through converge/IPC or document why it is editor-safe. Completes item 2 fully; queue maintenance is done in #fccqueue.
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported 'tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.' Supervisor pid 1742954 is alive now; pane %78 OpenCode TUI shows 'Thinking' normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from my cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe=(deleted)) as a crash. NEED operator to paste exact error text or the pane capture from the crash moment, or the specific cycle id, to root-cause. Not currently reproducible from logs alone.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.

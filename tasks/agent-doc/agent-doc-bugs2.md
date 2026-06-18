@@ -84,7 +84,19 @@ That error is the **qflood pause protection working as intended on `equityfundin
 - **equityfundingsource.md / monsterrodholders.md heads** → cross-document. Out of scope for this `agent-doc-bugs2` session; I won't touch those docs from here (scope discipline). Their drift is the same class as `#docdriftgrace`.
 
 So nothing here is new agent-drainable work — it's the documented qflood re-presentation pattern (`recent_noop_closeouts=5`). I'm closing `#jbacceptwedge`, reporting the rest, and **not** auto-looping these stale/operator-verify/cross-doc heads (looping would just churn another no-op cycle). The remaining backlog is `#docdriftgrace`, `#pcwcdiskfree`, `#tsiftmdcrash`, `#qpauseux` — all operator-verify; review items `#restartagentmenu`, `#agentreloadrestart`, `#rz3a` need focused clean cycles / are DO-NOT-IMPLEMENT-gated.
-<!-- agent:boundary:730f05bb -->
+
+### Re: #tsiftmdcrash re-presented — filing the qflood root cause + pausing the flood — opus-4-8
+
+`[#tsiftmdcrash]` came back to the queue, but nothing changed: it's still the same operator-verify item **blocked on you pasting the exact crash error text / pane capture / cycle id**. I can't `--done` it (not reproducible from logs — only the intended execve-recycle window appears) and `queue consume` refuses it (id-backed). This is the 6th consecutive no-op closeout — pure qflood thrash.
+
+**Root cause filed → `#qheadsync` (plan `tasks/agent-doc/plan-answered-queue-head-autostrike.md`).** The thrash is structural: a closeout that *answers* a queue head never reconciles that resolution back to the head itself.
+- **Free-text reports stay drainable after filing.** Your `File Cache Conflict` and `eqf/monsterrodholders drift` reports were filed as `#pcwcdiskfree` / `#docdriftgrace` (operator-verify), but the original free-text queue heads were never linked or struck → they re-present as `queue_drainable` every cycle.
+- **`--done <id>` orphans the `[#id]` queue head.** Reaping the backlog item leaves the matching `[#id]` head in place → hard-blocks the next preflight and needs manual Edit+`reset`+`commit` surgery (hit this with `#jbacceptwedge` last cycle).
+
+The fix (in the plan): `--done`/`--pending-gate` strikes the matching `[#id]` head in-write; filed free-text heads get linked to their backlog id so they defer like the item; drainability dereferences bare `[#id]` heads to their operator-verify tag.
+
+**Halting the flood.** Until `#qheadsync` lands, every `/agent-doc` here is a no-op churn cycle. I'm pausing this queue and **stopping** — not auto-looping. Resume when you have new work, the `#tsiftmdcrash` crash text, or after `#qheadsync` is implemented. Note: editor IPC was degraded this whole session (commit refused twice, buffer mangled) so this response was written via `--force-disk`; your IntelliJ buffer will reload from disk on next focus.
+<!-- agent:boundary:c5878581 -->
 <!-- /agent:exchange -->
 
 ## Queue

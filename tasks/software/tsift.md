@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -131,7 +131,7 @@ stateDiagram-v2
 Single-host, Rust: **`fs4`/`fd-lock` advisory locks as the primary liveness + refcount-zero signal, a SQLite `kg_refs` registry (WAL) written only through `tsift kg ref acquire|release|reap`, a heartbeat+TTL sweep and PID/start-time check as backstop, and Ollama `keep_alive` as the resource-side safety net.** That gives crash-safe reclamation without trusting a heartbeat as the sole signal, and keeps the deterministic-binary-as-arbiter property you specified.
 
 I've written the full multi-phase design to **`tasks/software/plan-tsift-kg-multisession-refcount.md`** and queued **`#kgreflease`** in the backlog to implement it.
-<!-- agent:boundary:9632f6e7 -->
+<!-- agent:boundary:c8716141 -->
 <!-- /agent:exchange -->
 
 ## Queue

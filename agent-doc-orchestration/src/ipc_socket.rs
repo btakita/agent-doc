@@ -499,7 +499,7 @@ pub fn send_vcs_refresh(project_root: &Path) -> Result<bool> {
 #[allow(unreachable_code)]
 pub fn start_listener<F>(project_root: &Path, handler: F) -> Result<()>
 where
-    F: Fn(&str) -> Option<String> + Send + 'static,
+    F: Fn(&str) -> Option<String> + Send + Sync + 'static,
 {
     let sock_path = socket_path(project_root);
 
@@ -519,58 +519,70 @@ where
     let opts = ListenerOptions::new().name(name);
     let listener = opts.create_sync()?;
 
+    // Handle each connection on its own thread so a slow/blocking apply handler
+    // can never stall the accept loop and pile up connections in the socket
+    // backlog (the "22 unaccepted connections" wedge, #jbacceptwedge). The
+    // handler only captures an `extern "C" fn` pointer (Send + Sync), so sharing
+    // it across threads via Arc is sound.
+    let handler = std::sync::Arc::new(handler);
+    let root_buf = project_root.to_path_buf();
+
     loop {
         match listener.accept() {
             Ok(stream) => {
-                let (reader_half, mut writer_half) = stream.split();
-                let mut reader = BufReader::new(reader_half);
-                let mut line = String::new();
+                let handler = std::sync::Arc::clone(&handler);
+                let root_buf = root_buf.clone();
+                std::thread::spawn(move || {
+                    let (reader_half, mut writer_half) = stream.split();
+                    let mut reader = BufReader::new(reader_half);
+                    let mut line = String::new();
 
-                while reader.read_line(&mut line).unwrap_or(0) > 0 {
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() {
-                        // Early-ack: if the sender opted in, emit a `pending` ack
-                        // the instant we receive the patch — before the blocking
-                        // apply handler runs — so the sender's liveness probe is
-                        // decoupled from apply latency. The terminal ack still
-                        // follows. Senders that do not opt in get only the
-                        // terminal ack, exactly as before.
-                        if message_requests_early_ack(trimmed) {
-                            let mut early = early_ack_line().to_string();
-                            early.push('\n');
-                            if let Err(e) = writer_half.write_all(early.as_bytes()) {
-                                eprintln!("[ipc-socket] early-ack write error: {}", e);
-                            } else if let Err(e) = writer_half.flush() {
-                                eprintln!("[ipc-socket] early-ack flush error: {}", e);
-                            } else {
-                                // #saev prove/disprove: a successful early-ack emit was
-                                // previously silent (only failures logged), so a live
-                                // EARLY_ACK_ENABLED run had no grep-able proof the
-                                // `pending` ack actually went out before the blocking
-                                // apply. Emit a positive marker on the success path.
-                                eprintln!("[ipc-socket] early-ack pending emitted before apply");
-                                // #x9ds: the stderr line above is invisible to the
-                                // ops.log gate-verify scan, and its hyphenated text does
-                                // not contain the `early_ack_pending` predicate token.
-                                // Also record the marker to ops.log (derived from the
-                                // listener's project root) so the #saev gate is provable
-                                // from ops.log once EARLY_ACK_ENABLED is driven live.
-                                crate::ops_log::log_op(project_root, early_ack_ops_marker());
+                    while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() {
+                            // Early-ack: if the sender opted in, emit a `pending` ack
+                            // the instant we receive the patch — before the blocking
+                            // apply handler runs — so the sender's liveness probe is
+                            // decoupled from apply latency. The terminal ack still
+                            // follows. Senders that do not opt in get only the
+                            // terminal ack, exactly as before.
+                            if message_requests_early_ack(trimmed) {
+                                let mut early = early_ack_line().to_string();
+                                early.push('\n');
+                                if let Err(e) = writer_half.write_all(early.as_bytes()) {
+                                    eprintln!("[ipc-socket] early-ack write error: {}", e);
+                                } else if let Err(e) = writer_half.flush() {
+                                    eprintln!("[ipc-socket] early-ack flush error: {}", e);
+                                } else {
+                                    // #saev prove/disprove: a successful early-ack emit was
+                                    // previously silent (only failures logged), so a live
+                                    // EARLY_ACK_ENABLED run had no grep-able proof the
+                                    // `pending` ack actually went out before the blocking
+                                    // apply. Emit a positive marker on the success path.
+                                    eprintln!("[ipc-socket] early-ack pending emitted before apply");
+                                    // #x9ds: the stderr line above is invisible to the
+                                    // ops.log gate-verify scan, and its hyphenated text does
+                                    // not contain the `early_ack_pending` predicate token.
+                                    // Also record the marker to ops.log (derived from the
+                                    // listener's project root) so the #saev gate is provable
+                                    // from ops.log once EARLY_ACK_ENABLED is driven live.
+                                    crate::ops_log::log_op(&root_buf, early_ack_ops_marker());
+                                }
+                            }
+                            if let Some(response) = handler(trimmed) {
+                                let mut resp = response;
+                                resp.push('\n');
+                                if let Err(e) = writer_half.write_all(resp.as_bytes()) {
+                                    eprintln!("[ipc-socket] handler write error: {}", e);
+                                }
+                                if let Err(e) = writer_half.flush() {
+                                    eprintln!("[ipc-socket] handler flush error: {}", e);
+                                }
                             }
                         }
-                        if let Some(response) = handler(trimmed) {
-                            let mut resp = response;
-                            resp.push('\n');
-                            if let Err(e) = writer_half.write_all(resp.as_bytes()) {
-                                eprintln!("[ipc-socket] handler write error: {}", e);
-                            }
-                            if let Err(e) = writer_half.flush() {
-                                eprintln!("[ipc-socket] handler flush error: {}", e);
-                            }
-                        }
+                        line.clear();
                     }
-                    line.clear();
-                }
+                });
             }
             Err(e) => {
                 eprintln!("[ipc-socket] accept error: {}", e);
@@ -583,6 +595,56 @@ where
 mod tests {
     use super::*;
     use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn slow_handler_does_not_block_concurrent_connections() {
+        // Regression for #jbacceptwedge: the accept loop used to block on the
+        // (potentially slow) apply handler, piling connections up in the socket
+        // backlog ("22 unaccepted connections"). Now each connection is handled
+        // on its own thread, so N concurrent sends to a slow handler complete in
+        // ~one handler-duration rather than ~N. Sequential handling of three
+        // 600ms runs would take ~1.8s+; the parallel bound below is generous
+        // enough for CI variance while still failing under the old loop.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, move |msg| {
+                thread::sleep(Duration::from_millis(600));
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                Some(serde_json::json!({"type":"ack","id":v["type"]}).to_string())
+            })
+            .ok()
+        });
+        thread::sleep(Duration::from_millis(120));
+
+        let start = Instant::now();
+        let handles: Vec<_> = (0..3)
+            .map(|i| {
+                let root = root.clone();
+                thread::spawn(move || {
+                    send_message(&root, &serde_json::json!({"type": format!("m{}", i)}))
+                })
+            })
+            .collect();
+        for h in handles {
+            let r = h.join().unwrap().unwrap();
+            assert!(r.is_some(), "concurrent send should still receive an ack");
+        }
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(1500),
+            "3 concurrent sends to a 600ms handler took {:?} (expected parallel < 1.5s; \
+             sequential would be ~1.8s+)",
+            elapsed
+        );
+
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
 
     #[test]
     fn socket_roundtrip() {

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,108 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260618-041608.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260618-055841.md`*
 
 Compacted content:
-- Archived 6 response topic(s): Selecting a lender advances deal to Processing; Activity History event on lender select + deployed; deploy; 3 more
-- Prior summary/context: prior compacted content: Archived 12 response topic(s): Video-corpus task + deploy do not apply to EFS this cycle; de...
-
-### Re: AvailableDeal dialog + page restructure (#spec-test-commit-push, deploy) — opus-4.8
-
-> **Queue prompt:**
->
-> deploy
-
-
-> **Queue prompt:**
->
-> Make "Loan Status" thin and move "Borrower Info" in between "Loan Status" and "Application"
-
-
-> **Queue prompt:**
->
-> Rename "Application Record" to "Application"
-
-
-> **Queue prompt:**
->
-> Remove "Borrower Onboarding Data"
-
-
-> **Queue prompt:**
->
-> Move "proposed loan amount", "loan purpose", "occupancy", "property value", "tmo loan number" from "Borrower Onboarding Data" to "Application Record"
-
-
-> **Queue prompt:**
->
-> Move "Property Address" from "Borrower Info" to "Application Record"
-
-
-> **Queue prompt:**
->
-> Remove "Payment Schedule" and all data + logic associated with it. EFS does not collect borrower payments.
-
-
-> **Queue prompt:**
->
-> Remove "Final Loan Documents" and all data + logic associated with it. The closing docs will be its own step defined later.
-
-
-> **Queue prompt:**
->
-> In "Loan Status", add Lender Selected step after Application Received
-
-
-Done, verified, and deployed. Reworked the admin AvailableDeal view (`portal/admin/loan_detail.tsx`, reused embedded in the pipeline dialog and as the full page):
-
-- **Lender Selected step** added after "Application Received" (in `LOAN_STATUS_STEPS`, the stepper, and as a `lender-selected` board column). Selecting the funding lender now advances the loan to **Lender Selected** (was Processing).
-- **Final Loan Documents removed** (full removal, per your call). Because it held the only notarize control — which gated wire disbursement — I also removed the dashboard final-docs attention item and relaxed the wire-status gate (UI + server 409) so funding isn't hard-blocked. The borrower-signature API + `final_docs_*` D1 columns are preserved for the future closing-docs step (queued in backlog).
-- **Payment Schedule removed** (EFS does not collect borrower payments).
-- **Borrower Onboarding Data removed**; `proposed_loan_amount`, `loan_purpose`, `occupancy`, `property_value`, and `Property Address` lifted into the **Application** card via `onboarding_fields_`.
-- **"Application Record" → "Application"**.
-- **Layout**: Loan Status is now a thin full-width bar with Borrower Info between it and Application; the secure Wire Links card is retained.
-
-Also fixed two build-breaks left in the working tree from a prior interrupted cycle (`onboarding_fields_` and `ADMIN_LOAN_INFO_COPY_VALUE_STYLE` were referenced but undefined) and restored `LoanWireLinks`, which that cycle had over-removed.
-
-Verification: `bun run check` green — **813 tests pass, 0 fail**, app + worker builds clean. Committed (`c9aa3a6`) + pushed to `origin/main`, deployed to production (version `fb99f394`); home and `/admin/login` return 200.
-
-### Re: queue cleanup — AvailableDeal block already shipped — opus-4.8
-
-The AvailableDeal restructure (entire queue block) was completed, verified, committed (`c9aa3a6`), pushed, and deployed last cycle (worker `fb99f394`). The queue had re-served the remaining bullets as stragglers because the per-finalize strike heuristic only consumes one head at a time — so this cycle I struck the 7 answered free-text heads (Payment Schedule removal, the field moves, the rename, the layout, and deploy) via `queue consume`. They were all already satisfied by `c9aa3a6`; nothing new was implemented.
-
-The only remaining head, `do [#5eq8]` (closing-docs/notarization redesign), is **gated** — it's blocked on design + your decision on re-gating wires on notarization (that gate is relaxed in the interim). It should not auto-implement; it now lives as a gated review item rather than an auto-drained backlog/queue head.
-
-### Re: Loan Status thin node map in a single row — opus-4.8
-
-> **Queue prompt:**
->
-> "Loan Status", "Borrower Info", "Application" should fit into a single row in desktop width. Make "Loan Status" thin to only encapsulate the width of the content. Remove "Loan Status" title so only the vertical node map is visible. The title can remain "Loan Status" so a hover event surfaces "Loan Status".
-
-
-Done (spec + tests + commit + push; no deploy per the preset). The three cards now share one desktop row in the AvailableDeal view.
-
-- **`LoanStatusStepper` compact mode** (`portal/shared/loan_status_stepper.tsx`): renders only the vertical node map — status circles + connectors — at `width:fit-content`. Each step name surfaces on a hover tooltip (the active node reads "… (current)"); the name/badge column is dropped in compact mode.
-- **Title → hover:** the visible "Loan Status" heading is gone; "Loan Status" now surfaces as a hover tooltip (`title`/`aria-label`) on the node map.
-- **Single row:** `loan_detail.tsx` lays out Loan Status, Borrower Info, and Application in one wrapping flex row — Loan Status is `flex:0 0 auto` (content width, thin), the two info cards are `flex:1 1 300px`. Wraps on narrow viewports.
-
-Verification: `bun run check` green — **814 tests pass, 0 fail** (added a compact-stepper test), app + worker builds clean. Committed (`5fd227e`) + pushed to `origin/main`. Not deployed (the preset is `#spec-test-commit-push`; say the word and I'll `deploy:worker`).
-
-### Re: deploy — opus-4.8
-
-Deployed to production. `bun run deploy:worker` shipped the current `main` (`5fd227e`) — both the AvailableDeal restructure and the thin Loan Status node-map refinement are now live. Remote D1 migrate ran (no new migrations). Worker version `6a4c2155`; `/` and `/admin/login` return 200.
-
-### Re: render node labels + bring back Loan Status title, deploy — opus-4.8
-
-> **Queue prompt:**
->
-> The node labels of LoanStatusStepper should be rendered. Bring back the "Loan Status" title since the labels + nodes are wider than the title. deploy
-
-
-Done and deployed. Reverted the compact node-map-only experiment: Loan Status now renders the full `LoanStatusStepper` — the visible "Loan Status" title plus the per-step node labels — in its content-width card within the single row. You're right that the labels are wider than the title, so hiding the title saved no width; I removed the `compact` mode entirely.
-
-Verification: `bun run check` green — **814 tests pass, 0 fail**, app + worker builds clean. Committed (`34834ec`) + pushed, superproject pointer (`35d68a56c`). Deployed to production: worker version `35957c99`; `/` and `/admin/login` return 200.
-<!-- agent:boundary:ba30a83b -->
+- Archived 5 response topic(s): AvailableDeal dialog + page restructure (#spec-test-commit-push, deploy); queue cleanup; Loan Status thin node map in a single row; 2 more
+- Prior summary/context: prior compacted content: Archived 6 response topic(s): Selecting a lender advances deal to Processing; Activity Histo...
+<!-- agent:boundary:1528cdd5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -147,6 +51,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Make the Available Deal dialog full screen in Deal Pipeline. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -221,15 +221,70 @@ So changing the agent today **evicts the live turn** instead of restarting at a 
 **Why I gated `#agentreloadrestart` + `#restartagentmenu` rather than auto-implementing them here:** this bug proves the change governs **cross-session turn lifecycle** — getting the kill-guard or boundary timing wrong kills live turns in *other* sessions (it just did). It is genuinely blocked on `make tmux-ci` multi-pane live verification (two panes, one mid-turn, proving the switch waits for the boundary and never evicts a running turn) — a live-pane proof this saturated, non-`/clear`ing autonomous loop cannot safely provide. The plan + exact hooks (`start.rs:171` harness resolution, `harness.rs:116` re-resolve, the route/sync cold-start path) are captured so a dedicated focused session implements it correctly with you able to watch the live restart. `#restartagentmenu` stays gated behind it (and behind operator plugin-install).
 
 Both feature heads are now gated → the queue has no agent-drainable work left; the remaining backlog (`#tsiftmdcrash`, `#jbacceptwedge`, `#rz3a`) is all operator-gated. The loop stops here.
-<!-- agent:boundary:17b6d05f -->
+
+### Re: :pushpin: JB File Cache Conflict — root cause + fix shipped (#pcwcdiskfree) — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.
+
+**Root cause (ops.log).** Every recent `write_authority` event already showed `action=routed reason=plugin_listener_active` — `#fccqueue` / `#fccaudit` / `#fccroute` closed the preflight, finalize, status, guard-marker, and route-dispatch hot paths. The remaining disk write behind the editor was in **`emit_postcommit_worktree_check`** (`git.rs:2535`): when `postcommit_worktree_lost_committed_content` returned true it ran `std::fs::write(file, &head_doc)` *unconditionally*, then called `send_postcommit_editor_refresh` to push HEAD through editor IPC. The disk write was the conflict source — it fired behind IntelliJ's open buffer on every detected lost-committed-content drift, which during normal go-mode drains is usually unsaved-editor divergence rather than real corruption.
+
+Evidence trail (last 30 min): `postcommit_worktree_auto_reconciled reason=committed_content_lost` fired at ts 1781763350, 1781764321, 1781765051 — each one a direct disk write against the live JB buffer.
+
+**Fix shipped — listener-aware reconcile (`#pcwcdiskfree`, submodule `0f393296`, parent pointer pending closeout).** The reconcile is now listener-aware:
+
+- **JB/VS Code IPC listener active → skip the disk write entirely.** `send_postcommit_editor_refresh` carries HEAD content back through `refresh_content`; the editor buffer becomes authoritative and the disk catches up on the IDE's next save. Logged `postcommit_worktree_auto_reconciled ... transport=editor_ipc_skipped_disk_write`.
+- **No listener (headless / CI) → still write HEAD to disk authoritatively.** Committed content is restored even when no editor is attached. Logged `transport=disk`.
+
+This closes the last normal-operation session-doc disk write on the post-commit hot path. The remaining raw disk writes are the authoritative recovery/scaffold/migration paths (`claim` scaffold, `repair` orphan recovery, preflight migration/repair, `session-check` remedy, `reset` resume-clear) — those must hit disk even when the editor/IPC path is itself wedged.
+
+**Tests** (`make check` 4676 passed, clippy clean on touched files):
+- New: `postcommit_worktree_auto_reconcile_skips_disk_write_with_active_listener` — proves the disk file is NOT rewritten when a listener is active (the direct no-`File Cache Conflict` proof), while the editor refresh still observes HEAD content.
+- New: `postcommit_worktree_auto_reconcile_writes_disk_without_listener` — proves the no-listener branch still restores HEAD to disk (no regression for headless / CI runs).
+- Existing: `postcommit_worktree_auto_reconcile_refreshes_live_editor_buffer` and `postcommit_worktree_check_logs_match_false_for_real_corruption` continue to pass.
+- `start_fake_listener` corrected to model `refresh_content` messages properly (applies the message's `content` field, not reads from disk) — the prior test was indirectly asserting the disk write, not the editor IPC refresh.
+- FlowCore `reason=` token budget bumped 11 → 13 in `tests/test_cli.rs` for the two new transport-specific log lines.
+
+SPEC §07 and VERSIONS.md updated. Binary built + installed (`0.34.3`).
+
+**Operator action:** nothing required — the next go-mode drain should not produce `File Cache Conflict` from this path. If you still see the dialog, capture the timestamp and grep `ops.log` for `transport=disk` lines on the session doc — those will identify any remaining hot-path disk write.
+
+### Re: equityfundingsource.md stuck cycle — recovery still pending — glm-5.2
+
+> **Queue prompt:**
+>
+> #advance-review
+
+
+The captured response (`### Re: Application progress "Accepted" step never checked`, fix `c10310f` in `src/equityfundingsource-dev`) is still stuck at `response_captured` for cycle `cycle-1781763952349`. Recovery (run one):
+
+- **From pane `%90`** (preferred — owns session `62fe1f41`): `agent-doc finalize tasks/professional/equityfundingsource.md`
+- **From this pane `%92`:** `agent-doc claim tasks/professional/equityfundingsource.md && agent-doc write --commit tasks/professional/equityfundingsource.md`
+
+I did not auto-drain from here because `%90` is a live `agent-doc` process that may be mid-its-own work — hijacking the session from `%92` would race it.
+
+Filed related UX gap as **`#routedrainnextaction`** at the top of the backlog: the route's `wait_for_owner_turn_to_drain` next_action hid the actual recovery command (`agent-doc reset --from-current --preserve-session` / `agent-doc write --commit`) that was already logged in `ops.log`. The route should surface the specific recovery command when the underlying blocker is a stuck captured cycle, not a live owner turn.
+<!-- agent:boundary:87819c48 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- #advance-review
+- ~~#advance-review~~
 - [#tsiftmdcrash]
 - [#jbacceptwedge]: 0.2.170 installed
+- :pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.
+---
+:pushpin: JB `Run Agent Doc` on equityfundingsource.md
+```
+[route] target tmux session: 0
+[preflight] review: 14 item(s), 14 gated
+[route] active closeout for tasks/professional/equityfundingsource.md could not be drained before reroute; existing queue head "Why is the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application > Available deal > Application > Application progress > Accepted not checked?" remains queued behind the closeout ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
+```
+---
+- :pushpin: equityfundingsource.md & monsterrodholders.md keeps on drifting with edits.
+- do [#routedrainnextaction]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -256,6 +311,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#routedrainnextaction] When route_dispatch_drain_closeout_blocked fires for a stuck response_captured cycle (captured-response baseline drift / IPC no_ack), the user-visible next_action wait_for_owner_turn_to_drain is misleading: there is no live owner turn — the cycle is just stuck. The route already logs the actual blocker+recovery (captured response snapshot no longer matches current baseline ... agent-doc reset --from-current --preserve-session FILE then agent-doc write --commit FILE / agent-doc finalize FILE) inside ops.log, but it does not surface in the JB-visible queue prompt. Repro (equityfundingsource.md, cycle-1781763952349): FFI socket no_ack on patch ea67e1d9 left the cycle at response_captured; 4 consecutive Run Agent Doc invocations showed only ui_outcome=queued_behind_owner next_action=wait_for_owner_turn_to_drain, hiding the actual recovery until ops.log inspection. Fix direction: when route_dispatch_drain_closeout_blocked blocks on baseline drift / IPC no_ack, propagate the specific recovery command into the surfaced next_action (e.g. next_action=run agent-doc reset --from-current --preserve-session FILE, or next_action=run agent-doc write --commit FILE), and reserve wait_for_owner_turn_to_drain for cases where the owner pane is genuinely running a live turn. Plan: tasks/agent-doc/plan-route-drain-blocked-next-action.md (TBD).
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported 'tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.' Supervisor pid 1742954 is alive now; pane %78 OpenCode TUI shows 'Thinking' normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from my cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe=(deleted)) as a crash. NEED operator to paste exact error text or the pane capture from the crash moment, or the specific cycle id, to root-cause. Not currently reproducible from logs alone.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.
 <!-- /agent:backlog -->

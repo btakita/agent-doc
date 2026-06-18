@@ -361,22 +361,14 @@ You're correct on both counts, and I traced exactly where it comes from.
 - **Hardening (queued `#fccreap`, binary-testable):** reap dead-PID `jetbrains-<pid>` consumer files in the IPC GC + on plugin shutdown, and dedupe to a single live consumer per file across instances, so stale/concurrent registrations can't pile up or race. This is the durable defense against the multi-instance condition.
 
 Net: nothing to fix in the deletion path or the merge — the merge already handles disjoint struck-item deletion; the contamination is the multi-IntelliJ-window environment, addressed by `#fccreap` + collapsing to one window.
-<!-- agent:boundary:d12201ca -->
+<!-- agent:boundary:40ef24e0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
- :pushpin: Still getting JB `File Cache Conflict` dialogs. Absolute 0 is the target. Only emergency cases should write to the disk. Everything else should use the editor plugin. We also need to handle conflicts with the editor plugin path.
-~~~done
-:pushpin: Fix a circumstance where I deleted some struck items from the queue. The deleted struck items were unrelated to the new strikeout. So this should not have caused a cross-document contamination. In addition, as I was writing this prompt, the last word I wrote was deleted by the CRDT. This item is unrelated to the current task so this promp should not have been touched.
-```
-● Confirmed cross-document contamination: HEAD is intact (my work present, zero foreign content), but the stale IntelliJ
-  buffer injected monsterrodholders cf-txn-email content into the agent-doc-bugs2.md working tree. The IntelliJ buffer
-  for this file is now corrupt and cross-contaminated — actively writing foreign content to disk. Let me recover the
-  worktree to the clean HEAD:
-```
-~~~
+- :pushpin: Still getting JB `File Cache Conflict` dialogs. Absolute 0 is the target. Only emergency cases should write to the disk. Everything else should use the editor plugin. We also need to handle conflicts with the editor plugin path.
+---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md
 ```
 [route] target tmux session: 0
@@ -390,19 +382,16 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
-- ~~:round_pushpin: do [#021p]~~
-- :pushpin: ~~:pushpin: equityfundingsource.md & monsterrodholders.md keeps on drifting with edits.~~ (filed #docdriftgrace)
 - :pushpin: do [#733r]
-- ~~:pushpin: do [#semmerge]~~
 - :pushpin: do [#qpauseux]
-- ~~do [#1vhn]~~
 - :pushpin: do [#tsiftmdcrash]
-- ~~do [#aqhr]~~
 - :pushpin: do [#gszq]
 - :pushpin: do [#supselfheal]
 - :pushpin: do [#pk3f]
 - :pushpin: do [#msn6]
 - :pushpin: do [#cyh0]
+- do [#1vhn]
+- do [#docdriftgrace]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

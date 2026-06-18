@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -156,7 +156,36 @@ One command, zero doc/config churn, and it closes review `#1v5m` (which is exact
 **One thing to confirm first (either path):** that the working token actually carries the scopes EFS needs (D1 edit + Workers deploy for the EFS account). I didn't hit the Cloudflare API unprompted, but I can verify non-destructively via `GET /user/tokens/verify` against the token (value stays masked) if you want a green light before you change anything.
 
 Want me to do it? Tell me **B** (I'll guide the one-liner / you paste the value — I won't print secrets) or **A** (I'll repoint `.env` + the two docs and run the verify check). I changed nothing this turn — this is a decision for you.
-<!-- agent:boundary:1298a39b -->
+
+### Re: Do B — held off; the premise is inverted — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Do B
+
+
+I verified both tokens against Cloudflare's `GET /user/tokens/verify` **before** overwriting anything, and the result flips the plan — so I did **not** execute B:
+
+| passage entry | CF verify | |
+|---|---|---|
+| `btak/equityfundingsource/cloudflare_api_token` (EFS uses today) | `success:true, status:active` | ✅ **VALID** |
+| `btak/d1/CLOUDFLARE_API_TOKEN` (B would copy this in) | `Invalid API Token` (code 1000) | ❌ **DEAD** |
+
+"Do B" meant *copy the working D1 token into the EFS entry* — but `btak/d1/...` holds an **invalid/revoked** token. Copying it in would have replaced EFS's working credential with a dead one and broken every D1/Workers operation. So I stopped and changed nothing.
+
+**Net: no change is needed, and that's the correct outcome.** EFS is already pointed at — and storing — the only valid token. Every option degrades from here:
+- **A** (repoint config to `btak/d1/...`) → points at a dead token. ❌
+- **B** (copy `btak/d1/...` value into the EFS entry) → overwrites the live token with a dead one. ❌
+- **Status quo** → EFS keeps using the valid, active token. ✅
+
+This also explains the earlier "D1 API token unblocked" note: the thing that got unblocked is the **EFS-scoped** token; the `btak/d1/CLOUDFLARE_API_TOKEN` entry is just a **stale/revoked** copy.
+
+**`btak/d1/CLOUDFLARE_API_TOKEN` is dead — your call:**
+1. **Leave it** — EFS doesn't use it, zero risk. *(recommended)*
+2. If you want `btak/d1/...` to be a canonical shared D1 token store, regenerate a fresh token in the Cloudflare dashboard and `passage insert -f btak/d1/CLOUDFLARE_API_TOKEN`; then we can revisit consolidation against a token that actually verifies.
+
+I made **no** edits to passage, `.env`, or any docs this turn. Tell me if you want help regenerating a fresh `btak/d1` token, otherwise nothing more to do here.
+<!-- agent:boundary:58246bfe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -169,7 +198,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Should we change CLOUDFLARE_API_TOKEN=[REDACTED] to CLOUDFLARE_API_TOKEN=[REDACTED]
 <!-- /agent:queue -->
 
 ## Backlog

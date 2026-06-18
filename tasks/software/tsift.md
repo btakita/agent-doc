@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -173,16 +173,42 @@ New public API in `tsift-local-model` (`src/lib.rs` after `build_unload_actions`
 - Submodule pointer bumped in agent-loop (`7fb19820b`).
 
 **Queue still active (1 head):** `do [#kgaduse]` — activate or drop `tsift-agent-doc`'s dead `tsift-kg` re-export.
-<!-- agent:boundary:0b7ba42f -->
+
+### Re: #kgaduse — drop dead tsift-kg dep — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#kgaduse]
+
+
+> **Queue prompt:** do [#kgaduse]
+
+Done — chose **drop**, not activate. Full activation is a larger design pass (which planner call sites consume `.tsift/graph.db` evidence, and how), and carrying a dead re-export of the wrong layer was obscuring the spec-vs-reality gap rather than helping.
+
+**What landed (tsift commit `57a3b2b`, pushed `5e08f2a..57a3b2b`):**
+- **Removed `tsift-kg` Cargo dep** from `packages/tsift-agent-doc/Cargo.toml`.
+- **Removed `pub use tsift_kg as kg;`** from `packages/tsift-agent-doc/src/lib.rs` (zero call sites — verified via `grep -rn 'tsift_agent_doc::kg\|::kg::'` across the workspace).
+- **In-source comment** at the old re-export site points to `#kgadactivate` for the real consumer work.
+- **README expanded** with a "Current state" subsection documenting the gap between the contract and the implementation so future readers don't mistake the dropped dep for a regression.
+
+**Why drop, not activate:** the README contract is explicit — agent-doc may **read** `.tsift/graph.db` via the **`tsift-sqlite`/`tsift-core` GraphStore layer**, but must not own the **`tsift-kg` extraction pipeline**. The re-export was exposing exactly the wrong layer. Activating it in its current shape would have deepened the contract violation; dropping it clears the slate for `#kgadactivate` to add the correct (store-read) seam.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- `make check` green (full suite).
+- `cargo install --path . --locked` → installed.
+- Submodule pointer bumped in agent-loop (`20dcd0484`).
+
+**Captured follow-up:** `#kgadactivate` now sits at the top of `agent:backlog` as the actionable next step — implement the real `GraphStore`-backed evidence lookup helper, add `tsift-sqlite` + `tsift-core` deps, wire it into `session_digest` or planning. Flagged as needing a dedicated design pass on consumer call sites.
+
+**Queue drained.** This was the last head — `queue_active` should clear on the next preflight.
+<!-- agent:boundary:1f47accb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#kgmrs]~~
-- ~~do [#kgcliext]~~
-- ~~do [#kgunloadpost]~~
-- do [#kgaduse]
+- do [#kgadactivate]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -191,7 +217,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgaduse] Activate or drop tsift-agent-doc's tsift-kg Cargo dep (today only 'pub use tsift_kg as kg;' re-export, no call site — dead dep per local-kg-model.md spec line 29-30). Plan: packages/tsift-agent-doc/src/lib.rs
+- [ ] [#kgadactivate] Implement the real tsift-agent-doc KG evidence consumer: a read-only GraphStore-backed lookup helper that surfaces .tsift/graph.db facts to planning/orchestration. Per local-kg-model.md spec line 29-30, this is the contract the dropped re-export was supposed to seed. Plan: add tsift-sqlite + tsift-core deps to packages/tsift-agent-doc/Cargo.toml, add a graph_evidence module that calls SqliteGraphStore::open_read_only_resilient + scoped node/edge queries, wire it into session_digest or planning. Larger scope than #kgmrs/#kgcliext/#kgunloadpost — needs a dedicated design pass on which planner call sites consume the evidence.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 

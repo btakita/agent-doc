@@ -202,7 +202,18 @@ That's the crash-repro detail I needed — thank you. Captured it into `#routede
 Note: your queue edit with this detail was itself dropped by the `content_ours` merge this cycle — that's `#semmerge` (the CRDT-merge fail-closed last-writer-wins) biting in real time. I recovered the text from the dropped-edit guard and folded it into `#routedeadshell` so it's durable. `#semmerge` is high on the list precisely because it keeps eating concurrent edits like this.
 
 Two threads in `#routedeadshell` now: (1) agent-actionable — route must not type into a dead shell + must restart a crashed harness; (2) the reproducible supervisor+pane crash root-cause (capture `supervisor-stderr.log` + scrollback if it recurs).
-<!-- agent:boundary:ab3de215 -->
+
+### Re: #semmerge — scoped; needs a fresh focused cycle (not a quick drain) — opus-4-8
+
+I read `plan-semantic-ast-merge.md` end-to-end and confirmed the markdown-ast overlay API (`components() -> Component{items: Vec<Item{id, text, struck, kind}}>`) the owner would build on. The real shape:
+
+- **The full fix is Phase-4-blocked** — it hard-depends on `#md-ast-document-model` (typed node-keyed substrate), which isn't built. So `#semmerge` can't be finished in one pass.
+- **Two tractable slices, both substantial:** (1) `#semmerge-owner` — the *pure* `semantic_merge` + 11-row transition table + `merged_doc` reconstruction + exhaustive unit tests (safe: no commit-path risk, but a large careful function); (2) the **conservative converge stopgap** — narrows the fail-close to commit when drift is provably component-disjoint from the agent's edits, which would have auto-committed every worktree-drift case this session — but it edits the **safety-critical commit/convergence path**, where a wrong rebase corrupts commits, so it must be strictly disjoint-only with thorough commit-path tests.
+
+This is **not** a quick queue drain — it's a multi-phase feature touching the merge/commit core. After 3 shipped fixes this session (`#qheadsync` wedge-clear 0.34.4, `#mirrorall` 0.34.5, `#qheadsync` orphan-shadow 0.34.6) the context here is very large, and the merge/commit layer is the worst place to accept the quality risk of a saturated session. I'm **not** rushing it inline.
+
+**Recommendation:** `/clear` then `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` so `#semmerge` starts with clean context — I'd take **`#semmerge-owner` first** (pure, fully testable, unblocks the converge adapter) or the **conservative stopgap** if you want the worktree-drift pain killed sooner. The plan, phasing (`#semmerge-owner/-converge-adapter/-queue-node-strike/-ack-turn/-simworld`), and the disjoint-only safety constraint are all recorded. Queue stays paused; say which slice and I'll do it clean.
+<!-- agent:boundary:28af883a -->
 <!-- /agent:exchange -->
 
 ## Queue

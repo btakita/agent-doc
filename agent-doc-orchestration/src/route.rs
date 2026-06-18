@@ -2302,6 +2302,84 @@ fn classify_route_closeout_block(
     }
 }
 
+/// `#routedrainnextaction`: format the user-facing outcome fields for a route
+/// closeout block. When the underlying closeout recovery decision is `Blocked`
+/// (a stuck cycle with a recommended recovery command — captured-response
+/// baseline drift, IPC no_ack, etc.), surface `BlockedWithExactUnblocker` so
+/// the operator sees the actual next action instead of the misleading
+/// `wait_for_owner_turn_to_drain` (which implies a live owner turn is running).
+///
+/// The recovery command (`agent-doc reset ...` / `agent-doc write --commit
+/// ...`) contains spaces, so it cannot ride in the validated single-token
+/// `unblocker` field. Keep `unblocker` a short action token
+/// (`run_recovery_command`) and append the literal command as a trailing
+/// free-text `recovery_command=` field — it is always last on the log line, so
+/// `key=value` parsing of the structured fields still works.
+///
+/// For every other decision variant (genuine queue-behind, replay-safe, etc.)
+/// keep the historical `QueuedBehindOwner` outcome — those really are "wait for
+/// the owner turn to drain" cases.
+fn route_closeout_user_outcome_fields(
+    decision: &crate::flow::closeout::CloseoutRecoveryDecision,
+) -> String {
+    use crate::flow::closeout::CloseoutRecoveryDecision as Decision;
+    use crate::flow::outcome::UserFacingOutcomeKind;
+    if let Decision::Blocked { recommended, .. } = decision {
+        let command =
+            extract_recovery_command(recommended).unwrap_or_else(|| recommended.clone());
+        if let Ok(outcome) = crate::flow::outcome::UserFacingOutcome::with_unblocker(
+            UserFacingOutcomeKind::BlockedWithExactUnblocker,
+            "run_recovery_command",
+        ) {
+            return format!("{} recovery_command={}", outcome.log_fields(), command);
+        }
+    }
+    user_outcome_fields(UserFacingOutcomeKind::QueuedBehindOwner)
+}
+
+/// Pull the first `agent-doc <subcommand> <FILE>` invocation out of a
+/// closeout-recovery `recommended` string so the surfaced `recovery_command`
+/// stays short and copy-pasteable. Markdown backticks are stripped first so a
+/// command wrapped in `` `...` `` is detected (the leading backtick would
+/// otherwise prevent the `agent-doc` start match). Returns `None` if no
+/// `agent-doc` invocation is present (caller falls back to the full text).
+fn extract_recovery_command(recommended: &str) -> Option<String> {
+    // Strip markdown backticks so a `\`agent-doc ...\`` command is detected and
+    // the trailing backtick does not glue onto the final path token.
+    let cleaned = recommended.replace('`', " ");
+    let words: Vec<&str> = cleaned.split_whitespace().collect();
+    let mut start = None;
+    let mut end = 0;
+    for (i, &tok) in words.iter().enumerate() {
+        if start.is_none() {
+            if tok == "agent-doc" {
+                start = Some(i);
+            }
+            continue;
+        }
+        // Stop at the first token that is not part of an agent-doc CLI word
+        // (subcommand, file path, or a known short flag). Keep the surface
+        // tight: just the command + subcommand + file (or short flag + arg).
+        let is_cli_word = tok
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '='));
+        if !is_cli_word {
+            break;
+        }
+        end = i + 1;
+    }
+    let start = start?;
+    if end <= start {
+        return None;
+    }
+    let command = words[start..end].join(" ");
+    if command.is_empty() {
+        None
+    } else {
+        Some(command)
+    }
+}
+
 fn queue_prompt_text_for_route_change(change_text: &str) -> Option<String> {
     let mut lines = Vec::new();
     for line in change_text.lines() {
@@ -3271,7 +3349,7 @@ fn route_via_authoritative_actor(
         }
         RouteCloseoutDrainOutcome::Blocked(reason) => {
             match classify_route_closeout_block(file, reason, prompt_context.is_some()) {
-                RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout { .. } => {
+                RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout { decision } => {
                     let Some(context) = prompt_context else {
                         unreachable!("prompt-context decision requires a prompt context");
                     };
@@ -3296,9 +3374,7 @@ fn route_via_authoritative_actor(
                         queued.appended,
                         queued.already_present,
                         queued.superseded,
-                        user_outcome_fields(
-                            crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
-                        )
+                        route_closeout_user_outcome_fields(&decision)
                     );
                     return Ok(dispatch_pane);
                 }
@@ -3317,9 +3393,7 @@ fn route_via_authoritative_actor(
                         "[route] active closeout for {} could not be drained before reroute; existing queue head {:?} remains queued behind the closeout {}",
                         file.display(),
                         head,
-                        user_outcome_fields(
-                            crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
-                        )
+                        route_closeout_user_outcome_fields(&decision)
                     );
                     return Ok(dispatch_pane);
                 }
@@ -4851,6 +4925,86 @@ mod tests {
     use super::*;
     use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+
+    #[test]
+    fn route_closeout_user_outcome_surfaces_unblocker_for_stuck_cycle() {
+        // #routedrainnextaction: a stuck `Blocked` closeout recovery decision
+        // (captured-response baseline drift / IPC no_ack) must surface the
+        // specific recovery command via BlockedWithExactUnblocker instead of
+        // the misleading `wait_for_owner_turn_to_drain` (no live owner turn).
+        use crate::flow::closeout::{CloseoutRecoveryDecision, CloseoutRecoveryState};
+        let decision = CloseoutRecoveryDecision::Blocked {
+            state: CloseoutRecoveryState::OpenCycle,
+            missing_proof: "open cycle must finish, be replayed, or be explicitly queued behind"
+                .to_string(),
+            recommended: "finish the response, then `agent-doc finalize /abs/path/session.md` (or `agent-doc write --commit /abs/path/session.md` to absorb an already-visible response)".to_string(),
+        };
+        let fields = route_closeout_user_outcome_fields(&decision);
+        assert!(
+            fields.contains("ui_outcome=blocked_with_exact_unblocker"),
+            "stuck-cycle decision must surface BlockedWithExactUnblocker, not QueuedBehindOwner: {fields}"
+        );
+        assert!(
+            fields.contains("next_action=follow_unblocker"),
+            "stuck-cycle next_action must point at the unblocker: {fields}"
+        );
+        assert!(
+            fields.contains("unblocker=run_recovery_command"),
+            "stuck-cycle unblocker must be the short run-recovery action token: {fields}"
+        );
+        assert!(
+            fields.contains("recovery_command=agent-doc finalize /abs/path/session.md"),
+            "stuck-cycle must surface the literal recovery command as trailing free text: {fields}"
+        );
+        assert!(
+            !fields.contains("wait_for_owner_turn_to_drain"),
+            "stuck-cycle must NOT use the live-owner-turn next_action: {fields}"
+        );
+    }
+
+    #[test]
+    fn route_closeout_user_outcome_keeps_queued_behind_owner_for_genuine_wait() {
+        // #routedrainnextaction: a non-Blocked recovery decision (the operator's
+        // turn is genuinely running, prompt is queued behind it) keeps the
+        // historical QueuedBehindOwner / wait_for_owner_turn_to_drain wording.
+        use crate::flow::closeout::{CloseoutRecoveryDecision, CloseoutRecoveryState};
+        let decision = CloseoutRecoveryDecision::QueuePromptForAfterCloseout {
+            state: CloseoutRecoveryState::OpenCycle,
+            reason: "live owner turn in progress".to_string(),
+        };
+        let fields = route_closeout_user_outcome_fields(&decision);
+        assert!(
+            fields.contains("ui_outcome=queued_behind_owner"),
+            "genuine queue-behind must keep QueuedBehindOwner: {fields}"
+        );
+        assert!(
+            fields.contains("next_action=wait_for_owner_turn_to_drain"),
+            "genuine queue-behind must keep the live-owner-turn next_action: {fields}"
+        );
+    }
+
+    #[test]
+    fn extract_recovery_command_picks_first_agent_doc_invocation() {
+        // Recovery prose typically looks like: "finish the response, then
+        // `agent-doc finalize <FILE>` (or `agent-doc write --commit <FILE>`
+        // to absorb an already-visible response)" — pull just the first
+        // `agent-doc ...` invocation so the surfaced unblocker token stays
+        // short and copy-pasteable.
+        let recommended = "finish the response, then `agent-doc finalize /abs/session.md` (or `agent-doc write --commit /abs/session.md` to absorb an already-visible response)";
+        assert_eq!(
+            extract_recovery_command(recommended).as_deref(),
+            Some("agent-doc finalize /abs/session.md")
+        );
+        // No agent-doc in the prose → None (caller falls back to full text).
+        assert!(extract_recovery_command("just finish the response").is_none());
+        // Backticks are stripped because they aren't CLI word characters; the
+        // command still extracts cleanly across the boundary.
+        let mixed = "Rebuild sidecars: `agent-doc reset --from-current --preserve-session /path/session.md`";
+        assert_eq!(
+            extract_recovery_command(mixed).as_deref(),
+            Some("agent-doc reset --from-current --preserve-session /path/session.md")
+        );
+    }
 
     struct EnvGuard {
         key: &'static str,

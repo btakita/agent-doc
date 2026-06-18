@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -202,13 +202,55 @@ Done — chose **drop**, not activate. Full activation is a larger design pass (
 **Captured follow-up:** `#kgadactivate` now sits at the top of `agent:backlog` as the actionable next step — implement the real `GraphStore`-backed evidence lookup helper, add `tsift-sqlite` + `tsift-core` deps, wire it into `session_digest` or planning. Flagged as needing a dedicated design pass on consumer call sites.
 
 **Queue drained.** This was the last head — `queue_active` should clear on the next preflight.
-<!-- agent:boundary:46bd6b5c -->
+
+### Re: #kgadactivate — graph_evidence read seam + tsift kg evidence — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#kgadactivate]
+
+
+> **Queue prompt:** do [#kgadactivate]
+
+Done. `tsift-agent-doc` now has the real `GraphStore`-read seam the spec contract describes, and it's observable through a new `tsift kg evidence` CLI subcommand. The arc that started with the "does tsift actively use local models with the kg?" audit is now closed end-to-end.
+
+**What landed (tsift commit `bc2bbc8`, pushed `57a3b2b..bc2bbc8`):**
+
+`tsift-agent-doc::graph_evidence` module (`packages/tsift-agent-doc/src/graph_evidence.rs`):
+- **`GraphEvidenceQuery`** with `symbol` / `kind` / `limit` builder methods (blank strings treated as no-filter so CLI plumbing can't accidentally over-filter).
+- **`GraphEvidenceNode`** flattens `GraphNode::provenance` into `source_refs` and `provenance_systems` — agents want those directly, not a nested chain.
+- **`GraphEvidenceReport`** carries `exists`, totals, the query echo, and the ranked matches; missing db is `exists: false`, never an error.
+- **`read_graph_evidence(project_root, query)`** joins `.tsift/graph.db`; **`read_graph_evidence_from_db(db_path, query)`** is the explicit-path entry; **`build_report`** is the pure projection used by tests.
+- Ranking: substring match (case-insensitive) on label / id / kind, optional exact-kind filter, then sort by incident edge count desc → label asc for determinism.
+
+`tsift-cli` exposes the seam via `tsift kg evidence` (`--symbol`, `--kind`, `--limit`, `--graph-db`, `--json`). Five `kg` subcommands now: `extract`, `status`, `evidence`, `unload`, `smoke`.
+
+Cargo deps corrected: `tsift-agent-doc` now depends on `tsift-core` + `tsift-sqlite` (the read layer) — no `tsift-kg`.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- `make check` green (clippy `-D warnings` + full suite + opencode-plugin-test).
+- `cargo test -p tsift-agent-doc --lib graph_evidence` → 10 passed (ranking with tie-break, symbol-by-label/id/kind, kind filter, limit cap, provenance flattening, empty db, missing db, populated-store read, query builder blank handling).
+- `cargo install --path . --locked` → installed.
+- Live spot-check: `tsift kg evidence --graph-db /tmp/nonexistent.db` and `--json` both produce the expected missing-db response cleanly.
+- Submodule pointer bumped in agent-loop (`07b86fe94`).
+
+**Spec vs reality (updated from the original audit):**
+| Surface | Status |
+|---|---|
+| `tsift kg extract` CLI | ✅ Active (since `#lmlazy`) |
+| `tsift kg status` / `unload` / `smoke` | ✅ Active (since `#kgcliext` / `#kgunloadpost`) |
+| `tsift kg evidence` | ✅ Active (this cycle) |
+| `tsift-memgraphrag` consumes `tsift-kg` | ✅ Active (since `#kgmrs`) |
+| `tsift-agent-doc` consumes `GraphStore` | ✅ Library seam + CLI (this cycle); deeper `session_digest`/planning wiring remains a separate design pass |
+| VRAM unload POST | ✅ Planner-owned (since `#kgunloadpost`) |
+
+**Queue drained.** This was the last head.
+<!-- agent:boundary:d4ca3bd6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#kgadactivate]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -217,7 +259,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgadactivate] Implement the real tsift-agent-doc KG evidence consumer: a read-only GraphStore-backed lookup helper that surfaces .tsift/graph.db facts to planning/orchestration. Per local-kg-model.md spec line 29-30, this is the contract the dropped re-export was supposed to seed. Plan: add tsift-sqlite + tsift-core deps to packages/tsift-agent-doc/Cargo.toml, add a graph_evidence module that calls SqliteGraphStore::open_read_only_resilient + scoped node/edge queries, wire it into session_digest or planning. Larger scope than #kgmrs/#kgcliext/#kgunloadpost — needs a dedicated design pass on which planner call sites consume the evidence.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 

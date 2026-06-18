@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -169,7 +169,33 @@ Post-publish CI on the v0.12.0 release commit (`93d9286`) went **red** — but n
 **Scope note on `#lzbenchbudget`:** this fix updates ONLY the version tag, not the lock-acquisition budget numbers — those remain at their pre-existing values and `make benchmark-check` stays red on the same four `thread_safe` overshoots. Whether to refresh those baselines (via `make benchmark-update`) or investigate a real contention regression is the `#lzbenchbudget` judgment call, still open in backlog. The published crates.io `0.12.0` artifact carries BENCHMARKS.md with the old `0.11.1` tag (a trivial doc-string inconsistency; crates.io versions are immutable so it stands — not worth a 0.12.1 for a benchmark-report version string).
 
 **Published artifact is functionally correct** — the version-tag drift is documentation only; no code/API in the published `0.12.0` is affected. New CI run triggered by `28c170c`; finishing from local evidence (test green) per the AGENTS.md in-flight-CI rule. `#lzbenchbudget` remains the queue head (not in-session drainable, `queue_continuation_required` per binary).
-<!-- agent:boundary:bc7fda02 -->
+
+### Re: do #lzbenchbudget — budgets refreshed, not a regression — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#lzbenchbudget]
+
+The judgment call is settled: **not a regression.** Refreshed the four stale site budgets; `make benchmark-check` is green.
+
+**Investigation (3 controlled reruns of `examples/instrumentation_profile.rs`):** the two red profiles (`thread_safe_contention_same_slot_write_read_16`, `thread_safe_contention_independent_slots_16`) are driven by `run_thread_safe_same_slot_contention` / `run_thread_safe_independent_slot_contention` — real OS threads over `ctx.computed()`. They **never call `ctx.signal()`**, so the 38b18e4 eager-Signal path is unexercised; and 8665e29 (`id.0 as usize` → `usize::try_from` via `node_index()`) is a pure index refactor that cannot add lock acquisitions. The backlog's "introduced by" was correlation, not causation. Real cause: the old budgets were pegged to a low-water outlier — the archived snapshot recorded `set_cell_invalidation=2` for same_slot_write_read_16 while fresh runs report 87–123; `independent_slots_16` is rock-stable at ~937 total / ~248 set_cell / ~370 other, all 3–5× over the 64/160/700 budgets.
+
+**Fix — budgets raised to the observed plateau + deterministic headroom** (`scripts/update-benchmark-results.py`):
+- `same_slot_write_read_16`: `set_cell_invalidation` 32 → **180** (observed 87–123; wide real-thread variance).
+- `independent_slots_16`: max 700 → **1100**, `other` 160 → **450**, `set_cell_invalidation` 64 → **300** (very stable).
+
+**BENCHMARKS.md regenerated** (`--no-run`): profile snapshot refreshed from a current run (the misleading `set_cell=2` row now carries realistic values); Criterion throughput/latency estimate tables unchanged (cache `cached_reads/thread_safe_context=65.223 ns` byte-identical to published); version/env lines did not churn.
+
+**Verification (local):**
+- `python3 scripts/update-benchmark-results.py --check` → **exit 0** (was: 4 budget failures). `make benchmark-check` green.
+- No Rust source / tests / build logic touched — only `REGRESSION_BUDGETS` constants + generated `BENCHMARKS.md`, so the Rust test suites (loom / ffi / ipc / webrtc / lean / async / tokio) are unaffected.
+
+**Commit + push (executed):**
+- lazily-rs submodule `cd73b2c` → `lazily-hub/lazily-rs` main (`28c170c..cd73b2c`).
+- superproject `847d8309b` (gitlink bump) → `btakita/agent-loop` main.
+
+**Queue drained.** Backlog empty; the four `[operator-drive]` review items (`#kb9b`, `#kabc`, `#h6qb`, `#xccx`) are unchanged — none touched by a benchmark-budget refresh.
+<!-- agent:boundary:24b9b9db -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -178,13 +204,11 @@ Post-publish CI on the v0.12.0 release commit (`93d9286`) went **red** — but n
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#lzbenchbudget]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzbenchbudget] #lzbenchbudget=Refresh stale thread_safe instrumentation lock-acquisition budgets in src/lazily-rs/BENCHMARKS.md. make benchmark-check is red (deterministic, reproducible 2x): thread_safe_contention_same_slot_write_read_16 set_cell_invalidation 78>32; thread_safe_contention_independent_slots_16 lock_acquisitions 908>700, other 345>160, set_cell_invalidation 244>64. Pre-existing at tag v0.11.1 (BENCHMARKS.md + thread_safe.rs unchanged since), introduced by 8665e29 (SlotId casts) + 38b18e4 (eager Signal on ThreadSafeContext) without a budget refresh. Either run make benchmark-update to record the new baselines or investigate a real contention regression. Unrelated to the str0m_net v0.12.0 release content.
 <!-- /agent:backlog -->
 
 ## Review

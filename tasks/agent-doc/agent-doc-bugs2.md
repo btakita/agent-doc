@@ -425,7 +425,7 @@ That paste is not a route-find failure — the route succeeded. It found a dispa
 **Unblocker (operator-gated — matches the diagnostic's own `unblocker=resume_or_clear_queue_control`):** recycle the supervisor so it adopts 0.34.8, refresh the IntelliJ buffer so the editor matches HEAD, then resume. I deliberately did **not** recycle/`cargo install` from inside this session — installing a newer client against my own live stale host supervisor is the exact move that worsens `live_prompt_drift` and drops queue edits.
 
 **Queue:** leaving it paused is correct. Per the diagnostic the remaining heads are already-filed (`#routedeadshell` virtuousai crash), cross-doc (equityfundingsource), or operator-gated — nothing agent-drainable here. Not auto-looping into a degraded/unproven-IPC transport.
-<!-- agent:boundary:2f938e7b -->
+<!-- agent:boundary:84f90316 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -440,6 +440,8 @@ resync: stash pane %93 is unregistered but still hosts live supervisor 62fe1f41-
 [route] authoritative actor for tasks/agent-doc/agent-doc-bugs2.md projected busy but the live pane proves a dispatch-ready prompt (generation 535); repairing stale busy projection to ready and dispatching instead of queuing
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=broken editor IPC: content_ours adoption (live_prompt_drift, #semmerge) loses every exchange-finalize response AND consumes queue heads without landing answers (recovered last response via raw git). Remaining heads are already-answered/filed (virtuousai crash=#routedeadshell), cross-doc (equityfundingsource), or operator-gated. Pausing to stop churn. Resume in a clean session (refresh IntelliJ buffer + recycle binary) and take #smconv (the converge.rs fix for this very bug) first. receipt_id=3960 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control blocked_head_bytes=44 blocked_head_sha256=4ec56b3745f04f438f52f8bffc1d7fe8b9e8e0964028b4db7008fffeb4bf4ff5 trigger_bytes=45 trigger_sha256=ce2c7a444f4ae0b6cfce11a6ceac977be5b3811138cfe31a7252a021e9b2c9ad
 ```
+---
+:pushpin: - I ran JB `Run Agent Doc` on virtuousai.md, the turn started. I navigated away. When I navigated back,
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md
 ```

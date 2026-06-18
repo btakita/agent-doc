@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -40,7 +40,7 @@ completed
 Compacted content:
 ❯ - Archived 13 response topic(s): JB Run Agent Doc post-clear submit cruft; next steps / review cleanup; same-cycle pending-add queue sync; 10 more
 ❯ - Prior summary/context: prior compacted content: Archived 15 response topic(s): Existing drafted Run Agent Doc input; Queue drain state; Queu...
-<!-- agent:boundary:f81bfa77 -->
+<!-- agent:boundary:daabf559 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -75,6 +75,9 @@ How can we prevent the wedge conflict from occurring, as what happened in equity
 ```
 Aside from fixing the wedge, we should ensure the run does not stall.
 ---
+- do [#claudesubmit]
+- do [#queediturn]
+- do [#codefence-strip]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -157,7 +157,7 @@ Drafted and pushed to your **Gmail Drafts** (not sent — yours to review/send).
 Kept it short per your note and Judith's tone (busy, gentle, no pressure, no call-duration). It frames the key as admin-portal-only (matching what I found in the sandbox UI) so the ask lands as "you're the one who can get this," and gives Robert an easy on-ramp to help.
 
 Tweak the wording if you like, then send from Gmail. Want me to adjust tone/length, thread it onto an existing Judith email, or leave as-is?
-<!-- agent:boundary:b2e47b95 -->
+<!-- agent:boundary:338a26a7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -170,6 +170,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- lucas-huang told me that we are already using the sandbox api key. What is the api key env variable name?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -78,7 +78,7 @@ Per chunk: seed salient terms → expand top-K neighbors by connectivity + recen
 **Backlog:** I reframed **`#kggraphscope`** as Phase 1 — a bounded deterministic `kg context-pack` retrieval API (it subsumes the evidence-cap item). Phases 2 (inject into the extractor prompt) and 3 (graph-aware incremental re-extract) are in the plan: `tasks/software/plan-tsift-kg-graphrag-context.md`. This composes with `#kgleasewire` — graph-aware extraction runs the local model more, so the reference-counted load/unload lifecycle matters more.
 
 **Recommendation:** do `#kgleasewire` first (small, closes the loop on the lease lifecycle just shipped), then this — it's the bigger feature but the one that actually makes the local KG model good.
-<!-- agent:boundary:da4ccd73 -->
+<!-- agent:boundary:a5151860 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -87,7 +87,7 @@ Per chunk: seed salient terms → expand top-K neighbors by connectivity + recen
 - do [#kgleasewire]
 - do [#kgleasereap]
 - do [#kgextractrefresh]
-- :pushpin: do [#kggraphscope]: Should we integrate the memgraphrag, semantic neighborhoods, and graphdb to determine the context for the local model?
+- ~~:pushpin: do [#kggraphscope]: Should we integrate the memgraphrag, semantic neighborhoods, and graphdb to determine the context for the local model?~~
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

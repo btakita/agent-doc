@@ -146,9 +146,26 @@ The accept-loop wedge (`#jbacceptwedge`) lived in the socket listener's `start_l
 3. Non-trivial implementation cost: koffi callback registration, cross-thread dispatch to VS Code's main thread, socket lifecycle management, thread-safety between listener and Node's event loop.
 4. Risk transfer: `#jbacceptwedge` lived in the socket listener. Adding it to VSCode imports that complexity surface for no current gain.
 5. **Revisit trigger**: if an operator reports visible finalize→patch delay in VS Code (file-poll latency over ~200ms), that would justify the socket investment.
+- Detection signal, not hard assertion. Coverage: `fence_count_drop_is_logged_for_visible_document_write` + `count_code_fence_openings_handles_backtick_and_tilde`. cargo test + FlowCore budget gate green.
+- `log_fence_count_drop_if_any(path, new_content)` — reads existing file before each visible-document write, counts fences in old vs new, logs `fence_count_dropped file=... old_fences=N new_fences=M` to `ops.log` when the count drops.
+- `count_code_fence_openings(content)` — counts ``` and ~~~ fence-opening lines.
 
 **No code changes.** `#vscode-socket-parity` marked done via `--done`.
-<!-- agent:boundary:04274d0f -->
+
+### Re: #codefence-strip — detection shipped; deleted-queue-item = #queediturn — glm-5.2
+
+> **Queue prompt:**
+>
+> [#codefence-strip] may have been due to a wedge issue or stale state. Can you detect when this issue occurred? I just added a queue item to monsterrodholders.md and agent-doc deleted it.
+
+**1. "agent-doc deleted a queue item" → `#queediturn` (shipped `454f935a`, installed).** Reactive-watch mid-turn churn — fix added `cycle_freshly_in_flight(path, now)` to `watch.rs`. Verify: `grep cycle_freshly_in_flight .agent-doc/logs/ops.log`.
+
+**2. "Can you detect when this issue occurred?" → detection shipped.** New in `write.rs`: `count_code_fence_openings(content)` + `log_fence_count_drop_if_any(path, new_content)` — reads existing file before each visible-document write, logs `fence_count_dropped file=... old_fences=N new_fences=M` to `ops.log` when fence count drops. Coverage: `fence_count_drop_is_logged_for_visible_document_write` + `count_code_fence_openings_handles_backtick_and_tilde`. cargo test + FlowCore budget gate green.
+
+**`#codefence-strip` done** (detection shipped). `#fence-strip-fix [operator-verify: repro needed]` already in backlog for the definitive preservation fix — needs your repro (which document/run/fence). Parsing path already masks fences (`#0kjc`/`#lintfence`).
+
+**Not installed mid-session** — detection live after next `make install` + recycle. **Companion source uncommitted**: say the word and I'll commit + push.
+<!-- agent:boundary:42b3d243 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -185,7 +202,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#codefence-strip] [operator-verify] agent-doc stripped a code fence on a prior run. Needs operator repro (which document/run/fence) to fix definitively; will then audit patch/template fence-preservation and add a regression.
+- [ ] [#fence-strip-fix] [operator-verify: repro needed] Definitive fence-preservation fix. Detection logging shipped (#codefence-strip done), but the root-cause fix needs operator repro: which document/run/fence was stripped. Once captured, bisect the sanitize/normalize/materialize transformation that dropped the fence (parsing path already masks fences via #0kjc/#lintfence). The new fence_count_dropped ops.log marker will catch the next incident automatically.
 - [ ] [#claudesubmit] [operator-verify: live Claude-pane validation] Claude/OpenCode dispatch-only submit proof + bounded Enter retry. Root cause found (no prompt-submit hook → accepted-only without retry). Plan ready: tasks/agent-doc/plan-claude-dispatch-submit-proof-retry.md. Code impl is planned; validating the retry genuinely needs a live Claude pane (operator), so deferring until operator can validate.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.
 <!-- /agent:backlog -->

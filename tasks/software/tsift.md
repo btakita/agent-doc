@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -56,13 +56,31 @@ Drained the `#spec-test-build-install-commit-push` queue head (`Port 8080 is fre
 - **Commit + push:** completed the outstanding `cargo fmt` drift across 8 files (session_cost, session_review, cli, infra, lib, exit_code test, log_digest, local-model lib) and pushed `cd648b5..0e41e4b` to origin/main (`style: apply cargo fmt across agent-doc, cli, digest, local-model`).
 
 Queue head consumed. No new actionable backlog items — the remaining backlog head `#vmax` (crates.io OIDC trusted-publishing registration) is still operator-gated.
-<!-- agent:boundary:787bfdd3 -->
+
+### Re: local-model runtime + service-vs-lazy — glm-5.2
+
+> **Queue prompt:**
+>
+> Is the tsift local model running now? If not, let's start it. Should it be a service or should we make this a lazy instance?
+
+**1. Not running — and nothing is installed to run it.** No provider listens on 8080 (llama.cpp) / 11434 (ollama) / 8000 (vllm); the RTX 5090 is idle (179 / 32607 MiB, no compute procs); the GPU lease registry is empty. `tsift local-model status` reports `qwen3-32b-q4` selectable (28692 MiB est) and `qwen3-embedding-0.6b` selectable, but there are **no model files** on disk and **no provider binary** (`ollama`, `llama-server`/`llama.cpp`, `vllm` are all absent). So there is nothing to start yet.
+
+**2. tsift won't "start" it itself** — `tsift local-model` ships only `status | unload | lease | resolve | swap` by design (provider-neutral, no daemon). Starting means launching an external provider.
+
+**3. Service vs lazy → lazy, by spec.** [`specs/local-kg-model.md`](../../src/tsift/specs/local-kg-model.md) (Runtime Provider Contract + VRAM Cleanup Acceptance) and the `tsift-local-model` crate (#gctrl1 lease registry / #gctrl2 per-call preference / #gctrl3 swap) are built around **acquire → use → unload-with-cleanup-proof**: cooperative GPU leases with idle TTL, single-GPU serialization, and a mandatory pre/post VRAM probe. The spec's non-goals explicitly list "parallel 30B/32B model serving." There is intentionally **no tsift-owned daemon** — the provider (llama.cpp / ollama / vllm) is treated as an on-demand resource, and `build_unload_actions` sends `keep_alive:0` / router-unload / vLLM-sleep / process-exit to release it. A lazy instance matches both the code and the spec; a persistent service would fight the unload/cleanup contract.
+
+**To start it (lazy path) — needs your call on provider + model:**
+- **Easiest:** install `ollama`, `ollama serve`, `ollama run qwen3-32b-q4` (~29 GB pull), then `export TSIFT_OLLAMA_ENDPOINT=...` (ollama keeps the model warm until tsift sends `keep_alive:0`).
+- **Lighter smoke first:** `ollama run qwen3-embedding-0.6b` (~3 GB) to exercise extract/embed without the 29 GB pull.
+- **No-download path:** `tsift local-model resolve --profile hash` uses `tsift-local-hash-v1` (0 MiB, always selectable) to validate the lease/resolve plumbing end-to-end on the GPU-free fallback.
+
+Captured as backlog `#lmlazy` [recommended]. Want me to proceed with ollama + the embedding-0.6b smoke (then the 32B extractor), or just wire the hash fallback for now?
+<!-- agent:boundary:e63ccc4c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Is the tsift local model running now? If not, let's start it. Should it be a service or should we make this a lazy instance?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

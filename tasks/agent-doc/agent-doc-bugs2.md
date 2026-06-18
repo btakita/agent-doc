@@ -319,7 +319,22 @@ Done. Shipped **`#smconv` (Phase 2)** plus the **`### Re:` heading-prose extensi
 **Verification:** `agent-doc-markdown-ast` 53/53, `agent-doc-orchestration write::ipc` 117/117, full workspace green, clippy clean, FlowCore budget audited. Built + installed (`~/.cargo/bin` 0.34.7, cdylib refreshed, 2 controllers marked to recycle onto the fix at the next idle boundary).
 
 **Remaining `#semmerge` phases:** `#smqstrike` (P3 — route queue_consume strike through the merged node tree), `#smackturn` (P4 — turn the `semantic_merge_ack_pending` outcomes into an exchange ack turn), `#smsim` (P5 — SimWorld matrix). Plus `#mdastclose` (the overlay `end_byte` close-marker bug found Phase 1).
-<!-- agent:boundary:59276e59 -->
+
+### Re: semantic structure merge + File Cache Conflict → zero disk — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Ensure we have a semantic structure merge. Where the agent doc is strutured and the agent-doc binary understand what parts of the structure are affected. What parts of the document are active in the turn. And whether or no the active area is changed by the merge.
+
+
+**Semantic structure merge — the core shipped this session (`#smconv` 0.34.7); naming the remaining dimension.** You asked for a merge where the binary (a) understands the doc as *structure* and knows *what parts are affected*, (b) knows *what's active in the turn*, and (c) only conflicts when *the active area is changed by the merge*. Status against those three:
+- **(a) structured + affected-parts — DONE.** `agent_doc_markdown_ast::semantic_merge` models the doc as typed nodes (frontmatter scalars; queue/backlog/review items by `[#id]`; `### Re:` exchange turns as append-only heading nodes) and merges per-node: node-disjoint operator+agent edits (the common case) both apply in one commit; same-node collisions are the only conflicts. `converge.rs` consumes it before the old fail-close. This is live.
+- **(b)/(c) turn-active-area awareness — the concrete gap, queued as `#smturnactive`.** Today the merge resolves *every* same-node collision operator-wins regardless of whether it's in the area this turn is operating on. The affectedness signal already exists in the binary (`op_affectedness.turn_affected`, `response_target_disjoint_from_user_edit`) but isn't threaded into `semantic_merge` as a first-class input. The next phase passes the turn-active node-set in so a collision *outside* the active area auto-resolves silently and only an *active-area* collision raises an ack — exactly your "whether the active area is changed by the merge."
+
+**File Cache Conflict → absolute zero disk (`#fcczero`, queued).** I audited every session-doc disk-write site on the hot path. They are **already** listener-guarded: post-commit worktree reconcile skips the disk write with a listener (`#pcwcdiskfree`), the boundary reposition queues through file IPC and only touches disk when IPC is `Unavailable`, and queue/pending/status maintenance route through the `converge_or_disk_write` gate (`#fccqueue`/`#fccaudit`). The only remaining disk writes are genuine recovery/scaffold/migration emergencies — which matches your "only emergency cases." So the FCC you're still seeing has an **unidentified trigger** I can't pin without the live repro: **which exact action raises the dialog?** (the command + the `ops.log` line at that moment — e.g. `write_authority action=... transport=disk`). With that I can find the specific unguarded path. One known contributor this session was my manual `git checkout HEAD` recovery (a disk write) — and `#smconv` removes the *need* for that recovery by merging drift instead of dropping the response, so the FCC rate should already drop once the supervisor is on 0.34.7 with a fresh editor buffer.
+
+Both are queued as concrete actionable phases (`#smturnactive`, `#fcczero`); `#fcczero` is the one that needs your repro detail to close.
+<!-- agent:boundary:9c02e3c1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -331,7 +346,7 @@ Done. Shipped **`#smconv` (Phase 2)** plus the **`### Re:` heading-prose extensi
 - ~~:pushpin: After JB `Clear Session Context` on this document then JB `Run Agent Doc` stalled.~~
 - ~~:pushpin: The agent defined a task id #rz3afix, but agent-doc redefined the task id to [#021p]. If an agent defines a task id, agent-doc should be able to parse the task id and use the agent defined task id. Note that if the agent's defined task id does not pass the id validation logic such as malformed or duplicate of a prompt_preset or another entity, resolve and create a new task id if necessary.~~
 - ~~:pushpin: I ran JB `Run Agent Doc` on virtuousai.md and the supervisor + tmux pane crashed 2 times. The 3rd attempt stalled and I manually ran the `agent-doc .../virtuousai.md` command...and the turn is in progress.~~
-- :pushpin: Ensure we have a semantic structure merge. Where the agent doc is strutured and the agent-doc binary understand what parts of the structure are affected. What parts of the document are active in the turn. And whether or no the active area is changed by the merge.
+- ~~:pushpin: Ensure we have a semantic structure merge. Where the agent doc is strutured and the agent-doc binary understand what parts of the structure are affected. What parts of the document are active in the turn. And whether or no the active area is changed by the merge.~~
 - :pushpin: Still getting JB `File Cache Conflict` dialogs. Absolute 0 is the target. Only emergency cases should write to the disk. Everything else should use the editor plugin. We also need to handle conflicts with the editor plugin path.
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md
@@ -359,6 +374,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - do [#supselfheal]
 - do [#pk3f]
 - do [#msn6]
+- do [#cyh0]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

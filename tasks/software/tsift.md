@@ -83,13 +83,40 @@ Marked `#lmlazy` `[x]` done. Follow-ups (not blocking): execute the unload actio
 **Bottom line:** local models are wired into the KG only through the standalone `tsift kg extract` command. The downstream consumers the spec names (`tsift-memgraphrag`, `tsift-agent-doc`) do not yet drive local-model inference, and the operational surface (`status`/`unload`/smoke) is incomplete.
 
 Did **not** apply the `#spec-test-build-install-commit-push` preset this cycle: the prompt was a state-assessment question, not a change request — no spec/test/code changes were made, so build/install/commit/push does not apply. Captured the four concrete gaps above as `#kgmrs`, `#kgcliext`, `#kgunloadpost`, `#kgaduse` in `agent:backlog`; `#kgmrs` is the top item (it is the largest spec-vs-reality delta).
-<!-- agent:boundary:a6345b8c -->
+
+### Re: #kgmrs — memgraphrag consumes tsift-kg — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#kgmrs]
+
+
+> **Queue prompt:** do [#kgmrs]
+
+Done. `tsift-memgraphrag` now drives real model-backed KG extraction via `tsift-kg`, closing the spec line 27-28 gap.
+
+**What landed (tsift commit `d159838`, pushed `8b9e71b..d159838`):**
+- **`KgSemanticProvider<E: KgExtractor = OllamaKgExtractor>`** (`packages/tsift-memgraphrag/src/lib.rs:170-264`) — generic over any `KgExtractor`, with `::ollama(model_tag)` for production and `::with_extractor(stub)` for tests. Routes `SemanticProvider::extract_concepts` through `extract_documents_to_projection`, mapping each accepted `KgJsonEntity` to a `SemanticConceptCandidate` keyed `kg:<kind>`. Degrades to a primary candidate when the model returns zero entities so a thin extraction can't blank a memory row.
+- **`tsift-kg` Cargo dep** added to `packages/tsift-memgraphrag/Cargo.toml`.
+- **`embed()` stays on the hash fallback** — the ollama embedder is a separate `#lmlazy` follow-up (noted in code comments); `metadata().embedding_model` reports `HASH_SEMANTIC_PROVIDER_ID` honestly so downstream consumers see the split.
+- **5 new unit tests**: metadata propagation, pipeline extraction (verifies 2 entities from a stub), empty-extraction fallback, hash-fallback embed, and an end-to-end traversal-projection test proving `KgSemanticProvider` feeds the same graph-build path `FixtureSemanticProvider` already exercised.
+
+**Verification (`#spec-test-build-install-commit-push` preset):**
+- `make check` green (clippy `-D warnings` + full suite + opencode-plugin-test). Targeted `cargo test -p tsift-memgraphrag --lib kg_semantic_provider` → 5 passed.
+- `cargo install --path . --locked` → installed (replaced `/home/brian/.cargo/bin/tsift`).
+- Submodule pointer bumped in agent-loop (`9e57d6e33`).
+
+**Remaining queue (OpenCode has no auto-loop — re-invoke `/agent-doc` to drain the next head):**
+- `do [#kgcliext]` — `tsift kg status` / `unload` / `smoke` subcommands (spec line 31-32).
+- `do [#kgunloadpost]` — `build_unload_actions` actually POSTs `keep_alive:0`.
+- `do [#kgaduse]` — activate or drop `tsift-agent-doc`'s dead `tsift-kg` re-export.
+<!-- agent:boundary:5e3265ce -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#kgmrs]
+- ~~do [#kgmrs]~~
 - do [#kgcliext]
 - do [#kgunloadpost]
 - do [#kgaduse]
@@ -101,7 +128,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgmrs] Wire tsift-kg into tsift-memgraphrag so it actually invokes OllamaKgExtractor (today memgraphrag has no tsift-kg Cargo dep and only references tsift_local_model::ProviderKind as a type — local-kg-model.md spec line 27-28 is unfulfilled). Plan: packages/tsift-memgraphrag/src/lib.rs
 - [ ] [#kgcliext] Add tsift kg status / tsift kg unload / tsift kg smoke subcommands per local-kg-model.md spec line 31-32 (today KgCommand only has Extract). Plan: packages/tsift-cli/src/cli.rs + packages/tsift-cli/src/commands/kg.rs
 - [ ] [#kgunloadpost] Make tsift-local-model build_unload_actions actually POST the ollama keep_alive:0 (today it plans but does not POST — operator ran ollama stop manually). Plan: packages/tsift-local-model/src/lib.rs
 - [ ] [#kgaduse] Activate or drop tsift-agent-doc's tsift-kg Cargo dep (today only 'pub use tsift_kg as kg;' re-export, no call site — dead dep per local-kg-model.md spec line 29-30). Plan: packages/tsift-agent-doc/src/lib.rs

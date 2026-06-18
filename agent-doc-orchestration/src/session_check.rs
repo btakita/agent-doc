@@ -6178,6 +6178,40 @@ Body\n\
         );
     }
     #[test]
+    fn session_check_clears_dropped_queue_marker_when_id_preserved_in_other_spelling() {
+        // The real #queue-user-edit-overwrite wedge (observed on agent-doc-bugs2
+        // with #qpauseux/#docdriftgrace): the dropped prompt was recorded as the
+        // bare `[#id]` form, but HEAD carries the consumed/struck `do [#id]`
+        // spelling from a PRIOR cycle. Text-identity matching cannot bridge
+        // `[#id]` vs `do [#id]`, and the id was NOT resolved this cycle — yet the
+        // edit visibly reached the document (struck), so the guard must auto-clear
+        // by id instead of wedging session-check indefinitely (forcing a manual
+        // supervisor restart / patch surgery).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->\n",
+            "\n<!-- agent:queue auto -->\n- ~~do [#qpauseux]~~\n- do [#existing]\n<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+        crate::cycle_state::record_dropped_queue_prompts(&doc, &["[#qpauseux]".to_string()])
+            .unwrap();
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "guard should self-clear when the dropped [#id] is preserved as a struck do [#id] head"
+        );
+        assert!(
+            crate::cycle_state::load(&doc)
+                .unwrap()
+                .expect("state")
+                .dropped_queue_prompts
+                .is_empty(),
+            "resolved marker should be cleared"
+        );
+    }
+    #[test]
     fn session_check_clears_dropped_queue_marker_when_consumed_this_cycle() {
         let tmp = tempfile::TempDir::new().unwrap();
         // HEAD's queue lacks the head because the response consumed #gscaccess

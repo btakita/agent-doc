@@ -69,6 +69,45 @@ pub(crate) fn queue_contains_prompt_line(doc: &str, prompt: &str) -> bool {
         .any(|line| normalized_queue_line_for_match(line) == needle)
 }
 
+/// `#queue-user-edit-overwrite` wedge auto-clear: the `[#id]` tokens present in
+/// `doc`'s `agent:queue`, INCLUDING struck/consumed lines (`~~do [#id]~~`).
+///
+/// `committed_queue_head_ids` deliberately skips struck lines because it powers
+/// live-head accounting, but for *loss* detection a struck head visibly reached
+/// the document and was consumed — its id must still count as preserved.
+/// Without this, a dropped prompt recorded as the bare `[#id]` form stays
+/// "missing" forever when HEAD carries the struck `~~do [#id]~~` spelling
+/// (text-identity matching cannot bridge `[#id]` vs `do [#id]`), wedging
+/// `session-check` until a manual supervisor restart / patch surgery. Stripping
+/// the strike wrapper before id extraction lets the guard self-clear instead.
+pub(crate) fn queue_ids_including_struck(doc: &str) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    let Ok(components) = crate::component::parse(doc) else {
+        return ids;
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return ids;
+    };
+    for line in queue.content(doc).lines() {
+        let trimmed = line.trim();
+        let no_bullet = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+            .or_else(|| trimmed.strip_prefix("+ "))
+            .unwrap_or(trimmed)
+            .trim();
+        let unstruck = no_bullet
+            .strip_prefix("~~")
+            .and_then(|s| s.strip_suffix("~~"))
+            .or_else(|| no_bullet.strip_prefix('~').and_then(|s| s.strip_suffix('~')))
+            .unwrap_or(no_bullet);
+        for id in do_directive_target_ids_in_line(unstruck) {
+            ids.insert(id);
+        }
+    }
+    ids
+}
+
 /// `#queue-user-edit-overwrite`: fail closed when this cycle recorded a
 /// user-authored `agent:queue` edit dropped during a `content_ours` IPC adoption
 /// and that queue line is still absent from the committed `HEAD` — unless the
@@ -98,6 +137,12 @@ pub(crate) fn check_dropped_queue_prompt_guard(
         .map(String::as_str)
         .unwrap_or_default();
     let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
+    // #queue-user-edit-overwrite wedge auto-clear: id tokens preserved in the
+    // committed/visible queue in ANY form, including struck/consumed lines. A
+    // dropped `[#id]` whose id is present here visibly reached the document and
+    // was consumed in some cycle, so it is not a silent loss.
+    let visible_queue_ids = queue_ids_including_struck(&visible);
+    let head_queue_ids = queue_ids_including_struck(head);
     let still_missing: Vec<String> = state
         .dropped_queue_prompts
         .iter()
@@ -111,11 +156,22 @@ pub(crate) fn check_dropped_queue_prompt_guard(
             {
                 return false;
             }
+            let dropped_ids = do_directive_target_ids(std::slice::from_ref(prompt));
+            // Preserved by id: the dropped prompt's `[#id]` is present in the
+            // committed/visible queue (possibly as a struck `~~do [#id]~~` from a
+            // prior cycle). Text-identity matching above cannot bridge the bare
+            // `[#id]` record against the `do [#id]`/struck spelling, so without
+            // this the guard wedges `session-check` indefinitely.
+            if !dropped_ids.is_empty()
+                && dropped_ids
+                    .iter()
+                    .all(|id| visible_queue_ids.contains(id) || head_queue_ids.contains(id))
+            {
+                return false;
+            }
             // Legitimately consumed this cycle: the queued `do [#id]` id reached
             // a done/gate/reap outcome, so deleting the queue line is correct.
-            let consumed = do_directive_target_ids(std::slice::from_ref(prompt))
-                .into_iter()
-                .any(|id| resolved_ids.contains(&id));
+            let consumed = dropped_ids.iter().any(|id| resolved_ids.contains(id));
             !consumed
         })
         .cloned()

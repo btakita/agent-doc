@@ -80,7 +80,7 @@ Done — and it turned out to be agent-runnable, not operator-gated: the environ
 I seeded from `specs/local-kg-model.md` (the file that documents this contract). The two items now compose: the `#kgwiring` `graph_evidence` section will surface these `tsift-kg` `semantic_entity` / `kg_source` nodes on planning cycles that touch them. The `.tsift/graph.db` is a gitignored local artifact, so there's nothing to commit — this was a workspace-state seeding, and re-running over the same source preserves stable fact ids (per the spec's Run Manifest contract).
 
 Queue drained — both `do [#kgwiring]` and `do [#kgoperatorrun]` are complete.
-<!-- agent:boundary:4bf8f45b -->
+<!-- agent:boundary:011eb0cc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -88,7 +88,7 @@ Queue drained — both `do [#kgwiring]` and `do [#kgoperatorrun]` are complete.
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#kgwiring]~~
 - ~~do [#kgoperatorrun]~~
-- 
+- :pushpin: tsift kg should handle multiple sessions. Where it remains loaded if at least one session cla
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

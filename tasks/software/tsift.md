@@ -60,12 +60,36 @@ Drained the `[#lmlazy]` queue head. The lazy Ollama provider is now wired end-to
 - `make check` green (clippy `-D warnings` + full suite + opencode-plugin-test); 15 new `tsift-kg` tests (prompt body, schema, JSON-cleaning, repair, pipeline round-trip, + a `TSIFT_OLLAMA_SMOKE`-gated live test).
 
 Marked `#lmlazy` `[x]` done. Follow-ups (not blocking): execute the unload action (today's run used `ollama stop` directly — `build_unload_actions` plans but does not yet POST), and an ollama embedding profile wired into `tsift semantic`.
-<!-- agent:boundary:80ea8be1 -->
+
+### Re: active local-model KG usage — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: Does sift now actively use local models with the kg?
+
+
+> **Queue prompt:** Does sift now actively use local models with the kg?
+
+**Partially — one path is live, the spec-promised substrates are not.**
+
+| Surface | Active? | Evidence |
+|---|---|---|
+| `tsift kg extract` CLI | **Yes** | `packages/tsift-cli/src/commands/kg.rs:39-44` instantiates `OllamaKgExtractor`, runs `extract_documents_to_projection`, and optionally upserts into `.tsift/graph.db`. Live-verified on RTX 5090 last cycle (commit `8b9e71b`). |
+| `tsift-memgraphrag` | **No** | No `tsift-kg` Cargo dep (`packages/tsift-memgraphrag/Cargo.toml`); the crate only imports `tsift_local_model::ProviderKind` as a type (`src/lib.rs:6`). Spec line 27-28 (`memgraphrag consumes tsift-kg providers`) is **unfulfilled**. |
+| `tsift-agent-doc` | **No** | Declares `tsift-kg` as a Cargo dep but the only use is `pub use tsift_kg as kg;` in `src/lib.rs:7` — re-export, no call site. Spec line 29-30 (`agent-doc consumes graph evidence`) is **unfulfilled**. |
+| `tsift kg` subcommands | Partial | `KgCommand` enum (`packages/tsift-cli/src/cli.rs:1094`) has only `Extract`. Spec line 31-32 calls for `status`, `unload`, and smoke-test commands — **missing**. |
+| VRAM unload | **No** | Per last cycle: `build_unload_actions` plans but does not POST the ollama `keep_alive:0`; operator ran `ollama stop` directly. |
+
+**Bottom line:** local models are wired into the KG only through the standalone `tsift kg extract` command. The downstream consumers the spec names (`tsift-memgraphrag`, `tsift-agent-doc`) do not yet drive local-model inference, and the operational surface (`status`/`unload`/smoke) is incomplete.
+
+Did **not** apply the `#spec-test-build-install-commit-push` preset this cycle: the prompt was a state-assessment question, not a change request — no spec/test/code changes were made, so build/install/commit/push does not apply. Captured the four concrete gaps above as `#kgmrs`, `#kgcliext`, `#kgunloadpost`, `#kgaduse` in `agent:backlog`; `#kgmrs` is the top item (it is the largest spec-vs-reality delta).
+<!-- agent:boundary:1639c8ac -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- do [#kgmrs]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -74,6 +98,10 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#kgmrs] Wire tsift-kg into tsift-memgraphrag so it actually invokes OllamaKgExtractor (today memgraphrag has no tsift-kg Cargo dep and only references tsift_local_model::ProviderKind as a type — local-kg-model.md spec line 27-28 is unfulfilled). Plan: packages/tsift-memgraphrag/src/lib.rs
+- [ ] [#kgcliext] Add tsift kg status / tsift kg unload / tsift kg smoke subcommands per local-kg-model.md spec line 31-32 (today KgCommand only has Extract). Plan: packages/tsift-cli/src/cli.rs + packages/tsift-cli/src/commands/kg.rs
+- [ ] [#kgunloadpost] Make tsift-local-model build_unload_actions actually POST the ollama keep_alive:0 (today it plans but does not POST — operator ran ollama stop manually). Plan: packages/tsift-local-model/src/lib.rs
+- [ ] [#kgaduse] Activate or drop tsift-agent-doc's tsift-kg Cargo dep (today only 'pub use tsift_kg as kg;' re-export, no call site — dead dep per local-kg-model.md spec line 29-30). Plan: packages/tsift-agent-doc/src/lib.rs
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 

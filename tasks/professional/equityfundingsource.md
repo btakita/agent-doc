@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -131,7 +131,7 @@ Usage rules (livestream-safe):
 - It confirms the `#next-steps` line: D1 API token is unblocked, migrations 0025/0026 already applied. No prod-D1 command was run this turn — I just captured the credential location for the next time prod-D1 access is needed.
 
 Verified the path resolves on this machine (value not printed). Nothing else to action from this note.
-<!-- agent:boundary:1f75d527 -->
+<!-- agent:boundary:210f163e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -144,6 +144,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Should we change CLOUDFLARE_API_TOKEN=[REDACTED] to CLOUDFLARE_API_TOKEN=[REDACTED]
 <!-- /agent:queue -->
 
 ## Backlog

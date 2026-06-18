@@ -378,14 +378,34 @@ Implemented, not just queued. The durable defense against the multi-instance con
 - ⏳ The **live** File Cache Conflict dialog while *multiple IntelliJ windows are currently open on this workspace* is IntelliJ's own memory/disk conflict — the reaper clears the dead ones, but two live windows on one buffer still fight. That last mile is `#fcczero` (operator-verify): **collapse to a single IntelliJ window + close/reopen the file**, then confirm the dialog is gone. With one window + the reaper + the `#smconv` merge (0.34.7), the drift/FCC family should be resolved.
 
 Combined with `#smconv` (semantic structure merge, 0.34.7) and `#smturnactive` (queued — turn-active-area gating so the CRDT never touches your in-flight typing), the merge/IPC data-loss family is now: merge-not-drop (shipped), heading-prose turns (shipped), dead-consumer reap (shipped), turn-active gating (queued), live-dialog verify (operator). The controllers are marked to recycle onto 0.34.8 at the next idle boundary.
-<!-- agent:boundary:31cc5e78 -->
+
+### Re: why ~17 plugin consumers — they were dead-instance debris, not live; per-instance, and yes we can limit to 1 — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: "This session has ~17 live `jetbrains-<pid>` plugin consumers registered against this project". Why are there ~17 live plugin consumers? Is this per document or can we limit to 1?
+
+
+Good catch — my earlier "17 **live**" wording was wrong. They were **17 stale/dead consumer files**, not 17 live instances. Here's the accurate picture:
+
+**What the consumer id is.** The JB plugin generates `id = jetbrains-<pid>-<uuid>` **once per plugin process** (`TypingTracker.kt`), and patch files are named `<doc_hash>.jetbrains-<pid>-<uuid>.json`. So a consumer is **per IntelliJ instance (process)**, and the patch files are per **(document × instance)** — not one-per-document.
+
+**Why ~17 accumulated.** Each IntelliJ restart / reindex / plugin hot-reload gets a fresh pid+uuid = a fresh consumer id. The old instance's file was **never reaped on death**, so across this long session's many restarts they piled up to 17 — all from **dead** pids (I verified: `kill(pid,0)` → `ESRCH` on every one). That's exactly what `#fccreap` (0.34.8) now cleans: the closeout reaped all 17 and the count is currently **0**.
+
+**Can we limit to 1? Yes — and that's the real multi-window fix.**
+- With a **single** IntelliJ window open, there is already exactly **one live** consumer per document. The "many" was purely dead debris (now auto-reaped).
+- With **multiple** windows open on the same project, you get **one live consumer per window** — N live consumers racing patch-apply + `saveDocument` on one buffer, which is the File Cache Conflict source. `#fccreap` only reaps the *dead* ones; it does not dedupe *live* ones.
+- To enforce **one live owner per document**, I queued **`#fcconeowner`**: the plugin acquires a short-TTL per-document owner lease (lock file / sessions registry); non-owner instances defer patch-apply + save for that doc, and ownership hands off when the owner window closes. That's the durable "limit to 1" you're asking for.
+
+**Net:** per-instance by design; dead debris is now auto-reaped (`#fccreap`, count 0); limiting to one **live** consumer across windows is `#fcconeowner` (queued, plugin-side + operator-verify). Immediate mitigation remains one IntelliJ window for this workspace.
+<!-- agent:boundary:736ed35a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Still getting JB `File Cache Conflict` dialogs. Absolute 0 is the target. Only emergency cases should write to the disk. Everything else should use the editor plugin. We also need to handle conflicts with the editor plugin path.~~
-- :pushpin: "This session has ~17 live `jetbrains-<pid>` plugin consumers registered against this project". Why are there ~17 live plugin consumers? Is this per document or can we limit to 1?
+- ~~:pushpin: "This session has ~17 live `jetbrains-<pid>` plugin consumers registered against this project". Why are there ~17 live plugin consumers? Is this per document or can we limit to 1?~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md
 ```

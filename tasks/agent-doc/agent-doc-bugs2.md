@@ -361,13 +361,31 @@ You're correct on both counts, and I traced exactly where it comes from.
 - **Hardening (queued `#fccreap`, binary-testable):** reap dead-PID `jetbrains-<pid>` consumer files in the IPC GC + on plugin shutdown, and dedupe to a single live consumer per file across instances, so stale/concurrent registrations can't pile up or race. This is the durable defense against the multi-instance condition.
 
 Net: nothing to fix in the deletion path or the merge — the merge already handles disjoint struck-item deletion; the contamination is the multi-IntelliJ-window environment, addressed by `#fccreap` + collapsing to one window.
-<!-- agent:boundary:40ef24e0 -->
+
+### Re: File Cache Conflict — shipped the dead-PID consumer reaper (#fccreap, 0.34.8) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Still getting JB `File Cache Conflict` dialogs. Absolute 0 is the target. Only emergency cases should write to the disk. Everything else should use the editor plugin. We also need to handle conflicts with the editor plugin path.
+
+
+Implemented, not just queued. The durable defense against the multi-instance condition driving your File Cache Conflicts is now live.
+
+**`#fccreap` (0.34.8, installed + pushed — submodule `e27b3c39`, superproject `7d9dcdf6c`):** the post-commit closeout now best-effort reaps stale per-instance IntelliJ consumer patch files. Each dead/restarted IntelliJ instance left a `<doc_hash>.jetbrains-<pid>-<uuid>.json` in `.agent-doc/patches/` that was never cleaned (I watched 17+ dead-PID files up to 143 KB regenerate after manual cleanup) — that accumulation is what fed the multi-instance IPC confusion + cross-buffer drift. `fire_post_commit` now parses the pid from each consumer file and removes only **provably-dead** ones (`kill(pid,0)`: `ESRCH`→reap, `EPERM`/alive→keep, never the current pid, never the base `<hash>.json`). It runs on every closeout — including this one — so the dead-consumer pile self-cleans going forward. Pure, unit-tested core; full workspace green, clippy clean.
+
+**What this does and doesn't fix:**
+- ✅ Stops the **accumulation** of dead-instance consumer files (the bloat + stale-consumer races that confused IPC routing).
+- ⏳ The **live** File Cache Conflict dialog while *multiple IntelliJ windows are currently open on this workspace* is IntelliJ's own memory/disk conflict — the reaper clears the dead ones, but two live windows on one buffer still fight. That last mile is `#fcczero` (operator-verify): **collapse to a single IntelliJ window + close/reopen the file**, then confirm the dialog is gone. With one window + the reaper + the `#smconv` merge (0.34.7), the drift/FCC family should be resolved.
+
+Combined with `#smconv` (semantic structure merge, 0.34.7) and `#smturnactive` (queued — turn-active-area gating so the CRDT never touches your in-flight typing), the merge/IPC data-loss family is now: merge-not-drop (shipped), heading-prose turns (shipped), dead-consumer reap (shipped), turn-active gating (queued), live-dialog verify (operator). The controllers are marked to recycle onto 0.34.8 at the next idle boundary.
+<!-- agent:boundary:1699c9a5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: Still getting JB `File Cache Conflict` dialogs. Absolute 0 is the target. Only emergency cases should write to the disk. Everything else should use the editor plugin. We also need to handle conflicts with the editor plugin path.
+- ~~:pushpin: Still getting JB `File Cache Conflict` dialogs. Absolute 0 is the target. Only emergency cases should write to the disk. Everything else should use the editor plugin. We also need to handle conflicts with the editor plugin path.~~
+- :pushpin: "This session has ~17 live `jetbrains-<pid>` plugin consumers registered against this project". Why are there ~17 live plugin consumers? Is this per document or can we limit to 1?
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md
 ```

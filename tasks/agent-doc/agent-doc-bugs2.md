@@ -191,8 +191,13 @@ This drains the queue. The remaining backlog (`#agentreloadrestart` + `#restarta
 
 > **Queue prompt:**
 >
-> do [#agentreloadrestart]
+❯ > :pushpin: agent-doc killed equityfundingsource.md turn mid-run.
+
+
+❯ > **Queue prompt:**
 >
+> do [#agentreloadrestart]
+❯ >
 > do [#restartagentmenu]
 
 
@@ -211,7 +216,7 @@ So changing the agent today **evicts the live turn** instead of restarting at a 
 **Why I gated `#agentreloadrestart` + `#restartagentmenu` rather than auto-implementing them here:** this bug proves the change governs **cross-session turn lifecycle** — getting the kill-guard or boundary timing wrong kills live turns in *other* sessions (it just did). It is genuinely blocked on `make tmux-ci` multi-pane live verification (two panes, one mid-turn, proving the switch waits for the boundary and never evicts a running turn) — a live-pane proof this saturated, non-`/clear`ing autonomous loop cannot safely provide. The plan + exact hooks (`start.rs:171` harness resolution, `harness.rs:116` re-resolve, the route/sync cold-start path) are captured so a dedicated focused session implements it correctly with you able to watch the live restart. `#restartagentmenu` stays gated behind it (and behind operator plugin-install).
 
 Both feature heads are now gated → the queue has no agent-drainable work left; the remaining backlog (`#tsiftmdcrash`, `#jbacceptwedge`, `#rz3a`) is all operator-gated. The loop stops here.
-<!-- agent:boundary:3f0a804a -->
+<!-- agent:boundary:ecbceb4b -->
 <!-- /agent:exchange -->
 
 ## Queue

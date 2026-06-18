@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -183,7 +183,7 @@ Tweak the wording if you like, then send from Gmail. Want me to adjust tone/leng
 For local dev, set `TMO_API_TOKEN` (and optionally `TMO_API_BASE_URL`) in `.env` / `.dev.vars` — both are stubbed blank in `.env.example`.
 
 **Reconciles with last turn:** since `TMO_API_TOKEN` is already deployed and read-sync is live, the sandbox key is **already provisioned** — so the draft email to Judith asking for it may be unnecessary (or only needed if you want a *fresh/rotated* key, or a separate write-scoped one for the gated `#dzmm` writeback). Worth confirming with Lucas which token is in `TMO_API_TOKEN` before sending. I left that email in Drafts, unsent. No changes made this turn — all reads.
-<!-- agent:boundary:d76d3ab9 -->
+<!-- agent:boundary:065599e9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -196,6 +196,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application I clicked "Accept and Send to TMO" but got an error "Writeback: failed - TMO NewLoan failed with 400: {"Data":null,"ErrorMessage":"Unable to save record.\r\nDuplicate loan number.","ErrorNumber":400,"Status":-1}". The record should be associated with the TMO record in this case and the button should not be present.
 <!-- /agent:queue -->
 
 ## Backlog

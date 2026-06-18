@@ -146,7 +146,7 @@ Applied. Each backlog/review/icebox item that is **blocked by an operator action
 Left unbolded (conservative — not over-eager): `#agentreloadrestart` (blocked on agent implementation, not on you), `#restartagentmenu` (blocked on `#agentreloadrestart` first — the operator-install only comes after the build), and `#rz3a` (a DO-NOT-IMPLEMENT design gate, not an action you perform). I'll add the `**Operator action:**` bold to those if/when they become genuinely operator-gated, and I'll follow this convention on every new operator-blocked item going forward.
 
 If you want this enforced by the binary rather than by convention (auto-bold the operator action during backlog/review maintenance), say so and I'll scope it — though reliable auto-detection of "the operator action" span in free prose is the hard part, so the convention may be the cleaner path. Queue stays paused (`receipt_id=64`).
-<!-- agent:boundary:ae2c7cea -->
+<!-- agent:boundary:9a462fca -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -154,8 +154,8 @@ If you want this enforced by the binary rather than by convention (auto-bold the
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#tsiftmdcrash]~~
 - ~~:pushpin: Any backlog, review, or icebox item that is blocked by some operation action should have the operator action with bold formatting.~~
-- :pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.
-- :pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.
+- ~~:pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.~~ (filed #qheadsync)
+- ~~:pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.~~ (filed #pcwcdiskfree)
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md
 ```
@@ -170,7 +170,7 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
-- :pushpin: equityfundingsource.md & monsterrodholders.md keeps on drifting with edits.
+- ~~:pushpin: equityfundingsource.md & monsterrodholders.md keeps on drifting with edits.~~ (filed #docdriftgrace)
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

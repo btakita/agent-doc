@@ -196,13 +196,14 @@ Both drained this cycle through **one shared seam** (tsift `b7d161a`, pushed; su
 **Verified:** `make check` green (workspace + clippy clean); targeted `tsift-kg` 31 + `tsift-cli` 678 tests pass, including new coverage for the context-aware prompt builder (incl. byte-identity with no pack), `derive_seeds`, `ChunkContextSource` per-chunk retrieval, and the `extract_documents_to_projection_with_context` threading seam; `cargo install` done and `--no-context` is live on both `kg extract` and `kg refresh`. Spec (`specs/local-kg-model.md` § GraphRAG Context Retrieval) + VERSIONS updated. tsift CI run 27745965173 in progress at closeout (proceeding on local evidence).
 
 **Queue now:** only `#vmax` remains — `[operator-verify]` crates.io OIDC publishing (needs a crates.io account + browser 2FA; agent cannot perform). The `#kggraphscope` GraphRAG arc (Phases 1–3) is now complete.
-<!-- agent:boundary:8f7ef6a4 -->
+<!-- agent:boundary:836c813b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - :pushpin: Ensure that tsift works without `tsift kg`
+- do [#5hed]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -211,6 +212,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 n
 <!-- agent:backlog priority queue -->
+- [ ] [#5hed] [recommended] Add an explicit hermetic regression test asserting core commands (search/explain/graph/source-read/session-review) succeed in a workspace with NO .tsift/graph.db and an unreachable Ollama, and that none of them create a graph.db — locks the 'tsift works without tsift kg' invariant the whole suite currently only covers implicitly.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -168,7 +168,7 @@ Phase 1 of GraphRAG context is done — a deterministic, bounded known-entity-pa
 **Verified:** 8 new context_pack tests (seed-match-over-connectivity, deterministic node-id tiebreak, confidence gate, max_entities cap, bounded-scan truncation, non-entity filtering, empty-seeds connectivity ranking, default-confidence-zero); `cargo test --workspace --lib` green across all crates; clippy clean. No CLI surface changed (library API only; the `tsift` binary is unaffected), so no reinstall was needed. CI run 27743665120 in progress at closeout (proceeding on local evidence).
 
 **Queue:** `#kgctxinject` (Phase 2 — inject the pack into the extractor prompt) and `#kgctxincremental` (Phase 3 — graph-aware re-extract) added as the next actionable phases.
-<!-- agent:boundary:75775041 -->
+<!-- agent:boundary:271ad7e7 -->
 <!-- /agent:exchange -->
 
 ## Queue

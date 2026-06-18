@@ -139,7 +139,41 @@ Done. `tsift-cli` now exposes the full operational surface required by `specs/lo
 **Note on `#kgunloadpost`:** the operator-facing gap (manual `ollama stop`) is closed — `tsift kg unload` POSTs. The architectural side remains open: `build_unload_actions` in `tsift-local-model` is still a plan-only function; the new POST execution lives in `tsift-cli`. Leaving `#kgunloadpost` open with its original scope (refactor the planner to own execution so lease-drop can also POST without a CLI call).
 
 **Queue still active (2 heads):** `do [#kgunloadpost]`, `do [#kgaduse]`. Re-invoke `/agent-doc` to drain the next.
-<!-- agent:boundary:2cfc0450 -->
+
+### Re: #kgunloadpost — planner owns execution — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#kgunloadpost]
+
+
+> **Queue prompt:** do [#kgunloadpost]
+
+Done. `build_unload_actions` is no longer a plan-only function — the planner in `tsift-local-model` now owns execution end-to-end, closing the architectural side that `#kgcliext` left open (CLI was the only caller POSTing).
+
+**What landed (tsift commit `5e08f2a`, pushed `665b5a0..5e08f2a`):**
+
+New public API in `tsift-local-model` (`src/lib.rs` after `build_unload_actions`):
+- **`UnloadActionResult { label, executed, outcome }`** — serializable outcome type, reused by the CLI report.
+- **`PreparedUnloadRequest`** — pure projection of an action into a concrete request (url + body + fallback_command). Separated from execution so the body-rewriting and URL-normalization logic is fully testable without a live HTTP server.
+- **`rewrite_unload_body_model(body, model_tag)`** — fixes the silent-`--model`-override bug. `build_unload_actions` formats the body with `profile.model_ref`, so without this rewrite the override never reached the POST. Empty override is a byte-for-byte passthrough (no serde key reorder).
+- **`normalize_unload_url(endpoint)`** — appends `/api/generate` idempotently; tolerates trailing slashes; accepts either bare host or full generate URL.
+- **`prepare_unload_request(action, model_tag)`** — pure; returns `None` for non-API actions; synthesizes a body when the plan has none.
+- **`execute_unload_request(req)`** — impure; POSTs then falls back to the attached subprocess command.
+- **`execute_unload_actions(actions, model_tag)`** — chain driver with **required-action short-circuit**: once a `required: true` action succeeds, subsequent fallbacks are reported as `skipped: prior required unload succeeded`. Fixes the redundant `ollama stop` call after a successful `keep_alive:0` POST.
+- **`unload_model_at(host, model_tag)`** — fire-and-forget convenience for callers without a full action plan (used by `tsift kg smoke --unload`).
+
+**CLI refactor** (`packages/tsift-cli/src/commands/kg.rs`): `cmd_kg_unload` now delegates to `execute_unload_actions`; `KgUnloadReport` reuses the local-model `UnloadActionResult` type directly. The CLI shed ~130 lines of duplicated POST/fallback logic.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- `make check` green (clippy `-D warnings` + full suite).
+- `cargo test -p tsift-local-model --lib` → 50 passed (10 new for `#kgunloadpost`: body rewriting × 3, URL normalization × 3, prepare/request projection × 2, non-API skip, chain short-circuit).
+- `cargo install --path . --locked` → installed.
+- **Live spot-check** against `127.0.0.1:11434`: `tsift kg unload --json` → primary `ollama keep_alive zero` POST returns HTTP 200 OK; fallback `ollama stop` correctly reported `skipped: prior required unload succeeded`. Pre-refactor it was running both.
+- Submodule pointer bumped in agent-loop (`7fb19820b`).
+
+**Queue still active (1 head):** `do [#kgaduse]` — activate or drop `tsift-agent-doc`'s dead `tsift-kg` re-export.
+<!-- agent:boundary:0b7ba42f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -147,7 +181,7 @@ Done. `tsift-cli` now exposes the full operational surface required by `specs/lo
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#kgmrs]~~
 - ~~do [#kgcliext]~~
-- do [#kgunloadpost]
+- ~~do [#kgunloadpost]~~
 - do [#kgaduse]
 <!-- /agent:queue -->
 <!--
@@ -157,7 +191,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgunloadpost] Make tsift-local-model build_unload_actions actually POST the ollama keep_alive:0 (today it plans but does not POST — operator ran ollama stop manually). Plan: packages/tsift-local-model/src/lib.rs
 - [ ] [#kgaduse] Activate or drop tsift-agent-doc's tsift-kg Cargo dep (today only 'pub use tsift_kg as kg;' re-export, no call site — dead dep per local-kg-model.md spec line 29-30). Plan: packages/tsift-agent-doc/src/lib.rs
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->

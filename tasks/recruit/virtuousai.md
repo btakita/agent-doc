@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -141,13 +141,57 @@ Done. Updated both resume content stores in the `resume/` submodule:
 Also refreshed that entry's `end = "present"`, `duration = "7+ yrs"`, and added e-commerce / Cloudflare Workers / D1 / Hono / WooCommerce / Stripe / PayPal to its `skills`/`domains`. `data.toml` validated (parses cleanly, Brian Takita now has 9 accomplishments).
 
 The MonsterRodHolders content is sourced from the actual client work (the bot-attack sales analysis & traffic RCA), so the achievements are concrete and verifiable rather than generic. Resume-repo changes are left **uncommitted** in the submodule for your review (same as the transcript & message draft). Next up in the queue: building the custom VirtuousAI resume.
-<!-- agent:boundary:d41d98b8 -->
+
+### Re: draft LinkedIn message + resume path — opus-4-8
+
+> **Queue prompt:**
+>
+> Please show me the draft linkedin message to laura-rondon-de-barros and the resume path.
+
+
+**Draft LinkedIn message** → [`mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md`](../../mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md) (status: **draft, not sent**). Full text:
+
+> **To Laura** (forwardable to Chris Happ; cc Rory Donovan)
+>
+> Hi Laura,
+>
+> Thanks again for the conversation yesterday. My tailored resume is coming separately. Here's a short note you can forward to Chris & Rory with the call recording -- I want them to see why I'm the right engineer #2 for what they're building.
+>
+> Thanks,
+> Brian
+>
+> ---
+>
+> **For Chris & Rory**
+>
+> Hi Chris & Rory,
+>
+> I read the BAIO/DS2O materials and watched Chris's GROW LA panel with Mugsy. Two reasons I'm the right engineer #2:
+>
+> **I've lived the execution gap.** I run engineering & ops for MonsterRodHolders, a mid-market WooCommerce store. I'm wired into every system -- order DB, Stripe, PayPal, Cloudflare, GTM -- turning raw signals into outcomes. When revenue dipped, I pulled the order data and traced it to a card-testing bot attack (170+ failed PayPal charges silently declining real customers), quantified it, and fixed it. When the owner panicked over "zero orders today," I debunked it with live checkout tests + Cloudflare events instead of a knee-jerk rollback. That's DS2O by hand.
+>
+> **I build the substrate BAIO runs on -- in the open.** My open-source ecosystem is your architecture in miniature:
+> - **agent-doc** -- real-time *white-box* interaction with AI agents. A plain markdown document is the live control surface: queue, backlog, exchange, and the agent's reasoning all visible, editable, and git-committed. It's Rory's "deep explainability" applied at the human-agent layer, and it's the shared-workspace vision Chris described on the panel.
+> - **tsift** -- a Semantic Agent Interface over a graph + vector knowledge substrate: MemGraphRAG, a local-model knowledge graph, Graph DB + Vector DB, AST-aware code intelligence. The same shape as your Neo4j / PyTorch-Geometric graph + open-weight-model stack.
+>
+> **The fit.** 20+ years full-stack; Python, TypeScript, React & LLM integrations daily; e-commerce lineage (I helped build the CrystalCommerce platform). The last two years I've shipped production AI where the hard part was the control plane -- permissions, lifecycle, cancellation, legible to humans and agents at once. I ship Rust across crates.io, PyPI & npm.
+>
+> Engineer #2 with Rory, building explainable AI for the mid-market, is exactly the room where I do my best work. I'd love to go deep on the architecture.
+>
+> Thanks,
+> Brian
+
+**Resume** (in the `resume/` submodule, both **uncommitted**):
+- **Generated PDF** → `resume/BrianTakita-virtuousai.pdf` (42 KB) — the custom VirtuousAI resume to attach/send.
+- **Profile source** → `resume/profiles/virtuousai.toml` (4.2 KB) — the VirtuousAI-tailored profile that selects/orders the `data.toml` entries and supplies the custom summary.
+
+Underlying content stores also modified (uncommitted): `resume/data.toml` (added MonsterRodHolders + Equity Funding Source accomplishments) and `resume/BrianTakita.md` (master template).
+<!-- agent:boundary:86165db7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Please show me the draft linkedin message to laura-rondon-de-barros and the resume path.
 <!-- /agent:queue -->
 
 ## Backlog

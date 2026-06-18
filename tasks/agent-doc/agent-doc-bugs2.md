@@ -17,7 +17,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -61,7 +61,7 @@ Compacted content:
 Two real fixes shipped this session and installed: accretion default-off (`7addd9ee`) and the reactive-watch mid-turn guard (`454f935a`) — both verified, pushed, and live via `make install`. The IPC ack_mismatch also cleared after the cdylib rebuild, so `queue consume` now persists again.
 
 For the queue to terminate, the three remaining backlog items are all genuinely operator-gated: one needs a live Claude pane to validate a dispatch retry, one needs a JB plugin-side fix + install, and one needs an operator repro of fence-stripping. I've retagged all three cleanly so go-mode defers them instead of re-amplifying every cycle — that stops the self-driving churn and lets the queue reach drainable=0.
-<!-- agent:boundary:257f6376 -->
+<!-- agent:boundary:a930863e -->
 <!-- /agent:exchange -->
 
 ## Queue

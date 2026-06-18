@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -76,7 +76,31 @@ Did not touch the loan/lead/application dialogs — those stay bounded per the e
 **Verification:** `make check` green — 816 tests pass / 0 fail / 5838 expect() calls (incl. the new test); worker bundle builds clean. No CI workflow on the efs repo. Did not deploy (`#spec-test-commit-push`).
 
 **Data caveat:** I could not confirm this specific deal's live `full_applications.status` — the `CLOUDFLARE_API_TOKEN` in `src/equityfundingsource-dev/.env` is expired/invalid, so `wrangler d1 execute --remote` fails (auth 10000). If "Accepted" still doesn't check after this fix ships, this application hasn't actually reached `accepted` status: acceptance only happens via the "Accept and send to TMO" flow (`application_writeback_accept_`), which gates on TMO writeback success — currently blocked by #dzmm / #7a4d. Recorded the token refresh as #cftk.
-<!-- agent:boundary:44403246 -->
+
+### Re: #cftk — Cloudflare D1 token refresh is operator-blocked — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#cftk]
+
+Diagnosed `.env` and tested **every** stored credential — `#cftk` can't be completed this turn; it's blocked on an operator-provided credential. Gated `#cftk` with the blocker.
+
+**`.env` findings (`src/equityfundingsource-dev/.env`):**
+- `CLOUDFLARE_API_TOKEN` is a **53-char malformed value** → Cloudflare rejects it (`Invalid format for Authorization header [code: 6111]`).
+- `CLOUDFLARE_ACCOUNT_ID` is the **literal placeholder** `passage:btak/equityfundingsource/cloudflare_account_id` (54 chars), not an ID — wrangler can't auto-select an account from it. The real account is `1e7e194ff8da4ad9e40ce041aea84f76`, DB `280e1539-b940-4c59-8988-fbed63c12ac0` (per `wrangler.toml`, binding `DB`, name `equityfundingsource`). The `passage:` ref looks like an intentional deploy-loader indirection, so I left it intact.
+
+**Stored credentials tested — none can query D1 `equityfundingsource` on Brian.takita's account:**
+| candidate | result |
+|---|---|
+| `.env` token (53-char) | malformed → `6111` |
+| `btak/CLOUDFLARE_API_TOKEN` (40-char) | valid auth, **no D1 scope** → `10000` |
+| `btak/equityfundingsource/cloudflare_api_token` (53-char) | wrong account → `Couldn't find DB 'efs'` |
+| `btak/CLOUDFLARE_MEMBERSHIP_ADMIN_TOKEN` | not authorized on account → `7403` |
+
+No cached OAuth login (`~/.wrangler/config/default.toml` absent), so `make deploy` must expand the `passage:` refs through a loader rather than rely on these raw `.env` values.
+
+**Blocker (unblocks #cftk):** an operator must create a Cloudflare API token scoped with **D1 Edit** (Account → D1 → Edit) on account `1e7e194ff8da4ad9e40ce041aea84f76`, then store it (passage and/or `.env` `CLOUDFLARE_API_TOKEN`). Token creation needs the Cloudflare dashboard + your login + 2FA — I can't do it. Once provided, I'll drop it into `.env`, verify `wrangler d1 execute equityfundingsource --remote`, and run the live D1 status check `#cftk` was originally blocking.
+<!-- agent:boundary:19e5d598 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,18 +113,17 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#cftk]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#cftk] Refresh expired CLOUDFLARE_API_TOKEN in src/equityfundingsource-dev/.env — wrangler d1 execute --remote fails (auth 10000 / invalid Authorization header); blocked live D1 verification of the deal/application status this turn. Deploy auth path is unaffected.
 <!-- /agent:backlog -->
 s
 ## Review
 
 <!-- agent:review -->
+- [/] [#cftk] [blocked:operator-credential] Refresh CLOUDFLARE_API_TOKEN in src/equityfundingsource-dev/.env with a D1-Edit-scoped token on account 1e7e194ff8da4ad9e40ce041aea84f76 (DB 280e1539). No stored credential has D1 access (tested: 10000/wrong-acct/7403/malformed); operator must create the token in the Cloudflare dashboard. .env CLOUDFLARE_ACCOUNT_ID is a literal passage: placeholder (left intact).
 - [/] [#5eq8] Closing docs step (redesign): rebuild the closing-documents/notarization flow as its own step (replaces the removed Final Loan Documents section). This re-introduces a notarize control and SHOULD re-gate allocation wire status (Sent/Confirmed) on notarization — the UI gate + server 409 were removed in the 2026-06-18 AvailableDeal restructure so funding is not hard-blocked in the interim. Borrower-signature API + final_docs_* D1 columns are preserved.
 - [/] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
 - [/] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.

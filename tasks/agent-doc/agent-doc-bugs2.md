@@ -80,7 +80,7 @@ Both items were filed last cycle from ops.log evidence. Deep investigation confi
 **#dqjf:** duplicate of #6esm (same-cycle pending-add sync artifact). Removed.
 
 Queue drained. The two `[operator-verify]` items (#tsiftmdcrash, #jbacceptwedge) remain undrainable — both need operator action (crash reproduction / plugin 0.2.170 install + IntelliJ restart).
-<!-- agent:boundary:e2eb48b8 -->
+<!-- agent:boundary:9200e005 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -113,6 +113,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#fccaudit] Extend the #fccqueue editor-IPC write gate to the remaining preflight/closeout session-doc disk-write sites (boundary cleanup, compact, git checkout/commit working-tree writes) so NO agent-doc disk write touches the session doc while a JB editor listener is active. Audit every std::fs::write/atomic_write(file) call site against is_listener_active and route each through converge/IPC or document why it is editor-safe. Completes item 2 fully; queue maintenance is done in #fccqueue.
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported 'tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.' Supervisor pid 1742954 is alive now; pane %78 OpenCode TUI shows 'Thinking' normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from my cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe=(deleted)) as a crash. NEED operator to paste exact error text or the pane capture from the crash moment, or the specific cycle id, to root-cause. Not currently reproducible from logs alone.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.
 <!-- /agent:backlog -->

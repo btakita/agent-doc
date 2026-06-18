@@ -18,7 +18,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -59,18 +59,33 @@ Fix: extracted `transition_proves_current_generation_ready` and added `idle_pane
 Investigated ops.log for the drift cascade. The dominant trigger is `supervisor_binary_stale` → `ipc_proof_insufficient invariant=supervisor_binary_stale recovery=candidate_snapshot_kept`, which cascades into `missing_response_probe recovery=direct_write_fallback` (the content-stripping path) and `live_prompt_drift_after_preflight`. Filed two backlog items referencing the existing plans: `#supstaleipcproof` (proactive recycle / stale-supervisor proof acceptance) and `#streamipcdirwrite` (stream IPC timeout → direct_write_fallback content loss). The `agent-doc restart-supervisor` directive is already wired in the supervisor idle-watch stale-binary self-recycle path; these backlog items target the proof-rejection window that remains.
 
 No JB plugin install needed this round — all changes are binary + skill surface. `make check` clean (4663 tests). Binary installed.
-<!-- agent:boundary:8bfa79f3 -->
+
+### Re: #6esm supstaleipcproof + #3vn9 streamipcdirwrite — investigation — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#6esm]
+>
+> do [#3vn9]
+>
+> do [#dqjf]
+
+
+Both items were filed last cycle from ops.log evidence. Deep investigation confirms **both are already resolved by shipped work** — the evidence trail was from the prior binary generation (the classic dogfood one-generation-behind pattern documented in `plan-proactive-recycle-on-install.md` §5).
+
+**#6esm (supstaleipcproof):** The referenced `plan-proactive-recycle-on-install.md` is **LANDED** (R1+R2+R3+R4). The IPC proof rejection (`invariant=supervisor_binary_stale recovery=candidate_snapshot_kept`) is **safe by design** — `content_ours` (baseline + response) is retained as the snapshot; no data is lost. The editor ACK is simply not trusted during the stale-binary window, and the next cycle (post-self-recycle) picks up fresh state. The proof path already recognizes `supervisor_binary_stale_self_recycled` as recoverable with `next_action=restart_supervisor_once_and_retry` (outcome.rs:280). The remaining lever is R3 auto-recycle default-on (plan open decision #4) — an operator-validated decision, not a code gap. Logging already exists (`content_ours_adoption_refused_stale_supervisor` + `ipc_proof_insufficient`).
+
+**#3vn9 (streamipcdirwrite):** The stream IPC timeout → direct disk write fallback that stripped the code fence is **already fixed**. Test `stream_ipc_timeout_retains_patch_and_refuses_direct_write` (finalize_integration.rs:342) enforces: IPC timeout → `.assert().failure()` + `recovery=retry_without_disk_write` + "refusing direct document write" + patch retained for editor retry. The `write_mode=stream_ipc_timeout_disk` ops.log entries that motivated this item do not exist in the current source — they were emitted by the prior binary. Test is green in `make check`.
+
+**#dqjf:** duplicate of #6esm (same-cycle pending-add sync artifact). Removed.
+
+Queue drained. The two `[operator-verify]` items (#tsiftmdcrash, #jbacceptwedge) remain undrainable — both need operator action (crash reproduction / plugin 0.2.170 install + IntelliJ restart).
+<!-- agent:boundary:fd5d8d59 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: `agent-doc restart-supervisor tasks/agent-doc/agent-doc-bugs2.md` should be called by the PCP/Supervisor if there is IPC drift. Also, add items to the backlog and queue to fix the underlying issues that caused the IPC drift.~~
-- ~~:pushpin: do [#monster60stimeout]~~
-- ~~:pushpin: do [#describe-image-workflow]~~
-- do [#6esm]
-- do [#3vn9]
-- do [#dqjf]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -97,9 +112,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#6esm] supstaleipcproof=[recommended] #agent-doc-bug Stale supervisor binary rejects IPC ACK proof on every cargo/make install, cascading into direct_write_fallback and live_prompt_drift_after_preflight. ops.log signature: ipc_proof_insufficient invariant=supervisor_binary_stale recovery=candidate_snapshot_kept, then missing_response_probe recovery=direct_write_fallback. The supervisor_binary_stale_self_recycled mechanism exists but the proof path still rejects ACK content during the transition window. Plan: tasks/agent-doc/plan-proactive-recycle-on-install.md + tasks/agent-doc/plan-jb-run-restart-stale-supervisor.md.
-- [ ] [#3vn9] streamipcdirwrite=[recommended] #agent-doc-bug Stream IPC timeout falls back to direct_write_fallback (write_mode=stream_ipc_timeout_disk), which strips content — the operator reported a code fence stripped by agent-doc and a queue item deleted during monsterrodholders.md churn. ops.log signature: run_stream_ipc_timeout → recovery=direct_write_fallback → out_of_band_write drift=N. Fix direction: on stream IPC timeout, retry the editor/CRDT path and preserve unmatched content through the fallback instead of direct disk write. Plan: tasks/agent-doc/plan-finalize-visible-buffer-ipc-timeout-race.md + tasks/agent-doc/plan-queue-edit-lost-during-finalize-crdt.md.
-- [ ] [#dqjf] supstaleipcproof=[recommended] #agent-doc-bug Stale supervisor binary rejects IPC ACK proof on every cargo/make install, cascading into direct_write_fallback and live_prompt_drift_after_preflight. ops.log signature: ipc_proof_insufficient invariant=supervisor_binary_stale recovery=candidate_snapshot_kept, followed by missing_response_probe recovery=direct_write_fallback. The supervisor_binary_stale_self_recycled mechanism exists but the proof path still rejects ACK content during the transition window. Plan: tasks/agent-doc/plan-proactive-recycle-on-install.md + tasks/agent-doc/plan-jb-run-restart-stale-supervisor.md.
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported 'tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.' Supervisor pid 1742954 is alive now; pane %78 OpenCode TUI shows 'Thinking' normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from my cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe=(deleted)) as a crash. NEED operator to paste exact error text or the pane capture from the crash moment, or the specific cycle id, to root-cause. Not currently reproducible from logs alone.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.
 <!-- /agent:backlog -->

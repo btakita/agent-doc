@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -157,7 +157,33 @@ Drafted and pushed to your **Gmail Drafts** (not sent — yours to review/send).
 Kept it short per your note and Judith's tone (busy, gentle, no pressure, no call-duration). It frames the key as admin-portal-only (matching what I found in the sandbox UI) so the ask lands as "you're the one who can get this," and gives Robert an easy on-ramp to help.
 
 Tweak the wording if you like, then send from Gmail. Want me to adjust tone/length, thread it onto an existing Judith email, or leave as-is?
-<!-- agent:boundary:338a26a7 -->
+
+### Re: TMO sandbox API key — env variable name — opus-4-8
+
+> **Queue prompt:**
+>
+> lucas-huang told me that we are already using the sandbox api key. What is the api key env variable name?
+
+
+**The env variable is `TMO_API_TOKEN`.** Lucas is right — it's already set and in use.
+
+**Evidence (verified, no secret values printed):**
+- **Code:** `TMO_API_TOKEN` is the credential read for all live TMO API calls — `require_secret_(env.TMO_API_TOKEN, 'TMO_API_TOKEN')` in `lib/borrower/shared.ts:690,766`, plus `lib/borrower/applications/tmo_writeback.ts:305` and `lib/tmo-api/index.ts:75`. Paired with **`TMO_API_BASE_URL`** (endpoint; defaults to `https://api.themortgageoffice.com` when unset).
+- **Deployed:** `wrangler secret list` on the worker shows **`TMO_API_TOKEN`** (and `TMO_DATABASE`) as configured `secret_text`. So the sandbox token is already wired into the live worker.
+- **Working:** prod loans carry real TMO data (`tmo_loan_status`, `tmo_loan_application_status='Application Received'`, borrower fields), which only populate if the read-side `tmo-sync` is authenticating successfully with that token.
+
+**Summary for Lucas / config:**
+| purpose | env var | notes |
+|---|---|---|
+| TMO API key/token | **`TMO_API_TOKEN`** | secret; already set on the deployed worker |
+| TMO API endpoint | `TMO_API_BASE_URL` | optional; defaults to `https://api.themortgageoffice.com` |
+| TMO DB id | `TMO_DATABASE` | secret; set |
+| local sim toggles | `TMO_SIM_ENABLED` / `TMO_SIM_TOKEN` / `TMO_SIM_DATABASE` | for the in-repo TMO simulator |
+
+For local dev, set `TMO_API_TOKEN` (and optionally `TMO_API_BASE_URL`) in `.env` / `.dev.vars` — both are stubbed blank in `.env.example`.
+
+**Reconciles with last turn:** since `TMO_API_TOKEN` is already deployed and read-sync is live, the sandbox key is **already provisioned** — so the draft email to Judith asking for it may be unnecessary (or only needed if you want a *fresh/rotated* key, or a separate write-scoped one for the gated `#dzmm` writeback). Worth confirming with Lucas which token is in `TMO_API_TOKEN` before sending. I left that email in Drafts, unsent. No changes made this turn — all reads.
+<!-- agent:boundary:d76d3ab9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -170,7 +196,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- lucas-huang told me that we are already using the sandbox api key. What is the api key env variable name?
 <!-- /agent:queue -->
 
 ## Backlog

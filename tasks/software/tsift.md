@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -39,12 +39,13 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): queue drain; local-model runtime + service-vs-lazy
 - Prior summary/context: prior compacted content: Archived 14 response topic(s): queue recovery closeout; #kgm2 local model substrate; #kgm3 M...
-<!-- agent:boundary:c923de13 -->
+<!-- agent:boundary:952eecd0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#lmlazy]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

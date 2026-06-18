@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -169,7 +169,7 @@ Post-publish CI on the v0.12.0 release commit (`93d9286`) went **red** — but n
 **Scope note on `#lzbenchbudget`:** this fix updates ONLY the version tag, not the lock-acquisition budget numbers — those remain at their pre-existing values and `make benchmark-check` stays red on the same four `thread_safe` overshoots. Whether to refresh those baselines (via `make benchmark-update`) or investigate a real contention regression is the `#lzbenchbudget` judgment call, still open in backlog. The published crates.io `0.12.0` artifact carries BENCHMARKS.md with the old `0.11.1` tag (a trivial doc-string inconsistency; crates.io versions are immutable so it stands — not worth a 0.12.1 for a benchmark-report version string).
 
 **Published artifact is functionally correct** — the version-tag drift is documentation only; no code/API in the published `0.12.0` is affected. New CI run triggered by `28c170c`; finishing from local evidence (test green) per the AGENTS.md in-flight-CI rule. `#lzbenchbudget` remains the queue head (not in-session drainable, `queue_continuation_required` per binary).
-<!-- agent:boundary:2d021baa -->
+<!-- agent:boundary:bc7fda02 -->
 <!-- /agent:exchange -->
 ###
 <!--

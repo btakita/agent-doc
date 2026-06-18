@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -119,7 +119,11 @@ Done (spec + tests + commit + push; no deploy per the preset). The three cards n
 - **Single row:** `loan_detail.tsx` lays out Loan Status, Borrower Info, and Application in one wrapping flex row — Loan Status is `flex:0 0 auto` (content width, thin), the two info cards are `flex:1 1 300px`. Wraps on narrow viewports.
 
 Verification: `bun run check` green — **814 tests pass, 0 fail** (added a compact-stepper test), app + worker builds clean. Committed (`5fd227e`) + pushed to `origin/main`. Not deployed (the preset is `#spec-test-commit-push`; say the word and I'll `deploy:worker`).
-<!-- agent:boundary:7d2aef1c -->
+
+### Re: deploy — opus-4.8
+
+Deployed to production. `bun run deploy:worker` shipped the current `main` (`5fd227e`) — both the AvailableDeal restructure and the thin Loan Status node-map refinement are now live. Remote D1 migrate ran (no new migrations). Worker version `6a4c2155`; `/` and `/admin/login` return 200.
+<!-- agent:boundary:63e19414 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -132,7 +136,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

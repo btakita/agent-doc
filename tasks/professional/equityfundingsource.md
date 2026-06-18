@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -61,7 +61,7 @@ I verified this against prod D1 (`equityfundingsource`, the DB `wrangler.toml` b
 **Bottom line:** the accepted step is gated behind the **approve** action (complete full application → writeback path), which is exactly the TMO-writeback area this session has gated (`#dzmm` / `#7a4d` / `#k2xg`). For your specific deal it's most likely **(a)** — it isn't a backed full-application — but I can't rule out **(b)**.
 
 To pin it exactly, tell me: is `brian-takita.workers.dev` on the prod D1 (`280e1539`) or a separate preview DB? Or give me the borrower name/email on that deal and I'll trace its real `full_applications.status` and whether it's eligible to be approved. I made **no** data changes — all reads.
-<!-- agent:boundary:bcbbc860 -->
+<!-- agent:boundary:79666247 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,11 +74,14 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: How did the application get into the Available Deal step but not be accepted. It should be accepted before being available.
+- do [#214f]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#214f] [recommended] Gate investor deal publish on acceptance: admin_deal_publish_ (app/equityfundingsource/lib/admin/repo.ts:2054) + POST /api/admin/loans/:id/deal publish a loan to the investor marketplace with NO acceptance check (only 'if (!loan) throw'); any non-Funded loan becomes status='published'. So a deal can be an Available Deal while its application is not accepted (observed: investment_deal 7a0c1463 published from loan 45ddae53 status='submitted', tmo 'Application Received', with NO full_application row). Decide the business rule ('accepted before available') and add the gate before status='published' (and/or surface why a loan is ineligible to publish). Relates to the full_applications<->loans<->investment_deals decoupling.
 <!-- /agent:backlog -->
 
 ## Review

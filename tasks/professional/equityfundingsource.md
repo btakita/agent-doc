@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -76,7 +76,7 @@ Did not touch the loan/lead/application dialogs — those stay bounded per the e
 **Verification:** `make check` green — 816 tests pass / 0 fail / 5838 expect() calls (incl. the new test); worker bundle builds clean. No CI workflow on the efs repo. Did not deploy (`#spec-test-commit-push`).
 
 **Data caveat:** I could not confirm this specific deal's live `full_applications.status` — the `CLOUDFLARE_API_TOKEN` in `src/equityfundingsource-dev/.env` is expired/invalid, so `wrangler d1 execute --remote` fails (auth 10000). If "Accepted" still doesn't check after this fix ships, this application hasn't actually reached `accepted` status: acceptance only happens via the "Accept and send to TMO" flow (`application_writeback_accept_`), which gates on TMO writeback success — currently blocked by #dzmm / #7a4d. Recorded the token refresh as #cftk.
-<!-- agent:boundary:50c426bb -->
+<!-- agent:boundary:44403246 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,7 +97,7 @@ After 20:30
 <!-- agent:backlog priority queue -->
 - [ ] [#cftk] Refresh expired CLOUDFLARE_API_TOKEN in src/equityfundingsource-dev/.env — wrangler d1 execute --remote fails (auth 10000 / invalid Authorization header); blocked live D1 verification of the deal/application status this turn. Deploy auth path is unaffected.
 <!-- /agent:backlog -->
-
+s
 ## Review
 
 <!-- agent:review -->

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -100,7 +100,23 @@ Diagnosed `.env` and tested **every** stored credential — `#cftk` can't be com
 No cached OAuth login (`~/.wrangler/config/default.toml` absent), so `make deploy` must expand the `passage:` refs through a loader rather than rely on these raw `.env` values.
 
 **Blocker (unblocks #cftk):** an operator must create a Cloudflare API token scoped with **D1 Edit** (Account → D1 → Edit) on account `1e7e194ff8da4ad9e40ce041aea84f76`, then store it (passage and/or `.env` `CLOUDFLARE_API_TOKEN`). Token creation needs the Cloudflare dashboard + your login + 2FA — I can't do it. Once provided, I'll drop it into `.env`, verify `wrangler d1 execute equityfundingsource --remote`, and run the live D1 status check `#cftk` was originally blocking.
-<!-- agent:boundary:19e5d598 -->
+
+### Re: harness switch + cleanup — opus-4-8
+
+Bookkeeping cycle, no new directive. Two working-tree edits reconciled:
+
+- **Frontmatter `agent: opencode → claude`** — this session now attributes to Claude; I'm responding as `opus-4-8`. Closeout stays on the same finalize/`session-check` path.
+- **Removed stray `s`** between the backlog close marker and the `## Review` heading (an accidental keystroke that had been committed).
+
+Session state is otherwise quiet: Status is `completed`, the queue is drained (`queue_active=false`, no preset items), and there's no pending question or `do #id`. The commented block under the exchange tail (borrower-portal message admin/email round-trip; the post-20:30 TMO login + sync note) is parked, not an active prompt — say the word to activate any of it.
+
+**On the three `semantic_completion_match` warnings** (advisory, not acted on): they're false positives. Each flagged review item is a *still-gated follow-up*, not a duplicate of the matched done item:
+- `#dropbox-sync-adapter` (real credential-backed worker) vs done `#dropbox-sync-contract` (contract + mocked adapter only) — adapter is still gated on Dropbox access.
+- `#dzmm-writeback-replay` (outbox replay) vs done `#37ah` (broker portal backend shipped) — replay still gated on `#7a4d` field map + `#k2xg` support answers.
+- `#zwws-vestings-local` vs done `#zwws-local-first` — the local-first decomposition shipped earlier phases; the vestings/special-instructions half is still open.
+
+Left all 15 review items gated as-is; they're externally blocked (operator credentials, Dropbox access, TMO writeback field map). Nothing to close this turn.
+<!-- agent:boundary:4c8c7351 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -119,7 +135,7 @@ After 20:30
 
 <!-- agent:backlog priority queue -->
 <!-- /agent:backlog -->
-s
+
 ## Review
 
 <!-- agent:review -->

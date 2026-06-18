@@ -80,13 +80,32 @@ Both items were filed last cycle from ops.log evidence. Deep investigation confi
 **#dqjf:** duplicate of #6esm (same-cycle pending-add sync artifact). Removed.
 
 Queue drained. The two `[operator-verify]` items (#tsiftmdcrash, #jbacceptwedge) remain undrainable — both need operator action (crash reproduction / plugin 0.2.170 install + IntelliJ restart).
-<!-- agent:boundary:9200e005 -->
+
+### Re: File Cache Conflict + backlog→queue immediacy — opus-4-8
+
+> **Queue prompt:**
+>
+> `agent:backlog` with `queue` attribute should have added the backlog items into the queue immediately when the items were added to the backlog.
+
+
+Both queue items trace to one surface — preflight writing the session document to disk behind the open editor — and the dominant bug is **fixed + shipped** (agent-doc `ff4d88ef`, 0.34.2 installed).
+
+**JB `File Cache Conflict` (still occurring) — ROOT-CAUSED + FIXED (`#fccqueue`).** The 08b write-authority cutover routed the *finalize/response* writes through the editor IPC (no external-modification dialog), but `run_queue_maintenance` still persisted its own mutations (queue body sync, opening-tag activation-token strip, `queue:` frontmatter) with four **unconditional `std::fs::write(file, …)`** calls that bypassed that routing. So during a go-mode drain *every* preflight cycle touched the doc on disk while IntelliJ held it open → the conflict dialog. The four sites now route through one `persist_queue_maintenance_doc` gate: with a JB listener active it converges the queue shape through the editor (`converge_live_buffer_queue_shape` → plugin `setText` + `saveDocument`) and **skips the disk write**, logging `write_authority action=routed surface=queue_maintenance`; with no listener it writes to disk exactly as before. No plugin change needed — the convergence patch handler already persists conflict-free. This brings queue maintenance to the same `#fcc0` converge-or-disk discipline the pending/review sites already use.
+
+**`agent:backlog queue` populating the queue — already implemented at cycle boundaries; this fix is what makes it visible.** The go-mode backlog→queue sync (`#backlog-queue-attr-populates-in-go-mode`) appends fresh `queue`-attr backlog ids to the live queue on every preflight, and same-cycle `--pending-add` captures sync at closeout (`#pendingaddqueuesync`) — both covered by tests. What was broken was *persistence*: that sync wrote to disk behind the editor (the same `std::fs::write` above), so its queue updates fought the IDE buffer. `#fccqueue` is exactly what lets a `queue`-attr backlog addition reach the live editor queue without a conflict. (Operator-verify items like `#tsiftmdcrash`/`#jbacceptwedge` are correctly *excluded* from the auto-drain queue — by design, not a missing sync.)
+
+Verification: `make check` 4664 passed, clippy clean; binary built + installed 0.34.2 (`.bin` + `~/.cargo/bin`); pushed to origin/main. CI 27738315509 in progress at closeout — recorded, finishing from local evidence.
+
+Follow-ups in backlog: `#fccaudit` (extend the gate to the remaining preflight/closeout disk-write sites so "no external disk writes while the editor runs" is fully closed) and `#editsync` [recommended] (sub-cycle keystroke-level sync if next-cycle latency proves insufficient).
+<!-- agent:boundary:619f8d6e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- `agent:backlog` with `queue` attribute should have added the backlog items into the queue immediately when the items were added to the backlog.
+- ~~`agent:backlog` with `queue` attribute should have added the backlog items into the queue immediately when the items were added to the backlog.~~
+- `agent:backlog` with `queue` attribute should add remaining backlog items into the queue an prepare and finalize. Note that if items are gated or have preconditions that are not met such as a date in the future, do not add the backlog item into the queue.
+- :pushpin: do [#fccaudit]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

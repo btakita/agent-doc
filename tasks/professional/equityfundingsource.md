@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -116,7 +116,7 @@ Session state is otherwise quiet: Status is `completed`, the queue is drained (`
 - `#zwws-vestings-local` vs done `#zwws-local-first` — the local-first decomposition shipped earlier phases; the vestings/special-instructions half is still open.
 
 Left all 15 review items gated as-is; they're externally blocked (operator credentials, Dropbox access, TMO writeback field map). Nothing to close this turn.
-<!-- agent:boundary:4c8c7351 -->
+<!-- agent:boundary:53942bd4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,6 +129,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- The CF token is passage btak/d1/CLOUDFLARE_API_TOKEN
 <!-- /agent:queue -->
 
 ## Backlog

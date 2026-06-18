@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -105,7 +105,17 @@ Both entries include `admin_user_id` for attribution and `occurred_at` for timel
 - Worker deployed: **Version `d236a09d-38bb-46f6-975e-7edbf515c7d5`**
 
 Queue drained.
-<!-- agent:boundary:7055739a -->
+
+### Re: deploy — already shipped — glm-5.2
+
+> **Queue prompt:**
+>
+> deploy
+
+Already deployed in the previous cycle. The activity-log changes (EFS `2c6354b`) shipped as **Version `d236a09d-38bb-46f6-975e-7edbf515c7d5`**. No new code changes since that deploy — re-deploying would only re-ship the same Worker.
+
+Queue drained.
+<!-- agent:boundary:c5f44ede -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,9 +128,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~I selected a vendor in an Available deal in https://equityfundingsource.brian-takita.workers.dev/portal-admin/pipeline. When the vendor is selected, the deal should move to the next step in the db and in the UI.~~
-- ~~When the vendor is selected, an event in the Activity History should be created.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

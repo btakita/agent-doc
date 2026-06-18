@@ -84,7 +84,7 @@ That error is the **qflood pause protection working as intended on `equityfundin
 - **equityfundingsource.md / monsterrodholders.md heads** → cross-document. Out of scope for this `agent-doc-bugs2` session; I won't touch those docs from here (scope discipline). Their drift is the same class as `#docdriftgrace`.
 
 So nothing here is new agent-drainable work — it's the documented qflood re-presentation pattern (`recent_noop_closeouts=5`). I'm closing `#jbacceptwedge`, reporting the rest, and **not** auto-looping these stale/operator-verify/cross-doc heads (looping would just churn another no-op cycle). The remaining backlog is `#docdriftgrace`, `#pcwcdiskfree`, `#tsiftmdcrash`, `#qpauseux` — all operator-verify; review items `#restartagentmenu`, `#agentreloadrestart`, `#rz3a` need focused clean cycles / are DO-NOT-IMPLEMENT-gated.
-<!-- agent:boundary:c4afdc95 -->
+<!-- agent:boundary:730f05bb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -117,7 +117,7 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
-- [#jbacceptwedge]: 0.2.170 installed
+- ~~[#jbacceptwedge]: 0.2.170 installed~~
 - :pushpin: equityfundingsource.md & monsterrodholders.md keeps on drifting with edits.
 - ~~do [#qpauseux]~~
 <!-- /agent:queue -->

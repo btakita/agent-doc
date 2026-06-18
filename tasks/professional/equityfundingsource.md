@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -57,7 +57,26 @@ Made the published-deal (Available Deal) dialog in `/admin/pipeline` full screen
 **Deploy** (`make deploy`): migrations list remote = none pending; Worker uploaded + activated. Version ID `5ed228fb-a817-454f-9789-96566079a9c3` on `https://equityfundingsource.brian-takita.workers.dev`. Smoke: `/` → 200, `/admin/pipeline` → 303 (Cloudflare Access redirect, expected). The full-screen dialog is live behind admin auth.
 
 Did not touch the loan/lead/application dialogs — those stay bounded per the existing `#pipeline-dialog-controls-scope` test. If you want the loan dialog to also go full screen (e.g. for consistency on Available-Deals-column loans without a published deal), say the word and I'll mirror the change.
-<!-- agent:boundary:b387bd3e -->
+
+### Re: Application progress "Accepted" step never checked — glm-5.2
+
+> **Queue prompt:**
+>
+> Why is the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application > Available deal > Application > Application progress > Accepted not checked?
+
+
+> **Queue prompt:**
+>
+> Why is the …/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-…&deal_tab=application > Available deal > Application > Application progress > Accepted not checked?
+
+**Root cause (UI):** the `ApplicationProgress` stepper marked a step done only when `idx < active_idx`. Because `accepted` is the last entry in `STATUS_FLOW = ['draft','submitted','in_review','accepted']`, the "Accepted" step could never satisfy `idx < active_idx` — even when an application's status *was* `accepted`, that final step rendered as the **active** step (navy circle, number "4") instead of done (gold ✓). So "Accepted" was never checked for any accepted application.
+
+**Fix** (`src/equityfundingsource-dev` @ c10310f, pushed to `origin/main`): added `completed = status === 'accepted'` in `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`; when completed, the terminal step and its inbound connector use `idx <= active_idx` so "Accepted" renders as `is-done` (✓). Declined and in-progress statuses are unchanged. Test added: `application progress stepper checks off the accepted step once accepted` in `tests/application-status-ui.test.ts`.
+
+**Verification:** `make check` green — 816 tests pass / 0 fail / 5838 expect() calls (incl. the new test); worker bundle builds clean. No CI workflow on the efs repo. Did not deploy (`#spec-test-commit-push`).
+
+**Data caveat:** I could not confirm this specific deal's live `full_applications.status` — the `CLOUDFLARE_API_TOKEN` in `src/equityfundingsource-dev/.env` is expired/invalid, so `wrangler d1 execute --remote` fails (auth 10000). If "Accepted" still doesn't check after this fix ships, this application hasn't actually reached `accepted` status: acceptance only happens via the "Accept and send to TMO" flow (`application_writeback_accept_`), which gates on TMO writeback success — currently blocked by #dzmm / #7a4d. Recorded the token refresh as #cftk.
+<!-- agent:boundary:50c426bb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,12 +89,13 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Why is the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application > Available deal > Application > Application progress > Accepted not checked?
+- do [#cftk]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#cftk] Refresh expired CLOUDFLARE_API_TOKEN in src/equityfundingsource-dev/.env — wrangler d1 execute --remote fails (auth 10000 / invalid Authorization header); blocked live D1 verification of the deal/application status this turn. Deploy auth path is unaffected.
 <!-- /agent:backlog -->
 
 ## Review

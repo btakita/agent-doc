@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -123,7 +123,18 @@ Verification: `bun run check` green — **814 tests pass, 0 fail** (added a comp
 ### Re: deploy — opus-4.8
 
 Deployed to production. `bun run deploy:worker` shipped the current `main` (`5fd227e`) — both the AvailableDeal restructure and the thin Loan Status node-map refinement are now live. Remote D1 migrate ran (no new migrations). Worker version `6a4c2155`; `/` and `/admin/login` return 200.
-<!-- agent:boundary:20a2b3e9 -->
+
+### Re: render node labels + bring back Loan Status title, deploy — opus-4.8
+
+> **Queue prompt:**
+>
+> The node labels of LoanStatusStepper should be rendered. Bring back the "Loan Status" title since the labels + nodes are wider than the title. deploy
+
+
+Done and deployed. Reverted the compact node-map-only experiment: Loan Status now renders the full `LoanStatusStepper` — the visible "Loan Status" title plus the per-step node labels — in its content-width card within the single row. You're right that the labels are wider than the title, so hiding the title saved no width; I removed the `compact` mode entirely.
+
+Verification: `bun run check` green — **814 tests pass, 0 fail**, app + worker builds clean. Committed (`34834ec`) + pushed, superproject pointer (`35d68a56c`). Deployed to production: worker version `35957c99`; `/` and `/admin/login` return 200.
+<!-- agent:boundary:ba30a83b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -136,7 +147,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The node labels of LoanStatusStepper should be rendered. Bring back the "Loan Status" title since the labels + nodes are wider than the title. deploy
 <!-- /agent:queue -->
 
 ## Backlog

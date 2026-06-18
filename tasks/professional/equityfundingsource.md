@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -115,7 +115,7 @@ Queue drained.
 Already deployed in the previous cycle. The activity-log changes (EFS `2c6354b`) shipped as **Version `d236a09d-38bb-46f6-975e-7edbf515c7d5`**. No new code changes since that deploy — re-deploying would only re-ship the same Worker.
 
 Queue drained.
-<!-- agent:boundary:c5f44ede -->
+<!-- agent:boundary:8e2496ee -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,6 +128,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Please change /portal-admin to /admin. Are there any issues of conflict with doing this?
 <!-- /agent:queue -->
 
 ## Backlog

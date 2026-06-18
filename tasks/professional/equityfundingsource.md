@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -133,7 +133,7 @@ Checked the live sandbox via chromium-bridge (your tab [0], already logged in as
 **Housekeeping:** I navigated your TMO tab (Settings → Integrations → Marketplace) and then back toward Trust Accounts — read-only, nothing saved. If the tab looks parked on Marketplace, the hash-nav "timeout" is just the SPA not firing a load event; click Trust Accounts to refresh.
 
 Want me to dig further into a specific area (e.g., **Apps**, **Online Portals**, or the **Profile/Account** pages), or is the takeaway — "API access must come from TMO support (`#k2xg`)" — enough? No data changed.
-<!-- agent:boundary:41c04309 -->
+<!-- agent:boundary:4c3b5224 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -146,6 +146,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Please draft an email to judith-krug and robert-waldman for me to get the sandbox API key. This happens through the TMO admin portal where judith-krug is the admin. Keep it short and simple.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -39,7 +39,46 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): Is tsift kg now in active usage?
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): do [#kgwiring]; do [#kgoperatorrun]; tsift kg multi-session re...
-<!-- agent:boundary:68123efb -->
+
+### Re: Integrate memgraphrag + semantic neighborhoods + graphdb as local-model context? — yes (GraphRAG) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#kggraphscope]: Should we integrate the memgraphrag, semantic neighborhoods, and graphdb to determine the context for the local model?
+
+**Yes — this is the GraphRAG pattern, and it's the single highest-leverage quality improvement for the local KG model.** The pieces already exist; the extractor just doesn't consume them yet.
+
+**Why (verified current state):** `extract_documents_to_projection` extracts each chunk in **isolation** — `OllamaKgExtractor::chat_request_body(chunk_text)` sends only a system prompt + the raw chunk, with no graph context. That stateless design is the root of three quality problems:
+- **Duplicate / variant entities** — the model re-invents `stable_id_seed`s instead of reconciling against entities already in the graph.
+- **Missed cross-chunk relations** — an edge whose endpoints sit in different chunks is never emitted; the model never sees the other endpoint.
+- **No incremental consistency** — re-extraction duplicates instead of updating.
+
+Meanwhile the **retrieval machinery already exists** over `graph.db`: `tsift semantic` / `tsift related` (semantic-neighborhood expansion), and `tsift-memgraphrag` (`KgSemanticProvider`, `rank_memory_events` with recency/decay). So this is **wiring existing retrieval into the extractor prompt, not building retrieval.**
+
+**The design — bounded, deterministic, confidence-gated:**
+
+```mermaid
+flowchart LR
+    chunk[Source chunk] --> seed[Semantic seeds]
+    seed --> retrieve[graph.db: semantic neighborhoods + memgraphrag rank]
+    retrieve --> pack[Bounded context pack: known stable ids + labels]
+    chunk --> model[Local KG model: chunk + context]
+    pack --> model
+    model --> upsert[Upsert: stable-id reconciled]
+    upsert -.feeds next chunk.-> retrieve
+```
+
+Per chunk: seed salient terms → expand top-K neighbors by connectivity + recency (capped by token budget) → inject a compact "known entities — reuse these stable ids" block → the model aligns to canonical ids and bridges chunks → upsert preserves stable fact ids.
+
+**Why staged, not all-at-once (the guards):**
+- **Context poisoning** — only inject high-confidence, recent facts (threshold + provenance), or stale facts bias the model.
+- **Determinism** — retrieval must be stably ordered so re-runs preserve stable fact ids (Run Manifest contract).
+- **Cost / finite context window** — bounded top-K + cache seed→neighbors; the same bounded-scan discipline as `#kgwiring` (never feed the 418k-node graph). This is also where the original `#kggraphscope` evidence-cap concern folds in — same cap, now applied to retrieval.
+
+**Backlog:** I reframed **`#kggraphscope`** as Phase 1 — a bounded deterministic `kg context-pack` retrieval API (it subsumes the evidence-cap item). Phases 2 (inject into the extractor prompt) and 3 (graph-aware incremental re-extract) are in the plan: `tasks/software/plan-tsift-kg-graphrag-context.md`. This composes with `#kgleasewire` — graph-aware extraction runs the local model more, so the reference-counted load/unload lifecycle matters more.
+
+**Recommendation:** do `#kgleasewire` first (small, closes the loop on the lease lifecycle just shipped), then this — it's the bigger feature but the one that actually makes the local KG model good.
+<!-- agent:boundary:da4ccd73 -->
 <!-- /agent:exchange -->
 
 ## Queue

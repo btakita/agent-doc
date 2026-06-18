@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -116,7 +116,22 @@ Session state is otherwise quiet: Status is `completed`, the queue is drained (`
 - `#zwws-vestings-local` vs done `#zwws-local-first` — the local-first decomposition shipped earlier phases; the vestings/special-instructions half is still open.
 
 Left all 15 review items gated as-is; they're externally blocked (operator credentials, Dropbox access, TMO writeback field map). Nothing to close this turn.
-<!-- agent:boundary:b3e08834 -->
+
+### Re: Cloudflare D1 API token location — opus-4-8
+
+> **Queue prompt:**
+>
+> The CF token is passage btak/d1/CLOUDFLARE_API_TOKEN
+
+
+Noted. The Cloudflare API token for prod D1 lives at `passage btak/d1/CLOUDFLARE_API_TOKEN`. Recorded it into the `#next-steps` review item so it survives exchange compaction.
+
+Usage rules (livestream-safe):
+- Resolve it in a subshell, never inline the value: `CLOUDFLARE_API_TOKEN="$(passage btak/d1/CLOUDFLARE_API_TOKEN)" wrangler d1 ...` (or pass via env to the project's wrangler wrapper). Don't echo or `cat` the value.
+- It confirms the `#next-steps` line: D1 API token is unblocked, migrations 0025/0026 already applied. No prod-D1 command was run this turn — I just captured the credential location for the next time prod-D1 access is needed.
+
+Verified the path resolves on this machine (value not printed). Nothing else to action from this note.
+<!-- agent:boundary:1f75d527 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,7 +144,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The CF token is passage btak/d1/CLOUDFLARE_API_TOKEN
 <!-- /agent:queue -->
 
 ## Backlog

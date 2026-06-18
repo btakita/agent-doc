@@ -398,14 +398,48 @@ Good catch — my earlier "17 **live**" wording was wrong. They were **17 stale/
 - To enforce **one live owner per document**, I queued **`#fcconeowner`**: the plugin acquires a short-TTL per-document owner lease (lock file / sessions registry); non-owner instances defer patch-apply + save for that doc, and ownership hands off when the owner window closes. That's the durable "limit to 1" you're asking for.
 
 **Net:** per-instance by design; dead debris is now auto-reaped (`#fccreap`, count 0); limiting to one **live** consumer across windows is `#fcconeowner` (queued, plugin-side + operator-verify). Immediate mitigation remains one IntelliJ window for this workspace.
-<!-- agent:boundary:736ed35a -->
+
+### Re: JB `Run Agent Doc` stalled — queue is deliberately paused, root fix already shipped (operator recycle needed) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` on equityfundingsource.md
+> ```
+> [route] target tmux session: 0
+> [preflight] review: 14 item(s), 14 gated
+> [route] active closeout for tasks/professional/equityfundingsource.md could not be drained before reroute; existing queue head "Why is the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application > Available deal > Application > Application progress > Accepted not checked?" remains queued behind the closeout ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
+> ```
+
+
+That paste is not a route-find failure — the route succeeded. It found a dispatch-ready pane and repaired the stale busy projection (`generation 535`), then the **controller refused to dispatch on purpose**: `failed_stage=queue_paused`. It paused to stop churn, not because it couldn't reach the harness.
+
+**Why it paused:** the editor-IPC `content_ours` adoption bug (`live_prompt_drift`, `#semmerge`) — the live supervisor was dropping every exchange-finalize response and consuming queue heads without landing answers (last response recovered via raw git).
+
+**The fix for exactly this bug is already shipped and installed:**
+- `c300eeec` `#semmerge-owner` — node-keyed `semantic_merge` primitive.
+- `bd55c187` `#smconv` (0.34.7) — converge now node-merges live editor drift instead of the `content_ours`-wins drop. `#aqhr` is in `done.md`.
+- Installed binary is **0.34.8** (`e27b3c39`), which contains both.
+
+**Why it still bit this session:** the route-owned **supervisor is stale** — it was started on the pre-0.34.7 binary and keeps using it until recycled (`cargo install` / `lib-install` does not hot-swap a running supervisor). This very preflight still reported `ipc_proof_insufficient … invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle` and recovered the prior response from the snapshot. So the *code* is fixed; the *running process* is old.
+
+**Unblocker (operator-gated — matches the diagnostic's own `unblocker=resume_or_clear_queue_control`):** recycle the supervisor so it adopts 0.34.8, refresh the IntelliJ buffer so the editor matches HEAD, then resume. I deliberately did **not** recycle/`cargo install` from inside this session — installing a newer client against my own live stale host supervisor is the exact move that worsens `live_prompt_drift` and drops queue edits.
+
+**Queue:** leaving it paused is correct. Per the diagnostic the remaining heads are already-filed (`#routedeadshell` virtuousai crash), cross-doc (equityfundingsource), or operator-gated — nothing agent-drainable here. Not auto-looping into a degraded/unproven-IPC transport.
+<!-- agent:boundary:2f938e7b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: Still getting JB `File Cache Conflict` dialogs. Absolute 0 is the target. Only emergency cases should write to the disk. Everything else should use the editor plugin. We also need to handle conflicts with the editor plugin path.~~
-- ~~:pushpin: "This session has ~17 live `jetbrains-<pid>` plugin consumers registered against this project". Why are there ~17 live plugin consumers? Is this per document or can we limit to 1?~~
+:pushpin: JB `Run Agent Doc` stalled on this document.
+```
+[sync] recovered live pane %92 for session b26b9957 via supervisor pid 1535801
+[sync] recovered live pane %105 for session 9342c5f7 via supervisor pid 1101234
+resync: stash pane %93 is unregistered but still hosts live supervisor 62fe1f41-886c-4f3d-b6fa-48d46106ec27 — skipping kill
+[route] target tmux session: 0
+[route] authoritative actor for tasks/agent-doc/agent-doc-bugs2.md projected busy but the live pane proves a dispatch-ready prompt (generation 535); repairing stale busy projection to ready and dispatching instead of queuing
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=broken editor IPC: content_ours adoption (live_prompt_drift, #semmerge) loses every exchange-finalize response AND consumes queue heads without landing answers (recovered last response via raw git). Remaining heads are already-answered/filed (virtuousai crash=#routedeadshell), cross-doc (equityfundingsource), or operator-gated. Pausing to stop churn. Resume in a clean session (refresh IntelliJ buffer + recycle binary) and take #smconv (the converge.rs fix for this very bug) first. receipt_id=3960 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control blocked_head_bytes=44 blocked_head_sha256=4ec56b3745f04f438f52f8bffc1d7fe8b9e8e0964028b4db7008fffeb4bf4ff5 trigger_bytes=45 trigger_sha256=ce2c7a444f4ae0b6cfce11a6ceac977be5b3811138cfe31a7252a021e9b2c9ad
+```
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md
 ```
@@ -420,7 +454,7 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
-- :pushpin: do [#733r]
+- ~~:pushpin: do [#733r]~~
 - :pushpin: do [#qpauseux]
 - :pushpin: do [#tsiftmdcrash]
 - :pushpin: do [#gszq]

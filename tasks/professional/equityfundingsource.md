@@ -131,7 +131,32 @@ Usage rules (livestream-safe):
 - It confirms the `#next-steps` line: D1 API token is unblocked, migrations 0025/0026 already applied. No prod-D1 command was run this turn — I just captured the credential location for the next time prod-D1 access is needed.
 
 Verified the path resolves on this machine (value not printed). Nothing else to action from this note.
-<!-- agent:boundary:210f163e -->
+
+### Re: Repoint CLOUDFLARE_API_TOKEN to btak/d1? — opus-4-8
+
+Short answer: **I'd recommend NOT repointing the config to `btak/d1/...`. Instead keep the project-scoped path and update the value it stores.** Here's why, grounded in what I checked.
+
+**Key fact: these are two different tokens, not aliases.** I compared both passage entries by hash (values never printed):
+- `btak/equityfundingsource/cloudflare_api_token` → `2f1df31d…`
+- `btak/d1/CLOUDFLARE_API_TOKEN` → `811d11e7…`
+
+They hold **different secret values**. So this isn't a cosmetic rename — switching changes which actual credential EFS deploys/D1 ops use. Right now the repo-root `.env` and `docs/deploy.md` both resolve the EFS-scoped one; the `cf-wrangler.ts` wrapper and every `bin/cf-*.ts` script key off that.
+
+**Recommendation — update the value, keep the path (Option B):**
+```
+passage btak/equityfundingsource/cloudflare_api_token   # paste the working D1 token as the new value
+```
+One command, zero doc/config churn, and it closes review `#1v5m` (which is exactly "configure/rotate the EFS-scoped token"). Reasons I prefer this over repointing:
+- **Isolation:** EFS keeps its own secret. If `btak/d1/...` gets rotated or revoked for another project's needs, EFS deploys won't silently break.
+- **Self-documenting:** `btak/equityfundingsource/...` obviously belongs to EFS; `btak/d1/...` is ambiguous shared infra.
+- **No edit sprawl:** repointing means touching `.env`, `docs/deploy.md:21`, and `docs/operator-runbook-pending-config.md` (×3 refs). Updating the value touches nothing tracked.
+
+**When Option A (repoint to `btak/d1/...`) is the right call instead:** if your intent is deliberately "one shared Cloudflare token for all btak projects" to cut down on tokens to rotate. That's a valid infra policy — just know it couples EFS to shared infra.
+
+**One thing to confirm first (either path):** that the working token actually carries the scopes EFS needs (D1 edit + Workers deploy for the EFS account). I didn't hit the Cloudflare API unprompted, but I can verify non-destructively via `GET /user/tokens/verify` against the token (value stays masked) if you want a green light before you change anything.
+
+Want me to do it? Tell me **B** (I'll guide the one-liner / you paste the value — I won't print secrets) or **A** (I'll repoint `.env` + the two docs and run the verify check). I changed nothing this turn — this is a decision for you.
+<!-- agent:boundary:1298a39b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -144,7 +169,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Should we change CLOUDFLARE_API_TOKEN=[REDACTED] to CLOUDFLARE_API_TOKEN=[REDACTED]
+- :pushpin: Should we change CLOUDFLARE_API_TOKEN=[REDACTED] to CLOUDFLARE_API_TOKEN=[REDACTED]
 <!-- /agent:queue -->
 
 ## Backlog

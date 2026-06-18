@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -198,13 +198,28 @@ The MonsterRodHolders content is sourced from the actual client work (the bot-at
 1. **"That's DS2O by hand."** — This appropriates *their* trademarked methodology and claims your ad-hoc incident debugging is equivalent to their platform. It reads as trying too hard to speak their language back at them. Cut it.
 
 Underlying content stores also modified (uncommitted): `resume/data.toml` (added MonsterRodHolders + Equity Funding Source accomplishments) and `resume/BrianTakita.md` (master template).
-<!-- agent:boundary:1c0ea36e -->
+
+### Re: MRH is a small company, not mid-market — opus-4-8
+
+> **Queue prompt:**
+>
+> MRH is a small company. Mid size starts at $10M in revenue.
+
+Fixed — corrected the overselling. MonsterRodHolders is now described as a **small WooCommerce store** everywhere, and I removed the implicit claim that you've run *mid-market* e-commerce. Changes (all in the `resume/` submodule + mail draft, still **uncommitted** for review):
+
+- **`resume/data.toml`** — MRH accomplishment: "mid-market WooCommerce e-commerce store" → "**small** WooCommerce e-commerce store".
+- **`resume/BrianTakita.md`** (master template) — same MRH bullet fix.
+- **`resume/profiles/virtuousai.toml`** — the custom summary line (shown in the PDF) no longer claims "mid-market e-commerce execution that platforms like this serve"; it now reads "has run **hands-on small-business e-commerce operations end to end**" and "**Hands-on small-business WooCommerce operations (MonsterRodHolders)**". Also fixed two source comments.
+- **`mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md`** — "a mid-market WooCommerce store" → "a **small** WooCommerce store".
+- **`resume/BrianTakita-virtuousai.pdf`** — regenerated; verified via `pdftotext` that no "mid-market"/"mid-size" wording remains and the summary + MRH bullet both read "small."
+
+I left the message's closing line ("building explainable AI for the mid-market") untouched — that describes **VirtuousAI's** target market, not MRH, so it's a claim about them rather than an oversell of your experience. Say the word if you'd rather soften that too.
+<!-- agent:boundary:def23cfe -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- MRH is a small company. Mid size starts at $10M in revenue.
 <!-- /agent:queue -->
 
 ## Backlog

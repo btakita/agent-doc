@@ -38,21 +38,41 @@ completed
 Compacted content:
 - Archived 11 response topic(s): #monster60stimeout route ready-prompt barrier; #describe-image-workflow; IPC drift root causes + restart-supervisor directive; 8 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): JB Clear Session Context on OpenCode does not submit `/new`; O...
-<!-- agent:boundary:849dc4f1 -->
+
+### Re: JB Restart Supervisor → "Run Agent Doc" dispatch error (qflood queue pause) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: After a JB `Restart Supervisor Process` which surfaced a `Interrupt and Clear`...JB `Run Agent Doc` error
+> ```
+> resync: pruned 5 stale session(s)
+> [route] target tmux session: 0
+> Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3933 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
+> ```
+
+
+That error is the **qflood pause protection working as intended on `equityfundingsource.md`**, not a new failure. After your `Restart Supervisor Process`, "Run Agent Doc" tried to dispatch to `equityfundingsource.md`, whose queue is **paused** (`failed_stage=queue_paused reason=qflood`). The queue was auto-paused because the supervisor idle-watch was re-injecting `agent-doc` triggers on an already-drained queue (4 consecutive no-op cycles) — this is exactly **`#rz3a`** (the analyzed idle-watch re-injection bug, still gated DO-NOT-IMPLEMENT per its own directive). All real `equityfundingsource` work already shipped+deployed (`c9aa3a6` / worker `fb99f394`); only the gated `#5eq8` (design-blocked) remains, which must not auto-drain. So the dispatch is correctly **blocked, not broken** — the error even names the fix: `next_action=follow_unblocker unblocker=resume_or_clear_queue_control`.
+
+**To clear it** (run against `equityfundingsource.md` — I'm not touching that doc from this agent-doc-bugs session): `agent-doc admin queue resume tasks/professional/equityfundingsource.md` if you want to add new work, un-gate `#5eq8`, or `agent-doc admin queue clear tasks/professional/equityfundingsource.md` to drop the paused control entirely.
+
+**Real UX gap — filed `#qpauseux` [recommended].** A `queue_paused`/qflood dispatch block surfaces in JB "Run Agent Doc" as a raw red `Error:` toast rather than an actionable "queue paused — resume to continue" state. The unblocker token is in the text, but the framing reads as a crash. The plugin should render a paused-queue block as an info/action notification (with a Resume button) keyed off `ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control`.
+
+**`#routedrainnextaction` is now live.** The supervisor you restarted came up on the pre-fix binary (preflight flagged `stale_install`), so I ran `make install`: binary + cdylib rebuilt at `a24ff990` (CI green on that push), and `lib-install` marked 2 controllers to auto-recycle at the next idle boundary. After this turn the fixed route-closeout diagnostic (`recovery_command=agent-doc reset --from-current ... / write --commit ...` instead of the misleading `wait_for_owner_turn_to_drain`) is running.
+<!-- agent:boundary:1f64db68 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#docdriftgrace]
----
-:round_pushpin: After a JB `Restart Supervisor Process` which surfaced a `Interrupt and Clear`...JB `Run Agent Doc` error
+~~~done
+:pushpin: After a JB `Restart Supervisor Process` which surfaced a `Interrupt and Clear`...JB `Run Agent Doc` error
 ```
 resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3933 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
----
+~~~
+- do [#docdriftgrace]
 - ~~:pushpin: do [#routedrainnextaction]~~
 - :pushpin: agent-doc should not thrash when the document changes during a turn...when the current document does not match the snapshot. The binary should gracefully resolve the difference without the agent knowing about it. Only structural conflicts based on the current work should be surfaced...such as editing the current prompt. Unrelated changes should be gracefully handled by the agent-doc binary without the agent needed to intervene.
 - [#tsiftmdcrash]

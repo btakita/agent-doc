@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-agent: claude
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -119,7 +119,7 @@ I chose **on-demand** (vs. scheduled) as the trigger: it's deterministic, needs 
 **Verified live:** `tsift kg refresh --graph-db .tsift/graph.db` against the existing graph correctly reported the one `kg_source` (`specs/local-kg-model.md` from `#kgoperatorrun`) as `NoRecordedHash` (it predates the hash) and emitted its re-extract command. `make check` green (clippy clean; cli 389→391 tests — 2 new for `plan_refresh`); installed. Spec + VERSIONS updated. CI run 27740735657 queued at closeout (proceeding on local evidence).
 
 **Queue now:** `#kggraphscope` (the GraphRAG-context feature — the big one, plan written) is next, then `#kgleasereap` (deferred — needs clean `src/agent-doc`), plus new `#kgrefreshapply` and operator-gated `#vmax`.
-<!-- agent:boundary:14617b61 -->
+<!-- agent:boundary:2dad4b6a -->
 <!-- /agent:exchange -->
 
 ## Queue

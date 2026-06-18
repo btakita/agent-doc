@@ -337,7 +337,11 @@ queue item, or marks a specific parked item with a per-item enqueue token.
 Semantics:
 
 - "Active" backlog items are open `[ ]` items with an id. Gated (`[/]`) and done
-  (`[x]`) items are excluded — they are not actionable queue targets.
+  (`[x]`) items are excluded — they are not actionable queue targets. An open
+  item whose `not-before=YYYY-MM-DD` scheduling precondition is still in the
+  future is also excluded until its date arrives (`#backlog-not-before`; see
+  `specs/pending-system.md`), so a `queue`-attributed backlog never enqueues work
+  scheduled for later.
 - Per-item enqueue markers are idempotent and opt in only the marked open item:
   unmarked siblings are ignored, gated/done marked items are excluded, and
   existing active or struck `do [#id]` queue entries are not duplicated.
@@ -362,6 +366,32 @@ Semantics:
   bypassed the write-authority routing the finalize/response path uses. The
   private `.agent-doc/` snapshot is still written directly (never open in the
   IDE, so it cannot conflict).
+- **Remaining session-doc write-site audit (`#fccaudit`).** Extending `#fccqueue`,
+  every session-document disk-write site is audited against an active editor
+  listener and either routed through the `#fcc0` converge gate
+  (`converge_or_disk_write` / `converge_document_or_disk`) or documented as
+  editor-safe:
+  - *Normal-path writes routed through the converge gate:* the
+    `agent-doc write --status` component replace (`status_set`) and the
+    post-commit ephemeral guard-marker strip (`strip_guard_markers`, removing
+    `<!-- no-pending-capture -->` / `<!-- no-pending-done-guard -->`). With a
+    listener active they converge through editor IPC (no `File Cache Conflict`);
+    with no listener they fall back to the same byte-identical disk write.
+  - *Already editor-safe:* exchange compaction (`#w42v`), the post-commit
+    boundary reposition (skips the working-tree write while a listener is active
+    and lets the IPC reposition signal own the buffer), and the `#pcwc`
+    post-commit worktree reconcile (disk write is the HEAD-authoritative repair
+    of a working tree that *lost* committed content, immediately followed by an
+    editor-buffer IPC refresh with a stale-buffer hash guard).
+  - *Authoritative must-hit-disk by design:* the recovery / scaffold / migration
+    writes (`claim` scaffold before any editor attaches, `repair` orphan
+    recovery, preflight format migration/repair, `session-check`
+    over-application remedy, `reset` resume-clear). These restore correctness
+    when the editor or IPC path may itself be wedged, so they must write disk
+    authoritatively rather than fail closed on a live but unresponsive listener.
+  The `(HEAD)` response-heading annotations and `agent:boundary` markers are
+  *not* in scope: the working tree and editor buffer deliberately preserve them
+  so the user sees which headings are new.
 - **Active-loop population (`#backlog-queue-sync-pending-add-amplification` /
   `#backlog-queue-attr-populates-in-go-mode`).** While a queue is *persisted-active*
   (`queue_active: true`) the population rule depends on the loop mode:

@@ -761,7 +761,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `git/tests.rs` (large-module split, #splitmods2). The 6 removed
         // `guard_` occurrences were test-assertion literals, not production
         // hot-path guards.
-        ("agent-doc-orchestration/src/git.rs", "guard_") => 18,
+        // +1 (#fccaudit): `strip_guard_markers_from_disk` now routes the
+        // working-tree marker strip through `converge_or_disk_write(...,
+        // "strip_guard_markers")` instead of a bare `std::fs::write`, so no
+        // disk write touches the session doc behind a live JB editor listener.
+        // The new `guard_` occurrence is only the `"strip_guard_markers"` source
+        // label string — not a new flow guard boundary.
+        ("agent-doc-orchestration/src/git.rs", "guard_") => 19,
         ("agent-doc-orchestration/src/git/normalize.rs", "guard_") => 1,
         // +1 (`reason=committed_content_lost`): #pcwc post-commit auto-reconcile
         // logs when it restored the working tree to HEAD because committed content

@@ -1537,10 +1537,12 @@ pub fn detect_dropped_from_history_with_extra_current_ids(
 /// Gated (`[/]`) and done (`[x]`) items are excluded — they are not actionable
 /// queue targets. Items without an id are skipped.
 pub fn active_item_ids(body: &str) -> Vec<String> {
+    let today = today_civil_day();
     PendingLayout::parse(body)
         .items()
         .into_iter()
         .filter(|item| matches!(item.state, PendingState::Open) && !item.id.is_empty())
+        .filter(|item| !item_precondition_unmet(&item.text, today))
         .map(|item| item.id.clone())
         .collect()
 }
@@ -1565,11 +1567,13 @@ fn token_is_enqueue_marker(token: &str) -> bool {
 /// an item opt into queue population without requiring the whole component to
 /// carry the `queue` attribute.
 pub fn active_enqueue_item_ids(body: &str) -> Vec<String> {
+    let today = today_civil_day();
     PendingLayout::parse(body)
         .items()
         .into_iter()
         .filter(|item| matches!(item.state, PendingState::Open) && !item.id.is_empty())
         .filter(|item| item_has_enqueue_marker(&item.text))
+        .filter(|item| !item_precondition_unmet(&item.text, today))
         .map(|item| item.id.clone())
         .collect()
 }
@@ -1596,12 +1600,91 @@ pub fn item_priority_rank(text: &str) -> u8 {
 /// Active (open) backlog item ids paired with their priority rank, in document
 /// order. Used to priority-order a synced `agent:queue` (`#backlog-priority-attribute`).
 pub fn active_item_priorities(body: &str) -> Vec<(String, u8)> {
+    let today = today_civil_day();
     PendingLayout::parse(body)
         .items()
         .into_iter()
         .filter(|item| matches!(item.state, PendingState::Open) && !item.id.is_empty())
+        .filter(|item| !item_precondition_unmet(&item.text, today))
         .map(|item| (item.id.clone(), item_priority_rank(&item.text)))
         .collect()
+}
+
+/// Parse a `not-before=YYYY-MM-DD` scheduling precondition from an item's text
+/// (`#backlog-not-before`). Returns the threshold as a day number (days since
+/// 1970-01-01) so callers can compare it against [`today_civil_day`]. The token
+/// must start at a word boundary so prose does not match, and only a strict
+/// zero-or-more-digit `YYYY-MM-DD` is accepted; a malformed value is ignored (the
+/// item is then treated as having no precondition rather than silently held).
+pub fn item_not_before_day(text: &str) -> Option<i64> {
+    const TOK: &str = "not-before=";
+    let mut search = 0;
+    while let Some(rel) = text[search..].find(TOK) {
+        let idx = search + rel;
+        let boundary_ok = idx == 0
+            || !text[..idx]
+                .chars()
+                .next_back()
+                .map(|c| c.is_ascii_alphanumeric() || c == '-')
+                .unwrap_or(false);
+        search = idx + TOK.len();
+        if !boundary_ok {
+            continue;
+        }
+        let value: String = text[search..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '-')
+            .collect();
+        if let Some(day) = parse_ymd_to_civil_day(&value) {
+            return Some(day);
+        }
+    }
+    None
+}
+
+fn parse_ymd_to_civil_day(value: &str) -> Option<i64> {
+    let parts: Vec<&str> = value.split('-').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let y: i64 = parts[0].parse().ok()?;
+    let m: u32 = parts[1].parse().ok()?;
+    let d: u32 = parts[2].parse().ok()?;
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    Some(days_from_civil(y, m, d))
+}
+
+/// Days from 1970-01-01 for a proleptic Gregorian calendar date (Howard
+/// Hinnant's `days_from_civil`). Negative before the epoch.
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = (if y >= 0 { y } else { y - 399 }) / 400;
+    let yoe = y - era * 400;
+    let mp = ((m + 9) % 12) as i64;
+    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+/// Today as a day number (days since 1970-01-01, UTC) from the system clock,
+/// for evaluating `not-before=` scheduling preconditions. Best-effort: a clock
+/// before the epoch clamps to day 0.
+pub fn today_civil_day() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| (d.as_secs() / 86_400) as i64)
+        .unwrap_or(0)
+}
+
+/// True when an item's `not-before=` scheduling precondition is still in the
+/// future relative to `today` (so it must be held out of the backlog→queue
+/// sync). An item with no `not-before=` token, or with a threshold on/<= `today`,
+/// is eligible (`#backlog-not-before`).
+pub fn item_precondition_unmet(text: &str, today: i64) -> bool {
+    item_not_before_day(text).is_some_and(|day| day > today)
 }
 
 /// Parse `after=#id` dependency tokens from an item's text
@@ -2608,6 +2691,58 @@ mod tests {
     #[test]
     fn active_item_ids_empty_for_empty_body() {
         assert!(active_item_ids("").is_empty());
+    }
+
+    #[test]
+    fn active_item_ids_holds_future_not_before_items() {
+        // #backlog-not-before: a `not-before=` precondition in the future holds
+        // the item out of the backlog→queue sync; a past threshold is eligible.
+        // 2020-01-01 is always past and 2999-12-31 always future for any real
+        // test-run clock, so no clock injection is needed.
+        let body = concat!(
+            "- [ ] [#now] ready now\n",
+            "- [ ] [#past] not-before=2020-01-01 already due\n",
+            "- [ ] [#future] not-before=2999-12-31 scheduled later\n",
+        );
+        assert_eq!(active_item_ids(body), vec!["now", "past"]);
+        assert_eq!(
+            active_item_priorities(body)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec!["now", "past"]
+        );
+    }
+
+    #[test]
+    fn active_enqueue_item_ids_holds_future_not_before_items() {
+        // A future `not-before=` precondition overrides an explicit enqueue marker.
+        let body = concat!(
+            "- [ ] [#mark] /enqueue not-before=2999-12-31 scheduled later\n",
+            "- [ ] [#ready] /enqueue not-before=2020-01-01 due\n",
+        );
+        assert_eq!(active_enqueue_item_ids(body), vec!["ready"]);
+    }
+
+    #[test]
+    fn item_not_before_day_parses_and_validates() {
+        assert_eq!(item_not_before_day("not-before=1970-01-01 x"), Some(0));
+        assert_eq!(item_not_before_day("text not-before=1970-01-02 x"), Some(1));
+        // word boundary: prose / hyphenated prefix must not match
+        assert_eq!(item_not_before_day("xnot-before=2020-01-01"), None);
+        // malformed → ignored (treated as no precondition)
+        assert_eq!(item_not_before_day("not-before=2020-13-01"), None);
+        assert_eq!(item_not_before_day("not-before=garbage"), None);
+        assert_eq!(item_not_before_day("no token here"), None);
+    }
+
+    #[test]
+    fn item_precondition_unmet_compares_against_today() {
+        let today = days_from_civil(2026, 6, 18);
+        assert!(item_precondition_unmet("not-before=2026-06-19 x", today));
+        assert!(!item_precondition_unmet("not-before=2026-06-18 x", today)); // due today
+        assert!(!item_precondition_unmet("not-before=2026-06-17 x", today));
+        assert!(!item_precondition_unmet("no precondition", today));
     }
 
     #[test]

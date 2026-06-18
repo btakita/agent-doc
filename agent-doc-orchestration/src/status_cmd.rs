@@ -23,7 +23,11 @@ pub fn set(file: &Path, text: &str) -> Result<()> {
     let (full_content, comp) = find_status_component(file)?;
     let new_content = format!("\n{}\n", text);
     let new_doc = comp.replace_content(&full_content, &new_content);
-    std::fs::write(file, &new_doc)?;
+    // #fccaudit: route the status mutation through the editor-IPC converge gate
+    // so it never writes the session document behind a live JB editor buffer
+    // (File Cache Conflict). With no listener this falls back to the same plain
+    // disk write as before — byte-identical without an attached editor.
+    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "status_set")?;
     Ok(())
 }
 
@@ -129,6 +133,32 @@ pub fn reconcile_top_backlog_status_content(content: &str) -> Result<Option<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_writes_status_to_disk_without_listener() {
+        // #fccaudit: `set` now routes through `converge_or_disk_write`. With no
+        // editor IPC listener (no `.agent-doc/ipc.sock`) it must fall back to the
+        // same plain disk write as before — byte-identical without an attached
+        // editor — so the status component reflects the new text on disk.
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "## Status\n\n",
+                "<!-- agent:status patch=replace -->\n",
+                "old status\n",
+                "<!-- /agent:status -->\n",
+            ),
+        )
+        .unwrap();
+
+        set(&doc, "new status").unwrap();
+
+        let on_disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(on_disk.contains("new status"), "status not written: {on_disk}");
+        assert!(!on_disk.contains("old status"), "old status not replaced: {on_disk}");
+    }
 
     #[test]
     fn reconciles_stale_top_backlog_status_to_live_head() {

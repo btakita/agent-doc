@@ -1491,8 +1491,20 @@ fn strip_guard_markers_from_disk(file: &Path) {
     }
     if let Ok(content) = std::fs::read_to_string(file) {
         let cleaned = strip_guard_markers(&content);
+        // #fccaudit: route the working-tree guard-marker strip through the
+        // editor-IPC converge gate so it never writes behind a live JB editor
+        // buffer (File Cache Conflict). The stripped markers
+        // (`<!-- no-pending-capture -->`, `<!-- no-pending-done-guard -->`) are
+        // ephemeral directives, not `(HEAD)` annotations, so the editor buffer
+        // should drop them too. With no listener this falls back to the same
+        // byte-for-byte disk write as before.
         if cleaned != content
-            && let Err(e) = std::fs::write(file, &cleaned)
+            && let Err(e) = crate::write::converge_or_disk_write(
+                file,
+                &content,
+                &cleaned,
+                "strip_guard_markers",
+            )
         {
             eprintln!("[commit] warning: failed to strip guard markers from file: {e}");
         }

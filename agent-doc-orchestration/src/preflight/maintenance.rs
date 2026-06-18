@@ -2750,6 +2750,52 @@ mod tests {
         );
     }
     #[test]
+    fn run_queue_maintenance_holds_future_not_before_backlog_item_out_of_queue() {
+        // #backlog-not-before: a backlog item with a future `not-before=` date
+        // precondition is NOT synced into the queue (operator: "if items have
+        // preconditions that are not met such as a date in the future, do not add
+        // the backlog item into the queue"). A ready item still syncs.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#ready] do now\n",
+            "- [ ] [#later] not-before=2999-12-31 scheduled for the future\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(
+            updated.contains("- do [#ready]"),
+            "the ready item must sync into the queue:\n{updated}"
+        );
+        assert!(
+            !updated.contains("do [#later]"),
+            "a future not-before item must be held out of the queue:\n{updated}"
+        );
+        assert!(
+            !state.synced_queue_ids.contains(&"later".to_string()),
+            "future-dated id must not be a synced queue id: {:?}",
+            state.synced_queue_ids
+        );
+    }
+    #[test]
     fn closeout_sync_appends_same_cycle_pending_add_in_go_mode() {
         // #pendingaddqueuesync: pending-add writes happen after preflight queue
         // maintenance, so closeout appends recorded same-cycle ids once the

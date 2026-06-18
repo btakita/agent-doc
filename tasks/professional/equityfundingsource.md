@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -104,7 +104,7 @@ Verification: `bun run check` green — **813 tests pass, 0 fail**, app + worker
 The AvailableDeal restructure (entire queue block) was completed, verified, committed (`c9aa3a6`), pushed, and deployed last cycle (worker `fb99f394`). The queue had re-served the remaining bullets as stragglers because the per-finalize strike heuristic only consumes one head at a time — so this cycle I struck the 7 answered free-text heads (Payment Schedule removal, the field moves, the rename, the layout, and deploy) via `queue consume`. They were all already satisfied by `c9aa3a6`; nothing new was implemented.
 
 The only remaining head, `do [#5eq8]` (closing-docs/notarization redesign), is **gated** — it's blocked on design + your decision on re-gating wires on notarization (that gate is relaxed in the interim). It should not auto-implement; it now lives as a gated review item rather than an auto-drained backlog/queue head.
-<!-- agent:boundary:eb443445 -->
+<!-- agent:boundary:03fbe31d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,17 +117,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-In AvailableDeal dialog + page
-- ~~In "Loan Status", add Lender Selected step after Application Received~~
-- ~~Remove "Final Loan Documents" and all data + logic associated with it. The closing docs will be its own step defined later.~~
-- ~~Remove "Payment Schedule" and all data + logic associated with it. EFS does not collect borrower payments.~~
-- ~~Move "Property Address" from "Borrower Info" to "Application Record"~~
-- ~~Move "proposed loan amount", "loan purpose", "occupancy", "property value", "tmo loan number" from "Borrower Onboarding Data" to "Application Record"~~
-- ~~Remove "Borrower Onboarding Data"~~
-- ~~Rename "Application Record" to "Application"~~
-- ~~Make "Loan Status" thin and move "Borrower Info" in between "Loan Status" and "Application"~~
-- ~~deploy~~
-- do [#5eq8]
 <!-- /agent:queue -->
 
 ## Backlog

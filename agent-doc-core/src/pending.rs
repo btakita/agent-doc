@@ -1346,6 +1346,16 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
         .filter(|component| {
             crate::component::is_tracked_work_component(&component.name)
                 || component.name == "exchange"
+                // `agent:queue` `[#id]` / `do [#id]` heads are legitimate queue
+                // references to backlog items, NOT shadow backlog items hiding in
+                // commented-out prose. A reaped id's lingering queue head (e.g.
+                // `[#jbacceptwedge]: 0.2.170 installed`) or any `#mirrorall`-mirrored
+                // head must not be misclassified as an "open backlog item outside
+                // the live backlog" and hard-wedge preflight — the done-strike
+                // maintenance pass owns clearing resolved queue heads
+                // (#qheadsync orphan-shadow). The shadow guard targets stray prose
+                // (HTML comments, non-component sections), so exclude the queue too.
+                || component.name == "queue"
         })
         .map(|component| (component.open_start, component.close_end))
         .collect();
@@ -4489,6 +4499,53 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["live1"]
         );
+        assert_eq!(
+            report
+                .shadow_only
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["lost1"]
+        );
+    }
+
+    #[test]
+    fn detect_shadow_open_items_ignores_agent_queue_id_heads() {
+        // #qheadsync orphan-shadow: a reaped id's lingering queue head (`[#id]: note`
+        // form) or any #mirrorall-mirrored `do [#id]` head must NOT be classified as
+        // a shadow "open backlog item outside the live backlog" — the queue is a
+        // legitimate component, not stray prose. A genuine shadow item in a commented
+        // section is still caught.
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#live1] Keep in backlog\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#live1]\n",
+            "- [#reaped1]: 0.2.170 installed\n",
+            "- do [#reaped2]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- parked copy\n",
+            "- [ ] [#lost1] Drifted out of backlog\n",
+            "-->\n",
+        );
+
+        let report = detect_shadow_open_items(doc).unwrap();
+        // No queue head — reaped or mirrored — is flagged.
+        assert!(
+            report
+                .shadow_only
+                .iter()
+                .all(|item| item.id != "reaped1" && item.id != "reaped2"),
+            "reaped/mirrored queue id heads must not be shadow_only: {:?}",
+            report.shadow_only
+        );
+        assert!(
+            report.duplicated_in_live_backlog.is_empty(),
+            "queue is excluded from the scan, so the mirrored do [#live1] head is not a duplicate: {:?}",
+            report.duplicated_in_live_backlog
+        );
+        // The genuine commented-out shadow item is still caught.
         assert_eq!(
             report
                 .shadow_only

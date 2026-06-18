@@ -383,6 +383,16 @@ Combined with `#smconv` (semantic structure merge, 0.34.7) and `#smturnactive` (
 
 > **Queue prompt:**
 >
+> :pushpin: JB `Run Agent Doc` on equityfundingsource.md
+> ```
+> [route] target tmux session: 0
+> [preflight] review: 14 item(s), 14 gated
+> [route] active closeout for tasks/professional/equityfundingsource.md could not be drained before reroute; existing queue head "Why is the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application > Available deal > Application > Application progress > Accepted not checked?" remains queued behind the closeout ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
+> ```
+
+
+> **Queue prompt:**
+>
 > :pushpin: "This session has ~17 live `jetbrains-<pid>` plugin consumers registered against this project". Why are there ~17 live plugin consumers? Is this per document or can we limit to 1?
 
 
@@ -396,37 +406,24 @@ Good catch — my earlier "17 **live**" wording was wrong. They were **17 stale/
 - With a **single** IntelliJ window open, there is already exactly **one live** consumer per document. The "many" was purely dead debris (now auto-reaped).
 - With **multiple** windows open on the same project, you get **one live consumer per window** — N live consumers racing patch-apply + `saveDocument` on one buffer, which is the File Cache Conflict source. `#fccreap` only reaps the *dead* ones; it does not dedupe *live* ones.
 - To enforce **one live owner per document**, I queued **`#fcconeowner`**: the plugin acquires a short-TTL per-document owner lease (lock file / sessions registry); non-owner instances defer patch-apply + save for that doc, and ownership hands off when the owner window closes. That's the durable "limit to 1" you're asking for.
+- Installed binary is **0.34.8** (`e27b3c39`), which contains both.
+- **`#restartagentmenu`** → actionable backlog (restart-agent Phase 2). Converted with the operator-install live-gate **logging requirement** (action invocation + resolved harness).
+- Pushed: submodule `8bcbe499`, superproject pointer `4b4f33a6c`. CI was `in_progress` at push (head `8bcbe499`) — local `make check` is the green evidence; not blocking the drain on CI completion.
+- Built `cargo build --release`, `cargo install --path .` → **0.34.9**, `agent-doc lib-install` (cdylib refreshed; auto-recycle marked 2 controllers to adopt 0.34.9 at the next idle boundary).
+- `make check` green — clippy `-D warnings` + full workspace suite, exit 0; the 7 `overlay` tests pass including the new one.
+- **`#agentreloadrestart`** → actionable backlog (restart-agent Phase 1, foundational). Converted with explicit **logging requirements** (`harness_change_detected`, `agent_restart_boundary_gate`, `agent_restart_performed` → ops.log) so the live supervisor gate can be proven/disproven from logs.
+- **`#semmerge` (parent)** — Phase 1 (`#semmerge-owner`) and Phase 2 (`#aqhr`/`#smconv`) are shipped/in `done.md`. The remaining phases are now all actionable backlog: `#msn6` (Ph6 turn-active) and `#pk3f` (Ph4 ack-turn) already existed; I added **`#smqstrike`** (Ph3 queue-node-strike) and **`#smsim`** (Ph5 SimWorld matrix). Parent review entry removed.
+- `bd55c187` `#smconv` (0.34.7) — converge now node-merges live editor drift instead of the `content_ours`-wins drop. `#aqhr` is in `done.md`.
+- `c300eeec` `#semmerge-owner` — node-keyed `semantic_merge` primitive.
 
 **Net:** per-instance by design; dead debris is now auto-reaped (`#fccreap`, count 0); limiting to one **live** consumer across windows is `#fcconeowner` (queued, plugin-side + operator-verify). Immediate mitigation remains one IntelliJ window for this workspace.
 
-### Re: JB `Run Agent Doc` stalled — queue is deliberately paused, root fix already shipped (operator recycle needed) — opus-4-8
+### Re: virtuousai crash deleted my queue item — the crash is #routedeadshell, the lost queue edit is a new durability gap (#qdurcrash) — opus-4-8
 
 > **Queue prompt:**
 >
-> :pushpin: JB `Run Agent Doc` on equityfundingsource.md
-> ```
-> [route] target tmux session: 0
-> [preflight] review: 14 item(s), 14 gated
-> [route] active closeout for tasks/professional/equityfundingsource.md could not be drained before reroute; existing queue head "Why is the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application > Available deal > Application > Application progress > Accepted not checked?" remains queued behind the closeout ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
-> ```
+> :pushpin: - I added a queue item and ran JB `Run Agent Doc` on virtuousai.md, the turn started. I navigated away. When I navigated back, supervisor/tmux pane crashed and restarted. My queue item was deleted.
 
-
-That paste is not a route-find failure — the route succeeded. It found a dispatch-ready pane and repaired the stale busy projection (`generation 535`), then the **controller refused to dispatch on purpose**: `failed_stage=queue_paused`. It paused to stop churn, not because it couldn't reach the harness.
-
-**Why it paused:** the editor-IPC `content_ours` adoption bug (`live_prompt_drift`, `#semmerge`) — the live supervisor was dropping every exchange-finalize response and consuming queue heads without landing answers (last response recovered via raw git).
-
-**The fix for exactly this bug is already shipped and installed:**
-- `c300eeec` `#semmerge-owner` — node-keyed `semantic_merge` primitive.
-- `bd55c187` `#smconv` (0.34.7) — converge now node-merges live editor drift instead of the `content_ours`-wins drop. `#aqhr` is in `done.md`.
-- Installed binary is **0.34.8** (`e27b3c39`), which contains both.
-
-**Why it still bit this session:** the route-owned **supervisor is stale** — it was started on the pre-0.34.7 binary and keeps using it until recycled (`cargo install` / `lib-install` does not hot-swap a running supervisor). This very preflight still reported `ipc_proof_insufficient … invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle` and recovered the prior response from the snapshot. So the *code* is fixed; the *running process* is old.
-
-**Unblocker (operator-gated — matches the diagnostic's own `unblocker=resume_or_clear_queue_control`):** recycle the supervisor so it adopts 0.34.8, refresh the IntelliJ buffer so the editor matches HEAD, then resume. I deliberately did **not** recycle/`cargo install` from inside this session — installing a newer client against my own live stale host supervisor is the exact move that worsens `live_prompt_drift` and drops queue edits.
-
-**Queue:** leaving it paused is correct. Per the diagnostic the remaining heads are already-filed (`#routedeadshell` virtuousai crash), cross-doc (equityfundingsource), or operator-gated — nothing agent-drainable here. Not auto-looping into a degraded/unproven-IPC transport.
-
-### Re: virtuousai crash deleted my queue item — the crash is #routedeadshell, the lost queue edit is a new durability gap (#qdurcrash) — opus-4-8
 
 Two separate things in this report; one is already filed, one is genuinely new.
 
@@ -437,32 +434,12 @@ Two separate things in this report; one is already filed, one is genuinely new.
 **The second head — "JB Run Agent Doc stalled" with `failed_stage=queue_paused reason=broken editor IPC (content_ours / live_prompt_drift, #semmerge)`** — is not a new bug: that pause came from a **stale supervisor** running a pre-0.34.7 binary that still did the `content_ours`-wins drop. The installed binary is now **0.34.8** (`e27b3c39`) with `#smconv`/`#semmerge-owner`. Recycle the route-owned supervisor (so it adopts 0.34.8) and resume — the deliberate pause clears. No agent fix needed beyond the recycle.
 
 Net: nothing new on the crash (operator-gated on scrollback), the lost-queue-item is now a durable actionable item (`#qdurcrash`), and the stall is the known stale-supervisor pause that 0.34.8 + recycle resolves.
-
-### Re: equityfundingsource route paste is `ok` (cross-doc), and I cleared the gated review items per your standing directive — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: - I added a queue item and ran JB `Run Agent Doc` on virtuousai.md, the turn started. I navigated away. When I navigated back, supervisor/tmux pane crashed and restarted. My queue item was deleted.
-
-
-**The equityfundingsource `Run Agent Doc` paste is not a failure — nothing to do here.** Its outcome is `ui_outcome_class=ok ui_outcome=queued_behind_owner next_action=wait_for_owner_turn_to_drain`: the route reached the harness, saw an active closeout already owns that document, and correctly **queued behind the owner** (the "Accepted not checked?" head waits its turn). That is the designed behavior, it is cross-document (equityfundingsource.md), and it is informational drift re-pasted into this doc's exchange — I am not acting on it from this session (scope discipline). The earlier `queue_paused`/`qflood` paste below it is the already-explained stale-supervisor pause that 0.34.8 + recycle clears.
-
-**Executed your standing directive: "make backlog replacements for all gated review items … no more gates … clear the review items."** I removed all three gated `agent:review` items and ensured every one is now tracked as an **actionable** backlog item (no gates):
-
-- **`#semmerge` (parent)** — Phase 1 (`#semmerge-owner`) and Phase 2 (`#aqhr`/`#smconv`) are shipped/in `done.md`. The remaining phases are now all actionable backlog: `#msn6` (Ph6 turn-active) and `#pk3f` (Ph4 ack-turn) already existed; I added **`#smqstrike`** (Ph3 queue-node-strike) and **`#smsim`** (Ph5 SimWorld matrix). Parent review entry removed.
-- **`#agentreloadrestart`** → actionable backlog (restart-agent Phase 1, foundational). Converted with explicit **logging requirements** (`harness_change_detected`, `agent_restart_boundary_gate`, `agent_restart_performed` → ops.log) so the live supervisor gate can be proven/disproven from logs.
-- **`#restartagentmenu`** → actionable backlog (restart-agent Phase 2). Converted with the operator-install live-gate **logging requirement** (action invocation + resolved harness).
-
-`agent:review` is now **empty**. Per your "make sure all JB live gate items have adequate logging" note, both restart-agent items carry concrete ops.log signals to prove/disprove. I will tell you when JB plugin builds are needed: **`#restartagentmenu`, `#8bfz`, and `#qpauseux`** are the plugin-side items that will require an install + live gate when implemented — none are built this cycle (this cycle was the review/backlog restructure only).
-
-Note: session accretion is at `warn` (exchange ~393 lines / 22 sections); the queue is active so I am not stopping to compact — flagging the size in one line per the guidance.
-<!-- agent:boundary:2b9ca9fc -->
+<!-- agent:boundary:a673ff9a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: - I added a queue item and ran JB `Run Agent Doc` on virtuousai.md, the turn started. I navigated away. When I navigated back, supervisor/tmux pane crashed and restarted. My queue item was deleted.~~
 - :pushpin: [#1vhn]
 - :pushpin: JB `Run Agent Doc` stalled on this document.
 ```
@@ -489,17 +466,18 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - ~~:pushpin: do [#733r]~~
 - :pushpin: do [#qpauseux]
 - :pushpin: do [#tsiftmdcrash]
-- :pushpin: do [#gszq]
+- ~~:pushpin: do [#gszq]~~
 - :pushpin: do [#supselfheal]
 - :pushpin: do [#pk3f]
 - :pushpin: do [#msn6]
 - :pushpin: do [#cyh0]
-- do [#1vhn]
-- do [#docdriftgrace]
-- do [#8bfz]
-- do [#qdurcrash]
-- do [#smqstrike]
-- do [#smsim]
+- :pushpin: do [#docdriftgrace]
+- :pushpin: do [#8bfz]
+- :pushpin: do [#qdurcrash]
+- :pushpin: do [#smqstrike]
+- :pushpin: do [#smsim]
+- :pushpin: do [#agentreloadrestart]
+- :pushpin: do [#restartagentmenu]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -534,7 +512,6 @@ What are #next-steps to fix bugs?
 - [ ] [#smqstrike] #semmerge Phase 3 (queue-node-strike): route queue_consume strike-through through the markdown_ast semantic_merge merged node tree (shipped #semmerge-owner c300eeec) instead of the line-level strike, so an answered/consumed queue head is struck on the merged structure and survives concurrent operator queue edits. Plan: tasks/agent-doc/plan-semantic-ast-merge.md
 - [ ] [#smsim] #semmerge Phase 5 (simworld matrix): add deterministic SimWorld coverage of the operator<->agent concurrent-edit matrix against semantic_merge — node-disjoint auto-merge, same-node operator-wins, operator-deleted-agent-edited-node ack, turn-active vs unrelated-area gating — so the merge/IPC data-loss family is regression-locked. Plan: tasks/agent-doc/plan-semantic-ast-merge.md
 - [ ] [#supselfheal] #supselfheal agent-doc-bug: a stale-binary route-owned supervisor has NO non-disruptive self-heal, so it wedges editor IPC indefinitely. Observed 0.34.4: supervisor pid 3218321 mapped a stale binary → every finalize/write --commit refused (socket ack timeout → file-IPC no_ack → recovery=retry_without_disk_write / reason=send_failed); an orphaned 2398-byte response could not land across 4 invocations. Root gaps: (1) `agent-doc admin recycle` only recycles CONTROLLERS, never the route-owned supervisor (no CLI recycles a supervisor); (2) supervisor idle self-recycle exists (start/idle_watch.rs supervisor_perform_reexec via execve_preserve_child) but is default-OFF (AGENT_DOC_SUPERVISOR_AUTO_RECYCLE), so supervisor_recycle_action returns Detect-only and keeps the stale binary; (3) the trigger is idle-boundary only — a paused/wedged queue may never reach it, and the wedge itself is not used as a recycle trigger; (4) re-exec ENOENT (inode deleted by make install) falls back to continue_current_binary forever with no kill+relaunch escalation; (5) SKILL.md/queue_continuation_guidance FALSELY claim a stale/wedged supervisor self-heals via drain-lease expiry. Net: indefinite operator-only wedge while the agent correctly refuses force-disk/restart-supervisor (live JetBrains editor). Fix: extend start/decisions.rs::supervisor_recycle_action with write_wedged + EscalateKillRelaunch rows; make admin recycle reach the supervisor (explicit-intent override of default-OFF); wedge-trigger recycle from write/converge.rs; wire kill+relaunch on re-exec failure; correct the guidance. Phase 1 (admin recycle reaches supervisor) is the quick-win. Plan: tasks/agent-doc/plan-stale-supervisor-wedge-no-selfheal.md
-- [ ] [#gszq] #mdastclose #agent-doc-bug agent-doc-markdown-ast overlay::Component::end_byte is wrong for the standard close-marker spelling (slash-then agent:name): parse_close_marker only recognizes the agent:slash-name form, so for the real spelling the component implicitly closes and end_byte points just past the open marker. components()/items still parse via implicit-close so item parsing is unaffected, but consumers relying on Component.end_byte byte-span slicing get a wrong range. Fix parse_close_marker in overlay.rs to accept the slash-then-name form; add a test asserting end_byte spans the full component for both spellings. Found during #semmerge-owner (worked around with a local marker scan).
 - [ ] [#1vhn] #routedeadshell agent-doc-bug: JB Run Agent Doc dispatched the agent-doc FILE trigger into a bare zsh % shell on recruit/virtuousai.md (harness had crashed/exited to a shell), so it did not submit (screenshot img_48.png, ~14:03, during a /model opus switch). REPRO (operator 2026-06-18): Run Agent Doc on virtuousai.md -> supervisor + tmux pane CRASHED 2 times -> 3rd attempt stalled -> operator manually ran agent-doc. So the supervisor/pane crash on this dispatch path is REPRODUCIBLE, not a one-off. Route must positively identify a HARNESS dispatch-ready prompt and treat a bare shell prompt as NOT-ready -> fail closed with claim/restart guidance (or auto-restart) instead of typing into the shell; re-verify the harness prompt immediately before send to close the crash-mid-dispatch race; add a dead-harness route diagnostic + SimWorld coverage. Separately root-cause WHY the supervisor+pane crash repeats (the /model opus switch/restart is the lead). **Operator action: if it recurs, capture .agent-doc/logs/supervisor-stderr.log + the pane scrollback at the crash moment.** Plan: tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md
 - [ ] [#733r] #qheadsync agent-doc-bug: answered/filed queue heads are not reliably reconciled to the queue (free-text reports left un-struck; done-reaping orphans the matching id-backed queue head; manual strikes do not persist through finalize content_ours; backlog-to-queue sync has no sweep for items missed in prior turns and items can be lost). Fix at closeout in the binary. Plan: tasks/agent-doc/plan-answered-queue-head-autostrike.md
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block as a raw red Error: toast instead of an actionable queue paused — resume notification. Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button rather than a dispatch error. **Operator action: install the updated JB plugin, then verify the paused-queue notification renders (live gate).**

@@ -149,6 +149,13 @@ The accept-loop wedge (`#jbacceptwedge`) lived in the socket listener's `start_l
 - Detection signal, not hard assertion. Coverage: `fence_count_drop_is_logged_for_visible_document_write` + `count_code_fence_openings_handles_backtick_and_tilde`. cargo test + FlowCore budget gate green.
 - `log_fence_count_drop_if_any(path, new_content)` — reads existing file before each visible-document write, counts fences in old vs new, logs `fence_count_dropped file=... old_fences=N new_fences=M` to `ops.log` when the count drops.
 - `count_code_fence_openings(content)` — counts ``` and ~~~ fence-opening lines.
+- `route_dispatch_start_late_resubmit_proven file=… harness=… dispatch_stage=… retry=late_enter` — the retry succeeded.
+- `route_submit_late_resubmit file=… pane=… harness=claude cause=dispatch_start_unproven_prompt_visible` — the retry fired.
+5. Waits for proof again, emits markers.
+4. If visible + `pending_draft_enter_resubmit()` (which returns `true` for ALL harnesses, `sessions.rs:253`) → sends a single bounded Enter retry (`send_direct_pane_enter_resubmit`, retry=1).
+3. That captures the pane, checks if the drafted trigger is still visible (`direct_pane_existing_draft_visible`).
+2. If proof doesn't arrive and status is `Accepted`, calls `try_late_direct_pane_enter_resubmit_after_unproven_dispatch`.
+1. `dispatch_routed_reopen_with_mode` sends text + Enter, waits for dispatch-start proof.
 
 **No code changes.** `#vscode-socket-parity` marked done via `--done`.
 
@@ -165,7 +172,7 @@ The accept-loop wedge (`#jbacceptwedge`) lived in the socket listener's `start_l
 **`#codefence-strip` done** (detection shipped). `#fence-strip-fix [operator-verify: repro needed]` already in backlog for the definitive preservation fix — needs your repro (which document/run/fence). Parsing path already masks fences (`#0kjc`/`#lintfence`).
 
 **Not installed mid-session** — detection live after next `make install` + recycle. **Companion source uncommitted**: say the word and I'll commit + push.
-<!-- agent:boundary:f5c40802 -->
+<!-- agent:boundary:c5c30f0e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -204,7 +211,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#fence-strip-fix] [operator-verify: repro needed] Definitive fence-preservation fix. Detection logging shipped (#codefence-strip done), but the root-cause fix needs operator repro: which document/run/fence was stripped. Once captured, bisect the sanitize/normalize/materialize transformation that dropped the fence (parsing path already masks fences via #0kjc/#lintfence). The new fence_count_dropped ops.log marker will catch the next incident automatically.
-- [ ] [#claudesubmit] [operator-verify: live Claude-pane validation] Claude/OpenCode dispatch-only submit proof + bounded Enter retry. Root cause found (no prompt-submit hook → accepted-only without retry). Plan ready: tasks/agent-doc/plan-claude-dispatch-submit-proof-retry.md. Code impl is planned; validating the retry genuinely needs a live Claude pane (operator), so deferring until operator can validate.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.
 <!-- /agent:backlog -->
 

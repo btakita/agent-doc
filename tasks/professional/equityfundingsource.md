@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -89,6 +89,11 @@ One thing to decide for the fix: for **TMO-originated** loans (like this one —
 
 ### Re: do #214f (gate publish on acceptance) — one decision needed first — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#214f]
+
+
 
 I want to implement this, but I'm **holding on the commit+push** because the fix turns on a business rule I can't safely guess — and I'd be pushing investor-facing logic to the prod repo. `#214f` is the item I just filed this turn; `do [#214f]` got auto-queued by go-mode before that rule is settled. **#214f stays OPEN — I am not completing it this turn.**
 
@@ -108,7 +113,7 @@ Gate `admin_deal_publish_` (and `POST /api/admin/loans/:id/deal`) to **refuse pu
 **What I need from you (one answer unblocks the whole thing):** for TMO loans, which `tmo_loan_status` values are "approved enough to be an Available Deal"? Give me that list (or say "use EFS full_application acceptance only, and TMO loans shouldn't be publishable at all") and I'll implement the gate, add tests, and commit+push.
 
 No code or data changed this turn.
-<!-- agent:boundary:a1951abd -->
+<!-- agent:boundary:5d1dee8f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -121,19 +126,17 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: How did the application get into the Available Deal step but not be accepted. It should be accepted before being available.~~
-- do [#214f]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#214f] [recommended] Gate investor deal publish on acceptance: admin_deal_publish_ (app/equityfundingsource/lib/admin/repo.ts:2054) + POST /api/admin/loans/:id/deal publish a loan to the investor marketplace with NO acceptance check (only 'if (!loan) throw'); any non-Funded loan becomes status='published'. So a deal can be an Available Deal while its application is not accepted (observed: investment_deal 7a0c1463 published from loan 45ddae53 status='submitted', tmo 'Application Received', with NO full_application row). Decide the business rule ('accepted before available') and add the gate before status='published' (and/or surface why a loan is ineligible to publish). Relates to the full_applications<->loans<->investment_deals decoupling.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#214f] [recommended] Gate investor deal publish on acceptance: admin_deal_publish_ (app/equityfundingsource/lib/admin/repo.ts:2054) + POST /api/admin/loans/:id/deal publish a loan to the investor marketplace with NO acceptance check (only 'if (!loan) throw'); any non-Funded loan becomes status='published'. So a deal can be an Available Deal while its application is not accepted (observed: investment_deal 7a0c1463 published from loan 45ddae53 status='submitted', tmo 'Application Received', with NO full_application row). Decide the business rule ('accepted before available') and add the gate before status='published' (and/or surface why a loan is ineligible to publish). Relates to the full_applications<->loans<->investment_deals decoupling.
 - [/] [#cftk] [blocked:operator-credential] Refresh CLOUDFLARE_API_TOKEN in src/equityfundingsource-dev/.env with a D1-Edit-scoped token on account 1e7e194ff8da4ad9e40ce041aea84f76 (DB 280e1539). No stored credential has D1 access (tested: 10000/wrong-acct/7403/malformed); operator must create the token in the Cloudflare dashboard. .env CLOUDFLARE_ACCOUNT_ID is a literal passage: placeholder (left intact).
 - [/] [#5eq8] Closing docs step (redesign): rebuild the closing-documents/notarization flow as its own step (replaces the removed Final Loan Documents section). This re-introduces a notarize control and SHOULD re-gate allocation wire status (Sent/Confirmed) on notarization — the UI gate + server 409 were removed in the 2026-06-18 AvailableDeal restructure so funding is not hard-blocked in the interim. Borrower-signature API + final_docs_* D1 columns are preserved.
 - [/] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.

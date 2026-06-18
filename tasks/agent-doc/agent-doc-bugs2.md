@@ -146,7 +146,24 @@ Applied. Each backlog/review/icebox item that is **blocked by an operator action
 Left unbolded (conservative — not over-eager): `#agentreloadrestart` (blocked on agent implementation, not on you), `#restartagentmenu` (blocked on `#agentreloadrestart` first — the operator-install only comes after the build), and `#rz3a` (a DO-NOT-IMPLEMENT design gate, not an action you perform). I'll add the `**Operator action:**` bold to those if/when they become genuinely operator-gated, and I'll follow this convention on every new operator-blocked item going forward.
 
 If you want this enforced by the binary rather than by convention (auto-bold the operator action during backlog/review maintenance), say so and I'll scope it — though reliable auto-detection of "the operator action" span in free prose is the hard part, so the convention may be the cleaner path. Queue stays paused (`receipt_id=64`).
-<!-- agent:boundary:a3eff37e -->
+
+### Re: mirror all backlog items into the queue (+ sweep for missed) — opus-4-8
+
+> **Queue prompt:**
+>
+> ~~:pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.~~ (filed #qheadsync)
+
+
+Shipped agent-doc **0.34.5** (`e71b87df`, CI green). The backlog→queue sync now mirrors **all** open `queue`-attr backlog items into the queue — including `[operator-verify]` ones — instead of skipping them. Verified live: preflight just logged `mirrored 3 operator-verify backlog head(s)` and the queue now carries `do [#qpauseux]`, `do [#733r]` (the restored `#qheadsync`), with `#docdriftgrace`/`#tsiftmdcrash` already present from prior heads.
+
+**Two mechanisms, as you asked:**
+- **Immediate add** on creation (already worked for actionable items; now also mirrors operator-verify).
+- **Reconciliation sweep** — the per-preflight sync is idempotent and runs every cycle, so any backlog item missing from the queue (added before activation, or *lost in a prior-turn drift* — which is exactly what happened to `#qheadsync`, now restored as `#733r`) is re-mirrored on the next preflight. That's the redundancy.
+
+**Loop stays safe:** mirrored operator-verify heads are deferred by `head_is_drainable`, so `queue_drainable_head_count` excludes them — the in-session auto-drain loop is not re-armed by them (test asserts this). For non-agent-actionable items, the head surfaces your instructions via the item text (the bolded `**Operator action: …**` from last turn).
+
+**One required follow-up before you resume the queue (`#rz3a`, Phase 2):** the supervisor idle-watch (`start/idle_watch.rs`) must apply the same drainability defer, or operator-verify-only heads will re-injection-thrash the supervisor. Mirroring authorizes reversing that DO-NOT-IMPLEMENT gate. **Operator action: keep the queue paused (`receipt_id=64`) until I land the `#rz3a` supervisor defer; then resume.** I'll do that next.
+<!-- agent:boundary:34cbcf5c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -154,8 +171,9 @@ If you want this enforced by the binary rather than by convention (auto-bold the
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#tsiftmdcrash]~~
 - ~~:pushpin: Any backlog, review, or icebox item that is blocked by some operation action should have the operator action with bold formatting.~~
-- ~~:pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.~~ (filed #qheadsync)
+- ~~~~:pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.~~ (filed #qheadsync)~~
 - ~~:pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.~~ (filed #pcwcdiskfree)
+- :pushpin: JB `Run Agent Doc` on virtuousai.com did not submit. Then it crashed. ![img_48.png](img_48.png)
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md
 ```
@@ -172,6 +190,8 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 - ~~:pushpin: equityfundingsource.md & monsterrodholders.md keeps on drifting with edits.~~ (filed #docdriftgrace)
 - do [#733r]
+- do [#semmerge]
+- do [#qpauseux]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

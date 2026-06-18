@@ -64,7 +64,7 @@ Short version: **the machinery is complete and correct; the operational track re
 2. **The one real extraction is provenance-blind.** `tsift kg refresh` confirms live: `Sources: 1, Needs refresh: 1 — specs/local-kg-model.md [NoRecordedHash]`, and **0 of 26 entities carry a recorded confidence**. Both predate the hashing/confidence work, so the staleness + confidence-gating machinery cannot yet protect the only data it has. Self-correcting on the next extract.
 
 **Bottom line:** the *mechanism* is effective and feature-complete; *operational adoption and measurement* are near zero beyond a smoke-scale seed. To actually claim operating effectiveness you would run a multi-doc extraction and measure entity-dedup with/without context injection, the confidence distribution, and one real refresh→reconcile cycle — filed as `[#kgeffmeasure]`. I did **not** kick off a corpus extraction this turn (loads the model / holds the GPU — operator-gated); say the word and I will run the measured before/after. `do [#vmax]` stays gated (crates.io OIDC registration needs your account + browser 2FA).
-<!-- agent:boundary:d3bba0fe -->
+<!-- agent:boundary:f6af564e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -72,6 +72,7 @@ Short version: **the machinery is complete and correct; the operational track re
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: Please let me know the operating effectiveness of tsift kg.~~
 - do [#vmax]
+- :pushpin: do [#kgeffmeasure]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

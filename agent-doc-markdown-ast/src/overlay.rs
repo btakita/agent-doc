@@ -116,12 +116,18 @@ fn parse_open_marker(trimmed: &str) -> Option<(String, String)> {
     Some((name, attrs))
 }
 
-/// Parse a `<!-- /agent:name -->` close marker, returning the name.
+/// Parse a close marker, returning the name. Accepts both spellings:
+///   `<!-- /agent:name -->` — the standard slash-then-`agent:name` form
+///   `<!-- agent:/name -->` — the legacy `agent:`-then-slash form
 fn parse_close_marker(trimmed: &str) -> Option<String> {
     let inner = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?.trim();
-    let rest = inner
-        .strip_prefix("agent:/")
-        .or_else(|| inner.strip_prefix("agent:")?.strip_prefix('/'))?;
+    let rest = if let Some(after) = inner.strip_prefix('/') {
+        // `/agent:name`
+        after.strip_prefix("agent:")?
+    } else {
+        // `agent:/name`
+        inner.strip_prefix("agent:")?.strip_prefix('/')?
+    };
     let name = rest.trim();
     (!name.is_empty()).then(|| name.to_string())
 }
@@ -380,6 +386,41 @@ mod tests {
         assert_eq!(b.items[0].kind, ItemKind::BacklogTask { checkbox: ' ' });
         assert_eq!(b.items[0].id, "alpha");
         assert_eq!(b.items[1].kind, ItemKind::BacklogTask { checkbox: 'x' });
+    }
+
+    #[test]
+    fn end_byte_spans_full_component_for_both_close_spellings() {
+        // #gszq: the close marker must be recognized for BOTH spellings so
+        // `Component.end_byte` spans the whole component (through the close
+        // line) rather than collapsing to just past the open marker.
+        for src in [
+            // standard slash-then-`agent:name`
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+            // legacy `agent:`-then-slash
+            "<!-- agent:queue -->\n- do [#a]\n<!-- agent:/queue -->\n",
+        ] {
+            let comps = components(src);
+            assert_eq!(comps.len(), 1, "src={src:?}");
+            let q = &comps[0];
+            // end_byte must reach the end of the close-marker line, i.e. the
+            // full source length here, not the offset just past the open line.
+            assert_eq!(
+                q.end_byte,
+                src.len(),
+                "end_byte must span the full component (src={src:?})"
+            );
+            assert!(
+                q.end_byte > q.start_byte + "<!-- agent:queue -->\n".len(),
+                "end_byte must extend past the open marker (src={src:?})"
+            );
+            // byte-span slicing yields the whole component, not a truncated head.
+            let slice = &src[q.start_byte..q.end_byte];
+            assert!(slice.contains("[#a]"), "span must include the item");
+            assert!(
+                slice.contains("queue -->") && slice.matches("-->").count() == 2,
+                "span must include the close marker (src={src:?})"
+            );
+        }
     }
 
     #[test]

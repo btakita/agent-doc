@@ -1246,7 +1246,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     .as_deref()
                     .map(crate::ipc_socket::is_listener_active)
                     .unwrap_or(false);
-                let (drainable, skipped) =
+                let (_drainable, skipped) =
                     partition_drainable_backlog_ids(&backlog_ids, &exec_ctxs);
                 if !skipped.is_empty() {
                     let session_label = if live_ipc { "live_ipc" } else { "clean" };
@@ -1254,17 +1254,29 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                         crate::ops_log::log_op(
                             file,
                             &format!(
-                                "go_queue_skip_undrainable id=#{} reason={} session={}",
+                                "go_queue_mirror_deferred id=#{} reason={} session={} (#mirrorall)",
                                 skip.id, skip.reason, session_label
                             ),
                         );
                     }
+                    // #mirrorall (operator directive 2026-06-18): mirror ALL open
+                    // `queue`-attr backlog ids into the queue, INCLUDING `[operator-verify]`
+                    // items, so the queue is a complete worklist (an operator-verify head
+                    // surfaces the operator instructions carried in the item text). Crucially
+                    // `backlog_ids` is NOT narrowed to the drainable subset: `head_is_drainable`
+                    // already defers operator-verify ids (via `deferred_backlog_ids`), so
+                    // mirroring them does NOT re-arm the in-session auto-drain loop
+                    // (`queue_drainable_head_count` still excludes them). The supervisor
+                    // idle-watch must apply the same drainability defer before a mirrored queue
+                    // is resumed (#rz3a), else operator-verify-only heads re-injection-thrash;
+                    // the queue stays operator-paused until that companion lands. This
+                    // supersedes the prior #goqueuestall/#qcontdrain queue-skip that kept
+                    // operator-verify items out of the queue entirely.
                     eprintln!(
-                        "[preflight] queue: skipped {} agent-undrainable backlog head(s) from the auto-drain queue \
-                         (operator-verify; #qcontdrain)",
+                        "[preflight] queue: mirrored {} operator-verify backlog head(s) into the queue \
+                         (deferred from auto-drain; #mirrorall)",
                         skipped.len()
                     );
-                    backlog_ids = drainable;
                 }
             }
         }
@@ -2495,6 +2507,55 @@ mod tests {
                 .any(|w| w.code == "backlog_queue_sync_pending"),
             "empty-queue-before-sync must emit backlog_queue_sync_pending warning, got {:?}",
             state.warnings
+        );
+    }
+    #[test]
+    fn run_queue_maintenance_mirrors_operator_verify_into_queue_but_keeps_it_nondrainable() {
+        // #mirrorall (operator directive 2026-06-18): operator-verify backlog items
+        // are mirrored INTO the queue (complete worklist) instead of being skipped,
+        // but they stay non-drainable — `drainable_head_count` counts only the
+        // actionable head, so the in-session auto-drain loop is not re-armed by the
+        // mirrored operator-verify head.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=sync -->\n",
+            "- [ ] [#act] actionable work\n",
+            "- [ ] [#opv] [operator-verify] needs a human, do not auto-drain\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(
+            updated.contains("- do [#act]"),
+            "actionable item mirrored into queue:\n{updated}"
+        );
+        assert!(
+            updated.contains("- do [#opv]"),
+            "operator-verify item must ALSO be mirrored into the queue (#mirrorall):\n{updated}"
+        );
+        // ...but the operator-verify head must NOT count as drainable: the loop is
+        // safe because only the actionable head is countable.
+        let drainable = crate::queue_continuation::drainable_head_count(&doc, &updated);
+        assert_eq!(
+            drainable, 1,
+            "operator-verify head must be deferred from drainability (#mirrorall keeps the loop \
+             safe); only #act should count:\n{updated}"
         );
     }
     #[test]

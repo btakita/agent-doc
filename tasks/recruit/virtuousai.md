@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -257,13 +257,13 @@ No "DS2O by hand," no "your architecture in miniature," no buzzword run — thos
 - Profile source → `resume/profiles/virtuousai.toml` (4.2 KB)
 
 Message and resume are left as drafts — nothing sent, nothing committed beyond this session doc. Send via LinkedIn or email when you're ready.
-
-<!-- agent:boundary:329d90e1 -->
+<!-- agent:boundary:6e5c4816 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- The phrasing is too salesy. Explain how I will provide value to VirtuousAI. I need it to resonate with what the company does. Imagine the role itself of integration and how my work can augment their business.
 <!-- /agent:queue -->
 
 ## Backlog

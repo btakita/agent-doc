@@ -43,6 +43,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> :pushpin: agent-doc should not thrash when the document changes during a turn...when the current document does not match the snapshot. The binary should gracefully resolve the difference without the agent knowing about it. Only structural conflicts based on the current work should be surfaced...such as editing the current prompt. Unrelated changes should be gracefully handled by the agent-doc binary without the agent needed to intervene.
+
+
+> **Queue prompt:**
+>
 > do [#docdriftgrace]
 >
 > do [#qpauseux]
@@ -65,7 +70,7 @@ That error is the **qflood pause protection working as intended on `equityfundin
 **Real UX gap — filed `#qpauseux` [recommended].** A `queue_paused`/qflood dispatch block surfaces in JB "Run Agent Doc" as a raw red `Error:` toast rather than an actionable "queue paused — resume to continue" state. The unblocker token is in the text, but the framing reads as a crash. The plugin should render a paused-queue block as an info/action notification (with a Resume button) keyed off `ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control`.
 
 **`#routedrainnextaction` is now live.** The supervisor you restarted came up on the pre-fix binary (preflight flagged `stale_install`), so I ran `make install`: binary + cdylib rebuilt at `a24ff990` (CI green on that push), and `lib-install` marked 2 controllers to auto-recycle at the next idle boundary. After this turn the fixed route-closeout diagnostic (`recovery_command=agent-doc reset --from-current ... / write --commit ...` instead of the misleading `wait_for_owner_turn_to_drain`) is running.
-<!-- agent:boundary:b9859aa7 -->
+<!-- agent:boundary:b7fd072f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -81,7 +86,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ~~~
 - ~~do [#docdriftgrace]~~
 - ~~:pushpin: do [#routedrainnextaction]~~
-- :pushpin: agent-doc should not thrash when the document changes during a turn...when the current document does not match the snapshot. The binary should gracefully resolve the difference without the agent knowing about it. Only structural conflicts based on the current work should be surfaced...such as editing the current prompt. Unrelated changes should be gracefully handled by the agent-doc binary without the agent needed to intervene.
+- ~~:pushpin: agent-doc should not thrash when the document changes during a turn...when the current document does not match the snapshot. The binary should gracefully resolve the difference without the agent knowing about it. Only structural conflicts based on the current work should be surfaced...such as editing the current prompt. Unrelated changes should be gracefully handled by the agent-doc binary without the agent needed to intervene.~~
 - [#tsiftmdcrash]
 - :pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.
 ---

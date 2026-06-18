@@ -1,9 +1,9 @@
 ---
 agent_doc_session: 9342c5f7-a651-49a3-bb81-4c87be5988ca
 agent: claude
+claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
-claude_model: opus
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
@@ -17,6 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
+queue: start
 ---
 
 ## Status
@@ -81,7 +82,8 @@ Still uncommitted to the repo beyond this session doc's finalize — it's a cont
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- Research https://www.virtuousai.com/ and https://www.virtuousai.com/resources. Get the transcript from https://www.youtube.com/watch?v=Tmb3CJS07Nk. I will be creating a custom resume for my services for Virtuous AI. Emphasize my monsterrodholders work. Create a message for laura-rondon-de-barros, who will forward to chris-happ, to demonstrate what value I can bring to VirtuousAI and how I am the best candidate for their company.
 <!-- /agent:queue -->
 
 ## Backlog

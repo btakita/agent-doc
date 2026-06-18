@@ -1055,7 +1055,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // longer logs `reason=listener_degraded` on a disk fallback because that
         // fallback is gone. It now records `degraded_cause=...` on the file-IPC /
         // fail-closed path, preserving diagnostics without expanding flow reasons.
-        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 17,
+        // +1 (#fccroute): the route/dispatch session-write sites
+        // (`route_session_id`, `route_dedup_scrub`, `route_queue_activation`) now
+        // route through `converge_document_or_disk`; the added no-listener route
+        // fallback regression test asserts `reason=no_listener` in the ops-log,
+        // which is a test-assertion string, not a new hot-path flow reason.
+        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 18,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

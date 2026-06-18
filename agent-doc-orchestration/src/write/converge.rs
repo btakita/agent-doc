@@ -1213,6 +1213,42 @@ mod core_tests {
         );
     }
     #[test]
+    fn converge_document_or_disk_route_source_falls_back_to_disk_without_listener() {
+        // `#fccroute`: the three route/dispatch session-document write sites
+        // (`route_session_id`, `route_dedup_scrub`, `route_queue_activation`) now
+        // route their disk writes through `converge_document_or_disk` so a live JB
+        // editor converges them instead of hitting the File Cache Conflict dialog.
+        // With NO listener the gate must remain byte-identical to the old direct
+        // disk write: the target lands on disk and a source-labelled disk fallback
+        // is recorded. Cover each route source label so a future regression on any
+        // one of them is caught.
+        for source_label in ["route_session_id", "route_dedup_scrub", "route_queue_activation"] {
+            let dir = TempDir::new().unwrap();
+            let agent_doc_dir = dir.path().join(".agent-doc");
+            fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+            let doc = dir.path().join("plan.md");
+
+            let source = crate::test_support::queue_consume_convergence_source();
+            let target = crate::test_support::queue_consume_convergence_target();
+            fs::write(&doc, &source).unwrap();
+
+            converge_document_or_disk(&doc, &target, &source, source_label).unwrap();
+
+            assert_eq!(
+                fs::read_to_string(&doc).unwrap(),
+                target,
+                "{source_label}: with no listener the converger must write the target to disk"
+            );
+            let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+            assert!(
+                log.contains(&format!("{source_label}_writeback"))
+                    && log.contains("transport=disk_fallback")
+                    && log.contains("reason=no_listener"),
+                "{source_label}: no-listener route write must record the source-labelled disk fallback:\n{log}"
+            );
+        }
+    }
+    #[test]
     fn converge_document_or_disk_blocks_disk_fallback_with_active_listener_without_ack_content() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");

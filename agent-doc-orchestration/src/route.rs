@@ -1923,7 +1923,7 @@ pub fn run_with_tmux(
     frontmatter::require_agent_doc_document(&content, file)?;
     let (mut updated_content, session_id) = frontmatter::ensure_session_for_file(&content, file)?;
     if updated_content != content {
-        std::fs::write(file, &updated_content)
+        crate::write::converge_document_or_disk(file, &updated_content, &content, "route_session_id")
             .with_context(|| format!("failed to write {}", file.display()))?;
         eprintln!("[route] Generated session UUID: {}", session_id);
     }
@@ -1940,7 +1940,12 @@ pub fn run_with_tmux(
     if let Some(cleanup) =
         scrub_duplicate_prompt_comments_for_route(&updated_content, &preserve_docs)?
     {
-        crate::write::atomic_write_pub(file, &cleanup.content)?;
+        crate::write::converge_document_or_disk(
+            file,
+            &cleanup.content,
+            &updated_content,
+            "route_dedup_scrub",
+        )?;
         if cleanup.removed_answered_tail {
             crate::ops_log::log_op(
                 file,
@@ -2598,7 +2603,7 @@ fn activate_existing_route_queue_head(
     content = strip_queue_component_auto_attr(&content)?;
     let activated = content != original;
     if activated {
-        crate::write::atomic_write_pub(file, &content)
+        crate::write::converge_document_or_disk(file, &content, &original, "route_queue_activation")
             .with_context(|| format!("failed to activate queue in {}", file.display()))?;
         crate::snapshot::save(file, &content).with_context(|| {
             format!(

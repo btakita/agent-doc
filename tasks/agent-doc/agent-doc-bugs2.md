@@ -168,7 +168,23 @@ Shipped agent-doc **0.34.5** (`e71b87df`, CI green). The backlog→queue sync no
 **Loop stays safe:** mirrored operator-verify heads are deferred by `head_is_drainable`, so `queue_drainable_head_count` excludes them — the in-session auto-drain loop is not re-armed by them (test asserts this). For non-agent-actionable items, the head surfaces your instructions via the item text (the bolded `**Operator action: …**` from last turn).
 
 **One required follow-up before you resume the queue (`#rz3a`, Phase 2):** the supervisor idle-watch (`start/idle_watch.rs`) must apply the same drainability defer, or operator-verify-only heads will re-injection-thrash the supervisor. Mirroring authorizes reversing that DO-NOT-IMPLEMENT gate. **Operator action: keep the queue paused (`receipt_id=64`) until I land the `#rz3a` supervisor defer; then resume.** I'll do that next.
-<!-- agent:boundary:7994f7ca -->
+
+### Re: JB Run Agent Doc on virtuousai.md did not submit, then crashed — opus-4-8
+
+> **Queue prompt:**
+>
+> Any free text that is processed and struck should have a response in the agent:exchange.
+
+
+Read the screenshot (`img_48.png`). It shows the root: the pane is at a bare **zsh `%` shell prompt** with `agent-doc .../tasks/recruit/virtuousai.md` typed but **not submitted**, and the normal shell prompt (`main 12 *5 !39 ?30 … 14:03:22`) below — i.e. the Claude harness had **already exited/crashed to a shell**, and "Run Agent Doc" routed the trigger into that dead shell, where it just sits as un-run text. A `/model opus` switch ("saved as default; settings pins Opus 4.6 on restart") had just happened, so a model-switch/restart was in play.
+
+Two issues, filed as **`#routedeadshell`** (plan `tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md`):
+
+1. **Agent-actionable — route dispatched into a crashed harness.** `route.rs` must positively identify a *harness* dispatch-ready prompt and treat a bare shell prompt (`%`/`$`) as NOT-ready → fail closed with claim/restart guidance (or auto-restart) instead of typing the trigger into a shell, and re-verify the harness prompt immediately before send to close the crash-mid-dispatch race. SimWorld coverage for the bare-shell case. I'll implement this in a focused route cycle.
+2. **Harness crash root-cause — needs you.** Why Claude exited to a shell on `recruit/virtuousai.md` isn't in this document's logs (it's a different session's logs / the dead pane's scrollback). Like `#tsiftmdcrash`. **Operator action: paste the `recruit/virtuousai.md` crash error text / pane scrollback from the crash moment (or the cycle id)** — the `/model opus` restart context is the lead to chase.
+
+This was the leading queue head; remaining drainable agent-doc work now queued: `#733r` (qheadsync), `#021p`/`#rz3afix` (the mirror-all Phase 2 supervisor defer), `#semmerge` (closeout CRDT/IPC merge — likely the root of the IPC drift this session keeps hitting), plus `#routedeadshell`. Queue stays paused; tell me which to take next, or I'll start with `#rz3afix` (unblocks resuming the queue) then `#semmerge`.
+<!-- agent:boundary:3e20fbfa -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -178,7 +194,7 @@ Shipped agent-doc **0.34.5** (`e71b87df`, CI green). The backlog→queue sync no
 - ~~:pushpin: Any backlog, review, or icebox item that is blocked by some operation action should have the operator action with bold formatting.~~
 - ~~~~:pushpin: An equityfundingsource.md turn had a wedge and deleted what I wrote in the queue.~~ (filed #qheadsync)~~
 - ~~~~:pushpin: JB `File Cache Conflict` still occurring. Please replace all direct file writes on the hot path.~~ (filed #pcwcdiskfree)~~
-- Any free text that is processed and struck should have a response in the agent:exchange.
+- ~~Any free text that is processed and struck should have a response in the agent:exchange.~~
 - :pushpin: JB `Run Agent Doc` on virtuousai.com did not submit. Then it crashed. ![img_48.png](img_48.png)
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md

@@ -175,7 +175,28 @@ Phase 1 of GraphRAG context is done — a deterministic, bounded known-entity-pa
 **Verified:** 8 new context_pack tests (seed-match-over-connectivity, deterministic node-id tiebreak, confidence gate, max_entities cap, bounded-scan truncation, non-entity filtering, empty-seeds connectivity ranking, default-confidence-zero); `cargo test --workspace --lib` green across all crates; clippy clean. No CLI surface changed (library API only; the `tsift` binary is unaffected), so no reinstall was needed. CI run 27743665120 in progress at closeout (proceeding on local evidence).
 
 **Queue:** `#kgctxinject` (Phase 2 — inject the pack into the extractor prompt) and `#kgctxincremental` (Phase 3 — graph-aware re-extract) added as the next actionable phases.
-<!-- agent:boundary:b9e7df91 -->
+
+### Re: do [#kgctxincremental] / do [#kgctxinject] → Phase 2+3 GraphRAG context injection shipped — opus-4-8
+
+> **Queue prompts:**
+>
+> do [#kgctxincremental]
+> do [#kgctxinject]
+
+Both drained this cycle through **one shared seam** (tsift `b7d161a`, pushed; superproject `684216de2`). The harness switched back to `agent: claude` and I found Phase 2's library scaffolding already carried-forward uncommitted in `tsift-kg` (`extract_json_with_context`, `chat_request_body_with_context`, `derive_seeds`, `ChunkContextSource`) — but **unwired**: the CLI still called the plain `extract_documents_to_projection`, so nothing actually injected context. I completed the wiring, fixed a compile bug in the WIP (`derive_seeds` moved `lower` after `seen.insert`), added the missing tests, and closed both phases.
+
+**Phase 2 (`#kgctxinject`) — the model now reconciles instead of re-inventing.** `tsift kg extract --graph-db <db>` builds a bounded known-entity pack from the *existing* graph (read-only `all_nodes`/`all_edges` → `ChunkContextSource`) and prepends a `[KNOWN ENTITIES — reuse these exact stable ids …]` block ahead of each chunk under a `[CHUNK]` marker. The model is told the canonical `kgent-…` ids, so it aligns to them rather than minting duplicates. Key guards:
+- **Byte-identical no-context path** — no `--graph-db`, an empty/new graph (no `semantic_entity` nodes), or `--no-context` ⇒ the request body is byte-for-byte the old prompt. A fresh graph never changes behavior (test-enforced).
+- **Bounded** — the pack is capped by `ContextPackConfig` (`max_entities`, `max_candidate_scan`), so prompt/context-window cost stays bounded — the same discipline as Phase 1's scan.
+- **Backward-compatible extractor trait** — `KgExtractor::extract_json_with_context` defaults to the plain `extract_json`; only `OllamaKgExtractor` overrides it, so `HashKgExtractor` and every other extractor are untouched.
+- The extract outcome now reports `context_entities` (how many existing entities were offered for reconciliation).
+
+**Phase 3 (`#kgctxincremental`) — graph-aware re-extract by composition.** `tsift kg refresh --apply` already re-extracts each changed source (the `#kgextractrefresh` staleness plan) through the shared `run_kg_extract` path. Because that path now injects context, re-extracting a changed file **reconciles against the existing graph's stable ids instead of duplicating** — exactly Phase 3's contract — with no new code beyond the shared `--no-context` opt-out. Honest scope: this delivers the *reconciliation mechanism*; full end-to-end extraction quality still rides on the live local model (operator-gated, GPU + Ollama), same as every model-extract path.
+
+**Verified:** `make check` green (workspace + clippy clean); targeted `tsift-kg` 31 + `tsift-cli` 678 tests pass, including new coverage for the context-aware prompt builder (incl. byte-identity with no pack), `derive_seeds`, `ChunkContextSource` per-chunk retrieval, and the `extract_documents_to_projection_with_context` threading seam; `cargo install` done and `--no-context` is live on both `kg extract` and `kg refresh`. Spec (`specs/local-kg-model.md` § GraphRAG Context Retrieval) + VERSIONS updated. tsift CI run 27745965173 in progress at closeout (proceeding on local evidence).
+
+**Queue now:** only `#vmax` remains — `[operator-verify]` crates.io OIDC publishing (needs a crates.io account + browser 2FA; agent cannot perform). The `#kggraphscope` GraphRAG arc (Phases 1–3) is now complete.
+<!-- agent:boundary:e28e9c68 -->
 <!-- /agent:exchange -->
 
 ## Queue

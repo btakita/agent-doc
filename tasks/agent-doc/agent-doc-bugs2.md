@@ -182,7 +182,31 @@ Already filed last turn with state captured. Re-listing for visibility: supervis
 #### Queue state
 
 Drained so far this drain session: JB Clear OpenCode /new, File Cache Conflict, tsift crash (capture-only). Remaining drainable: `:pushpin: do [#opencodeclearnewsubmit]` (already shipped last turn — cycle will mark it done), `What are #next-steps to fix agent-doc bugs?`, vision workflow item (functionally closed by `agent-doc describe-image`).
-<!-- agent:boundary:c30ccbef -->
+
+### Re: queue cleanup + #opencodeclearnewsubmit closed — glm-5.2
+
+#### Queue contamination cleanup
+
+Session-check flagged two `agent:queue` lines as response-prose contamination (`#jb-run-agent-doc-response-queue-contamination`):
+- `:pushpin: A non-vision model should use a vision model via agent-doc or tsift.`
+- `What are #next-steps to fix agent-doc bugs?`
+
+Both struck in `agent:queue`. The vision workflow item is functionally resolved — `agent-doc describe-image` is shipped and was validated last turn on `img_46.png`. The `#next-steps` question is generic; the actionable answers are the backlog items already filed this drain (`#tsiftmdcrash`, `#monster60stimeout`, `#describe-image-workflow`).
+
+#### `#opencodeclearnewsubmit` — marked done
+
+Split text+Enter tmux send shipped last turn in `cc766e0c` (parent gitlink `e1fb44e22` on `origin/main`). Binary + cdylib installed via `make install`. Live `[operator-verify]` gate remains on the JB plugin install + IntelliJ restart for `#jbacceptwedge`, but the code work is complete and tests are green. Marking `--done`.
+
+#### Remaining drainable queue items
+
+- `do [#opencodeclearnewsubmit]` — already shipped; this turn marks it done.
+- `do [#monster60stimeout]` — long-standing route readiness gap (`#startroute / #r313 / #rtbr` family). Too large for this cycle; the plan (`tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md`) needs a clean session and a current-generation ready-prompt barrier driven by fresh `tmux capture-pane` prompt-shape proof. Stays in backlog.
+- `do [#describe-image-workflow]` — small SKILL.md runbook note documenting `agent-doc describe-image` as the canonical non-vision-model workflow. Also stays in backlog; not blocking.
+
+#### Session-accretion
+
+Still at `warn` (now 153 exchange lines, 7 cycles / 30 min). Per `#no-compact-prompt-during-queue-drain`, not compacting mid-queue. Operator: when the queue empties, consider `/agent-doc compact exchange tasks/agent-doc/agent-doc-bugs2.md` or setting `agent_doc_auto_compact: true` in frontmatter.
+<!-- agent:boundary:1f7dd0cd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -226,7 +250,6 @@ What are #next-steps to fix bugs?
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported 'tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.' Supervisor pid 1742954 is alive now; pane %78 OpenCode TUI shows 'Thinking' normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from my cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe=(deleted)) as a crash. NEED operator to paste exact error text or the pane capture from the crash moment, or the specific cycle id, to root-cause. Not currently reproducible from logs alone.
 - [ ] [#monster60stimeout] [recommended] Recurring route readiness gap (matches done #startroute / #r313 / #rtbr). Operator: 'After closing the session for monsterrodholders.md, then running JB Run Agent Doc, I had to wait for the 60s timeout before the dispatch completed.' ops.log signature: route_authoritative_actor_starting_not_ready timeout_ms=60000 elapsed_ms=~60100 actor_state=ready runtime_state=ready supervisor_health=healthy prompt_ready=false last_transition_reason=idle_pane_reconcile. The supervisor self-heals busy→ready via idle_pane_reconcile but the prompt_ready flag stays false, so route waits the full 60s and fails. Recent occurrences: 1781508488 (lazily-rs.md %91), 1781559935 + 1781582168 (equityfundingsource.md %101/%111). Root fix path: current-generation ready-prompt barrier driven by fresh tmux capture-pane prompt-shape proof (not the edge-triggered pty->stdout transition that missed the redraw). Plan: tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md.
 - [ ] [#describe-image-workflow] [recommended] The #img-describe-toolcall workflow demonstrated this session IS already shipped: agent-doc describe-image <FILE> [--provider openai|anthropic] [--prompt <text>] shells out to a vision-capable model and returns text to stdout. Validated on tasks/agent-doc/img_46.png — returned an accurate structured description matching the claude -p @img analysis. Source: src/describe_image.rs (746 lines) + CLI wired through main.rs. Skill should document this as the canonical path for non-vision models (glm-5.2, etc.) to analyze images — add a runbook note to SKILL.md so future agents know to call this instead of writing per-session claude -p invocations.
-- [ ] [#opencodeclearnewsubmit] ROOT CAUSE CONFIRMED via claude vision analysis of img_46.png (operator-pinned prompt — non-vision GLM-5.2 delegated to claude CLI per #img-describe-toolcall workflow): H2 — /new is typed into the OpenCode composer but the autocomplete slash-command dropdown intercepts the Enter-submit. Screenshot shows: OpenCode TUI, composer reads '/new' with cursor block after, dropdown open with '/new' highlighted (orange/salmon), 'New session' label, idle state at 25% context. No error dialog. The bare-Enter retry in verify_clear_submit_after_delivery (session_actor_cmd.rs:1657-1703) either didn't fire or also failed to dismiss the dropdown. Fix direction: for opencode, send '/new' and Enter in SEPARATE tmux send-keys calls with a small inter-call delay so the dropdown opens before the Enter is delivered; OR send Escape first to prevent the dropdown from opening; OR use a palette-row-aware submit (Down then Enter on the highlighted row). Precondition still: #jbacceptwedge [operator-install] of plugin 0.2.170 + IntelliJ restart (the verify_supervisor_clear_submit poll may be timing out under the wedged accept loop). Plan: tasks/agent-doc/plan-opencode-clear-new-not-submitted.md.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.
 <!-- /agent:backlog -->
 

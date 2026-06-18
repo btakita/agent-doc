@@ -97,15 +97,41 @@ Both queue items trace to one surface — preflight writing the session document
 Verification: `make check` 4664 passed, clippy clean; binary built + installed 0.34.2 (`.bin` + `~/.cargo/bin`); pushed to origin/main. CI 27738315509 in progress at closeout — recorded, finishing from local evidence.
 
 Follow-ups in backlog: `#fccaudit` (extend the gate to the remaining preflight/closeout disk-write sites so "no external disk writes while the editor runs" is fully closed) and `#editsync` [recommended] (sub-cycle keystroke-level sync if next-cycle latency proves insufficient).
-<!-- agent:boundary:7cb9bf78 -->
+
+### Re: queue-attr exclusion + #fccaudit + #rz3a — opus-4-8
+
+> **Queue prompt:**
+>
+> `agent:backlog` with `queue` attribute should add remaining backlog items into the queue an prepare and finalize. Note that if items are gated or have preconditions that are not met such as a date in the future, do not add the backlog item into the queue.
+
+
+> **Queue prompt:**
+>
+> `agent:backlog` with `queue` attribute should add remaining backlog items into the queue and prepare and finalize. Note that if items are gated or have preconditions that are not met such as a date in the future, do not add the backlog item into the queue.
+>
+> do [#fccaudit]
+>
+> do [#rz3a]
+
+**Queue-attr exclusion — already implemented, now committed (`#backlog-not-before`).** The behavior you described was implemented last cycle but left **uncommitted** in the `src/agent-doc` working tree (the installed `0.34.3` binary already runs it, which is why this session's preflight already skipped the two `[operator-verify]` heads). The backlog→queue sync already excluded gated `[/]` and done `[x]` items; the prior work adds the **future-date precondition** you asked for: an open item carrying `not-before=YYYY-MM-DD` is held out of the `queue`-attribute sync until that UTC date, then syncs normally — it stays a plain `[ ]` entry the whole time (soft schedule, never auto-gated). Committed as `69efb8b2` with `pending::item_not_before_day` / `item_precondition_unmet` / `today_civil_day` and SimWorld/unit coverage.
+
+**#fccaudit — done.** Extended the `#fccqueue` editor-IPC write gate audit to every remaining session-doc disk-write site. Two normal-path gaps now route through `converge_or_disk_write` (converge through the editor when a JB listener is live → no `File Cache Conflict`; byte-identical disk write with no listener): the `agent-doc write --status` replace (`status_set`) and the post-commit ephemeral guard-marker strip (`strip_guard_markers`, dropping `` / ``). Already-safe sites are documented rather than re-gated: compaction (`#w42v`), the post-commit boundary reposition (already skips the working-tree write while a listener is active), and the `#pcwc` worktree reconcile (HEAD-authoritative repair of a tree that *lost* committed content, followed by an editor-buffer IPC refresh). The recovery/scaffold/migration writes (`claim` scaffold, `repair`, preflight migration/repair, `session-check` over-application remedy, `reset` resume-clear) stay authoritative must-hit-disk **by design** — they must restore correctness even when the editor/IPC path is itself wedged, so failing closed on a live-but-unresponsive listener would break recovery. `(HEAD)` annotations / `agent:boundary` markers are deliberately out of scope. SPEC §07 records the full classification; `make check` green (4671 passed, clippy clean).
+
+**#rz3a — gated, not implemented (per its own directive).** Your item says **"DO NOT IMPLEMENT THE FIX."** It got auto-drained this cycle only because that hold was unstructured prose, not a `[/]` gate or a `not-before=` date — so the sync (correctly, by its rules) treated it as an open actionable head. I gated it `[/]`, which is exactly the exclusion rule you described: a gated item is now held out of the backlog→queue sync, so it stops generating no-op `do [#rz3a]` churn cycles. Ungate it when you authorize implementing the supervisor idle-watch drainability fix.
+
+*Session recovery:* preflight opened on two pieces of prior-cycle IPC drift — a merged `#rz3a`/`#fccaudit` backlog line (the newline between them was lost) and a stale snapshot longer than HEAD carrying your uncommitted `#rz3a` addition. Split the line, rebuilt the snapshot from current (`reset --from-current --preserve-session`), preserving all your edits. Release binary built; `cargo install` is deferred to right after this closeout so the freshly-installed `#fccaudit` binary doesn't drift against this session's still-running supervisor (it self-recycles onto it at the next idle boundary).
+<!-- agent:boundary:843a7b06 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~`agent:backlog` with `queue` attribute should have added the backlog items into the queue immediately when the items were added to the backlog.~~
-- `agent:backlog` with `queue` attribute should add remaining backlog items into the queue an prepare and finalize. Note that if items are gated or have preconditions that are not met such as a date in the future, do not add the backlog item into the queue.
-- :pushpin: do [#fccaudit]
+- ~~`agent:backlog` with `queue` attribute should add remaining backlog items into the queue an prepare and finalize. Note that if items are gated or have preconditions that are not met such as a date in the future, do not add the backlog item into the queue.~~
+- JB `File Cache Conflict` dialog is still occurring. Any more raw disk writes that need to be replaced?
+- ~~:pushpin: do [#fccaudit]~~
+- ~~do [#rz3a]~~
+- Add `Restart Agent` Plugin menu command. Changing the agent such as from claude to opencode should restart the agent during the next boundary.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -132,8 +158,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rz3a] qflood-gated supervisor idle-watch re-injection: the supervisor idle-queue watch keeps re-injecting agent-doc FILE triggers on a queue whose only remaining head is gated / operator-blocked, causing repeated no-op agent-doc cycles. REPRO (equityfundingsource.md, 2026-06-18): a go-queue block was fully drained (all 7 free-text heads consumed via agent-doc queue consume); the lone remaining head (a do-reference to a now-gated review item) was gated via pending-gate and moved to agent:review. session-check then reported queue_continuation_required=false, queue_drainable_head_count=0, ui_outcome=no_drainable_work. After agent-doc admin queue resume, the supervisor idle-watch re-injected agent-doc FILE repeatedly: 4 consecutive no-op agent-doc cycles, each preflight no_changes=true. agent-doc admin queue pause stops it. EXPECTED: when queue_drainable_head_count==0 and queue_continuation_required==false (only gated or operator-verify heads remain), the supervisor idle-queue watch should DEFER instead of injecting, matching the in-session loop stop rule. ROOT-CAUSE HYPOTHESIS: the idle-watch dispatch gate keys off queue presence / queue:start frontmatter instead of the binary drainability filter; the in-session loop already honors queue_continuation_required=false but the supervisor idle-watch path does not. FIX DIRECTION (do not implement): make the supervisor idle-queue watch reuse the same drainability filter as the in-session loop and defer when queue_drainable_head_count==0. DO NOT IMPLEMENT THE FIX.
-- [ ] [#fccaudit] Extend the #fccqueue editor-IPC write gate to the remaining preflight/closeout session-doc disk-write sites (boundary cleanup, compact, git checkout/commit working-tree writes) so NO agent-doc disk write touches the session doc while a JB editor listener is active. Audit every std::fs::write/atomic_write(file) call site against is_listener_active and route each through converge/IPC or document why it is editor-safe. Completes item 2 fully; queue maintenance is done in #fccqueue.
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported 'tsift.md agent-doc turn crashed and killed the session process. The tmux pane was still active.' Supervisor pid 1742954 is alive now; pane %78 OpenCode TUI shows 'Thinking' normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from my cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe=(deleted)) as a crash. NEED operator to paste exact error text or the pane capture from the crash moment, or the specific cycle id, to root-cause. Not currently reproducible from logs alone.
 - [ ] [#jbacceptwedge] [operator-verify] [operator-install] ROOT CAUSE FOUND + SHIPPED: FFI socket accept loop (ipc_socket.rs) blocked on apply handler before returning to accept(), piling connections in the backlog. Per-connection-thread fix landed (86c68db7, binary+cdylib installed 0.34.1 21:14). This cycle added ops.log proof: ipc_accept_thread_spawned inflight=N marker + InflightConnectionGuard + inflight_connection_handlers() accessor, plus strengthened slow_handler_does_not_block_concurrent_connections regression to assert peak inflight>=2. Plugin bumped 0.2.169 -> 0.2.170, built+signed: editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.170-signed.zip. Plan: tasks/agent-doc/plan-jb-accept-loop-wedge.md. Live gate: operator installs signed zip + restarts IntelliJ, drives a queue drain or any concurrent-IPC turn, then greps .agent-doc/logs/ops.log for 'ipc_accept_thread_spawned inflight=2' (or higher) — impossible under the old single-threaded loop, so it proves the fix is exercising concurrency. Make check: 4654 passed.
 <!-- /agent:backlog -->
@@ -141,6 +165,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#rz3a] qflood-gated supervisor idle-watch re-injection: the supervisor idle-queue watch keeps re-injecting agent-doc FILE triggers on a queue whose only remaining head is gated / operator-blocked, causing repeated no-op agent-doc cycles. REPRO (equityfundingsource.md, 2026-06-18): a go-queue block was fully drained (all 7 free-text heads consumed via agent-doc queue consume); the lone remaining head (a do-reference to a now-gated review item) was gated via pending-gate and moved to agent:review. session-check then reported queue_continuation_required=false, queue_drainable_head_count=0, ui_outcome=no_drainable_work. After agent-doc admin queue resume, the supervisor idle-watch re-injected agent-doc FILE repeatedly: 4 consecutive no-op agent-doc cycles, each preflight no_changes=true. agent-doc admin queue pause stops it. EXPECTED: when queue_drainable_head_count==0 and queue_continuation_required==false (only gated or operator-verify heads remain), the supervisor idle-queue watch should DEFER instead of injecting, matching the in-session loop stop rule. ROOT-CAUSE HYPOTHESIS: the idle-watch dispatch gate keys off queue presence / queue:start frontmatter instead of the binary drainability filter; the in-session loop already honors queue_continuation_required=false but the supervisor idle-watch path does not. FIX DIRECTION (do not implement): make the supervisor idle-queue watch reuse the same drainability filter as the in-session loop and defer when queue_drainable_head_count==0. DO NOT IMPLEMENT THE FIX.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -104,7 +104,7 @@ Verification: `bun run check` green — **813 tests pass, 0 fail**, app + worker
 The AvailableDeal restructure (entire queue block) was completed, verified, committed (`c9aa3a6`), pushed, and deployed last cycle (worker `fb99f394`). The queue had re-served the remaining bullets as stragglers because the per-finalize strike heuristic only consumes one head at a time — so this cycle I struck the 7 answered free-text heads (Payment Schedule removal, the field moves, the rename, the layout, and deploy) via `queue consume`. They were all already satisfied by `c9aa3a6`; nothing new was implemented.
 
 The only remaining head, `do [#5eq8]` (closing-docs/notarization redesign), is **gated** — it's blocked on design + your decision on re-gating wires on notarization (that gate is relaxed in the interim). It should not auto-implement; it now lives as a gated review item rather than an auto-drained backlog/queue head.
-<!-- agent:boundary:03fbe31d -->
+<!-- agent:boundary:8f8e01b4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,6 +117,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- "Loan Status", "Borrower Info", "Application" should fit into a single row in desktop width. Make "Loan Status" thin to only encapsulate the width of the content. Remove "Loan Status" title so only the vertical node map is visible. The title can remain "Loan Status" so a hover event surfaces "Loan Status".
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -113,7 +113,7 @@ Gate `admin_deal_publish_` (and `POST /api/admin/loans/:id/deal`) to **refuse pu
 **What I need from you (one answer unblocks the whole thing):** for TMO loans, which `tmo_loan_status` values are "approved enough to be an Available Deal"? Give me that list (or say "use EFS full_application acceptance only, and TMO loans shouldn't be publishable at all") and I'll implement the gate, add tests, and commit+push.
 
 No code or data changed this turn.
-<!-- agent:boundary:5d1dee8f -->
+<!-- agent:boundary:3d6bf52d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -126,6 +126,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Use chromium-bridge to see if we can retrieve the API key for the sandbox https://app2.themortgageoffice.com/default#TrustAccounts/TrustAccounts?viewrecid=All
 <!-- /agent:queue -->
 
 ## Backlog

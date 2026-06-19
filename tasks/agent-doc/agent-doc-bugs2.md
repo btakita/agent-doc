@@ -86,14 +86,30 @@ Implemented and shipped. `#fccreap` (0.34.8) only reaped *dead*-pid consumer pat
 **Install note:** did the safe cdylib `lib-install` (new FFI symbols present for when the new plugin is installed); deferred `cargo install --path .` (binary swap) to avoid the documented live-supervisor finalize-drift hazard — it's not needed to activate this change.
 
 **Gated `#8bfz` (operator-verify):** the code is complete/committed/pushed and the plugin zip is built, but activation needs you to install `agent-doc-jetbrains-0.2.171-signed.zip` and run a live **multi-window** test (open the same workspace in 2+ IntelliJ windows, drive a response, confirm only one applies + saves and `.agent-doc/plugin-owner/<hash>.json` shows a single owner). That live-editor proof can't be agent-done, so it's `[/]` in `agent:review`.
-<!-- agent:boundary:3778fff7 -->
+
+### Re: do [#supselfheal] — already shipped, marking done — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#supselfheal]
+
+
+No code to write — `#supselfheal` is fully shipped, so draining the build/install preset again would just re-run it (the hazard the earlier pause flagged). Marking it `--done`.
+
+All five gaps in the item are closed on `origin/main`:
+- **Ph1** (admin recycle reaches the route-owned supervisor via `explicit_admin` override) — `68717eaf`.
+- **Ph2–5** (wedge-trigger recycle from write/converge, `EscalateKillRelaunch` on re-exec failure, bounded kill+relaunch, corrected SKILL/guidance) — `318aceee`, with the default-on test/doc alignment in `e9cf3b74`.
+- VERSIONS.md Unreleased carries the full entry + coverage list (decision-table tests, converge classifier/reader tests, SimWorld reproductions).
+
+The only open descendant is the separate `#supselfheal-adminwire` follow-up (live `admin recycle` → supervisor IPC adapter), which is its own backlog id — not this one.
+<!-- agent:boundary:6fae6973 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#8bfz]~~
-- :pushpin: do [#supselfheal]
+- ~~:pushpin: do [#supselfheal]~~
 - :pushpin: do [#msn6]
 - :pushpin: do [#pk3f]
 - :pushpin: do [#smqstrike]
@@ -167,6 +183,7 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
+- :pushpin: do [#orphanqhead]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -201,7 +218,6 @@ What are #next-steps to fix bugs?
 - [ ] [#pk3f] #smackturn #semmerge Phase 4 (ack-turn): turn semantic_merge requires_ack outcomes (logged semantic_merge_ack_pending in write/ipc.rs as of #smconv 0.34.7) into a queued agent exchange turn the next cycle — acknowledge operator-deleted-an-agent-edited-node and same-node operator-override, carried via cycle_state. Phases 3 (#smqstrike: route queue_consume strike through the merged node tree) and 5 (#smsim: SimWorld coverage of the operator<->agent concurrent matrix) also remain. Plan: tasks/agent-doc/plan-semantic-ast-merge.md
 - [ ] [#smqstrike] #semmerge Phase 3 (queue-node-strike): route queue_consume strike-through through the markdown_ast semantic_merge merged node tree (shipped #semmerge-owner c300eeec) instead of the line-level strike, so an answered/consumed queue head is struck on the merged structure and survives concurrent operator queue edits. Plan: tasks/agent-doc/plan-semantic-ast-merge.md
 - [ ] [#smsim] #semmerge Phase 5 (simworld matrix): add deterministic SimWorld coverage of the operator<->agent concurrent-edit matrix against semantic_merge — node-disjoint auto-merge, same-node operator-wins, operator-deleted-agent-edited-node ack, turn-active vs unrelated-area gating — so the merge/IPC data-loss family is regression-locked. Plan: tasks/agent-doc/plan-semantic-ast-merge.md
-- [ ] [#supselfheal] #supselfheal agent-doc-bug: a stale-binary route-owned supervisor has NO non-disruptive self-heal, so it wedges editor IPC indefinitely. Observed 0.34.4: supervisor pid 3218321 mapped a stale binary → every finalize/write --commit refused (socket ack timeout → file-IPC no_ack → recovery=retry_without_disk_write / reason=send_failed); an orphaned 2398-byte response could not land across 4 invocations. Root gaps: (1) `agent-doc admin recycle` only recycles CONTROLLERS, never the route-owned supervisor (no CLI recycles a supervisor); (2) supervisor idle self-recycle exists (start/idle_watch.rs supervisor_perform_reexec via execve_preserve_child) but is default-OFF (AGENT_DOC_SUPERVISOR_AUTO_RECYCLE), so supervisor_recycle_action returns Detect-only and keeps the stale binary; (3) the trigger is idle-boundary only — a paused/wedged queue may never reach it, and the wedge itself is not used as a recycle trigger; (4) re-exec ENOENT (inode deleted by make install) falls back to continue_current_binary forever with no kill+relaunch escalation; (5) SKILL.md/queue_continuation_guidance FALSELY claim a stale/wedged supervisor self-heals via drain-lease expiry. Net: indefinite operator-only wedge while the agent correctly refuses force-disk/restart-supervisor (live JetBrains editor). Fix: extend start/decisions.rs::supervisor_recycle_action with write_wedged + EscalateKillRelaunch rows; make admin recycle reach the supervisor (explicit-intent override of default-OFF); wedge-trigger recycle from write/converge.rs; wire kill+relaunch on re-exec failure; correct the guidance. Phase 1 (admin recycle reaches supervisor) is the quick-win. Plan: tasks/agent-doc/plan-stale-supervisor-wedge-no-selfheal.md
 - [ ] [#733r] #qheadsync agent-doc-bug: answered/filed queue heads are not reliably reconciled to the queue (free-text reports left un-struck; done-reaping orphans the matching id-backed queue head; manual strikes do not persist through finalize content_ours; backlog-to-queue sync has no sweep for items missed in prior turns and items can be lost). Fix at closeout in the binary. Plan: tasks/agent-doc/plan-answered-queue-head-autostrike.md
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block as a raw red Error: toast instead of an actionable queue paused — resume notification. Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button rather than a dispatch error. **Operator action: install the updated JB plugin, then verify the paused-queue notification renders (live gate).**
 - [ ] [#docdriftgrace] [operator-verify] agent-doc thrashes when the session doc changes mid/between turn in ways unrelated to the current prompt: snapshot>visible drift (operator trimmed old committed Re: blocks + harness switch + queue edits) made preflight refuse commit (looks like a manual cleanup with stale snapshot) and forced a manual reset --from-current. Binary should classify drift by component and silently auto-rebase snapshot/CRDT for unrelated changes, surfacing ONLY structural conflicts on the in-flight prompt/response. **Operator action: watch one live re-baseline cycle to verify the silent auto-rebase.** Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -65,15 +65,20 @@ The release is already done as far as an agent can take it — there is no new a
 **This failure is `#vmax`, not a code/release-config bug.** The OIDC migration is already shipped (`#1td4`, `rust-lang/crates-io-auth-action@v1`); the auth handshake reached crates.io and was rejected only because no Trusted Publisher is registered. That registration is **operator-gated** — it needs a crates.io login + browser 2FA to register the Trusted Publisher for each of the 23 crates (agent cannot perform). Once the operator completes `#vmax` (register publishers → force-move `v0.1.71` to HEAD → re-push to re-trigger), the crates.io job authenticates via OIDC and publishes; no code change is required.
 
 **Not auto-looping the remaining `release + publish` queue items** — they request the same already-completed release, and the sole outstanding step (crates.io) is operator-gated under review `#vmax`. Re-running would be a no-op against a clean tree at the already-tagged HEAD.
-<!-- agent:boundary:dbc1fde2 -->
+
+### Re: release + publish (duplicate head) — no new work — opus-4-8
+
+> **Queue prompt:**
+>
+> release + publish
+
+Duplicate of the queue head answered immediately above. The v0.1.71 release is published (GitHub Release + OpenCode npm + all binaries); the only outstanding step is the crates.io publish, which failed solely because no OIDC Trusted Publisher is registered for `btakita/tsift` — the operator-gated `#vmax`. Working tree is clean at the already-tagged `v0.1.71` HEAD, so there is nothing for a second release pass to do. Queue drained; not auto-looping.
+<!-- agent:boundary:77f063c7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: release + publish~~
-- ~~:pushpin: Do [#vmax]. I approve. Whatever you can automate, do it.~~
-- release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

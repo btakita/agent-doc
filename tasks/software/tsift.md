@@ -72,14 +72,14 @@ Operator-approved, so I ran the live measurement. A/B extraction (Qwen3-32B-Q4 o
 **(c) Refresh detects staleness but reconciliation is additive and duplicates entities.** Editing a source correctly flipped its watermark from Unchanged to Stale, and refresh --apply re-extracted it cleanly. But the re-extraction is purely additive: one source went from 9 to 18 entities — all 9 prior stable ids were retained (no id churn), yet 9 new nodes were added with no tombstone of the prior projection, leaving duplicate canonical entities for a single source (tsift-memgraphrag appeared 3 times, the graph-db path 3 times, MemGraphRAG twice). Root cause: the node primary-key id derives from chunk plus description, not the canonical entity_id — which is already present as a property and does match across passes (two duplicate nodes shared one canonical entity_id but had different node ids). The reconciliation key exists in the data; the upsert just does not key on it. Filed as a backlog follow-up (kgrefreshdup).
 
 Net: the machinery runs end-to-end on a real corpus and the context-injection dedup is real and measurable, but two operational gaps block production-grade use — confidence is never persisted, and refresh duplicates entities. Both are now top of the backlog as actionable tsift code work, and the measurement item is done.
-<!-- agent:boundary:811ba1a1 -->
+<!-- agent:boundary:a33738bf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: [#kgeffmeasure]: approved~~
-- do [#vmax]
+- ~~do [#vmax]~~
 - do [#kgconf]
 - do [#kgrefreshdup]
 <!-- /agent:queue -->

@@ -119,7 +119,36 @@ Implemented and deployed. When the admin accepts a full application (`POST /api/
 **Verified:** spec + test added (`#accept-autopublish` ordering: accept → publish → return, best-effort); worker build `done`; `make check` full suite **825 pass, 0 fail**.
 
 **Deployed:** `make deploy` → no D1 migrations; uploaded `equityfundingsource` (Worker startup 21 ms); live smoke test `https://equityfundingsource.brian-takita.workers.dev/` → **200**. Pushed: EFS `d6c6651` (origin/main), superproject pointer `541f9a7bb`.
-<!-- agent:boundary:fc90aa80 -->
+
+### Re: FTM631 still not published — keep Published, just backfill this one loan — opus-4-8
+
+> **Queue prompt:**
+>
+> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=loan&dialog_loan_id=bbd437b0-913f-4a6f-960b-901c72a410c9 is still not published. Should we remove the Published state or make it computed based on the application being accepted?
+
+
+I queried prod D1. Here's what's actually going on:
+
+- App `94fd3f07` → `status = accepted` (accepted ~02:33am)
+- Loan `bbd437b0` / **FTM631** → `tmo_loan_status = Application Received`, **no `investment_deals` row** (`deal_id`, `deal_status`, `published_at` all null) → not in the marketplace.
+
+It was accepted **~8 minutes before `#accept-autopublish` deployed** (~02:41am), so the new auto-publish hook never ran for it. I checked the whole table: **exactly one** accepted loan has no deal — this one. Every acceptance *going forward* auto-publishes, so this is a one-time gap, not a recurring bug.
+
+**Recommendation: keep the stored Published state — don't remove it, don't make it purely computed.** "Published" is not the same fact as "accepted":
+
+1. The `investment_deals` row is its own entity with a lifecycle **published → funded → closed**. `funded` (`tmo_loan_status = Funded`) and `closed` (deal closed, or a loan-lifecycle change closes it) are **not** derivable from `application.status = accepted`. A computed-from-accepted flag loses the ability to close/withdraw a deal from the marketplace while the application stays accepted, and has no place for funded/closed.
+2. The row **snapshots deal terms** at publish time — `sold_rate`, `min_investment_amount`, `term_months`, LTV — pulled from the TMO cache + platform settings. A computed-on-read flag has nowhere to store these and would re-derive them every read against live TMO-cache freshness.
+3. Publishing fires a **side-effect** (the deal-published lender notification email) and stamps `published_at` for marketplace ordering. A boolean has no firing edge for "newly published."
+
+So removing it or fully computing it would actually regress the deal lifecycle. The thing the "computed" idea is reaching for — *consistency* — is better gotten two ways:
+
+- **Now (the real fix):** one-time backfill of FTM631. Two options:
+  - `admin_deal_publish_(db, 'bbd437b0-…')` directly → **quiet**, no lender email (this is exactly what the auto-publish path does).
+  - `POST /api/admin/loans/bbd437b0-…/deal` → publishes **and** emails lenders (`deal-published-email`).
+- **Optional follow-up:** add a reconcile affordance in the pipeline loan dialog — when an app is accepted but has no published deal, surface a one-click **Publish** (or auto-reconcile on open). That gives you the consistency without throwing away the stored lifecycle.
+
+This is a prod write that makes the loan publicly visible in the investor marketplace, so I haven't run it. **Want me to backfill FTM631 — quiet (no email) or with the lender notification?** Captured as `#ftm631-publish-backfill`.
+<!-- agent:boundary:30bdf002 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -132,12 +161,13 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=loan&dialog_loan_id=bbd437b0-913f-4a6f-960b-901c72a410c9 is still not published. Should we remove the Published state or make it computed based on the application being accepted?
+- do [#e9fy]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#e9fy] #ftm631-publish-backfill [recommended] One-time backfill: loan FTM631/bbd437b0 (app 94fd3f07) is accepted but was accepted ~8min BEFORE #accept-autopublish deployed, so it has no investment_deals row. Exactly 1 such loan exists. Publish it via admin_deal_publish_ (quiet, no lender email) or POST /api/admin/loans/bbd437b0.../deal (emails lenders). Keep stored Published state; do NOT remove or fully-compute it.
 <!-- /agent:backlog -->
 
 ## Review

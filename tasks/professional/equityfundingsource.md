@@ -38,7 +38,22 @@ completed
 Compacted content:
 ❯ - Archived 6 response topic(s): Lender Group table is malformed; Is "Loan Terms" the borrower preferred terms?; Funding Commitment should say "Express Interest", not "Awaiting EFS selection"; 3 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:7211a98d -->
+
+### Re: I still see the TMO loan terms on deal d6b78994 — opus-4-8
+
+Good catch — fixed the discriminator, built, tested, committed, pushed, and deployed. This was exactly the caveat I flagged: my first pass keyed on `tmo_loan` *presence*, but the **TMO cache carries a loan record even for published/reserved deals** (sourced from `tmo_cache_rows_by_source_R_`, defaulting to `{}`), so an available deal still had a non-empty `tmo_loan` and kept showing "Loan Terms".
+
+**Fix:** key off the **deal lifecycle status** instead of `tmo_loan`. `investment_deal_status_T = 'published' | 'reserved' | 'funded' | 'closed'`, and the deal-by-id API already returns `status`. Now `deal_funded = deal.status === 'funded' || deal.status === 'closed'`; funded/closed → "Loan Details" (TMO Loan Terms), published/reserved → "Preferred Terms". Deal d6b78994 is published/available, so it now shows Preferred Terms.
+
+**Changed paths (`src/equityfundingsource-dev`, commit `1c02f38`, pushed + deployed):**
+- `lib/ui--browser--efs/portal/investor/available_deals.tsx` — add `status` to the `InvestorDeal` interface.
+- `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — `deal_funded` discriminator replaces the `tmo_loan` check.
+- `tests/investor-portal-e2e.test.ts` — assert the status-based condition.
+
+**Verify + deploy:** `make check` green — **895 pass, 0 fail**, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `1c02f38` (`5549c0b81`).
+
+Please refresh the deal page and confirm. Confidence: high — `status` is the lender-independent global deal lifecycle, so it won't be fooled by per-lender funding state. Escalation: none.
+<!-- agent:boundary:cda5b3ff -->
 <!-- /agent:exchange -->
 ###
 <!--

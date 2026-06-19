@@ -38,13 +38,38 @@ completed
 Compacted content:
 - Archived 5 response topic(s): [#1vhn] route dispatching the trigger into a crashed/exited harness shell; queue auto-re-fired despite the pause; do [#8bfz]; 2 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:36690621 -->
+
+### Re: do [#pk3f] — #semmerge-ack-turn Phase 4 — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#pk3f]
+
+
+Shipped Phase 4 of the semantic-AST-merge plan (`#pk3f` / `#semmerge-ack-turn`), the rung that turns the `requires_ack` outcomes from the convergence semantic merge into an acknowledgement the agent's *next* turn actually sees. agent-doc `a4bda87f`, superproject pointer `99e64d1bc`, version `0.34.14` built + installed + cdylib refreshed.
+
+**The gap it closes.** `#smconv` (0.34.7) already merges node-disjoint operator↔agent edits and lets the operator win same-node conflicts, but when it couldn't apply the agent's change verbatim — operator deleted an agent-edited node, overrode the same node, or revived an agent-deleted node — it only logged `semantic_merge_ack_pending` to `ops.log`. Nothing carried that into the agent's next response, so the operator silently won with no acknowledgement in the exchange. The `write/ipc.rs` TODO at the ack site was exactly Phase 4.
+
+**What changed (carry-forward via cycle_state, as the backlog specified):**
+- `write/ipc.rs` now persists each `requires_ack` `AckRequest` via the new `cycle_state::record_semantic_merge_acks` alongside the existing log marker.
+- `CycleState` gains `pending_semantic_merge_acks: Vec<PendingSemanticMergeAck>`. `start_preflight` carries **un-surfaced** acks forward exactly one cycle and marks them surfaced.
+- Lifecycle is driven by a per-ack `surfaced` flag, **not** a `cycle_id` comparison — `cycle_id` is millisecond-derived and two back-to-back cycles can collide, which would have leaked or dropped acks. (This was the one subtle correctness trap; the `surfaced` flag sidesteps it entirely.)
+- `preflight` surfaces them as a structured `semantic_merge_acks` field **plus** a companion `semantic_merge_ack_pending` `PreflightWarning`, so the skill's existing "surface warnings" path drives the acknowledgement — zero SKILL.md/audit-docs churn.
+- New stable `AckReason::token()` is the wire format cycle_state persists (`operator_deleted_agent_edited_node` / `same_node_operator_override` / `operator_revived_agent_deleted_node`).
+
+The merged document is **unchanged** — operator content already won — so this adds only the courtesy acknowledgement; no content is created or lost.
+
+**Verification.** `make check` green (EXIT=0, no FAILED/error). 5 new tests: `ack_reason_tokens_are_stable` (markdown-ast); `record_semantic_merge_acks_tags_current_cycle_and_dedupes`, `start_preflight_carries_prior_cycle_acks_forward_exactly_once` (two-boundary surface-once-then-drop), `semantic_merge_ack_recorded_after_carry_chains_to_next_cycle` (cycle_state); `preflight_output_semantic_merge_acks_roundtrip` (preflight). SPEC (`07-closeout-commands.md`) + VERSIONS + plan updated; latest agent-doc CI green pre-push.
+
+Remaining semmerge phases: `#smqstrike` (Phase 3, queue-node-strike) and `#smsim` (Phase 5, SimWorld matrix) — both still queued.
+<!-- agent:boundary:36522c51 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#pk3f]
+- ~~:pushpin: do [#pk3f]~~
+- JB `Run Agent Doc` in equityfundingsource.md moves an uncommitted queue item from the queue into the agent prompt. The queue item is gone and the turn stalls uncommitted with incorrect agent input.
 - :pushpin: do [#smqstrike]
 - :pushpin: do [#smsim]
 - :pushpin: do [#cyh0]
@@ -156,7 +181,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qpausego] #agent-doc-bug `agent-doc admin queue pause <FILE>` is accepted (durable receipt, e.g. ids 68/70 at generation 548) but does NOT halt a `go`-mode queue: after pause, preflight still reports queue_active=true / queue_paused=None / queue_trigger=auto and the supervisor/auto-loop keeps re-dispatching the next head (observed 3 consecutive auto-re-dispatches of agent-doc-bugs2.md after an accepted pause). Either the controller pause receipt is not consulted by the auto-dispatch path for a queue whose `agent:queue` header carries `go`, or preflight does not surface the controller pause (queue_paused stays None despite an accepted pause). Investigate: (1) does the supervisor idle-watch / queue auto-dispatch read the controller pause receipt before injecting, and does `go` override it? (2) should preflight expose queue_paused=true and drop queue_continuation_required when a controller pause is active? Today the only effective halt for a go-queue is editing `queue: stop` frontmatter / removing `go` by hand (done this session), which races the live IPC supervisor. Fix so an accepted `admin queue pause` durably suppresses auto-dispatch (and is reflected in preflight) even for go-mode queues.
 - [ ] [#qdurcrash] #agent-doc-bug queue-edit durability across a supervisor/pane crash+restart: operator adds a queue item, the turn starts, the supervisor+tmux pane crashes and restarts, and the operator added queue item is GONE (virtuousai.md repro, same crash event as #routedeadshell/#1vhn). Root-cause hypothesis: the operator queue add lived only in the editor buffer / supervisor in-memory CRDT and was never journaled to a crash-durable on-disk store before the process died, so restart reloaded from the last snapshot/HEAD (predating the add) and dropped it. Fix (agent-actionable, binary-side): persist inbound operator queue patches to the on-disk snapshot/journal immediately on receipt (before the supervisor mutates queue state / before ack), and add a supervisor-startup reconcile that merges the on-disk document queue against the reloaded snapshot, so a crash+restart replays the pending queue edit instead of losing it. Verify: add a queue item, kill -9 the supervisor mid-turn, restart, confirm the item survives. Distinct from #semmerge (live-merge drop during a turn) and #routedeadshell (route dispatch into a dead shell).
 - [ ] [#cyh0] #fcczero #agent-doc-bug [operator-verify] JB File Cache Conflict still occurring; target is ABSOLUTE zero session-doc disk writes except genuine emergencies (everything via editor IPC). Audit (#smconv cycle) confirms the documented hot-path sites are already listener-guarded: post-commit worktree reconcile skips disk with a listener (#pcwcdiskfree), boundary reposition queues via file IPC and only disk-writes when IPC is Unavailable, queue/pending/status maintenance route through converge_or_disk_write (#fccqueue/#fccaudit); remaining disk writes are recovery/scaffold/migration emergencies by design. So the remaining FCC has an UNIDENTIFIED trigger. **Operator action: capture which exact action raises the dialog (the agent-doc command + ops.log line at that moment, e.g. write_authority action=... transport=disk) so the specific unguarded path can be found.** Likely candidates to check: the ack-content sidecar write, the VCS-refresh/save-document signal, or an editor-IPC convergence that the plugin still surfaces as a conflict. Note: this session most FCC came from manual `git checkout HEAD` recovery (a disk write), which #smconv removes the need for by merging drift instead of dropping responses.
-- [ ] [#pk3f] #smackturn #semmerge Phase 4 (ack-turn): turn semantic_merge requires_ack outcomes (logged semantic_merge_ack_pending in write/ipc.rs as of #smconv 0.34.7) into a queued agent exchange turn the next cycle — acknowledge operator-deleted-an-agent-edited-node and same-node operator-override, carried via cycle_state. Phases 3 (#smqstrike: route queue_consume strike through the merged node tree) and 5 (#smsim: SimWorld coverage of the operator<->agent concurrent matrix) also remain. Plan: tasks/agent-doc/plan-semantic-ast-merge.md
 - [ ] [#smqstrike] #semmerge Phase 3 (queue-node-strike): route queue_consume strike-through through the markdown_ast semantic_merge merged node tree (shipped #semmerge-owner c300eeec) instead of the line-level strike, so an answered/consumed queue head is struck on the merged structure and survives concurrent operator queue edits. Plan: tasks/agent-doc/plan-semantic-ast-merge.md
 - [ ] [#smsim] #semmerge Phase 5 (simworld matrix): add deterministic SimWorld coverage of the operator<->agent concurrent-edit matrix against semantic_merge — node-disjoint auto-merge, same-node operator-wins, operator-deleted-agent-edited-node ack, turn-active vs unrelated-area gating — so the merge/IPC data-loss family is regression-locked. Plan: tasks/agent-doc/plan-semantic-ast-merge.md
 - [ ] [#733r] #qheadsync agent-doc-bug: answered/filed queue heads are not reliably reconciled to the queue (free-text reports left un-struck; done-reaping orphans the matching id-backed queue head; manual strikes do not persist through finalize content_ours; backlog-to-queue sync has no sweep for items missed in prior turns and items can be lost). Fix at closeout in the binary. Plan: tasks/agent-doc/plan-answered-queue-head-autostrike.md

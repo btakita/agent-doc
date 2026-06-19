@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -255,7 +255,7 @@ Same out-of-sync deal (`7a0c1463` / loan `45ddae53` / `GQI751`). I traced the fa
 **Not yet fixed — the deal-specific *trigger*.** The fix makes errors diagnosable but isn't itself the cause; some endpoint the deal dialog hits throws for *this* loan. I statically traced the obvious suspects — `admin_deal_R_` → `deal_with_calculated_ltv_` → `loan_ltv_calc_` → `onboarding_data_` → `onboarding_json_`, plus the loans/documents/interests/funds/activity endpoints — and they're **all null/parse-guarded**, so I can't honestly pin the throw from code alone. I couldn't reproduce live either: no prod D1 access (still gated on `#cftk`), and `cf:worker:tail` needs a live click to catch it. I'm not going to guess a culprit.
 
 **Captured `#dealtab500`** (backlog): with the stack now logged, reproduce the loan tab under `bun run cf:worker:tail` to catch the throwing endpoint, then guard it + add a regression test. Strong hypothesis given the prior turn's diagnosis: an admin deal/loan endpoint that assumes a `full_application` / richer onboarding that this thin TMO-synced loan never got. Ties directly back to the `#5q7z`/`#214f` sync gap.
-<!-- agent:boundary:c5446344 -->
+<!-- agent:boundary:f9d42cf4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -268,6 +268,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#dealtab500]
 <!-- /agent:queue -->
 
 ## Backlog

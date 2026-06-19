@@ -152,7 +152,27 @@ Commands/proof carried from the shipped closeout:
 Verification: high; duplicate queue closeout only.
 
 Escalation: none.
-<!-- agent:boundary:90517672 -->
+
+### Re: Duplicate queue head: group-backed interest — gpt-5
+
+> **Queue prompt:**
+>
+> A lender can be interested in a loan on behalf of self or on behalf of a lender group.
+
+
+No additional code changes were needed. Group-backed interest was already implemented and deployed: lender interest can be recorded as self or as a lender group, persists `lending_group_id`, validates group membership, snapshots group allocations, and cleans old group allocations when switching/removing interest.
+
+Changed paths: none in this continuation.
+
+Commands/proof carried from the shipped closeout:
+- `make check` passed: 882 tests, browser build, and worker build.
+- EFS code commit `fa4fd50` pushed to `origin/main`.
+- `make deploy` applied the remote D1 migration and deployed Worker version `362d88ac-72d1-47c5-9e3c-0e0741d158bd`.
+
+Verification: high; duplicate queue closeout only.
+
+Escalation: none.
+<!-- agent:boundary:e65997c7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -169,7 +189,7 @@ After 20:30
 - ~~:pushpin: A lender can be interested in a loan on behalf of self or on behalf of a lender group.~~
 - ~~:pushpin: deploy~~
 - ~~Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.~~
-- A lender can be interested in a loan on behalf of self or on behalf of a lender group.
+- ~~A lender can be interested in a loan on behalf of self or on behalf of a lender group.~~
 - deploy
 <!-- /agent:queue -->
 

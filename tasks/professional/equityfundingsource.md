@@ -139,6 +139,11 @@ This refines the open `#5eq8` (closing-docs redesign): the rebuilt step records 
 
 > **Queue prompt:**
 >
+> /home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/docs/deal-pipeline-flow.md "Close offering (deal → closed)" still is a self-closed loop. It needs bi-directional TMO sync. Either the site or TMO can set the status.
+
+
+> **Queue prompt:**
+>
 > Loan -> Closed diagram step should be bi-directionally driven with TMO. An automatic state change.
 
 
@@ -149,7 +154,7 @@ Updated the diagram and surrounding text to match. The `Loan → Closed / Funded
 - **Admin action #7** — reworded from "Close the loan / offering" to "Close the offering," clarifying the loan-status milestone is TMO-automatic and does not auto-close the offering.
 
 Committed + pushed: EFS `58e1e49` on `origin/main`, superproject submodule pointer bumped (`204c0473c`).
-<!-- agent:boundary:f8ee9041 -->
+<!-- agent:boundary:ad3b6653 -->
 <!-- /agent:exchange -->
 ###
 <!--

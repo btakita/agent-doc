@@ -262,7 +262,7 @@ Shipped a drain path for orphaned id-backed queue heads, but **not** as the auto
 **Deferred on purpose:** `cargo install` (the `~/.cargo/bin` finalize client used by tmux sessions) is *not* run mid-session — a newer finalize client against this still-running supervisor is the documented exit-75 `live_prompt_drift` hazard, and this session is already IPC-drift-prone. Do `cargo install --path .` + `agent-doc admin recycle` at the session/idle boundary to make the new `queue consume --id` command live for tmux-spawned runs.
 
 The newly-queued free-text items (autostart-on-typing, save-detection watcher) and the remaining `[operator-verify]` heads (`#hap7`, `#fbwire`, `#qpauseux`, `#docdriftgrace`, `#tsiftmdcrash`) are untouched this cycle — they drain in later iterations / need a live editor.
-<!-- agent:boundary:f50f245a -->
+<!-- agent:boundary:98c0faba -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -368,6 +368,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - ~~:pushpin: do [#donemirrorreap]~~
 - :pushpin: do [#fbwire]
 - do [#hap7]
+- do [#gf5n]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -394,6 +395,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#gf5n] #numlistrev #agent-doc-bug Operator-reported: the initial response for a turn renders numbered/ordered lists in REVERSE order (e.g. items emit as 4,3,2,1 instead of 1,2,3,4), with the boundary marker landing after the reversed block. Likely a streaming-checkpoint / response-render ordering bug where ordered-list nodes are emitted/merged tail-first. Repro: a response whose body contains a markdown numbered list; first-turn render shows it inverted. Investigate the stream/CRDT ordered-list emission + boundary insertion order.
 - [ ] [#hap7] [operator-verify] #agent-doc-bug #qdup Operator-reported (2026-06-19): agent-doc duplicated the operator equityfundingsource.md queue prompt (All upload preview dialogs should be full screen, deploy) on a concurrent edit. Second instance of the queue-prompt duplication family (first: virtuousai.md). Fix per operator spec: constrain the CRDT/semantic merge to the structural part it applies to (per-structural-node merges, not whole-component) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; and when the operator deletes a structure that agent content targets, note it in agent:exchange instead of merging. Merge-core change, the corruption source this session, so NOT safe to rush in the in-session loop; needs a focused cycle. Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md
 - [ ] [#fbwire] [operator-verify] #agent-doc-bug Phase 2 live wiring of the #fullboundary convergence gate (Phase 1 decision core + playback shipped, submodule 17010e78). Call convergence_gate_decision inside the supervisor idle-queue-watch/drain inter-item dispatch (start/idle_watch.rs to start.rs): gather the four facts (committed via cycle_state, editor converged==HEAD via emit_postcommit_worktree_check, ipc_socket inflight==0, actor idle), defer the next trigger until Dispatch, on ForceDiskFallback do the real --force-disk write + record_force_disk_fallback. Add SimWorld acceptance. Live-supervisor-critical: needs make check + make tmux-ci across two live panes, so NOT in-session-loop-drainable; needs a focused operator-driven cycle. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block to the operator badly. Two variants: (1) a deliberate/admin pause renders as a raw red Error: toast instead of an actionable notification; (2) a churn-stop pause (reason: broken editor IPC, pausing to stop churn — the #41a32133 exception that blocks every caller including an explicit operator reopen so the route restarts the stale supervisor first) renders as NOTHING — JB Run Agent Doc just silently stalls with no notification at all (operator report 2026-06-19). Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button; for the churn-stop variant surface a restart-supervisor / resume action instead of silence. Operator action: install the updated JB plugin, then verify both the paused-queue notification AND the churn-stop notification render (live gate).

@@ -143,7 +143,13 @@ I confirmed the gap is real (supervisor resolves the harness once at start and r
 2 unit tests, `make check` green, built + installed, shipped (submodule `8ce4110f`).
 
 **Why Phase 1b is gated (not punted):** the restart EXECUTION re-derives the launch spec in the supervisor restart loop (or a no-preserve-child recycle variant, since `supervisor_perform_reexec` currently *adopts* the live child). That edits the live supervisor restart loop and **cannot be verified without `make tmux-ci` across two live panes** — exactly the "Live-supervisor-critical: focused clean cycle" the backlog item specifies. The Phase-1a logging I just shipped is the instrument to prove detection before that lands. Plan: `tasks/agent-doc/plan-restart-agent.md` (Phase 1a/1b split documented). Continuing the drain.
-<!-- agent:boundary:93335b7f -->
+
+### Re: full boundary between queue items + loud force-disk fallback — opus-4-8
+
+Yes — that's the root-cause direction, sharpened to **editor-IPC convergence** (not just the git commit). Filed `#fullboundary` with the plan, made it the highest-priority queue item (above the `:pushpin:` annotations), and folded in your force-disk-as-loud-error directive.
+
+**Landing this via `--force-disk` per your authorization** — the editor IPC is wedged (`inflight=5` / `send_failed`), so this write is itself an instance of exactly the fallback `#fullboundary` will make loud + replayable. Recycling the PCP/supervisor next.
+<!-- agent:boundary:258c4464 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -163,9 +169,9 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - ~~:pushpin: In equityfundingsource.md After a recycle restart + queue continuation, the prompt is not submitted after the restart.~~
 - ~~:pushpin: do [#733r]~~
 - ~~:pushpin: do [#docdriftgrace]~~
-- ~~:pushpin: do [#agentreloadrestart]~~
-- :pushpin: do [#restartagentmenu]
-- :pushpin: do [#qpauseux]
+- ~~:pushpin: do [#agentrelo adrestart]~~
+- ~~:pushpin: do [#restartagentmenu]~~
+- ~~:pushpin: do [#qpauseux]~~
 - :pushpin: do [#tsiftmdcrash]
 - :pushpin: do [#orphanqhead]
 - :pushpin: As I was typing in a queue item into virtuousai.md, parts of the document was duplicated, corrupting the document. The CRDT/semantic merge should be constrained only to the structural part that it applies to. Do multiple merges for each structural part as needed. This should remove the possibility of structural corruption and should reduce conflicts. If the operator deletes parts of the structure in the document and there is new agent content for a deleted structure, mention the fact in the exchange but do not attempt to merge...as the in-editor document is the source of truth.
@@ -248,6 +254,7 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
+- do [#fullboundary]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -274,6 +281,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#fullboundary] #fullboundary #agent-doc-bug convergence-gated inter-queue-item boundary: serialize the queue so item N+1 does NOT dispatch until item N proves a quiescent close (committed AND editor-IPC converged==HEAD AND this doc inflight drained to 0 AND actor idle) — root-fixes the content_ours / live_prompt_drift / #pcwcdiskfree post-commit-worktree-drop / inflight-backlog send_failed race family (the drain lease #kp5z serializes dispatch ownership but NOT editor convergence). Bounded timeout falls back to a LOUD force-disk write logged as an ERROR with an operation-playback artifact (.agent-doc/playback/<doc-hash>/<cycle>.json: ordered IPC attempt sequence + transport + ack outcomes, inflight, snapshot/baseline/HEAD hashes, cycle/gen/supervisor-pid, closeout state-machine transitions) so an agent can root-cause exactly what wedged. Live-supervisor-critical: focused make check + make tmux-ci cycle. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md
 - [ ] [#orphanqhead] Orphaned id-backed queue head has no drain path: after a backlog item is reaped via --done, if the matching id-backed queue head [#id] strike was lost to IPC drift, the head is orphaned — --done <id> is then a no-op ("already resolved") and queue consume rejects id-backed heads ("reap via --done"), so the head is unreachable. preflight marks it queue_drainable_head_count=0 but never auto-strikes it, leaving a permanent phantom head that re-fires the auto-loop. Repro: tasks/recruit/virtuousai.md #p3kj on agent-doc 0.34.11; compounded by a wedged editor IPC (live IntelliJ buffer) refusing queue/pending writes (ack_mismatch/send_failed). Fix: auto-strike id-backed heads whose backing item is already done/absent during preflight reconciliation, or allow queue consume --id <id> to strike an orphaned id-backed head.
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block as a raw red Error: toast instead of an actionable queue paused — resume notification. Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button rather than a dispatch error. **Operator action: install the updated JB plugin, then verify the paused-queue notification renders (live gate).**
 - [ ] [#docdriftgrace] [operator-verify] agent-doc thrashes when the session doc changes mid/between turn in ways unrelated to the current prompt: snapshot>visible drift (operator trimmed old committed Re: blocks + harness switch + queue edits) made preflight refuse commit (looks like a manual cleanup with stale snapshot) and forced a manual reset --from-current. Binary should classify drift by component and silently auto-rebase snapshot/CRDT for unrelated changes, surfacing ONLY structural conflicts on the in-flight prompt/response. **Operator action: watch one live re-baseline cycle to verify the silent auto-rebase.** Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md

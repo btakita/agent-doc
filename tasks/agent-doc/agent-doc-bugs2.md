@@ -7,6 +7,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
+agent_doc_lint_dialect: off
 prompt_presets:
   '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/agent-doc/agent-doc-bugs2.md

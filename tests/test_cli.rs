@@ -808,7 +808,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // logs `write_authority action=routed reason=plugin_listener_active
         // surface=queue_maintenance` when it routes a queue-maintenance mutation
         // through the editor IPC instead of a raw disk write (#fccqueue).
-        ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 3,
+        // 3 -> 4 (`reason=queue_edit_lease`): `run_queue_maintenance` logs
+        // `queue_maintenance_deferred reason=queue_edit_lease holder_pid=<pid>`
+        // when it defers ALL queue mutation while a different live process holds a
+        // fresh queue-edit lease (a direct `queue prune-noise`/`consume` in flight;
+        // #sqedit-race Phase 2).
+        ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 4,
         ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/route.rs", "accepted_only") => 2,

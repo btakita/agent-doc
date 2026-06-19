@@ -1157,6 +1157,27 @@ pub(crate) fn dedup_queue_nodes_by_key(content: &str) -> Result<Option<(String, 
 }
 
 pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
+    // #sqedit-race Phase 2: defer ALL queue maintenance mutation while a different,
+    // live process holds a fresh queue-edit lease (a direct `queue prune-noise` /
+    // `queue consume` in flight). Round-tripping a torn intermediate queue through
+    // the #mirrorall mirror / backlog→queue sync / #7r2s pin / dedup re-mangles
+    // entries (double-pins, dropped heads). The brief lease makes this a yield, not
+    // a stall: the direct edit completes in well under a TTL and the next preflight
+    // performs maintenance normally on the settled queue.
+    if let Some(holder_pid) =
+        crate::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_maintenance_deferred reason=queue_edit_lease holder_pid={holder_pid} (#sqedit-race)"
+            ),
+        );
+        eprintln!(
+            "[preflight] queue: deferring maintenance — direct queue edit in flight (pid {holder_pid}; #sqedit-race)"
+        );
+        return Ok(QueueState::default());
+    }
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
         Err(_) => return Ok(QueueState::default()),
@@ -2580,6 +2601,60 @@ mod tests {
             state.warnings
         );
     }
+    #[test]
+    fn run_queue_maintenance_defers_while_foreign_queue_edit_lease_held() {
+        // #sqedit-race Phase 2: a backlog `queue=sync` would normally regenerate
+        // the empty queue. While a DIFFERENT live process holds a fresh queue-edit
+        // lease (a direct `queue prune-noise` / `queue consume` in flight),
+        // preflight maintenance must defer entirely — no mutation, no sync — so it
+        // never round-trips a torn intermediate queue.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=sync -->\n",
+            "- [ ] [#alpha] first\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        // pid 1 (init) is always live on Unix and is never this test process →
+        // a genuine foreign in-flight queue edit.
+        let doc_str = doc.to_string_lossy().to_string();
+        crate::queue_edit_owner::refresh_queue_edit_owner_lease(&doc_str, 1).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(after, content, "queue must be untouched while a foreign edit is in flight");
+        assert!(
+            state.synced_queue_ids.is_empty(),
+            "no backlog→queue sync may run while deferred, got {:?}",
+            state.synced_queue_ids
+        );
+        assert!(
+            !after.contains("- do [#alpha]"),
+            "deferred maintenance must not mint the queue head:\n{after}"
+        );
+
+        // Once the lease clears, the next pass syncs normally (the defer is a
+        // yield, not a permanent skip).
+        crate::queue_edit_owner::clear_queue_edit_owner_lease(&doc_str);
+        let resumed = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(resumed.synced_queue_ids, vec!["alpha".to_string()]);
+        assert!(std::fs::read_to_string(&doc).unwrap().contains("- do [#alpha]"));
+    }
+
     #[test]
     fn run_queue_maintenance_mirrors_operator_verify_into_queue_but_keeps_it_nondrainable() {
         // #mirrorall (operator directive 2026-06-18): operator-verify backlog items

@@ -1599,6 +1599,23 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     continue;
                 }
 
+                // #sqedit-race Phase 2: a direct `queue prune-noise` / `queue
+                // consume` is mid read-modify-write. Defer this tick so the
+                // idle-watch never reads (and re-dispatches against) a torn
+                // intermediate queue head. The lease is short-TTL, so this is a
+                // brief yield: the edit settles and the next tick drains normally.
+                if let Some(holder_pid) =
+                    crate::queue_edit_owner::foreign_queue_edit_in_flight(&file)
+                {
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "idle_queue_watch_drain_skipped reason=queue_edit_in_flight holder_pid={holder_pid} (#sqedit-race)"
+                        ),
+                    );
+                    continue;
+                }
+
                 // Single-owner tie-break: if the Claude Code `/loop` auto-loop holds
                 // a fresh drain-owner lease it owns this drain, so the supervisor
                 // must defer instead of double-injecting (#kp5z / #qflood).

@@ -122,6 +122,11 @@ pub fn consume_orphan_id(file: &Path, id: &str) -> Result<()> {
 }
 
 pub fn consume(file: &Path, count: usize) -> Result<()> {
+    // #sqedit-race Phase 2: hold the queue-edit lease for the whole strike loop so
+    // preflight queue maintenance and the supervisor idle-watch defer instead of
+    // round-tripping a torn intermediate queue. Released on drop (incl. early
+    // return / `bail!`).
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
     let target = count.max(1);
     let mut struck: Vec<String> = Vec::new();
     let mut last_remaining = 0usize;
@@ -188,6 +193,9 @@ pub fn consume(file: &Path, count: usize) -> Result<()> {
 /// free-text heads. Supervisor-safe: routes through the same editor-IPC-converged
 /// write path the closeout strikes use.
 pub fn prune_noise(file: &Path) -> Result<()> {
+    // #sqedit-race Phase 2: hold the queue-edit lease across the prune so the
+    // supervisor idle-watch + preflight maintenance defer (single queue writer).
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
     let struck = crate::write::prune_noise_queue_heads(file)?;
     if struck == 0 {
         println!(

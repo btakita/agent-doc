@@ -1325,7 +1325,15 @@ pub fn dedup_live_prompts(entries: &[QueueEntry]) -> Option<Vec<QueueEntry>> {
 }
 
 fn dedup_key_for_prompt(prompt: &QueuePrompt) -> Option<String> {
-    let trimmed = prompt.text.trim().to_ascii_lowercase();
+    // Strip a leading operator/agent pin marker (`:pushpin:` / `:round_pushpin:`,
+    // any spelling) before testing the `do [#id]` identity prefix
+    // (`#qdup-pin-prefix`). The pin is a priority annotation, not part of the
+    // queue identity, so a pinned head (`:pushpin: do [#id]`) must dedupe against
+    // its unpinned twin (`do [#id]`) — otherwise a re-pinned id-backed head
+    // accumulates as a visible duplicate instead of being collapsed. A plain
+    // capitalized `Do [#id]` already normalizes via `to_ascii_lowercase`; the pin
+    // prefix was the sole gap.
+    let trimmed = strip_priority_markers(&prompt.text).to_ascii_lowercase();
     if !(trimmed.starts_with("do [#") || trimmed.starts_with("do #")) {
         return None;
     }
@@ -2170,6 +2178,48 @@ mod tests {
         assert!(
             dedup_live_prompts(&entries).is_none(),
             "no duplicates → no mutation"
+        );
+    }
+
+    #[test]
+    fn dedup_live_prompts_collapses_pin_prefixed_id_duplicate() {
+        // #qdup-pin-prefix: a re-pinned id-backed head (`:pushpin: do [#x]`) must
+        // collapse against its unpinned twin (`do [#x]`) — the pin marker is a
+        // priority annotation, not part of the queue identity. Before the fix the
+        // pin prefix defeated the `do [#` identity check, so the duplicate
+        // accumulated visibly in the queue.
+        let entries = parse(concat!(
+            "- do [#x]\n",
+            "- :pushpin: do [#x]\n",
+            "- :round_pushpin: Do [#x]\n",
+        ))
+        .unwrap();
+        let deduped =
+            dedup_live_prompts(&entries).expect("pin-prefixed id duplicates should collapse");
+        assert_eq!(
+            prompts(&deduped).len(),
+            1,
+            "all three same-id heads collapse to the first occurrence: {deduped:?}"
+        );
+        assert_eq!(render(&deduped), "- do [#x]\n");
+    }
+
+    #[test]
+    fn sync_does_not_readd_id_already_present_as_pinned_head() {
+        // The operator's requirement (`agent:backlog` with a `queue` attribute must
+        // not re-add an item already present in the queue) holds even when the
+        // existing head carries a leading pin marker: `entry_do_id` reads the id
+        // from anywhere in the text, so Append/Prepend skip it.
+        let entries = parse("- :pushpin: do [#foo]\n").unwrap();
+        assert!(
+            sync_backlog_into_queue(&entries, &ids(&["foo"]), BacklogQueueSyncMode::Append)
+                .is_none(),
+            "id already present as a pinned head must not be re-appended"
+        );
+        assert!(
+            sync_backlog_into_queue(&entries, &ids(&["foo"]), BacklogQueueSyncMode::Prepend)
+                .is_none(),
+            "id already present as a pinned head must not be re-prepended"
         );
     }
 

@@ -284,7 +284,7 @@ The virtuousai mid-type duplication report is tracked by **#hap7/#qdup** (scoped
 **Operator-verify remainder** (need a live editor / JB-plugin gate, not agent-drainable): `#qpauseux`, `#docdriftgrace`, `#tsiftmdcrash`, `#fbwire`, `#hap7`.
 
 Stopping here rather than churning the contaminated remainder — the genuine agent work available this session is done: `#orphanqhead` shipped + installed, `#numlistrev` filed, the stale binary and corrupt buffer cleaned.
-<!-- agent:boundary:c7c48198 -->
+<!-- agent:boundary:2ccf2719 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -391,6 +391,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - :pushpin: do [#fbwire]
 - do [#hap7]
 - do [#gf5n]
+- do [#rt83]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -417,6 +418,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rt83] #qrepin #agent-doc-bug The active-queue stripped diff perpetually reports a phantom pushpin-add of the operator-verify head #qpauseux every preflight even when the doc and snapshot raw queue bodies are byte-identical, keeping no_changes:false and re-triggering the supervisor idle-watch. Investigated: sync_backlog_into_queue (entry_do_id/do_prompt_id), the #mirrorall mirror, and the #7r2s auto-pin (annotate_manual_queue_additions) all correctly recognize and skip the already-pinned bare-id head, so it is NOT a content mutation. Root is in the preflight stripped-diff/boundary-reposition path: commit repositions the boundary in the snapshot but skips the working-tree reposition while a live IPC listener is active, so the post-commit snapshot queue and the post-maintenance doc queue diverge on the pinned operator-verify head position/strip, surfacing a phantom pin add. Cosmetic (no corruption) but it sustains qchurn. Fix: normalize operator-verify mirror pins symmetrically in the stripped diff, or converge the snapshot boundary reposition with the working tree even under a live listener. Needs instrumented per-phase queue-body tracing.
 - [ ] [#gf5n] #numlistrev #agent-doc-bug Operator-reported: the initial response for a turn renders numbered/ordered lists in REVERSE order (e.g. items emit as 4,3,2,1 instead of 1,2,3,4), with the boundary marker landing after the reversed block. Likely a streaming-checkpoint / response-render ordering bug where ordered-list nodes are emitted/merged tail-first. Repro: a response whose body contains a markdown numbered list; first-turn render shows it inverted. Investigate the stream/CRDT ordered-list emission + boundary insertion order.
 - [ ] [#hap7] [operator-verify] #agent-doc-bug #qdup Operator-reported (2026-06-19): agent-doc duplicated the operator equityfundingsource.md queue prompt (All upload preview dialogs should be full screen, deploy) on a concurrent edit. Second instance of the queue-prompt duplication family (first: virtuousai.md). Fix per operator spec: constrain the CRDT/semantic merge to the structural part it applies to (per-structural-node merges, not whole-component) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; and when the operator deletes a structure that agent content targets, note it in agent:exchange instead of merging. Merge-core change, the corruption source this session, so NOT safe to rush in the in-session loop; needs a focused cycle. Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md
 - [ ] [#fbwire] [operator-verify] #agent-doc-bug Phase 2 live wiring of the #fullboundary convergence gate (Phase 1 decision core + playback shipped, submodule 17010e78). Call convergence_gate_decision inside the supervisor idle-queue-watch/drain inter-item dispatch (start/idle_watch.rs to start.rs): gather the four facts (committed via cycle_state, editor converged==HEAD via emit_postcommit_worktree_check, ipc_socket inflight==0, actor idle), defer the next trigger until Dispatch, on ForceDiskFallback do the real --force-disk write + record_force_disk_fallback. Add SimWorld acceptance. Live-supervisor-critical: needs make check + make tmux-ci across two live panes, so NOT in-session-loop-drainable; needs a focused operator-driven cycle. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md

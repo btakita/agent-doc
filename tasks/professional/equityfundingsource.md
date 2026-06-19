@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -59,7 +59,24 @@ How it differs from the neighboring tabs:
 - **Funding Commits** = the actual dollar commitments and their wire/funded state (the money).
 
 So the flow is: a lender shows interest → gets selected → their committed funds show up here as a Pending commitment → you confirm the wire → it becomes Active and is reported to TMO.
-<!-- agent:boundary:5a1d9c68 -->
+
+### Re: Is the Funding Commit driven by TMO? — opus-4-8
+
+> **Queue prompt:**
+>
+> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=funds, the selected lender is not in the "Funding Commit".
+
+
+No — the Funding Commit is **EFS-owned**, not driven by TMO. Here's the actual data direction in the code:
+
+1. **Created in EFS.** A Funding Commit is a row in the EFS `funds` table (D1). It's created when a lender funds the deal through the **investor portal** (`POST` fund → `INSERT INTO funds ... status='pending'`), entering an amount, their account number, and vesting/beneficiary. At that point it has **no** TMO record id yet.
+2. **Written back to TMO on wire confirm.** When an admin clicks **Confirm wire** (`PUT /api/admin/funds/:id/confirm-wire`), EFS calls TMO's `AddLoanFunding`, stores the returned `tmo_funding_rec_id`, and flips the commit to **Active**. So EFS *pushes* the commit to TMO — TMO doesn't originate it. (This writeback is gated on the TMO field-map/support items `#7a4d`/`#dzmm`.)
+3. **Reconciled from TMO (amounts only).** The TMO sync reads TMO's fundings into a cache and **updates the `amount_funded` on funds rows that already exist** (matched by `tmo_funding_rec_id`, or account + loan number). It does **not** create new `funds` rows from TMO.
+
+So: TMO is the downstream system of record EFS syncs *to* (and reconciles amounts *from*), but a Funding Commit will never appear just because TMO has a funding — it has to exist in EFS first.
+
+**Why this matters for your earlier report:** selecting a lender writes only the interest's `selected_at` + reserves the deal; it creates no `funds` row, and TMO sync won't create one either. So the selected lender stays absent from Funding Commits until an **EFS-side** commit exists. That's exactly the decision I asked about — whether selecting a lender should auto-create that EFS commit (and for what amount), add an admin "Add commitment" action, or leave it to the lender's portal funding. Let me know which and I'll build it.
+<!-- agent:boundary:4137e788 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,7 +89,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=funds, the selected lender is not in the "Funding Commit".
 <!-- /agent:queue -->
 
 ## Backlog

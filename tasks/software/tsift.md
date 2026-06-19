@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -34,56 +34,20 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260619-174251.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260619-175702.md`*
 
 Compacted content:
-- Archived 4 response topic(s): #next-steps to fix tsift bugs; #kgentitycollapse; #kgconfrank; 1 more
-- Prior summary/context: prior compacted content: Archived 4 response topic(s): #kgeffmeasure; measured kg extraction effectiveness on a real ...
-
-### Re: #kgsameas — durable same_as edges for canonical-entity duplicates — opus-4-8
-
-> **Queue prompt:**
->
-> do [#kgsameas]
-
-
-Done. `#kgentitycollapse` deduped only the context-pack retrieval surface; graph-level consumers (`tsift graph`/`explain`/`summarize`, the SurrealDB projection) read `graph_nodes` directly and still saw every per-chunk/per-source duplicate. Now `kg extract` writes durable `same_as` links so all consumers collapse to one logical entity.
-
-- **`SqliteGraphStore::link_nodes_by_shared_property`** — stars nodes of a kind sharing a prefixed id-property value to the group's smallest node id, with link edges of a given kind. Idempotent (edges key on `from/to/kind`), no node deleted (provenance preserved).
-- **`tsift-kg::link_canonical_entities_sqlite`** wraps it with KG constants (`semantic_entity` / `entity_id` / `kgent-` / `same_as` / provider+contract).
-- **`kg extract`** runs the linker after the per-source replace upsert (`#kgrefreshdup`), so every extraction re-links idempotently.
-- spec (`local-kg-model.md`) documents the durable links beside the query-time merge — together they give one logical entity to both the retrieval pack and direct graph traversal.
-
-(Correction to the proposal text: `same_as` was *not* a pre-existing edge kind in `tsift-index` — that grep hit was a test name; I introduced `same_as` as a new KG edge kind here.)
-
-**Verification:** `link_nodes_by_shared_property_stars_duplicates_idempotently` (sqlite — representative choice, idempotency, prefix/singleton skips) + `link_canonical_entities_writes_same_as_edges` (kg wrapper); `cargo test -p tsift-kg -p tsift-sqlite` 60 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `1a451a1`, pushed; superproject pointer `93ba03706`.
-
-Next queue head: `do [#kgconfgate]` (provenance-aware min_confidence gating). `#kgconfreqverify` stays gated (operator-verify).
-
-### Re: #kgconfgate — provenance-aware min_confidence gating — opus-4-8
-
-> **Queue prompt:**
->
-> do [#kgconfgate]
-
-
-Done — this finishes the `#kgconf` operability arc. `#kgconfrank` made *ranking* provenance-aware, but the `min_confidence` *gate* still filtered by raw confidence, so a derived `default 0.500` survived a `0.4` gate while a real model `0.300` was excluded.
-
-- **`ContextCandidate`** gains `confidence_is_default` (set only when `confidence_source=default` explicitly), distinct from `confidence_is_model`. Untagged/legacy (pre-`#kgconf`) nodes are **neither** — so they keep working as before.
-- **`passes_confidence_gate`** — a positive `min_confidence` excludes explicit derived defaults outright (an unknown default isn't a measured score); model-sourced and untagged/legacy nodes gate by raw confidence; `min_confidence==0` admits everything.
-- spec (`local-kg-model.md`) documents the provenance-aware gate as the gating counterpart to `#kgconfrank`.
-
-The three-state distinction (model / explicit-default / untagged-legacy) is the key subtlety: only an *explicit* derived default is gate-excluded, so legacy graphs and the existing raw-gate test keep their behavior.
-
-**Verification:** `confidence_gate_is_provenance_aware` (default 0.9 excluded by a 0.4 gate, model 0.5 + legacy 0.7 admitted) + `confidence_gate_admits_defaults_when_threshold_is_zero`; `cargo test -p tsift-kg` 39 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `254eab0`, pushed; superproject pointer `2d7ce6158`.
-
-Queue drained. The KG-quality arc is complete: `#kgconf` (record confidence) → `#kgrefreshdup` (no refresh dups) → `#kgentitycollapse` (retrieval merge) → `#kgconfrank` (rank model > default) → `#kgsameas` (durable same_as) → `#kgconfgate` (gate model > default). Only `#kgconfreqverify` remains, gated as operator-verify (live-GPU A/B).
-<!-- agent:boundary:013d61b4 -->
+❯ - Archived 2 response topic(s): #kgsameas; #kgconfgate
+❯ - Prior summary/context: prior compacted content: Archived 4 response topic(s): #next-steps to fix tsift bugs; #kgentitycollapse; #kgconfrank;...
+<!-- agent:boundary:4c07d9ca -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: release + publish
+- ~~:pushpin: Do [#vmax]. I approve. Whatever you can automate, do it.~~
+- release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

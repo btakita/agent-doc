@@ -173,7 +173,22 @@ Done. Backfilled the missing `investment_deals` row for **FTM631** (loan `bbd437
 **Pre-flight confirmed exactly one gap, as expected:** before the write, `deal_count = 0` for this loan (INSERT branch, not the UPDATE branch), consistent with the earlier finding that FTM631 was the single accepted loan with no deal. Stored Published state is preserved — I did **not** remove it or make it computed.
 
 **Scope notes:** this is a one-time data backfill, not a code change — the EFS working tree is clean, so the queue preset's `#spec-test-commit-push` steps (spec/test/commit/push) are N/A; there's nothing to commit or deploy. (Separately, preflight flagged a `stale_install` for the agent-doc binary itself — unrelated to EFS; leaving it for a post-session `make install` rather than rebuilding against the live supervisor.)
-<!-- agent:boundary:73b9e3bc -->
+
+### Re: Document preview on /lenders/documents — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Documents in https://equityfundingsource.brian-takita.workers.dev/lenders/documents should have preview. deploy
+
+
+Preview is already implemented and was already live — I verified it end-to-end on the real page, then redeployed to guarantee current HEAD is on production.
+
+**What I verified (live, logged in as DL Dude Lender):** clicking the "Preliminary Title Report" PDF on https://equityfundingsource.brian-takita.workers.dev/lenders/documents opens the in-browser viewer modal — an `<iframe>` rendering the PDF from a `blob:` object URL, no forced download. This is the `#doc-viewer` / `#c7cs` click-to-view (`DocumentFileLink` → `use_document_viewer_`) shipped 2026-06-14; it covers images, PDFs, and text inline with a Download fallback.
+
+**Deploy:** the previous deploy's worker finished ~16s after the latest commit (`d6c6651`), so I ran a fresh `deploy:worker` to remove all doubt. Result: `No migrations to apply` (D1 already current), `No updated asset files to upload` (the preview frontend bundle was already live — consistent with the verification above), worker redeployed at version `54534f34`. Post-deploy health: home `200`, `/lenders/documents` `303` (auth redirect, expected unauthenticated).
+
+**One gap I noticed (queued as `[recommended]`):** the page renders only *provided-from-request* documents. `/api/investor/documents` also returns the investor's published `documents` bucket (statements/tax/legal) and `public_documents`, but `documents.tsx` reads only `requests` and drops both — so a lender with published or public docs wouldn't see (or preview) them here. For this account only the provided Title Report exists, so nothing's missing today, but rendering those two buckets with the same `DocumentFileLink` preview would complete the page.
+<!-- agent:boundary:40349485 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -186,11 +201,13 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#3tek]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#3tek] [recommended] /lenders/documents only renders provided-from-request documents (these already click-to-preview via #doc-viewer). The investor documents API (/api/investor/documents) also returns the investor published `documents` bucket (statements/tax/legal from investor_documents_R_) and `public_documents`, but documents.tsx fetches only `requests` and drops both. Render those two buckets with DocumentFileLink preview to complete the page.
 <!-- /agent:backlog -->
 
 ## Review

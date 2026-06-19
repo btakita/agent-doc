@@ -113,6 +113,24 @@ pub fn run(file: &Path) -> Result<()> {
     run_with_options(file, false)
 }
 
+/// `#qpausemix`: the queue-continuation guidance `session-check` prints when
+/// `queue_continuation_required == true`, resolved against the controller pause
+/// state. Reads the effective `admin queue pause` reason and composes the
+/// pause-aware [`crate::queue_continuation::continuation_guidance`] — the SAME
+/// single source consumed by the preflight `queue_continuation_guidance` field.
+///
+/// Printing the bare `CONTINUATION_NO_STALL_GUIDANCE` constant here (the prior
+/// behavior) let the mixed-signal resolution reach preflight JSON but not
+/// session-check stdout, so an agent reading session-check saw `queue_paused:
+/// true` next to `queue_continuation_required: true` with no explanation and
+/// stalled deciding whether the pause was operator intent or transient
+/// drain-coordination state. The guidance now carries the "queue_paused is NOT a
+/// contradiction" preamble and recorded reason whenever the queue is paused.
+fn continuation_guidance_for(file: &Path) -> String {
+    let pause_reason = crate::queue_continuation::document_queue_controller_pause_reason(file);
+    crate::queue_continuation::continuation_guidance(pause_reason.as_deref())
+}
+
 /// `session-check` with the optional Codex final-gate.
 ///
 /// Default (`codex_final_gate = false`): keeps exit 0 for a clean document and
@@ -171,10 +189,13 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // #degraded-ipc-no-stall: binary-authoritative "keep draining"
                 // guidance so the loop is not stalled on a degraded transport /
                 // stale supervisor / accretion / semantic-completion warning.
-                eprintln!(
-                    "[session-check] {}",
-                    crate::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE
-                );
+                //
+                // #qpausemix: emit the pause-aware guidance, NOT the bare
+                // `CONTINUATION_NO_STALL_GUIDANCE` constant, so a controller-paused
+                // queue (`queue_paused: true` alongside this
+                // `queue_continuation_required: true`) prints the "queue_paused is
+                // NOT a contradiction" preamble + recorded pause reason here too.
+                eprintln!("[session-check] {}", continuation_guidance_for(file));
                 if codex_final_gate {
                     if let Some(command) =
                         crate::queue_command::slash_command_text(&continuation.head_prompt)
@@ -7343,6 +7364,70 @@ Body\n\
             "codex_final_gate should exit 2 for abandoned recursive invocation without captured response\nstdout: {}\nstderr: {}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    /// `#qpausemix`: set the document-scope controller queue-control state for a
+    /// doc, mirroring an accepted `admin queue pause` (same seam the
+    /// queue_continuation tests use).
+    fn set_document_queue_control(root: &Path, doc: &Path, state: &str, reason: Option<&str>) {
+        let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+        let scope_id = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc_sqlite::state_store::upsert_queue_control_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &scope_id,
+                state,
+                reason,
+                operation_receipt_id: None,
+            },
+        )
+        .unwrap();
+    }
+
+    /// `#qpausemix`: the session-check continuation guidance must resolve the
+    /// `queue_paused` + `queue_continuation_required` mixed signal by carrying the
+    /// "NOT a contradiction" preamble and the recorded pause reason — not the bare
+    /// `CONTINUATION_NO_STALL_GUIDANCE` constant. This is the regression for an
+    /// agent stalling on "is this an operator-set pause or transient state?" when
+    /// reading session-check output (the resolution previously only reached the
+    /// preflight JSON `queue_continuation_guidance` field).
+    #[test]
+    fn continuation_guidance_for_carries_pause_preamble_when_controller_paused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("doc.md");
+        fs::write(
+            &doc,
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n\
+             <!-- agent:queue go -->\n- fix the parser\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+
+        // Unpaused: the bare no-stall constant verbatim (no pause preamble).
+        let unpaused = continuation_guidance_for(&doc);
+        assert_eq!(
+            unpaused,
+            crate::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE,
+            "an unpaused queue must print the bare no-stall guidance: {unpaused}"
+        );
+
+        // Controller-paused: the guidance must explain the mixed signal in-line.
+        set_document_queue_control(root, &doc, "paused", Some("qflood: idle-watch re-injecting"));
+        let paused = continuation_guidance_for(&doc);
+        assert!(
+            paused.contains("queue_paused is set but is NOT a contradiction"),
+            "paused session-check guidance must resolve the mixed signal: {paused}"
+        );
+        assert!(
+            paused.contains("recorded pause reason: qflood: idle-watch re-injecting"),
+            "paused session-check guidance must surface the recorded reason: {paused}"
+        );
+        assert!(
+            paused.contains(crate::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE),
+            "paused guidance must still preserve the normal no-stall rules: {paused}"
         );
     }
 }

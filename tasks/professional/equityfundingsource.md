@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -473,7 +473,21 @@ Phase 4 is built, green, committed, and pushed.
 - Superproject pointer: `9f3186f3b` pushed to `origin/main`.
 
 **Notes:** not deployed; this queue preset was spec/test/commit/push, not deploy. I left the unrelated EFS `AGENTS.md` tsift instruction-version bump unstaged. Confidence: high. Escalation: none.
-<!-- agent:boundary:5f729818 -->
+`#8667p4` is complete. EFS commit `4f715d6` and the superproject pointer commit `9f3186f3b` were pushed to `origin/main`.
+
+Verification:
+- Focused lending-group + portal tests passed.
+- `make check` passed: 879 tests, 0 failures, build + worker build clean.
+- No EFS GitHub workflow named `CI` exists.
+- `agent-doc` closeout recovered after an IPC retry and `session-check` is OK.
+
+Not deployed. I left the unrelated EFS `AGENTS.md` tsift-version bump unstaged.
+
+Commit message used:
+```txt
+feat(lending-groups): render deal co-lenders (#8667p4)
+```
+<!-- agent:boundary:399db9b1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -486,9 +500,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: do [#8667p2]~~
-- ~~:pushpin: [#8667p3]~~
-- :pushpin: [#8667p4]
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

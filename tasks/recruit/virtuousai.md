@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -294,13 +294,37 @@ Yes to both — done. Here's my reasoning and what I changed.
 **One thing to decide now that it's informal:** the more casual the note, the more the *typeset PDF* formality works against it — a polished PDF carrying a chatty note is a slight mismatch. For a small startup I'd lean toward **letting Laura paste this as plain text** into her own forward instead of attaching the PDF. The PDF is still there if you want a clean attachment, but if you're going informal to match their culture, plain text is the more consistent move. Your call — I kept both ready.
 
 Nothing sent.
-<!-- agent:boundary:5eabd904 -->
+
+### Re: mention the Ron Berkes / China manufacturing supplier relationship? — opus-4-8
+
+> **Queue prompt:**
+>
+> Should I mention my working relationship with ron-berkes who is the China manufacturing supplier?
+
+
+Two separate questions hiding in one, and they have different answers.
+
+**Naming Ron specifically: no.** VirtuousAI doesn't know Ron, so a name in the note adds nothing and reads slightly odd — like an inside reference dropped into a cold intro. The only reason to name him would be if he's a *reference* they could call, which isn't what this is. So don't put the name in.
+
+**The relationship itself — managing an overseas/China manufacturing supplier: yes, it's genuinely good signal, and it's on-thesis.** VirtuousAI sells to mid-market businesses juggling exactly this kind of multi-party operational execution. "I run a physical-goods business with overseas manufacturing" is concrete proof you've lived the operator's complexity their software is meant to tame. That's stronger operator evidence than the softer items already in the line (SEO, packaging).
+
+**So the move is: fold the *capability* in, not the *name*.** The cleanest version drops it into the existing MRH sentence as one more thing you own:
+
+> *"...I own the whole thing — the seasonal campaigns, the catalog, the **overseas manufacturing**, the SEO, the packaging, and whatever broke that week."*
+
+That broadens your operator depth without adding a third paragraph or a name nobody knows, and it keeps the note's one-idea punch intact. "Overseas manufacturing" (or "the supplier relationships") carries the weight; "Ron Berkes" doesn't belong in a client-facing note.
+
+**Where Ron *does* belong: the live conversation.** "I manage a China supplier relationship for my own catalog — here's how I handle lead times / QC / FX" is great founder-mode color when they probe your operator story. Save the specifics and the name for there, where a real anecdote lands.
+
+**My recommendation:** add "overseas manufacturing" to the MRH line, leave Ron's name out, keep the supplier anecdote in your back pocket for the call. Want me to make that one-line edit to the note and regenerate the PDF? Say the word.
+
+Nothing sent.
+<!-- agent:boundary:9d9f7f03 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Should I mention my working relationship with ron-berkes who is the China manufacturing supplier?
 <!-- /agent:queue -->
 
 ## Backlog

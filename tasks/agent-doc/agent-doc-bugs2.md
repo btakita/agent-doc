@@ -70,7 +70,23 @@ Not draining the next head. You said "drain #1vhn only, then pause" last turn; t
 - **Next head `do [#supselfheal]` is already shipped** — submodule HEAD `318aceee` is the supselfheal feature commit (wedge-trigger recycle + bounded re-exec escalation, Ph2-5). Draining it under the `#spec-test-build-install-commit-push` preset would just re-run build/install, the hazard you paused for.
 
 Say "go" (or re-point the queue) when you want me to resume; otherwise I'm stopped here.
-<!-- agent:boundary:076159bb -->
+
+### Re: do [#8bfz] — single live plugin-consumer election — opus-4-8
+
+Implemented and shipped. `#fccreap` (0.34.8) only reaped *dead*-pid consumer patch files; this adds the live-dedup half so N open IntelliJ windows can't each apply + `saveDocument` the same broadcast patch into a File Cache Conflict.
+
+**What landed (agent-doc `237f5fb2`, superproject `260b4e42d`, pushed to origin):**
+- **`agent-doc-orchestration::plugin_owner`** — a per-document single-owner lease (`.agent-doc/plugin-owner/<hash>.json`, mirrors `drain_owner`) claimed atomically via `create_new` (O_EXCL) so two instances racing for an unowned/stale lease can't both win. Sticky while the owner keeps applying (heartbeat refreshed each patch event) and self-healing — a stale heartbeat OR a provably-dead owner pid (`kill(pid,0)`) hands ownership to the next live consumer; `release` on dispose hands over immediately (30s TTL, `AGENT_DOC_PLUGIN_OWNER_TTL_SECS` override).
+- **FFI** `agent_doc_plugin_owner_try_acquire` / `agent_doc_plugin_owner_release` (verified exported in the release cdylib).
+- **`PatchWatcher.processPatchFile`** gates only **untargeted** (`editor_id == null`) patches behind the lease — editor-targeted patches already have a unique consumer and bypass it. Non-owners leave the patch file for the owner to apply + delete. Dispose releases owned leases.
+- **Fail-open by construction**: any IO/FFI error, or an older binary missing the symbol, returns "apply" — a single-instance setup is never worse off than before.
+
+**Verification:** `make check` green (full workspace, 4727 tests incl. 5 new `plugin_owner` unit tests covering first-wins/second-defers, dead-pid takeover, stale-heartbeat takeover, own-only release, end-to-end real-path election). `cargo build --release` + `agent-doc lib-install` refreshed the cdylib (2 controllers marked for idle-boundary recycle). Plugin zips built: `agent-doc-jetbrains-0.2.171(-signed).zip`. Submodule CI for `237f5fb2` was in_progress at closeout; proceeding on the green local suite.
+
+**Install note:** did the safe cdylib `lib-install` (new FFI symbols present for when the new plugin is installed); deferred `cargo install --path .` (binary swap) to avoid the documented live-supervisor finalize-drift hazard — it's not needed to activate this change.
+
+**Gated `#8bfz` (operator-verify):** the code is complete/committed/pushed and the plugin zip is built, but activation needs you to install `agent-doc-jetbrains-0.2.171-signed.zip` and run a live **multi-window** test (open the same workspace in 2+ IntelliJ windows, drive a response, confirm only one applies + saves and `.agent-doc/plugin-owner/<hash>.json` shows a single owner). That live-editor proof can't be agent-done, so it's `[/]` in `agent:review`.
+<!-- agent:boundary:e9619d26 -->
 <!-- /agent:exchange -->
 
 ## Queue

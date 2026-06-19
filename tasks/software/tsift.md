@@ -39,13 +39,39 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 ❯ - Archived 2 response topic(s): #kgsameas; #kgconfgate
 ❯ - Prior summary/context: prior compacted content: Archived 4 response topic(s): #next-steps to fix tsift bugs; #kgentitycollapse; #kgconfrank;...
-<!-- agent:boundary:4c07d9ca -->
+
+### Re: release + publish — v0.1.71 is published except the operator-gated crates.io step — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: release + publish
+
+The release is already done as far as an agent can take it — there is no new agent-doable release work this cycle.
+
+**v0.1.71 state (tsift submodule):**
+- HEAD = tag `v0.1.71` = `396bbdc` (`chore: release v0.1.71`); working tree clean, in sync with `origin/main`. Tag is pushed.
+- CI green. Installed binary `tsift 0.1.71` (matches the release).
+
+**Release workflow run `27841350649` — 6 of 7 jobs succeeded:**
+- ✅ `publish GitHub release` — `v0.1.71` live with all three platform artifacts (`x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`) + `.sha256` sidecars.
+- ✅ `publish OpenCode npm plugin`.
+- ✅ all three cross-target builds + `verify release inputs`.
+- ❌ `publish crates.io package` — the **only** failure:
+  ```
+  Failed to retrieve token from Cargo registry. Status: 400.
+  Error: No Trusted Publishing config found for repository `btakita/tsift`.
+  ```
+
+**This failure is `#vmax`, not a code/release-config bug.** The OIDC migration is already shipped (`#1td4`, `rust-lang/crates-io-auth-action@v1`); the auth handshake reached crates.io and was rejected only because no Trusted Publisher is registered. That registration is **operator-gated** — it needs a crates.io login + browser 2FA to register the Trusted Publisher for each of the 23 crates (agent cannot perform). Once the operator completes `#vmax` (register publishers → force-move `v0.1.71` to HEAD → re-push to re-trigger), the crates.io job authenticates via OIDC and publishes; no code change is required.
+
+**Not auto-looping the remaining `release + publish` queue items** — they request the same already-completed release, and the sole outstanding step (crates.io) is operator-gated under review `#vmax`. Re-running would be a no-op against a clean tree at the already-tagged HEAD.
+<!-- agent:boundary:dbc1fde2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: release + publish
+- ~~:pushpin: release + publish~~
 - ~~:pushpin: Do [#vmax]. I approve. Whatever you can automate, do it.~~
 - release + publish
 <!-- /agent:queue -->

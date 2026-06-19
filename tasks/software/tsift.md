@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -93,12 +93,13 @@ Done. `#kgconf` records a `confidence_source` tag (`model|default`) on every nod
 **Verification:** `model_confidence_outranks_derived_default` + `within_model_tier_higher_confidence_wins`; `cargo test -p tsift-kg` 36 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `1ab19d5`, pushed; superproject pointer `6ecfe25e1`.
 
 Queue drained — the three KG follow-ups from this round (`#kgentitycollapse`, `#kgconfrank`) are done; `#kgconfreqverify` is gated in review as operator-verify (needs live GPU + Ollama A/B). No drainable work remains.
-<!-- agent:boundary:0fd9ceab -->
+<!-- agent:boundary:0c3aa787 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: What are #next-steps to fix tsift bugs?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

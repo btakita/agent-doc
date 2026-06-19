@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -182,12 +182,13 @@ Bottom line: keep the reassurance simple and steady-state, don't over-explain, a
 So the answer to "attach both the email and the message to the engineers?" — there's no separate send to the engineers. One email to Laura, resume PDF attached, two-part body. She handles the client side.
 
 Nothing sent — the draft's ready when you are.
-<!-- agent:boundary:ba4e2845 -->
+<!-- agent:boundary:96c0c2a6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- I don't have Laura's email. So it has to be the LinkedIn message. Should I add the message as an attachment file or should I even have it?
 <!-- /agent:queue -->
 
 ## Backlog

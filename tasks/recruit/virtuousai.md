@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -162,12 +162,13 @@ Honest read: you're in a defensible position, but a few things are worth being d
 **Don't undersell the upside, though.** Running your own storefront, building EFS, and pushing a demo out for the Stealth client is founder-mode energy — exactly what engineer #2 at a tiny startup needs. A lot of founders read "builds and ships their own things" as a *plus*, not a liability. So hold the portfolio as evidence of capacity and ownership — just be ready to show, calmly, that it won't divide your focus.
 
 Bottom line: keep the reassurance simple and steady-state, don't over-explain, and have the "what if it ramps" answer ready in your head for the live conversation. I queued a `[recommended]` item to draft that tight verbal answer (`#availanswer`).
-<!-- agent:boundary:8b4fd0b4 -->
+<!-- agent:boundary:9fd5ed33 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- How should I send the linkedin message? Attach both the email and the message to the engineers? Change "I'd like to talk with Rory about where he wants to take the architecture." to something less presumptious. "Looking forward to continuing the conversation."?
 <!-- /agent:queue -->
 
 ## Backlog

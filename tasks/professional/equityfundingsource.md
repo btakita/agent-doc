@@ -304,7 +304,28 @@ No code changed this cycle — EFS HEAD is still `7218eb3` (== origin/main), cle
 ### Re: deploy (already live) — opus-4-8
 
 This `deploy` head was already satisfied by the previous cycle — the Express-interest change shipped to the live Worker (commit `932399f0a`, bundle `index.browser-ZCVCQ7MB.js`, homepage 200, live-bundle verified). EFS HEAD is still `7218eb3` (== origin/main) with a clean tree, so there are no new commits to push — re-running `make deploy` now would be a no-op. Consuming this duplicate marker and moving on to the **Remove "Deal Summary" section** and **Title Case** items next.
-<!-- agent:boundary:7fa7f858 -->
+
+### Re: Remove the "Deal Summary" section from the lender deal detail — opus-4-8
+
+> **Queue prompt:**
+>
+> Remove "Deal Summary" section from https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d. The terms of the deal have not been settled yet. The lender will propose terms and the buyer will accept, reject, or negotiate the terms. We are simply not in a state where the terms of the deal should be displayed. Another benefit is the main CTA, "Express Interest" is at the top of the dialog.
+
+
+Done (code committed + pushed; **deploy held** — the queued `deploy` comes after the Title Case item, so I'll deploy both together next). The **Deal Summary** card is removed from the lender deal-detail dialog.
+
+**What changed** (`src/equityfundingsource-dev`, `lib/ui--browser--efs/portal/investor/deal_detail.tsx`):
+- Removed the right-column **Deal Summary** card entirely — it showed loan amount, property value, LTV, **Preferred sold rate**, **Preferred term**, payment frequency, due day, and min. investment. As you noted, those terms aren't settled at this stage (the lender proposes, the borrower accepts/rejects/negotiates), so displaying them is premature.
+- With that card gone, the primary **"Express Interest"** CTA (`DealInterestAction`) is now the **top** of the sticky sidebar / dialog.
+- Factual loan info is **not lost** — the left-column **"Loan Details"** card (`TmoLoanDetails`) still carries the loan facts.
+- Dropped the now-unused `LoanAmountValue` helper.
+
+**Verified:** `bun run check` (test + browser build + worker build) → **836 pass / 0 fail**, builds clean. Updated the `lender-account-gate` test (the stale "deal summary stays visible" assertion) and added a regression guard (`not.toContain('>Deal Summary<')` + `not.toContain('Preferred sold rate')`).
+
+**Committed/pushed:** EFS `7218eb3..1637a53` (origin/main), superproject pointer `298be3a2f`.
+
+**Deploy held** until the Title Case change lands, then one `make deploy` ships both.
+<!-- agent:boundary:950f816e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -319,7 +340,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: EFS does not arrange partial loans from independent lenders. If a lender or lender group is interested in the loan, the entity will service the entire loan. The proposed terms are optional. A lender can be interested in a loan without any proposed terms. The lender may want to learn more about the property and the borrower...such as receiving documents or viewing the property in person. Please bring back the button to express interest that is independent of the proposed terms.~~
 - ~~:pushpin: deploy~~
-- Remove "Deal Summary" section from https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d. The terms of the deal have not been settled yet. The lender will propose terms and the buyer will accept, reject, or negotiate the terms. We are simply not in a state where the terms of the deal should be displayed. Another benefit is the main CTA, "Express Interest" is at the top of the dialog.
+- ~~Remove "Deal Summary" section from https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d. The terms of the deal have not been settled yet. The lender will propose terms and the buyer will accept, reject, or negotiate the terms. We are simply not in a state where the terms of the deal should be displayed. Another benefit is the main CTA, "Express Interest" is at the top of the dialog.~~
 - Use "Title Case" for all headings and buttons. We are currently using "Sentenc case".
 - deploy
 - do [#8667]

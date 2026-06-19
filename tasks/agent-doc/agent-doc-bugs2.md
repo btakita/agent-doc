@@ -98,7 +98,25 @@ Investigated both JB-`Run Agent Doc` reports. These are route/tmux dispatch issu
 **Why I'm not blind-fixing:** without a live repro + `agent-doc admin detect` (cross-doc pane contamination?) + the ops.log route diagnostics from the failing moment, I can't tell a real new bug from already-fixed behavior, and editing the invariant-heavy route path on a guess is how regressions ship. Capturing this as an operator-verify item that needs one captured repro.
 
 Filed `#jbrundispatch` (operator-verify). The fix needs: the failing `admin detect` + ops.log/route trace at stall time.
-<!-- agent:boundary:e15e41e8 -->
+
+### Re: draining the resolved bug-report heads — opus-4-8
+
+These three free-text reports are each duplicated 2–3× in the queue (CRDT-drift replay — the `#sqedit-race`/`#qrepin` instability) and are all now resolved or captured. Striking every copy so the queue drains and stops churning:
+
+> In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.
+
+Resolved — `#qdup-bare-id` (0.34.16, committed `2e5927d4`): preflight now collapses duplicate bare `[#id]` mirror heads. The free-text copies of this very report are themselves a duplication artifact of the same churn, now being struck.
+
+> In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB Run Agent Doc stalled.
+
+Captured as `#jbrundispatch` (operator-verify) — a route/startup-miss issue that needs a live repro (`admin detect` + ops.log route trace at stall time) to fix safely, not a blind edit to the invariant-heavy `route.rs`.
+
+> Some JB Run Agent Doc operations do not submit to Claude Code.
+
+Captured as `#jbrundispatch` (operator-verify) — Claude Code dispatch is `accepted_only` (no submit-proof hook); needs the failing pane-state repro to distinguish a real bug from accepted-but-unsubmitted timing.
+
+Net: the only genuinely open work here is `#jbrundispatch` (operator repro needed) plus the deeper `#sqedit-race` queue-CRDT-churn that keeps re-surfacing these heads.
+<!-- agent:boundary:2e9489ec -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -106,8 +124,8 @@ Filed `#jbrundispatch` (operator-verify). The fix needs: the failing `admin dete
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.~~
 - ~~:pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.~~
-- :pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.
-- :pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.
+- ~~:pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.~~
+- ~~:pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.~~
 - :pushpin: [#sqedit-race]
 ---
 :pushpin: do [#tsiftmdcrash]
@@ -115,11 +133,12 @@ Filed `#jbrundispatch` (operator-verify). The fix needs: the failing `admin dete
 - :pushpin: [#qpausemix-verify]
 - :pushpin: do [#fbwire]
 - :pushpin: do [#hap7]
-- :pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.
+- ~~:pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.~~
 - ~~[#prunenoise-live]~~
-- :pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.
-- :pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.
-- :pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.
+- ~~:pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.~~
+- ~~:pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.~~
+- ~~:pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.~~
+- :pushpin: do [#jbrundispatch]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

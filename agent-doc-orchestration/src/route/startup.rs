@@ -1374,6 +1374,59 @@ mod tests {
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn route_refuses_dispatch_into_dead_bare_shell() {
+        // #1vhn: when the harness has crashed/exited to a bare interactive
+        // shell, route must fail closed instead of typing the trigger into the
+        // shell. The pane starts as a bare shell (no harness), so a dispatch
+        // must be blocked; once a harness dispatch-ready prompt appears the
+        // block lifts.
+        let _tmux_guard = tmux_start_lock();
+        let iso = IsolatedTmux::new("route-test-dead-shell");
+        let session = "test";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(
+            wait_for_shell(&iso, &pane, std::time::Duration::from_secs(5)),
+            "shell did not become ready"
+        );
+
+        let harness = HarnessConfig::claude();
+
+        // Bare shell, no harness running → dispatch must be blocked.
+        let blocked =
+            super::super::dispatch::dead_harness_shell_dispatch_block(&iso, &pane, &harness);
+        assert!(
+            blocked.is_some(),
+            "expected dead-harness shell block on a bare shell pane, got None"
+        );
+
+        // The actual send path must fail closed (not type the trigger into the shell).
+        let doc = cwd.join("dead-shell.md");
+        let err = super::super::dispatch::send_command_unchecked(
+            &iso,
+            &pane,
+            &doc.to_string_lossy(),
+            &harness,
+        )
+        .expect_err("send must fail closed into a bare shell");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("bare") && msg.contains("not running"),
+            "fail-closed error should explain the dead harness: {msg}"
+        );
+
+        // Once a harness dispatch-ready prompt is visible, dispatch is allowed.
+        send_keys_with_retry(&iso, &pane, &mock_agent_script(500));
+        wait_for_pane_contains(&iso, &pane, "❯", std::time::Duration::from_secs(5));
+        let allowed =
+            super::super::dispatch::dead_harness_shell_dispatch_block(&iso, &pane, &harness);
+        assert!(
+            allowed.is_none(),
+            "harness dispatch-ready prompt visible should not be blocked, got {allowed:?}"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_detects_claude_composer_hint_prompt() {
         let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-claude-composer-hint");

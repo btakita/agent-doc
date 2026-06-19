@@ -91,6 +91,22 @@ dispatch-start proof, degraded-authority, and prompt-ready-barrier classifiers
 from `flow::routed_reopen`; `route.rs` remains the tmux/supervisor/controller
 I/O boundary.
 
+**Dead-harness pre-send guard (#1vhn):** the dispatch-ready prompt proof can go
+stale between the readiness check and the actual send if the harness crashes or
+exits to a bare interactive shell in that window. Before typing the routed
+trigger into a pane, the direct-pane send path re-verifies that a live harness
+still owns the pane: it fails closed when `#{pane_current_command}` reports a
+bare shell (`zsh`/`bash`/`sh`/`fish`/`dash`/`ksh`/`tcsh`/`csh`, with or without a
+login `-` prefix) **and** the captured pane shows no harness dispatch-ready
+prompt. Both signals are required so a harness that briefly spawns a subshell, or
+a momentary `#{pane_current_command}` read while the harness composer is still
+the visible prompt, does not trip a false positive. On a dead-harness pane route
+refuses the send, logs `route_dispatch_into_dead_shell_blocked ...
+reason=harness_exited_to_bare_shell`, and surfaces claim/restart guidance instead
+of leaving `agent-doc <FILE>` as un-run text in a shell. This closes the
+crash-mid-dispatch race observed when a `/model` switch / restart dropped the
+harness to a shell right as "Run Agent Doc" routed the trigger.
+
 ## Stash Window Routing
 
 The stash system preserves running Claude sessions when the user switches editor tabs. Panes are moved to a hidden stash window rather than killed, keeping the Claude session alive for later reuse.

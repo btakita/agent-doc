@@ -296,6 +296,11 @@ Note: the next queued items (constrain Available Deal once a lender is selected,
 
 > **Queue prompt:**
 >
+> Once the Lender is selected, move to the "Loan Estimate" step.
+
+
+> **Queue prompt:**
+>
 > We need to constrain Available Deal up to the point to where the lender is selected. Once the lender is selected, the Deal is no longer available to other lenders. We need a separate out "Loan Estimate", "Intent to Proceed", "Processing", "Underwriting", "Closing", "Closed", "Funded". Ensure these steps are in the Deal pipeline.
 
 
@@ -314,7 +319,7 @@ Done (EFS submodule `5e3116d`). I confirmed the two decisions with you first (st
 **One follow-up to flag (`#closed-step-decouple`, [recommended], adding to backlog):** `Closed` is now both a pipeline step *and* the existing terminal close-deal trigger — `admin_deal_status_sync_by_loan_` flips a deal to `closed` whenever a loan reaches status `Closed`. So advancing a loan to the `Closed` milestone will currently close the investment deal, which conflicts with a strict `Closing → Closed → Funded` progression. Decoupling milestone-`Closed` from the terminal close-deal action is a separate decision — tell me if you want that and I'll do it before deploy.
 
 (Closeout note: the route-owned editor IPC for this doc is still wedged with no live-buffer present, so this committed via the proven force-disk path again. Exchange is ~261 lines; queue active.)
-<!-- agent:boundary:42b1ca9f -->
+<!-- agent:boundary:bbc1d352 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -329,7 +334,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=loan, the lender is selected but the Loan Status does not reflect the vendor as being selected.~~
 - ~~We need to constrain Available Deal up to the point to where the lender is selected. Once the lender is selected, the Deal is no longer available to other lenders. We need a separate out "Loan Estimate", "Intent to Proceed", "Processing", "Underwriting", "Closing", "Closed", "Funded". Ensure these steps are in the Deal pipeline.~~
-- Once the Lender is selected, move to the "Loan Estimate" step.
+- ~~Once the Lender is selected, move to the "Loan Estimate" step.~~
 - deploy
 - do [#8yzs]
 <!-- /agent:queue -->

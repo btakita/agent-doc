@@ -2,7 +2,7 @@
 description: "Interactive markdown session for Codex. TRIGGER: user writes agent-doc <file> as a normal Codex message. Requires a markdown session document, installed CLI, and write+commit every cycle. Do not use slash commands; Codex rejects project-defined /agent-doc."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.34.1"
+agent-doc-version: "0.34.11"
 ---
 
 # agent-doc
@@ -125,8 +125,11 @@ RESPONSE
 
 Full detail (ordering, full-suite + tmux-CI review, session-doc staging rule): [runbooks/persist-closeout.md](runbooks/persist-closeout.md), [runbooks/commit.md](runbooks/commit.md).
 
+## Vision workflow for non-vision models
+Non-vision models cannot read `![alt](path.png)` images. Delegate to `agent-doc describe-image <IMAGE> [--provider openai|anthropic] [--prompt "<question>"]` and reason over the stdout text. See [runbooks/describe-image.md](runbooks/describe-image.md). Do not reinvent per-session `claude -p @img` invocations.
+
 ## Runbooks
 
-Use runbooks for detail that is not needed every turn. Key runbooks: [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md), [runbooks/pending-ops.md](runbooks/pending-ops.md), [runbooks/commit.md](runbooks/commit.md), [runbooks/split-spec-files.md](runbooks/split-spec-files.md). `split-spec-files` applies across agent-doc-managed surfaces; custom root files stay opt-in unless they still match the generated baseline. Full catalog: `compact-exchange`, `transfer-extract`, `model-tier-gate`, `command-synonyms`, `compound-task-steering`, `streaming-checkpoints`, `document-format`, `code-enforced-directives`, `jb-cache-conflict`, `baseline-drift`.
+Use runbooks for detail that is not needed every turn. Key runbooks: [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md), [runbooks/pending-ops.md](runbooks/pending-ops.md), [runbooks/commit.md](runbooks/commit.md), [runbooks/split-spec-files.md](runbooks/split-spec-files.md). `split-spec-files` applies across agent-doc-managed surfaces; custom root files stay opt-in unless they still match the generated baseline. Full catalog: `compact-exchange`, `transfer-extract`, `model-tier-gate`, `command-synonyms`, `compound-task-steering`, `streaming-checkpoints`, `document-format`, `code-enforced-directives`, `jb-cache-conflict`, `baseline-drift`, `describe-image`.
 
 **Read each runbook at most once per session.** If you already opened a runbook earlier this session, its content is still in context — reuse it instead of re-reading. Re-open the same runbook only when its content changed or your earlier copy was compacted away. Redundant re-reads waste context tokens and are heaviest on per-cycle shell harnesses (for example Codex re-`cat`ing closeout runbooks every cycle).

@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -162,13 +162,32 @@ Honest read: you're in a defensible position, but a few things are worth being d
 **Don't undersell the upside, though.** Running your own storefront, building EFS, and pushing a demo out for the Stealth client is founder-mode energy — exactly what engineer #2 at a tiny startup needs. A lot of founders read "builds and ships their own things" as a *plus*, not a liability. So hold the portfolio as evidence of capacity and ownership — just be ready to show, calmly, that it won't divide your focus.
 
 Bottom line: keep the reassurance simple and steady-state, don't over-explain, and have the "what if it ramps" answer ready in your head for the live conversation. I queued a `[recommended]` item to draft that tight verbal answer (`#availanswer`).
-<!-- agent:boundary:9fd5ed33 -->
+
+### Re: how to send it + soften the closing line — opus-4-8
+
+> **Queue prompt:**
+>
+> How should I send the linkedin message? Attach both the email and the message to the engineers? Change "I'd like to talk with Rory about where he wants to take the architecture." to something less presumptious. "Looking forward to continuing the conversation."?
+
+
+**Closing line — agreed, softened it.** Changed *"I'd like to talk with Rory about where he wants to take the architecture"* to **"I'd be glad to talk through the architecture whenever it's useful."** Your instinct is right — naming Rory and his roadmap presumes you're already in. One note on your suggested *"Looking forward to continuing the conversation"*: that phrasing implies you've already spoken with the engineers, and you haven't yet (only the recruiter call). So I kept it humble *and* truthful for people you haven't met, while keeping a light architecture hook so it doesn't go fully generic. "Looking forward to continuing the conversation" is perfect for the **private Laura note** though, if you want to add it there — you *have* talked to her.
+
+**How to send it — short version: send it all to Laura, not to the engineers.** You're going through G2i, and on the screening call Laura said she uploads your resume + the call recording to the client herself. So:
+
+- **Don't message Chris or Rory directly.** Reaching the engineers yourself steps on the recruiter's process and can read as going around her. The "forwardable message" is for *Laura to forward*, not for you to send to the team.
+- **One message to Laura, two clearly-marked parts:** the short private note (your availability reassurance) + the forwardable block below it labeled "yours to forward to Chris and Rory." That's exactly how the draft is structured now.
+- **Channel: email beats LinkedIn here.** Email lets you attach the tailored resume PDF (`BrianTakita-virtuousai.pdf`) cleanly and makes it trivial for Laura to forward with the attachment intact. LinkedIn messaging mangles attachments and forwarding. If LinkedIn is the only thread you have warm with her, send the note there and say "emailing you the updated resume now," then email the PDF.
+- **The call recording:** Laura already has it from the screening — no need to re-attach. Just reference that your updated resume is attached.
+
+So the answer to "attach both the email and the message to the engineers?" — there's no separate send to the engineers. One email to Laura, resume PDF attached, two-part body. She handles the client side.
+
+Nothing sent — the draft's ready when you are.
+<!-- agent:boundary:ba4e2845 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- How should I send the linkedin message? Attach both the email and the message to the engineers? Change "I'd like to talk with Rory about where he wants to take the architecture." to something less presumptious. "Looking forward to continuing the conversation."?
 <!-- /agent:queue -->
 
 ## Backlog

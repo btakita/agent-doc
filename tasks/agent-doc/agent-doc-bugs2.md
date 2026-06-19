@@ -94,7 +94,30 @@ This is a triage/filing cycle (the document's `#agent-doc-bug` pattern), not an 
 **Coverage added:** `smqstrike_struck_head_survives_concurrent_operator_queue_add` (markdown-ast) — base has `do [#a]`, agent strikes it, operator concurrently adds `do [#b]`; asserts the merged tree keeps `~~do [#a]~~` **and** `do [#b]`, reparses to `[a, b]`, and needs no ack (node-disjoint). `make check` green; test + docs only, no behavior change.
 
 **Remaining semmerge phase:** `#smsim` (Phase 5, SimWorld matrix for the operator↔agent concurrent-edit matrix) — the last one.
-<!-- agent:boundary:07a5059f -->
+
+### Re: do [#smsim] — semmerge Phase 5 done; all 5 phases complete — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#smsim]
+
+
+`#smsim` shipped — deterministic SimWorld coverage of the operator↔agent concurrent-edit matrix against `semantic_merge`. **This completes all five semmerge phases.** agent-doc `0b0216b2`, superproject `ce4faea60`.
+
+**What landed:**
+- `SimWorld::converge_semantic_merge(base, agent, operator, active_component)` — runs the production `semantic_merge_scoped` (the same `exchange`-active scoping the real `#smconv` `try_semantic_merge_convergence` applies), adopts the merged doc, and classifies the transition-matrix outcome into four new coverage counters.
+- Four `semmerge_sim_*` scenarios locking the merge/IPC data-loss family:
+  1. **Node-disjoint** — agent strikes a queue head while the operator concurrently adds a new item; both survive, no ack.
+  2. **Same-node operator-wins (active area)** — agent + operator edit the same `exchange` node differently; operator content wins **and** an ack is raised.
+  3. **Turn-active gating** — the *identical* same-node conflict OUTSIDE the active area auto-resolves operator-wins with **no** ack noise (`#smturnactive`).
+  4. **Operator-deleted-agent-edited-node** — deletion stands (node not resurrected) and a `OperatorDeletedAgentEditedNode` ack is raised.
+
+`make check` green; test-only (no production behavior change).
+
+**Semmerge plan status — all phases complete:** Phase 1 `#semmerge-owner` ✅ · Phase 2 `#semmerge-converge-adapter` (`#smconv`) ✅ · Phase 3 `#smqstrike` ✅ · Phase 4 `#pk3f`/`#semmerge-ack-turn` ✅ · Phase 5 `#smsim` ✅. The `live_prompt_drift` / `reset --from-current` data-loss class this plan targeted is now node-merged and regression-locked.
+
+Next queue heads: `#cyh0` (FCC zero-disk audit, operator-verify), then the remaining `do #id` items and free-text bug reports.
+<!-- agent:boundary:02552514 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -103,10 +126,11 @@ This is a triage/filing cycle (the document's `#agent-doc-bug` pattern), not an 
 - ~~:pushpin: do [#pk3f]~~
 - ~~JB `Run Agent Doc` in equityfundingsource.md moves an uncommitted queue item from the queue into the agent prompt. The queue item is gone and the turn stalls uncommitted with incorrect agent input.~~
 - ~~:pushpin: do [#smqstrike]~~
-- :pushpin: do [#smsim]
+- ~~:pushpin: do [#smsim]~~
 - :pushpin: do [#cyh0]
 - :pushpin: do [#qpausego]
 - :pushpin: do [#qdurcrash]
+- :pushpin: In equityfundingsource.md After a recycle restart + queue continuation, the prompt is not submitted after the restart.
 - :pushpin: do [#733r]
 - :pushpin: do [#docdriftgrace]
 - :pushpin: do [#agentreloadrestart]
@@ -124,6 +148,17 @@ Initial response for a turn renders numeric lists in reverse order:
 2. **Post-6/14 GTM-v6 conversion QA** → #convfix-verify (this one **unblocks #nbsl2** non-brand Search) — read-only Ads+GA4 parity.
 1. **6/19 offline-conversion re-check** → #2qrx-metrics-lag + #conv-backfill-615-617-verify — read-only Ads action 7649654590 metrics + Woo reconcile.
 <!-- agent:boundary:a5b6cae3 -->
+```
+---
+monsterrodholders.md sent duplicate uncommitted response
+```
+- **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).
+- **Resolved 3 genuinely-finished reviews** → archived to `agent:done`: `#2qrx` (apply done; verify handed to archived `#2qrx-verify`), `#7m2s` (GTM v6 fix shipped 6/14; verify owned by open `#convfix-verify`), `#ef5h` (duplicate of archived `#fishloc-curated-rollout`; adapter blocker tracked by open `#3456`).
+- **Kept 2 false-positive matches** (real open work): `#2b8q` (live operator-gated NB-Search follow-up — HydroWeb rebalance + phase-2 enable), `#conv-backfill-615-617-verify` (distinct 6/15–6/18 batch, now-due on/after today — not the 5/29–6/14 batch `#2qrx-verify` covered).
+- **Kept 2 false-positive matches** (real open work): `#2b8q` (live operator-gated NB-Search follow-up — HydroWeb rebalance + phase-2 enable), `#conv-backfill-615-617-verify` (distinct 6/15–6/18 batch, now-due on/after today — not the 5/29–6/14 batch `#2qrx-verify` covered).
+- **Resolved 3 genuinely-finished reviews** → archived to `agent:done`: `#2qrx` (apply done; verify handed to archived `#2qrx-verify`), `#7m2s` (GTM v6 fix shipped 6/14; verify owned by open `#convfix-verify`), `#ef5h` (duplicate of archived `#fishloc-curated-rollout`; adapter blocker tracked by open `#3456`).
+- **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).
+<!-- agent:boundary:7c96f9ce -->
 ```
 ---
 :pushpin: JB `Run Agent Doc` on this file
@@ -215,7 +250,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qdurcrash] #agent-doc-bug queue-edit durability across a supervisor/pane crash+restart: operator adds a queue item, the turn starts, the supervisor+tmux pane crashes and restarts, and the operator added queue item is GONE (virtuousai.md repro, same crash event as #routedeadshell/#1vhn). Root-cause hypothesis: the operator queue add lived only in the editor buffer / supervisor in-memory CRDT and was never journaled to a crash-durable on-disk store before the process died, so restart reloaded from the last snapshot/HEAD (predating the add) and dropped it. Fix (agent-actionable, binary-side): persist inbound operator queue patches to the on-disk snapshot/journal immediately on receipt (before the supervisor mutates queue state / before ack), and add a supervisor-startup reconcile that merges the on-disk document queue against the reloaded snapshot, so a crash+restart replays the pending queue edit instead of losing it. Verify: add a queue item, kill -9 the supervisor mid-turn, restart, confirm the item survives. Distinct from #semmerge (live-merge drop during a turn) and #routedeadshell (route dispatch into a dead shell).
 - [ ] [#qdispatchloss] #agent-doc-bug #qdispatchloss JB Run Agent Doc consumes an UNCOMMITTED operator queue item (editor-buffer-only / synced to disk by the plugin but not git-committed) as the dispatch prompt and loses it: the item is moved into the agent prompt (possibly half-typed = incorrect agent input), consumed/activated without a committed-snapshot backing, then dropped so the turn stalls uncommitted. No-crash sibling of #qdurcrash. Route selects the queue head from disk via std::fs::read_to_string with no committed-snapshot proof (route.rs:2291 active head, 2618 inactive_route_queue_head, 2670 activate_existing_route_queue_head). Fix direction: refuse to CONSUME a head not backed by the committed snapshot (commit the inbound queue edit first, shared journal with #qdurcrash) OR debounce dispatch until the editor buffer settles; add a route_dispatch_uncommitted_head ops.log diagnostic for the live gate. Plan: tasks/agent-doc/plan-uncommitted-queue-item-dispatch-loss.md
 - [ ] [#cyh0] #fcczero #agent-doc-bug [operator-verify] JB File Cache Conflict still occurring; target is ABSOLUTE zero session-doc disk writes except genuine emergencies (everything via editor IPC). Audit (#smconv cycle) confirms the documented hot-path sites are already listener-guarded: post-commit worktree reconcile skips disk with a listener (#pcwcdiskfree), boundary reposition queues via file IPC and only disk-writes when IPC is Unavailable, queue/pending/status maintenance route through converge_or_disk_write (#fccqueue/#fccaudit); remaining disk writes are recovery/scaffold/migration emergencies by design. So the remaining FCC has an UNIDENTIFIED trigger. **Operator action: capture which exact action raises the dialog (the agent-doc command + ops.log line at that moment, e.g. write_authority action=... transport=disk) so the specific unguarded path can be found.** Likely candidates to check: the ack-content sidecar write, the VCS-refresh/save-document signal, or an editor-IPC convergence that the plugin still surfaces as a conflict. Note: this session most FCC came from manual `git checkout HEAD` recovery (a disk write), which #smconv removes the need for by merging drift instead of dropping responses.
-- [ ] [#smsim] #semmerge Phase 5 (simworld matrix): add deterministic SimWorld coverage of the operator<->agent concurrent-edit matrix against semantic_merge — node-disjoint auto-merge, same-node operator-wins, operator-deleted-agent-edited-node ack, turn-active vs unrelated-area gating — so the merge/IPC data-loss family is regression-locked. Plan: tasks/agent-doc/plan-semantic-ast-merge.md
 - [ ] [#733r] #qheadsync agent-doc-bug: answered/filed queue heads are not reliably reconciled to the queue (free-text reports left un-struck; done-reaping orphans the matching id-backed queue head; manual strikes do not persist through finalize content_ours; backlog-to-queue sync has no sweep for items missed in prior turns and items can be lost). Fix at closeout in the binary. Plan: tasks/agent-doc/plan-answered-queue-head-autostrike.md
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block as a raw red Error: toast instead of an actionable queue paused — resume notification. Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button rather than a dispatch error. **Operator action: install the updated JB plugin, then verify the paused-queue notification renders (live gate).**
 - [ ] [#docdriftgrace] [operator-verify] agent-doc thrashes when the session doc changes mid/between turn in ways unrelated to the current prompt: snapshot>visible drift (operator trimmed old committed Re: blocks + harness switch + queue edits) made preflight refuse commit (looks like a manual cleanup with stale snapshot) and forced a manual reset --from-current. Binary should classify drift by component and silently auto-rebase snapshot/CRDT for unrelated changes, surfacing ONLY structural conflicts on the in-flight prompt/response. **Operator action: watch one live re-baseline cycle to verify the silent auto-rebase.** Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md

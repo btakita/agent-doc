@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -93,13 +93,28 @@ Done. `#kgconf` records a `confidence_source` tag (`model|default`) on every nod
 **Verification:** `model_confidence_outranks_derived_default` + `within_model_tier_higher_confidence_wins`; `cargo test -p tsift-kg` 36 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `1ab19d5`, pushed; superproject pointer `6ecfe25e1`.
 
 Queue drained — the three KG follow-ups from this round (`#kgentitycollapse`, `#kgconfrank`) are done; `#kgconfreqverify` is gated in review as operator-verify (needs live GPU + Ollama A/B). No drainable work remains.
-<!-- agent:boundary:0c3aa787 -->
+
+### Re: #next-steps to fix tsift bugs (round 2) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: What are #next-steps to fix tsift bugs?
+
+
+The prior round's KG-quality arc is committed (`#kgconf` → `#kgrefreshdup` → `#kgentitycollapse` → `#kgconfrank`); the backlog drained. A grounded scan turned up **no TODO/FIXME/XXX or ignored tests** in the tsift packages, so the codebase is otherwise clean. The two genuine remaining gaps both come from incomplete halves of this round's fixes, now queued in priority order:
+
+1. **`#kgconfgate` (top)** — `#kgconfrank` made *ranking* provenance-aware but left *gating* blind: `context_pack.rs:220` filters by raw `confidence`, so a derived `default 0.500` survives a `min_confidence=0.4` gate while a real model `0.300` is excluded. Make the gate provenance-aware (only model-sourced confidence counts toward `min_confidence`, or defaults need `min_confidence==0`) so unknown defaults aren't treated as gate-passing real scores. This finishes the `#kgconf` operability arc.
+2. **`#kgsameas` (med)** — `#kgentitycollapse` deduped only the *retrieval* surface (the context pack). Graph-level consumers (`tsift graph`/`explain`/`summarize`, the SurrealDB projection) still read `graph_nodes` directly and see every per-chunk/per-source duplicate. Promote the merge to durable `same_as` edges keyed on canonical `entity_id` (the heavier alternative noted in `#kgentitycollapse`; `same_as` already exists in `tsift-index`) so *all* consumers see one logical entity. Link, never delete — provenance preserved.
+
+**Top of backlog: `#kgconfgate`.** (`#kgconfreqverify` stays gated in review — operator-verify, live-GPU A/B.)
+<!-- agent:boundary:23985ee5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: What are #next-steps to fix tsift bugs?
+- do [#kgsameas]
+- do [#kgconfgate]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -108,6 +123,8 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#kgsameas] tsift KG entity dedup is retrieval-only: #kgentitycollapse merges canonical-entity duplicates in the context pack (collect_candidates_from_nodes), but graph-level consumers (tsift graph/explain/summarize, SurrealDB projection) still read graph_nodes directly and see every per-chunk/per-source duplicate node. Promote the merge to durable same_as edges keyed on the canonical entity_id (the heavier alternative noted in #kgentitycollapse) so ALL consumers see one logical entity, not just the context pack. Preserve per-source provenance (link, never delete); cf. existing same_as usage in packages/tsift-index/src/index.rs.
+- [ ] [#kgconfgate] tsift KG min_confidence gating is provenance-blind (completes #kgconfrank's other half): context_pack.rs line 220 filters by raw confidence, so a derived default 0.500 SURVIVES a min_confidence=0.4 gate while a real model 0.300 is excluded. #kgconfrank fixed ranking (model-tier above default) but not gating. Make the gate provenance-aware — e.g. only model-sourced confidence counts toward min_confidence, or default-sourced entities require min_confidence==0 — so derived defaults are not treated as gate-passing real scores.
 <!-- /agent:backlog -->
 
 ## Review

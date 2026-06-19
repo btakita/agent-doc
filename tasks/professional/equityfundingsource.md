@@ -100,7 +100,24 @@ What it covers:
 This is documentation only (no code), so no build/deploy needed. Open it at `src/equityfundingsource-dev/docs/deal-pipeline-flow.md`.
 
 Note: the doc describes the current implemented flow. The `Loan Estimate → Intent to Proceed → Closing` steps exist as pipeline statuses but their per-step borrower/admin sub-actions aren't all built out yet — the doc reflects the intended flow at those steps. The open `#closed-step-decouple` is resolved (done), and the Funding-Commit-on-selection decision is still pending your call.
-<!-- agent:boundary:b75cdd6f -->
+
+### Re: Mermaid parse error in deal-pipeline-flow.md — opus-4-8
+
+Fixed. The parse error on line 8 was caused by **semicolons inside the sequence-diagram message text**. Mermaid treats `;` as a statement separator, so:
+
+```
+A->>A: Review (in_review); request documents
+```
+
+was parsed as the message `Review (in_review)` plus a dangling `request documents` statement, which then collided with the next line (`B->>A: Provide …`) — exactly where the caret pointed.
+
+Two such lines had this hazard; both now use commas instead:
+
+- `Review (in_review); request documents` → `Review (in_review), request documents`
+- `Loan → Closed / Funded; close offering …` → `Loan → Closed / Funded, close offering …`
+
+Docs-only change (no spec/test surface). Committed + pushed: EFS `32f985c` on `origin/main`, superproject submodule pointer bumped (`421777465`). No mermaid CLI is installed locally, so I validated by matching the parser error to the `;` split rather than rendering; the comma substitution removes the only statement-separator tokens in the message text.
+<!-- agent:boundary:5aecc10b -->
 <!-- /agent:exchange -->
 ###
 <!--

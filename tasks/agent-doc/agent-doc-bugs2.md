@@ -34,80 +34,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260619-202251.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260619-213455.md`*
 
 Compacted content:
-- Archived 5 response topic(s): queue drain state; JB `Run Agent Doc` is not submitting; #docdriftgrace; 2 more
-- Prior summary/context: prior compacted content: Archived 4 response topic(s): closeout repair; #driftrootfix; queue drain state; 1 more
-
-### Re: Fix equityfundingsource.md "Mixed signals" — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Fix equityfundingsource.md "Mixed signals"
-> ```
-> ● Mixed signals: queue_paused: true (an explicit pause flag) coexists with queue_continuation_required: true. Let me
->   check whether this is an operator-set pause (with a reason) or transient drain-coordination state before deciding
->   whether to loop into the large Phase 4 UI work.
-> ```
-
-
-Root-caused and fixed in the product (agent-doc submodule `2cf7bcee`).
-
-**The mixed signal was real but cosmetic — and the resolution already existed, just not where the agent reads it.** `queue_paused: true` (an accepted `admin queue pause`) and `queue_continuation_required: true` legitimately coexist: the pause suppresses only the *unattended* supervisor idle-watch auto-injection (the qflood guard), while the attended in-session loop remains the single legitimate drainer. The binary already encodes that in `continuation_guidance(pause_reason)`, which prepends a "queue_paused is NOT a contradiction" preamble + the recorded pause reason.
-
-**The bug:** `session-check` printed the *bare* `CONTINUATION_NO_STALL_GUIDANCE` constant instead of calling `continuation_guidance(pause_reason)`. So the pause-aware resolution reached the preflight JSON `queue_continuation_guidance` field but never the session-check stderr line. An agent reading session-check output saw the two booleans with no explanation and stalled — exactly the "Let me check whether this is an operator-set pause or transient drain-coordination state" hesitation that was captured here. The `continuation_guidance` doc comment even claimed it was "the single source consumed by both preflight JSON and session-check stdout," which was aspirational, not true.
-
-**Fix:** routed the session-check guidance through a new `continuation_guidance_for(file)` helper that reads the controller pause reason and composes the same pause-aware guidance the preflight field already used. Unpaused queues still print the bare no-stall constant verbatim; paused queues now carry the preamble + reason in-line. Added a deterministic regression test (`continuation_guidance_for_carries_pause_preamble_when_controller_paused`) that seeds a controller pause and asserts both shapes. `make check` is green (clippy clean, full suite + SimWorld pass, no masked failures).
-
-**Deferred (operator-gated):** queued `#qpausemix-verify`. The build+install (`make install`) is intentionally **not** run this session — installing now would make this finalize client newer than the live route-owned supervisor and trigger `live_prompt_drift` exit-75. It should run at a supervisor recycle boundary, after which the live check is: on a controller-paused queue, confirm session-check stderr now shows the "NOT a contradiction" preamble.
-
-### Re: Clean up the noise queue heads — opus-4-8
-
-Shipped a real fix for this, but the live cleanup of THIS doc is gated — here's why, plainly.
-
-**The gap:** session-check counts ~20 `queue_stale_noise_lines` (pasted JB error dumps, cross-doc response fragments, duplicate "Mixed signals" blocks), but the binary had **no** command to clear them. `queue consume` only strikes a contiguous *leading* free-text run and stops at the first id-backed head — and this queue's noise is interleaved *behind* the operator-verify `do [#tsiftmdcrash]` / `do [#hap7]` mirror heads, so consume can never reach it. The code literally noted noise is "never auto-deleted (the live IPC supervisor races on direct queue edits)."
-
-**The fix (submodule `9c53d423`):** new `agent-doc queue prune-noise <FILE>` — strikes every non-drainable noise head at **any** position via the same editor-IPC-converged write path the closeout strikes use (supervisor-safe), while preserving id-backed directives and genuinely drainable free-text heads. Noise classification reuses the existing `queue_stale_noise_lines` logic (preset-aware), so it strikes exactly what session-check counts. Unit test covers interleaving + preservation + idempotency; spec updated; `make check` green; CLI smoke-tested on a throwaway doc (struck noise behind an id-head, preserved the id-head + a drainable head).
-
-**Why I did NOT run it live on this doc:** the command exists only in the freshly-built binary; the running route-owned supervisor is on the old binary. Running a cross-binary queue mutation against this live session — whose queue is *already* visibly corrupted by IPC/CRDT drift (the `--pending-add` for the follow-up item just hit a snapshot-vs-document queue-head divergence) — is exactly the race that would corrupt it further. So the live prune is deferred to the supervisor-recycle boundary, tracked as `#prunenoise-live`: at recycle, run `make install` → `agent-doc admin recycle` → `agent-doc queue prune-noise <FILE>` and confirm `queue_stale_noise_lines` drops to 0 with the `do [#id]` heads preserved. This shares the same one safe boundary as `#qpausemix-verify`.
-
-### Re: Fix live IPC supervisor races on direct queue edits + clean noise after restart — opus-4-8
-
-Traced it precisely, and the responsible move is to **plan it, not rush it** — here's why, and the concrete fix.
-
-**It is not one bug in the write path.** `write/converge.rs::try_editor_converge` is already fail-closed: it refuses on `ack_mismatch` / `no_ack` and never lets a stale editor buffer silently win. The corruption is the compounding of three concurrent queue writers + a stale buffer:
-
-1. **Multiple live JB plugin consumers (#8bfz)** — each IntelliJ instance applies/saves patches independently; one applies the node-strike, another re-flushes its stale buffer and re-injects the struck lines. `#fccreap` only reaps *dead* consumers.
-2. **Preflight queue maintenance round-trips malformed entries** — every preflight runs `#mirrorall` re-mirror + backlog→queue sync + `#7r2s` pin + live-buffer converge. On a queue already holding malformed entries from a prior race (double-pins, stray `~~~done`/`---` runs), the parse→render round-trip re-mangles them. You can see it in *this turn's* preflight diff: `~~~done`→`---`, one head split into `---\n---\n:pushpin: do [#id]\n---\n---`, `#fbwire` dropped.
-3. **Supervisor idle-watch** re-reads the head against a torn intermediate state.
-
-**Why not land it now:** this is the **same safety-critical supervisor/commit-path class** as `#aqhr`/`#smconv`, which the codebase explicitly required to land in *"a focused clean cycle + make check + make tmux-ci, NOT a degraded-session drain."* This session is the degraded, actively-corrupting one — the worst place to land a supervisor-path change that could regress every session. Your own phrasing ("clean up noise **after restart**") already assumes the build→restart→clean ordering.
-
-**The fix (queued `#sqedit-race`, plan `tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md`):**
-- **Phase 1** — single live plugin owner per doc (absorbs `#8bfz`): non-owner instances defer patch apply + save, killing the re-flush source.
-- **Phase 2** — a queue-edit lease that the supervisor idle-watch **and** preflight maintenance both respect, so an out-of-band `prune-noise`/`consume` is atomic w.r.t. them.
-- **Phase 3** — idempotent malformed-entry normalization (render∘parse is a fixed point), routed through converge — a round-trip converges instead of amplifying.
-- **Phase 4 (the restart + cleanup you asked for)** — after 1–3 ship: `make install` → `agent-doc admin recycle` (fresh buffer) → `agent-doc queue prune-noise <FILE>`, confirm `queue_stale_noise_lines` → 0 and that it **sticks** across the next preflight. Folds in `#prunenoise-live` + `#qpausemix-verify`.
-
-So: noise cleanup is Phase 4 of `#sqedit-race`, gated behind the race fix exactly as you framed it. The shipped `queue prune-noise` command (this session) is the cleanup tool; this plan makes the live run safe.
-
-### Re: queued #sqedit-race + #prunenoise-live + #qpausemix-verify — opus-4-8
-
-You pinned all three to the queue head. All three are `[operator-verify]`, so preflight reports `queue_drainable_head_count: 0` / `queue_continuation_required: false` — **I will not auto-loop** on them. They also converge on the *same* boundary, so here's the honest state and the one move that unblocks them:
-
-**#sqedit-race** — the root fix. Plan is committed (`6c2932fe8 plan(#sqedit-race)`, `tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md`). The item is explicit: SAFETY-CRITICAL supervisor/commit-path, *"focused clean cycle with make check + make tmux-ci, NOT a degraded-session drain."* This session is exactly what that forbids — `session_accretion: warn` (60 exchange lines, 2 no-op closeouts in 30 min, recent restart) on top of the IPC/CRDT churn history filling this queue. Implementing it here risks the merge-corruption it's meant to fix landing in its own finalize. **It's ready to implement in a fresh, clean session.**
-
-**#prunenoise-live** and **#qpausemix-verify** — both gated on the **supervisor-recycle boundary**: each needs `make install` (`cargo install --path .` + `cargo build --release` + `agent-doc lib-install`) then `agent-doc admin recycle`. Running `make install` mid-session against the live route-owned supervisor is the finalize-client-newer-than-supervisor drift hazard — the exact thing that's been corrupting these queues. So I won't do it inside this turn. Note both are explicitly **Phase 4 of #sqedit-race** ("restart + queue prune-noise cleanup … folds in #prunenoise-live + #qpausemix-verify"), so the race fix is the real prerequisite anyway.
-
-One aside on the preflight `semantic_completion_match`: it flags #sqedit-race as possibly resolved by the archived #aqhr (1.800). That's a false positive — #sqedit-race's text deliberately scopes *past* the converge path ("NOT a single converge-path bug; `try_editor_converge` is already fail-closed"). Leave it open.
-
-**Recommended path** — pick one:
-1. **Fresh session for #sqedit-race** (preferred): start a clean `/agent-doc` session and take the race fix first; #prunenoise-live + #qpausemix-verify fall out of its Phase 4.
-2. **Recycle boundary now**: `make install` → `agent-doc admin recycle tasks/agent-doc/agent-doc-bugs2.md` → then I can run `agent-doc queue prune-noise` (#prunenoise-live) and the live #qpausemix-verify check against the matched binary.
-
-Stopping here — no loop (drainable=0, all operator-gated).
-<!-- agent:boundary:bc204cc2 -->
+- Archived 4 response topic(s): Fix equityfundingsource.md "Mixed signals"; Clean up the noise queue heads; Fix live IPC supervisor races on direct queue edits + clean noise after restart; 1 more
+- Prior summary/context: prior compacted content: Archived 5 response topic(s): queue drain state; JB `Run Agent Doc` is not submitting; #docd...
+<!-- agent:boundary:92886818 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -116,8 +48,11 @@ Stopping here — no loop (drainable=0, all operator-gated).
 - [#sqedit-race]
 - [#prunenoise-live]
 - [#qpausemix-verify]
+- In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.
+- In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.
+- Some JB `Run Agent Doc` operations do not submit to Claude Code.
 ---
-Fix the root cause of monsterrodholders.md HEAD issue with already done items.
+:round_pushpin: Fix the root cause of monsterrodholders.md HEAD issue with already done items.
 ```
   The one thing I can't fix from here — please reload the doc in IDEA
   The queue keeps showing 11 heads of duplicates of already-completed prompts because the live IDEA editor buffer is
@@ -132,6 +67,16 @@ Fix the root cause of monsterrodholders.md HEAD issue with already done items.
   deploy config) and I'll take it.
 ```
 ---
+---
+:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md
+```
+resync: pruned 5 stale session(s)
+[route] target tmux session: 0
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
+```
+---
+- [#sqedit-race]
+- [#prunenoise-live]
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not start. It should have started.
 ```
 [route] target tmux session: 0
@@ -211,14 +156,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 [preflight] review: 14 item(s), 14 gated
 [route] active closeout for tasks/professional/equityfundingsource.md could not be drained before reroute; existing queue head "Why is the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=application > Available deal > Application > Application progress > Accepted not checked?" remains queued behind the closeout ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
 ```
----
-JB `Run Agent Doc` on equityfundingsource.md
-```
-resync: pruned 5 stale session(s)
-[route] target tmux session: 0
-Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
-```
----
+- [#qpausemix-verify]
 - :pushpin: do [#fbwire]
 - :pushpin: do [#hap7]
 ---
@@ -268,8 +206,6 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
   check whether this is an operator-set pause (with a reason) or transient drain-coordination state before deciding
   whether to loop into the large Phase 4 UI work.
 ```
----
----
 :pushpin: monsterrodholders.md sent duplicate uncommitted response
 ```
 - :pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).

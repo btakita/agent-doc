@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -40,6 +40,11 @@ Compacted content:
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
 ### Re: I still see the TMO loan terms on deal d6b78994 — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: I still see the TMO loan terms in https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d. Use Preferred Loan Terms instead when the deal is in available state.
+
 
 Good catch — fixed the discriminator, built, tested, committed, pushed, and deployed. This was exactly the caveat I flagged: my first pass keyed on `tmo_loan` *presence*, but the **TMO cache carries a loan record even for published/reserved deals** (sourced from `tmo_cache_rows_by_source_R_`, defaulting to `{}`), so an available deal still had a non-empty `tmo_loan` and kept showing "Loan Terms".
 
@@ -66,7 +71,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: I still see the TMO loan terms in https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d. Use Preferred Loan Terms instead when the deal is in available state.
 <!-- /agent:queue -->
 
 ## Backlog

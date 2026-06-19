@@ -455,7 +455,20 @@ Warmed up the private note to Laura in `mail/drafts/2026-06-18-laura-virtuousai-
 **One thing to decide before this goes out:** that same file still has a *stale forward body* below the private note — it keeps the old "With MonsterRodHolders I own more than the code" ownership claim and the agent-doc "steer while it runs / redirect mid-task" realtime overclaim, both of which #p3kj already fixed in the canonical `mail/drafts/2026-06-18-virtuousai-forward-note.md` (.pdf). If you forward from this file instead of the canonical note, the false claims ship. I left it intact rather than rewrite your copy unasked, and queued `#lauraltr` (recommended) to either delete that forward-body section here or align it to the canonical note. Tell me which and I'll do it.
 
 **On the #p3kj queue bug you flagged:** you'd already cleared `[#p3kj]` out of the live editor buffer (replacing it with this Laura request), so it was only still sitting in committed HEAD — this finalize commits your cleared queue, so `[#p3kj]` is gone for real now. The root defect is real and I filed it to `agent-doc-bugs2.md` as `#orphanqhead`: once an id-backed queue head gets orphaned (its backlog item reaped but the head-strike lost to IPC drift), there's no drain path — `--done` is a no-op and `queue consume` refuses id-backed heads. It was compounded here by a wedged editor-IPC listener (your live IntelliJ buffer) bouncing every queue/pending write with `ack_mismatch`/`send_failed`. Nothing sent.
-<!-- agent:boundary:9dbfd7c0 -->
+
+### Re: rewriting the forward note in your voice + regenerating the PDF — opus-4-8
+
+Done. Cleaned up `mail/drafts/2026-06-18-virtuousai-forward-note.md` and regenerated the PDF.
+
+**Voice / AI tells:**
+- Removed both spaced em-dashes. "...control surface for an AI agent — you steer the work..." became two clean sentences ("...for an AI agent. You steer the work..."), and "...e-commerce brand — I run its site..." likewise ("...e-commerce brand. I run its site..."). Verified zero `—` in the rendered PDF.
+- No `...` overuse to fix — the note had none, and I didn't add any. Punctuation is plain periods, commas, and colons throughout.
+- Kept your wording and substance otherwise (you'd already iterated this note hard); the edits are surgical, not a rewrite.
+
+**PDF regenerated and verified:** `mail/drafts/2026-06-18-virtuousai-forward-note.pdf` — 1 page, Palatino (P052) to match the resume, "Brian Takita" appears once as the header, apostrophes render clean, full corrected text confirmed via `pdftotext`. `.md` committed in the `mail` submodule (`6feb206`); the `.pdf` stays untracked on disk as before.
+
+**One gotcha worth fixing (`#notecss`, recommended):** `mail/templates/build-pdf.sh` defaults to `proposal.css`, which is Helvetica sans-serif — running the note through it plain swaps the font off Palatino. I rendered with a Palatino stylesheet (resume's font stack) to keep it matching, but it'd be worth adding a proper Palatino letter template so this doesn't bite the next note. Nothing sent.
+<!-- agent:boundary:d04e4c4b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -467,6 +480,7 @@ Warmed up the private note to Laura in `mail/drafts/2026-06-18-laura-virtuousai-
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#notecss] [recommended] mail/templates/build-pdf.sh defaults to proposal.css (Helvetica sans-serif), but the forward-note + resume use Palatino (P052). Regenerating the note PDF through build-pdf.sh silently changes the font. Add a Palatino letter stylesheet (font stack from resume.css) to mail/templates and either make build-pdf.sh take a --css arg or add a letter-specific wrapper, so note regens keep the resume-matching serif.
 - [ ] [#lauraltr] [recommended] mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md still carries a STALE forward body (the "I own more than the code" MRH ownership claim + the agent-doc "steer while it runs / redirect mid-task" realtime overclaim) that #p3kj already corrected in the canonical mail/drafts/2026-06-18-virtuousai-forward-note.md. Delete that forward-body section (keep only the private note to Laura) or align it to the canonical note so the false claim cannot ship if forwarded from the wrong file.
 - [ ] [#500r] [recommended] #availanswer Prepare a tight 2-3 sentence verbal answer for the live interview 'do you have the bandwidth?' question — steady-state framing (calendar open; MRH light ops; EFS on a subcontractor with you architecting/reviewing), extra-hours/Stealth-demo story held as backup evidence of drive only if probed.
 <!-- /agent:backlog -->

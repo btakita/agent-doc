@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -173,7 +173,7 @@ Done. Backfilled the missing `investment_deals` row for **FTM631** (loan `bbd437
 **Pre-flight confirmed exactly one gap, as expected:** before the write, `deal_count = 0` for this loan (INSERT branch, not the UPDATE branch), consistent with the earlier finding that FTM631 was the single accepted loan with no deal. Stored Published state is preserved — I did **not** remove it or make it computed.
 
 **Scope notes:** this is a one-time data backfill, not a code change — the EFS working tree is clean, so the queue preset's `#spec-test-commit-push` steps (spec/test/commit/push) are N/A; there's nothing to commit or deploy. (Separately, preflight flagged a `stale_install` for the agent-doc binary itself — unrelated to EFS; leaving it for a post-session `make install` rather than rebuilding against the live supervisor.)
-<!-- agent:boundary:afae9a37 -->
+<!-- agent:boundary:73b9e3bc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -186,13 +186,11 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#e9fy]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#e9fy] #ftm631-publish-backfill [recommended] One-time backfill: loan FTM631/bbd437b0 (app 94fd3f07) is accepted but was accepted ~8min BEFORE #accept-autopublish deployed, so it has no investment_deals row. Exactly 1 such loan exists. Publish it via admin_deal_publish_ (quiet, no lender email) or POST /api/admin/loans/bbd437b0.../deal (emails lenders). Keep stored Published state; do NOT remove or fully-compute it.
 <!-- /agent:backlog -->
 
 ## Review

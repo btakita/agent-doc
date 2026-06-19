@@ -1075,7 +1075,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // route through `converge_document_or_disk`; the added no-listener route
         // fallback regression test asserts `reason=no_listener` in the ops-log,
         // which is a test-assertion string, not a new hot-path flow reason.
-        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 18,
+        // +1 (#supselfheal Ph2): write_wedged_supervisor_recycle_requested ops-log
+        // line carries `reason=repeated_ack_timeout_active_listener` — audited.
+        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 19,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

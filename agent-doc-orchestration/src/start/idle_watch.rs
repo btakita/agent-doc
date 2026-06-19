@@ -9,6 +9,7 @@
 use super::*;
 use crate::start::decisions::{
     IdleQueueContextClearInFlightDecision, IdleQueueContextClearInFlightFacts,
+    MAX_REEXEC_ESCALATIONS, reexec_escalation_within_bound,
 };
 
 const CLEAN_SESSION_CONTEXT_RESET_REASON: &str = "active queue head is a [clean-session] item - clearing to give it a fresh agent context (#cleandrainsup)";
@@ -307,6 +308,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // build each tick). After one failure the supervisor logs once and leaves the
             // refresh to the operator, exactly like `reexec_recycle_disabled`.
             let mut auto_install_disabled = false;
+            // `#supselfheal` Phase 3 (`#supselfheal-reexecescalate`): set true once an
+            // in-place `execve` recycle has failed, so the recycle policy escalates to
+            // a bounded kill+relaunch (`EscalateKillRelaunch`) instead of re-logging
+            // `continue_current_binary` on every later idle boundary. The escalation
+            // counter caps the kill+relaunches (`MAX_REEXEC_ESCALATIONS`) so a relaunch
+            // that never clears the staleness cannot spin into an unbounded kill loop.
+            let mut reexec_failed = false;
+            let mut reexec_escalation_attempts: u32 = 0;
+            let mut reexec_escalation_exhausted_logged = false;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
@@ -927,13 +937,111 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // this to `true` is the queued follow-up (`#supselfheal-adminwire`);
                 // until it lands the idle path keeps its current behavior.
                 let explicit_admin_recycle = false;
+                // `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): read the
+                // persisted editor-IPC wedge fact for the owned document. The
+                // write/converge closeout path latches `degraded` after repeated
+                // `send_failed`/`no_ack` against a nominally-active JB listener and
+                // logs `write_wedged_supervisor_recycle_requested`; the supervisor
+                // reads that latch here and combines it with its own staleness probe,
+                // so a wedge against a stale binary recycles immediately instead of
+                // waiting for an opt-in or an idle boundary that may never come.
+                let write_wedged = path
+                    .canonicalize()
+                    .ok()
+                    .map(|canonical| {
+                        let project_root =
+                            crate::write::resolve_ipc_project_root_pub(&canonical);
+                        crate::write::editor_ipc_write_wedged(&project_root, &canonical)
+                    })
+                    .unwrap_or(false);
                 let recycle_action = supervisor_recycle_action(
                     supervisor_stale,
                     recycle_auto_enabled,
                     turn_boundary,
                     head_pending,
                     explicit_admin_recycle,
+                    write_wedged,
+                    reexec_failed,
                 );
+                // `#supselfheal` Phase 3 (`#supselfheal-reexecescalate`): a stale
+                // supervisor whose in-place `execve` already failed cannot converge by
+                // re-execing again. Escalate to a bounded kill+relaunch of the harness
+                // child — reusing the `#supkill-bg` drain-and-relaunch path (request a
+                // non-reexec restart; it drains the in-flight turn first, so no live
+                // turn is dropped) — instead of looping `continue_current_binary`
+                // forever (the indefinite wedge this plan fixes). Bounded so a relaunch
+                // that never clears the staleness cannot spin into an unbounded kill
+                // loop; past the bound, fall back to continuing on the current binary
+                // with a one-time operator-restart hint.
+                if matches!(recycle_action, SupervisorRecycleAction::EscalateKillRelaunch) {
+                    if reexec_escalation_within_bound(
+                        reexec_escalation_attempts,
+                        MAX_REEXEC_ESCALATIONS,
+                    ) {
+                        reexec_escalation_attempts += 1;
+                        shared.restart_reexec.store(false, Ordering::Relaxed);
+                        shared.restart_requested.store(true, Ordering::Relaxed);
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "supervisor_reexec_escalate_kill_relaunch pane={} attempt={}/{} reason=reexec_failed",
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                reexec_escalation_attempts,
+                                MAX_REEXEC_ESCALATIONS,
+                            ),
+                        );
+                        crate::ops_log::log_op(
+                            &path,
+                            &format!(
+                                "supervisor_reexec_escalate_kill_relaunch file={} pane={} attempt={}/{} action=request_kill_relaunch reason=reexec_failed",
+                                path.display(),
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                reexec_escalation_attempts,
+                                MAX_REEXEC_ESCALATIONS,
+                            ),
+                        );
+                        eprintln!(
+                            "[agent-doc] supervisor in-place hot-reload failed; escalating to a kill+relaunch of the harness child (attempt {}/{}) to clear the wedge",
+                            reexec_escalation_attempts, MAX_REEXEC_ESCALATIONS,
+                        );
+                    } else if !reexec_escalation_exhausted_logged {
+                        reexec_escalation_exhausted_logged = true;
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "supervisor_reexec_escalation_exhausted pane={} attempts={} fallback=continue_current_binary",
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                reexec_escalation_attempts,
+                            ),
+                        );
+                        crate::ops_log::log_op(
+                            &path,
+                            &format!(
+                                "supervisor_reexec_escalation_exhausted file={} pane={} attempts={} fallback=continue_current_binary",
+                                path.display(),
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                reexec_escalation_attempts,
+                            ),
+                        );
+                        eprintln!(
+                            "[agent-doc] supervisor kill+relaunch escalation exhausted after {} attempts; continuing on the current binary — restart this session to pick up the new build",
+                            reexec_escalation_attempts,
+                        );
+                        if let Some(pane) = shared.inject_pane.as_deref() {
+                            let _ = std::process::Command::new("tmux")
+                                .args([
+                                    "display-message",
+                                    "-t",
+                                    pane,
+                                    "agent-doc: binary hot-reload + relaunch failed; restart this session to pick up the new build",
+                                ])
+                                .status();
+                        }
+                    }
+                    // The escalation owns this tick's recycle decision; the requested
+                    // restart is consumed at the next tick's restart-action boundary.
+                    continue;
+                }
                 // The idle-grace debounce only gates the no-head-pending path; an
                 // inter-queue-item recycle bypasses it.
                 let (recycle_debounced, next_recycle_since) =
@@ -1041,7 +1149,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     ),
                                 );
                                 eprintln!(
-                                    "[agent-doc] supervisor execve hot-reload failed ({err}); continuing on the current binary — restart this session to pick up the new build"
+                                    "[agent-doc] supervisor execve hot-reload failed ({err}); escalating to a bounded kill+relaunch on the next idle boundary"
                                 );
                                 if let Some(pane) = shared.inject_pane.as_deref() {
                                     let _ = std::process::Command::new("tmux")
@@ -1049,11 +1157,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                             "display-message",
                                             "-t",
                                             pane,
-                                            "agent-doc: binary hot-reload failed; restart this session to pick up the new build",
+                                            "agent-doc: binary hot-reload failed; escalating to kill+relaunch",
                                         ])
                                         .status();
                                 }
                                 reexec_recycle_disabled = true;
+                                // `#supselfheal` Phase 3: the in-place execve cannot
+                                // start (deleted inode / syscall error). Mark the
+                                // failure so the recycle policy returns
+                                // `EscalateKillRelaunch` next tick instead of sitting
+                                // forever on `continue_current_binary`.
+                                reexec_failed = true;
                             }
                         }
                     }

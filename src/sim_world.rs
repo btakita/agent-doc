@@ -183,6 +183,12 @@ enum SimCommand {
     ActivateGoModeQueueHead,
     /// A later `cargo install` made the supervisor's launch binary stale.
     MarkSupervisorBinaryStale,
+    /// `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): the editor-IPC write
+    /// path is wedged — the converge closeout has refused repeated writes against a
+    /// nominally-active JB listener (the de-wedge latch tripped `degraded`). The
+    /// wedge feeds `supervisor_recycle_action` as `write_wedged`, forcing an
+    /// immediate recycle of a stale supervisor even when auto-recycle is opted OUT.
+    MarkWriteWedged,
     /// `#suprecyclestall`: the next in-place `execve` recycle will fail to launch
     /// any candidate binary (e.g. an old pre-fix launch path). The watch must fall
     /// back to continuing on the current binary, never `process::exit` (which would
@@ -539,6 +545,18 @@ struct RecycleClearModel {
     /// disabled further recycle attempts and keeps running on the current binary
     /// (mirrors idle_watch.rs's `reexec_recycle_disabled`).
     recycle_disabled: bool,
+    /// `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): the editor-IPC write is
+    /// wedged against a nominally-active listener (the persisted `degraded` latch the
+    /// converge closeout reads). Feeds `write_wedged` to `supervisor_recycle_action`.
+    write_wedged: bool,
+    /// `#supselfheal` Phase 3 (`#supselfheal-reexecescalate`): a prior in-place
+    /// `execve` recycle failed, so the recycle policy escalates to a bounded
+    /// kill+relaunch (`EscalateKillRelaunch`) instead of looping
+    /// `continue_current_binary` (mirrors idle_watch.rs's `reexec_failed`).
+    reexec_failed: bool,
+    /// `#supselfheal` Phase 3: how many bounded kill+relaunch escalations have fired
+    /// this supervisor lifetime (mirrors idle_watch.rs's `reexec_escalation_attempts`).
+    reexec_escalation_attempts: u32,
     /// The head the idle-queue watch last injected a trigger for (drain dedup).
     last_dispatched: Option<String>,
     /// `#qflood2`: the watch sent its OWN `/clear` (an opt-in context reset or a
@@ -640,6 +658,14 @@ struct Coverage {
     /// `#suprecyclestall`: a self-`execve` recycle failed and the watch fell back to
     /// continuing on the current binary (never `process::exit`, so the pane survives).
     supervisor_recycle_failures: usize,
+    /// `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): a stale supervisor with a
+    /// wedged editor-IPC write recycled immediately because of the wedge — even though
+    /// auto-recycle was opted OUT (the wedge overrides the default-OFF surface-only).
+    wedge_triggered_recycles: usize,
+    /// `#supselfheal` Phase 3 (`#supselfheal-reexecescalate`): a stale supervisor whose
+    /// in-place `execve` failed escalated to a bounded kill+relaunch of the harness
+    /// child instead of looping `continue_current_binary` forever.
+    reexec_kill_relaunch_escalations: usize,
     /// `#supkill-bg`: an explicit `restart-supervisor` drained its in-flight turn,
     /// then hot-reloaded in place via `execve` at the turn boundary (stale binary,
     /// `supervisor_restart_action` → `ReexecInPlace`), preserving the live pane.
@@ -2581,6 +2607,117 @@ fn stale_supervisor_self_recycles_at_turn_boundary_by_default() {
     assert_eq!(
         world.route.durable.pane_id, pane_before,
         "blue/green: the live pane is preserved via execve (not a cold rebind)"
+    );
+}
+
+#[test]
+fn wedged_opted_out_supervisor_recycles_on_write_wedge() {
+    // `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): reproduces the firsthand
+    // session — a stale-binary route-owned supervisor whose editor-IPC write is
+    // wedged (repeated send_failed/no_ack against a nominally-active JB listener) so
+    // an orphaned response cannot land. The doc OPTED OUT of auto-recycle, so without
+    // the wedge trigger the policy would only `Detect`/surface and the wedge would be
+    // indefinite. The wedge fact must override the default-OFF opt-out and recycle the
+    // stale supervisor immediately at the turn boundary, clearing the wedge so the
+    // previously-orphaned response commits — with NO operator restart and NO
+    // `--force-disk`.
+    let mut world = SimWorld::new(7_531);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    // Explicit opt-out: absent the wedge trigger this stale supervisor only surfaces.
+    world
+        .apply(SimCommand::DisableSupervisorAutoRecycle)
+        .unwrap();
+
+    let gen_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    // Stale binary + a wedged editor-IPC write (the orphaned-response state).
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::MarkWriteWedged).unwrap();
+    assert!(world.recycle_clear.write_wedged);
+
+    // One idle tick at a turn boundary: the wedge overrides the opt-out →
+    // RecycleImmediate. The in-place execve promotes the fresh binary, preserves the
+    // live pane, and clears the wedge.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.wedge_triggered_recycles, 1,
+        "a wedged write against an opted-OUT stale supervisor recycles via the wedge trigger"
+    );
+    assert_eq!(
+        world.coverage.supervisor_recycles, 1,
+        "the wedge-triggered recycle is a real in-place execve recycle"
+    );
+    assert!(
+        !world.recycle_clear.write_wedged,
+        "promoting the fresh binary clears the editor-IPC wedge"
+    );
+    assert!(
+        !world.recycle_clear.binary_stale,
+        "the wedge trigger promoted the freshly-installed binary"
+    );
+    assert_eq!(
+        world.route.durable.generation,
+        gen_before + 1,
+        "the wedge-triggered recycle advances the generation"
+    );
+    assert_eq!(
+        world.route.durable.pane_id, pane_before,
+        "blue/green: the live pane is preserved (no cold rebind, no operator restart)"
+    );
+}
+
+#[test]
+fn failed_reexec_escalates_to_bounded_kill_relaunch() {
+    // `#supselfheal` Phase 3 (`#supselfheal-reexecescalate`): when the in-place execve
+    // re-exec cannot start (a deleted inode from a fresh `make install`, or another
+    // syscall error), the supervisor must NOT sit on `continue_current_binary`
+    // forever. After the failed re-exec, the recycle policy returns
+    // `EscalateKillRelaunch`, and the watch escalates to a bounded kill+relaunch of
+    // the harness child (reclaiming the wedged child so the orphaned response commits),
+    // capped at MAX_REEXEC_ESCALATIONS.
+    use agent_doc_orchestration::start::decisions::MAX_REEXEC_ESCALATIONS;
+
+    let mut world = SimWorld::new(7_532);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    // Stale binary, a wedged write, and the next in-place execve WILL fail to launch.
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::MarkWriteWedged).unwrap();
+    world.apply(SimCommand::MarkReexecWillFail).unwrap();
+
+    // Tick 1: stale + wedge → RecycleImmediate, but the execve fails. The watch records
+    // the failure (`reexec_failed`) instead of promoting a binary.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.supervisor_recycle_failures, 1,
+        "the in-place execve failed"
+    );
+    assert!(
+        world.recycle_clear.reexec_failed,
+        "a failed execve marks the policy to escalate next tick"
+    );
+    assert_eq!(
+        world.coverage.reexec_kill_relaunch_escalations, 0,
+        "the escalation fires on the NEXT tick, once reexec_failed is set"
+    );
+
+    // Subsequent ticks: the policy returns EscalateKillRelaunch and the watch escalates
+    // to a bounded kill+relaunch, capped at MAX_REEXEC_ESCALATIONS — never an
+    // indefinite wedge. The kill+relaunch reclaims the wedged child so the orphaned
+    // response can commit; the wedge clears.
+    for _ in 0..(MAX_REEXEC_ESCALATIONS + 3) {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    }
+    assert_eq!(
+        world.coverage.reexec_kill_relaunch_escalations as u32, MAX_REEXEC_ESCALATIONS,
+        "kill+relaunch escalation is bounded at MAX_REEXEC_ESCALATIONS — no unbounded kill loop"
+    );
+    assert!(
+        !world.recycle_clear.write_wedged,
+        "the kill+relaunch reclaimed the wedged child so the orphaned response commits"
     );
 }
 

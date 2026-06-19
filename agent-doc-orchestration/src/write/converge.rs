@@ -296,6 +296,58 @@ pub(crate) fn log_live_prompt_drift_auto_recovered(
     );
 }
 
+/// `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`) — pure classifier for the
+/// typed `write_wedged` fact the route-owned supervisor uses as a recycle trigger.
+///
+/// The editor-IPC write path is "wedged" when a *nominally-active* JB listener has
+/// refused a bounded number of consecutive writes (`send_failed`/`no_ack`/
+/// `retry_without_disk_write` ack timeouts) without ever proving delivery — exactly
+/// the `consecutive_timeouts` the `#fcc0e` de-wedge circuit breaker latches
+/// `degraded` on. A failure against a listener that is NOT nominally active is just
+/// a safe no-listener disk fallback, not a wedge, so it never trips. Pure so the
+/// derivation is unit-testable without a live socket.
+pub fn write_wedged_from_ipc_failures(
+    consecutive_failures: u64,
+    listener_nominally_active: bool,
+    threshold: u64,
+) -> bool {
+    listener_nominally_active && consecutive_failures >= threshold
+}
+
+/// `#supselfheal` Phase 2 — read the persisted editor-IPC wedge fact for `file` so
+/// the route-owned supervisor idle watch can feed `write_wedged` into
+/// `supervisor_recycle_action`. Returns `true` once the de-wedge circuit breaker
+/// has latched `degraded` for the current session (the converge closeout path's
+/// repeated refusals against a nominally-active listener). This is the wedge → owner
+/// "request a recycle" channel: the converge process persists the latch, the
+/// supervisor reads it here and combines it with its own staleness probe. The
+/// converge side self-heals the marker the moment the socket recovers
+/// (`ipc_direct_disk_degraded` → `listener_ack_recovered`), so a read of the raw
+/// latch is intentional — the supervisor must not run its own socket probe. Best
+/// effort: a missing/unreadable marker is "not wedged".
+pub(crate) fn editor_ipc_write_wedged(project_root: &Path, file: &Path) -> bool {
+    ipc_dewedge_marker_for_current_session(project_root, file)
+        .ok()
+        .flatten()
+        .and_then(|value| value.get("degraded").and_then(|v| v.as_bool()))
+        .unwrap_or(false)
+}
+
+/// `#supselfheal` Phase 2 — log that a wedged editor-IPC write is now requesting a
+/// supervisor recycle through the policy owner, instead of the converge path
+/// silently looping refusals. Emitted once when the de-wedge latch first trips so
+/// the wedge → recycle escalation is attributable in `ops.log`.
+pub(crate) fn log_write_wedge_requests_supervisor_recycle(file: &Path, source: &str) {
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "write_wedged_supervisor_recycle_requested file={} source={} action=request_recycle_through_owner reason=repeated_ack_timeout_active_listener",
+            file.display(),
+            source
+        ),
+    );
+}
+
 pub(crate) fn try_editor_converge_live_prompt_drift(
     file: &Path,
     project_root: &Path,
@@ -668,10 +720,19 @@ pub fn try_editor_converge(
             // degraded and subsequent converges skip the doomed socket up front.
             if is_socket_ack_timeout_error(&err) {
                 match record_ipc_socket_ack_timeout(&project_root, file, Some(&patch_id), source) {
-                    Ok(true) => eprintln!(
-                        "[write] IPC listener degraded for {} after repeated {source} ack timeouts",
-                        file.display()
-                    ),
+                    Ok(true) => {
+                        eprintln!(
+                            "[write] IPC listener degraded for {} after repeated {source} ack timeouts",
+                            file.display()
+                        );
+                        // `#supselfheal` Phase 2: the latch just tripped — the editor
+                        // write is wedged against a nominally-active listener. Record
+                        // that the wedge is now a supervisor-recycle request (the
+                        // route-owned supervisor reads the latched marker via
+                        // `editor_ipc_write_wedged` and recycles a stale binary)
+                        // instead of looping silent refusals.
+                        log_write_wedge_requests_supervisor_recycle(file, source);
+                    }
                     Ok(false) => {}
                     Err(e) => eprintln!(
                         "[write] WARNING: {source} converge ack-timeout record failed (non-fatal): {e}"
@@ -929,6 +990,43 @@ mod core_tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn write_wedged_classifier_trips_only_against_active_listener_at_threshold() {
+        // `#supselfheal` Phase 2: the wedge fact trips only when a *nominally
+        // active* listener has refused >= threshold consecutive writes. A failure
+        // against an inactive listener is a safe disk fallback, not a wedge.
+        let threshold = IPC_DEWEDGE_TIMEOUT_THRESHOLD;
+        // Active listener at/over threshold → wedged.
+        assert!(write_wedged_from_ipc_failures(threshold, true, threshold));
+        assert!(write_wedged_from_ipc_failures(threshold + 1, true, threshold));
+        // Active listener under threshold → not yet wedged (transient lull).
+        assert!(!write_wedged_from_ipc_failures(threshold - 1, true, threshold));
+        // No listener nominally active → never a wedge (disk fallback is safe).
+        assert!(!write_wedged_from_ipc_failures(threshold + 5, false, threshold));
+        assert!(!write_wedged_from_ipc_failures(0, true, threshold));
+    }
+
+    #[test]
+    fn editor_ipc_write_wedged_reads_latched_degraded_marker() {
+        // `#supselfheal` Phase 2: the supervisor-facing reader returns true once the
+        // de-wedge latch has persisted `degraded` for the current session, and false
+        // when there is no marker. Drive it through the real persistence path.
+        let dir = TempDir::new().unwrap();
+        let project_root = dir.path();
+        let file = project_root.join("plan.md");
+        fs::write(&file, "# plan\n").unwrap();
+        // No marker yet → not wedged.
+        assert!(!editor_ipc_write_wedged(project_root, &file));
+        // Record ack timeouts up to the latch threshold → degraded persisted.
+        for _ in 0..IPC_DEWEDGE_TIMEOUT_THRESHOLD {
+            record_ipc_socket_ack_timeout(project_root, &file, Some("p1"), "finalize").unwrap();
+        }
+        assert!(
+            editor_ipc_write_wedged(project_root, &file),
+            "a latched degraded marker should read as a write wedge"
+        );
+    }
 
     #[test]
     fn live_prompt_drift_auto_recovery_safe_accepts_benign_wedge() {

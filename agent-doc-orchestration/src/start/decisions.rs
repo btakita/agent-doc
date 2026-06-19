@@ -380,6 +380,29 @@ pub enum SupervisorRecycleAction {
     /// unrelated turns): recycle once the idle-grace debounce elapses so a momentary
     /// idle gap never thrashes the live agent child.
     RecycleDebounced,
+    /// `#supselfheal` Phase 3 (`#supselfheal-reexecescalate`): a stale supervisor
+    /// whose in-place `execve` re-exec already failed (a deleted-inode `ENOENT`
+    /// from a fresh `make install`, or another syscall error) cannot converge onto
+    /// the fresh binary by recycling again — re-trying the same doomed `execve`
+    /// just re-logs `continue_current_binary` forever. Escalate to one bounded
+    /// (`MAX_REEXEC_ESCALATIONS`) kill+relaunch of the harness child so the wedge
+    /// is reclaimed deterministically instead of sitting indefinitely.
+    EscalateKillRelaunch,
+}
+
+/// `#supselfheal` Phase 3 — maximum number of times a stale supervisor whose
+/// in-place `execve` re-exec keeps failing may escalate to a kill+relaunch before
+/// the idle watch gives up and continues on the current binary (surfacing the
+/// one-time operator-restart hint). Bounded so a relaunch that itself never clears
+/// the staleness cannot spin the watch into an unbounded kill loop.
+pub const MAX_REEXEC_ESCALATIONS: u32 = 2;
+
+/// `#supselfheal` Phase 3 — whether a re-exec-failure escalation may still fire,
+/// given how many kill+relaunch escalations have already been attempted this
+/// supervisor lifetime. Pure so the bound is unit-testable without the live
+/// kill/relaunch machinery; the caller increments the counter on each escalation.
+pub fn reexec_escalation_within_bound(attempts: u32, max: u32) -> bool {
+    attempts < max
 }
 
 /// `#ctlrecycle` R3 / `#suprecyclequeue` / `#supselfheal` — pure recycle policy for the
@@ -403,19 +426,46 @@ pub enum SupervisorRecycleAction {
 /// `auto_recycle` is false, so `admin recycle` (the gentle fix the closeout path
 /// itself recommends) can actually clear a stale-binary supervisor wedge. It still
 /// respects `turn_boundary` (never drops a live turn) and is a no-op when not stale.
+///
+/// `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): `write_wedged` is the typed
+/// fact derived in the write/converge closeout path from repeated
+/// `send_failed`/`no_ack`/`retry_without_disk_write` against a nominally-active
+/// editor IPC listener. A wedge is the clearest possible proof the live binary is
+/// bad, so — like `explicit_admin` — it **overrides the default-OFF opt-out** and
+/// recycles immediately at the next turn boundary instead of sitting in `Detect`.
+/// The wedge never has to wait for an opt-in or an idle-grace debounce; the only
+/// gate it still respects is `turn_boundary` (never drop a live turn).
+///
+/// `#supselfheal` Phase 3 (`#supselfheal-reexecescalate`): `reexec_failed` is set
+/// once a prior in-place `execve` re-exec returned an error (deleted-inode `ENOENT`
+/// from a fresh `make install`, or another syscall failure). Re-trying the same
+/// doomed `execve` only re-logs `continue_current_binary` forever, so a stale
+/// supervisor with a failed re-exec escalates to a bounded kill+relaunch
+/// (`EscalateKillRelaunch`) regardless of the opt-in/admin/wedge inputs — that is
+/// the deterministic recovery the wedge plan requires. It still respects
+/// `turn_boundary` and is a no-op when not stale.
 pub fn supervisor_recycle_action(
     stale: bool,
     auto_recycle: bool,
     turn_boundary: bool,
     head_pending: bool,
     explicit_admin: bool,
+    write_wedged: bool,
+    reexec_failed: bool,
 ) -> SupervisorRecycleAction {
     if !stale || !turn_boundary {
         return SupervisorRecycleAction::None;
     }
-    if explicit_admin {
-        // Operator/agent explicit `admin recycle` — recycle now, overriding the
-        // default-OFF opt-out. The next turn boundary is the deliberate restart point.
+    if reexec_failed {
+        // Phase 3: the in-place re-exec already failed; recycling onto it again is
+        // pointless. Escalate to a bounded kill+relaunch instead of looping
+        // `continue_current_binary`. This wins over every recycle arm below.
+        return SupervisorRecycleAction::EscalateKillRelaunch;
+    }
+    if explicit_admin || write_wedged {
+        // Operator/agent explicit `admin recycle`, or a wedged editor-IPC write —
+        // recycle now, overriding the default-OFF opt-out. The next turn boundary is
+        // the deliberate restart point; a wedge must never stay `Detect`.
         return SupervisorRecycleAction::RecycleImmediate;
     }
     if !auto_recycle {
@@ -753,32 +803,45 @@ mod tests {
     fn supervisor_recycle_action_policy() {
         use SupervisorRecycleAction::*;
         // `#ctlrecycle` R3 / `#suprecyclequeue` policy truth table.
-        // (stale, auto_recycle, turn_boundary, head_pending, explicit_admin)
+        // (stale, auto_recycle, turn_boundary, head_pending, explicit_admin,
+        //  write_wedged, reexec_failed)
         // Fresh binary → never act.
-        assert_eq!(supervisor_recycle_action(false, true, true, true, false), None);
-        assert_eq!(supervisor_recycle_action(false, true, true, false, false), None);
+        assert_eq!(
+            supervisor_recycle_action(false, true, true, true, false, false, false),
+            None
+        );
+        assert_eq!(
+            supervisor_recycle_action(false, true, true, false, false, false, false),
+            None
+        );
         // Stale but mid-turn (not at a boundary) → never act, even with the flag on.
-        assert_eq!(supervisor_recycle_action(true, true, false, true, false), None);
-        assert_eq!(supervisor_recycle_action(true, true, false, false, false), None);
+        assert_eq!(
+            supervisor_recycle_action(true, true, false, true, false, false, false),
+            None
+        );
+        assert_eq!(
+            supervisor_recycle_action(true, true, false, false, false, false, false),
+            None
+        );
         // Stale at a turn boundary, auto-recycle OFF → surface only, regardless of
         // whether a queue head is pending.
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, false),
+            supervisor_recycle_action(true, false, true, false, false, false, false),
             Detect
         );
         assert_eq!(
-            supervisor_recycle_action(true, false, true, true, false),
+            supervisor_recycle_action(true, false, true, true, false, false, false),
             Detect
         );
         // Stale + boundary + opt-in ON, a queue head waiting → recycle NOW so the next
         // queue item runs on the fresh binary (debounce bypassed).
         assert_eq!(
-            supervisor_recycle_action(true, true, true, true, false),
+            supervisor_recycle_action(true, true, true, true, false, false, false),
             RecycleImmediate
         );
         // Stale + boundary + opt-in ON, no head waiting → debounced recycle.
         assert_eq!(
-            supervisor_recycle_action(true, true, true, false, false),
+            supervisor_recycle_action(true, true, true, false, false, false, false),
             RecycleDebounced
         );
     }
@@ -792,28 +855,117 @@ mod tests {
         // Auto-recycle OFF + explicit admin → RecycleImmediate (overrides Detect),
         // regardless of whether a head is pending.
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, true),
+            supervisor_recycle_action(true, false, true, false, true, false, false),
             RecycleImmediate
         );
         assert_eq!(
-            supervisor_recycle_action(true, false, true, true, true),
+            supervisor_recycle_action(true, false, true, true, true, false, false),
             RecycleImmediate
         );
         // Auto-recycle ON + explicit admin → still immediate (no debounce wait).
         assert_eq!(
-            supervisor_recycle_action(true, true, true, false, true),
+            supervisor_recycle_action(true, true, true, false, true, false, false),
             RecycleImmediate
         );
         // Explicit admin NEVER drops a live turn: mid-turn (no boundary) stays None.
         assert_eq!(
-            supervisor_recycle_action(true, false, false, false, true),
+            supervisor_recycle_action(true, false, false, false, true, false, false),
             None
         );
         // Explicit admin on a FRESH binary → nothing to recycle.
         assert_eq!(
-            supervisor_recycle_action(false, false, true, false, true),
+            supervisor_recycle_action(false, false, true, false, true, false, false),
             None
         );
+    }
+
+    #[test]
+    fn supervisor_recycle_action_write_wedge_overrides_opt_out() {
+        use SupervisorRecycleAction::*;
+        // `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): a wedged editor-IPC
+        // write against a nominally-active listener is the clearest proof the live
+        // binary is bad. Like explicit admin, it overrides the default-OFF opt-out
+        // and recycles immediately at the boundary — a wedge must never stay Detect.
+        // Auto-recycle OFF + write_wedged → RecycleImmediate (overrides Detect).
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, false, false, true, false),
+            RecycleImmediate
+        );
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, true, false, true, false),
+            RecycleImmediate
+        );
+        // Auto-recycle ON + write_wedged → immediate (no debounce wait, even with no
+        // head pending — the wedge does not wait for an idle boundary that may never
+        // come).
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, false, false, true, false),
+            RecycleImmediate
+        );
+        // A wedge NEVER drops a live turn: mid-turn (no boundary) stays None.
+        assert_eq!(
+            supervisor_recycle_action(true, false, false, false, false, true, false),
+            None
+        );
+        // A wedge on a FRESH binary → nothing to recycle (the wedge is not a stale
+        // binary; some other transient cause owns the converge retry).
+        assert_eq!(
+            supervisor_recycle_action(false, false, true, false, false, true, false),
+            None
+        );
+    }
+
+    #[test]
+    fn supervisor_recycle_action_reexec_failure_escalates_to_kill_relaunch() {
+        use SupervisorRecycleAction::*;
+        // `#supselfheal` Phase 3 (`#supselfheal-reexecescalate`): once an in-place
+        // re-exec has failed, recycling onto the same doomed `execve` is pointless —
+        // escalate to a bounded kill+relaunch regardless of the opt-in/admin/wedge
+        // inputs.
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, true, false, false, true),
+            EscalateKillRelaunch
+        );
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, false, false, false, true),
+            EscalateKillRelaunch
+        );
+        // Escalation wins over the wedge/admin RecycleImmediate arms (re-trying the
+        // failed execve would otherwise be chosen).
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, false, true, true, true),
+            EscalateKillRelaunch
+        );
+        // Escalation still respects turn_boundary — a failed re-exec mid-turn must
+        // not drop the live turn.
+        assert_eq!(
+            supervisor_recycle_action(true, true, false, true, false, false, true),
+            None
+        );
+        // A failed re-exec on a FRESH binary → nothing to escalate.
+        assert_eq!(
+            supervisor_recycle_action(false, true, true, true, false, false, true),
+            None
+        );
+    }
+
+    #[test]
+    fn reexec_escalation_bound_caps_retries() {
+        // `#supselfheal` Phase 3: the bounded escalation may fire only while fewer
+        // than MAX_REEXEC_ESCALATIONS kill+relaunches have already been attempted.
+        assert!(reexec_escalation_within_bound(0, MAX_REEXEC_ESCALATIONS));
+        assert!(reexec_escalation_within_bound(
+            MAX_REEXEC_ESCALATIONS - 1,
+            MAX_REEXEC_ESCALATIONS
+        ));
+        assert!(!reexec_escalation_within_bound(
+            MAX_REEXEC_ESCALATIONS,
+            MAX_REEXEC_ESCALATIONS
+        ));
+        assert!(!reexec_escalation_within_bound(
+            MAX_REEXEC_ESCALATIONS + 1,
+            MAX_REEXEC_ESCALATIONS
+        ));
     }
 
     #[test]

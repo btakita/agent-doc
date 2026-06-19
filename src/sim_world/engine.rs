@@ -449,6 +449,9 @@ impl SimWorld {
             SimCommand::MarkSupervisorBinaryStale => {
                 self.recycle_clear.binary_stale = true;
             }
+            SimCommand::MarkWriteWedged => {
+                self.recycle_clear.write_wedged = true;
+            }
             SimCommand::MarkReexecWillFail => {
                 self.recycle_clear.reexec_will_fail = true;
             }
@@ -829,7 +832,38 @@ impl SimWorld {
             turn_boundary,
             head_pending,
             false,
+            self.recycle_clear.write_wedged,
+            self.recycle_clear.reexec_failed,
         );
+        // `#supselfheal` Phase 3: a stale supervisor whose in-place execve already
+        // failed escalates to a bounded kill+relaunch instead of recycling onto the
+        // doomed execve again. The relaunch reclaims the wedged harness child (so the
+        // previously-orphaned response can commit) and clears the editor-IPC wedge;
+        // past the bound the watch continues on the current binary (operator restart).
+        if matches!(recycle_action, SupervisorRecycleAction::EscalateKillRelaunch) {
+            use agent_doc_orchestration::start::decisions::{
+                MAX_REEXEC_ESCALATIONS, reexec_escalation_within_bound,
+            };
+            if turn_boundary
+                && reexec_escalation_within_bound(
+                    self.recycle_clear.reexec_escalation_attempts,
+                    MAX_REEXEC_ESCALATIONS,
+                )
+            {
+                self.recycle_clear.reexec_escalation_attempts += 1;
+                // The kill+relaunch reclaims the wedged child; the orphaned response
+                // commits and the editor-IPC wedge clears (the relaunched child
+                // re-establishes the listener). The supervisor binary stays stale
+                // until an operator restart — the relaunch is child-scoped.
+                self.recycle_clear.write_wedged = false;
+                self.coverage.reexec_kill_relaunch_escalations += 1;
+                self.record_ops_proof(format!(
+                    "supervisor_reexec_escalate_kill_relaunch attempt={}/{} reason=reexec_failed",
+                    self.recycle_clear.reexec_escalation_attempts, MAX_REEXEC_ESCALATIONS,
+                ));
+            }
+            return Ok(());
+        }
         // RecycleImmediate fires at once (the next-queue-item boundary bypasses the
         // grace debounce); RecycleDebounced fires after the idle-grace elapses, which
         // we model as satisfied on this tick for determinism. Detect/None never recycle.
@@ -837,6 +871,12 @@ impl SimWorld {
             recycle_action,
             SupervisorRecycleAction::RecycleImmediate | SupervisorRecycleAction::RecycleDebounced
         );
+        // `#supselfheal` Phase 2: a wedge-driven RecycleImmediate against an opted-OUT
+        // stale supervisor is the wedge trigger overriding the default-OFF surface-only.
+        let wedge_triggered = self.recycle_clear.write_wedged
+            && self.recycle_clear.binary_stale
+            && !self.recycle_clear.auto_recycle
+            && matches!(recycle_action, SupervisorRecycleAction::RecycleImmediate);
         // `#suprecyclestall`: once a self-`execve` recycle has failed the watch
         // disables further attempts and runs on the current binary, so a hopeless
         // recycle is not re-tried every idle boundary.
@@ -852,6 +892,11 @@ impl SimWorld {
                 // binary stays stale (the operator restarts to pick up the new build).
                 self.recycle_clear.recycle_disabled = true;
                 self.coverage.supervisor_recycle_failures += 1;
+                // `#supselfheal` Phase 3: the failed in-place execve marks the
+                // recycle policy to escalate to a bounded kill+relaunch on the next
+                // idle tick (`EscalateKillRelaunch`), instead of sitting on
+                // `continue_current_binary` indefinitely.
+                self.recycle_clear.reexec_failed = true;
                 if self.recycle_clear.jb_run_recycle_probe_pending {
                     self.recycle_clear.jb_run_recycle_probe_pending = false;
                     self.coverage.suprehot_jb_mapped_recycle_failures += 1;
@@ -864,6 +909,13 @@ impl SimWorld {
                 // The in-place execve promoted the freshly-installed binary.
                 self.recycle_clear.binary_stale = false;
                 self.coverage.supervisor_recycles += 1;
+                if wedge_triggered {
+                    // `#supselfheal` Phase 2: the wedge drove this recycle on an
+                    // opted-OUT supervisor; promoting the fresh binary resolves the
+                    // wedge cause, so clear the latch.
+                    self.recycle_clear.write_wedged = false;
+                    self.coverage.wedge_triggered_recycles += 1;
+                }
                 if self.recycle_clear.jb_run_recycle_probe_pending {
                     self.recycle_clear.jb_run_recycle_probe_pending = false;
                     self.coverage.suprehot_jb_observed_promotions += 1;

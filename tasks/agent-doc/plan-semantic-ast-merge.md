@@ -136,12 +136,29 @@ node-keyed substrate — not a second CRDT.
    `merged_doc` → on parse failure only, fall back to `crdt.rs::merge`. Delete the
    `content_ours`-wins adoption for the node-disjoint case; keep fail-closed
    **only** when the owner returns an unrepresentable conflict.
-3. **`#semmerge-queue-node-strike`** — route `queue_consume` strike through the
-   merged node tree by id so a drifted operator queue edit no longer aborts the
-   head strike. Overlaps `#qheadsync(C)`.
-4. **`#semmerge-ack-turn`** — turn `AckRequest`s into a queued exchange turn the
-   next cycle (operator-deleted-an-agent-edited-node acknowledgement; same-node
-   override note), carried via `cycle_state.rs`.
+3. **`#semmerge-queue-node-strike`** — ✅ DONE (`#smqstrike`, verified 0.34.14).
+   The contract (strike on the merged node tree by id; a drifted operator queue
+   edit never aborts/loses the head strike) is delivered across all three write
+   paths: (a) editor IPC sends per-node `strike` patches keyed by `node_key`
+   (`build_ipc_node_patches_json` → `queue_consume_node_patches`), so concurrent
+   operator edits to other nodes are untouched; (b) the disk path reconciles a
+   diverged snapshot instead of bailing (the merged document wins, head struck,
+   concurrent add preserved — `queue_consume_reconciles_diverged_snapshot_instead_of_bailing`);
+   (c) the `#smconv` content_ours convergence runs `semantic_merge`, which treats
+   `struck` as a node-disjoint flag-edit so a struck head merges cleanly with a
+   concurrent operator add. Added explicit merged-tree coverage
+   (`smqstrike_struck_head_survives_concurrent_operator_queue_add`). No
+   re-implementation needed — landed incrementally with the `#smconv`/divergence
+   work. Overlaps `#qheadsync(C)`.
+4. **`#semmerge-ack-turn`** — ✅ DONE (0.34.14, `#pk3f`). `write/ipc.rs` now
+   persists each convergence `AckRequest` to `CycleState.pending_semantic_merge_acks`
+   via `record_semantic_merge_acks`; `start_preflight` carries un-surfaced acks
+   forward exactly one cycle (per-ack `surfaced` flag, not a millisecond-collidable
+   `cycle_id` compare); preflight surfaces them as `semantic_merge_acks` plus a
+   companion `semantic_merge_ack_pending` warning so the standard "surface warnings"
+   skill path drives the acknowledgement. New stable `AckReason::token()` wire
+   string. The merged document is unchanged (operator already won) — this only adds
+   the courtesy acknowledgement.
 5. **`#semmerge-simworld`** — SimWorld coverage for the operator↔agent concurrent
    matrix (node-disjoint union, delete-vs-edit ack, same-node override),
    reproducing this session's `queue: stop` + cross-head case deterministically.

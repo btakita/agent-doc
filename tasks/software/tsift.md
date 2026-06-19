@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -91,16 +91,32 @@ Root cause confirmed and fixed. The projection layer (`entity_node`/`relation_ed
 **Verification:** new test `projection_always_persists_confidence_with_source_tag` (model value tagged `model`, omitted value → default tagged `default`, on both nodes and edges) + extended schema-required assertions. `cargo test -p tsift-kg` 32 passed, `clippy` clean, full `make check` exit 0, `cargo install` (root + cli) → `tsift 0.1.70` live. CI run 27812097553 was pending at push time (recorded, not blocking).
 
 Next queue head: `do [#kgrefreshdup]` (refresh accumulates duplicate canonical entities — key the upsert on canonical `entity_id`).
-<!-- agent:boundary:78284515 -->
+
+### Re: #kgrefreshdup — KG refresh now replaces a source instead of accumulating duplicates — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#kgrefreshdup]
+
+
+Root cause confirmed and fixed. `upsert_kg_projection_sqlite` is purely additive (`INSERT … ON CONFLICT(id) DO UPDATE`) — it only updates a node when the *same* id reappears. On re-extraction of an edited source the chunk byte-ranges shift, so `chunk.id` (and thus every `kgent-…` entity node id, derived as `stable_id("kgent", [chunk.id, entity.id])`) changes, and the non-deterministic model relabels entities. The prior nodes are never keyed again, so they orphan while the new ones pile on → the observed 9→18 entities for one source after a single refresh.
+
+I took the **tombstone-the-prior-source-projection** option (more robust than re-keying on canonical `entity_id`, which still can't fix shifted chunk nodes when the source text actually changed):
+
+- **`tsift-sqlite` — `SqliteGraphStore::delete_source_projection(source_ref, provider)`**: deletes a provider's nodes for a source; incident edges, node/edge properties, and semantic vectors are removed automatically through the graph's `ON DELETE CASCADE` foreign keys. **Provider-scoped** (`tsift-kg`) so it never touches AST/symbol nodes that share a `source_ref` path in the same `graph.db`.
+- **`tsift-kg` — `replace_kg_source_projection_sqlite()`**: deletes every `source_ref` present in the fresh projection, then upserts it — making per-source extraction idempotent. Distinct sources are untouched, so cross-source graphs still accumulate correctly.
+- **`kg.rs`** — the extract/refresh write path now calls the replacing variant.
+- **`specs/local-kg-model.md`** — documents per-source replacement under the refresh contract (the old "stable fact ids reconcile rather than duplicate" line was aspirational; now it's enforced).
+
+**Verification:** `replace_source_projection_does_not_accumulate_duplicate_entities` (kg) reproduces the edited-source 9→18 case and asserts the source stays at its real count (2, not 4) with sibling sources untouched; `delete_source_projection_is_scoped_by_provider_and_cascades` (sqlite) proves provider scoping spares a non-KG node sharing the path and that edges/properties cascade. `cargo test -p tsift-kg -p tsift-sqlite` 55 passed, clippy clean, full `make check` exit 0 (0 failures), `cargo install` (root + cli) → `tsift 0.1.70` live. Committed `af2418f`, pushed to origin/main; superproject pointer `f43b05252`. CI run from the prior push was pending (recorded, not blocking).
+
+Queue is now drained — both `#kgconf` and `#kgrefreshdup` closed. Remaining backlog is empty; review holds two operator-gated crates.io-publishing items (`#vmax`/`#1td4`).
+<!-- agent:boundary:a2e9773a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: [#kgeffmeasure]: approved~~
-- ~~do [#vmax]~~
-- ~~do [#kgconf]~~
-- do [#kgrefreshdup]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -109,7 +125,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgrefreshdup] tsift kg refresh --apply accumulates duplicate canonical entities. Re-extracting one edited source went 9→18 entities (verified 2026-06-19): all 9 prior stable ids retained, but 9 NEW nodes added with NO tombstone of the prior source projection → tsift-memgraphrag x3, .tsift/graph.db x3, MemGraphRAG x2, #kgwiring x2 for a single source after one refresh. Root cause: node primary-key id derives from chunk+description, not the canonical entity_id (already present as a property and matching across passes). Key the node upsert on canonical entity_id, or tombstone the prior source projection before re-insert.
 <!-- /agent:backlog -->
 
 ## Review

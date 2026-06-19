@@ -860,6 +860,125 @@ pub fn strike_answered_free_text_queue_heads(
     Ok(keys.len())
 }
 
+/// Strike an **orphaned id-backed queue head** by id (#orphanqhead). An id-backed
+/// directive head (`do [#id]` / `[#id]` / `#id`) whose backing backlog item was
+/// already reaped (`--done` reports "already resolved") or is otherwise gone has
+/// no drain path: `queue consume` rejects id-backed heads ("reap via --done") and
+/// `--done <id>` is a no-op, so the phantom head sits forever and keeps re-firing
+/// the auto-loop. This is the explicit operator escape hatch
+/// `agent-doc queue consume --id <id>`, which strikes that specific head in the
+/// document and snapshot in sync.
+///
+/// Guard: refuses to strike a head whose id still names an OPEN (non-done) backlog
+/// item — that is live work with a real `--done` / `--pending-gate` drain path, so
+/// the operator should use those instead. Returns `true` when a head was struck,
+/// `false` when nothing matched (already struck / drained).
+pub fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool> {
+    let _lock = acquire_doc_lock(file)?;
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("orphan strike: failed to read {}", file.display()))?;
+    let target_id = crate::pending::normalize_pending_id(id).to_ascii_lowercase();
+    if target_id.is_empty() {
+        anyhow::bail!("orphan strike: empty id");
+    }
+    // A head whose id still names OPEN backlog work has a real drain path — do not
+    // let the escape hatch desync live work; require the normal closeout instead.
+    if head_id_names_open_backlog_item(&content, &target_id) {
+        anyhow::bail!(
+            "{}: [#{target_id}] still names an OPEN backlog item with a real drain path — \
+             reap it through `--done {target_id}` / `--pending-gate {target_id}` instead of \
+             force-striking the queue head.",
+            file.display()
+        );
+    }
+    let keys = id_backed_head_node_keys(&content, &target_id)?;
+    if keys.is_empty() {
+        anyhow::bail!(
+            "{}: no live id-backed queue head matching [#{target_id}] to strike \
+             (already struck, drained, or the head is free-text).",
+            file.display()
+        );
+    }
+    let new_document = consume_queue_nodes_by_key(&content, &keys)?;
+    if new_document == content {
+        return Ok(false);
+    }
+    // Snapshot sync: strike the same id-backed head in the snapshot by its own node
+    // keys so required closeouts prove both sides converge on the struck state.
+    let new_snapshot = match snapshot::load(file)? {
+        Some(snap) => {
+            let snap_keys = id_backed_head_node_keys(&snap, &target_id)?;
+            if snap_keys.is_empty() {
+                None
+            } else {
+                Some(consume_queue_nodes_by_key(&snap, &snap_keys)?)
+            }
+        }
+        None => None,
+    };
+    converge_document_or_disk(file, &new_document, &content, "orphan_id_head_strike")
+        .context("orphan strike: failed to write document")?;
+    if let Some(snap) = new_snapshot {
+        snapshot::save(file, &snap)?;
+    }
+    eprintln!(
+        "[queue] struck orphaned id-backed head [#{target_id}] ({} node(s); #orphanqhead)",
+        keys.len()
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "orphan_id_head_strike file={} id={} struck={}",
+            file.display(),
+            target_id,
+            keys.len()
+        ),
+    );
+    Ok(true)
+}
+
+/// Node keys of every live (non-struck) id-backed queue head whose directive id
+/// resolves to exactly `target_id`. Free-text prompts — even ones that merely
+/// *contain* a `#token` — are excluded so the orphan escape hatch can never strike
+/// a free-text operator report by accident.
+fn id_backed_head_node_keys(content: &str, target_id: &str) -> Result<Vec<String>> {
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
+        anyhow::anyhow!("orphan strike: failed to derive queue node keys: {err}")
+    })?;
+    let mut keys = Vec::new();
+    for node in nodes {
+        if node.item.struck {
+            continue;
+        }
+        let text = node.item.text.trim();
+        if text.is_empty() || queue_prompt_text_is_free_text(content, text) {
+            continue;
+        }
+        if queue_prompt_done_id(text).as_deref() == Some(target_id) {
+            keys.push(node.node_key);
+        }
+    }
+    Ok(keys)
+}
+
+/// True when `target_id` names a NON-done item in any `agent:backlog` component —
+/// live work that should drain through the normal `--done` lifecycle rather than
+/// the orphan escape hatch.
+fn head_id_names_open_backlog_item(content: &str, target_id: &str) -> bool {
+    let Ok(comps) = crate::component::parse(content) else {
+        return false;
+    };
+    comps
+        .iter()
+        .filter(|c| crate::component::is_backlog_component(&c.name))
+        .any(|comp| {
+            let (_, items, _) = crate::pending::parse_items(comp.content(content));
+            items.iter().any(|item| {
+                !item.is_done() && !item.id.is_empty() && item.id.eq_ignore_ascii_case(target_id)
+            })
+        })
+}
+
 /// Resolve whether this cycle's committed response should consume (strike) the
 /// active queue head. Single source of truth for the strict-closeout decision so
 /// successful closeouts advance the queue identically and never leave an answered
@@ -2302,6 +2421,75 @@ mod core_tests {
         assert!(
             snap_result.contains("- user added later"),
             "snapshot must adopt the reconciled document queue:\n{snap_result}"
+        );
+    }
+    #[test]
+    fn strike_orphan_id_backed_queue_head_strikes_absent_backing_item() {
+        // #orphanqhead: an id-backed head whose backing backlog item was reaped
+        // (absent from agent:backlog) is undrainable — `queue consume` rejects it
+        // and `--done` is a no-op. The escape hatch strikes it in doc + snapshot.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#orphangone]\n",
+            "- do [#liveone]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#liveone] still open and drainable\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let struck = strike_orphan_id_backed_queue_head(&doc, "orphangone").unwrap();
+        assert!(struck, "the orphaned head must be struck");
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("~~do [#orphangone]~~"),
+            "orphaned id-backed head must be struck:\n{result}"
+        );
+        assert!(
+            result.contains("- do [#liveone]") && !result.contains("~~do [#liveone]~~"),
+            "the live id-backed head must stay runnable:\n{result}"
+        );
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("~~do [#orphangone]~~"),
+            "snapshot must converge on the struck state:\n{snap}"
+        );
+    }
+    #[test]
+    fn strike_orphan_id_backed_queue_head_refuses_open_backlog_item() {
+        // The escape hatch must NOT desync live work: an id still naming an OPEN
+        // backlog item has a real `--done` drain path and must be refused.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#stillopen]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#stillopen] genuine open work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let err = strike_orphan_id_backed_queue_head(&doc, "stillopen").unwrap_err();
+        assert!(
+            err.to_string().contains("OPEN backlog item"),
+            "must refuse to strike an open backlog id: {err}"
+        );
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- do [#stillopen]") && !result.contains("~~do [#stillopen]~~"),
+            "open backlog head must remain runnable:\n{result}"
         );
     }
     #[test]

@@ -1834,6 +1834,13 @@ enum QueueAction {
         /// Number of leading free-text heads to strike (default 1)
         #[arg(long, default_value_t = 1)]
         count: usize,
+        /// Escape hatch (#orphanqhead): strike the orphaned id-backed head
+        /// `[#id]` whose backing backlog item was already reaped (`--done`
+        /// reports "already resolved") or is gone, leaving the phantom head
+        /// undrainable by the normal `--done` / free-text consume paths. Refuses
+        /// when the id still names an OPEN backlog item (use `--done` instead).
+        #[arg(long, conflicts_with = "count")]
+        id: Option<String>,
     },
 }
 
@@ -3459,8 +3466,12 @@ fn main() -> anyhow::Result<()> {
                 max_git_versions,
             } => queue_recovery::run(&file, json, max_git_versions),
             QueueAction::Sync { file } => agent_doc_orchestration::queue_cmd::sync(&file),
-            QueueAction::Consume { file, count } => {
-                agent_doc_orchestration::queue_cmd::consume(&file, count)
+            QueueAction::Consume { file, count, id } => {
+                if let Some(id) = id {
+                    agent_doc_orchestration::queue_cmd::consume_orphan_id(&file, &id)
+                } else {
+                    agent_doc_orchestration::queue_cmd::consume(&file, count)
+                }
             }
         },
         Commands::ResolveGateCmd { gate_type, scope } => {

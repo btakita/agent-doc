@@ -6,6 +6,9 @@
 //!   `queue` attribute or per-item enqueue markers into `agent:queue`.
 //! - `agent-doc queue consume <FILE> [--count N]` — explicitly strike the
 //!   leading N free-text queue head(s) the agent has already answered.
+//! - `agent-doc queue consume <FILE> --id <id>` — escape hatch (#orphanqhead)
+//!   that strikes an orphaned id-backed head whose backing backlog item was
+//!   already reaped (or is gone), so it stops re-firing the auto-loop.
 
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -97,6 +100,27 @@ fn classify_active_head(content: &str) -> Result<HeadKind> {
 /// guidance to use `--done`, so it can never silently desync a head from its
 /// still-open backlog item. Writes document + snapshot like `sync`; the caller
 /// closes out through the normal commit path.
+/// Escape hatch (#orphanqhead): strike an orphaned id-backed queue head by id.
+/// Delegates to the write-layer striker, which guards against desyncing live
+/// open backlog work and keeps the document and snapshot in sync.
+pub fn consume_orphan_id(file: &Path, id: &str) -> Result<()> {
+    let normalized = pending::normalize_pending_id(id);
+    if crate::write::strike_orphan_id_backed_queue_head(file, id)? {
+        println!(
+            "{}: struck orphaned id-backed queue head [#{}] (#orphanqhead).",
+            file.display(),
+            normalized
+        );
+    } else {
+        println!(
+            "{}: no change — orphaned id-backed head [#{}] was already struck or drained.",
+            file.display(),
+            normalized
+        );
+    }
+    Ok(())
+}
+
 pub fn consume(file: &Path, count: usize) -> Result<()> {
     let target = count.max(1);
     let mut struck: Vec<String> = Vec::new();

@@ -9,6 +9,13 @@ pub(crate) struct DirectPaneAcceptance {
     /// Whether the trigger text was still visible in the pane when the window
     /// closed (only meaningful when `status == TimedOut`).
     trigger_visible: bool,
+    /// The trigger NEVER landed in the composer (the send silently no-op'd into a
+    /// not-ready pane): the composer stayed empty the whole window AND the pane is
+    /// sitting at an idle dispatch-ready prompt — so the empty composer is NOT a
+    /// fast submit, it's a non-dispatch. The caller re-sends the FULL trigger
+    /// (text+Enter), not a bare Enter. (#jbrundispatch directive 2 — "detect if the
+    /// prompt was not dispatched into the session, and send + submit it".)
+    not_dispatched: bool,
 }
 
 const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR: Duration = Duration::from_millis(900);
@@ -112,10 +119,25 @@ pub(crate) fn poll_direct_pane_acceptance(
                         capture_hash,
                         proof: None,
                     });
+                    // #jbrundispatch directive 2: an empty composer is normally a
+                    // submit — UNLESS the trigger was NEVER observed in the composer
+                    // (so we can't prove it was typed) AND the pane is now sitting at
+                    // an idle dispatch-ready prompt. For an agent-doc trigger that
+                    // starts a turn, a genuine submit leaves the pane PROCESSING (not
+                    // idle), so empty+idle+never-seen means the send no-op'd into a
+                    // not-ready pane — the prompt was not dispatched.
+                    let not_dispatched = !poll_state.saw_trigger_visible
+                        && last_capture
+                            .as_ref()
+                            .map(|(_, _, _, content)| {
+                                pane_idle_dispatch_ready(content, harness)
+                            })
+                            .unwrap_or(false);
                     return DirectPaneAcceptance {
                         status: CommandDispatchStatus::Accepted,
                         elapsed,
                         trigger_visible: false,
+                        not_dispatched,
                     };
                 }
             }
@@ -168,7 +190,21 @@ pub(crate) fn poll_direct_pane_acceptance(
         status: CommandDispatchStatus::TimedOut,
         elapsed,
         trigger_visible,
+        // A timed-out window with the trigger still drafted is "submit didn't fire",
+        // handled by the bare-Enter resubmit — not a non-dispatch.
+        not_dispatched: false,
     }
+}
+
+/// True when the pane's last prompt candidate is an idle, dispatch-ready harness
+/// prompt (composer empty and waiting for input) — i.e. NOT processing a turn.
+/// Used to tell a genuine fast submit (pane now processing) from a send that never
+/// landed (pane still idle). (#jbrundispatch directive 2)
+fn pane_idle_dispatch_ready(content: &str, harness: &HarnessConfig) -> bool {
+    harness
+        .last_prompt_candidate(content)
+        .map(|line| harness.is_dispatch_ready_prompt_line(&line))
+        .unwrap_or(false)
 }
 
 /// `#jbcodexsubmit` / `#jbclaudesubmit`: decide whether a timed-out direct-pane
@@ -467,6 +503,9 @@ fn send_direct_pane_enter_resubmit_until_stable(
         status,
         elapsed,
         trigger_visible,
+        // The bare-Enter resubmit path only handles a drafted (visible) trigger, so a
+        // non-dispatch is never produced here.
+        not_dispatched: false,
     }
 }
 
@@ -581,6 +620,7 @@ pub(crate) fn send_command_unchecked(
                 status: CommandDispatchStatus::TimedOut,
                 elapsed: Duration::ZERO,
                 trigger_visible: true,
+                not_dispatched: false,
             },
         );
         return Ok(CommandDispatchResult {
@@ -590,7 +630,7 @@ pub(crate) fn send_command_unchecked(
     }
 
     let trigger = send_command_once_unchecked(tmux, pane, file_path, harness)?;
-    let first = poll_direct_pane_acceptance(
+    let mut acceptance = poll_direct_pane_acceptance(
         tmux,
         pane,
         file,
@@ -598,10 +638,51 @@ pub(crate) fn send_command_unchecked(
         &trigger,
         "direct_pane_acceptance",
     );
-    if first.status == CommandDispatchStatus::Accepted {
+
+    // #jbrundispatch directive 2: "detect if the prompt was not dispatched into the
+    // session, and send the prompt and submit the prompt." When the trigger never
+    // landed in the composer (`not_dispatched`) — the classic pane-kill+restart
+    // "Run Agent Doc stalled" case where the send no-op'd into a not-ready pane —
+    // re-send the FULL trigger (text+Enter), not a bare Enter, until it lands or the
+    // budget is exhausted. The bare-Enter resubmit below cannot recover this: there
+    // is no drafted text in the composer to submit.
+    let mut full_resends = 0usize;
+    while acceptance.not_dispatched && full_resends < direct_pane_max_enter_resubmits() {
+        full_resends += 1;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_redispatch_not_landed file={} pane={} attempt={} harness={}",
+                file.display(),
+                pane,
+                full_resends,
+                harness.binary
+            ),
+        );
+        let resent = send_command_once_unchecked(tmux, pane, file_path, harness)?;
+        acceptance = poll_direct_pane_acceptance(
+            tmux,
+            pane,
+            file,
+            harness,
+            &resent,
+            "direct_pane_redispatch_acceptance",
+        );
+    }
+
+    if acceptance.not_dispatched {
+        // Budget exhausted and the trigger still never landed — report a genuine
+        // non-dispatch (TimedOut) instead of a false Accepted, so the caller knows
+        // the dispatch did not reach the session.
         return Ok(CommandDispatchResult {
-            status: first.status,
-            elapsed: first.elapsed,
+            status: CommandDispatchStatus::TimedOut,
+            elapsed: acceptance.elapsed,
+        });
+    }
+    if acceptance.status == CommandDispatchStatus::Accepted {
+        return Ok(CommandDispatchResult {
+            status: acceptance.status,
+            elapsed: acceptance.elapsed,
         });
     }
 
@@ -612,7 +693,7 @@ pub(crate) fn send_command_unchecked(
         harness,
         &trigger,
         "direct_pane_resubmit_acceptance",
-        first,
+        acceptance,
     );
 
     Ok(CommandDispatchResult {
@@ -1652,6 +1733,26 @@ mod tests {
             ));
         }
     }
+    #[test]
+    fn pane_idle_dispatch_ready_distinguishes_non_dispatch_from_fast_submit() {
+        // #jbrundispatch directive 2: an empty composer at an idle prompt means the
+        // trigger never landed (re-send the full trigger); a processing pane means a
+        // genuine fast submit (do NOT re-send, or the agent runs twice).
+        let h = HarnessConfig::claude();
+        assert!(
+            pane_idle_dispatch_ready("prior output\n\n❯\n", &h),
+            "empty composer at an idle prompt is a non-dispatch"
+        );
+        assert!(
+            !pane_idle_dispatch_ready("❯ agent-doc tasks/x.md\n", &h),
+            "a drafted trigger in the composer is not idle"
+        );
+        assert!(
+            !pane_idle_dispatch_ready("Working… (esc to interrupt)\n", &h),
+            "a processing pane is not idle — a fast submit must not be re-sent"
+        );
+    }
+
     #[test]
     fn direct_pane_enter_resubmit_is_bounded_while_trigger_remains_visible() {
         let cap = direct_pane_max_enter_resubmits();

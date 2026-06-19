@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -448,7 +448,32 @@ Striking `do #8667p2` advanced the go-queue to **#8667p3**, which I found alread
 **Scope call** (flag if you'd rather I'd crammed it in): the backlog item's *view rendering* half ("render co-lenders … in the deal-package / interested-lenders views") lands on the same 2,000–3,000-line admin/investor `deal_detail` components that **#8667p4** already targets, and it needs a by-deal participation query that doesn't exist yet. Rather than wedge a risky view change into a backend carry-forward commit on a live app, I shipped the participation **mechanism + API** as Phase 3 and broadened **#8667p4** to own the deal/interest-view rendering (admin **and** the investor deal-package surface) plus the by-deal query. Nothing dropped.
 
 Next in the queue: `#8667p4`.
-<!-- agent:boundary:91b20e88 -->
+
+### Re: do #8667p4 — Multi-Lender Group Phase 4 shipped — gpt-5
+
+Phase 4 is built, green, committed, and pushed.
+
+**What shipped:**
+- Backend deal-centric query: `lending_group_deal_groups_R_` + `lending_group_deal_participations_for_deal_R_` return every group participating in a deal, each active co-lender's per-deal allocation, total allocated %, fully-allocated status, and the majority controller.
+- Routes: admin `GET /api/admin/deals/:dealId/lending-groups`; lender `GET /api/lender/deals/:dealId/lending-groups`, scoped to groups the requesting lender belongs to.
+- Admin UI: the Deal Detail `Interested Lenders` tab now includes a `Multi-Lender Groups` panel showing group name, each co-lender email + %, allocated total, and `CONTROLS` / tie state.
+- Investor UI: the deal-package view now includes a `Co-Lenders` card for the lender's own participating group(s), using the same member %, allocation, and controller display.
+- Tests: expanded `deal_participation.test.ts` for the deal-centric query and added portal source-contract coverage for the new admin/lender routes and both UI panels.
+
+**Changed paths:**
+`app/equityfundingsource/lib/lending_groups/{repo.ts,deal_participation.ts,deal_participation.test.ts,routes.ts}`, `lib/ui--browser--efs/portal/{admin,investor}/deal_detail.tsx`, `tests/investor-portal-e2e.test.ts`, plus the superproject `src/equityfundingsource-dev` gitlink.
+
+**Verification:**
+- `bun test app/equityfundingsource/lib/lending_groups/deal_participation.test.ts tests/investor-portal-e2e.test.ts` — pass.
+- `make check` — exit 0; **879 pass, 0 fail**, build + worker build clean. The digest's one `d1 down` hit is from an intentional passing non-fatal outbox test log.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists in the EFS repo.
+
+**Commits / push:**
+- EFS submodule: `4f715d6` pushed to `origin/main`.
+- Superproject pointer: `9f3186f3b` pushed to `origin/main`.
+
+**Notes:** not deployed; this queue preset was spec/test/commit/push, not deploy. I left the unrelated EFS `AGENTS.md` tsift instruction-version bump unstaged. Confidence: high. Escalation: none.
+<!-- agent:boundary:5f729818 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -469,7 +494,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#8667p4] Multi-Lender Group Phase 4 — deal/interest view rendering: add a by-deal participation query (groups participating in a deal), then render co-lenders + each member's % + the majority controller in the admin deal / interest views AND the investor deal-package view (folds in #8667p3's view-rendering half); tests.
 <!-- /agent:backlog -->
 
 ## Review

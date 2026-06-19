@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -134,7 +134,7 @@ Got it — corrected the doc to match. The Closing-stage signing is **not** an i
 Updated `src/equityfundingsource-dev/docs/deal-pipeline-flow.md` borrower-actions §4 to drop the "borrower-signature API" e-sign framing and state the wet-ink + notarize + bi-directional-TMO-sync model. Committed + pushed: EFS `2631896` on `origin/main`, superproject submodule pointer bumped.
 
 This refines the open `#5eq8` (closing-docs redesign): the rebuilt step records a signed/notarized flag and syncs it bidirectionally with TMO rather than capturing an e-signature. (Exchange is large — flag if you want a compact.)
-<!-- agent:boundary:e40ec9d7 -->
+<!-- agent:boundary:8d4a0f8b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -147,6 +147,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Loan -> Closed diagram step should be bi-directionally driven with TMO. An automatic state change.
 <!-- /agent:queue -->
 
 ## Backlog

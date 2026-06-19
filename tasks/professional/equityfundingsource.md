@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -187,7 +187,7 @@ Converted the sequence diagram's TMO interactions to mermaid bidirectional arrow
 - `A<<->>TMO: Close offering (deal → closed) — either side can set it`
 
 Non-TMO arrows (Borrower↔Admin, Admin↔Lender) are left one-directional since the directive was specifically about TMO. Docs-only change. Committed + pushed: EFS `c23f2f4` on `origin/main`, superproject submodule pointer `82d67a584`.
-<!-- agent:boundary:4d125fb4 -->
+<!-- agent:boundary:69e724b7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -200,6 +200,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- "Offering close is a bi-directional EFS ↔ TMO sync — either the site or TMO can set it" should have shorter text and a bi-directional arrow.
 <!-- /agent:queue -->
 
 ## Backlog

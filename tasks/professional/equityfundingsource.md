@@ -131,7 +131,28 @@ Commands/proof:
 Verification: high; this was a no-code queue closeout for an already completed deployment.
 
 Escalation: none.
-<!-- agent:boundary:29ef2ade -->
+
+### Re: Duplicate queue head: Lender Groups pages — gpt-5
+
+> **Queue prompt:**
+>
+> Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.
+
+
+No additional code changes were needed. The requested Lender Groups pages were already implemented and deployed in the shipped closeout.
+
+Changed paths: none in this continuation.
+
+Commands/proof carried from the shipped closeout:
+- EFS code commit `fa4fd50` pushed to `origin/main`.
+- Parent submodule pointer commit `cca7fae14` records the EFS submodule at `fa4fd50`.
+- `make check` passed: 882 tests, browser build, and worker build.
+- `make deploy` applied `0091_investor_interest_lending_group.sql` and deployed Worker version `362d88ac-72d1-47c5-9e3c-0e0741d158bd`.
+
+Verification: high; duplicate queue closeout only.
+
+Escalation: none.
+<!-- agent:boundary:90517672 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -147,7 +168,7 @@ After 20:30
 - ~~:pushpin: Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.~~
 - ~~:pushpin: A lender can be interested in a loan on behalf of self or on behalf of a lender group.~~
 - ~~:pushpin: deploy~~
-- Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.
+- ~~Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.~~
 - A lender can be interested in a loan on behalf of self or on behalf of a lender group.
 - deploy
 <!-- /agent:queue -->

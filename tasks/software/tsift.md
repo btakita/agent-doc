@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -183,7 +183,7 @@ Already shipped last cycle:
 - Pushed: tsift `6af8a07` → origin; superproject pointer `c68a910ab` + session doc `a87639b0d` → origin/main.
 
 Consuming this duplicate head only. Nothing else to do.
-<!-- agent:boundary:2c3a12f2 -->
+<!-- agent:boundary:95b3259e -->
 <!-- /agent:exchange -->
 
 ## Queue

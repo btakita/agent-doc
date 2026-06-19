@@ -62,7 +62,17 @@ Done. `#qdispatchloss` you struck is already shipped (last cycle, submodule `515
 `admin queue resume` (state `resumed`) clears all of it; `drain` (`draining`) is not `paused` and does not gate continuation. The `go` attribute no longer overrides an accepted pause anywhere.
 
 **Verification.** 4 new tests (`document_queue_controller_paused_false_without_state_db`, `…_reflects_paused_then_resumed`, `detect_returns_none_when_controller_paused`, `run_queue_maintenance_controller_pause_halts_go_mode_continuation`); full `make check` green; built + installed both binaries + cdylib (lib-install marked the live controller to recycle onto the new build at its next idle boundary). Spec/README/VERSIONS updated. Latest CI on main is green; my changes will run on push.
-<!-- agent:boundary:759392e3 -->
+
+### Re: don't stall the loop on a controller pause — opus-4-8
+
+Corrected — you were right, the first `#qpausego` cut over-reached. A controller `admin queue pause` must **not** stall the attended in-session `/loop`.
+
+The bug `#qpausego` is the *unattended* supervisor idle-watch flooding a live session with duplicate `agent-doc <FILE>` triggers. The in-session `/loop` is the legitimate single-owner drain of real backlog (`#qdurcrash`, `#733r`, `#agentreloadrestart`, …), so stalling it on a pause stranded genuine drainable work.
+
+**Reverted the over-reach:** preflight no longer drops `queue_continuation_required` / `queue_drainable_head_count` on a controller pause, and `queue_continuation::detect` no longer short-circuits (so `session-check` / the codex-stop gate keep continuing too). **Kept:** the supervisor idle-watch still defers its direct trigger injection while paused (suppresses only the unattended injector), and `preflight.queue_paused: bool` is still surfaced for visibility. `queue: stop` frontmatter / `--- stop` fences remain the in-session stop control.
+
+Verified live on this doc (which has an active pause, receipt 70): preflight now returns `queue_paused: true` **and** `queue_continuation_required: true` with 15 drainable heads — the loop continues. `make check` green; built + installed; shipped (submodule `b214f0d0`, superproject `2d0c6f999`). Continuing the drain.
+<!-- agent:boundary:a3c0988b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -70,6 +80,15 @@ Done. `#qdispatchloss` you struck is already shipped (last cycle, submodule `515
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#qpausego]~~
 - :pushpin: do [#qdurcrash]
+---
+:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not start. It should have started.
+```
+[route] target tmux session: 0
+[route] activated existing inactive agent:queue head "do [#e9fy]" for tasks/professional/equityfundingsource.md (already_present=true, activated=true) before dispatch-only reopen
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=4035 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control blocked_head_bytes=10 blocked_head_sha256=530312e6f606f7822758890ee49c7c43ee49243070f547326736709d7bcbd7f4 trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
+```
+---
+- :pushpin: Response in monsterrodholders.md is committed but then deleted in an uncommitted state.
 - :pushpin: In equityfundingsource.md After a recycle restart + queue continuation, the prompt is not submitted after the restart.
 - :pushpin: do [#733r]
 - :pushpin: do [#docdriftgrace]

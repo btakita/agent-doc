@@ -262,6 +262,24 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_cancel_preflight_cycle(file_path: String): Int
 
+    /**
+     * #8bfz / #fcconeowner: elect a single live plugin consumer per document.
+     * Returns true if THIS consumer (consumer_id, pid) owns the document and
+     * should apply the patch + saveDocument; false if a live owner already holds
+     * it and this instance must defer. Cross-process safe + self-healing; fails
+     * open (returns true) on any IO error so single-instance setups are never
+     * worse off than before the lease.
+     */
+    fun agent_doc_plugin_owner_try_acquire(file_path: String, consumer_id: String, pid: Long): Boolean
+
+    /**
+     * #8bfz / #fcconeowner: release the plugin-owner lease for file_path, but
+     * only if consumer_id still owns it. Call when the instance stops watching
+     * the document (project/file close) so a live successor takes over without
+     * waiting for the TTL.
+     */
+    fun agent_doc_plugin_owner_release(file_path: String, consumer_id: String)
+
     /** Try to acquire the sync lock. Returns true if acquired. */
     fun agent_doc_sync_try_lock(): Boolean
 

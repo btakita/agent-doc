@@ -61,6 +61,13 @@ class PatchWatcher(private val project: Project) : Disposable {
     /** Patch files delayed because the target document is still being edited. */
     private val scheduledPatchRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /**
+     * #8bfz / #fcconeowner: documents for which THIS instance has acquired the
+     * single-owner lease, so [dispose] can release them and hand ownership to a
+     * live sibling without waiting for the lease TTL.
+     */
+    private val ownedDocs = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     /** Boundary reposition requests delayed because the target document is still being edited. */
     private val scheduledRepositionRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
@@ -639,6 +646,31 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
     }
 
+    /**
+     * #8bfz / #fcconeowner: returns true if THIS instance holds (or just won)
+     * the single-owner lease for [filePath] and should apply the patch +
+     * saveDocument. Fails open (returns true) when the FFI is unavailable or the
+     * symbol is missing on an older binary, so single-instance setups never
+     * regress below the pre-lease behavior. Tracks won docs in [ownedDocs] so
+     * [dispose] can release them for a live sibling.
+     */
+    private fun ownsDocument(filePath: String): Boolean {
+        val lib = AgentDocLib.get() ?: return true
+        return try {
+            val owns = lib.agent_doc_plugin_owner_try_acquire(
+                filePath,
+                EditorIdentity.id,
+                ProcessHandle.current().pid(),
+            )
+            if (owns) ownedDocs.add(filePath) else ownedDocs.remove(filePath)
+            owns
+        } catch (e: Throwable) {
+            // Older binary without the symbol, or any FFI failure → apply as before.
+            LOG.debug("[patch-watcher] #8bfz plugin-owner election unavailable, applying: ${e.message}")
+            true
+        }
+    }
+
     private fun processPatchFile(patchFile: File) {
         try {
             val parseStart = System.nanoTime()
@@ -693,6 +725,17 @@ class PatchWatcher(private val project: Project) : Disposable {
             // that only the controller-owned writer may perform.
             if (patch.editorId == null && isFileWatchApplyDemoted(patch.file)) {
                 LOG.info("[patch-watcher] read-only demotion (#dsqa): not applying ${patchFile.name} via WatchService; controller-owned watcher + socket IPC are sole writer")
+                return
+            }
+            // #8bfz / #fcconeowner: single live-owner election for untargeted
+            // (broadcast) patches. When N windows have the project open they all
+            // watch .agent-doc/patches/ and would each apply + saveDocument this
+            // untargeted patch, racing into a File Cache Conflict. Editor-TARGETED
+            // patches already have a unique consumer (the binary picked the
+            // editor_id), so they bypass this gate. Non-owners leave the file for
+            // the owner instance to apply + delete.
+            if (patch.editorId == null && !ownsDocument(patch.file)) {
+                LOG.info("[patch-watcher] #8bfz single-owner: not the live owner of ${patch.file}, deferring untargeted patch to the owner instance: ${patchFile.name}")
                 return
             }
             if (!awaitIdleBeforeDocumentMutation(patch.file, "file patch")) {
@@ -1656,6 +1699,12 @@ class PatchWatcher(private val project: Project) : Disposable {
     override fun dispose() {
         running = false
         val lib = AgentDocLib.get()
+        // #8bfz / #fcconeowner: hand single-owner leases to a live sibling now
+        // instead of waiting out the TTL.
+        for (doc in ownedDocs) {
+            try { lib?.agent_doc_plugin_owner_release(doc, EditorIdentity.id) } catch (_: Throwable) {}
+        }
+        ownedDocs.clear()
         for (state in rootStates.values) {
             state.watchThread?.interrupt()
             state.watchThread = null

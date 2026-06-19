@@ -862,6 +862,60 @@ pub extern "C" fn agent_doc_sync_unlock() {
     SYNC_LOCKED.store(false, Ordering::SeqCst);
 }
 
+/// `#8bfz` / `#fcconeowner`: elect a single live IntelliJ plugin consumer per
+/// document. Returns `1` if THIS consumer owns the document (apply the patch +
+/// `saveDocument`), `0` if a live owner already holds it (defer; leave the patch
+/// for the owner to apply).
+///
+/// Cross-process safe: the election is a `.agent-doc/plugin-owner/<hash>.json`
+/// lease claimed atomically (O_EXCL), self-healing on a stale heartbeat or a
+/// dead owner pid. Fail-open — any IO error returns `1` (apply) so a
+/// single-instance setup is never worse off than before the lease.
+///
+/// # Safety
+///
+/// `file_path` and `consumer_id` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_plugin_owner_try_acquire(
+    file_path: *const c_char,
+    consumer_id: *const c_char,
+    pid: i64,
+) -> i32 {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return 1, // can't resolve path — fail open (apply)
+    };
+    let consumer = match unsafe { CStr::from_ptr(consumer_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return 1,
+    };
+    agent_doc_orchestration::plugin_owner::try_acquire_plugin_owner(path, consumer, pid as u32) as i32
+}
+
+/// `#8bfz` / `#fcconeowner`: release the plugin-owner lease for `file_path`, but
+/// only if `consumer_id` still owns it (never stomps a successor). The plugin
+/// calls this when it stops watching the document (project/file close) so a
+/// live successor takes over without waiting for the TTL.
+///
+/// # Safety
+///
+/// `file_path` and `consumer_id` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_plugin_owner_release(
+    file_path: *const c_char,
+    consumer_id: *const c_char,
+) {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let consumer = match unsafe { CStr::from_ptr(consumer_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    agent_doc_orchestration::plugin_owner::release_plugin_owner(path, consumer);
+}
+
 /// Bump the sync debounce generation. Returns the new generation number.
 ///
 /// Editors call this when a layout change is detected. After a delay (e.g., 500ms),

@@ -487,13 +487,13 @@ fn reap_stale_jetbrains_consumers_with(
 /// process) means dead. On non-Unix this conservatively reports every pid as
 /// live so nothing is reaped.
 #[cfg(unix)]
-fn pid_is_live(pid: u32) -> bool {
+pub(crate) fn pid_is_live(pid: u32) -> bool {
     let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
     ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 #[cfg(not(unix))]
-fn pid_is_live(_pid: u32) -> bool {
+pub(crate) fn pid_is_live(_pid: u32) -> bool {
     true
 }
 

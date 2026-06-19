@@ -81,6 +81,7 @@ pub mod doctor;
 pub mod document_watcher;
 pub mod drain_owner;
 pub mod editor_route_errors;
+pub mod plugin_owner;
 pub mod flow;
 pub mod focus;
 pub mod gc;

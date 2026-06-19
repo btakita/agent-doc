@@ -34,45 +34,19 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260618-180930.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260619-051804.md`*
 
 Compacted content:
-- Archived 9 response topic(s): Integrate memgraphrag + semantic neighborhoods + graphdb as local-model context?; do [#kgleasereap] → implemented the foundational [#kgleasewire] instead; do [#kgextractrefresh]; 6 more
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): Is tsift kg now in active usage?
-
-### Re: Operating effectiveness of tsift kg — opus-4-8
-
-> **Queue prompt:** :pushpin: Please let me know the operating effectiveness of tsift kg.
-
-Short version: **the machinery is complete and correct; the operational track record is one document.** I assessed the live graphs and Ollama directly rather than reciting the build log.
-
-**Two layers, very different maturity — measured live:**
-
-| Layer | tsift repo `graph.db` | superproject `graph.db` | Verdict |
-|---|---|---|---|
-| **Deterministic code graph** (AST, no LLM) | 10,412 nodes / 64,450 edges | 418,358 / 910,292 | **Effective, in active use** |
-| **LLM-extracted semantic layer** (`tsift kg extract` → Ollama) | **26 `semantic_entity`, 2 `kg_chunk`, 18 `semantic_relation`** | comparable seed only | **Built + verified, barely exercised** |
-
-- **As a code-RAG substrate it works and is genuinely used.** The structural graph (`calls` 349k, `defines` 347k, `has_ast_span`, `contains`) is large and fresh, and it is what every core command (`search`/`explain`/`graph`/`source-read`/digests) actually runs on — proven independent of the KG/model path by the `#5hed` hermetic guard.
-- **As an LLM knowledge graph it has been run essentially once.** The only extracted source in the live graph is `specs/local-kg-model.md` (from `#kgoperatorrun`) → 26 entities. The labels are *coherent*, not garbage (`LocalModelLease`, `GpuProbe`, `qwen3-32b-q4`, `RTX 5090`, `VRAM usage baseline`), so extraction quality on that doc is plausible — but n=1.
-
-**Infra is live and healthy:** Ollama up serving `Qwen3-32B-Q4` (the lease profile); no GPU-lease registry present at idle (expected — the reference-counted lease only exists during an active extract). The full command surface ships and is installed: `extract / status / refresh(+--apply) / evidence / unload / smoke`, plus GraphRAG context injection (`--graph-db` / `--no-context`).
-
-**Two honest gaps the live data exposes:**
-
-1. **No measured effectiveness.** Everything this session built — lease lifecycle (`#kgleasewire`/`#kgleasereap`), staleness refresh (`#kgextractrefresh`/`#kgrefreshapply`), GraphRAG context injection to *reduce duplicate entities* (`#kgctxinject`) — is plumbing that is green in CI but has **no before/after metric on a real corpus**. The dedup improvement the context-pack exists to deliver has never been measured against a baseline.
-2. **The one real extraction is provenance-blind.** `tsift kg refresh` confirms live: `Sources: 1, Needs refresh: 1 — specs/local-kg-model.md [NoRecordedHash]`, and **0 of 26 entities carry a recorded confidence**. Both predate the hashing/confidence work, so the staleness + confidence-gating machinery cannot yet protect the only data it has. Self-correcting on the next extract.
-
-**Bottom line:** the *mechanism* is effective and feature-complete; *operational adoption and measurement* are near zero beyond a smoke-scale seed. To actually claim operating effectiveness you would run a multi-doc extraction and measure entity-dedup with/without context injection, the confidence distribution, and one real refresh→reconcile cycle — filed as `[#kgeffmeasure]`. I did **not** kick off a corpus extraction this turn (loads the model / holds the GPU — operator-gated); say the word and I will run the measured before/after. `do [#vmax]` stays gated (crates.io OIDC registration needs your account + browser 2FA).
-<!-- agent:boundary:f13bb204 -->
+- Archived 1 response topic(s): Operating effectiveness of tsift kg
+- Prior summary/context: prior compacted content: Archived 9 response topic(s): Integrate memgraphrag + semantic neighborhoods + graphdb as lo...
+<!-- agent:boundary:75cb0594 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: Please let me know the operating effectiveness of tsift kg.~~
-- do [#vmax]
 - :pushpin: do [#kgeffmeasure]
+- do [#vmax]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

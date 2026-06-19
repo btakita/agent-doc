@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -76,15 +76,29 @@ I took the **query-time identity merge** (the backlog's safer option — no grap
 **Verification:** `collapses_candidates_sharing_canonical_entity_id` (merged rep keeps max degree; distinct canonical id + local-slug node stay separate); `cargo test -p tsift-kg` 34 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `0648af5`, pushed; superproject pointer `ee8437d34`.
 
 Next queue head: `do [#kgconfrank]` (weight `confidence_source` so derived defaults don't outrank real model scores). `#kgconfreqverify` stays operator-gated.
-<!-- agent:boundary:f91a1d84 -->
+
+### Re: #kgconfrank — model confidence now outranks derived defaults — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#kgconfrank]
+
+
+Done. `#kgconf` records a `confidence_source` tag (`model|default`) on every node, but the context-pack ranker still read only raw `confidence` — so a derived `default 0.500` outranked and out-survived a real model `0.300`, defeating the point of recording confidence.
+
+- **`ContextCandidate`** now carries `confidence_is_model` (read from the `confidence_source` property; only an explicit `=model` counts as a real score).
+- **`build_context_pack`** inserts a confidence-provenance tier into the deterministic sort, between connectivity and raw confidence: `seed match → degree → provenance tier (model before default) → confidence desc → node-id`. So at equal connectivity a real model `0.300` ranks above an unknown `0.500` default; within a tier raw confidence still decides.
+- spec (`local-kg-model.md`) documents the provenance tier in the ranking contract.
+
+**Verification:** `model_confidence_outranks_derived_default` + `within_model_tier_higher_confidence_wins`; `cargo test -p tsift-kg` 36 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `1ab19d5`, pushed; superproject pointer `6ecfe25e1`.
+
+Queue drained — the three KG follow-ups from this round (`#kgentitycollapse`, `#kgconfrank`) are done; `#kgconfreqverify` is gated in review as operator-verify (needs live GPU + Ollama A/B). No drainable work remains.
+<!-- agent:boundary:0fd9ceab -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#kgentitycollapse]~~
-- do [#kgconfrank]
-- ~~:pushpin: do [#kgconfreqverify]~~
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -93,7 +107,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgconfrank] tsift KG context-pack ranking/gating ignores the new confidence_source tag (#kgconf): node_to_candidate in packages/tsift-kg/src/context_pack.rs reads only the raw confidence, so a derived default 0.500 outranks and out-survives a real model 0.300. Thread confidence_source into ranking (model-tier above default-tier) and/or min_confidence gating so derived defaults are distinguishable from model scores — completes the operability #kgconf set up.
 <!-- /agent:backlog -->
 
 ## Review

@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -242,12 +242,13 @@ Done. The forwardable note is now a standalone client-facing PDF, and the privat
 ---
 
 That's the full send: the message above as the LinkedIn body, with both PDFs attached via the paperclip. The note-PDF carries your builder+operator pitch to the team in your words; the resume backs it. Nothing sent — ready when you are.
-<!-- agent:boundary:06fabe27 -->
+<!-- agent:boundary:725af1fd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- Before I send, I want to do a sanity check. How do you think this will land?
 <!-- /agent:queue -->
 
 ## Backlog

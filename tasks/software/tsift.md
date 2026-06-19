@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -134,7 +134,7 @@ Verification **passes**. Closing `#kgconfreqverify`; no schema relaxation needed
 The net: confidence data is high-quality and complete, with no zero-yield documents — the cost the relax was meant to avoid. Relaxing to prompt-only off one confounded sample would discard the confirmed 100%-model-confidence benefit for no demonstrated gain, so I'm resolving rather than relaxing.
 
 Filed `[recommended]` follow-up: if yield ever becomes an operational concern, re-run the A/B 3–5× per binary and compare means before reconsidering a prompt-only relax — that's the only way to separate nondeterminism from a real cut. No code changed this cycle.
-<!-- agent:boundary:28eda902 -->
+<!-- agent:boundary:7a7a3808 -->
 <!-- /agent:exchange -->
 
 ## Queue

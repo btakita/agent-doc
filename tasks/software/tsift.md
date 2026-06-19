@@ -39,7 +39,28 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): Operating effectiveness of tsift kg
 - Prior summary/context: prior compacted content: Archived 9 response topic(s): Integrate memgraphrag + semantic neighborhoods + graphdb as lo...
-<!-- agent:boundary:bd0aecdb -->
+
+### Re: #kgeffmeasure — measured tsift kg extraction effectiveness on a real corpus — opus-4-8
+
+Operator-approved. Ran a live multi-doc `tsift kg extract` A/B (Qwen3-32B-Q4 on GPU) over `specs/local-kg-model.md` + `specs/memgraphrag-direction.md` into **scratch DBs** (`/tmp/kg-eval/*.db`) — the live `.tsift/graph.db` (26 entities) and the tsift working tree are **untouched**. Three questions, three concrete findings:
+
+**(a) Entity-dedup via GraphRAG context injection (#kgctxinject) — works, ~15% fewer nodes, concentrated on later docs.**
+- No context (`--no-context`): **71** entities (doc1=46, doc2=25).
+- With context injection (default): **60** entities (doc1=51, doc2=**9**).
+- The injected known-entity pack hits the *second* document hardest: doc2 new entities **25 → 9 (−64%)**, while exact cross-doc label agreement rose **2 → 7** shared labels. So later docs reconcile toward canonical names and emit far fewer redundant entities. Caveat: dedup is *naming convergence + suppression*, not node-identity collapse — same-label entities from different chunks still get distinct node ids (see finding c).
+
+**(b) Confidence distribution — none. The projection never persists confidence.**
+- **0 of 71** freshly-extracted `semantic_entity` nodes carry a real `confidence` property (the only property keys are `chunk_id, contract, description, document_id, entity_id, entity_kind, kg_extraction_model, kg_provider, kg_provider_kind, provider, source_ref`). The "26 with 0 confidence" in the live graph isn't a one-off — the extractor/projection emits no confidence field at all, so the spec's confidence/recency gating has nothing to gate on. → filed **#kgconf**.
+
+**(c) Refresh cycle — staleness detection works; reconciliation is additive and duplicates entities.**
+- Watermark staleness works: editing the source flipped `Unchanged → Stale`; `refresh --apply` re-extracted 1, 0 failed.
+- But refresh is **purely additive**: re-extracting one edited source went **9 → 18** entities — all 9 prior stable ids retained (good, no id churn) yet **9 new nodes added with no tombstone of the prior projection**, yielding duplicate canonical entities for a single source: `tsift-memgraphrag ×3`, `.tsift/graph.db ×3`, `MemGraphRAG ×2`, `#kgwiring ×2`.
+- Root cause: the node primary-key id derives from chunk+description, **not** the canonical `entity_id` — which *is* present as a property and *does* match across passes (two dup nodes shared `entity_id=kgent-72df35b3…` but had different node ids). The reconciliation key exists in the data; the upsert just doesn't use it. Since LLM output is non-deterministic, every refresh accumulates duplicates. → filed **#kgrefreshdup**.
+
+**Net:** the KG machinery runs end-to-end on a real corpus, context-injection dedup is real and measurable, but two operational gaps block it from being production-grade: confidence is never recorded (#kgconf) and refresh duplicates entities (#kgrefreshdup) — both now top of backlog as actionable tsift code work.
+
+Not auto-looping: the only remaining queue head is `do [#vmax]`, which is operator-gated (crates.io Trusted Publisher registration for 23 crates + browser 2FA — agent cannot perform). `queue_continuation_required=false`.
+<!-- agent:boundary:6efcdfdc -->
 <!-- /agent:exchange -->
 
 ## Queue

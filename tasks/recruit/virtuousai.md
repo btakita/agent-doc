@@ -85,7 +85,24 @@ Rewrote it from scratch. No metrics anywhere — no test count, no charge count,
 **Process (the judge/improve loop you asked for earlier):** a subagent rated my first rewrite as VirtuousAI's hiring side (resume + call attached) at **78/100** — flagged that the opener read as a generic thesis, it over-echoed their vocabulary, repeated its one idea, and omitted current building work. The revision fixed all four and scored **89/100, "ship it"**; a v3 trimming pass made it flatter, so it stopped at diminishing returns. No AI-tells, no spaced em-dashes.
 
 Still your voice, still a **draft — nothing sent**. Resume path unchanged: `resume/BrianTakita-virtuousai.pdf` + `resume/profiles/virtuousai.toml`.
-<!-- agent:boundary:384823ec -->
+
+### Re: stealth company + Presence AI to push real-time work? — opus-4-8
+
+Short answer: **keep it on the resume and save it for the call with Rory — don't thread it into this letter.**
+
+Here's the reasoning, plainly:
+
+**What "real-time" means to them vs. what it means in your work.** VirtuousAI's "continuous execution" is real-time *data → outcome* (pricing, inventory, campaigns, signals) with a white-box/explainable spin. Your Presence AI + stealth-company work is real-time *media* — low-latency lip-sync and audio avatars over WebRTC on H100s. Those are both genuinely hard real-time engineering, but they're different domains. If the letter leans on "real-time avatars," a reader aims at the wrong target and wonders why a media-streaming person is applying to a data-execution platform.
+
+**Where it's a strength: as proof of senior systems depth, not as the pitch.** Making a ByteDance latent-sync model actually run real-time is exactly the "owns hard performance problems end-to-end" signal Rory wants in engineer #2. That belongs on the resume (Presence AI is already your lead entry) and is great *live* material when the architecture conversation turns to latency/streaming. It just shouldn't compete with the letter's one sharp idea.
+
+**Why the letter stays as-is.** The rewrite's power is a single hook — *builds AI infrastructure AND has run a mid-market business*. That hits their explainability thesis (agent-doc = white-box UX) and their market (you've sat in the operator's chair) in one move. Adding a real-time-media thread would be a third idea pulling against the first two, and dilution is exactly what made the old draft weaker.
+
+**Recommendation:**
+- **Resume:** keep Presence AI prominent; optionally add one supporting line for the stealth-client real-time audio-avatar work (framed as "low-latency production AI systems," since you can't name the client). I've queued that as a `[recommended]` backlog item.
+- **Letter:** no change — keep it focused on builder + operator.
+- **Call with Rory:** lead the real-time/performance story there, where it lands as systems credibility without crowding the note.
+<!-- agent:boundary:ea637e56 -->
 <!-- /agent:exchange -->
 
 ## Queue

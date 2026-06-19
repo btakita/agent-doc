@@ -39,13 +39,33 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): #next-steps to fix tsift bugs; #kgentitycollapse; #kgconfrank; 1 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): #kgeffmeasure; measured kg extraction effectiveness on a real ...
-<!-- agent:boundary:200bf350 -->
+
+### Re: #kgsameas — durable same_as edges for canonical-entity duplicates — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#kgsameas]
+
+
+Done. `#kgentitycollapse` deduped only the context-pack retrieval surface; graph-level consumers (`tsift graph`/`explain`/`summarize`, the SurrealDB projection) read `graph_nodes` directly and still saw every per-chunk/per-source duplicate. Now `kg extract` writes durable `same_as` links so all consumers collapse to one logical entity.
+
+- **`SqliteGraphStore::link_nodes_by_shared_property`** — stars nodes of a kind sharing a prefixed id-property value to the group's smallest node id, with link edges of a given kind. Idempotent (edges key on `from/to/kind`), no node deleted (provenance preserved).
+- **`tsift-kg::link_canonical_entities_sqlite`** wraps it with KG constants (`semantic_entity` / `entity_id` / `kgent-` / `same_as` / provider+contract).
+- **`kg extract`** runs the linker after the per-source replace upsert (`#kgrefreshdup`), so every extraction re-links idempotently.
+- spec (`local-kg-model.md`) documents the durable links beside the query-time merge — together they give one logical entity to both the retrieval pack and direct graph traversal.
+
+(Correction to the proposal text: `same_as` was *not* a pre-existing edge kind in `tsift-index` — that grep hit was a test name; I introduced `same_as` as a new KG edge kind here.)
+
+**Verification:** `link_nodes_by_shared_property_stars_duplicates_idempotently` (sqlite — representative choice, idempotency, prefix/singleton skips) + `link_canonical_entities_writes_same_as_edges` (kg wrapper); `cargo test -p tsift-kg -p tsift-sqlite` 60 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `1a451a1`, pushed; superproject pointer `93ba03706`.
+
+Next queue head: `do [#kgconfgate]` (provenance-aware min_confidence gating). `#kgconfreqverify` stays gated (operator-verify).
+<!-- agent:boundary:40a161ae -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#kgsameas]
+- ~~do [#kgsameas]~~
 - do [#kgconfgate]
 <!-- /agent:queue -->
 <!--
@@ -55,7 +75,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgsameas] tsift KG entity dedup is retrieval-only: #kgentitycollapse merges canonical-entity duplicates in the context pack (collect_candidates_from_nodes), but graph-level consumers (tsift graph/explain/summarize, SurrealDB projection) still read graph_nodes directly and see every per-chunk/per-source duplicate node. Promote the merge to durable same_as edges keyed on the canonical entity_id (the heavier alternative noted in #kgentitycollapse) so ALL consumers see one logical entity, not just the context pack. Preserve per-source provenance (link, never delete); cf. existing same_as usage in packages/tsift-index/src/index.rs.
 - [ ] [#kgconfgate] tsift KG min_confidence gating is provenance-blind (completes #kgconfrank's other half): context_pack.rs line 220 filters by raw confidence, so a derived default 0.500 SURVIVES a min_confidence=0.4 gate while a real model 0.300 is excluded. #kgconfrank fixed ranking (model-tier above default) but not gating. Make the gate provenance-aware — e.g. only model-sourced confidence counts toward min_confidence, or default-sourced entities require min_confidence==0 — so derived defaults are not treated as gate-passing real scores.
 <!-- /agent:backlog -->
 

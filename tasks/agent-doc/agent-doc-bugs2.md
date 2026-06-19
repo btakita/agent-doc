@@ -58,7 +58,15 @@ Proof: no repo code changes in this cycle; commands run were `agent-doc prefligh
 I’m folding this report into `#qpauseux` rather than opening a second bug. The symptom is the same operator-facing failure family: the JB action reaches a paused/churn-stop dispatch state or a blocked route, but the plugin leaves the operator with either a raw error or no visible submission result.
 
 I updated `#qpauseux` to explicitly include the “appears not to submit” variant. No repo code changed this cycle; this was a tracking/triage response. Commands run: `tsift status`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc write --help`, and `git status --short -- tasks/agent-doc/agent-doc-bugs2.md`. Verification is the finalize/session-check closeout. Confidence: medium, because the queue already contains detailed paused/qflood and broken-IPC Run Agent Doc failures matching this report. Escalation: none.
-<!-- agent:boundary:559dba81 -->
+
+### Re: #docdriftgrace — gpt-5
+
+This cycle gives partial live evidence for `#docdriftgrace`: preflight did not refuse the document or require a manual snapshot reset, and it reported the document/snapshot bodies aligned after comment stripping before queue/backlog mirroring ran. That means the earlier hard-blocking drift path did not reproduce here.
+
+I am not marking the underlying backlog item complete yet because this was not a clean unrelated-drift reproduction; it was queue maintenance against an already active queue. The item stays operator-verify until an actual operator edit outside the in-flight prompt silently re-baselines without a File Cache Conflict, lost response, or queue churn.
+
+Proof: changed paths before finalize were none for `tasks/agent-doc/agent-doc-bugs2.md`; commands run were `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, and `git status --short`. Verification is this finalize/session-check closeout. Confidence: medium. Escalation: none.
+<!-- agent:boundary:bbbf4147 -->
 <!-- /agent:exchange -->
 
 ## Queue

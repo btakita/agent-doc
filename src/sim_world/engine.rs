@@ -1268,6 +1268,78 @@ impl SimWorld {
         }
     }
 
+    /// `#smsim` (semantic_merge Phase 5): model the `#smconv` node-keyed
+    /// convergence over an operator↔agent concurrent edit. Runs the production
+    /// `semantic_merge_scoped` (the same `exchange`-active scoping the real
+    /// `try_semantic_merge_convergence` applies), adopts the merged doc as both
+    /// the snapshot and the live buffer, and records which transition-matrix
+    /// outcome fired. `active_exchange` toggles the turn-active scoping so the
+    /// same-node ack gating (`#smturnactive`) can be exercised both ways. The
+    /// merged document is operator-wins on same-node conflicts, so content is
+    /// never lost — only ack emission depends on scope.
+    pub(crate) fn converge_semantic_merge(
+        &mut self,
+        base: &str,
+        agent_ours: &str,
+        operator_theirs: &str,
+        active_component: Option<&str>,
+    ) -> agent_doc_markdown_ast::semantic_merge::SemanticMerge {
+        use agent_doc_markdown_ast::semantic_merge::{
+            ActiveNodes, AckReason, OutcomeKind, semantic_merge_scoped,
+        };
+        let active = match active_component {
+            Some(name) => ActiveNodes::new().active_component(name),
+            None => ActiveNodes::new(),
+        };
+        let sm = semantic_merge_scoped(base, agent_ours, operator_theirs, &active);
+        self.snapshot = sm.merged_doc.clone();
+        self.doc = sm.merged_doc.clone();
+
+        let has_operator_won = sm
+            .outcomes
+            .iter()
+            .any(|o| o.kind == OutcomeKind::OperatorWonConflict);
+        let has_delete_kept = sm
+            .outcomes
+            .iter()
+            .any(|o| o.kind == OutcomeKind::DeletionKept);
+        let delete_ack = sm
+            .requires_ack
+            .iter()
+            .any(|a| a.reason == AckReason::OperatorDeletedAgentEditedNode);
+        let only_disjoint = sm.requires_ack.is_empty()
+            && !has_operator_won
+            && !has_delete_kept
+            && sm.outcomes.iter().any(|o| {
+                matches!(
+                    o.kind,
+                    OutcomeKind::AppliedAgentEdit
+                        | OutcomeKind::AppliedOperatorEdit
+                        | OutcomeKind::AppliedAgentAdd
+                        | OutcomeKind::AppliedOperatorAdd
+                        | OutcomeKind::AppliedBothAdd
+                )
+            });
+
+        if only_disjoint {
+            self.coverage.semantic_merge_node_disjoint += 1;
+        }
+        if has_operator_won {
+            self.coverage.semantic_merge_operator_wins += 1;
+        }
+        if has_delete_kept && delete_ack {
+            self.coverage.semantic_merge_delete_acks += 1;
+        }
+        // Turn-active gating proof: a same-node conflict exists, but it raised an
+        // ack ONLY because the node was inside the active area. The identical
+        // conflict with no active area (or a different active component)
+        // auto-resolves operator-wins with no ack.
+        if has_operator_won && active_component.is_some() && !sm.requires_ack.is_empty() {
+            self.coverage.semantic_merge_scope_gated_acks += 1;
+        }
+        sm
+    }
+
     /// Model the `ipc_socket_already_applied_live_buffer_diverged` recovery
     /// (`#mrhpcdrift2`): the socket reported `already_applied` but the live
     /// buffer diverged with the assistant response fragmented out of `exchange`.

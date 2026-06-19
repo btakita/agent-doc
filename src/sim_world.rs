@@ -716,6 +716,20 @@ struct Coverage {
     /// stale-binary recycle failure path and mapped to the existing
     /// #recyclerestart-verify/#aazp/#4myd operator-verify proof bucket.
     suprehot_jb_mapped_recycle_failures: usize,
+    /// `#smsim` (semantic_merge Phase 5): an operator↔agent concurrent edit on
+    /// DISJOINT nodes auto-merged through `semantic_merge` — both sides applied,
+    /// no ack, no content loss.
+    semantic_merge_node_disjoint: usize,
+    /// `#smsim`: a same-node operator↔agent conflict resolved operator-wins via
+    /// `semantic_merge` (operator content in the merged doc).
+    semantic_merge_operator_wins: usize,
+    /// `#smsim`: the operator deleted an agent-edited/struck node — the deletion
+    /// stood and `semantic_merge` raised an ack for the next turn.
+    semantic_merge_delete_acks: usize,
+    /// `#smsim`: turn-active-area gating — a same-node conflict OUTSIDE the
+    /// active `exchange` area auto-resolved operator-wins with NO ack noise, while
+    /// the identical conflict INSIDE the active area raised an ack.
+    semantic_merge_scope_gated_acks: usize,
 }
 
 impl Coverage {
@@ -856,6 +870,10 @@ impl Coverage {
         self.between_turn_enqueue_busy_skips += other.between_turn_enqueue_busy_skips;
         self.suprehot_jb_observed_promotions += other.suprehot_jb_observed_promotions;
         self.suprehot_jb_mapped_recycle_failures += other.suprehot_jb_mapped_recycle_failures;
+        self.semantic_merge_node_disjoint += other.semantic_merge_node_disjoint;
+        self.semantic_merge_operator_wins += other.semantic_merge_operator_wins;
+        self.semantic_merge_delete_acks += other.semantic_merge_delete_acks;
+        self.semantic_merge_scope_gated_acks += other.semantic_merge_scope_gated_acks;
     }
 }
 
@@ -3354,6 +3372,141 @@ fn finalize_carries_directive_edit_forward_instead_of_merging() {
         world.doc.contains("dispatch #spec-test-build-install"),
         "the directive is carried forward in the live buffer for the next cycle:\n{}",
         world.doc
+    );
+}
+
+// #smsim (semantic_merge Phase 5): deterministic SimWorld coverage of the
+// operator↔agent concurrent-edit matrix through the `#smconv` node-keyed
+// convergence. Locks the merge/IPC data-loss family against regression:
+// node-disjoint auto-merge, same-node operator-wins, operator-deleted-an-
+// agent-edited-node ack, and turn-active-vs-unrelated-area ack gating.
+#[test]
+fn semmerge_sim_node_disjoint_operator_add_and_agent_strike_both_apply() {
+    let mut world = SimWorld::new(2_051);
+    let base = concat!(
+        "<!-- agent:queue go -->\n",
+        "- do [#a] task\n",
+        "<!-- /agent:queue -->\n",
+    );
+    // Agent consumed + struck the head; operator concurrently added a new item.
+    let agent_ours = concat!(
+        "<!-- agent:queue go -->\n",
+        "- ~~do [#a] task~~\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let operator_theirs = concat!(
+        "<!-- agent:queue go -->\n",
+        "- do [#a] task\n",
+        "- do [#b] operator added\n",
+        "<!-- /agent:queue -->\n",
+    );
+
+    let sm = world.converge_semantic_merge(base, agent_ours, operator_theirs, Some("queue"));
+
+    assert!(sm.requires_ack.is_empty(), "disjoint merge needs no ack");
+    assert_eq!(world.coverage.semantic_merge_node_disjoint, 1);
+    assert!(
+        world.snapshot.contains("~~do [#a] task~~"),
+        "the agent strike must survive:\n{}",
+        world.snapshot
+    );
+    assert!(
+        world.snapshot.contains("do [#b] operator added"),
+        "the concurrent operator add must survive:\n{}",
+        world.snapshot
+    );
+}
+
+#[test]
+fn semmerge_sim_same_node_conflict_operator_wins_with_ack_in_active_area() {
+    let mut world = SimWorld::new(2_052);
+    let base = concat!(
+        "<!-- agent:exchange -->\n",
+        "- do [#a] original\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    let agent_ours = base.replace("original", "AGENT EDIT");
+    let operator_theirs = base.replace("original", "OPERATOR EDIT");
+
+    let sm = world.converge_semantic_merge(base, &agent_ours, &operator_theirs, Some("exchange"));
+
+    assert_eq!(world.coverage.semantic_merge_operator_wins, 1);
+    assert_eq!(
+        world.coverage.semantic_merge_scope_gated_acks, 1,
+        "an in-active-area same-node conflict must raise an ack"
+    );
+    assert!(
+        !sm.requires_ack.is_empty(),
+        "same-node conflict in the active area must ack"
+    );
+    assert!(
+        world.snapshot.contains("OPERATOR EDIT") && !world.snapshot.contains("AGENT EDIT"),
+        "operator content must win the merged doc:\n{}",
+        world.snapshot
+    );
+}
+
+#[test]
+fn semmerge_sim_same_node_conflict_outside_active_area_auto_resolves_no_ack() {
+    let mut world = SimWorld::new(2_053);
+    // Same same-node conflict, but the operator edited a node OUTSIDE the
+    // turn-active area (queue, while only `exchange` is active). Operator still
+    // wins the content, but no ack noise is raised (#smturnactive gating).
+    let base = concat!(
+        "<!-- agent:queue go -->\n",
+        "- do [#a] original\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let agent_ours = base.replace("original", "AGENT EDIT");
+    let operator_theirs = base.replace("original", "OPERATOR EDIT");
+
+    let sm = world.converge_semantic_merge(base, &agent_ours, &operator_theirs, Some("exchange"));
+
+    assert!(
+        sm.requires_ack.is_empty(),
+        "an out-of-active-area conflict must NOT raise ack noise: {:?}",
+        sm.requires_ack
+    );
+    assert_eq!(world.coverage.semantic_merge_scope_gated_acks, 0);
+    assert!(
+        world.snapshot.contains("OPERATOR EDIT"),
+        "operator content still wins the merged doc:\n{}",
+        world.snapshot
+    );
+}
+
+#[test]
+fn semmerge_sim_operator_deleted_agent_edited_node_keeps_deletion_and_acks() {
+    let mut world = SimWorld::new(2_054);
+    let base = concat!(
+        "<!-- agent:exchange -->\n",
+        "- do [#a] keep\n",
+        "- do [#b] doomed\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    // Agent edited #b; operator concurrently DELETED #b entirely.
+    let agent_ours = base.replace("doomed", "AGENT EDITED doomed");
+    let operator_theirs = concat!(
+        "<!-- agent:exchange -->\n",
+        "- do [#a] keep\n",
+        "<!-- /agent:exchange -->\n",
+    );
+
+    let sm = world.converge_semantic_merge(base, &agent_ours, operator_theirs, Some("exchange"));
+
+    assert_eq!(
+        world.coverage.semantic_merge_delete_acks, 1,
+        "operator-deleted-agent-edited node must raise a deletion ack"
+    );
+    assert!(
+        sm.requires_ack.iter().any(|a| a.reason
+            == agent_doc_markdown_ast::semantic_merge::AckReason::OperatorDeletedAgentEditedNode),
+        "ack reason must be operator-deleted-agent-edited-node"
+    );
+    assert!(
+        !world.snapshot.contains("doomed"),
+        "the operator deletion must stand (node not resurrected):\n{}",
+        world.snapshot
     );
 }
 

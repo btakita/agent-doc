@@ -229,7 +229,7 @@ I did **not** build the schema yet — three one-way-door decisions to confirm f
 ### Re: deploy — opus-4-8
 
 Deployed. Worker version `034efce3-cbb2-436d-b963-9975df1df624` is live at https://equityfundingsource.brian-takita.workers.dev (build + remote D1 migrate clean, new browser bundle uploaded). Verified the calculator removal in the deployed artifact: the production JS bundle has zero `investor-commitment-amount` and zero `Commitment calculator`, and now contains the `Funding terms` panel + the "Each loan funds at full value" note. Remaining items unchanged — lending-groups (`#8667`) stays gated on your name/scope/privacy picks.
-<!-- agent:boundary:4aefcfc6 -->
+<!-- agent:boundary:f139325d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -251,7 +251,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#8667] Lending groups: build the lender "Lending group" mechanism per src/equityfundingsource-dev/prds/lending-groups-plan.md (Phase 1 schema+repo → 2 group CRUD/invites → 3 deal participation → 4 admin visibility). GATED on operator decision: group name ("Lending group" recommended), persistent-vs-deal-scoped, and member-privacy. Do not build schema until confirmed.
+- [ ] [#8667] [operator-verify] Lending groups: build the lender "Lending group" mechanism per src/equityfundingsource-dev/prds/lending-groups-plan.md (Phase 1 schema+repo → 2 group CRUD/invites → 3 deal participation → 4 admin visibility). GATED on operator decision: group name ("Lending group" recommended), persistent-vs-deal-scoped, member-privacy. Do not build until confirmed.
 <!-- /agent:backlog -->
 
 ## Review

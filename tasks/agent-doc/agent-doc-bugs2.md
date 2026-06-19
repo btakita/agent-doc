@@ -309,7 +309,13 @@ Addressing the first drainable report:
 This is **`#hap7` / `#qdup`** verbatim — the operator's scoped-CRDT-merge spec (constrain each merge to the structural node it applies to; on a deleted-structure-with-new-agent-content conflict, note it in the exchange rather than merging). It's already tracked as an `[operator-verify]` merge-core item with a plan (`tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md`), deliberately **not** rushed in-session because it edits the same merge machinery this session keeps drifting on. Striking this free-text duplicate; the work lives on `#hap7`.
 
 The remaining drainable heads (`#tsiftmdcrash` report, and `do [#gf5n]`=#numlistrev / `do [#rt83]`=#qrepin) continue via the loop.
-<!-- agent:boundary:f8880adb -->
+
+### Re: Turn crashed on virtuousai.md — opus-4-8
+
+> Turn crashed on virtuousai.md. ![img_49.png](img_49.png)
+
+Tracked by **`#tsiftmdcrash`** (`[operator-verify]`). Investigated already: supervisor pid 1742954 stayed alive, pane %78's OpenCode TUI showed normal `Thinking`, and `tsift-v0.1.log` (994KB) carries **no panic/abort/crash signature** — only two intentional `supervisor_binary_stale_self_recycled via=execve_preserve_child` entries from a `cargo install` + `make install` (the `#supkill-bg` blue/green drain-and-supersede). Most plausible: the brief `execve`-recycle window (where `current_exe` is momentarily deleted) was visible as a "crash." Not reproducible from logs alone — so it stays operator-gated: it needs the **exact crash error text / pane capture from the crash moment, or the specific cycle id**, which I can't extract from logs. (I can't read the screenshot — non-vision turn; `agent-doc describe-image img_49.png` could OCR it if the image is still on disk.) Striking the duplicate report; the work lives on `#tsiftmdcrash`.
+<!-- agent:boundary:bddcfb7e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -333,7 +339,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - :pushpin: do [#tsiftmdcrash]
 - ~~:pushpin: do [#orphanqhead]~~
 - ~~:pushpin: As I was typing in a queue item into virtuousai.md, parts of the document was duplicated, corrupting the document. The CRDT/semantic merge should be constrained only to the structural part that it applies to. Do multiple merges for each structural part as needed. This should remove the possibility of structural corruption and should reduce conflicts. If the operator deletes parts of the structure in the document and there is new agent content for a deleted structure, mention the fact in the exchange but do not attempt to merge...as the in-editor document is the source of truth.~~
-- :pushpin: Turn crashed on virtuousai.md. ![img_49.png](img_49.png)
+- ~~:pushpin: Turn crashed on virtuousai.md. ![img_49.png](img_49.png)~~
 ---
 :pushpin: Initial response for a turn renders numeric lists in reverse order:
 ```

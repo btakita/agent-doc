@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -58,7 +58,31 @@ Good catch — fixed the discriminator, built, tested, committed, pushed, and de
 **Verify + deploy:** `make check` green — **895 pass, 0 fail**, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `1c02f38` (`5549c0b81`).
 
 Please refresh the deal page and confirm. Confidence: high — `status` is the lender-independent global deal lifecycle, so it won't be fooled by per-lender funding state. Escalation: none. (Note: written via `--force-disk` — the route-owned supervisor was running a stale binary with a wedged IPC listener; `admin recycle` is queued to refresh it at the next idle boundary.)
-<!-- agent:boundary:fa8421f8 -->
+
+### Re: Reinstate loan info (property value, loan amount) alongside preferred terms — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Reinstate the loan info that includes the property value and loan amount along side the preferred terms. deploy
+
+
+Done — built, tested, committed, pushed, and deployed. On available deals the deal page now shows a **"Loan Info"** card next to **"Preferred Terms"**.
+
+**What changed:** the available-deal branch (`PreferredLoanTerms`) now renders two stacked cards:
+- **Loan Info** — Property Value, Loan Amount, LTV, Lien Position (the deal's factual loan data, from `deal.property_value` / `deal.loan_amount` / `deal.ltv` / `deal.lien_position`).
+- **Preferred Terms** — Preferred Loan Amount, Sold Rate, Term, Payment Frequency, Day Due (the borrower's preferred financing terms). Relabeled the preferred amount "Preferred Loan Amount" so it reads distinctly from the Loan Info "Loan Amount".
+
+Each card renders only when it has data; if a deal has loan info but no preferred terms set, you still see Loan Info plus a "No preferred terms set yet" note (and vice-versa).
+
+**Changed paths (`src/equityfundingsource-dev`, commit `630816a`, pushed + deployed):**
+- `lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx` — `PreferredLoanTerms` gains a `loan_info` prop + `deal_loan_info_T`; renders the Loan Info card.
+- `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — passes `loan_info` from the deal.
+- `tests/investor-portal-e2e.test.ts` — assert the Loan Info card + property value/loan amount fields.
+
+**Verify + deploy:** `make check` green — **895 pass, 0 fail**, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `630816a` (`d3c45eb51`).
+
+Please refresh the deal page and confirm. Confidence: high — suite-verified. Escalation: none.
+<!-- agent:boundary:227cefa3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,7 +95,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Reinstate the loan info that includes the property value and loan amount along side the preferred terms. deploy
 <!-- /agent:queue -->
 
 ## Backlog

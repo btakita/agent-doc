@@ -730,6 +730,39 @@ fn normalize_queue_head_text(text: &str) -> String {
         .to_string()
 }
 
+/// True when a queue head, after stripping the leading bullet and `:shortcode:`
+/// pins, begins with a markdown bold span (`**…**`) — the shape of an agent
+/// response-fragment summary bullet (`**migrate** — folded …`, `**Resolved 3
+/// reviews** → archived …`) that a cross-doc CRDT merge can splice into this
+/// queue (#qcontam). Genuine operator directives lead with a verb / `#id` / plain
+/// text, never a bold summary span, so this is a safe noise signal. Unlike
+/// [`normalize_queue_head_text`] this keeps `*` so the bold span survives.
+fn leads_with_markdown_bold_report(text: &str) -> bool {
+    let mut s = text.trim();
+    if let Some(rest) = s.strip_prefix('-') {
+        s = rest.trim_start();
+    }
+    // Strip leading `:shortcode:` pins (e.g. `:pushpin:`), repeatedly.
+    loop {
+        s = s.trim_start();
+        if let Some(after_colon) = s.strip_prefix(':')
+            && let Some(end) = after_colon.find(':')
+        {
+            let token = &after_colon[..end];
+            if !token.is_empty()
+                && token
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                s = &after_colon[end + 1..];
+                continue;
+            }
+        }
+        break;
+    }
+    s.trim_start().starts_with("**")
+}
+
 /// Whether a queue `Prompt` head is auto-drainable in go-mode (`#goqstall2`).
 ///
 /// A pre-materialized `## Queue` block can carry bulleted free-text lines that are
@@ -749,13 +782,25 @@ pub(crate) fn is_drainable_queue_head(text: &str) -> bool {
 }
 
 fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directive: bool) -> bool {
-    // `#cleardrainsignal`: a queue head carrying a fenced ``` code block is pasted
-    // console-output / error-report evidence the operator already triaged into
-    // backlog ids (e.g. `JB \`Run Agent Doc\` ... \`\`\`<log>\`\`\``), NOT a drain
-    // target — even though it incidentally contains a directive word like "run".
-    // Such blocks would otherwise churn no-op go-mode cycles forever. An `#id` head
-    // never carries a fence, so this only demotes free-text paste blocks.
-    if text.contains("```") {
+    // Pasted console-output / agent-response-fragment evidence is NOISE, not a drain
+    // target — even under a preset, and even if it incidentally contains a directive
+    // word like "run", a directive verb, or a stray `[#id]`. None of these markers
+    // appears in a genuine operator directive:
+    //   1. a fenced ``` code block (#cleardrainsignal) — pasted logs / error reports;
+    //   2. an agent component or boundary comment (`<!-- agent:` / `agent:boundary`)
+    //      — a spliced agent response artifact;
+    //   3. a leading markdown bold summary span (`**…**`) — an agent response bullet
+    //      (e.g. a cross-doc `**migrate** — folded … agent:review` fragment that a
+    //      CRDT merge split out of its fence into this queue). (#qcontam)
+    // These otherwise churn no-op go-mode cycles forever; the `preset` short-circuit
+    // below made it worse by promoting *every* non-fenced line to a drainable
+    // directive. Checked BEFORE the `#id` fast-path so a fragment carrying a stray
+    // cross-doc id is still demoted.
+    if text.contains("```")
+        || text.contains("<!-- agent:")
+        || text.contains("agent:boundary")
+        || leads_with_markdown_bold_report(text)
+    {
         return false;
     }
     if extract_head_id(text).is_some() {
@@ -1626,6 +1671,29 @@ mod tests {
         );
         assert_eq!(drainable_head_count(&doc, &content), 2);
         assert_eq!(queue_stale_noise_lines(&doc), 0);
+    }
+
+    #[test]
+    fn is_drainable_queue_head_treats_cross_doc_response_fragment_as_noise() {
+        // #qcontam: a cross-doc agent response-fragment bullet that a CRDT merge
+        // split into this queue is noise even under a preset, even though it has no
+        // fence and incidentally contains directive verbs / stray ids.
+        let bold_lead =
+            ":pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).";
+        assert!(!is_drainable_queue_head(bold_lead));
+        assert!(!is_drainable_queue_head_with_context(bold_lead, true));
+        let resolved_lead =
+            ":pushpin: **Resolved 3 genuinely-finished reviews** → archived to `agent:done`: `#2qrx` (apply done).";
+        assert!(!is_drainable_queue_head_with_context(resolved_lead, true));
+        // An agent component/boundary comment spliced into a head is also noise.
+        let boundary = ":pushpin: stray response tail\n<!-- agent:boundary:7c96f9ce -->";
+        assert!(!is_drainable_queue_head_with_context(boundary, true));
+        // A genuine operator directive (no bold lead, no agent markers) stays
+        // drainable under a preset, even when long.
+        let legit = "All upload preview dialogs should be full screen. deploy";
+        assert!(is_drainable_queue_head_with_context(legit, true));
+        // A plain `**bold**`-free imperative is still drainable without a preset.
+        assert!(is_drainable_queue_head("run the full test suite"));
     }
 
     #[test]

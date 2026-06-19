@@ -38,14 +38,37 @@ completed
 Compacted content:
 - Archived 7 response topic(s): do [#pk3f]; JB Run Agent Doc consumes + loses an uncommitted queue item (equityfundingsource.md); do [#smqstrike]; 4 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): [#1vhn] route dispatching the trigger into a crashed/exited ha...
-<!-- agent:boundary:d81dbd1e -->
+
+### Re: do [#qpausego] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#qpausego]
+
+
+Done. `#qdispatchloss` you struck is already shipped (last cycle, submodule `515a6663`), so I drained the next go-mode head, `#qpausego`.
+
+**Root cause (two leaks).** An accepted `admin queue pause` records a durable controller `queue_controls` row that the controller *dispatch* RPC already honored (`failed_stage=queue_paused`) — but two paths bypassed it, so a `go`-mode auto-queue kept re-dispatching after an accepted pause:
+
+1. **Supervisor idle-queue watch** injects `agent-doc <FILE>` triggers straight into the pane, bypassing the dispatch RPC — `idle_queue_drain_decision` never consulted the pause.
+2. **Preflight / `queue_continuation::detect`** computed continuation from the document alone, so `queue_continuation_required` stayed `true` and the in-session `/loop` kept going.
+
+**Fix.** New best-effort read-only helper `queue_continuation::document_queue_controller_paused(file)` resolves the project root + canonical document id and reads the effective `queue_controls` state from `.agent-doc/state.db` (returns `false` — never paused — when no control-plane DB exists or a read errors, logging the error). Both leaks now consult it:
+
+- idle-watch defers its drain (`queue_dispatch_skipped … reason=queue_control_paused`) while the pause is active;
+- preflight surfaces a new `queue_paused: bool` and drops `queue_continuation_required` + `queue_drainable_head_count` to 0;
+- `detect` returns `None`, so `session-check` / the codex-stop hook stop too.
+
+`admin queue resume` (state `resumed`) clears all of it; `drain` (`draining`) is not `paused` and does not gate continuation. The `go` attribute no longer overrides an accepted pause anywhere.
+
+**Verification.** 4 new tests (`document_queue_controller_paused_false_without_state_db`, `…_reflects_paused_then_resumed`, `detect_returns_none_when_controller_paused`, `run_queue_maintenance_controller_pause_halts_go_mode_continuation`); full `make check` green; built + installed both binaries + cdylib (lib-install marked the live controller to recycle onto the new build at its next idle boundary). Spec/README/VERSIONS updated. Latest CI on main is green; my changes will run on push.
+<!-- agent:boundary:759392e3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#qdispatchloss]~~
-- :pushpin: do [#qpausego]
+- ~~:pushpin: do [#qpausego]~~
 - :pushpin: do [#qdurcrash]
 - :pushpin: In equityfundingsource.md After a recycle restart + queue continuation, the prompt is not submitted after the restart.
 - :pushpin: do [#733r]
@@ -162,7 +185,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#orphanqhead] Orphaned id-backed queue head has no drain path: after a backlog item is reaped via --done, if the matching id-backed queue head [#id] strike was lost to IPC drift, the head is orphaned — --done <id> is then a no-op ("already resolved") and queue consume rejects id-backed heads ("reap via --done"), so the head is unreachable. preflight marks it queue_drainable_head_count=0 but never auto-strikes it, leaving a permanent phantom head that re-fires the auto-loop. Repro: tasks/recruit/virtuousai.md #p3kj on agent-doc 0.34.11; compounded by a wedged editor IPC (live IntelliJ buffer) refusing queue/pending writes (ack_mismatch/send_failed). Fix: auto-strike id-backed heads whose backing item is already done/absent during preflight reconciliation, or allow queue consume --id <id> to strike an orphaned id-backed head.
-- [ ] [#qpausego] #agent-doc-bug `agent-doc admin queue pause <FILE>` is accepted (durable receipt, e.g. ids 68/70 at generation 548) but does NOT halt a `go`-mode queue: after pause, preflight still reports queue_active=true / queue_paused=None / queue_trigger=auto and the supervisor/auto-loop keeps re-dispatching the next head (observed 3 consecutive auto-re-dispatches of agent-doc-bugs2.md after an accepted pause). Either the controller pause receipt is not consulted by the auto-dispatch path for a queue whose `agent:queue` header carries `go`, or preflight does not surface the controller pause (queue_paused stays None despite an accepted pause). Investigate: (1) does the supervisor idle-watch / queue auto-dispatch read the controller pause receipt before injecting, and does `go` override it? (2) should preflight expose queue_paused=true and drop queue_continuation_required when a controller pause is active? Today the only effective halt for a go-queue is editing `queue: stop` frontmatter / removing `go` by hand (done this session), which races the live IPC supervisor. Fix so an accepted `admin queue pause` durably suppresses auto-dispatch (and is reflected in preflight) even for go-mode queues.
 - [ ] [#qdurcrash] #agent-doc-bug queue-edit durability across a supervisor/pane crash+restart: operator adds a queue item, the turn starts, the supervisor+tmux pane crashes and restarts, and the operator added queue item is GONE (virtuousai.md repro, same crash event as #routedeadshell/#1vhn). Root-cause hypothesis: the operator queue add lived only in the editor buffer / supervisor in-memory CRDT and was never journaled to a crash-durable on-disk store before the process died, so restart reloaded from the last snapshot/HEAD (predating the add) and dropped it. Fix (agent-actionable, binary-side): persist inbound operator queue patches to the on-disk snapshot/journal immediately on receipt (before the supervisor mutates queue state / before ack), and add a supervisor-startup reconcile that merges the on-disk document queue against the reloaded snapshot, so a crash+restart replays the pending queue edit instead of losing it. Verify: add a queue item, kill -9 the supervisor mid-turn, restart, confirm the item survives. Distinct from #semmerge (live-merge drop during a turn) and #routedeadshell (route dispatch into a dead shell).
 - [ ] [#733r] #qheadsync agent-doc-bug: answered/filed queue heads are not reliably reconciled to the queue (free-text reports left un-struck; done-reaping orphans the matching id-backed queue head; manual strikes do not persist through finalize content_ours; backlog-to-queue sync has no sweep for items missed in prior turns and items can be lost). Fix at closeout in the binary. Plan: tasks/agent-doc/plan-answered-queue-head-autostrike.md
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block as a raw red Error: toast instead of an actionable queue paused — resume notification. Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button rather than a dispatch error. **Operator action: install the updated JB plugin, then verify the paused-queue notification renders (live gate).**

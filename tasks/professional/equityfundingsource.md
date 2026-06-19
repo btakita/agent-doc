@@ -325,7 +325,24 @@ Done (code committed + pushed; **deploy held** — the queued `deploy` comes aft
 **Committed/pushed:** EFS `7218eb3..1637a53` (origin/main), superproject pointer `298be3a2f`.
 
 **Deploy held** until the Title Case change lands, then one `make deploy` ships both.
-<!-- agent:boundary:950f816e -->
+
+### Re: Use Title Case for all headings and buttons — opus-4-8
+
+Done (code committed + pushed; **deploy held** for the next `deploy` queue item, which ships this + the Deal Summary removal together). All portal **headings and buttons** are now Title Case instead of Sentence case.
+
+**Scope** (`src/equityfundingsource-dev`, 50 UI files across admin / borrower / broker / investor / shared portals): card-title, page-title, blank-title (empty-state), section/step headings, bare `<h1>`–`<h6>` tags, and `<button>` / `btn`-link labels — **264 strings**. Examples: "Broker dashboard" → "Broker Dashboard", "Pipeline activity" → "Pipeline Activity", "Available deals" → "Available Deals", "Express interest" → "Express Interest", "No available deals" → "No Available Deals".
+
+**How** — a closing-tag-anchored transform that touches **only static heading/button text**, never JSX expression containers or arrow handlers (`onClick={() => …}`), so no code was mangled. It:
+- Preserves acronyms (EFS, TMO, LTV, ACH, PDF, SSN, …), HTML entities (`&amp;`), and leading glyphs (`←`, `+`).
+- Lowercases minor words mid-phrase (a, and, of, to, from, with, in, on, …) — e.g. "Deals of Interest", "How to Make a Payment", "Back to Lenders".
+- **Left out of scope** (kept Sentence case): notification message titles (some are full sentences), body prose, and email content.
+
+**Verified:** `bun run check` (test + browser build + worker build) → **836 pass / 0 fail**, builds clean. Updated source-inspection test assertions to the new casing (delimiter-safe, so prose assertions were untouched); reverted two over-eager assertions for the out-of-scope email CTA + notification title.
+
+**Committed/pushed:** EFS `1637a53..873c9e4` (origin/main), superproject pointer `0834b79ef`.
+
+**Deploy held** — the next `deploy` item will `make deploy` both the Deal Summary removal and this Title Case pass.
+<!-- agent:boundary:9837ab12 -->
 <!-- /agent:exchange -->
 ###
 <!--

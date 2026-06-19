@@ -18,7 +18,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -65,14 +65,28 @@ Not draining the next head. You said "drain #1vhn only, then pause" last turn; t
 - **Next head `do [#supselfheal]` is already shipped** — submodule HEAD `318aceee` is the supselfheal feature commit (wedge-trigger recycle + bounded re-exec escalation, Ph2-5). Draining it under the `#spec-test-build-install-commit-push` preset would just re-run build/install, the hazard you paused for.
 
 Say "go" (or re-point the queue) when you want me to resume; otherwise I'm stopped here.
-<!-- agent:boundary:d8a21919 -->
+<!-- agent:boundary:cf50fc33 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
-- :pushpin: As I was typing in a queue item into virtuousai.md, parts of the document was duplicated, corrupting the document. The CRDT/semantic merge should be constrained only to the structural part that it applies to. Do multiple merges for each structural part as needed. This should remove the possibility of structural corruption and should reduce conflicts. If the operator deletes parts of the structure in the document and there is new agent content for a deleted structure, mention the fact in the exchange but do not attempt to merge...as the in-editor document is the source of truth.
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- :pushpin: do [#8bfz]
 - :pushpin: do [#supselfheal]
+- :pushpin: do [#msn6]
+- :pushpin: do [#pk3f]
+- :pushpin: do [#smqstrike]
+- :pushpin: do [#smsim]
+- :pushpin: do [#cyh0]
+- :pushpin: do [#qpausego]
+- :pushpin: do [#qdurcrash]
+- :pushpin: do [#733r]
+- :pushpin: do [#docdriftgrace]
+- :pushpin: do [#agentreloadrestart]
+- :pushpin: do [#restartagentmenu]
+- :pushpin: do [#qpauseux]
+- :pushpin: do [#tsiftmdcrash]
+- :pushpin: As I was typing in a queue item into virtuousai.md, parts of the document was duplicated, corrupting the document. The CRDT/semantic merge should be constrained only to the structural part that it applies to. Do multiple merges for each structural part as needed. This should remove the possibility of structural corruption and should reduce conflicts. If the operator deletes parts of the structure in the document and there is new agent content for a deleted structure, mention the fact in the exchange but do not attempt to merge...as the in-editor document is the source of truth.
 - :pushpin: Turn crashed on virtuousai.md. ![img_49.png](img_49.png)
 ---
 :pushpin: JB `Run Agent Doc` on this file
@@ -132,20 +146,6 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
-- :pushpin: do [#8bfz]
-- :pushpin: do [#msn6]
-- :pushpin: do [#pk3f]
-- :pushpin: do [#smqstrike]
-- :pushpin: do [#smsim]
-- :pushpin: do [#cyh0]
-- :pushpin: do [#qpausego]
-- :pushpin: do [#qdurcrash]
-- :pushpin: do [#733r]
-- :pushpin: do [#docdriftgrace]
-- :pushpin: do [#agentreloadrestart]
-- :pushpin: do [#restartagentmenu]
-- :pushpin: do [#qpauseux]
-- :pushpin: do [#tsiftmdcrash]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

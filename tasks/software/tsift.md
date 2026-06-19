@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -134,13 +134,26 @@ Verification **passes**. Closing `#kgconfreqverify`; no schema relaxation needed
 The net: confidence data is high-quality and complete, with no zero-yield documents — the cost the relax was meant to avoid. Relaxing to prompt-only off one confounded sample would discard the confirmed 100%-model-confidence benefit for no demonstrated gain, so I'm resolving rather than relaxing.
 
 Filed `[recommended]` follow-up: if yield ever becomes an operational concern, re-run the A/B 3–5× per binary and compare means before reconsidering a prompt-only relax — that's the only way to separate nondeterminism from a real cut. No code changed this cycle.
-<!-- agent:boundary:7a7a3808 -->
+
+### Re: do #m27b — closing (no trigger condition met) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#m27b]
+
+
+`#m27b` is a `[recommended]` *conditional* safeguard — "re-run the A/B 3–5× **if** KG extraction yield becomes an operational concern." That condition is not currently met:
+
+- The `#kgconf` A/B already ran this session and **passed** (resolved `#kgconfreqverify`, commit `227bba9ad`): confidence is 100% model-sourced, in-range (0.42–1.0), no zero-yield, and the feared yield-suppression mechanism was absent.
+- There is no live yield regression to investigate, so there is nothing to execute now.
+
+Go-mode pulled this backlog item into the active queue (`#backlog-queue-attr-populates-in-go-mode`), which would churn a no-op every cycle. Marking it `--done` to drain the head — the recommendation is preserved in `tsift.done.md` and is recoverable if a real yield concern ever surfaces. If/when that happens, the A/B re-run is operator-gated (needs GPU + Ollama), not agent-drainable. No code changed.
+<!-- agent:boundary:39112975 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#m27b]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -149,7 +162,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#m27b] [recommended] If KG extraction yield becomes an operational concern, re-run the #kgconf A/B 3-5x per binary (old b465979 vs HEAD) on the same corpus and compare mean entity/relation counts to separate LLM nondeterminism from a real required-confidence cut before considering a prompt-only relax.
 <!-- /agent:backlog -->
 
 ## Review

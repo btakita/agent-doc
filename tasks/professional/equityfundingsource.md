@@ -300,7 +300,11 @@ Deployed. The held **Express interest** change (`#express-interest`, EFS `7218eb
 No code changed this cycle — EFS HEAD is still `7218eb3` (== origin/main), clean tree. The earlier commit/push already landed; this was the deploy-only step.
 
 `do [#8667]` (Lending groups) stays gated — it's `[operator-verify]`, still waiting on your name/scope/privacy decisions.
-<!-- agent:boundary:7ca7263e -->
+
+### Re: deploy (already live) — opus-4-8
+
+This `deploy` head was already satisfied by the previous cycle — the Express-interest change shipped to the live Worker (commit `932399f0a`, bundle `index.browser-ZCVCQ7MB.js`, homepage 200, live-bundle verified). EFS HEAD is still `7218eb3` (== origin/main) with a clean tree, so there are no new commits to push — re-running `make deploy` now would be a no-op. Consuming this duplicate marker and moving on to the **Remove "Deal Summary" section** and **Title Case** items next.
+<!-- agent:boundary:7fa7f858 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -314,7 +318,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: EFS does not arrange partial loans from independent lenders. If a lender or lender group is interested in the loan, the entity will service the entire loan. The proposed terms are optional. A lender can be interested in a loan without any proposed terms. The lender may want to learn more about the property and the borrower...such as receiving documents or viewing the property in person. Please bring back the button to express interest that is independent of the proposed terms.~~
-- :pushpin: deploy
+- ~~:pushpin: deploy~~
 - Remove "Deal Summary" section from https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d. The terms of the deal have not been settled yet. The lender will propose terms and the buyer will accept, reject, or negotiate the terms. We are simply not in a state where the terms of the deal should be displayed. Another benefit is the main CTA, "Express Interest" is at the top of the dialog.
 - Use "Title Case" for all headings and buttons. We are currently using "Sentenc case".
 - deploy

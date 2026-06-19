@@ -262,7 +262,29 @@ Shipped a drain path for orphaned id-backed queue heads, but **not** as the auto
 **Deferred on purpose:** `cargo install` (the `~/.cargo/bin` finalize client used by tmux sessions) is *not* run mid-session — a newer finalize client against this still-running supervisor is the documented exit-75 `live_prompt_drift` hazard, and this session is already IPC-drift-prone. Do `cargo install --path .` + `agent-doc admin recycle` at the session/idle boundary to make the new `queue consume --id` command live for tmux-spawned runs.
 
 The newly-queued free-text items (autostart-on-typing, save-detection watcher) and the remaining `[operator-verify]` heads (`#hap7`, `#fbwire`, `#qpauseux`, `#docdriftgrace`, `#tsiftmdcrash`) are untouched this cycle — they drain in later iterations / need a live editor.
-<!-- agent:boundary:98c0faba -->
+
+### Re: queue triage — operator reports & contamination — opus-4-8
+
+Session state repaired this cycle: the `#orphanqhead` fix is now **installed** (`stale_install` cleared, `~/.cargo/bin/agent-doc` current), and the CRDT-corrupted editor buffer — my prior response had a `|` spliced into `--done` — was restored to clean HEAD via `git checkout` + `reset --from-current --preserve-session` and is holding. No new user prompt this cycle; triaging the drainable free-text queue reports:
+
+**Genuine agent-doc reports — already tracked:**
+
+> JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.
+
+The silent-stall variant of **#qpauseux** (operator-verify): a churn-stop pause renders as *nothing*. Tracked there; needs the JB-plugin live gate.
+
+> My free-text queue items are not immediately struck as if they are addressed.
+
+By design (**#ftstrike**): a free-text head strikes only when the committed response *quotes* its text (4+ words) in a blockquote — a guard so an unaddressed operator report is never silently dropped. A head merely *mentioned* in prose stays queued. Loosening that is a separate tuning call.
+
+The virtuousai mid-type duplication report is tracked by **#hap7/#qdup** (scoped-merge fix); the virtuousai crash by **#tsiftmdcrash** (needs the exact crash text); the numbered-list-reversed render is now filed as **#numlistrev**.
+
+**Cross-doc contamination (not this doc's prompts):** several queue heads are stray response fragments from other sessions — monsterrodholders (`migrate` / `Resolved 3 reviews` / `Kept 2 false-positive`), and equityfundingsource + JB `Run Agent Doc` dispatch-error log dumps. Per scope discipline I won't answer them as directives for agent-doc-bugs2; they should be cleared (operator strike, or `agent-doc queue consume` / `admin queue pause`).
+
+**Operator-verify remainder** (need a live editor / JB-plugin gate, not agent-drainable): `#qpauseux`, `#docdriftgrace`, `#tsiftmdcrash`, `#fbwire`, `#hap7`.
+
+Stopping here rather than churning the contaminated remainder — the genuine agent work available this session is done: `#orphanqhead` shipped + installed, `#numlistrev` filed, the stale binary and corrupt buffer cleaned.
+<!-- agent:boundary:c7c48198 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -273,8 +295,8 @@ The newly-queued free-text items (autostart-on-typing, save-detection watcher) a
 - :pushpin: [#qpauseux]
 - :pushpin: [#docdriftgrace]
 - ~~:pushpin: My equityfundingsource.md queue prompt `:pushpin: All upload preview dialogs should be full screen. deploy` was duplicated by agent-doc.~~
-- :pushpin: JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.
-- :pushpin: My free-text queue items are not immediately struck as if they are addressed.
+- ~~:pushpin: JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.~~
+- ~~:pushpin: My free-text queue items are not immediately struck as if they are addressed.~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not start. It should have started.
 ```

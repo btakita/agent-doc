@@ -79,7 +79,13 @@ The recent doc-only changes (bi-directional TMO documentation) carried no code/s
 **Fix:** wrap the entire attempt in one `try/catch` so the endpoint **always** returns structured JSON `{ ok:false, status:'failed', error }` (502); the catch marks failed best-effort (`.catch(() => null)`) so a D1 hiccup can't regress into a non-JSON 500. Admins now see the real reason — a TMO connectivity message, or for an already-associated loan like deal `7a0c1463` / `GQI751`, TMO's `NewLoan failed with 400: Duplicate loan number` (the duplicate-loan handling itself stays tracked in #5q7z).
 
 **Verification:** `make check` green — **824 pass, 0 fail**. Committed + pushed: EFS `e869e73` (origin/main), superproject pointer `5cd5c7c56`. The EFS repo has no CI workflow, so local `make check` is the verification of record. Not deployed (preset was commit+push, not deploy); the UI change ships on the next `make deploy`.
-<!-- agent:boundary:90cd617b -->
+
+### Re: Why "TMO writeback not sent: unavailable" (already answered above) — opus-4-8
+
+> **Queue prompt:** Why is there a "TMO writeback not sent: unavailable" error?
+
+Answered in the previous response (section **(2) Why "unavailable"**). In short: `unavailable` is the admin UI's last-resort fallback string, not a server message — it shows only when the `/approve` response can't be parsed as JSON (`res.json().catch(() => null)` → `null`). That happened because `application_tmo_writeback_attempt_` ran its prelude (live-TMO loan-number generation + D1 reads/writes) **outside** its `try/catch`, so a throw there escaped as a non-JSON 500. Fixed by wrapping the whole attempt so it always returns structured JSON `{ ok:false, error }`; admins now see the real reason. Shipped in EFS `e869e73` (origin/main), superproject `5cd5c7c56`, `make check` 824/0.
+<!-- agent:boundary:4a7f71fd -->
 <!-- /agent:exchange -->
 ###
 <!--

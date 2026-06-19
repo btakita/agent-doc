@@ -39,13 +39,36 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 ❯ - Archived 6 response topic(s): How to verify #kgconfreqverify; #kgconfreqverify A/B results; do #m27b; 3 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54...
-<!-- agent:boundary:e5a58f7a -->
+
+### Re: release + publish (#spec-test-build-install-commit-push) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: release + publish
+
+
+Did every agent-doable substep; the publish itself is operator-gated. Current state of `src/tsift`:
+
+- **commit + push** — already done. HEAD `08d0f65 chore: release v0.1.72` == origin/main, working tree clean.
+- **spec + tests** — nothing to update (clean tree). `make check` → exit 0, 0 failures.
+- **build + install (local testing)** — `cargo install --path .` and `-p packages/tsift-cli`; both `tsift` and `tsift-cli` binaries now at 0.1.72.
+
+**Publish is blocked on an operator step (#1yks), not on me.** crates.io has `tsift` at 0.1.69; `tsift-local-model` and `tsift-kg` do **not** exist there yet. A brand-new crate's first publish can't use OIDC trusted publishing (no config can attach to a nonexistent crate), and `tsift-cli` depends on both new crates — so the *whole* publish chain fails until they exist. That's why the v0.1.70/v0.1.71 tags never reached crates.io.
+
+I did **not** push the v0.1.72 tag: doing so now would just re-fail Release CI identically. Correct order is #1yks(1) first, then #1yks(2):
+
+1. **Operator (browser/passkey 2FA):** `cargo publish -p tsift-local-model` then `cargo publish -p tsift-kg` to create the crates, then enable Trusted Publishing for each on crates.io.
+2. **Then push the tag:** `git tag v0.1.72 08d0f65 && git push origin v0.1.72` to trigger Release CI; the OIDC publish (incl. the 23 already-configured crates + the two newly-bootstrapped ones) will then go green.
+
+Keeping #1yks gated as the operator's actionable.
+<!-- agent:boundary:00d85b40 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: release + publish
+- ~~:pushpin: release + publish~~
+- [#1yks]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

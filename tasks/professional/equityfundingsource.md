@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -134,7 +134,22 @@ Got it — corrected the doc to match. The Closing-stage signing is **not** an i
 Updated `src/equityfundingsource-dev/docs/deal-pipeline-flow.md` borrower-actions §4 to drop the "borrower-signature API" e-sign framing and state the wet-ink + notarize + bi-directional-TMO-sync model. Committed + pushed: EFS `2631896` on `origin/main`, superproject submodule pointer bumped.
 
 This refines the open `#5eq8` (closing-docs redesign): the rebuilt step records a signed/notarized flag and syncs it bidirectionally with TMO rather than capturing an e-signature. (Exchange is large — flag if you want a compact.)
-<!-- agent:boundary:8d4a0f8b -->
+
+### Re: Loan → Closed is an automatic bi-directional TMO state change — opus-4-8
+
+> **Queue prompt:**
+>
+> Loan -> Closed diagram step should be bi-directionally driven with TMO. An automatic state change.
+
+
+Updated the diagram and surrounding text to match. The `Loan → Closed / Funded` step is now modeled as a **TMO-driven automatic, bi-directional state change** (EFS ↔ TMO), not a manual admin action:
+
+- **Sequence diagram** — the step changed from `A->>A: Loan → Closed / Funded …` to `TMO-->>A: Loan → Closed / Funded (automatic bi-directional status sync)`, with closing the offering split out as the separate `A->>A: Close offering (deal → closed)` admin step.
+- **§1a Closed-status note** — now states the loan reaching `Closed`/`Funded` is an automatic bi-directional TMO sync, while *closing the offering* remains the explicit admin action (`PUT /api/admin/deals/:id/close`).
+- **Admin action #7** — reworded from "Close the loan / offering" to "Close the offering," clarifying the loan-status milestone is TMO-automatic and does not auto-close the offering.
+
+Committed + pushed: EFS `58e1e49` on `origin/main`, superproject submodule pointer bumped (`204c0473c`).
+<!-- agent:boundary:f8ee9041 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -147,7 +162,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Loan -> Closed diagram step should be bi-directionally driven with TMO. An automatic state change.
 <!-- /agent:queue -->
 
 ## Backlog

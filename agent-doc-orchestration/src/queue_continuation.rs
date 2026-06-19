@@ -106,18 +106,32 @@ pub fn detect(file: &Path) -> Result<Option<QueueContinuation>> {
 /// logged to stderr (never silently swallowed) and treated as not-paused so a
 /// transient DB hiccup cannot strand the drain.
 pub fn document_queue_controller_paused(file: &Path) -> bool {
-    let Some(root) = crate::snapshot::find_project_root(file) else {
-        return false;
-    };
+    document_queue_controller_pause_reason(file).is_some()
+}
+
+/// The effective controller pause reason for `file` when (and only when) the
+/// queue-control state is `paused` (`#qpausego` / `#qpausemix`).
+///
+/// Returns `Some(reason)` when an accepted `admin queue pause` is the effective
+/// control state — `reason` is the operator/controller-recorded pause reason, or
+/// an empty string when the pause carried none. Returns `None` when the queue is
+/// not controller-paused (or the control plane / state DB cannot be resolved).
+///
+/// Surfacing the reason is what resolves the operator-perceived "mixed signal"
+/// (`queue_paused: true` alongside `queue_continuation_required: true`): the
+/// reason and the pause-aware [`continuation_guidance`] preamble let the agent
+/// see *why* the queue was paused and that the pause only suppresses the
+/// unattended supervisor idle-watch, instead of guessing whether the pause is
+/// operator intent or transient drain-coordination state. Same best-effort,
+/// read-only error handling as [`document_queue_controller_paused`].
+pub fn document_queue_controller_pause_reason(file: &Path) -> Option<String> {
+    let root = crate::snapshot::find_project_root(file)?;
     let db_path = agent_doc_sqlite::state_store::state_db_path(&root);
     if !db_path.exists() {
         // No control plane has ever run for this project: nothing can be paused.
-        return false;
+        return None;
     }
-    let canonical = match file.canonicalize() {
-        Ok(canonical) => canonical,
-        Err(_) => return false,
-    };
+    let canonical = file.canonicalize().ok()?;
     let document_id = canonical.to_string_lossy().to_string();
     let conn = match agent_doc_sqlite::state_store::open_state_db(&root) {
         Ok(conn) => conn,
@@ -126,7 +140,7 @@ pub fn document_queue_controller_paused(file: &Path) -> bool {
                 "[agent-doc] queue_continuation: failed to open controller state DB at {} ({err:#}) — treating queue as not controller-paused",
                 root.display()
             );
-            return false;
+            return None;
         }
     };
     match agent_doc_sqlite::state_store::load_effective_queue_control_from_db(
@@ -134,15 +148,44 @@ pub fn document_queue_controller_paused(file: &Path) -> bool {
         &document_id,
         &root.to_string_lossy(),
     ) {
-        Ok(control) => control
-            .map(|control| control.state == "paused")
-            .unwrap_or(false),
+        Ok(control) => control.and_then(|control| {
+            (control.state == "paused").then(|| control.reason.unwrap_or_default())
+        }),
         Err(err) => {
             eprintln!(
                 "[agent-doc] queue_continuation: failed to load controller queue control for {} ({err:#}) — treating queue as not controller-paused",
                 file.display()
             );
-            false
+            None
+        }
+    }
+}
+
+/// Compose the binary-authoritative queue-continuation guidance, resolving the
+/// `queue_paused` + `queue_continuation_required` "mixed signal" (`#qpausemix`).
+///
+/// When the queue is not controller-paused (`pause_reason == None`), this returns
+/// the base [`CONTINUATION_NO_STALL_GUIDANCE`] verbatim. When an accepted
+/// `admin queue pause` is in effect, it prepends a preamble that explicitly
+/// states the two signals are NOT contradictory — the controller pause suppresses
+/// only the *unattended* supervisor idle-watch auto-injection, while the attended
+/// in-session loop remains the legitimate single-owner drain — and surfaces the
+/// recorded pause reason. This is the single source consumed by both preflight
+/// JSON (`queue_continuation_guidance`) and `session-check` stdout so they stay
+/// in agreement.
+pub fn continuation_guidance(pause_reason: Option<&str>) -> String {
+    match pause_reason {
+        None => CONTINUATION_NO_STALL_GUIDANCE.to_string(),
+        Some(reason) => {
+            let reason = reason.trim();
+            let reason_clause = if reason.is_empty() {
+                "no reason recorded".to_string()
+            } else {
+                format!("recorded pause reason: {reason}")
+            };
+            format!(
+                "queue_paused is set but is NOT a contradiction with queue_continuation_required — an accepted `admin queue pause` suppresses ONLY the unattended supervisor idle-watch auto-injection (the flood guard); the attended in-session loop remains the legitimate single-owner drain and must keep draining proven-closeout work. Do not stop the loop on the pause; to actually stop the in-session loop use `queue: stop` frontmatter or a `--- stop` fence, not pause ({reason_clause}). {CONTINUATION_NO_STALL_GUIDANCE}"
+            )
         }
     }
 }
@@ -1276,6 +1319,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn continuation_guidance_explains_controller_pause_reason() {
+        let g = continuation_guidance(Some("operator pause"));
+        assert!(
+            g.contains("queue_paused is set but is NOT a contradiction"),
+            "pause-aware guidance must explain the mixed-signal shape: {g}"
+        );
+        assert!(
+            g.contains("recorded pause reason: operator pause"),
+            "pause-aware guidance must carry the controller-recorded reason: {g}"
+        );
+        assert!(
+            g.contains(CONTINUATION_NO_STALL_GUIDANCE),
+            "pause-aware guidance must preserve the normal no-stall closeout rules: {g}"
+        );
+    }
+
     fn write_doc(dir: &Path, prompts: &[&str], queue_active: bool, has_auto: bool) -> PathBuf {
         let queue_attrs = if has_auto { " auto" } else { "" };
         write_doc_with_queue_attrs(dir, prompts, queue_active, queue_attrs)
@@ -1678,12 +1738,10 @@ mod tests {
         // #qcontam: a cross-doc agent response-fragment bullet that a CRDT merge
         // split into this queue is noise even under a preset, even though it has no
         // fence and incidentally contains directive verbs / stray ids.
-        let bold_lead =
-            ":pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).";
+        let bold_lead = ":pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).";
         assert!(!is_drainable_queue_head(bold_lead));
         assert!(!is_drainable_queue_head_with_context(bold_lead, true));
-        let resolved_lead =
-            ":pushpin: **Resolved 3 genuinely-finished reviews** → archived to `agent:done`: `#2qrx` (apply done).";
+        let resolved_lead = ":pushpin: **Resolved 3 genuinely-finished reviews** → archived to `agent:done`: `#2qrx` (apply done).";
         assert!(!is_drainable_queue_head_with_context(resolved_lead, true));
         // An agent component/boundary comment spliced into a head is also noise.
         let boundary = ":pushpin: stray response tail\n<!-- agent:boundary:7c96f9ce -->";

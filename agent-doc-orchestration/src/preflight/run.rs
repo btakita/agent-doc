@@ -1212,6 +1212,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         });
     }
 
+    let queue_continuation_guidance = queue_state.queue_continuation_required.then(|| {
+        crate::queue_continuation::continuation_guidance(queue_state.queue_pause_reason.as_deref())
+    });
+
     let output = PreflightOutput {
         warnings,
         layout_issues,
@@ -1257,11 +1261,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         queue_trigger: queue_state.queue_trigger,
         queue_halted: queue_state.queue_halted,
         queue_paused: queue_state.queue_paused,
+        queue_pause_reason: queue_state.queue_pause_reason,
         queue_drainable_head_count: queue_state.queue_drainable_head_count,
         queue_continuation_required: queue_state.queue_continuation_required,
-        queue_continuation_guidance: queue_state
-            .queue_continuation_required
-            .then(|| crate::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE.to_string()),
+        queue_continuation_guidance,
         session_accretion,
         pipeline,
         semantic_merge_acks,

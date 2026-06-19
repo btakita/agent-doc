@@ -447,6 +447,11 @@ pub struct PreflightOutput {
     /// `admin queue resume`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub queue_paused: bool,
+    /// `#qpausemix`: controller-recorded pause reason when `queue_paused` is true.
+    /// Included so callers do not have to infer whether a pause is operator-set
+    /// or a transient coordination artifact from mixed continuation signals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_pause_reason: Option<String>,
     /// `#cleardrainsignal`: count of agent-drainable heads (not deferred/noise) at
     /// the active queue head. Always emitted. `0` while `queue_active == true` means
     /// every remaining head is `[clean-session]` (under live IPC) / `[operator-verify]`
@@ -3428,7 +3433,11 @@ mod tests {
 
         let (rewritten, struck) = super::strike_done_queue_head_prompts(&entries, &done_ids)
             .expect("both #8667 sibling lines must strike");
-        assert_eq!(struck.len(), 2, "both lines for the resolved id strike: {struck:?}");
+        assert_eq!(
+            struck.len(),
+            2,
+            "both lines for the resolved id strike: {struck:?}"
+        );
         assert!(matches!(
             &rewritten[0],
             crate::queue::QueueEntry::Completed(p) if p.text == "[#8667]"

@@ -919,6 +919,12 @@ pub(crate) struct QueueState {
     /// `queue_continuation_required` / `queue_drainable_head_count` (the attended
     /// in-session `/loop` keeps draining real work). Cleared by `admin queue resume`.
     pub(crate) queue_paused: bool,
+    /// `#qpausemix`: the controller-recorded pause reason when `queue_paused` is
+    /// true (empty string when the pause carried none); `None` when not paused.
+    /// Surfaced so the agent can see *why* the queue was paused instead of reading
+    /// `queue_paused` + `queue_continuation_required` as a contradictory "mixed
+    /// signal". Feeds the pause-aware `queue_continuation_guidance`.
+    pub(crate) queue_pause_reason: Option<String>,
     /// `#cleardrainsignal`: count of agent-drainable heads (not deferred/noise) in
     /// the active queue. 0 while `queue_active` is `Some(true)` means a no-op churn
     /// cycle — the agent/auto-loop must NOT loop.
@@ -1721,6 +1727,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 queue_trigger: activation.trigger,
                 queue_halted: Some("stop_fence".into()),
                 queue_paused: false,
+                queue_pause_reason: None,
                 queue_drainable_head_count: 0,
                 queue_continuation_required: false,
                 synced_queue_ids,
@@ -1739,6 +1746,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 queue_trigger: activation.trigger,
                 queue_halted: None,
                 queue_paused: false,
+                queue_pause_reason: None,
                 queue_drainable_head_count: 0,
                 queue_continuation_required: false,
                 synced_queue_ids,
@@ -1863,6 +1871,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                         queue_trigger: activation.trigger,
                         queue_halted: Some("item_modified".into()),
                         queue_paused: false,
+                        queue_pause_reason: None,
                         queue_drainable_head_count: 0,
                         queue_continuation_required: false,
                         synced_queue_ids,
@@ -2102,7 +2111,9 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // pause stalling the in-session loop strands genuine drainable backlog
     // (`#qdurcrash`, `#733r`, …) — the operator-rejected over-reach. Use
     // `queue: stop` frontmatter / `--- stop` fences to stop the in-session loop.
-    let queue_paused = crate::queue_continuation::document_queue_controller_paused(file);
+    let queue_pause_reason =
+        crate::queue_continuation::document_queue_controller_pause_reason(file);
+    let queue_paused = queue_pause_reason.is_some();
     let queue_drainable_head_count = if activation.active {
         crate::queue_continuation::drainable_head_count(file, &content)
     } else {
@@ -2126,6 +2137,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         queue_trigger: activation.trigger,
         queue_halted: None,
         queue_paused,
+        queue_pause_reason,
         queue_drainable_head_count,
         queue_continuation_required,
         synced_queue_ids,
@@ -2772,11 +2784,15 @@ mod tests {
             "no controller pause means queue_paused is false"
         );
         assert!(
+            state.queue_pause_reason.is_none(),
+            "no controller pause means no pause reason is surfaced"
+        );
+        assert!(
             state.queue_continuation_required && state.queue_drainable_head_count > 0,
             "active go queue with a live head must require continuation before pause"
         );
 
-        // Accepted controller pause must halt continuation even for a go queue.
+        // Accepted controller pause must be surfaced without halting continuation.
         let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
         let scope_id = doc.canonicalize().unwrap().to_string_lossy().to_string();
         agent_doc_sqlite::state_store::upsert_queue_control_in_db(
@@ -2793,6 +2809,11 @@ mod tests {
 
         let paused = run_queue_maintenance(&doc, None).unwrap();
         assert!(paused.queue_paused, "accepted pause must set queue_paused");
+        assert_eq!(
+            paused.queue_pause_reason.as_deref(),
+            Some("operator pause"),
+            "accepted pause must surface its recorded reason"
+        );
         assert!(
             paused.queue_continuation_required,
             "controller pause must NOT stall the in-session loop continuation"
@@ -2817,6 +2838,10 @@ mod tests {
 
         let resumed = run_queue_maintenance(&doc, None).unwrap();
         assert!(!resumed.queue_paused, "resume must clear queue_paused");
+        assert!(
+            resumed.queue_pause_reason.is_none(),
+            "resume must clear the surfaced pause reason"
+        );
         assert!(
             resumed.queue_continuation_required && resumed.queue_drainable_head_count > 0,
             "resume keeps continuation for the active go-mode queue"
@@ -2922,8 +2947,8 @@ mod tests {
             content,
             "queue maintenance must not raw-write the session doc while a JB listener is active"
         );
-        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             log.contains("write_authority action=routed")
                 && log.contains("surface=queue_maintenance"),

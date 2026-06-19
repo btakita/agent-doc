@@ -2412,7 +2412,7 @@ fn postcommit_worktree_lost_committed_content(head_norm: &str, tree_norm: &str) 
     !added_user_work
 }
 
-fn send_postcommit_editor_refresh(file: &Path, head_doc: &str, stale_working: &str) {
+fn send_postcommit_editor_refresh(file: &Path, head_doc: &str, stale_working: &str) -> bool {
     let canonical = match file.canonicalize() {
         Ok(canonical) => canonical,
         Err(e) => {
@@ -2420,7 +2420,7 @@ fn send_postcommit_editor_refresh(file: &Path, head_doc: &str, stale_working: &s
                 "[commit] postcommit editor refresh skipped for {}: canonicalize failed: {e}",
                 file.display()
             );
-            return;
+            return false;
         }
     };
     let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
@@ -2432,7 +2432,7 @@ fn send_postcommit_editor_refresh(file: &Path, head_doc: &str, stale_working: &s
                 file.display()
             ),
         );
-        return;
+        return false;
     }
 
     let stale_hash = crate::ops_log::content_hash(stale_working);
@@ -2460,6 +2460,7 @@ fn send_postcommit_editor_refresh(file: &Path, head_doc: &str, stale_working: &s
                 "[commit] postcommit editor buffer refresh sent for {} (#pcwc)",
                 file.display()
             );
+            true
         }
         Ok(false) => {
             crate::ops_log::log_op(
@@ -2470,9 +2471,10 @@ fn send_postcommit_editor_refresh(file: &Path, head_doc: &str, stale_working: &s
                 ),
             );
             eprintln!(
-                "[commit] postcommit editor buffer refresh had no ack for {} (non-fatal)",
+                "[commit] postcommit editor buffer refresh had no ack for {}",
                 file.display()
             );
+            false
         }
         Err(e) => {
             crate::ops_log::log_op(
@@ -2484,9 +2486,43 @@ fn send_postcommit_editor_refresh(file: &Path, head_doc: &str, stale_working: &s
                 ),
             );
             eprintln!(
-                "[commit] postcommit editor buffer refresh failed for {} (non-fatal): {e}",
+                "[commit] postcommit editor buffer refresh failed for {}: {e}",
                 file.display()
             );
+            false
+        }
+    }
+}
+
+fn reconcile_postcommit_worktree_to_head(
+    file: &Path,
+    head_doc: &str,
+    head_sha: &str,
+    tree_sha: &str,
+    transport: &str,
+) -> bool {
+    match std::fs::write(file, head_doc) {
+        Ok(()) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "postcommit_worktree_auto_reconciled file={} head={} tree_before={} reason=committed_content_lost transport={}",
+                    file.display(),
+                    &head_sha[..head_sha.len().min(12)],
+                    &tree_sha[..tree_sha.len().min(12)],
+                    transport,
+                ),
+            );
+            eprintln!(
+                "[commit] postcommit_worktree_check match=false for {} — working tree lost committed content; auto-reconciled to HEAD via {} (#pcwc)",
+                file.display(),
+                transport
+            );
+            true
+        }
+        Err(e) => {
+            eprintln!("[commit] postcommit worktree auto-reconcile write failed: {e}");
+            false
         }
     }
 }
@@ -2538,13 +2574,12 @@ fn emit_postcommit_worktree_check(file: &Path) {
         // stale-buffer hash guard so the IDE stops writing the stale content back.
         if postcommit_worktree_lost_committed_content(&head_norm, &tree_norm) {
             // #pcwcdiskfree: when a JB editor listener is active, skip the disk
-            // write — `send_postcommit_editor_refresh` below pushes HEAD content
-            // through the editor IPC (`refresh_content`), letting the live buffer
-            // become authoritative and the disk catch up on the editor's next
-            // save. Writing to disk here while the IDE holds the file open is the
-            // documented source of the recurring `File Cache Conflict` dialog.
-            // With no listener, fall back to the authoritative disk write so a
-            // headless/CI run still restores committed content.
+            // write only after `send_postcommit_editor_refresh` proves the live
+            // buffer accepted HEAD content via editor IPC (`refresh_content`).
+            // Writing to disk here while the IDE holds the file open is the
+            // documented source of the recurring `File Cache Conflict` dialog,
+            // but a failed/no-ack refresh leaves the corrupt tree in place, so
+            // that path falls back to the authoritative disk write.
             let listener_active = file
                 .canonicalize()
                 .ok()
@@ -2554,41 +2589,38 @@ fn emit_postcommit_worktree_check(file: &Path) {
                 })
                 .unwrap_or(false);
             if listener_active {
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "postcommit_worktree_auto_reconciled file={} head={} tree_before={} reason=committed_content_lost transport=editor_ipc_skipped_disk_write",
-                        file.display(),
-                        &head_sha[..head_sha.len().min(12)],
-                        &tree_sha[..tree_sha.len().min(12)],
-                    ),
-                );
                 eprintln!(
-                    "[commit] postcommit_worktree_check match=false for {} — working tree lost committed content; converging HEAD through editor IPC, skipping disk write (#pcwcdiskfree)",
+                    "[commit] postcommit_worktree_check match=false for {} — working tree lost committed content; trying editor IPC before disk repair (#pcwc)",
                     file.display()
                 );
-                send_postcommit_editor_refresh(file, &head_doc, &working);
+                if send_postcommit_editor_refresh(file, &head_doc, &working) {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "postcommit_worktree_auto_reconciled file={} head={} tree_before={} reason=committed_content_lost transport=editor_ipc_skipped_disk_write",
+                            file.display(),
+                            &head_sha[..head_sha.len().min(12)],
+                            &tree_sha[..tree_sha.len().min(12)],
+                        ),
+                    );
+                    eprintln!(
+                        "[commit] postcommit_worktree_check match=false for {} — editor IPC acked HEAD refresh; skipping disk write (#pcwcdiskfree)",
+                        file.display()
+                    );
+                } else {
+                    reconcile_postcommit_worktree_to_head(
+                        file,
+                        &head_doc,
+                        &head_sha,
+                        &tree_sha,
+                        "disk_after_failed_editor_refresh",
+                    );
+                }
             } else {
-                match std::fs::write(file, &head_doc) {
-                    Ok(()) => {
-                        crate::ops_log::log_op(
-                            file,
-                            &format!(
-                                "postcommit_worktree_auto_reconciled file={} head={} tree_before={} reason=committed_content_lost transport=disk",
-                                file.display(),
-                                &head_sha[..head_sha.len().min(12)],
-                                &tree_sha[..tree_sha.len().min(12)],
-                            ),
-                        );
-                        eprintln!(
-                            "[commit] postcommit_worktree_check match=false for {} — working tree lost committed content; auto-reconciled to HEAD via disk (#pcwc, no editor listener)",
-                            file.display()
-                        );
-                        send_postcommit_editor_refresh(file, &head_doc, &working);
-                    }
-                    Err(e) => eprintln!(
-                        "[commit] postcommit worktree auto-reconcile write failed (non-fatal): {e}"
-                    ),
+                if reconcile_postcommit_worktree_to_head(
+                    file, &head_doc, &head_sha, &tree_sha, "disk",
+                ) {
+                    send_postcommit_editor_refresh(file, &head_doc, &working);
                 }
             }
             return;
@@ -3211,25 +3243,47 @@ mod th {
     // cannot distinguish "file has user edits" from "file has a missed agent response" —
     // both look like "file has content snapshot doesn't have".
     // --- #73tv: repo-scoped commit serialization + full transaction retry ---
-    pub(crate) fn start_fake_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
+    fn start_fake_listener_with_ack_status(
+        project_root: &Path,
+        ack_status: Option<&'static str>,
+    ) -> std::thread::JoinHandle<()> {
         let root = project_root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
             let root_clone = root.clone();
-            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+            let result = crate::ipc_socket::start_listener(&root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = v
                     .get("patch_id")
                     .and_then(|p| p.as_str())
                     .unwrap_or("unknown");
+                if let Some(status) = ack_status {
+                    return Some(
+                        serde_json::json!({
+                            "type": "ack",
+                            "id": patch_id,
+                            "status": status,
+                            "reason": "test_refresh_failed"
+                        })
+                        .to_string(),
+                    );
+                }
                 let ack_dir = root_clone.join(".agent-doc/ack-content");
-                let _ = std::fs::create_dir_all(&ack_dir);
+                if let Err(err) = std::fs::create_dir_all(&ack_dir) {
+                    eprintln!(
+                        "[test] fake listener failed to create ack dir {}: {err}",
+                        ack_dir.display()
+                    );
+                }
                 // Model the JB plugin's behavior: refresh_content messages carry
                 // the new content in the message body (the IDE applies it to its
                 // in-memory buffer without reading disk). Other message types
                 // fall back to disk (patch files, etc.).
                 let content = if v.get("type").and_then(|t| t.as_str()) == Some("refresh_content") {
-                    v.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string()
+                    v.get("content")
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("")
+                        .to_string()
                 } else {
                     let file_path = v.get("file").and_then(|f| f.as_str()).unwrap_or("");
                     if !file_path.is_empty() {
@@ -3238,10 +3292,27 @@ mod th {
                         String::new()
                     }
                 };
-                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
+                let ack_path = ack_dir.join(format!("{patch_id}.md"));
+                if let Err(err) = std::fs::write(&ack_path, &content) {
+                    eprintln!(
+                        "[test] fake listener failed to write ack content {}: {err}",
+                        ack_path.display()
+                    );
+                }
                 Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
             });
+            if let Err(err) = result {
+                eprintln!("[test] fake listener stopped: {err:#}");
+            }
         })
+    }
+    pub(crate) fn start_fake_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
+        start_fake_listener_with_ack_status(project_root, None)
+    }
+    pub(crate) fn start_fake_listener_error_ack(
+        project_root: &Path,
+    ) -> std::thread::JoinHandle<()> {
+        start_fake_listener_with_ack_status(project_root, Some("error"))
     }
     pub(crate) fn wait_for_listener(project_root: &Path) {
         for _ in 0..100 {
@@ -3261,7 +3332,7 @@ mod th {
 #[cfg(test)]
 pub(crate) use th::{
     add_submodule, commit_file, drift_gate_doc, drift_gate_scope, init_repo, start_fake_listener,
-    wait_for_listener,
+    start_fake_listener_error_ack, wait_for_listener,
 };
 
 #[cfg(test)]
@@ -5766,6 +5837,66 @@ Duplicate replay should stay live.
         );
     }
     #[test]
+    fn postcommit_worktree_auto_reconcile_writes_disk_when_editor_refresh_fails() {
+        // #pcwcfailfix: skipping disk is safe only after the live editor
+        // acknowledges the HEAD refresh. If the plugin rejects/no-acks that
+        // refresh, leaving the corrupted working tree in place re-seeds the next
+        // live_prompt_drift cycle, so fall back to the authoritative HEAD write.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        let _listener = start_fake_listener_error_ack(root);
+        wait_for_listener(root);
+
+        let head_doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\n\
+            ### Re: second\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+        let doc = root.join("session.md");
+
+        let corrupted = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        fs::write(&doc, corrupted).unwrap();
+
+        emit_postcommit_worktree_check(&doc);
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("postcommit_editor_refresh_failed"),
+            "failed editor refresh must be logged before disk fallback:\n{log}"
+        );
+        assert!(
+            log.contains("postcommit_worktree_auto_reconciled")
+                && log.contains("transport=disk_after_failed_editor_refresh"),
+            "failed editor refresh must fall back to the authoritative HEAD disk write:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=editor_ipc_skipped_disk_write"),
+            "failed editor refresh must not claim an editor-IPC reconciliation:\n{log}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            head_doc,
+            "failed editor refresh must restore the working tree to HEAD on disk"
+        );
+        assert!(
+            !root.join(".agent-doc/ack-content/unknown.md").exists(),
+            "error-ack listener must not pretend the editor applied HEAD content"
+        );
+    }
+    #[test]
     fn postcommit_worktree_auto_reconcile_writes_disk_without_listener() {
         // #pcwcdiskfree no-listener branch: a headless / CI run still restores
         // committed content to the working tree via the authoritative disk
@@ -5800,8 +5931,7 @@ Duplicate replay should stay live.
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("postcommit_worktree_auto_reconciled")
-                && log.contains("transport=disk"),
+            log.contains("postcommit_worktree_auto_reconciled") && log.contains("transport=disk"),
             "no-listener recovery must log the disk transport:\n{log}"
         );
         assert!(

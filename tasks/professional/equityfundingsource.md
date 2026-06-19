@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -357,7 +357,31 @@ Deployed. The **Deal Summary removal** + the **Title Case** sweep are now live (
 - **Live-bundle verify:** grepped the deployed JS — headings/buttons are Title Case (**"Available Deals"**, **"Broker Dashboard"**, **"Express Interest"**), and **"Deal Summary" has 0 occurrences** (card removed). Remaining lowercase hits are URLs (`/lenders/available-deals`), route ids, and prose — not headings.
 
 Both queued changes shipped in one deploy. `do [#8667]` (Lending groups) stays gated — `[operator-verify]`, awaiting your name/scope/privacy decisions.
-<!-- agent:boundary:5309c1eb -->
+
+### Re: #8667 terminology — "Lender Syndicate"? — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#8667]: Use the industry standard terminology. Is it "Lender Syndicate"?
+
+
+Short answer: **"Syndicate" is a real industry-standard term, but it comes from _institutional/commercial_ bank lending — not the private trust-deed world EFS actually operates in.** So it works, with a caveat. Here are the standard options by where the term comes from:
+
+**1. Syndicate (institutional / commercial banking).** A group of lenders jointly funding one loan to one borrower, usually with a designated **lead arranger / agent** who originates and services while the others participate. Idiomatic forms: **"syndicated loan," "loan syndicate," "lending syndicate."** Members are "syndicate participants" or "co-lenders." Note: "Lender Syndicate" is understandable but slightly less idiomatic than **"Loan Syndicate"** or just **"Syndicate."** Caveat: "syndicate" implies a lead/agent structure — if your group has **no designated lead** and just acts as one entity, the word slightly overpromises that machinery.
+
+**2. Multi-lender loan / Fractionalized note (private money + trust-deed — EFS's actual niche).** When several private investors fund one loan, each holding a fractional interest in the note/deed of trust: **"multi-lender loan," "fractionalized loan," "multi-beneficiary deed of trust."** This is the native vocabulary of The Mortgage Office and CA/private-lending regs. Investors are "co-lenders" or "beneficiaries."
+
+**3. Mortgage fund / pool.** Investors pool capital into an LLC/LP that is itself the single lender of record. Different structure (one entity lends), not a group-per-deal.
+
+**Recommendation — pick by audience:**
+- Selling sophistication to **institutional / larger lenders** → use **"Syndicate"** (label it "Loan Syndicate"; members = "Syndicate Participants"). Closest to your "the group services the entire loan" framing **if** you add a lead/servicer role.
+- Speaking to **private trust-deed investors** (your current lender base) → **"Multi-Lender Loan"** or **"Co-Lending Group"** is more accurate and less likely to imply a lead-arranger structure you may not have.
+- Want zero jargon → keep **"Lending Group."**
+
+My pick if you want one word that signals seriousness without misrepresenting structure: **"Syndicate"** is fine — go with **"Loan Syndicate" / "Syndicate Participants."** If you'd rather stay accurate to how private deals are actually structured, **"Multi-Lender Loan."**
+
+`#8667` stays gated — once you lock the name, I still need your calls on **persistent vs. deal-scoped** groups and **member privacy** before building. Tell me those two and I'll start (plan: `src/equityfundingsource-dev/prds/lending-groups-plan.md`).
+<!-- agent:boundary:e0d5c434 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -370,12 +394,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: EFS does not arrange partial loans from independent lenders. If a lender or lender group is interested in the loan, the entity will service the entire loan. The proposed terms are optional. A lender can be interested in a loan without any proposed terms. The lender may want to learn more about the property and the borrower...such as receiving documents or viewing the property in person. Please bring back the button to express interest that is independent of the proposed terms.~~
-- ~~:pushpin: deploy~~
-- ~~Remove "Deal Summary" section from https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d. The terms of the deal have not been settled yet. The lender will propose terms and the buyer will accept, reject, or negotiate the terms. We are simply not in a state where the terms of the deal should be displayed. Another benefit is the main CTA, "Express Interest" is at the top of the dialog.~~
-- ~~Use "Title Case" for all headings and buttons. We are currently using "Sentence case".~~
-- ~~deploy~~
-- do [#8667]
 <!-- /agent:queue -->
 
 ## Backlog

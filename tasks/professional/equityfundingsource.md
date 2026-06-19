@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -63,7 +63,29 @@ Done — spec + tests updated, committed, pushed, and deployed. The full Availab
 **Verify + deploy:** `make check` green — **895 pass, 0 fail**, typecheck clean, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `8590852` (`3424eaf69`, pushed).
 
 One heads-up: this **removes** the separate Selected/Pending sections and the Interested Only filter in favor of dashboard parity. If you'd rather keep those standalone sections *and* add Deals of Interest on top, say so and I'll switch to the additive layout. Confidence: high — suite-verified. Escalation: none. (Note: committed via `--force-disk` — the route-owned supervisor's IPC listener was wedged on a stale binary; `admin recycle` is queued to refresh it at the next idle boundary.)
-<!-- agent:boundary:1c1c8001 -->
+
+### Re: No invite email sent for the Lender Bros group — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: An email was not sent to btak.dev+lender2@gmail.com after btak.dev+investor@gmail.com invited btak.dev+lender2@gmail.com to the Lender Bros group. deploy
+
+Fixed, tested, committed, pushed, and deployed. Two root causes:
+
+**1. The invite email was gated off in production.** Multi-Lender Group invite/joined emails are gated behind `LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED`, and that flag was **never set in `wrangler.toml`** — so the gate defaulted off and every invite silently no-op'd the email (the in-app notification still fired). I enabled it, plus `LENDING_GROUP_NOTIFICATION_FROM` pointed at the Cloudflare-verified `info@briantakita.me` sender (same delivery path/token as the working contact + secure-message emails; the default `info@equityfundingsource.com` isn't verified in Cloudflare Email yet — #f4rq).
+
+**2. The invite email link was a 404.** The email body linked to `/investors/dashboard`, which doesn't exist — the investor portal lives under `/lenders`. Switched it to `URLS.portal_investor_dashboard` (`/lenders/dashboard`) for both the invite and member-joined emails.
+
+**Changed paths (`src/equityfundingsource-dev`, commit `5b3d72b`, pushed + deployed):**
+- `wrangler.toml` — `LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED = "true"` + `LENDING_GROUP_NOTIFICATION_FROM`.
+- `app/equityfundingsource/lib/lending_groups/notify.ts` — import `URLS`; fix both portal links.
+- `tests/lending-group-notify.test.ts` — new: flag gate, correct portal path (not `/investors/dashboard`), prod wrangler config, route wiring.
+- `prds/lending-groups-plan.md` — recorded the prod-enable + link fix (#lender-group-invite-email).
+
+**Verify + deploy:** `make check` green — **899 pass, 0 fail** (4 new), typecheck clean. `make deploy` succeeded; the live worker now shows `LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED ("true")` bound. Superproject pointer bumped to `5b3d72b` (`d447381db`, pushed).
+
+Please re-run the invite (btak.dev+investor → btak.dev+lender2 into "Lender Bros") and confirm lender2 receives the email. One caveat to verify live: delivery depends on the `CLOUDFLARE_EMAIL_API_TOKEN` secret being present in prod (it is for the working message/contact emails, which share the exact same gate + token). Confidence: high — same delivery path as the already-working email flows. Escalation: none. (Note: committed via `--force-disk` — the route-owned supervisor's IPC listener is still wedged on the stale binary; `admin recycle` remains queued for the next idle boundary.)
+<!-- agent:boundary:9d2e99d2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,7 +98,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: An email was not sent to btak.dev+lender2@gmail.com after btak.dev+investor@gmail.com invited btak.dev+lender2@gmail.com to the Lender Bros group. deploy
 <!-- /agent:queue -->
 
 ## Backlog

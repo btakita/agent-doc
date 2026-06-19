@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -171,7 +171,23 @@ Made the doc consistent with the invariant. It already described offering-close,
 - **§4 system-of-record note** — "**writes back** to TMO" reframed to "**All EFS ↔ TMO communication is bi-directional**" while keeping the ownership/origination clarification.
 
 Docs-only change, no test suite applies. Committed + pushed: EFS `a3f04cb` on `origin/main`, superproject submodule pointer bumped (`7b17ff663`).
-<!-- agent:boundary:1b23486d -->
+
+### Re: show bi-directional arrows to TMO in the diagram — opus-4-8
+
+> **Queue prompt:**
+>
+> Show bi-directional arrows to TMO in diagram in /home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/docs/deal-pipeline-flow.md
+
+
+Converted the sequence diagram's TMO interactions to mermaid bidirectional arrows (`<<->>`). Previously each TMO touch was a one-way `A->>TMO` request followed by a separate `TMO-->>A` response; now every TMO interaction reads as a single two-way sync arrow:
+
+- `A<<->>TMO: Approve writeback (accepted) ⇄ Loan created (Application Received)` — collapsed the approve + loan-creation pair.
+- `A<<->>TMO: Confirm wire (AddLoanFunding) ⇄ Funding reconciled (tmo_funding_rec_id)`
+- `A<<->>TMO: Loan → Closed / Funded (automatic bi-directional status sync)`
+- `A<<->>TMO: Close offering (deal → closed) — either side can set it`
+
+Non-TMO arrows (Borrower↔Admin, Admin↔Lender) are left one-directional since the directive was specifically about TMO. Docs-only change. Committed + pushed: EFS `c23f2f4` on `origin/main`, superproject submodule pointer `82d67a584`.
+<!-- agent:boundary:4d125fb4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -184,7 +200,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Show bi-directional arrows to TMO in diagram in /home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/docs/deal-pipeline-flow.md
 <!-- /agent:queue -->
 
 ## Backlog

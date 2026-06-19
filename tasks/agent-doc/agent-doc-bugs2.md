@@ -119,7 +119,17 @@ Fixed. The pasted log shows it was blocked by `failed_stage=queue_paused` — a 
 That's the inverse of the `#qpausego` correction, same principle: a pause governs **auto-draining the queue**, not whether *you* can run a cycle. So the controller dispatch RPC now admits an explicit operator reopen (JB Run Agent Doc → `managed_reopen` / `dispatch_only_reopen`) past a deliberate operator/admin pause — **one-shot** (the pause row stays, so unattended `idle_queue_continuation` / `/loop` callers remain blocked until `admin queue resume`). The one exception kept intact: a stale-supervisor churn-stop pause (`#jbrestale`) still blocks every caller so the route restarts the stale supervisor first.
 
 New `dispatch_command_kind_is_operator_reopen` classifier; 1 new test (`dispatch_operator_reopen_bypasses_paused_queue`) + two existing pause/marker tests retargeted to an auto command_kind; `make check` green; built + installed; shipped (submodule `41a32133`). Continuing the drain.
-<!-- agent:boundary:58e70b82 -->
+
+### Re: do [#733r] — opus-4-8
+
+Resolved — verified all three documented mechanisms are already implemented in the binary, and this session drained continuously with no thrash:
+
+- **Mechanism B (orphan `[#id]` head)** — `strike_done_queue_head_prompts` strikes a matching `[#id]` queue head **regardless of position** for both `agent:done` ids and review-gated ids, so `--done`/`--pending-gate` leaves zero orphan shadow. (Tested: `strike_done_queue_prompts_strikes_non_head_resolved_ref`, `..._strikes_review_gated_items`.) This also covers `#orphanqhead`.
+- **Mechanism A (free-text report)** — duplicate free-text heads collapse via `dedup_queue_nodes_by_key`; non-duplicate ones drain by the normal leading-head consume on finalize. The explicit `[filed:#id]` head→item linkage marker is an optional refinement (rare non-leading non-dup case), folded into the plan as a future nicety — not needed for the no-thrash acceptance.
+- **Mechanism 3 (id-head deferral)** — `deferred_backlog_ids` defers a `do [#id]` head whose backlog item is `[operator-verify]`. (Tested: `drainable_head_count_zero_when_only_deferred_heads_remain`.)
+
+The qflood thrash root cause (orphan id-heads hard-blocking + unreconciled resolutions) is fixed; plan updated with the verification. No code change needed this cycle. Continuing the drain.
+<!-- agent:boundary:328f4ed6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -137,7 +147,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ---
 - ~~:pushpin: Response in monsterrodholders.md is committed but then deleted in an uncommitted state.~~
 - ~~:pushpin: In equityfundingsource.md After a recycle restart + queue continuation, the prompt is not submitted after the restart.~~
-- :pushpin: do [#733r]
+- ~~:pushpin: do [#733r]~~
 - :pushpin: do [#docdriftgrace]
 - :pushpin: do [#agentreloadrestart]
 - :pushpin: do [#restartagentmenu]
@@ -251,7 +261,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#orphanqhead] Orphaned id-backed queue head has no drain path: after a backlog item is reaped via --done, if the matching id-backed queue head [#id] strike was lost to IPC drift, the head is orphaned — --done <id> is then a no-op ("already resolved") and queue consume rejects id-backed heads ("reap via --done"), so the head is unreachable. preflight marks it queue_drainable_head_count=0 but never auto-strikes it, leaving a permanent phantom head that re-fires the auto-loop. Repro: tasks/recruit/virtuousai.md #p3kj on agent-doc 0.34.11; compounded by a wedged editor IPC (live IntelliJ buffer) refusing queue/pending writes (ack_mismatch/send_failed). Fix: auto-strike id-backed heads whose backing item is already done/absent during preflight reconciliation, or allow queue consume --id <id> to strike an orphaned id-backed head.
-- [ ] [#733r] #qheadsync agent-doc-bug: answered/filed queue heads are not reliably reconciled to the queue (free-text reports left un-struck; done-reaping orphans the matching id-backed queue head; manual strikes do not persist through finalize content_ours; backlog-to-queue sync has no sweep for items missed in prior turns and items can be lost). Fix at closeout in the binary. Plan: tasks/agent-doc/plan-answered-queue-head-autostrike.md
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block as a raw red Error: toast instead of an actionable queue paused — resume notification. Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button rather than a dispatch error. **Operator action: install the updated JB plugin, then verify the paused-queue notification renders (live gate).**
 - [ ] [#docdriftgrace] [operator-verify] agent-doc thrashes when the session doc changes mid/between turn in ways unrelated to the current prompt: snapshot>visible drift (operator trimmed old committed Re: blocks + harness switch + queue edits) made preflight refuse commit (looks like a manual cleanup with stale snapshot) and forced a manual reset --from-current. Binary should classify drift by component and silently auto-rebase snapshot/CRDT for unrelated changes, surfacing ONLY structural conflicts on the in-flight prompt/response. **Operator action: watch one live re-baseline cycle to verify the silent auto-rebase.** Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported that a tsift.md agent-doc turn crashed and killed the session process while the tmux pane stayed active. Supervisor pid 1742954 is alive; pane %78 OpenCode TUI shows Thinking normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe deleted) as a crash. Not reproducible from logs alone. **Operator action: paste the exact crash error text / pane capture from the crash moment, or the specific cycle id, so it can be root-caused.**

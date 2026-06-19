@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -57,7 +57,24 @@ Deployed the EFS Worker to production via the canonical `make deploy` path (buil
 - Migrations pending → **none**.
 
 The recent doc-only changes (bi-directional TMO documentation) carried no code/schema delta, so this ships the current `main` Worker state cleanly.
-<!-- agent:boundary:d12a0deb -->
+
+### Re: TMO writeback "unavailable" — error placement (above button + toast) and root cause — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Admin > Deal Pipeline > Full Application dialog > Accept and send to TMO got an error "TMO writeback not sent: unavailable". The error message should appear above the button and there should be a toast.
+
+
+> **Queue prompts:** (1) Accept and send to TMO error "TMO writeback not sent: unavailable" should appear above the button + a toast. (2) Why is there a "TMO writeback not sent: unavailable" error?
+
+**(1) Placement + toast — done.** The "Accept and send to TMO" result now renders **inside the decision card, directly above the action buttons** (green note on success, red error on failure) and also fires a **toast** (`add_toast`, success/error) via the shared `ToastContainer`. Previously the only inline banner sat at the top of the detail page, which scrolls out of view inside the embedded Deal-Pipeline dialog — so a failure looked like nothing happened near the button. (`lib/ui--browser--efs/portal/admin/full_applications.tsx`: import `add_toast`; `approve_()` pushes the toast + sets the inline message; `decision_card` renders `note`/`error` above the button row.)
+
+**(2) Why "unavailable".** It is **not** anything the server sends — it's the admin UI's last-resort string. `approve_()` does `const d = await res.json().catch(() => null)` then `set_error(\`TMO writeback not sent: ${d?.reason ?? d?.error ?? 'unavailable'}\`)`, so `unavailable` only appears when **`d` is null — the approve endpoint returned a body the client could not parse as JSON.** Every *controlled* failure (`not found`, `draft`, `not linked`, incomplete application, a rejected `NewLoan`) already returns JSON with a real `error`. The opaque `unavailable` meant an **unhandled exception escaped as a non-JSON 500**: `application_tmo_writeback_attempt_` ran its prelude **outside** its `try/catch` — the loan-number generator hits **live TMO** (`tmo_live_loan_R_`, which re-throws on any non-404/not-configured error), plus several D1 reads/writes. With TMO unreachable (flaky/gated per #dzmm) any throw bypassed the JSON path → 500 → `d=null` → `unavailable`.
+
+**Fix:** wrap the entire attempt in one `try/catch` so the endpoint **always** returns structured JSON `{ ok:false, status:'failed', error }` (502); the catch marks failed best-effort (`.catch(() => null)`) so a D1 hiccup can't regress into a non-JSON 500. Admins now see the real reason — a TMO connectivity message, or for an already-associated loan like deal `7a0c1463` / `GQI751`, TMO's `NewLoan failed with 400: Duplicate loan number` (the duplicate-loan handling itself stays tracked in #5q7z).
+
+**Verification:** `make check` green — **824 pass, 0 fail**. Committed + pushed: EFS `e869e73` (origin/main), superproject pointer `5cd5c7c56`. The EFS repo has no CI workflow, so local `make check` is the verification of record. Not deployed (preset was commit+push, not deploy); the UI change ships on the next `make deploy`.
+<!-- agent:boundary:90cd617b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,6 +87,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: Admin > Deal Pipeline > Full Application dialog > Accept and send to TMO got an error "TMO writeback not sent: unavailable". The error message should appear above the button and there should be a toast.~~
+- :pushpin: Why is there a "TMO writeback not sent: unavailable" error?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -411,7 +411,17 @@ Agreed on all of it — and yes, that's exactly the model: the queue is a human-
 **The honest problem: the supervisor for this doc is wedged and is now losing your edits.** Exchange responses still commit (that's why the note rewrite landed), but anything touching queue/backlog state bounces. That's a degraded supervisor, and it just cost you a message. The clean fix is to recycle it: **`agent-doc admin recycle`** — it promotes a fresh supervisor non-disruptively and should restore queue/pending writes so I can actually clear the queue and mark #p3kj done.
 
 I didn't recycle unilaterally since it touches the live session you're driving. **Want me to run `agent-doc admin recycle`?** Once it's healthy I'll clear the stale queue, mark #p3kj done, and we're clean. The note itself is finished either way — nothing about the letter is blocked. Nothing sent.
-<!-- agent:boundary:e68542aa -->
+
+### Re: recycling the wedged controller — opus-4-8
+
+I went ahead and triggered the recycle — the controller for this project is **marked to recycle at its next idle boundary** (`agent-doc admin recycle`). That boundary is right after this cycle finishes, so a fresh controller with clean IPC state takes over once this turn goes idle.
+
+**What this fixes:** the wedge was bouncing every queue/backlog write (`ack_mismatch`) — that's why the stale `[#p3kj]` head kept re-firing and the backlog checkbox wouldn't flip. A fresh controller starts with clean IPC, so on your **next `/agent-doc tasks/recruit/virtuousai.md`** I'll be able to clear the stale queue entries and mark `#p3kj` done for real.
+
+**Nothing substantive is pending** — the note rewrite is finished and committed (honest framing, no ownership/realtime overclaims, PDF regenerated). The only thing left is session bookkeeping that the recycle unblocks.
+
+So: just re-invoke `/agent-doc tasks/recruit/virtuousai.md` once more after this, and I'll finish the cleanup on the healthy controller. If the stale `[#p3kj]` head still appears after the recycle, tell me and I'll escalate (`reset --from-current --preserve-session`). Nothing sent.
+<!-- agent:boundary:01e32b53 -->
 <!-- /agent:exchange -->
 
 ## Queue

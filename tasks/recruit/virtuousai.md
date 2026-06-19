@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -67,11 +67,6 @@ Still your voice, still a **draft — nothing sent**. Resume path unchanged: `re
 
 ### Re: rewrite the letter — drop the numbers — opus-4-8
 
-> **Queue prompt:**
->
-> This letter is not good. Please come up with something better. Forget about the numbers right now. The number of tests is not impressive at all.
-
-
 Rewrote it from scratch. No metrics anywhere — no test count, no charge count, no SERP rank. The case is made by the story now, not by figures. Draft: [`mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md`](../../mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md) (status: **draft, not sent**).
 
 **What changed and why it's better:**
@@ -102,19 +97,18 @@ Here's the reasoning, plainly:
 - **Resume:** keep Presence AI prominent; optionally add one supporting line for the stealth-client real-time audio-avatar work (framed as "low-latency production AI systems," since you can't name the client). I've queued that as a `[recommended]` backlog item.
 - **Letter:** no change — keep it focused on builder + operator.
 - **Call with Rory:** lead the real-time/performance story there, where it lands as systems credibility without crowding the note.
-<!-- agent:boundary:ea637e56 -->
+<!-- agent:boundary:fda45d11 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~This letter is not good. Please come up with something better. Forget about the numbers right now. The number of tests is not impressive at all.~~
-- Should we have the stealth company + PresenceAI to push real-time work?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [recommended] #stealthresume Add one supporting line to `resume/data.toml` for the stealth-client real-time audio-avatar work, framed as "low-latency production AI systems" (client unnamed). Presence AI already leads the experience in `resume/profiles/virtuousai.toml`; this is a secondary real-time depth signal, only if a tighter real-time story is wanted.
 <!-- /agent:backlog -->
 
 ## Icebox

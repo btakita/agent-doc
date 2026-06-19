@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,26 @@ completed
 Compacted content:
 - Archived 9 response topic(s): What is "Funding Commits" in the Deal Pipeline dialog?; Is the Funding Commit driven by TMO?; Document the entire Deal Pipeline flow (all roles + Broker variant); 6 more
 - Prior summary/context: prior compacted content: Archived 15 response topic(s): Why "Application progress" doesn't show the accepted step; Ho...
-<!-- agent:boundary:9cccc034 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed the EFS Worker to production via the canonical `make deploy` path (build → apply remote D1 migrations → upload Worker), per `runbooks/deployment.md`.
+
+**Pre-deploy:** submodule clean, on `main`, synced with `origin/main` (0/0); no pending D1 migrations; `make check` green — **822 pass, 0 fail**, `build` + `build:worker` succeeded.
+
+**Deploy:** `make deploy` uploaded `equityfundingsource` (8.67s). **Version ID `73dd0840-8196-4b39-9f54-d016468b56a7`**. No new asset files to upload; no migrations to apply.
+
+**Post-deploy verification:**
+- Live smoke test `https://equityfundingsource.brian-takita.workers.dev/` → **200**.
+- Migrations pending → **none**.
+
+The recent doc-only changes (bi-directional TMO documentation) carried no code/schema delta, so this ships the current `main` Worker state cleanly.
+<!-- agent:boundary:d12a0deb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +70,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

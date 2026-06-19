@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -319,12 +319,14 @@ That broadens your operator depth without adding a third paragraph or a name nob
 **My recommendation:** add "overseas manufacturing" to the MRH line, leave Ron's name out, keep the supplier anecdote in your back pocket for the call. Want me to make that one-line edit to the note and regenerate the PDF? Say the word.
 
 Nothing sent.
-<!-- agent:boundary:9d9f7f03 -->
+<!-- agent:boundary:1ecbc4c1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- I don't manager the China supplier relationship. Ron brought me onto the project so Steve can sell product. Ron wants to ensure Steve can buy more product.
+- Going back to the realtime agent-doc. I add items to the queue and do light steering. agent-doc has an auto-dag for orchestrating tasks by priority.
 <!-- /agent:queue -->
 
 ## Backlog

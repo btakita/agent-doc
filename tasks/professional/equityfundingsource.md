@@ -90,7 +90,24 @@ The recent doc-only changes (bi-directional TMO documentation) carried no code/s
 > **Queue prompt:** Why is there a "TMO writeback not sent: unavailable" error?
 
 Answered in the previous response (section **(2) Why "unavailable"**). In short: `unavailable` is the admin UI's last-resort fallback string, not a server message — it shows only when the `/approve` response can't be parsed as JSON (`res.json().catch(() => null)` → `null`). That happened because `application_tmo_writeback_attempt_` ran its prelude (live-TMO loan-number generation + D1 reads/writes) **outside** its `try/catch`, so a throw there escaped as a non-JSON 500. Fixed by wrapping the whole attempt so it always returns structured JSON `{ ok:false, error }`; admins now see the real reason. Shipped in EFS `e869e73` (origin/main), superproject `5cd5c7c56`, `make check` 824/0.
-<!-- agent:boundary:db1a9506 -->
+
+### Re: deploy error message fix — opus-4-8
+
+> **Queue prompt:**
+>
+> Once an application is accepted by the admin, it should immediately be published. deploy
+
+
+> **Queue prompt:** deploy error message fix
+
+Deployed the EFS Worker to production via `make deploy`. The build picked up the `#tmowbjson` TMO-writeback fix (always-JSON `/approve` + inline error/toast above the Accept button) — wrangler uploaded the rebuilt frontend bundle **`index.browser-XPUZTLSF.js`** (1 new asset; 43 unchanged).
+
+**Pre-deploy:** EFS submodule clean, on `main`, synced with `origin/main` (0/0); HEAD `e869e73` (the fix). No pending remote D1 migrations (`No migrations to apply!`).
+
+**Deploy:** `bunx wrangler deploy` uploaded `equityfundingsource` (8.17s), Worker startup 28 ms, all bindings intact (DB, R2 ×3, Durable Objects, Access env).
+
+**Post-deploy verification:** live smoke test `https://equityfundingsource.brian-takita.workers.dev/` → **200**. The admin Deal-Pipeline "Accept and send to TMO" flow now surfaces the real failure reason (structured JSON) with the message above the button + a toast, instead of the opaque "unavailable".
+<!-- agent:boundary:9d384d9b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,7 +120,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Once an application is accepted by the admin, it should immediately be published. deploy
 <!-- /agent:queue -->
 
 ## Backlog

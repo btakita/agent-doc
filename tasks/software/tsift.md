@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -61,14 +61,12 @@ I did **not** push the v0.1.72 tag: doing so now would just re-fail Release CI i
 2. **Then push the tag:** `git tag v0.1.72 08d0f65 && git push origin v0.1.72` to trigger Release CI; the OIDC publish (incl. the 23 already-configured crates + the two newly-bootstrapped ones) will then go green.
 
 Keeping #1yks gated as the operator's actionable.
-<!-- agent:boundary:00d85b40 -->
+<!-- agent:boundary:55a9682d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: release + publish~~
-- [#1yks]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

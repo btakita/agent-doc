@@ -268,7 +268,22 @@ Done and deployed. The document/upload preview dialogs now open **full screen** 
 - Pushed: EFS `af3f5e1..a279f82` (origin/main), superproject pointer `28be2cea5`.
 
 `do [#8667]` (Lending groups) stays gated — it's `[operator-verify]`, still waiting on your name/scope/privacy decisions.
-<!-- agent:boundary:6cd3b647 -->
+
+### Re: Bring back the express-interest button, independent of proposed terms — opus-4-8
+
+Done (code committed + pushed; **deploy held** — see below). A lender can now express interest in a deal with **no proposed terms**, and proposed terms are optional.
+
+**What changed** (`src/equityfundingsource-dev`, lender deal detail `lib/ui--browser--efs/portal/investor/deal_detail.tsx`):
+- Restored a standalone **"Express interest"** button (primary) that sends interest with an **empty body** — no committed amount, no sold rate required. Works even when a deal shows no remaining balance, since each loan funds at full value.
+- The committed-amount / sold-rate inputs are now an **"Optional — propose loan terms"** section. Submitting it sends/updates a proposal; leaving it blank still lets you express interest.
+- Once interest is sent, the card shows a "✓ Interest sent" confirmation and keeps the optional terms form (label "Update proposal") plus "Remove interest".
+
+**No server change needed:** the `/api/investor/deals/:id/interested` POST already stored a term-free interest — `loan_term_proposal_from_body_` returns no proposal (and no error) when amount/rate are absent. This was purely a client-side coupling: the old UI threw `'proposal'` unless amount+rate were filled. Validation is now gated on `with_proposal`.
+
+**Verified:** `bun test` → **836 pass / 0 fail** (added #express-interest assertions to the investor e2e suite); browser + worker builds clean. Committed/pushed: EFS `a279f82..7218eb3` (origin/main), superproject pointer `e53c8dff1`.
+
+**Deploy held:** this prompt didn't include `deploy` (unlike the full-screen one), so I committed + pushed but did **not** push to the live Worker. Say **"deploy"** (or re-queue with it) and I'll `make deploy` + smoke-test it live.
+<!-- agent:boundary:7c62e789 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -284,8 +299,9 @@ After 20:30
 - ~~:pushpin: Fix test suite~~
 - ~~:pushpin: What is "Sold rate %"?~~
 - ~~:pushpin: All upload preview dialogs should be full screen. deploy~~
+- ~~:pushpin: All upload preview dialogs should be full screen. deploy~~
+- :pushpin: EFS does not arrange partial loans from independent lenders. If a lender or lender group is interested in the loan, the entity will service the entire loan. The proposed terms are optional. A lender can be interested in a loan without any proposed terms. The lender may want to learn more about the property and the borrower...such as receiving documents or viewing the property in person. Please bring back the button to express interest that is independent of the proposed terms.
 - do [#8667]
-- All upload preview dialogs should be full screen. deploy
 <!-- /agent:queue -->
 
 ## Backlog

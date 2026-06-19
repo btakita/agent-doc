@@ -148,12 +148,37 @@ Filed `[recommended]` follow-up: if yield ever becomes an operational concern, r
 - There is no live yield regression to investigate, so there is nothing to execute now.
 
 Go-mode pulled this backlog item into the active queue (`#backlog-queue-attr-populates-in-go-mode`), which would churn a no-op every cycle. Marking it `--done` to drain the head — the recommendation is preserved in `tsift.done.md` and is recoverable if a real yield concern ever surfaces. If/when that happens, the A/B re-run is operator-gated (needs GPU + Ollama), not agent-drainable. No code changed.
-<!-- agent:boundary:39112975 -->
+
+### Re: Promote usage of tsift kg — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Promote usage of tsift kg
+
+
+Done (code-only scope you picked: `status` `use:` + `tsift workflow`, plus spec + tests + build + install + commit + push). tsift `6af8a07`, superproject pointer `c68a910ab`.
+
+**What changed**
+
+- **`tsift status` now promotes `kg`.** The `use:` recommendation list was `search, explain, graph` and never surfaced the KG. `build_recommendations` now appends `kg` (right after `graph`) whenever a project `.tsift/graph.db` exists; absent a graph.db it stays omitted so agents extract before they read. Verified live in this repo: `use: search, explain, graph, kg`.
+- **New `tsift workflow kg` recipe** (aliases `knowledge-graph`, `kg-workflow`): smoke-check → `kg extract` → `kg status` → `kg refresh` (`--apply` to re-extract drifted sources) → `kg evidence`. Handle contract is "extract once per source, answer reads with status/evidence." Unknown workflow topics now fail closed listing `search, kg`.
+- I corrected the recipe to match real flags while writing it: `kg evidence` takes `--symbol`/`--kind` (not a positional) and has **no** `--budget`; `kg status` JSON is `total_nodes`/`total_edges`/`nodes_by_kind`.
+
+**Spec + tests + verify**
+
+- `specs/search-navigation.md` documents both behaviors (the `kg` workflow recipe and the graph.db-gated `use:` promotion).
+- Tests: `status_fresh_index_with_graph_db_recommends_kg` / `..._without_graph_db_omits_kg` (presence + ordering), `kg_workflow_recipe_covers_extract_to_evidence` (step shape, `--symbol`/no-`--budget` guard).
+- `make check` green (full suite, exit 0, no `FAILED`); `cargo install --path .` replaced `~/.cargo/bin/tsift`; live `tsift status` / `tsift workflow kg` / unknown-topic all confirmed.
+
+**CI:** run `27847989538` is `in_progress` on `6af8a07` at finalize time — local suite is fully green; will surface if it goes red. I scoped strictly to code/spec/test per your "code only (use: output)" choice — no SKILL.md/AGENTS.md/runbook edits.
+<!-- agent:boundary:2e551c79 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- ~~:pushpin: Promote usage of tsift kg~~
+- Promote usage of tsift kg
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

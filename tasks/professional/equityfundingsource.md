@@ -328,6 +328,11 @@ Done (code committed + pushed; **deploy held** — the queued `deploy` comes aft
 
 ### Re: Use Title Case for all headings and buttons — opus-4-8
 
+> **Queue prompt:**
+>
+> Use "Title Case" for all headings and buttons. We are currently using "Sentence case".
+
+
 Done (code committed + pushed; **deploy held** for the next `deploy` queue item, which ships this + the Deal Summary removal together). All portal **headings and buttons** are now Title Case instead of Sentence case.
 
 **Scope** (`src/equityfundingsource-dev`, 50 UI files across admin / borrower / broker / investor / shared portals): card-title, page-title, blank-title (empty-state), section/step headings, bare `<h1>`–`<h6>` tags, and `<button>` / `btn`-link labels — **264 strings**. Examples: "Broker dashboard" → "Broker Dashboard", "Pipeline activity" → "Pipeline Activity", "Available deals" → "Available Deals", "Express interest" → "Express Interest", "No available deals" → "No Available Deals".
@@ -342,7 +347,7 @@ Done (code committed + pushed; **deploy held** for the next `deploy` queue item,
 **Committed/pushed:** EFS `1637a53..873c9e4` (origin/main), superproject pointer `0834b79ef`.
 
 **Deploy held** — the next `deploy` item will `make deploy` both the Deal Summary removal and this Title Case pass.
-<!-- agent:boundary:9837ab12 -->
+<!-- agent:boundary:f2445920 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -358,7 +363,7 @@ After 20:30
 - ~~:pushpin: EFS does not arrange partial loans from independent lenders. If a lender or lender group is interested in the loan, the entity will service the entire loan. The proposed terms are optional. A lender can be interested in a loan without any proposed terms. The lender may want to learn more about the property and the borrower...such as receiving documents or viewing the property in person. Please bring back the button to express interest that is independent of the proposed terms.~~
 - ~~:pushpin: deploy~~
 - ~~Remove "Deal Summary" section from https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d. The terms of the deal have not been settled yet. The lender will propose terms and the buyer will accept, reject, or negotiate the terms. We are simply not in a state where the terms of the deal should be displayed. Another benefit is the main CTA, "Express Interest" is at the top of the dialog.~~
-- Use "Title Case" for all headings and buttons. We are currently using "Sentenc case".
+- ~~Use "Title Case" for all headings and buttons. We are currently using "Sentence case".~~
 - deploy
 - do [#8667]
 <!-- /agent:queue -->

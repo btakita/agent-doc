@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -76,7 +76,7 @@ No — the Funding Commit is **EFS-owned**, not driven by TMO. Here's the actual
 So: TMO is the downstream system of record EFS syncs *to* (and reconciles amounts *from*), but a Funding Commit will never appear just because TMO has a funding — it has to exist in EFS first.
 
 **Why this matters for your earlier report:** selecting a lender writes only the interest's `selected_at` + reserves the deal; it creates no `funds` row, and TMO sync won't create one either. So the selected lender stays absent from Funding Commits until an **EFS-side** commit exists. That's exactly the decision I asked about — whether selecting a lender should auto-create that EFS commit (and for what amount), add an admin "Add commitment" action, or leave it to the lender's portal funding. Let me know which and I'll build it.
-<!-- agent:boundary:4137e788 -->
+<!-- agent:boundary:14a4340a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,6 +89,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Create a document that explains the entire Deal Pipeline flow...which includes the actions of all roles: Borrower, Admin, Lender. Also include a variant of the deal pipeline for the Broker.
 <!-- /agent:queue -->
 
 ## Backlog

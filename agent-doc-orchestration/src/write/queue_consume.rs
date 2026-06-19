@@ -684,6 +684,182 @@ pub(crate) fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
     Ok(true)
 }
 
+/// True when `text` is a free-text queue prompt (NOT an id-backed directive and
+/// NOT a queue trigger) — the per-entry analogue of
+/// [`queue_head_is_free_text_prompt`], used by the position-independent
+/// answered-head strike (#ftstrike) which must classify entries anywhere in the
+/// queue, not only the active head.
+pub(crate) fn queue_prompt_text_is_free_text(content: &str, text: &str) -> bool {
+    let normalized = normalize_queue_prompt_text(text);
+    if let Some(id) = queue_prompt_done_id(&normalized)
+        && topic_resolves_to_exact_id(&normalized, &id)
+    {
+        // Mirrors `queue_head_is_free_text_prompt`: a head resolving to exactly a
+        // registered preset token has no `--done` reap path, so it is free text;
+        // any other exact-id directive is id-backed.
+        return head_id_is_registered_preset(content, &id);
+    }
+    !crate::diff::detect_queue_trigger(&normalized)
+}
+
+/// Collapse a string to lowercase alphanumeric words separated by single spaces.
+/// Every non-alphanumeric run (`:pushpin:`, `- `, backticks, punctuation,
+/// newlines) becomes one space, so two spellings of the same prompt compare equal
+/// regardless of cosmetic markers (#ftstrike).
+fn normalize_for_answer_match(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_space = false;
+    for ch in s.chars() {
+        if ch.is_alphanumeric() {
+            for lc in ch.to_lowercase() {
+                out.push(lc);
+            }
+            prev_space = false;
+        } else if !prev_space && !out.is_empty() {
+            out.push(' ');
+            prev_space = true;
+        }
+    }
+    out.trim().to_string()
+}
+
+/// The concatenated, normalized text of every `>` blockquote line in the response.
+/// The skill quotes the prompt it is answering as a blockquote (`> **Queue
+/// prompt:**` / `> <text>`), so a free-text head is "answered" only when its text
+/// appears in this quoted region — prose that merely *mentions* a head (without
+/// quoting it as a prompt) does NOT count, which keeps an unaddressed operator
+/// report from being silently struck (#ftstrike false-strike guard).
+fn response_blockquote_text(response_body: &str) -> String {
+    let joined = response_body
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| line.starts_with('>'))
+        .map(|line| line.trim_start_matches('>'))
+        .collect::<Vec<_>>()
+        .join(" ");
+    normalize_for_answer_match(&joined)
+}
+
+/// True when the committed `response_body` answers the free-text queue head
+/// `head_text`: its normalized text appears inside the response's quoted-prompt
+/// blockquote region. Requires a head of at least four significant words so a
+/// short/empty head cannot match incidentally — the conservative direction,
+/// because a false positive silently drops an unaddressed operator report.
+pub(crate) fn free_text_head_answered_by_response(response_body: &str, head_text: &str) -> bool {
+    // Strip the leading operator/agent pin (`:pushpin:` …) first — its literal
+    // shortcode word would otherwise survive normalization and break the match.
+    let head_clean = crate::queue::strip_priority_markers(head_text);
+    let head_norm = normalize_for_answer_match(&head_clean);
+    if head_norm.split(' ').filter(|w| !w.is_empty()).count() < 4 {
+        return false;
+    }
+    response_blockquote_text(response_body).contains(&head_norm)
+}
+
+/// Node keys of every non-struck free-text queue head that `response_body`
+/// answers, at ANY position in the queue (#ftstrike). Mirrors how
+/// `strike_done_queue_head_prompts` strikes id-backed heads regardless of
+/// position, but matches free-text heads to the answering response instead of a
+/// tracked id outcome.
+pub(crate) fn answered_free_text_head_node_keys(
+    content: &str,
+    response_body: &str,
+) -> Result<Vec<String>> {
+    if response_body.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("free-text strike: failed to derive queue node keys: {err}"))?;
+    let mut keys = Vec::new();
+    for node in nodes {
+        if node.item.struck {
+            continue;
+        }
+        let text = node.item.text.trim();
+        if text.is_empty() || !queue_prompt_text_is_free_text(content, text) {
+            continue;
+        }
+        if free_text_head_answered_by_response(response_body, text) {
+            keys.push(node.node_key);
+        }
+    }
+    Ok(keys)
+}
+
+/// Strike every free-text queue head that the committed `response_body` answers,
+/// regardless of position (#ftstrike). The normal leading-head consume only
+/// strikes a contiguous leading run and stops at an id-backed head, so a free-text
+/// report sitting BEHIND an unfinished `do [#id]` head was never struck even after
+/// the response addressed it. This pass closes that gap by matching answered
+/// free-text heads to the response's quoted-prompt blockquotes. Strikes the doc
+/// and the snapshot in sync; returns the number of heads struck. No-op when the
+/// queue is inactive, the response is empty, or nothing matches.
+pub fn strike_answered_free_text_queue_heads(
+    file: &Path,
+    response_body: &str,
+    skip_visible_guard: bool,
+) -> Result<usize> {
+    if response_body.trim().is_empty() {
+        return Ok(0);
+    }
+    let _lock = acquire_doc_lock(file)?;
+    let content =
+        std::fs::read_to_string(file).context("free-text strike: failed to read document")?;
+    let (fm, _) = frontmatter::parse(&content)?;
+    if fm.queue_active != Some(true) {
+        return Ok(0);
+    }
+    let keys = answered_free_text_head_node_keys(&content, response_body)?;
+    if keys.is_empty() {
+        return Ok(0);
+    }
+    let new_document = consume_queue_nodes_by_key(&content, &keys)?;
+    if new_document == content {
+        return Ok(0);
+    }
+
+    // Snapshot sync: match the same answered free-text heads in the snapshot and
+    // strike them by the snapshot's own node keys (keys are position/hash derived
+    // and need not equal the document's). Required closeouts must prove both sides
+    // converge on the struck state.
+    let new_snapshot = match snapshot::load(file)? {
+        Some(snap) => {
+            let snap_keys = answered_free_text_head_node_keys(&snap, response_body)?;
+            if snap_keys.is_empty() {
+                None
+            } else {
+                Some(consume_queue_nodes_by_key(&snap, &snap_keys)?)
+            }
+        }
+        None => None,
+    };
+
+    if skip_visible_guard {
+        atomic_write(file, &new_document)
+            .context("free-text strike: failed to write document")?;
+    } else {
+        converge_document_or_disk(file, &new_document, &content, "free_text_strike")
+            .context("free-text strike: failed to write document")?;
+    }
+    if let Some(snap) = new_snapshot {
+        snapshot::save(file, &snap)?;
+    }
+
+    eprintln!(
+        "[queue] struck {} answered free-text head(s) by response match (#ftstrike)",
+        keys.len()
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "freetext_head_strike file={} struck={}",
+            file.display(),
+            keys.len()
+        ),
+    );
+    Ok(keys.len())
+}
+
 /// Resolve whether this cycle's committed response should consume (strike) the
 /// active queue head. Single source of truth for the strict-closeout decision so
 /// successful closeouts advance the queue identically and never leave an answered
@@ -2200,6 +2376,121 @@ mod core_tests {
             "an answered free-text head must be consumed on successful closeout"
         );
     }
+    // ---- #ftstrike: position-independent answered free-text head strike ----
+
+    const FTSTRIKE_RESPONSE: &str = concat!(
+        "### Re: two reports — opus\n\n",
+        "> **Queue prompts:**\n",
+        "> - JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.\n",
+        "> - My free-text queue items are not immediately struck as if they are addressed.\n\n",
+        "Triaged both.\n",
+    );
+
+    #[test]
+    fn free_text_head_answered_when_quoted_in_response_blockquote() {
+        assert!(free_text_head_answered_by_response(
+            FTSTRIKE_RESPONSE,
+            "My free-text queue items are not immediately struck as if they are addressed."
+        ));
+        // Cosmetic differences (`:pushpin:`, leading `- `, backticks) must not matter.
+        assert!(free_text_head_answered_by_response(
+            FTSTRIKE_RESPONSE,
+            ":pushpin: JB Run Agent Doc is stalled on this document when I tried to start the queue run. No notification."
+        ));
+    }
+
+    #[test]
+    fn free_text_head_not_struck_when_only_mentioned_in_prose() {
+        // FALSE-STRIKE GUARD: a head whose text appears only in prose (not a `>`
+        // quoted-prompt blockquote) must NOT be considered answered — otherwise an
+        // unaddressed operator report would be silently struck/dropped.
+        let prose_only = concat!(
+            "### Re: something else — opus\n\n",
+            "I noticed my free-text queue items are not immediately struck as if they are addressed, ",
+            "but that is a different report I did not handle this turn.\n",
+        );
+        assert!(!free_text_head_answered_by_response(
+            prose_only,
+            "My free-text queue items are not immediately struck as if they are addressed."
+        ));
+    }
+
+    #[test]
+    fn free_text_head_too_short_is_not_matched() {
+        let resp = "### Re: x\n\n> - fix it now\n";
+        assert!(!free_text_head_answered_by_response(resp, "fix it now"));
+    }
+
+    #[test]
+    fn answered_free_text_heads_selected_behind_id_backed_head() {
+        // The exact regression: two free-text reports sit BEHIND an unfinished
+        // `do [#fullboundary]` id head. The response answers both. The selector must
+        // return the two free-text node keys and NOT the id-backed head.
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#fullboundary]\n",
+            "- :pushpin: JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.\n",
+            "- :pushpin: My free-text queue items are not immediately struck as if they are addressed.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let keys = answered_free_text_head_node_keys(content, FTSTRIKE_RESPONSE).unwrap();
+        assert_eq!(
+            keys.len(),
+            2,
+            "both answered free-text heads behind the id head must be selected: {keys:?}"
+        );
+        // The id-backed `do [#fullboundary]` head must never be selected by this pass.
+        assert!(
+            !keys.iter().any(|k| k.contains("fullboundary")),
+            "id-backed head must not be struck by the free-text pass: {keys:?}"
+        );
+    }
+
+    #[test]
+    fn queue_prompt_text_is_free_text_classification() {
+        let content = "---\nqueue_active: true\n---\n<!-- agent:queue -->\n- x\n<!-- /agent:queue -->\n";
+        assert!(!queue_prompt_text_is_free_text(content, "do [#fullboundary]"));
+        assert!(!queue_prompt_text_is_free_text(content, "#orphanqhead"));
+        assert!(queue_prompt_text_is_free_text(
+            content,
+            "My free-text queue items are not immediately struck as if they are addressed."
+        ));
+    }
+
+    #[test]
+    fn strike_answered_free_text_heads_strikes_behind_id_head_end_to_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#fullboundary]\n",
+            "- :pushpin: JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.\n",
+            "- :pushpin: My free-text queue items are not immediately struck as if they are addressed.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let struck = strike_answered_free_text_queue_heads(&doc, FTSTRIKE_RESPONSE, true).unwrap();
+        assert_eq!(struck, 2, "both answered free-text heads must be struck");
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        // The id head stays runnable (not struck); the two free-text heads are struck.
+        assert!(
+            updated.contains("- do [#fullboundary]\n"),
+            "id-backed head must remain unstruck:\n{updated}"
+        );
+        assert!(
+            updated.matches("~~").count() >= 4,
+            "two heads struck => four ~~ markers:\n{updated}"
+        );
+        // Idempotent: a second pass strikes nothing more.
+        let again = strike_answered_free_text_queue_heads(&doc, FTSTRIKE_RESPONSE, true).unwrap();
+        assert_eq!(again, 0, "already-struck heads must not be re-struck");
+    }
+
     #[test]
     fn consume_decision_strikes_synthetic_preset_head_on_heading_match() {
         let dir = tempfile::tempdir().unwrap();

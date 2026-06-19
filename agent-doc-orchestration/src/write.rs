@@ -2125,6 +2125,23 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 }
             }
         }
+
+        // `#ftstrike`: strike any free-text queue head this cycle's response
+        // answered, regardless of position. The leading-head consume above only
+        // strikes a contiguous leading run and stops at an id-backed head, so a
+        // free-text report sitting BEHIND an unfinished `do [#id]` head (the
+        // common case while a backlog directive head is still draining) was never
+        // struck even after the response addressed it — the operator could not
+        // tell which typed reports were answered. This runs independent of
+        // `queue_consumption_allowed` (which governs the leading head only) and is
+        // best-effort: a missed strike must never fail an otherwise-clean closeout.
+        if commit_mode != CommitMode::None {
+            match strike_answered_free_text_queue_heads(file, &response_body, options.force_disk) {
+                Ok(0) => {}
+                Ok(n) => eprintln!("[queue] struck {n} answered free-text head(s) (#ftstrike)"),
+                Err(e) => eprintln!("[queue] warning: free-text head strike failed: {e}"),
+            }
+        }
     }
 
     // `#pendingaddqueuesync`: `--pending-add*` mutations are applied during

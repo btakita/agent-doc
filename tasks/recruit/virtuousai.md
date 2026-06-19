@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -123,7 +123,25 @@ Done. Added the stealth-client real-time work to the resume and rebuilt the tail
 **Framing held to your guardrails:** client unnamed ("under NDA"), framed as *low-latency production AI systems* (engineering depth), reinforcing Presence AI which still leads the experience. No numbers.
 
 Resume changes are **left uncommitted in the `resume/` submodule** for your review, consistent with the prior cycles. Say the word and I'll commit the submodule and bump the superproject pointer.
-<!-- agent:boundary:2ed8b6a5 -->
+
+### Re: availability concern — MRH side-project, EFS subcontractor — opus-4-8
+
+> **Queue prompt:**
+>
+> "I'm building Equity Funding Source, a fintech loan platform on Cloudflare Workers and D1, end to end". I'm using a subcontractor with this project. One concern with the conversation with laura-rondon-de-barros is if I would have enough time to take a full time role. I need to emphasize that MRH is a side-project and I'm using a subcontractor for EFS. 
+
+
+Good catch — that's a real risk. "Right now I'm building Equity Funding Source... end to end" reads as a current full-time commitment, which is exactly the doubt you don't want Laura carrying into the client conversation. Fixed it. Draft: [`mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md`](../../mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md) (still **draft, not sent**).
+
+**The fix has two parts, and the split is the important move:**
+
+- **A short private note to Laura (not forwarded)** carries the availability reassurance directly: *"I'm ready to commit to this full-time. MonsterRodHolders runs on light operational time, and I architected Equity Funding Source with a subcontractor handling the build, so neither one competes with a full-time role. My calendar is open."* One confident breath — stated as fact, not a defense.
+- **The forwardable team message keeps zero bandwidth language.** Putting "side project" or "I have time" in the body would *plant* the doubt for Chris and Rory instead of closing it. So the reassurance lives only where it's needed (with Laura), and the team-facing note stays pure leverage.
+
+**Why I didn't just call MRH a "side project" in the body:** that word undercuts the operator-empathy point that makes you stand out — the whole value is "I've *run* a real business and felt the execution gap." So in the forwardable note MRH still reads as a business you own ("I own more than the code: the seasonal campaigns, the catalog, the SEO, the packaging, and whatever broke that week"), and **EFS is reframed as senior delegation** — *"I architected Equity Funding Source... directing a subcontractor through the build."* That removes the full-time-commitment implication and adds an architect-who-delegates signal, which is a plus for engineer #2.
+
+A judge subagent rated the split-note revision **94/100** ("zero bandwidth doubt planted in the forward, availability closed in one confident breath with Laura"), confirming diminishing returns. No numbers, no AI-tells, still your voice. **Nothing sent.**
+<!-- agent:boundary:6e1915ab -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -272,7 +272,7 @@ Drained the go-mode head. I did the agent-doable half and hit the operator-gated
 - inspecting loan `45ddae53` / deal `7a0c1463` D1 rows once **`#cftk`** (D1-Edit token) is unblocked.
 
 Since only operator-gated work remains on this head, I'm stopping the queue drain here rather than re-churning the same static dead-end.
-<!-- agent:boundary:18a9c7e5 -->
+<!-- agent:boundary:3ac7ae4c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -285,7 +285,10 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#dealtab500]
+- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=loan, the lender is selected but the Loan Status does not reflect the vendor as being selected.
+- We need to constrain Available Deal up to the point to where the lender is selected. Once the lender is selected, the Deal is no longer available to other lenders. We need a separate out "Loan Estimate", "Intent to Proceed", "Processing", "Underwriting", "Closing", "Closed", "Funded". Ensure these steps are in the Deal pipeline.
+- Once the Lender is selected, move to the "Loan Estimate" step.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -190,13 +190,36 @@ Phase 1 shipped (real, tested); Phase 2 (the live dispatch wiring) is gated on t
 **Why Phase 2 is gated, not punted:** the remaining work calls `convergence_gate_decision` inside the **live supervisor inter-item dispatch loop** (`start/idle_watch.rs` → `start.rs`) and triggers the real `--force-disk` write on timeout. That edits the live dispatch/closeout path and **cannot be verified without `make tmux-ci` across two live panes** — which can't run from this live driving session (it IS the thing under test), and shouldn't run while the editor IPC is actively drifting (the very condition this fixes). Phase 1 deliberately adds **no runtime path**, so it changes no supervisor behavior and is safe to land from a drifting session. Take Phase 2 in a focused clean cycle against a freshly-recycled supervisor. Plan: `tasks/agent-doc/plan-fullboundary-convergence-gate.md`.
 
 Build + install + supervisor recycle follow this commit (deferred past finalize so a newer binary doesn't drift this cycle's own closeout).
-<!-- agent:boundary:82dea3c6 -->
+
+### Re: do [#ftstrike] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#ftstrike]
+
+Done — fixed and tested. This is the bug you reported earlier this session ("my free-text queue items are not immediately struck as if they are addressed").
+
+**Root cause.** The leading-head consume strikes only a *contiguous leading run* of answered free-text heads and **stops at an id-backed head** (`consume_bails_on_leading_id_backed_head`). Your two reports sat *behind* `do [#fullboundary]` (an id head with no completion that cycle), so consume bailed before ever reaching them — they stayed unstruck even though my response addressed them.
+
+**Fix** — a position-independent closeout pass (`strike_answered_free_text_queue_heads`, write.rs Phase 3c, after the leading-head consume), mirroring how `strike_done_queue_head_prompts` strikes id-heads at any position:
+
+- Selects every non-struck **free-text** head whose text the committed response answers, anywhere in the queue.
+- **Conservative matcher** (`free_text_head_answered_by_response`): the head text — priority markers stripped, normalized to lowercase alphanumeric words, ≥4 significant words — must appear inside the response's `>` **quoted-prompt blockquote** region. A head merely *mentioned in prose* is **not** struck, so an unaddressed report is never silently dropped (that false-strike would be worse than the bug).
+- Strikes the document **and** the snapshot in sync via `consume_queue_nodes_by_key`; runs independent of the leading-head `queue_consumption_allowed` decision; best-effort so a missed strike never fails an otherwise-clean closeout.
+
+**Tests** — 10 unit/adversarial: quoted head struck; only-mentioned head **not** struck; sub-4-word head not matched; both heads behind an id head selected (id head never struck); end-to-end strike behind `do [#fullboundary]`; idempotent re-strike. `make check` green. Committed: submodule `00e46fa0`, superproject `e3e4ec351`. SPEC + VERSIONS updated.
+
+Note: the fix strikes heads answered **in the same cycle**. The two reports you filed earlier this session were answered before this fix existed, so they remain historically unstruck — going forward, free-text reports strike the moment a response quotes them. Build + install + recycle follow this commit.
+<!-- agent:boundary:5ddf2026 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#fullboundary]~~
+- ~~:pushpin: do [#ftstrike]~~
+- :pushpin: [#qpauseux]
+- :pushpin: [#docdriftgrace]
 - :pushpin: JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.
 - :pushpin: My free-text queue items are not immediately struck as if they are addressed.
 ---
@@ -289,9 +312,6 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
-- do [#qpauseux]
-- do [#docdriftgrace]
-- do [#ftstrike]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -318,7 +338,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ftstrike] ftstrike= #agent-doc-bug Free-text (non-[#id]) queue items are only struck when they are the leading head consumed on finalize; a free-text item sitting behind another head (e.g. behind do [#fullboundary]) is never struck even after the response addresses it, so the operator cannot tell which typed bug-reports have been answered (operator report 2026-06-19). This is the promoted form of #733r Mechanism A. Fix: strike addressed free-text heads regardless of position, mirroring strike_done_queue_head_prompts for id-heads, matching a head to an addressed Re: section (never strike an unaddressed item) and mutating only queue nodes per #semmerge. Plan: tasks/agent-doc/plan-freetext-queue-strike-on-address.md
 - [ ] [#orphanqhead] Orphaned id-backed queue head has no drain path: after a backlog item is reaped via --done, if the matching id-backed queue head [#id] strike was lost to IPC drift, the head is orphaned — --done <id> is then a no-op ("already resolved") and queue consume rejects id-backed heads ("reap via --done"), so the head is unreachable. preflight marks it queue_drainable_head_count=0 but never auto-strikes it, leaving a permanent phantom head that re-fires the auto-loop. Repro: tasks/recruit/virtuousai.md #p3kj on agent-doc 0.34.11; compounded by a wedged editor IPC (live IntelliJ buffer) refusing queue/pending writes (ack_mismatch/send_failed). Fix: auto-strike id-backed heads whose backing item is already done/absent during preflight reconciliation, or allow queue consume --id <id> to strike an orphaned id-backed head.
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block to the operator badly. Two variants: (1) a deliberate/admin pause renders as a raw red Error: toast instead of an actionable notification; (2) a churn-stop pause (reason: broken editor IPC, pausing to stop churn — the #41a32133 exception that blocks every caller including an explicit operator reopen so the route restarts the stale supervisor first) renders as NOTHING — JB Run Agent Doc just silently stalls with no notification at all (operator report 2026-06-19). Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button; for the churn-stop variant surface a restart-supervisor / resume action instead of silence. Operator action: install the updated JB plugin, then verify both the paused-queue notification AND the churn-stop notification render (live gate).
 - [ ] [#docdriftgrace] [operator-verify] agent-doc thrashes when the session doc changes mid/between turn in ways unrelated to the current prompt: snapshot>visible drift (operator trimmed old committed Re: blocks + harness switch + queue edits) made preflight refuse commit (looks like a manual cleanup with stale snapshot) and forced a manual reset --from-current. Binary should classify drift by component and silently auto-rebase snapshot/CRDT for unrelated changes, surfacing ONLY structural conflicts on the in-flight prompt/response. **Operator action: watch one live re-baseline cycle to verify the silent auto-rebase.** Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md

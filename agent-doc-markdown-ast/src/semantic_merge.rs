@@ -1166,6 +1166,42 @@ mod tests {
     }
 
     #[test]
+    fn smqstrike_struck_head_survives_concurrent_operator_queue_add() {
+        // #smqstrike (semantic_merge Phase 3): an answered/consumed queue head is
+        // struck by the agent (ours) while the operator (theirs) concurrently adds
+        // a new queue item. The node-keyed merge must keep BOTH — the head struck
+        // on the merged structure AND the operator's add — with no ack
+        // (node-disjoint), so a drifted operator queue edit never aborts or loses
+        // the head strike. This is the merged-tree contract behind the shipped
+        // queue_consume node-keyed strike + divergence reconcile.
+        let base = q("- do [#a] task\n");
+        let ours = q("- ~~do [#a] task~~\n"); // agent struck the consumed head
+        let theirs = q("- do [#a] task\n- do [#b] operator added\n"); // operator add
+        let m = semantic_merge(&base, &ours, &theirs);
+        assert!(
+            m.merged_doc.contains("~~do [#a] task~~"),
+            "head must stay struck on the merged tree:\n{}",
+            m.merged_doc
+        );
+        assert!(
+            m.merged_doc.contains("do [#b] operator added"),
+            "concurrent operator queue add must survive:\n{}",
+            m.merged_doc
+        );
+        assert_eq!(reparses_to_ids(&m.merged_doc, "queue"), vec!["a", "b"]);
+        assert!(
+            m.requires_ack.is_empty(),
+            "node-disjoint strike+add needs no ack: {:?}",
+            m.requires_ack
+        );
+        assert_eq!(
+            outcome_for(&m, "a").unwrap().kind,
+            OutcomeKind::AppliedAgentEdit,
+            "the strike is an applied agent flag-edit"
+        );
+    }
+
+    #[test]
     fn row_present_agent_unchanged_operator_edited() {
         let base = q("- do [#a] task\n");
         let ours = base.clone();

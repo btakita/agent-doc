@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -73,13 +73,37 @@ The release is already done as far as an agent can take it — there is no new a
 > release + publish
 
 Duplicate of the queue head answered immediately above. The v0.1.71 release is published (GitHub Release + OpenCode npm + all binaries); the only outstanding step is the crates.io publish, which failed solely because no OIDC Trusted Publisher is registered for `btakita/tsift` — the operator-gated `#vmax`. Working tree is clean at the already-tagged `v0.1.71` HEAD, so there is nothing for a second release pass to do. Queue drained; not auto-looping.
-<!-- agent:boundary:f6cd8730 -->
+
+### Re: Follow crates.io/docs/trusted-publishing to setup trusted publishing — done + verified — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Follow https://crates.io/docs/trusted-publishing to setup trusted publishing.
+
+
+> **Queue prompt:**
+>
+> Follow https://crates.io/docs/trusted-publishing to setup trusted publishing.
+
+Done — this completes the operator-gated `#vmax`/`#1td4` that was the sole remaining gap in the v0.1.71 `release + publish`. Crates.io Trusted Publishing is now configured for **all 23 tsift crates** and the previously-failing OIDC publish is live.
+
+**What I did** (via your authenticated crates.io browser session, driven over chromium-bridge against the crates.io tab so your active tab was never hijacked — confirmed logged in as `btakita`):
+- Registered a GitHub Actions Trusted Publisher for **all 23 crates** in `release.yml`'s publish list — `repository_owner=btakita`, `repository_name=tsift`, `workflow_filename=release.yml`, no environment — via `POST /api/v1/trusted_publishing/github_configs`. All 23 returned HTTP 200.
+- Verified persistence: a follow-up GET per crate returned **23/23** with exactly one config each = `btakita/tsift:release.yml`.
+- Gate var `TSIFT_ENABLE_CRATES_PUBLISH` was already `true` (set 2026-05-21), so no change needed.
+
+**Verification (the actual publish):**
+- Re-ran the failed `publish crates.io package` job from the v0.1.71 release run (`27841350649 --failed`) rather than churning a new tag/GitHub-release/npm pass.
+- The **"Authenticate to crates.io via OIDC trusted publishing" step now succeeds** — this is the exact step that previously failed with `No Trusted Publishing config found for repository btakita/tsift`.
+- The publish is live via OIDC: `tsift-core` already moved to `0.1.71` on crates.io; the remaining crates publish in dependency order (each waits for crates.io to index its dependency). The full 23-crate publish is finishing in the background.
+
+No code or workflow change was required — the OIDC migration (`#1td4`, `rust-lang/crates-io-auth-action@v1`) was already shipped; it only needed the per-crate Trusted Publisher registration, which is what this did. Future `v*` releases now publish to crates.io automatically with no token/secret.
+<!-- agent:boundary:26a77da7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: Follow https://crates.io/docs/trusted-publishing to setup trusted publishing.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -421,7 +421,18 @@ I went ahead and triggered the recycle — the controller for this project is **
 **Nothing substantive is pending** — the note rewrite is finished and committed (honest framing, no ownership/realtime overclaims, PDF regenerated). The only thing left is session bookkeeping that the recycle unblocks.
 
 So: just re-invoke `/agent-doc tasks/recruit/virtuousai.md` once more after this, and I'll finish the cleanup on the healthy controller. If the stale `[#p3kj]` head still appears after the recycle, tell me and I'll escalate (`reset --from-current --preserve-session`). Nothing sent.
-<!-- agent:boundary:01e32b53 -->
+
+### Re: recycle worked — clearing the queue and closing #p3kj — opus-4-8
+
+The recycle took — clean IPC is back, pending/queue writes go through again. Closing out the bookkeeping:
+
+- **#p3kj marked done.** The note rewrite is finished and committed: MRH reframed as technical/growth work (no ownership claim), hook rebased on what's true either way, EFS left as "architected, directing a subcontractor," PDF regenerated and verified.
+- **Clearing the stale queue** — the `[#p3kj]` head (now done) and your cut-off `agent-doc` note are both resolved, so I'm draining them.
+
+**On that cut-off `agent-doc` note** (so it's not left dangling): you pointed at the line claiming agent-doc lets you "steer while it's running" and "redirect mid-task." I softened it in the note to claim only the definitely-true behavior — *"you steer the work by editing the document and queueing direction"* — since this session has been queue-paced between cycles, not true mid-run interruption. If agent-doc actually does support live mid-run steering and I under-sold it, say so and I'll restore the stronger wording. Otherwise the conservative version stands.
+
+That closes everything: the letter is honest and done, the queue is clear, #p3kj is reaped. Nothing sent.
+<!-- agent:boundary:e99222da -->
 <!-- /agent:exchange -->
 
 ## Queue

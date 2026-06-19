@@ -3402,6 +3402,48 @@ mod tests {
         ));
     }
     #[test]
+    fn strike_done_queue_prompts_strikes_all_sibling_lines_for_one_resolved_id() {
+        // #qstrikeall: when an id is resolved this cycle (e.g. `--review-resolve`
+        // archives it to agent:done), EVERY queue line referencing that id must
+        // strike — not just the leading one. A bare pin `[#id]` and a `do [#id]`
+        // directive for the same resolved id are both struck, at any position,
+        // even behind an unrelated live head. (The earlier single-strike report
+        // was against a stale binary; this locks in the multi-strike behavior.)
+        let entries = vec![
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "[#8667]".to_string(),
+                multiline: false,
+            }),
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#liveone]".to_string(),
+                multiline: false,
+            }),
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#8667] follow-up".to_string(),
+                multiline: false,
+            }),
+        ];
+        let done_ids: std::collections::HashSet<String> =
+            ["8667".to_string()].into_iter().collect();
+
+        let (rewritten, struck) = super::strike_done_queue_head_prompts(&entries, &done_ids)
+            .expect("both #8667 sibling lines must strike");
+        assert_eq!(struck.len(), 2, "both lines for the resolved id strike: {struck:?}");
+        assert!(matches!(
+            &rewritten[0],
+            crate::queue::QueueEntry::Completed(p) if p.text == "[#8667]"
+        ));
+        // The unrelated live head between them is preserved.
+        assert!(matches!(
+            &rewritten[1],
+            crate::queue::QueueEntry::Prompt(p) if p.text == "do [#liveone]"
+        ));
+        assert!(matches!(
+            &rewritten[2],
+            crate::queue::QueueEntry::Completed(p) if p.text == "do [#8667] follow-up"
+        ));
+    }
+    #[test]
     fn collect_agent_review_gated_ids_extracts_only_gated_marker() {
         let content = "\
 <!-- agent:review -->

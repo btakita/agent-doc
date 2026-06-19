@@ -229,7 +229,23 @@ It composes with `#fullboundary` (fewer concurrent writers → fewer merges) and
 I'm filing rather than implementing this cycle on purpose: it edits the CRDT/merge core — the same machinery producing this session's live `content_ours`/`live_prompt_drift` adoption — and a merge-core change must not be rushed in a session that is itself actively drifting. It needs a focused cycle with `make check` (+ `make tmux-ci` if the converge path is touched).
 
 (Also queued now: `#fbwire` = the `#fullboundary` Phase 2 live wiring, and `#donemirrorreap` = the false-reap bug, both from last cycle.)
-<!-- agent:boundary:6be49969 -->
+
+### Re: do [#donemirrorreap] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#donemirrorreap]
+
+Done — fixed and tested. This is the false-reap I caught two cycles ago, when the gated `[/] [#fullboundary]` review item vanished as an "already-done mirror."
+
+**Root cause.** `collect_agent_done_ids_with_root` built the "already done" id set by running `extract_pending_ids_from_text` over the **entire** `agent:done` component + external `archive=` file — which harvests *every* `[#id]` bracket anywhere in the text. The `#ftstrike` done-archive entry cites `[#fullboundary]` in its prose ("…a head behind do `[#fullboundary]` is now struck…"), so `fullboundary` landed in the done set, and the mirror-reap then removed the still-open `[/] [#fullboundary]` review item.
+
+**Fix.** New `agent-doc-core::extract_done_item_own_ids` collects only each list-item's **first** `[#id]` (its own identity) — skipping checkbox markers (`[x]`/`[/]`) and prose/continuation lines entirely. `collect_agent_done_ids_with_root` now uses it for both the inline `agent:done` component and the `archive=` file. A `[#id]` cited inside an item's description no longer marks that id done, so a citing entry can't reap an unrelated open mirror.
+
+**Tests** — 2 new (`extract_done_item_own_ids_ignores_prose_citations` asserts the `#ftstrike`-cites-`#fullboundary` case yields only `ftstrike`, and that the old whole-text extractor *does* harvest the citation, pinning the contrast; `..._handles_checkbox_and_skips_prose_lines`). The existing mirror-reap regression tests stay green (legit done items still reap their own mirrors). `make check` green. Committed: submodule `dd3f231d`, superproject `29854bc33`. SPEC + VERSIONS updated; build + install + recycle follow this commit.
+
+This is the same false-reap family as `#opsproofgate`. `#fbwire` (the `#fullboundary` Phase 2 wiring it falsely reaped) remains the actionable Phase-2 item.
+<!-- agent:boundary:8d0815f3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -332,7 +348,7 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
-- :pushpin: do [#donemirrorreap]
+- ~~:pushpin: do [#donemirrorreap]~~
 - :pushpin: do [#fbwire]
 - do [#hap7]
 <!-- /agent:queue -->
@@ -362,7 +378,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#hap7] qdup=#agent-doc-bug Operator-reported (2026-06-19): agent-doc duplicated the operator equityfundingsource.md queue prompt ("All upload preview dialogs should be full screen. deploy") on a concurrent edit. Second instance of the queue-prompt duplication family (first: the virtuousai.md report). Fix per operator spec: constrain the CRDT/semantic merge to the structural part it applies to — run per-structural-node merges (not whole-component/document merges) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; and when the operator deletes a structure that agent content targets, note it in agent:exchange instead of merging (in-editor doc is source of truth). Composes with #fullboundary (fewer writers) + #semmerge (per-structure constraint). Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md
-- [ ] [#donemirrorreap] #agent-doc-bug Preflight review reconciliation falsely reaped the gated [/] [#fullboundary] review item as an already-done mirror because the id appears only in PROSE inside an unrelated agent:done entry (the #ftstrike done archive mentions behind do fullboundary). The done-mirror detector must match a reaped id against the DONE items own id/heading token, not a substring mention in another done entrys prose. Repro: gate an id cycle N, archive a different item cycle N+1 whose text mentions that id -> gated review item reaped. Same false-reap family as #opsproofgate.
 - [ ] [#fbwire] #agent-doc-bug Phase 2 live wiring of the #fullboundary convergence gate (Phase 1 decision core + playback shipped, submodule 17010e78; gated review item falsely reaped this cycle, see #donemirrorreap). Call convergence_gate_decision inside the supervisor idle-queue-watch/drain inter-item dispatch (start/idle_watch.rs to start.rs): gather the four facts (committed via cycle_state, editor converged==HEAD via emit_postcommit_worktree_check, ipc_socket inflight==0, actor idle), defer the next trigger until Dispatch, on ForceDiskFallback do the real --force-disk write + record_force_disk_fallback. Add SimWorld acceptance (slow-ACK never piles inflight>1; wedged-editor timeout to force-disk + loadable playback). Live-supervisor-critical: needs make check + make tmux-ci. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md
 - [ ] [#orphanqhead] Orphaned id-backed queue head has no drain path: after a backlog item is reaped via --done, if the matching id-backed queue head [#id] strike was lost to IPC drift, the head is orphaned — --done <id> is then a no-op ("already resolved") and queue consume rejects id-backed heads ("reap via --done"), so the head is unreachable. preflight marks it queue_drainable_head_count=0 but never auto-strikes it, leaving a permanent phantom head that re-fires the auto-loop. Repro: tasks/recruit/virtuousai.md #p3kj on agent-doc 0.34.11; compounded by a wedged editor IPC (live IntelliJ buffer) refusing queue/pending writes (ack_mismatch/send_failed). Fix: auto-strike id-backed heads whose backing item is already done/absent during preflight reconciliation, or allow queue consume --id <id> to strike an orphaned id-backed head.
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block to the operator badly. Two variants: (1) a deliberate/admin pause renders as a raw red Error: toast instead of an actionable notification; (2) a churn-stop pause (reason: broken editor IPC, pausing to stop churn — the #41a32133 exception that blocks every caller including an explicit operator reopen so the route restarts the stale supervisor first) renders as NOTHING — JB Run Agent Doc just silently stalls with no notification at all (operator report 2026-06-19). Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button; for the churn-stop variant surface a restart-supervisor / resume action instead of silence. Operator action: install the updated JB plugin, then verify both the paused-queue notification AND the churn-stop notification render (live gate).

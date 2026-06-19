@@ -417,7 +417,23 @@ Decisions locked, and **Phase 1 (schema + repo + tests) is built, green, committ
 **One design call I made for you** (flag if you'd rather change it): "majority stake => more control" is modeled as control *derived from stake share* rather than a stored "controller" flag — the `lead` (group creator) is recorded, but the controlling vote follows whoever holds the largest stake (group-level `default_stake_bps`, or per-deal `allocation_bps`). That keeps control honest as percentages shift per deal.
 
 **Next:** Phases 2-4 are queued as actionable backlog items — `#8667p2` (group CRUD + invites, incl. admin account auto-create), `#8667p3` (deal participation + per-deal allocations + majority surfacing), `#8667p4` (admin visibility). None are blocked; say the word and I'll take Phase 2.
-<!-- agent:boundary:fd13ae73 -->
+
+### Re: do #8667p2 — Multi-Lender Group Phase 2 shipped — opus-4-8
+
+Phase 2 (group CRUD + invites + admin setup) is built, green, committed, and pushed to `origin/main` (`138448b`).
+
+**What shipped** (`app/equityfundingsource/lib/lending_groups/`):
+- `service.ts` — `ensure_lender_account_` (mirrors `ensure_admin_`; auto-creates the account, never flips an existing one's role), `lending_group_create_with_lead_`, `lending_group_invite_member_` (admin `auto_create` seats active; lender-to-lender invite stays pending), `lending_group_respond_invite_` (accept/decline; matches by user_id then invited email; links the account), `lending_group_user_is_member_`.
+- `routes.ts` (mounted in `worker.ts`) — Lender API (`role=investor`): `GET/POST /api/lender/groups`, `GET /api/lender/groups/:id` (group + members, member-gated so co-lenders see each other), `POST .../invites`, `POST .../respond`. Admin API: `POST /api/admin/lending-groups` (set up a group, auto-creating lender accounts by email) + `GET /api/admin/lending-groups/:id`.
+- `notify.ts` — invite + member-joined notifications (in-app always; email gated by `LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED`), mirroring `lib/broker/notify.ts`.
+- `service.test.ts` — 13 tests via the bun:sqlite D1 adapter.
+
+**Key decision surfaced while building:** EFS has **no `lender` user role** — the lender base is the `investor` role (`lender` is only a message/request label). So auto-created "lender" accounts are `investor`-role users. Flagging in case you want a distinct role later.
+
+**Verification:** full suite **868 pass / 0 fail**; `build` + `build:worker` clean.
+
+Next in the queue: `#8667p3` (deal participation + per-deal allocations).
+<!-- agent:boundary:55852a5c -->
 <!-- /agent:exchange -->
 ###
 <!--

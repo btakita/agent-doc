@@ -138,17 +138,35 @@ So no unguarded binary-side session-doc disk write remains in the hot path. The 
 **Gated, not done:** `--pending-gate cyh0`. The remaining piece is genuinely operator-only — capture the exact action that raises the dialog plus the `ops.log` line at that moment (e.g. `write_authority action=… transport=disk`, or a plugin saveDocument/VCS-refresh event), so the specific unguarded/plugin path can be pinned. Likely non-closeout candidates to watch: the post-commit VCS-refresh/save-document signal and editor-IPC convergence the plugin still surfaces as a conflict.
 
 This resolves the `#cyh0` queue head; the drainable tail (`#qpausego`, `#qdurcrash`, …) is now next.
-<!-- agent:boundary:832b32f1 -->
+
+### Re: do [#qdispatchloss] — implemented; route now defers an uncommitted queue head — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#qdispatchloss]
+
+
+Implemented and shipped the **Option A (fail-closed)** fix. agent-doc `515a6663`, superproject `45b080c21`.
+
+**The bug.** Route picks an inactive `agent:queue` head straight from the live on-disk document (`std::fs::read_to_string`). The JB/VS Code plugin can sync an *uncommitted* operator queue edit to disk before it reaches a git-committed snapshot, so route would move that possibly half-typed line into the agent prompt and then lose it — the consume never lands in a committed snapshot, the item vanishes, and the turn stalls uncommitted. No-crash sibling of `#qdurcrash`.
+
+**The fix (`route.rs`).** Before surfacing an inactive head, `inactive_route_queue_head_in_content` now proves it is backed by the committed snapshot via the new `route_queue_head_backed_by_committed_snapshot` (compares the candidate head text against the queue prompt/completed entries in `snapshot::load`):
+
+- head present in a committed queue → dispatch normally;
+- head **absent** from a present committed queue, or the committed snapshot has **no queue component** at all → treat as "still being edited": return `None` and log `route_dispatch_uncommitted_head ... reason=head_not_in_committed_snapshot decision=defer`.
+
+So the activate/dispatch path no-ops, the operator's edit survives on disk, and the bare reopen routes through the normal preflight path — which commits the queue edit first and then dispatches it from the committed snapshot. Conservative by design: a missing/unreadable/unparseable snapshot **allows** the head (bootstrap escape hatch — never stalls a legitimate drain). It only affects the inactive→activate path; active-queue continuation heads (`queue_active: true`) flow through `queue_continuation::live_continuation_head` and are untouched, so the running auto-loop is unaffected.
+
+**Verification.** `make check` green (4745 passed, clippy `-D warnings` clean). 4 new tests: `route_defers_uncommitted_queue_head_not_in_committed_snapshot`, `route_dispatches_committed_queue_head`, `route_queue_head_unbacked_when_committed_snapshot_has_no_queue`, `route_queue_head_backed_allows_when_no_committed_snapshot`. FlowCore `route.rs` `reason=` budget audited 8→9. SPEC (`08-session-routing.md`) + VERSIONS + plan updated. Binary installed + release built + cdylib hot-reloaded (`lib-install`: 1 controller marked to recycle at next idle boundary). Latest CI run green.
+
+The shared durable-journal "commit the inbound queue edit before dispatch" variant stays with `#qdurcrash`; this fix achieves the same safety by deferring to the preflight-commit path rather than feeding an uncommitted line as the prompt.
+<!-- agent:boundary:45d12cc5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#pk3f]~~
-- ~~JB `Run Agent Doc` in equityfundingsource.md moves an uncommitted queue item from the queue into the agent prompt. The queue item is gone and the turn stalls uncommitted with incorrect agent input.~~
-- ~~:pushpin: do [#smqstrike]~~
-- ~~:pushpin: do [#smsim]~~
-- ~~:pushpin: do [#cyh0]~~
+- do [#qdispatchloss]
 - :pushpin: do [#qpausego]
 - :pushpin: do [#qdurcrash]
 - :pushpin: In equityfundingsource.md After a recycle restart + queue continuation, the prompt is not submitted after the restart.
@@ -239,7 +257,6 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
-- do [#qdispatchloss]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

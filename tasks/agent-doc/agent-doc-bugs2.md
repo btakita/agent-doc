@@ -315,19 +315,22 @@ The remaining drainable heads (`#tsiftmdcrash` report, and `do [#gf5n]`=#numlist
 > Turn crashed on virtuousai.md. ![img_49.png](img_49.png)
 
 Tracked by **`#tsiftmdcrash`** (`[operator-verify]`). Investigated already: supervisor pid 1742954 stayed alive, pane %78's OpenCode TUI showed normal `Thinking`, and `tsift-v0.1.log` (994KB) carries **no panic/abort/crash signature** — only two intentional `supervisor_binary_stale_self_recycled via=execve_preserve_child` entries from a `cargo install` + `make install` (the `#supkill-bg` blue/green drain-and-supersede). Most plausible: the brief `execve`-recycle window (where `current_exe` is momentarily deleted) was visible as a "crash." Not reproducible from logs alone — so it stays operator-gated: it needs the **exact crash error text / pane capture from the crash moment, or the specific cycle id**, which I can't extract from logs. (I can't read the screenshot — non-vision turn; `agent-doc describe-image img_49.png` could OCR it if the image is still on disk.) Striking the duplicate report; the work lives on `#tsiftmdcrash`.
-<!-- agent:boundary:bddcfb7e -->
+
+### Re: do [#gf5n] / #numlistrev — opus-4-8
+
+Investigated by reproduction. Built a clean stream/CRDT (`agent_doc_write: crdt`) doc and finalized a response containing a `1.`/`2.`/`3.`/`4.` numbered list — it rendered **1-2-3-4, correct order**, boundary after. So `#numlistrev` is **not** a deterministic ordered-list render bug.
+
+The reversed `4,3,2,1` example came from the monsterrodholders turn, which was itself under heavy CRDT/live-buffer drift (`live_prompt_drift`, `content_ours` adoption). So the reversal is a **symptom of the CRDT merge-corruption family** — `#hap7`/`#qdup` (scoped per-structure merge) / `#semmerge` — where the merge inverts list-item order while racing the live editor buffer, not a standalone list bug. The grep also clears the obvious suspects: every `.rev()` in `markdown-ast` is correct (nearest-anchor search, reverse range-application to preserve byte offsets).
+
+I kept `#gf5n` **open** (edited, not closed) as a **`#hap7` verification check** — when the scoped-merge lands, confirm a numbered list survives a merge-during-finalize cycle in order. Closing it as "fixed" would be wrong since the root (`#hap7`) is still operator-verify. Striking the queue head via this `--pending-edit` closeout.
+<!-- agent:boundary:b5aed251 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#fullboundary]~~
-- ~~:pushpin: do [#ftstrike]~~
 - :pushpin: [#qpauseux]
 - :pushpin: [#docdriftgrace]
-- ~~:pushpin: My equityfundingsource.md queue prompt `:pushpin: All upload preview dialogs should be full screen. deploy` was duplicated by agent-doc.~~
-- ~~:pushpin: JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.~~
-- ~~:pushpin: My free-text queue items are not immediately struck as if they are addressed.~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not start. It should have started.
 ```
@@ -337,9 +340,6 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 ---
 - :pushpin: do [#tsiftmdcrash]
-- ~~:pushpin: do [#orphanqhead]~~
-- ~~:pushpin: As I was typing in a queue item into virtuousai.md, parts of the document was duplicated, corrupting the document. The CRDT/semantic merge should be constrained only to the structural part that it applies to. Do multiple merges for each structural part as needed. This should remove the possibility of structural corruption and should reduce conflicts. If the operator deletes parts of the structure in the document and there is new agent content for a deleted structure, mention the fact in the exchange but do not attempt to merge...as the in-editor document is the source of truth.~~
-- ~~:pushpin: Turn crashed on virtuousai.md. ![img_49.png](img_49.png)~~
 ---
 :pushpin: Initial response for a turn renders numeric lists in reverse order:
 ```
@@ -418,10 +418,9 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
-- ~~:pushpin: do [#donemirrorreap]~~
 - :pushpin: do [#fbwire]
 - do [#hap7]
-- do [#gf5n]
+- ~~do [#gf5n]~~
 - do [#rt83]
 <!-- /agent:queue -->
 <!--
@@ -449,8 +448,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qstrikeall] #agent-doc-bug Queue auto-strike only drains ONE head per cycle. When a turn resolves a queue item backing id (observed: --review-resolve #8667 in equityfundingsource.md), preflight auto-strikes only the leading already-resolved free-text head (logs auto-struck already-resolved head prompt source=review_gated) and leaves sibling/duplicate queue lines for the SAME resolved id un-struck (left "- [#8667]..." and "- do [#8667]..." in the queue). src/main.rs:1826-1830 confirms the strike heuristic consumes one free-text head per finalize and queue consume is only a manual escape hatch. Fix: preflight/commit should strike ALL queue heads already answered/resolved this turn — every free-text head whose text matches a prompt answered this cycle, and every id-backed head whose id is now done/resolved (agent:done or review-resolved) — not just the leading head. Add SimWorld coverage: a cycle resolving an id with 2+ queue lines referencing it must leave 0 un-struck. NOTE: observed against a STALE installed binary (stale_install predates source b9c8f31c); confirm current source still single-strikes before fixing.
 - [ ] [#rt83] #qrepin #agent-doc-bug The active-queue stripped diff perpetually reports a phantom pushpin-add of the operator-verify head #qpauseux every preflight even when the doc and snapshot raw queue bodies are byte-identical, keeping no_changes:false and re-triggering the supervisor idle-watch. Investigated: sync_backlog_into_queue (entry_do_id/do_prompt_id), the #mirrorall mirror, and the #7r2s auto-pin (annotate_manual_queue_additions) all correctly recognize and skip the already-pinned bare-id head, so it is NOT a content mutation. Root is in the preflight stripped-diff/boundary-reposition path: commit repositions the boundary in the snapshot but skips the working-tree reposition while a live IPC listener is active, so the post-commit snapshot queue and the post-maintenance doc queue diverge on the pinned operator-verify head position/strip, surfacing a phantom pin add. Cosmetic (no corruption) but it sustains qchurn. Fix: normalize operator-verify mirror pins symmetrically in the stripped diff, or converge the snapshot boundary reposition with the working tree even under a live listener. Needs instrumented per-phase queue-body tracing.
-- [ ] [#gf5n] #numlistrev #agent-doc-bug Operator-reported: the initial response for a turn renders numbered/ordered lists in REVERSE order (e.g. items emit as 4,3,2,1 instead of 1,2,3,4), with the boundary marker landing after the reversed block. Likely a streaming-checkpoint / response-render ordering bug where ordered-list nodes are emitted/merged tail-first. Repro: a response whose body contains a markdown numbered list; first-turn render shows it inverted. Investigate the stream/CRDT ordered-list emission + boundary insertion order.
+- [ ] [#gf5n] #numlistrev #agent-doc-bug Operator-reported: numbered/ordered lists rendered REVERSED (4,3,2,1) on an initial turn, boundary after the block. INVESTIGATED 2026-06-19: NOT reproducible in a clean stream/CRDT finalize — a 1-2-3-4 list renders 1-2-3-4 correctly (verified /tmp repro). It manifested only in the drift-heavy monsterrodholders turn, so it is a SYMPTOM of the CRDT merge-corruption family (#hap7/#qdup/#semmerge: the merge inverting list-item order under a live-buffer race), not an independent ordered-list render bug. Resolves when #hap7 scoped-merge lands. Kept open as a #hap7 verification check: confirm numbered-list order survives a merge-during-finalize cycle.
 - [ ] [#hap7] [operator-verify] #agent-doc-bug #qdup Operator-reported (2026-06-19): agent-doc duplicated the operator equityfundingsource.md queue prompt (All upload preview dialogs should be full screen, deploy) on a concurrent edit. Second instance of the queue-prompt duplication family (first: virtuousai.md). Fix per operator spec: constrain the CRDT/semantic merge to the structural part it applies to (per-structural-node merges, not whole-component) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; and when the operator deletes a structure that agent content targets, note it in agent:exchange instead of merging. Merge-core change, the corruption source this session, so NOT safe to rush in the in-session loop; needs a focused cycle. Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md
 - [ ] [#fbwire] [operator-verify] #agent-doc-bug Phase 2 live wiring of the #fullboundary convergence gate (Phase 1 decision core + playback shipped, submodule 17010e78). Call convergence_gate_decision inside the supervisor idle-queue-watch/drain inter-item dispatch (start/idle_watch.rs to start.rs): gather the four facts (committed via cycle_state, editor converged==HEAD via emit_postcommit_worktree_check, ipc_socket inflight==0, actor idle), defer the next trigger until Dispatch, on ForceDiskFallback do the real --force-disk write + record_force_disk_fallback. Add SimWorld acceptance. Live-supervisor-critical: needs make check + make tmux-ci across two live panes, so NOT in-session-loop-drainable; needs a focused operator-driven cycle. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block to the operator badly. Two variants: (1) a deliberate/admin pause renders as a raw red Error: toast instead of an actionable notification; (2) a churn-stop pause (reason: broken editor IPC, pausing to stop churn — the #41a32133 exception that blocks every caller including an explicit operator reopen so the route restarts the stale supervisor first) renders as NOTHING — JB Run Agent Doc just silently stalls with no notification at all (operator report 2026-06-19). Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button; for the churn-stop variant surface a restart-supervisor / resume action instead of silence. Operator action: install the updated JB plugin, then verify both the paused-queue notification AND the churn-stop notification render (live gate).

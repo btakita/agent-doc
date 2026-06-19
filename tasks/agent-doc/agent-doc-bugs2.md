@@ -38,7 +38,19 @@ completed
 Compacted content:
 ❯ - Archived 26 response topic(s): JB Restart Supervisor → "Run Agent Doc" dispatch error (qflood queue pause); queue thrash after JB Clear Session + #jbacceptwedge 0.2.170 installed; #tsiftmdcrash re-presented; 23 more
 ❯ - Prior summary/context: prior compacted content: Archived 11 response topic(s): #monster60stimeout route ready-prompt barrier; #describe-imag...
-<!-- agent:boundary:b564b2d4 -->
+
+### Re: [#1vhn] route dispatching the trigger into a crashed/exited harness shell — opus-4-8
+
+Fixed the agent-actionable half (issue A). Committed + pushed to the agent-doc submodule (`cbc30bca`); **build/install deferred** per your "drain #1vhn only" choice (installing mid-session would wedge the live supervisor managing this doc).
+
+**Root cause:** the dispatch-ready prompt proof can go stale between the readiness check and the actual `tmux send-keys`. If the harness crashes/exits to a bare shell in that window (your `/model opus` switch + restart on virtuousai.md), `send_command_unchecked` typed `agent-doc <FILE>` into the dead shell, where it sat as un-run text.
+
+**Fix** (`route/dispatch.rs`): a pre-send dead-harness guard re-verifies a live harness owns the pane immediately before the send. It fails closed only when **both** signals agree — `#{pane_current_command}` reports a bare shell (`zsh`/`bash`/`sh`/`fish`/…, login `-` prefix tolerated) **and** the captured pane shows no harness dispatch-ready prompt — so a brief subshell or a momentary command read can't false-positive. On a dead-harness pane it refuses the send, logs `route_dispatch_into_dead_shell_blocked reason=harness_exited_to_bare_shell`, and surfaces claim/restart guidance instead of dispatching into the shell.
+
+**Tests/spec:** pure unit test for the shell classifier (runs in `make check`); live tmux SimWorld test `route_refuses_dispatch_into_dead_bare_shell` (bare-shell pane → blocked + `send_command_unchecked` fails closed; harness prompt visible → allowed) gated to `make tmux-ci`; FlowCore hot-path token budget +1 for the audited `reason=` token; invariant documented in `specs/08-session-routing.md`. `make check` green (4721 passed, clippy `-D warnings` clean, sim-medium ok). CI in_progress for `cbc30bca`.
+
+**Still open** (not agent-doable): build/install + the live dead-shell verification, and **issue B** — the upstream harness *crash* root-cause needs your captured crash output / pane scrollback from the `recruit/virtuousai.md` session at the crash moment (the `/model opus` + Opus-4.6-on-restart pin is the lead). Pausing the queue here per your instruction; 12 heads remain.
+<!-- agent:boundary:db85f893 -->
 <!-- /agent:exchange -->
 
 ## Queue

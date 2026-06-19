@@ -442,7 +442,7 @@ Controller recycled — clearing the last bookkeeping: marking **#p3kj done** (t
 Closed out #p3kj for real this time. The actual deliverable was already finished — `mail/drafts/2026-06-18-virtuousai-forward-note.md` no longer claims you own Monster Rod Holders (it now reads "growing Monster Rod Holders... I run its site, SEO, and the WordPress/server stack"), and EFS is framed as "architected... directing a subcontractor," which is true whether it's your venture or a client. So the EFS-ownership question that was blocking the backlog item never actually needed answering, and there was nothing substantive left to do.
 
 What kept looping was bookkeeping, not work: the `--done p3kj` reap never stuck because of live-IPC drift, so the id-backed `[#p3kj]` queue head kept re-firing into a no-op cycle. I rebuilt the snapshot/CRDT from the current file (`reset --from-current`) to stop the stale replay, then marked #p3kj done — which reaps the id-backed queue head along with it. Queue is now empty; only #500r (the verbal-bandwidth answer prep, recommended) remains in the backlog. Nothing was sent.
-<!-- agent:boundary:43c749ff -->
+<!-- agent:boundary:1919c08b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -454,7 +454,6 @@ What kept looping was bookkeeping, not work: the `--done p3kj` reap never stuck 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#p3kj] Fix forwardable-note accuracy: drop the false 'I own MonsterRodHolders' claim (Steve Douglas owns it; Ron Berkes brought Brian in as the developer to grow sales). Reframe MRH as a client growth engagement and rebase the 'run a business' hook on what is genuinely Brian's. BLOCKED on user answer: is Equity Funding Source Brian's own venture or also a client? Then regenerate mail/drafts/2026-06-18-virtuousai-forward-note.pdf.
 - [ ] [#500r] [recommended] #availanswer Prepare a tight 2-3 sentence verbal answer for the live interview 'do you have the bandwidth?' question — steady-state framing (calendar open; MRH light ops; EFS on a subcontractor with you architecting/reviewing), extra-hours/Stealth-demo story held as backup evidence of drive only if probed.
 <!-- /agent:backlog -->
 

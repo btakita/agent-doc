@@ -39,20 +39,42 @@ completed
 Compacted content:
 - Archived 5 response topic(s): queue drain state; JB `Run Agent Doc` is not submitting; #docdriftgrace; 2 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): closeout repair; #driftrootfix; queue drain state; 1 more
-<!-- agent:boundary:64ec1706 -->
+
+### Re: Fix equityfundingsource.md "Mixed signals" — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Fix equityfundingsource.md "Mixed signals"
+> ```
+> ● Mixed signals: queue_paused: true (an explicit pause flag) coexists with queue_continuation_required: true. Let me
+>   check whether this is an operator-set pause (with a reason) or transient drain-coordination state before deciding
+>   whether to loop into the large Phase 4 UI work.
+> ```
+
+
+Root-caused and fixed in the product (agent-doc submodule `2cf7bcee`).
+
+**The mixed signal was real but cosmetic — and the resolution already existed, just not where the agent reads it.** `queue_paused: true` (an accepted `admin queue pause`) and `queue_continuation_required: true` legitimately coexist: the pause suppresses only the *unattended* supervisor idle-watch auto-injection (the qflood guard), while the attended in-session loop remains the single legitimate drainer. The binary already encodes that in `continuation_guidance(pause_reason)`, which prepends a "queue_paused is NOT a contradiction" preamble + the recorded pause reason.
+
+**The bug:** `session-check` printed the *bare* `CONTINUATION_NO_STALL_GUIDANCE` constant instead of calling `continuation_guidance(pause_reason)`. So the pause-aware resolution reached the preflight JSON `queue_continuation_guidance` field but never the session-check stderr line. An agent reading session-check output saw the two booleans with no explanation and stalled — exactly the "Let me check whether this is an operator-set pause or transient drain-coordination state" hesitation that was captured here. The `continuation_guidance` doc comment even claimed it was "the single source consumed by both preflight JSON and session-check stdout," which was aspirational, not true.
+
+**Fix:** routed the session-check guidance through a new `continuation_guidance_for(file)` helper that reads the controller pause reason and composes the same pause-aware guidance the preflight field already used. Unpaused queues still print the bare no-stall constant verbatim; paused queues now carry the preamble + reason in-line. Added a deterministic regression test (`continuation_guidance_for_carries_pause_preamble_when_controller_paused`) that seeds a controller pause and asserts both shapes. `make check` is green (clippy clean, full suite + SimWorld pass, no masked failures).
+
+**Deferred (operator-gated):** queued `#qpausemix-verify`. The build+install (`make install`) is intentionally **not** run this session — installing now would make this finalize client newer than the live route-owned supervisor and trigger `live_prompt_drift` exit-75. It should run at a supervisor recycle boundary, after which the live check is: on a controller-paused queue, confirm session-check stderr now shows the "NOT a contradiction" preamble.
+<!-- agent:boundary:eebe0748 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
----
+~~~done
 :pushpin: Fix equityfundingsource.md "Mixed signals"
 ```
 ● Mixed signals: queue_paused: true (an explicit pause flag) coexists with queue_continuation_required: true. Let me
   check whether this is an operator-set pause (with a reason) or transient drain-coordination state before deciding
   whether to loop into the large Phase 4 UI work.
 ```
----
+~~~
 Fix the root cause of monsterrodholders.md HEAD issue with already done items.
 ```
   The one thing I can't fix from here — please reload the doc in IDEA
@@ -75,7 +97,7 @@ Fix the root cause of monsterrodholders.md HEAD issue with already done items.
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=4035 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control blocked_head_bytes=10 blocked_head_sha256=530312e6f606f7822758890ee49c7c43ee49243070f547326736709d7bcbd7f4 trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
 ---
-:pushpin: - :pushpin: do [#tsiftmdcrash]
+:pushpin: do [#tsiftmdcrash]
 ---
 :pushpin: Initial response for a turn renders numeric lists in reverse order:
 ```
@@ -154,6 +176,7 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
+---
 - :pushpin: do [#fbwire]
 - :pushpin: do [#hap7]
 ---
@@ -163,11 +186,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
   check whether this is an operator-set pause (with a reason) or transient drain-coordination state before deciding
   whether to loop into the large Phase 4 UI work.
 ```
----
----
 :pushpin: - :pushpin: do [#tsiftmdcrash]
----
----
 :pushpin: monsterrodholders.md sent duplicate uncommitted response
 ```
 - :pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).
@@ -178,8 +197,6 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - :pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).
 <!-- agent:boundary:7c96f9ce -->
 ```
----
----
 :pushpin: More IPC/CRDT drift on virtuousai.md
 ```
   Note on the session: this hit heavy IPC/CRDT drift — finalize repeatedly raced the live JetBrains editor buffer
@@ -193,8 +210,6 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
   editor/CRDT path (finalize → commit → write --commit); all leave the response safely queued. Per the closeout rules I
   will not force a direct disk write and will not auto-loop on this unproven-IPC state.
 ```
----
----
 :pushpin: JB `Run Agent Doc` stalled on this document.
 ```
 [sync] recovered live pane %92 for session b26b9957 via supervisor pid 1535801

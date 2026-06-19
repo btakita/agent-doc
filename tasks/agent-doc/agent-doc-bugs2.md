@@ -91,20 +91,32 @@ Traced it precisely, and the responsible move is to **plan it, not rush it** —
 - **Phase 4 (the restart + cleanup you asked for)** — after 1–3 ship: `make install` → `agent-doc admin recycle` (fresh buffer) → `agent-doc queue prune-noise <FILE>`, confirm `queue_stale_noise_lines` → 0 and that it **sticks** across the next preflight. Folds in `#prunenoise-live` + `#qpausemix-verify`.
 
 So: noise cleanup is Phase 4 of `#sqedit-race`, gated behind the race fix exactly as you framed it. The shipped `queue prune-noise` command (this session) is the cleanup tool; this plan makes the live run safe.
-<!-- agent:boundary:576320e4 -->
+
+### Re: queued #sqedit-race + #prunenoise-live + #qpausemix-verify — opus-4-8
+
+You pinned all three to the queue head. All three are `[operator-verify]`, so preflight reports `queue_drainable_head_count: 0` / `queue_continuation_required: false` — **I will not auto-loop** on them. They also converge on the *same* boundary, so here's the honest state and the one move that unblocks them:
+
+**#sqedit-race** — the root fix. Plan is committed (`6c2932fe8 plan(#sqedit-race)`, `tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md`). The item is explicit: SAFETY-CRITICAL supervisor/commit-path, *"focused clean cycle with make check + make tmux-ci, NOT a degraded-session drain."* This session is exactly what that forbids — `session_accretion: warn` (60 exchange lines, 2 no-op closeouts in 30 min, recent restart) on top of the IPC/CRDT churn history filling this queue. Implementing it here risks the merge-corruption it's meant to fix landing in its own finalize. **It's ready to implement in a fresh, clean session.**
+
+**#prunenoise-live** and **#qpausemix-verify** — both gated on the **supervisor-recycle boundary**: each needs `make install` (`cargo install --path .` + `cargo build --release` + `agent-doc lib-install`) then `agent-doc admin recycle`. Running `make install` mid-session against the live route-owned supervisor is the finalize-client-newer-than-supervisor drift hazard — the exact thing that's been corrupting these queues. So I won't do it inside this turn. Note both are explicitly **Phase 4 of #sqedit-race** ("restart + queue prune-noise cleanup … folds in #prunenoise-live + #qpausemix-verify"), so the race fix is the real prerequisite anyway.
+
+One aside on the preflight `semantic_completion_match`: it flags #sqedit-race as possibly resolved by the archived #aqhr (1.800). That's a false positive — #sqedit-race's text deliberately scopes *past* the converge path ("NOT a single converge-path bug; `try_editor_converge` is already fail-closed"). Leave it open.
+
+**Recommended path** — pick one:
+1. **Fresh session for #sqedit-race** (preferred): start a clean `/agent-doc` session and take the race fix first; #prunenoise-live + #qpausemix-verify fall out of its Phase 4.
+2. **Recycle boundary now**: `make install` → `agent-doc admin recycle tasks/agent-doc/agent-doc-bugs2.md` → then I can run `agent-doc queue prune-noise` (#prunenoise-live) and the live #qpausemix-verify check against the matched binary.
+
+Stopping here — no loop (drainable=0, all operator-gated).
+<!-- agent:boundary:bc204cc2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-~~~done
-:pushpin: Fix equityfundingsource.md "Mixed signals"
-```
-● Mixed signals: queue_paused: true (an explicit pause flag) coexists with queue_continuation_required: true. Let me
-  check whether this is an operator-set pause (with a reason) or transient drain-coordination state before deciding
-  whether to loop into the large Phase 4 UI work.
-```
-~~~
+- [#sqedit-race]
+- [#prunenoise-live]
+- [#qpausemix-verify]
+---
 Fix the root cause of monsterrodholders.md HEAD issue with already done items.
 ```
   The one thing I can't fix from here — please reload the doc in IDEA

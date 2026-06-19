@@ -57,7 +57,20 @@ Compacted content:
 This repairs the same cycle's missing assistant heading through the binary write path. `#pcwcfailfix` is complete and pushed in `src/agent-doc` commit `3d3c3605`; the root submodule pointer is `04853f430`. The queue pause mixed-signal fix also landed: preflight now emits `queue_pause_reason`, and `queue_continuation_guidance` distinguishes controller pauses from attended continuation blockers.
 
 Verification passed: focused `agent-doc-orchestration` tests, `make check`, and `make install` (`agent-doc 0.34.14`). The latest agent-doc CI run after push is `27845274416` and was still in progress when checked; the root repo has no workflow named `CI`. `#driftrootfix`, `#hap7`, and `#tsiftmdcrash` remain open.
-<!-- agent:boundary:09926770 -->
+
+### Re: #driftrootfix — gpt-5
+
+I verified `#driftrootfix` against the current `src/agent-doc` `HEAD` and closed it without additional source edits. The Phase 2 fix is already present: `write/ipc.rs::guard_ipc_snapshot_adoption_against_live_prompt_drift` now tries the node-keyed semantic merge before adopting `content_ours`, and `semantic_merge` models `### Re:` heading-prose exchange turns as append-only nodes placed before the exchange boundary. That directly covers the reported failure mode where a live editor `content_ours` image spliced the new response into the wrong block or dropped it from its own block.
+
+Verification passed:
+- `cargo test -p agent-doc-orchestration smconv`
+- `cargo test -p agent-doc-orchestration ipc_live_prompt_drift_content_ours_ignores_unproven_live_queue_deletions`
+- `cargo test -p agent-doc-markdown-ast exchange_appends_agent_new_heading_prose_turn`
+- `cargo test -p agent-doc-markdown-ast exchange_boundary_marker_preserved_and_new_turn_before_it`
+- `make check`
+
+The latest `src/agent-doc` CI run for `3d3c3605` is completed successfully. `#hap7`, `#fbwire`, `#qpauseux`, `#docdriftgrace`, and `#tsiftmdcrash` remain open because they are operator-verify or separate follow-up items.
+<!-- agent:boundary:b6a63b2f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -179,7 +192,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - ~~:round_pushpin: do [#qstrikeall]~~
 - ~~:pushpin: do [#pcwcfailfix]~~
 - ~~do [#kbkz]~~
-- :pushpin: do [#driftrootfix]
+- ~~:pushpin: do [#driftrootfix]~~
 - :pushpin: do [#hap7]
 ---
 :pushpin: Fix equityfundingsource.md "Mixed signals"
@@ -231,7 +244,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 ---
 - ~~:round_pushpin: do [#pcwcfailfix]~~
-- :round_pushpin: do [#driftrootfix]
+- ~~:round_pushpin: do [#driftrootfix]~~
 - do [#hap7]
 ---
 Fix equityfundingsource.md "Mixed signals"
@@ -282,7 +295,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#driftrootfix] [clean-session] #agent-doc-bug #semmerge Layer-B root cause of the recurring worktree corruption: live_prompt_drift_after_preflight adopts a mangled content_ours on every finalize this session because the ack-content / editor CRDT buffer splices the new Re: response into the WRONG exchange block (dropped from its own block). Make the converge place a new response turn at the boundary position instead of merging it into a prior block. Overlaps #hap7/#gf5n/#semmerge; coordinate with those. Needs the focused converge-core session. Plan: tasks/agent-doc/plan-recurring-worktree-corruption.md priority=2
 - [ ] [#hap7] [operator-verify] #agent-doc-bug #qdup Operator-reported (2026-06-19): agent-doc duplicated the operator equityfundingsource.md queue prompt (All upload preview dialogs should be full screen, deploy) on a concurrent edit. Second instance of the queue-prompt duplication family (first: virtuousai.md). Fix per operator spec: constrain the CRDT/semantic merge to the structural part it applies to (per-structural-node merges, not whole-component) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; and when the operator deletes a structure that agent content targets, note it in agent:exchange instead of merging. Merge-core change, the corruption source this session, so NOT safe to rush in the in-session loop; needs a focused cycle. Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md
 - [ ] [#fbwire] [operator-verify] #agent-doc-bug Phase 2 live wiring of the #fullboundary convergence gate (Phase 1 decision core + playback shipped, submodule 17010e78). Call convergence_gate_decision inside the supervisor idle-queue-watch/drain inter-item dispatch (start/idle_watch.rs to start.rs): gather the four facts (committed via cycle_state, editor converged==HEAD via emit_postcommit_worktree_check, ipc_socket inflight==0, actor idle), defer the next trigger until Dispatch, on ForceDiskFallback do the real --force-disk write + record_force_disk_fallback. Add SimWorld acceptance. Live-supervisor-critical: needs make check + make tmux-ci across two live panes, so NOT in-session-loop-drainable; needs a focused operator-driven cycle. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md
 - [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block to the operator badly. Two variants: (1) a deliberate/admin pause renders as a raw red Error: toast instead of an actionable notification; (2) a churn-stop pause (reason: broken editor IPC, pausing to stop churn — the #41a32133 exception that blocks every caller including an explicit operator reopen so the route restarts the stale supervisor first) renders as NOTHING — JB Run Agent Doc just silently stalls with no notification at all (operator report 2026-06-19). Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button; for the churn-stop variant surface a restart-supervisor / resume action instead of silence. Operator action: install the updated JB plugin, then verify both the paused-queue notification AND the churn-stop notification render (live gate).

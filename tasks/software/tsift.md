@@ -60,7 +60,19 @@ Operator-approved. Ran a live multi-doc `tsift kg extract` A/B (Qwen3-32B-Q4 on 
 **Net:** the KG machinery runs end-to-end on a real corpus, context-injection dedup is real and measurable, but two operational gaps block it from being production-grade: confidence is never recorded (#kgconf) and refresh duplicates entities (#kgrefreshdup) — both now top of backlog as actionable tsift code work.
 
 Not auto-looping: the only remaining queue head is `do [#vmax]`, which is operator-gated (crates.io Trusted Publisher registration for 23 crates + browser 2FA — agent cannot perform). `queue_continuation_required=false`.
-<!-- agent:boundary:6efcdfdc -->
+
+### Re: measured kg extraction effectiveness on a real corpus — opus-4-8
+
+Operator-approved, so I ran the live measurement. A/B extraction (Qwen3-32B-Q4 on GPU) over two related specs — local-kg-model.md and memgraphrag-direction.md — into scratch DBs under /tmp/kg-eval. The live .tsift/graph.db (26 entities) and the tsift working tree were left untouched and verified clean afterward. Three questions, three findings.
+
+**(a) Context-injection dedup works, ~15% fewer nodes, concentrated on later documents.** Extraction without context injection produced 71 entities (doc1=46, doc2=25). With the default known-entity context pack it produced 60 (doc1=51, doc2=9). The pack hits the second document hardest: its new entities fell from 25 to 9, a 64% drop, while exact cross-document label agreement rose from 2 to 7 shared labels. So later documents reconcile toward canonical names and emit far fewer redundant entities. Caveat: the dedup is naming convergence plus suppression, not node-identity collapse — same-named entities from different chunks still land as distinct node ids (see c).
+
+**(b) Confidence is never recorded.** Zero of all 71 freshly-extracted entity nodes carry a real confidence property; the only keys present are chunk_id, contract, description, document_id, entity_id, entity_kind, kg_extraction_model, kg_provider, kg_provider_kind, provider, source_ref. The "26 with 0 confidence" in the live graph is not a one-off — the projection emits no confidence field at all, so the spec's confidence/recency gating has nothing to act on. Filed as a backlog follow-up (kgconf).
+
+**(c) Refresh detects staleness but reconciliation is additive and duplicates entities.** Editing a source correctly flipped its watermark from Unchanged to Stale, and refresh --apply re-extracted it cleanly. But the re-extraction is purely additive: one source went from 9 to 18 entities — all 9 prior stable ids were retained (no id churn), yet 9 new nodes were added with no tombstone of the prior projection, leaving duplicate canonical entities for a single source (tsift-memgraphrag appeared 3 times, the graph-db path 3 times, MemGraphRAG twice). Root cause: the node primary-key id derives from chunk plus description, not the canonical entity_id — which is already present as a property and does match across passes (two duplicate nodes shared one canonical entity_id but had different node ids). The reconciliation key exists in the data; the upsert just does not key on it. Filed as a backlog follow-up (kgrefreshdup).
+
+Net: the machinery runs end-to-end on a real corpus and the context-injection dedup is real and measurable, but two operational gaps block production-grade use — confidence is never persisted, and refresh duplicates entities. Both are now top of the backlog as actionable tsift code work, and the measurement item is done.
+<!-- agent:boundary:80f07bc0 -->
 <!-- /agent:exchange -->
 
 ## Queue

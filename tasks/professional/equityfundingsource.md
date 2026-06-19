@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,28 @@ completed
 Compacted content:
 - Archived 15 response topic(s): Why "Application progress" doesn't show the accepted step; How is it an Available Deal but not accepted?; do #214f (gate publish on acceptance); 12 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): Available Deal dialog full screen in Deal Pipeline; Applicatio...
-<!-- agent:boundary:72ce516f -->
+
+### Re: What is "Funding Commits" in the Deal Pipeline dialog? — opus-4-8
+
+> **Queue prompt:**
+>
+> What is "Funding Commits" in the Deal Pipeline dialog?
+
+
+It's the tab in the deal dialog that lists the **lender funding commitments** for that deal — i.e. how much money each lender has pledged to fund the loan, and where each pledge is in the wire/funding process. (Source: `lib/ui--browser--efs/portal/admin/deal_detail.tsx` "Funding Commits" tab → `AdminFundingCommits` / `GET /api/admin/funds`.)
+
+Each commitment row is one lender's investment in the deal, with a **status**:
+- **Pending** — the lender has committed an amount but the wire hasn't been received yet. You confirm receipt with "Confirm wire," which marks the funds received and submits the funding to TMO.
+- **Active** — funds received/confirmed; the lender is funding the loan.
+
+The tab has a status filter (**All funds / Pending / Active**), and the tab's count badge is the number of commitments on the deal. From here you also manage **fund allocations** (splitting/assigning a commitment).
+
+How it differs from the neighboring tabs:
+- **Interested Lenders** = lenders who expressed interest / the one selected as the funding lender (intent), *before* money.
+- **Funding Commits** = the actual dollar commitments and their wire/funded state (the money).
+
+So the flow is: a lender shows interest → gets selected → their committed funds show up here as a Pending commitment → you confirm the wire → it becomes Active and is reported to TMO.
+<!-- agent:boundary:d363fce5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +72,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- What is "Funding Commits" in the Deal Pipeline dialog?
 <!-- /agent:queue -->
 
 ## Backlog

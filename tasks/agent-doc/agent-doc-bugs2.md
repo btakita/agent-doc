@@ -70,7 +70,13 @@ Verification passed:
 - `make check`
 
 The latest `src/agent-doc` CI run for `3d3c3605` is completed successfully. `#hap7`, `#fbwire`, `#qpauseux`, `#docdriftgrace`, and `#tsiftmdcrash` remain open because they are operator-verify or separate follow-up items.
-<!-- agent:boundary:b6a63b2f -->
+
+### Re: queue drain state — gpt-5
+
+Preflight converged the queue through the editor path and reports `queue_active: true` with `queue_continuation_required: false` and `queue_drainable_head_count: 0`. That means this cycle has no agent-drainable queue head to execute.
+
+I treated the two queue text edits as operator-verify/gating edits, not as authorization to run repo work. `#hap7`, `#tsiftmdcrash`, the equityfundingsource items, and the monsterrodholders duplicate-response item remain queued/backlogged or operator-gated according to the current document state. No source files were changed and no tests were run in this cycle.
+<!-- agent:boundary:4b01a9b2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -245,9 +251,8 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ---
 - ~~:round_pushpin: do [#pcwcfailfix]~~
 - ~~:round_pushpin: do [#driftrootfix]~~
-- do [#hap7]
 ---
-Fix equityfundingsource.md "Mixed signals"
+:round_pushpin: Fix equityfundingsource.md "Mixed signals"
 ```
 ● Mixed signals: queue_paused: true (an explicit pause flag) coexists with queue_continuation_required: true. Let me
   check whether this is an operator-set pause (with a reason) or transient drain-coordination state before deciding
@@ -255,10 +260,7 @@ Fix equityfundingsource.md "Mixed signals"
 ```
 ---
 ---
-- :pushpin: do [#tsiftmdcrash]
----
----
-monsterrodholders.md sent duplicate uncommitted response
+:round_pushpin: monsterrodholders.md sent duplicate uncommitted response
 ```
 - :pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).
 - :pushpin: **Resolved 3 genuinely-finished reviews** → archived to `agent:done`: `#2qrx` (apply done; verify handed to archived `#2qrx-verify`), `#7m2s` (GTM v6 fix shipped 6/14; verify owned by open `#convfix-verify`), `#ef5h` (duplicate of archived `#fishloc-curated-rollout`; adapter blocker tracked by open `#3456`).
@@ -268,6 +270,10 @@ monsterrodholders.md sent duplicate uncommitted response
 - :pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).
 <!-- agent:boundary:7c96f9ce -->
 ```
+---
+- do [#hap7]
+---
+- :pushpin: do [#tsiftmdcrash]
 ---
 <!-- /agent:queue -->
 <!--

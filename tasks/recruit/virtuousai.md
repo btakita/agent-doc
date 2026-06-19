@@ -65,6 +65,10 @@ Still your voice, still a **draft — nothing sent**. Resume path unchanged: `re
 
 *(Recovery note: this session hit a compaction stale-snapshot/CRDT drift — the on-disk file was compacted while the live editor buffer still held the 30KB pre-compaction content, so the first finalize raced and mangled. I moved the stale CRDT sidecars aside and hand-rebuilt this exchange. The message work itself is unaffected.)*
 
+> **Queue prompt:**
+>
+> This letter is not good. Please come up with something better. Forget about the numbers right now. The number of tests is not impressive at all.
+
 ### Re: rewrite the letter — drop the numbers — opus-4-8
 
 Rewrote it from scratch. No metrics anywhere — no test count, no charge count, no SERP rank. The case is made by the story now, not by figures. Draft: [`mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md`](../../mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md) (status: **draft, not sent**).
@@ -80,6 +84,10 @@ Rewrote it from scratch. No metrics anywhere — no test count, no charge count,
 **Process (the judge/improve loop you asked for earlier):** a subagent rated my first rewrite as VirtuousAI's hiring side (resume + call attached) at **78/100** — flagged that the opener read as a generic thesis, it over-echoed their vocabulary, repeated its one idea, and omitted current building work. The revision fixed all four and scored **89/100, "ship it"**; a v3 trimming pass made it flatter, so it stopped at diminishing returns. No AI-tells, no spaced em-dashes.
 
 Still your voice, still a **draft — nothing sent**. Resume path unchanged: `resume/BrianTakita-virtuousai.pdf` + `resume/profiles/virtuousai.toml`.
+
+> **Queue prompt:**
+>
+> Should we have the stealth company + PresenceAI to push real-time work?
 
 ### Re: stealth company + Presence AI to push real-time work? — opus-4-8
 
@@ -97,7 +105,7 @@ Here's the reasoning, plainly:
 - **Resume:** keep Presence AI prominent; optionally add one supporting line for the stealth-client real-time audio-avatar work (framed as "low-latency production AI systems," since you can't name the client). I've queued that as a `[recommended]` backlog item.
 - **Letter:** no change — keep it focused on builder + operator.
 - **Call with Rory:** lead the real-time/performance story there, where it lands as systems credibility without crowding the note.
-<!-- agent:boundary:fda45d11 -->
+<!-- agent:boundary:5e3990df -->
 <!-- /agent:exchange -->
 
 ## Queue

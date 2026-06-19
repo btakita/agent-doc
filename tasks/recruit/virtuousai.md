@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -268,13 +268,38 @@ Honest read: **it lands well, and the reason is the same as the risk — it's po
 **The thing that actually determines whether it lands isn't the content — it's the handoff.** This whole package is bet on Laura forwarding it faithfully and the team reading it before they've formed an impression from the resume + call alone. So the highest-leverage move is making Laura *want* to forward it: the private note should make her feel like she's handing her client something that makes *her* look good (a strong, low-maintenance candidate). It currently does. Just make sure that note feels warm and personal, not transactional — she's the gate.
 
 **Bottom line:** I'd send it close to as-is. It's differentiated, honest, and well-targeted. The content risk is low; the real variable is process (Laura forwarding) and a slight formality bet on their culture. If you have any read on how scrappy/informal Chris and Rory are, that's the one input that would change my advice on PDF-vs-pasted-text. Otherwise — it's ready.
-<!-- agent:boundary:84252f97 -->
+
+### Re: remove "engineer #2" + make it more informal? — opus-4-8
+
+> **Queue prompt:**
+>
+> Should we remove Engineer #2 and make it more informal?
+
+
+Yes to both — done. Here's my reasoning and what I changed.
+
+**Remove "engineer #2": yes, no hesitation.** It was the one line stating something you were never actually told, and the note loses nothing by cutting it. The builder+operator value stands on its own. The closer is now just *"That's what I'd bring. Happy to talk through the architecture whenever it's useful."*
+
+**More informal: yes, but I warmed it, didn't slacken it.** The goal was to sound more like a person talking and less like a cover letter — contractions, shorter breaths, "I own the whole thing" instead of "I own more than the code." What I deliberately kept sharp is the one idea (build infra + run a business → meets at your white-box approach). Going fully casual would blur that, and the whole reason the note works is that it lands one point cleanly. So it reads warmer now, but the punch is intact.
+
+**Other changes:**
+- Softened the opener — the old version compared you to other engineers ("most engineers... never had to grow a business with it"), which was the line a prickly reader could bristle at. Now it's framed as what drew *you* to the role: *"Those two don't usually come in the same person."* Same point, no edge.
+- "your white-box bet" instead of "your white-box approach" — slightly more conversational.
+- "the chair your customers are in" instead of "the chair your mid-market customers sit in" — tighter.
+
+**Files updated:**
+- [`mail/drafts/2026-06-18-virtuousai-forward-note.md`](../../mail/drafts/2026-06-18-virtuousai-forward-note.md) — informal source
+- [`mail/drafts/2026-06-18-virtuousai-forward-note.pdf`](../../mail/drafts/2026-06-18-virtuousai-forward-note.pdf) — regenerated, verified "engineer #2" is gone and the full text renders
+
+**One thing to decide now that it's informal:** the more casual the note, the more the *typeset PDF* formality works against it — a polished PDF carrying a chatty note is a slight mismatch. For a small startup I'd lean toward **letting Laura paste this as plain text** into her own forward instead of attaching the PDF. The PDF is still there if you want a clean attachment, but if you're going informal to match their culture, plain text is the more consistent move. Your call — I kept both ready.
+
+Nothing sent.
+<!-- agent:boundary:d5b05e1b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Should we remove Engineer #2 and make it more informal?
 <!-- /agent:queue -->
 
 ## Backlog

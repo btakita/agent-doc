@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -34,80 +34,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260619-170438.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260619-174251.md`*
 
 Compacted content:
-- Archived 4 response topic(s): #kgeffmeasure; measured kg extraction effectiveness on a real corpus; #kgconf; 1 more
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): Operating effectiveness of tsift kg
-
-### Re: #next-steps to fix tsift bugs — opus-4-8
-
-> **Queue prompt:**
->
-> What are #next-steps to fix tsift bugs?
-
-
-The two queue items (`#kgconf`, `#kgrefreshdup`) are done; the backlog was empty. From the gaps those fixes exposed, here are the grounded next steps, now queued in priority order:
-
-1. **`#kgconfrank` (high)** — `#kgconf` makes every node carry a `confidence` + `confidence_source` tag, but nothing consumes the tag yet: `node_to_candidate` in `context_pack.rs` reads only the raw `confidence`, so a *derived* `default 0.500` outranks and out-survives a *real* model `0.300` under `min_confidence`/ranking. Weight model-emitted confidence above derived defaults. This directly completes the operability `#kgconf` set up, so it leads.
-2. **`#kgentitycollapse` (med)** — `#kgctxinject` dedup is naming-convergence + suppression, **not** node-identity collapse: node id = `stable_id(chunk.id, entity.id)`, so same-label entities from different chunks stay distinct nodes (two dup nodes shared one canonical `entity_id` but had different node ids — finding (c)). Add `same_as` edges keyed on the canonical `entity_id` (or a query-time merge) so retrieval sees one logical entity; preserve per-source provenance by linking rather than deleting.
-3. **`#kgconfreqverify` (operator-verify)** — `#kgconf` made `confidence` a *required* schema field to elicit real scores. Verify on the live Qwen3-32B model that this doesn't cut extraction yield or induce hallucinated scores; relax to prompt-only + default fallback if it does. Needs GPU + Ollama, so it's operator-gated.
-
-**Top of backlog: `#kgconfrank`.**
-
-(Heads-up: the exchange is at `session_accretion: warn` — 80 lines / 4 response sections. Say the word and I'll `agent-doc compact tasks/software/tsift.md --commit`.)
-
-### Re: #kgentitycollapse — query-time merge of canonical-entity duplicates — opus-4-8
-
-> **Queue prompt:**
->
-> do [#kgentitycollapse]
-
-
-Done. The extractor reconciles a recurring entity to a canonical `kgent-…` id (stored as the `entity_id` property), but each chunk/source still projects a distinct node id for it, so the graph holds several provenance-bearing nodes for one logical entity — `#kgctxinject` dedup is naming-convergence + suppression, not node-identity collapse. Retrieval surfaced each as a separate entity.
-
-I took the **query-time identity merge** (the backlog's safer option — no graph mutation, preserves all per-source provenance):
-
-- **`context_pack.rs` — `collect_candidates_from_nodes`** now collapses candidates that share a canonical `entity_id` to one representative (highest confidence → group's max degree → smallest node id, fully deterministic). The graph keeps every node; only the *retrieval surface* dedups.
-- **`canonical_entity_id()`** treats only `kgent-`-prefixed ids as merge keys, so chunk-local model slugs (`e0`/`e1`) never wrongly merge two genuinely distinct entities.
-- The bounded-scan cap now counts **nodes scanned** rather than deduped output, so the never-dump-the-graph guarantee still holds with merging.
-- spec (`local-kg-model.md`) documents the merge under the context-retrieval contract.
-
-**Verification:** `collapses_candidates_sharing_canonical_entity_id` (merged rep keeps max degree; distinct canonical id + local-slug node stay separate); `cargo test -p tsift-kg` 34 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `0648af5`, pushed; superproject pointer `ee8437d34`.
-
-Next queue head: `do [#kgconfrank]` (weight `confidence_source` so derived defaults don't outrank real model scores). `#kgconfreqverify` stays operator-gated.
-
-### Re: #kgconfrank — model confidence now outranks derived defaults — opus-4-8
-
-> **Queue prompt:**
->
-> do [#kgconfrank]
-
-
-Done. `#kgconf` records a `confidence_source` tag (`model|default`) on every node, but the context-pack ranker still read only raw `confidence` — so a derived `default 0.500` outranked and out-survived a real model `0.300`, defeating the point of recording confidence.
-
-- **`ContextCandidate`** now carries `confidence_is_model` (read from the `confidence_source` property; only an explicit `=model` counts as a real score).
-- **`build_context_pack`** inserts a confidence-provenance tier into the deterministic sort, between connectivity and raw confidence: `seed match → degree → provenance tier (model before default) → confidence desc → node-id`. So at equal connectivity a real model `0.300` ranks above an unknown `0.500` default; within a tier raw confidence still decides.
-- spec (`local-kg-model.md`) documents the provenance tier in the ranking contract.
-
-**Verification:** `model_confidence_outranks_derived_default` + `within_model_tier_higher_confidence_wins`; `cargo test -p tsift-kg` 36 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `1ab19d5`, pushed; superproject pointer `6ecfe25e1`.
-
-Queue drained — the three KG follow-ups from this round (`#kgentitycollapse`, `#kgconfrank`) are done; `#kgconfreqverify` is gated in review as operator-verify (needs live GPU + Ollama A/B). No drainable work remains.
-
-### Re: #next-steps to fix tsift bugs (round 2) — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: What are #next-steps to fix tsift bugs?
-
-
-The prior round's KG-quality arc is committed (`#kgconf` → `#kgrefreshdup` → `#kgentitycollapse` → `#kgconfrank`); the backlog drained. A grounded scan turned up **no TODO/FIXME/XXX or ignored tests** in the tsift packages, so the codebase is otherwise clean. The two genuine remaining gaps both come from incomplete halves of this round's fixes, now queued in priority order:
-
-1. **`#kgconfgate` (top)** — `#kgconfrank` made *ranking* provenance-aware but left *gating* blind: `context_pack.rs:220` filters by raw `confidence`, so a derived `default 0.500` survives a `min_confidence=0.4` gate while a real model `0.300` is excluded. Make the gate provenance-aware (only model-sourced confidence counts toward `min_confidence`, or defaults need `min_confidence==0`) so unknown defaults aren't treated as gate-passing real scores. This finishes the `#kgconf` operability arc.
-2. **`#kgsameas` (med)** — `#kgentitycollapse` deduped only the *retrieval* surface (the context pack). Graph-level consumers (`tsift graph`/`explain`/`summarize`, the SurrealDB projection) still read `graph_nodes` directly and see every per-chunk/per-source duplicate. Promote the merge to durable `same_as` edges keyed on canonical `entity_id` (the heavier alternative noted in `#kgentitycollapse`; `same_as` already exists in `tsift-index`) so *all* consumers see one logical entity. Link, never delete — provenance preserved.
-
-**Top of backlog: `#kgconfgate`.** (`#kgconfreqverify` stays gated in review — operator-verify, live-GPU A/B.)
-<!-- agent:boundary:23985ee5 -->
+- Archived 4 response topic(s): #next-steps to fix tsift bugs; #kgentitycollapse; #kgconfrank; 1 more
+- Prior summary/context: prior compacted content: Archived 4 response topic(s): #kgeffmeasure; measured kg extraction effectiveness on a real ...
+<!-- agent:boundary:200bf350 -->
 <!-- /agent:exchange -->
 
 ## Queue

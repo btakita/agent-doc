@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -62,6 +62,11 @@ The recent doc-only changes (bi-directional TMO documentation) carried no code/s
 
 > **Queue prompt:**
 >
+> :pushpin: Why is there a "TMO writeback not sent: unavailable" error?
+
+
+> **Queue prompt:**
+>
 > :pushpin: Admin > Deal Pipeline > Full Application dialog > Accept and send to TMO got an error "TMO writeback not sent: unavailable". The error message should appear above the button and there should be a toast.
 
 
@@ -87,8 +92,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Admin > Deal Pipeline > Full Application dialog > Accept and send to TMO got an error "TMO writeback not sent: unavailable". The error message should appear above the button and there should be a toast.~~
-- :pushpin: Why is there a "TMO writeback not sent: unavailable" error?
 <!-- /agent:queue -->
 
 ## Backlog

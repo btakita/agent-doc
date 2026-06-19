@@ -70,8 +70,29 @@ Add a queue item, `kill -9` the supervisor mid-turn, restart, confirm the item
 survives. Deterministic SimWorld coverage of the journal-replay path where live
 `kill -9` cannot be modeled.
 
-## Status
+## Status — IMPLEMENTED (additive)
 
-- Phase 1 (journal-before-ack): agent-drainable; not yet implemented.
-- Phase 2 (startup reconcile): **operator-design-gated** (`#fintol2`/`#pcwc`
-  carry-forward re-wire — needs operator go + Phase-0 re-baseline).
+Both phases shipped as an **additive, replay-only** mechanism that sidesteps the
+carry-forward risk entirely: it only ever *re-adds* operator queue prompts that
+were observed-then-lost, and never removes or rewrites existing content, so it
+does NOT re-wire the post-commit worktree reconcile the `#fintol2`/`#pcwc`
+invariant guards. Full `make check` (including those tests) stays green.
+
+- **Phase 1 — journal (`queue_journal::record`)**: preflight queue maintenance
+  durably appends each observed operator queue prompt to
+  `.agent-doc/queue-journal/<doc-hash>.jsonl` (append-only + fsync).
+- **Phase 2 — startup replay (`queue_journal::replay_missing` +
+  `merge_missing_into_content`)**: `run_with_reap_policy` re-inserts journaled
+  prompts absent from the reloaded document. A struck/consumed prompt counts as
+  present and is never resurrected.
+- **Prune (`queue_journal::clear`)**: every `commit_success` empties the journal
+  (queue state is now durable in the snapshot), bounding the journal — and any
+  replay — to operator additions observed since the last commit.
+
+### Known gap (follow-up, plugin-side)
+
+An add lost to a crash *before any cycle observes it* (pure editor-buffer, never
+flushed to disk / never seen by the binary) cannot be journaled binary-side — it
+needs a JB/VS Code plugin **buffer-flush-on-edit** (write the operator's queue
+edit to the on-disk document or a sidecar immediately, so the binary observes it
+on the next cycle / a restart can replay it). Operator-install/live-verify gated.

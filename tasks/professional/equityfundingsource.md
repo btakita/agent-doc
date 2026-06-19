@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -117,7 +117,24 @@ Two such lines had this hazard; both now use commas instead:
 - `Loan → Closed / Funded; close offering …` → `Loan → Closed / Funded, close offering …`
 
 Docs-only change (no spec/test surface). Committed + pushed: EFS `32f985c` on `origin/main`, superproject submodule pointer bumped (`421777465`). No mermaid CLI is installed locally, so I validated by matching the parser error to the `;` split rather than rendering; the comma substitution removes the only statement-separator tokens in the message text.
-<!-- agent:boundary:928d7c0d -->
+
+### Re: Closing docs are wet-ink + notarized, bi-directional TMO sync — opus-4-8
+
+> **Queue prompt:**
+>
+> "at the Closing stage (borrower-signature API + DB columns retained)." The borrower signs & notarizes the closing paper documents. This is not e-signed. We do want to record the closing documents are signed. This will be a bi-directional sync with TMO.
+
+
+Got it — corrected the doc to match. The Closing-stage signing is **not** an in-app e-signature flow:
+
+- Borrower **signs and notarizes the paper closing documents** (wet-ink, in person).
+- EFS only **records that the closing documents are signed** (a signed-status flag; the `final_docs_*` D1 columns are retained for this).
+- That signed status is a **bi-directional sync with TMO** (EFS ↔ TMO) — TMO can reflect signing status back, and EFS pushes its recorded status out.
+
+Updated `src/equityfundingsource-dev/docs/deal-pipeline-flow.md` borrower-actions §4 to drop the "borrower-signature API" e-sign framing and state the wet-ink + notarize + bi-directional-TMO-sync model. Committed + pushed: EFS `2631896` on `origin/main`, superproject submodule pointer bumped.
+
+This refines the open `#5eq8` (closing-docs redesign): the rebuilt step records a signed/notarized flag and syncs it bidirectionally with TMO rather than capturing an e-signature. (Exchange is large — flag if you want a compact.)
+<!-- agent:boundary:e40ec9d7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -130,7 +147,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- "at the Closing stage (borrower-signature API + DB columns retained)." The borrower signs & notarizes the closing paper documents. This is not e-signed. We do want to record the closing documents are signed. This will be a bi-directional sync with TMO.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -145,7 +161,7 @@ After 20:30
 - [/] [#5q7z] [recommended] 'Accept and send to TMO' duplicate-loan bug: for a loan already associated with a TMO record (deal 7a0c1463 / loan 45ddae53 has tmo_loan_number=GQI751, tmo_loan_rec_id=3840D27B..., tmo_loan_application_rec_id=cda67748), the approve flow (admin/applications/index.ts application_tmo_writeback_attempt_ -> tmo_writeback.ts:308 LOS.svc/NewLoan) sends NewLoan with the existing GQI751 -> TMO 400 'Duplicate loan number. Unable to save record.' Fix (2 parts): (1) approve/writeback must detect an existing TMO association (tmo_loan_rec_id / writeback_status='sent') and associate+mark accepted locally instead of calling NewLoan (or call an UpdateLoan endpoint); (2) hide/disable the 'Accept and send to TMO' button in lib/ui--browser--efs/portal/admin/full_applications.tsx:424 when the app/loan is already in TMO. Design Q: on accept of an already-in-TMO loan, associate-only (no TMO call) or also push UpdateLoan? Relates to #dzmm/#37ah/#214f.
 - [/] [#214f] [recommended] Gate investor deal publish on acceptance: admin_deal_publish_ (app/equityfundingsource/lib/admin/repo.ts:2054) + POST /api/admin/loans/:id/deal publish a loan to the investor marketplace with NO acceptance check (only 'if (!loan) throw'); any non-Funded loan becomes status='published'. So a deal can be an Available Deal while its application is not accepted (observed: investment_deal 7a0c1463 published from loan 45ddae53 status='submitted', tmo 'Application Received', with NO full_application row). Decide the business rule ('accepted before available') and add the gate before status='published' (and/or surface why a loan is ineligible to publish). Relates to the full_applications<->loans<->investment_deals decoupling.
 - [/] [#cftk] [blocked:operator-credential] Refresh CLOUDFLARE_API_TOKEN in src/equityfundingsource-dev/.env with a D1-Edit-scoped token on account 1e7e194ff8da4ad9e40ce041aea84f76 (DB 280e1539). No stored credential has D1 access (tested: 10000/wrong-acct/7403/malformed); operator must create the token in the Cloudflare dashboard. .env CLOUDFLARE_ACCOUNT_ID is a literal passage: placeholder (left intact).
-- [/] [#5eq8] Closing docs step (redesign): rebuild the closing-documents/notarization flow as its own step (replaces the removed Final Loan Documents section). This re-introduces a notarize control and SHOULD re-gate allocation wire status (Sent/Confirmed) on notarization — the UI gate + server 409 were removed in the 2026-06-18 AvailableDeal restructure so funding is not hard-blocked in the interim. Borrower-signature API + final_docs_* D1 columns are preserved.
+- [/] [#5eq8] Closing docs step (redesign): rebuild the closing-documents/notarization flow as its own step (replaces the removed Final Loan Documents section). Closing docs are wet-ink signed AND notarized on PAPER (not e-signed); EFS records a signed-status flag (+ final_docs_* D1 columns preserved) and that signed status is a BI-DIRECTIONAL sync with TMO (EFS <-> TMO), not an in-app e-signature flow. Re-introduces a notarize control and SHOULD re-gate allocation wire status (Sent/Confirmed) on notarization — the UI gate + server 409 were removed in the 2026-06-18 AvailableDeal restructure so funding is not hard-blocked in the interim.
 - [/] [#efs-cutover-sso-plan] Workers.dev to custom-domain/SSO closeout: write and execute a cutover checklist for equityfundingsource.com/www routing, /login/access-callback, rollback, and Google Workspace SSO after #m6ch credentials arrive. Advances #next-steps.
 - [/] [#zwws-vestings-local] [recommended] Investor dashboard phase 4 local half: capture/display vestings and special instructions in EFS D1/UI with tmo_cache_outbox enqueue; leave TMO push gated on #dzmm/#7a4d. Advances #zwws.
 - [/] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.

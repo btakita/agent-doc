@@ -71,6 +71,8 @@ pub mod codex_hook;
 pub mod compact;
 pub mod context_clear_in_flight;
 pub mod context_pct;
+pub mod convergence_gate;
+pub mod convergence_playback;
 pub mod cycle_state;
 pub mod dashboard;
 pub mod debounce;

@@ -913,6 +913,12 @@ pub(crate) struct QueueState {
     pub(crate) queue_start_at: Option<String>,
     pub(crate) queue_trigger: Option<crate::queue::QueueTrigger>,
     pub(crate) queue_halted: Option<String>,
+    /// `#qpausego`: true when an accepted controller `admin queue pause` is the
+    /// effective queue-control state. A pause durably drops
+    /// `queue_continuation_required` (and the drainable head count) even for a
+    /// `go`-mode queue, mirroring the controller dispatch RPC's `queue_paused`
+    /// block, so an accepted pause halts the in-session auto-loop.
+    pub(crate) queue_paused: bool,
     /// `#cleardrainsignal`: count of agent-drainable heads (not deferred/noise) in
     /// the active queue. 0 while `queue_active` is `Some(true)` means a no-op churn
     /// cycle — the agent/auto-loop must NOT loop.
@@ -1714,6 +1720,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 queue_start_at: None,
                 queue_trigger: activation.trigger,
                 queue_halted: Some("stop_fence".into()),
+                queue_paused: false,
                 queue_drainable_head_count: 0,
                 queue_continuation_required: false,
                 synced_queue_ids,
@@ -1731,6 +1738,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 queue_start_at: Some(dt.to_string()),
                 queue_trigger: activation.trigger,
                 queue_halted: None,
+                queue_paused: false,
                 queue_drainable_head_count: 0,
                 queue_continuation_required: false,
                 synced_queue_ids,
@@ -1854,6 +1862,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                         queue_start_at: None,
                         queue_trigger: activation.trigger,
                         queue_halted: Some("item_modified".into()),
+                        queue_paused: false,
                         queue_drainable_head_count: 0,
                         queue_continuation_required: false,
                         synced_queue_ids,
@@ -2073,12 +2082,20 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // / inert noise — a no-op churn cycle. Surfacing it lets the agent and the
     // Claude Code auto-loop stop without re-deriving drainability from prose, even
     // when the route-owned supervisor predates the idle-watch filter (#qchurn).
-    let queue_drainable_head_count = if activation.active {
+    // `#qpausego`: an accepted controller `admin queue pause` durably halts a
+    // queue the controller dispatch RPC already blocks. Honor it here too so an
+    // accepted pause drops `queue_continuation_required` (and the drainable head
+    // count) even for a `go`-mode queue, and surface `queue_paused` so the skill /
+    // auto-loop reports the halt instead of re-deriving it. `resume`/`drain` are
+    // not `paused` and do not gate continuation.
+    let queue_paused = crate::queue_continuation::document_queue_controller_paused(file);
+    let queue_drainable_head_count = if activation.active && !queue_paused {
         crate::queue_continuation::drainable_head_count(file, &content)
     } else {
         0
     };
-    let queue_continuation_required = activation.active && queue_drainable_head_count > 0;
+    let queue_continuation_required =
+        activation.active && !queue_paused && queue_drainable_head_count > 0;
 
     Ok(QueueState {
         queue_prompts,
@@ -2095,6 +2112,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         queue_start_at: activation.start_at,
         queue_trigger: activation.trigger,
         queue_halted: None,
+        queue_paused,
         queue_drainable_head_count,
         queue_continuation_required,
         synced_queue_ids,
@@ -2703,6 +2721,93 @@ mod tests {
             state.synced_queue_ids
         );
     }
+    #[test]
+    fn run_queue_maintenance_controller_pause_halts_go_mode_continuation() {
+        // `#qpausego`: an accepted controller `admin queue pause` must drop
+        // `queue_continuation_required` and `queue_drainable_head_count` to 0 even
+        // for a `go`-mode queue with a live drainable head, and surface
+        // `queue_paused`, so the in-session auto-loop halts. `resume` restores it.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#alpha] first\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        // Baseline: an active go-mode queue with a live head requires continuation.
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert!(
+            !state.queue_paused,
+            "no controller pause means queue_paused is false"
+        );
+        assert!(
+            state.queue_continuation_required && state.queue_drainable_head_count > 0,
+            "active go queue with a live head must require continuation before pause"
+        );
+
+        // Accepted controller pause must halt continuation even for a go queue.
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        let scope_id = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc_sqlite::state_store::upsert_queue_control_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &scope_id,
+                state: "paused",
+                reason: Some("operator pause"),
+                operation_receipt_id: None,
+            },
+        )
+        .unwrap();
+
+        let paused = run_queue_maintenance(&doc, None).unwrap();
+        assert!(paused.queue_paused, "accepted pause must set queue_paused");
+        assert!(
+            !paused.queue_continuation_required,
+            "controller pause must drop continuation for a go-mode queue"
+        );
+        assert_eq!(
+            paused.queue_drainable_head_count, 0,
+            "controller pause must zero the drainable head count"
+        );
+
+        // Resume restores continuation.
+        agent_doc_sqlite::state_store::upsert_queue_control_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &scope_id,
+                state: "resumed",
+                reason: Some("operator resume"),
+                operation_receipt_id: None,
+            },
+        )
+        .unwrap();
+
+        let resumed = run_queue_maintenance(&doc, None).unwrap();
+        assert!(!resumed.queue_paused, "resume must clear queue_paused");
+        assert!(
+            resumed.queue_continuation_required && resumed.queue_drainable_head_count > 0,
+            "resume must restore continuation for the active go-mode queue"
+        );
+    }
+
     #[test]
     fn run_queue_maintenance_go_mode_appends_fresh_backlog_into_nondrained_queue() {
         // #backlog-queue-attr-populates-in-go-mode: with the `go` control and a

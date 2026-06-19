@@ -71,11 +71,79 @@ pub const CONTINUATION_NO_STALL_GUIDANCE: &str = "queue continuation required �
 /// mirrors the codex-hook `active_auto_queue_prompt` logic in one shared,
 /// testable place.
 pub fn detect(file: &Path) -> Result<Option<QueueContinuation>> {
+    // `#qpausego`: an accepted controller `admin queue pause` durably stops
+    // continuation for every consumer (`session-check`, codex-stop hook,
+    // closeout) even for a `go`-mode queue — the same pause the controller
+    // dispatch RPC honors.
+    if document_queue_controller_paused(file) {
+        return Ok(None);
+    }
     let content = match std::fs::read_to_string(file) {
         Ok(content) => content,
         Err(_) => return Ok(None),
     };
     detect_in_content(file, &content)
+}
+
+/// Whether the document's effective controller queue-control state is `paused`
+/// (`#qpausego`).
+///
+/// An accepted `agent-doc admin queue pause <FILE>` records a durable
+/// `queue_controls` row that the controller *dispatch* RPC already honors
+/// (`load_effective_queue_control_from_db` → `failed_stage=queue_paused`). But
+/// the supervisor idle-watch injects `agent-doc <FILE>` triggers straight into
+/// the pane — bypassing that RPC — and this continuation signal was computed from
+/// the document alone, so a `go`-mode auto-queue kept re-dispatching after an
+/// accepted pause. Resolving the controller pause here lets both the idle-watch
+/// drain decision and `preflight` defer to an accepted pause even for `go`-mode
+/// queues. `resume`/`drain` are not `paused`, so they do not block here (the
+/// controller owns draining).
+///
+/// Best-effort and read-only: returns `false` (not paused) when the project root
+/// or controller state DB cannot be resolved/opened, so a missing control plane
+/// never wedges an otherwise-active queue. A non-absent open/query error is
+/// logged to stderr (never silently swallowed) and treated as not-paused so a
+/// transient DB hiccup cannot strand the drain.
+pub fn document_queue_controller_paused(file: &Path) -> bool {
+    let Some(root) = crate::snapshot::find_project_root(file) else {
+        return false;
+    };
+    let db_path = agent_doc_sqlite::state_store::state_db_path(&root);
+    if !db_path.exists() {
+        // No control plane has ever run for this project: nothing can be paused.
+        return false;
+    }
+    let canonical = match file.canonicalize() {
+        Ok(canonical) => canonical,
+        Err(_) => return false,
+    };
+    let document_id = canonical.to_string_lossy().to_string();
+    let conn = match agent_doc_sqlite::state_store::open_state_db(&root) {
+        Ok(conn) => conn,
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] queue_continuation: failed to open controller state DB at {} ({err:#}) — treating queue as not controller-paused",
+                root.display()
+            );
+            return false;
+        }
+    };
+    match agent_doc_sqlite::state_store::load_effective_queue_control_from_db(
+        &conn,
+        &document_id,
+        &root.to_string_lossy(),
+    ) {
+        Ok(control) => control
+            .map(|control| control.state == "paused")
+            .unwrap_or(false),
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] queue_continuation: failed to load controller queue control for {} ({err:#}) — treating queue as not controller-paused",
+                file.display()
+            );
+            false
+        }
+    }
 }
 
 fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuation>> {
@@ -1165,6 +1233,76 @@ mod tests {
     fn write_doc(dir: &Path, prompts: &[&str], queue_active: bool, has_auto: bool) -> PathBuf {
         let queue_attrs = if has_auto { " auto" } else { "" };
         write_doc_with_queue_attrs(dir, prompts, queue_active, queue_attrs)
+    }
+
+    /// `#qpausego`: set the document-scope controller queue-control state for a doc.
+    fn set_document_queue_control(root: &Path, doc: &Path, state: &str) {
+        let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+        let scope_id = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc_sqlite::state_store::upsert_queue_control_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &scope_id,
+                state,
+                reason: Some("test pause"),
+                operation_receipt_id: None,
+            },
+        )
+        .unwrap();
+    }
+
+    /// `#qpausego`: with no controller state DB at all, a doc is never reported
+    /// as controller-paused (a missing control plane must not wedge a queue).
+    #[test]
+    fn document_queue_controller_paused_false_without_state_db() {
+        let dir = tempfile::tempdir().unwrap();
+        // `.agent-doc` must exist for project-root resolution, but no state DB.
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = write_doc(dir.path(), &["do [#a]"], true, true);
+        assert!(
+            !document_queue_controller_paused(&doc),
+            "no state DB means nothing can be controller-paused"
+        );
+    }
+
+    /// `#qpausego`: an accepted `admin queue pause` (document-scope `paused`
+    /// control row) is reported as paused; `resume` clears it.
+    #[test]
+    fn document_queue_controller_paused_reflects_paused_then_resumed() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#a]"], true, true);
+
+        set_document_queue_control(dir.path(), &doc, "paused");
+        assert!(
+            document_queue_controller_paused(&doc),
+            "an accepted pause must report the queue as controller-paused"
+        );
+
+        set_document_queue_control(dir.path(), &doc, "resumed");
+        assert!(
+            !document_queue_controller_paused(&doc),
+            "resume must clear the controller pause"
+        );
+    }
+
+    /// `#qpausego`: a `paused` controller state suppresses continuation even for a
+    /// `go`/`auto` queue with a live drainable head — the auto-loop must stop.
+    #[test]
+    fn detect_returns_none_when_controller_paused() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do something"], true, true);
+        // Sanity: without a pause, this active auto queue requires continuation.
+        assert!(
+            detect(&doc).unwrap().is_some(),
+            "active auto queue with a live head should require continuation"
+        );
+
+        set_document_queue_control(dir.path(), &doc, "paused");
+        assert!(
+            detect(&doc).unwrap().is_none(),
+            "an accepted controller pause must suppress continuation for a go/auto queue"
+        );
     }
 
     fn write_doc_with_queue_attrs(

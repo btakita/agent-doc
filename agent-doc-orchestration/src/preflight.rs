@@ -436,6 +436,15 @@ pub struct PreflightOutput {
     /// When halted, `queue_prompts` is empty and `queue_active` is `false`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_halted: Option<String>,
+    /// `#qpausego`: true when an accepted controller `admin queue pause` is the
+    /// effective queue-control state. A pause durably drops
+    /// `queue_continuation_required` and `queue_drainable_head_count` to 0 even
+    /// for a `go`-mode queue (mirroring the controller dispatch RPC's
+    /// `failed_stage=queue_paused` block), so an accepted pause halts the
+    /// in-session auto-loop. The supervisor idle-watch honors the same pause.
+    /// Cleared by `admin queue resume`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queue_paused: bool,
     /// `#cleardrainsignal`: count of agent-drainable heads (not deferred/noise) at
     /// the active queue head. Always emitted. `0` while `queue_active == true` means
     /// every remaining head is `[clean-session]` (under live IPC) / `[operator-verify]`

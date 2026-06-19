@@ -1505,6 +1505,36 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     | IdleQueueContextResetDecision::SkipNoResetNeeded => {}
                 }
 
+                // `#qpausego`: an accepted `admin queue pause` records a durable
+                // controller pause the dispatch RPC already honors, but the
+                // idle-watch injects triggers straight into the pane and so
+                // historically ignored it — a `go`-mode auto-queue kept
+                // re-dispatching after an accepted pause. Defer the drain while
+                // the controller pause is active so the pause durably halts a
+                // go-mode queue too. `resume`/`drain` are not `paused` and do not
+                // block here.
+                if active_head.is_some()
+                    && crate::queue_continuation::document_queue_controller_paused(&path)
+                {
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "idle_queue_watch_drain_skipped harness={} reason=queue_control_paused file={}",
+                            harness.binary,
+                            path.display()
+                        ),
+                    );
+                    crate::ops_log::log_op(
+                        &path,
+                        &format!(
+                            "queue_dispatch_skipped file={} harness={} reason=queue_control_paused",
+                            path.display(),
+                            harness.binary
+                        ),
+                    );
+                    continue;
+                }
+
                 // Single-owner tie-break: if the Claude Code `/loop` auto-loop holds
                 // a fresh drain-owner lease it owns this drain, so the supervisor
                 // must defer instead of double-injecting (#kp5z / #qflood).

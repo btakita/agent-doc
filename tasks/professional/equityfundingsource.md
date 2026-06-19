@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,29 @@ completed
 Compacted content:
 - Archived 25 response topic(s): deploy; TMO writeback "unavailable"; Why "TMO writeback not sent: unavailable" (already answered above); 22 more
 - Prior summary/context: prior compacted content: Archived 9 response topic(s): What is "Funding Commits" in the Deal Pipeline dialog?; Is the...
-<!-- agent:boundary:3c988818 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed the EFS Worker from `src/equityfundingsource-dev` at commit `4f715d6`.
+
+Changed paths: none. The pre-existing `AGENTS.md` instruction-version diff was left untouched and is not part of the Worker build.
+
+Commands run:
+- `make check` — passed: 879 tests, browser/server build, and Worker build.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — found pending `0090_lending_groups.sql` before deploy.
+- `make deploy` — applied `0090_lending_groups.sql` to production D1, then deployed Worker version `ca952176-4ee2-4ffc-ad0d-946ba2166c63`.
+- Post-deploy migration check — passed: no migrations to apply.
+- Live smoke test — `https://equityfundingsource.brian-takita.workers.dev/` returned HTTP `200`.
+
+Verification confidence: high for the deploy path covered by local check, D1 migration state, and live root smoke test.
+
+Escalation: none.
+<!-- agent:boundary:b62d5223 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +73,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

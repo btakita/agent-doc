@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -458,6 +458,11 @@ Warmed up the private note to Laura in `mail/drafts/2026-06-18-laura-virtuousai-
 
 ### Re: rewriting the forward note in your voice + regenerating the PDF — opus-4-8
 
+> **Queue prompt:**
+>
+> Use my voice in 2026-06-18-virtuousai-forward-note.pdf. Remove typical AI tells such as —. Don't overdo `...` as well.
+
+
 Done. Cleaned up `mail/drafts/2026-06-18-virtuousai-forward-note.md` and regenerated the PDF.
 
 **Voice / AI tells:**
@@ -468,13 +473,12 @@ Done. Cleaned up `mail/drafts/2026-06-18-virtuousai-forward-note.md` and regener
 **PDF regenerated and verified:** `mail/drafts/2026-06-18-virtuousai-forward-note.pdf` — 1 page, Palatino (P052) to match the resume, "Brian Takita" appears once as the header, apostrophes render clean, full corrected text confirmed via `pdftotext`. `.md` committed in the `mail` submodule (`6feb206`); the `.pdf` stays untracked on disk as before.
 
 **One gotcha worth fixing (`#notecss`, recommended):** `mail/templates/build-pdf.sh` defaults to `proposal.css`, which is Helvetica sans-serif — running the note through it plain swaps the font off Palatino. I rendered with a Palatino stylesheet (resume's font stack) to keep it matching, but it'd be worth adding a proper Palatino letter template so this doesn't bite the next note. Nothing sent.
-<!-- agent:boundary:d04e4c4b -->
+<!-- agent:boundary:2968c92c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Use my voice in 2026-06-18-virtuousai-forward-note.pdf. Remove typical AI tells such as —. Don't overdo `...` as well.
 <!-- /agent:queue -->
 
 ## Backlog

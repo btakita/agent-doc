@@ -12,7 +12,30 @@ pub(crate) struct DirectPaneAcceptance {
 }
 
 const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR: Duration = Duration::from_millis(900);
-const DIRECT_PANE_MAX_ENTER_RESUBMITS: usize = 3;
+
+/// Default bare-Enter resubmit cap when the routed trigger stays drafted in the
+/// composer (not yet submitted).
+const DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT: usize = 6;
+
+/// Max bare-Enter resubmits while the trigger is still visible (drafted, not
+/// submitted) — the supervisor "retry until the prompt is submitted" budget
+/// (`#jbclaudesubmit`). Each resubmit re-polls for a full acceptance window, so the
+/// wall-clock budget is roughly this count times `direct_pane_submit_acceptance_timeout`.
+/// Raised from 3 → 6 (and made env-tunable via
+/// `AGENT_DOC_DIRECT_PANE_MAX_ENTER_RESUBMITS`) because a slow-to-ready Claude Code
+/// composer — which has no submit-proof hook, so dispatch is accepted-only — could
+/// exhaust the old 3-nudge budget before the pane focused and consumed the Enter,
+/// leaving the Run-Agent-Doc trigger sitting unsent ("doesn't submit to Claude Code").
+/// (Claude dispatch is accepted-only — text+Enter delivered without a submit-proof
+/// hook.) The loop still exits the moment the trigger is consumed (submitted), so the
+/// higher cap only costs extra wall-clock on a genuinely stuck pane.
+fn direct_pane_max_enter_resubmits() -> usize {
+    std::env::var("AGENT_DOC_DIRECT_PANE_MAX_ENTER_RESUBMITS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT)
+}
 
 #[derive(Debug, Default)]
 struct DirectPaneAcceptancePollState {
@@ -170,7 +193,7 @@ fn direct_pane_can_continue_enter_resubmit(
     trigger_visible: bool,
     attempts_sent: usize,
 ) -> bool {
-    attempts_sent < DIRECT_PANE_MAX_ENTER_RESUBMITS
+    attempts_sent < direct_pane_max_enter_resubmits()
         && direct_pane_needs_enter_resubmit(harness_binary, status, trigger_visible)
 }
 
@@ -1631,7 +1654,12 @@ mod tests {
     }
     #[test]
     fn direct_pane_enter_resubmit_is_bounded_while_trigger_remains_visible() {
-        for attempts_sent in 0..DIRECT_PANE_MAX_ENTER_RESUBMITS {
+        let cap = direct_pane_max_enter_resubmits();
+        assert!(
+            cap >= DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT,
+            "default resubmit budget should honor `retry until submitted` (#jbclaudesubmit)"
+        );
+        for attempts_sent in 0..cap {
             assert!(
                 direct_pane_can_continue_enter_resubmit(
                     "codex",
@@ -1646,7 +1674,7 @@ mod tests {
             "codex",
             CommandDispatchStatus::TimedOut,
             true,
-            DIRECT_PANE_MAX_ENTER_RESUBMITS,
+            cap,
         ));
         assert!(!direct_pane_can_continue_enter_resubmit(
             "codex",

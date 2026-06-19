@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -455,12 +455,13 @@ Warmed up the private note to Laura in `mail/drafts/2026-06-18-laura-virtuousai-
 **One thing to decide before this goes out:** that same file still has a *stale forward body* below the private note — it keeps the old "With MonsterRodHolders I own more than the code" ownership claim and the agent-doc "steer while it runs / redirect mid-task" realtime overclaim, both of which #p3kj already fixed in the canonical `mail/drafts/2026-06-18-virtuousai-forward-note.md` (.pdf). If you forward from this file instead of the canonical note, the false claims ship. I left it intact rather than rewrite your copy unasked, and queued `#lauraltr` (recommended) to either delete that forward-body section here or align it to the canonical note. Tell me which and I'll do it.
 
 **On the #p3kj queue bug you flagged:** you'd already cleared `[#p3kj]` out of the live editor buffer (replacing it with this Laura request), so it was only still sitting in committed HEAD — this finalize commits your cleared queue, so `[#p3kj]` is gone for real now. The root defect is real and I filed it to `agent-doc-bugs2.md` as `#orphanqhead`: once an id-backed queue head gets orphaned (its backlog item reaped but the head-strike lost to IPC drift), there's no drain path — `--done` is a no-op and `queue consume` refuses id-backed heads. It was compounded here by a wedged editor-IPC listener (your live IntelliJ buffer) bouncing every queue/pending write with `ack_mismatch`/`send_failed`. Nothing sent.
-<!-- agent:boundary:a44e1691 -->
+<!-- agent:boundary:9dbfd7c0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- Use my voice in 2026-06-18-virtuousai-forward-note.pdf. Remove typical AI tells such as —. Don't overdo `...` as well.
 <!-- /agent:queue -->
 
 ## Backlog

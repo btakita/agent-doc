@@ -90,3 +90,29 @@ a generic `send_failed`.
 
 Live-supervisor-critical (edits the supervisor inter-item dispatch + closeout
 path) — implement in a focused clean cycle with `make check` + `make tmux-ci`.
+
+## Phasing / Status
+
+Split to land the safe, fully-testable foundation ahead of the live-supervisor-critical
+wiring (same pattern the operator accepted for `#agentreloadrestart` Phase 1a/1b).
+
+- **Phase 1 — decision core + loud force-disk playback (SHIPPED).** Pure
+  `convergence_gate` module (`ConvergenceFacts` + `convergence_gate_decision` →
+  `Dispatch` / `Defer` / `ForceDiskFallback`, no I/O) and `convergence_playback`
+  module (`ConvergencePlayback` artifact at `.agent-doc/playback/<doc-hash>/<cycle-id>.json`
+  + ERROR-level `convergence_gate_force_disk_fallback severity=error …` ops-log line via
+  `record_force_disk_fallback`). 16 unit tests; `make check` green. These touch NO
+  live runtime path, so they are safe to land from a drifting session and change no
+  supervisor behavior until Phase 2 wires them in. SPEC + VERSIONS updated.
+
+- **Phase 2 — live wiring (REMAINING, live-supervisor-critical).** Call
+  `convergence_gate_decision` inside the supervisor idle-queue-watch / drain
+  inter-item dispatch decision (`start/idle_watch.rs` → `start.rs` dispatch path):
+  gather the four facts (cycle committed via `cycle_state`, editor convergence via the
+  `git::emit_postcommit_worktree_check` match ground-truth, `ipc_socket::inflight_connection_handlers()`,
+  actor idle from the controller/route readiness), defer the next `do [#id]` /
+  `agent-doc <FILE>` trigger until `Dispatch`, and on `ForceDiskFallback` perform the
+  real `--force-disk` write + `record_force_disk_fallback`. Add the SimWorld acceptance
+  tests (slow-ACK drain never piles inflight > 1; wedged-editor timeout → force-disk +
+  loadable playback). Requires `make check` + `make tmux-ci` across two live panes —
+  cannot run from the live driving session.

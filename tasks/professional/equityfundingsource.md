@@ -154,7 +154,24 @@ Updated the diagram and surrounding text to match. The `Loan → Closed / Funded
 - **Admin action #7** — reworded from "Close the loan / offering" to "Close the offering," clarifying the loan-status milestone is TMO-automatic and does not auto-close the offering.
 
 Committed + pushed: EFS `58e1e49` on `origin/main`, superproject submodule pointer bumped (`204c0473c`).
-<!-- agent:boundary:ad3b6653 -->
+
+### Re: deal-pipeline-flow.md — all communication with TMO is bi-directional — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: /home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/docs/deal-pipeline-flow.md All communication with TMO is bi-directional.
+
+
+Made the doc consistent with the invariant. It already described offering-close, loan-status, and closing-doc signed status as bi-directional EFS ↔ TMO syncs, but framed several other TMO touchpoints as one-way. Fixed:
+
+- **New top-level principle callout** (after the intro): every EFS ↔ TMO interaction is a two-way sync; bi-directional communication does **not** change ownership (EFS stays system-of-record/originator for loans, deals, Funding Commits).
+- **1c Funding Commit** — was "written back to TMO... **not** sourced from TMO"; now "EFS-owned and EFS-originated; its funding state is a **bi-directional EFS ↔ TMO sync**" (EFS posts `AddLoanFunding`, TMO reconciles back).
+- **Sequence diagram** — added `TMO-->>A: Funding reconciled (tmo_funding_rec_id)` so confirm-wire shows the return leg.
+- **Lender step 5** — "reported to TMO" → "**bi-directionally synced with TMO** (`AddLoanFunding` out, funding reconciliation back)".
+- **§4 system-of-record note** — "**writes back** to TMO" reframed to "**All EFS ↔ TMO communication is bi-directional**" while keeping the ownership/origination clarification.
+
+Docs-only change, no test suite applies. Committed + pushed: EFS `a3f04cb` on `origin/main`, superproject submodule pointer bumped (`7b17ff663`).
+<!-- agent:boundary:03258178 -->
 <!-- /agent:exchange -->
 ###
 <!--

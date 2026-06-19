@@ -225,7 +225,11 @@ Provided-from-request documents keep their existing section. Section ids (`#inve
 **2. Lender grouping** — recommendation + plan committed (`src/equityfundingsource-dev/prds/lending-groups-plan.md`, `2399f88`); queued as gated backlog `#8667`. Answers: (a) **Name → "Lending group"** — plain, matches your "lender group" wording, avoids "pool"/"syndicate" which imply fractional/pooled capital (conflicts with full-value loans). (b) **Yes, a persistent group** — co-lenders who already know each other and repeat-invest benefit from a reusable named group over per-deal re-invites. (c) **Yes, a lender starts a group and adds others** — creator is the **lead** (invite/remove/rename), added lenders are **members**; invite by email (existing lenders match by email, new ones get a sign-up link); a group pulls itself into a deal via the existing `investor_deal_interests` flow so co-lenders share the deal package + conversation.
 
 I did **not** build the schema yet — three one-way-door decisions to confirm first: **Name** ("Lending group" recommended / "Syndicate" / "Lender group" / other); **Scope** (persistent reusable group recommended / deal-scoped invite only / both); **Privacy** (do members see each other's proposal amounts/rates, or only that they share the deal? — recommend shared package + identities, not economics unless the lead opts in). Reply with your picks and I'll build it.
-<!-- agent:boundary:5c436a4d -->
+
+### Re: deploy — opus-4-8
+
+Deployed. Worker version `034efce3-cbb2-436d-b963-9975df1df624` is live at https://equityfundingsource.brian-takita.workers.dev (build + remote D1 migrate clean, new browser bundle uploaded). Verified the calculator removal in the deployed artifact: the production JS bundle has zero `investor-commitment-amount` and zero `Commitment calculator`, and now contains the `Funding terms` panel + the "Each loan funds at full value" note. Remaining items unchanged — lending-groups (`#8667`) stays gated on your name/scope/privacy picks.
+<!-- agent:boundary:4aefcfc6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -240,7 +244,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: In https://equityfundingsource.brian-takita.workers.dev/lenders/available-deals Deal detail, Remove the Committment Calculator section. Each loan is for full value. There can be multiple lenders for a deal, but those lenders already know each other.~~
 - ~~:pushpin: Please create a mechanism for lenders to group deals together. A lender could invite another lender to join a deal. What would this group be called? Should we have a lender group? Should we have a lender be able to start a lender group and add other lenders to the group?~~
-- deploy
+- ~~deploy~~
 - do [#8667]
 <!-- /agent:queue -->
 

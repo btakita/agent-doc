@@ -436,7 +436,13 @@ That closes everything: the letter is honest and done, the queue is clear, #p3kj
 ### Re: closing out the queue on the recycled controller — opus-4-8
 
 Controller recycled — clearing the last bookkeeping: marking **#p3kj done** (the note accuracy fix is finished and committed) and draining the stale queue head. The letter package is complete and honest; nothing substantive was ever blocked, only this session state. Done.
-<!-- agent:boundary:ea0e77b9 -->
+
+### Re: draining the stale #p3kj queue head — opus-4-8
+
+Closed out #p3kj for real this time. The actual deliverable was already finished — `mail/drafts/2026-06-18-virtuousai-forward-note.md` no longer claims you own Monster Rod Holders (it now reads "growing Monster Rod Holders... I run its site, SEO, and the WordPress/server stack"), and EFS is framed as "architected... directing a subcontractor," which is true whether it's your venture or a client. So the EFS-ownership question that was blocking the backlog item never actually needed answering, and there was nothing substantive left to do.
+
+What kept looping was bookkeeping, not work: the `--done p3kj` reap never stuck because of live-IPC drift, so the id-backed `[#p3kj]` queue head kept re-firing into a no-op cycle. I rebuilt the snapshot/CRDT from the current file (`reset --from-current`) to stop the stale replay, then marked #p3kj done — which reaps the id-backed queue head along with it. Queue is now empty; only #500r (the verbal-bandwidth answer prep, recommended) remains in the backlog. Nothing was sent.
+<!-- agent:boundary:43c749ff -->
 <!-- /agent:exchange -->
 
 ## Queue

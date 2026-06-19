@@ -146,7 +146,21 @@ This was the real gap. `poll_direct_pane_acceptance` treated an **empty composer
 **Verified:** new discriminator test (idle = non-dispatch / processing = real submit, so no double-run) + dispatch suite (130) + `make check` green; FlowCore hot-path budget respected.
 
 **Caveat (same as before):** unit tests can't reproduce the live pane-kill stall, so the real proof is a live repro — but the detection is conservative (never re-sends a processing/real submit). Committing + installing 0.34.18 next; `#jbrundispatch` stays gated for your live confirmation.
-<!-- agent:boundary:82b21794 -->
+
+### Re: both route directives shipped — draining the heads — opus-4-8
+
+Both of your refined directives are now implemented, committed, and installed (0.34.18). Striking the heads:
+
+> "Some Run Agent Doc ops don't submit to Claude Code.": The supervisor should detect a written prompt and retry until the prompt is submitted.
+
+Shipped — `#jbclaudesubmit` (0.34.17): detects the drafted trigger in the composer and resubmits Enter until consumed; budget raised 3→6 and env-tunable.
+
+> "Killed the pane + autostarted a new pane → Run Agent Doc stalled.": The supervisor should detect if the prompt was not dispatched into the session. And send the prompt and submit the prompt.
+
+Shipped — `#jbrundispatch` directive 2 (0.34.18): detects when the trigger never landed (empty composer + idle dispatch-ready pane + never seen) and re-sends the full trigger until it lands, reporting a genuine TimedOut instead of a false Accepted.
+
+Both want a live repro of the failing pane state to confirm they close the reports (the detection is conservative — it never re-sends a processing/real submit). `#jbrundispatch` stays gated for that.
+<!-- agent:boundary:4ec40070 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -157,8 +171,8 @@ This was the real gap. `poll_direct_pane_acceptance` treated an **empty composer
 - ~~:pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.~~
 - ~~:pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.~~
 - :pushpin: [#sqedit-race]
-- :pushpin: "Some Run Agent Doc ops don't submit to Claude Code.": The supervisor should detect a written prompt and retry until the prompt is submitted.
-- "Killed the pane + autostarted a new pane → Run Agent Doc stalled.": The supervisor should detect if the prompt was not dispatched into the session. And send the prompt and submit the prompt.
+- ~~:pushpin: "Some Run Agent Doc ops don't submit to Claude Code.": The supervisor should detect a written prompt and retry until the prompt is submitted.~~
+- ~~"Killed the pane + autostarted a new pane → Run Agent Doc stalled.": The supervisor should detect if the prompt was not dispatched into the session. And send the prompt and submit the prompt.~~
 ---
 :pushpin: do [#tsiftmdcrash]
 ---

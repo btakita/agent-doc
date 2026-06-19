@@ -4082,6 +4082,11 @@ mod tests {
         let receipt = envelope.data.unwrap();
         assert_eq!(receipt.status, "accepted");
 
+        // `#qpauserun`: a pause blocks UNATTENDED auto-dispatch (idle-watch /
+        // `/loop` continuation). Use an auto command_kind here so this asserts the
+        // pause-block; an explicit operator reopen (`managed_reopen`) is admitted
+        // past the pause and is covered by
+        // `dispatch_operator_reopen_bypasses_paused_queue`.
         let dispatch = ControllerRequest {
             command: "dispatch".to_string(),
             file: Some(doc.clone()),
@@ -4094,7 +4099,7 @@ mod tests {
             reason: None,
             supervisor_pid: None,
             supervisor_socket: None,
-            command_kind: Some("managed_reopen".to_string()),
+            command_kind: Some("idle_queue_continuation".to_string()),
             diagnostic_payload: Some("paused dispatch test harness=codex".to_string()),
         };
         let response = handle_request(
@@ -4207,7 +4212,7 @@ mod tests {
         );
         let pressure = inspection.queue_backpressure.last().unwrap();
         assert_eq!(pressure.capacity_class, "queue_paused");
-        assert_eq!(pressure.command_kind, "managed_reopen");
+        assert_eq!(pressure.command_kind, "idle_queue_continuation");
         assert_eq!(pressure.generation, Some(1));
         assert!(pressure.dispatch_receipt_id.is_some());
         let pressure_json = serde_json::to_value(pressure).unwrap();
@@ -4219,6 +4224,144 @@ mod tests {
                 .iter()
                 .any(|operation| operation.operation_kind == "queue_paused"
                     && operation.status == "accepted")
+        );
+    }
+
+    #[test]
+    fn dispatch_operator_reopen_bypasses_paused_queue() {
+        // `#qpauserun`: an explicit operator reopen (JB `Run Agent Doc` →
+        // `managed_reopen` / `dispatch_only_reopen`) must START even when the
+        // queue is controller-paused — the pause governs unattended auto-draining,
+        // not whether the operator can run a cycle. One-shot: the pause row stays.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/operator-reopen.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\n",
+                "agent_doc_session: session-reopen\n",
+                "agent: codex\n",
+                "queue: start\n",
+                "---\n\n",
+                "<!-- agent:queue -->\n",
+                "- do [#reopenhead]\n",
+                "<!-- /agent:queue -->\n\n",
+                "Body\n"
+            ),
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(&doc, "session-reopen", "%42", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-reopen",
+            "%42",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let pause = ControllerRequest {
+            command: "queue_control".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(1),
+            state: Some("pause".to_string()),
+            caller: Some("admin".to_string()),
+            reason: Some("operator pause".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("pause".to_string()),
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&pause).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<ControllerAdminReceipt> =
+            serde_json::from_str(&response).unwrap();
+        assert_eq!(envelope.data.unwrap().status, "accepted");
+
+        // Auto-dispatch stays blocked by the pause.
+        let auto = ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-reopen".to_string()),
+            pane_id: Some("%42".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("idle_queue_continuation".to_string()),
+            diagnostic_payload: Some("auto dispatch harness=codex".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&auto).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(
+            !envelope.ok,
+            "auto-dispatch must stay blocked by a paused queue"
+        );
+        assert!(
+            envelope
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("failed_stage=queue_paused")
+        );
+
+        // Explicit operator reopen is ADMITTED past the pause.
+        let reopen = ControllerRequest {
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some("operator reopen harness=codex".to_string()),
+            ..auto
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&reopen).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(
+            envelope.ok,
+            "explicit operator reopen must be admitted past a paused queue: {:?}",
+            envelope.error
+        );
+
+        // The pause row stays (one-shot bypass — auto callers remain blocked).
+        let conn = open_state_db(dir.path()).unwrap();
+        let document_id =
+            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let state: String = conn
+            .query_row(
+                "SELECT state FROM queue_controls WHERE scope_kind = 'document' AND scope_id = ?1",
+                params![&document_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            state, "paused",
+            "operator reopen bypass is one-shot — the pause must remain"
         );
     }
 
@@ -4620,7 +4763,12 @@ mod tests {
                 reason: None,
                 supervisor_pid: None,
                 supervisor_socket: None,
-                command_kind: Some("managed_reopen".to_string()),
+                // `#qpauserun`: use an auto command_kind so BOTH a stale-supervisor
+                // churn-stop pause and a deliberate operator pause block here — this
+                // test asserts the restart-redirect *marker* distinction on the
+                // queue_paused bail, not the operator-reopen bypass (covered by
+                // `dispatch_operator_reopen_bypasses_paused_queue`).
+                command_kind: Some("idle_queue_continuation".to_string()),
                 diagnostic_payload: Some("jbrestale paused dispatch".to_string()),
             };
             let response = handle_request(

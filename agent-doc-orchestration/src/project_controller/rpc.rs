@@ -459,6 +459,18 @@ pub fn dispatch_error_supervisor_restart_redirect(message: &str) -> Option<u32> 
     dispatch_error_stale_queue_pause_recovery(message).map(|recovery| recovery.stale_pid)
 }
 
+/// `#qpauserun`: whether a dispatch `command_kind` represents an EXPLICIT
+/// operator-initiated route reopen (JB `Run Agent Doc` → `managed_reopen` /
+/// `dispatch_only_reopen`), as opposed to unattended auto-dispatch
+/// (`idle_queue_continuation`, `/loop`). A `paused` queue control suppresses the
+/// unattended callers but must not block an explicit operator reopen — the pause
+/// governs auto-draining the queue, not whether the operator can start a cycle.
+/// Mirrors the `#qpausego` split (pause stops the unattended injector, not the
+/// attended action) on the controller dispatch RPC.
+pub(crate) fn dispatch_command_kind_is_operator_reopen(command_kind: &str) -> bool {
+    matches!(command_kind, "managed_reopen" | "dispatch_only_reopen")
+}
+
 /// `#anw0`: classify a failed dispatch as a stale-generation redirect and extract the
 /// current (N+1) generation to retry against. Returns `None` for every other failure —
 /// including a *terminal* stale_generation reject whose current actor is Closed/Blocked
@@ -3410,7 +3422,26 @@ pub(crate) fn handle_dispatch(
     }
     let queue_block_stage = queue_control.as_ref().and_then(|control| {
         if control.state == "paused" {
-            Some("queue_paused")
+            // `#qpauserun`: a deliberate operator/admin `paused` queue control
+            // suppresses UNATTENDED auto-dispatch (idle-watch / `/loop`
+            // continuation), but an EXPLICIT operator reopen (JB `Run Agent Doc`
+            // → route managed / dispatch-only reopen) must still start — the pause
+            // is about auto-draining the queue, not about whether the operator can
+            // run a cycle. Allowing the explicit reopen is one-shot: the pause row
+            // stays in place, so future auto callers remain blocked until
+            // `admin queue resume`. EXCEPTION: a stale-supervisor churn-stop pause
+            // (`#jbrestale`) is NOT a deliberate operator pause — it still blocks
+            // every caller so the route path restarts the stale supervisor and
+            // re-dispatches once, rather than admitting a reopen against a stale
+            // supervisor.
+            let stale_supervisor_pause = pause_reason_is_stale_supervisor_churn_stop(
+                control.reason.as_deref().unwrap_or(""),
+            );
+            if dispatch_command_kind_is_operator_reopen(&command_kind) && !stale_supervisor_pause {
+                None
+            } else {
+                Some("queue_paused")
+            }
         } else if control.state == "draining"
             && record.state != crate::session_actor::ActorState::Ready
         {

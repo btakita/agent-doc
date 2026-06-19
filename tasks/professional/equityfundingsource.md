@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -148,7 +148,7 @@ So removing it or fully computing it would actually regress the deal lifecycle. 
 - **Optional follow-up:** add a reconcile affordance in the pipeline loan dialog — when an app is accepted but has no published deal, surface a one-click **Publish** (or auto-reconcile on open). That gives you the consistency without throwing away the stored lifecycle.
 
 This is a prod write that makes the loan publicly visible in the investor marketplace, so I haven't run it. **Want me to backfill FTM631 — quiet (no email) or with the lender notification?** Captured as `#ftm631-publish-backfill`.
-<!-- agent:boundary:30bdf002 -->
+<!-- agent:boundary:89af9c47 -->
 <!-- /agent:exchange -->
 ###
 <!--

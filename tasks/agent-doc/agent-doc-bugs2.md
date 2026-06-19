@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -39,7 +39,30 @@ completed
 Compacted content:
 - Archived 25 response topic(s): do [#qpausego]; don't stall the loop on a controller pause; do [#qdurcrash]; 22 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): do [#pk3f]; JB Run Agent Doc consumes + loses an uncommitted q...
-<!-- agent:boundary:9a016075 -->
+
+### Re: post-commit recovery and queue pause — gpt-5
+
+Implemented and pushed the contained fixes.
+
+- `#pcwcfailfix` is done. `send_postcommit_editor_refresh` now returns a real success signal, and the listener-active post-commit repair skips the disk write only after `refresh_content` is acked. If the editor refresh no-acks/errors, the binary restores the working tree from committed `HEAD` and logs `transport=disk_after_failed_editor_refresh`, so a corrupted post-commit tree cannot keep re-seeding the next drift cycle.
+- The equityfundingsource.md mixed-signal path is fixed in the binary output. Controller pauses now carry `queue_pause_reason`, and `queue_continuation_guidance` explains that `queue_paused: true` suppresses only unattended supervisor auto-injection while attended continuation remains valid.
+- I updated `SPEC.md`, `README.md`, `specs/07-orchestration-commands.md`, and `VERSIONS.md` for both contracts.
+
+Verification:
+- `cargo test -p agent-doc-orchestration postcommit_worktree_auto_reconcile` passed.
+- `cargo test -p agent-doc-orchestration continuation_guidance` passed.
+- `cargo test -p agent-doc-orchestration run_queue_maintenance_controller_pause_surfaces_flag_without_stalling_continuation` passed.
+- `make check` passed.
+- `make install` passed (`agent-doc 0.34.14` installed locally).
+- Latest agent-doc CI after push is in progress: run `27845274416` for commit `3d3c3605`.
+- The superproject has no workflow named `CI`, so there was no root CI run to inspect.
+
+Commits pushed:
+- `src/agent-doc`: `3d3c3605 fix: harden queue pause and postcommit recovery`
+- superproject gitlink: `04853f430 chore: bump agent-doc submodule`
+
+I left `#driftrootfix`, `#hap7`, and `#tsiftmdcrash` open. `#driftrootfix`/`#hap7` are the deeper scoped semantic-merge/per-structural-node work; this cycle closed the Layer-A persistence loop but did not rewrite the merge core. `#tsiftmdcrash` still needs the exact crash text, pane capture, or cycle id to root-cause beyond the current logs.
+<!-- agent:boundary:ac74999d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -49,6 +72,28 @@ Compacted content:
 - :pushpin: [#qpauseux]
 - :pushpin: [#docdriftgrace]
 ---
+:pushpin: Fix equityfundingsource.md "Mixed signals"
+```
+● Mixed signals: queue_paused: true (an explicit pause flag) coexists with queue_continuation_required: true. Let me
+  check whether this is an operator-set pause (with a reason) or transient drain-coordination state before deciding
+  whether to loop into the large Phase 4 UI work.
+```
+---
+Fix the root cause of monsterrodholders.md HEAD issue with already done items.
+```
+  The one thing I can't fix from here — please reload the doc in IDEA
+  The queue keeps showing 11 heads of duplicates of already-completed prompts because the live IDEA editor buffer is
+  stale and re-injects them every cycle. The supervisor is fresh, so admin recycle won't help — only a file reload in
+  IDEA clears it. Until then the duplicate churn persists no matter how many times the queue is "drained."
+  Everything in the queue is done / resolved / gated:
+  - #134j resolved · WP-layout + localhost + relative-links + corky done & committed
+  - #tf52 (prod cutover) — operator-gated on your Cloudflare auth
+  - #bk92 remainder (water temp / EPA / state records) + #3yp0 (strategy) — backlog; the next ones need external data
+  sources or are Ron-driven direction, better scoped explicitly than auto-drained.
+  Reload IDEA and the queue will clear; or point me at the next concrete piece (e.g. water-temp source, or wiring W2/CF
+  deploy config) and I'll take it.
+```
+---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not start. It should have started.
 ```
 [route] target tmux session: 0
@@ -56,7 +101,7 @@ Compacted content:
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=4035 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control blocked_head_bytes=10 blocked_head_sha256=530312e6f606f7822758890ee49c7c43ee49243070f547326736709d7bcbd7f4 trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
 ---
-- :pushpin: do [#tsiftmdcrash]
+:pushpin: - :pushpin: do [#tsiftmdcrash]
 ---
 :pushpin: Initial response for a turn renders numeric lists in reverse order:
 ```
@@ -67,7 +112,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 <!-- agent:boundary:a5b6cae3 -->
 ```
 ---
-monsterrodholders.md sent duplicate uncommitted response
+:pushpin: monsterrodholders.md sent duplicate uncommitted response
 ```
 - :pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).
 - :pushpin: **Resolved 3 genuinely-finished reviews** → archived to `agent:done`: `#2qrx` (apply done; verify handed to archived `#2qrx-verify`), `#7m2s` (GTM v6 fix shipped 6/14; verify owned by open `#convfix-verify`), `#ef5h` (duplicate of archived `#fishloc-curated-rollout`; adapter blocker tracked by open `#3456`).
@@ -137,8 +182,60 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 - :pushpin: do [#fbwire]
 - ~~:round_pushpin: do [#qstrikeall]~~
-- :round_pushpin: do [#pcwcfailfix]
+- ~~:pushpin: do [#pcwcfailfix]~~
 - ~~do [#kbkz]~~
+- :pushpin: do [#driftrootfix]
+- :pushpin: do [#hap7]
+---
+Fix equityfundingsource.md "Mixed signals"
+```
+● Mixed signals: queue_paused: true (an explicit pause flag) coexists with queue_continuation_required: true. Let me
+  check whether this is an operator-set pause (with a reason) or transient drain-coordination state before deciding
+  whether to loop into the large Phase 4 UI work.
+```
+---
+---
+- :pushpin: do [#tsiftmdcrash]
+---
+---
+monsterrodholders.md sent duplicate uncommitted response
+```
+- :pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).
+- :pushpin: **Resolved 3 genuinely-finished reviews** → archived to `agent:done`: `#2qrx` (apply done; verify handed to archived `#2qrx-verify`), `#7m2s` (GTM v6 fix shipped 6/14; verify owned by open `#convfix-verify`), `#ef5h` (duplicate of archived `#fishloc-curated-rollout`; adapter blocker tracked by open `#3456`).
+- :pushpin: **Kept 2 false-positive matches** (real open work): `#2b8q` (live operator-gated NB-Search follow-up — HydroWeb rebalance + phase-2 enable), `#conv-backfill-615-617-verify` (distinct 6/15–6/18 batch, now-due on/after today — not the 5/29–6/14 batch `#2qrx-verify` covered).
+- :pushpin: **Kept 2 false-positive matches** (real open work): `#2b8q` (live operator-gated NB-Search follow-up — HydroWeb rebalance + phase-2 enable), `#conv-backfill-615-617-verify` (distinct 6/15–6/18 batch, now-due on/after today — not the 5/29–6/14 batch `#2qrx-verify` covered).
+- :pushpin: **Resolved 3 genuinely-finished reviews** → archived to `agent:done`: `#2qrx` (apply done; verify handed to archived `#2qrx-verify`), `#7m2s` (GTM v6 fix shipped 6/14; verify owned by open `#convfix-verify`), `#ef5h` (duplicate of archived `#fishloc-curated-rollout`; adapter blocker tracked by open `#3456`).
+- :pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).
+<!-- agent:boundary:7c96f9ce -->
+```
+---
+---
+:pushpin: More IPC/CRDT drift on virtuousai.md
+```
+  Note on the session: this hit heavy IPC/CRDT drift — finalize repeatedly raced the live JetBrains editor buffer
+  (live_prompt_drift_after_preflight, then a post-commit worktree merge that spliced my stealth bullets into the wrong
+  response). I hand-rebuilt the exchange cleanly and reset the sidecars to land a correct commit. The letter and
+  recommendation content were unaffected.
+```
+```
+● The editor IPC is persistently wedged this turn (no_ack) — identical to the previous turn, where the queued response
+  landed automatically on the next /agent-doc trigger once the JB plugin applied the patch. I've retried the
+  editor/CRDT path (finalize → commit → write --commit); all leave the response safely queued. Per the closeout rules I
+  will not force a direct disk write and will not auto-loop on this unproven-IPC state.
+```
+---
+---
+:pushpin: JB `Run Agent Doc` stalled on this document.
+```
+[sync] recovered live pane %92 for session b26b9957 via supervisor pid 1535801
+[sync] recovered live pane %105 for session 9342c5f7 via supervisor pid 1101234
+resync: stash pane %93 is unregistered but still hosts live supervisor 62fe1f41-886c-4f3d-b6fa-48d46106ec27 — skipping kill
+[route] target tmux session: 0
+[route] authoritative actor for tasks/agent-doc/agent-doc-bugs2.md projected busy but the live pane proves a dispatch-ready prompt (generation 535); repairing stale busy projection to ready and dispatching instead of queuing
+Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=broken editor IPC: content_ours adoption (live_prompt_drift, #semmerge) loses every exchange-finalize response AND consumes queue heads without landing answers (recovered last response via raw git). Remaining heads are already-answered/filed (virtuousai crash=#routedeadshell), cross-doc (equityfundingsource), or operator-gated. Pausing to stop churn. Resume in a clean session (refresh IntelliJ buffer + recycle binary) and take #smconv (the converge.rs fix for this very bug) first. receipt_id=3960 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control blocked_head_bytes=44 blocked_head_sha256=4ec56b3745f04f438f52f8bffc1d7fe8b9e8e0964028b4db7008fffeb4bf4ff5 trigger_bytes=45 trigger_sha256=ce2c7a444f4ae0b6cfce11a6ceac977be5b3811138cfe31a7252a021e9b2c9ad
+```
+---
+- ~~:round_pushpin: do [#pcwcfailfix]~~
 - :round_pushpin: do [#driftrootfix]
 - do [#hap7]
 <!-- /agent:queue -->
@@ -167,7 +264,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcwcfailfix] [clean-session] #agent-doc-bug Recurring post-commit working-tree corruption: every finalize commits the correct response to HEAD but the working tree is then mangled (new Re: response dropped from its block, fragments spliced into an older block), forcing a manual git checkout HEAD recovery each cycle. Layer-A root cause in git.rs emit_postcommit_worktree_check #pcwcdiskfree branch: when a JB listener is active the disk write is skipped and send_postcommit_editor_refresh pushes HEAD into the buffer, but on Ok(false) no-ack OR Err ack status=error (observed this session) it is swallowed as non-fatal and the caller returns, so the corrupted disk plus mangled editor buffer persist and re-seed content_ours next cycle = perpetual loop. Fix: make send_postcommit_editor_refresh return a success signal and, when it does NOT ack, fall back to the authoritative HEAD disk write even with a listener active (a one-time File Cache Conflict beats a perpetual corruption loop); keep disk-skip only on a real ack. Add SimWorld coverage for the failed-refresh disk fallback. Live-supervisor-critical: clean session, make check + make tmux-ci. Plan: tasks/agent-doc/plan-recurring-worktree-corruption.md priority=1
 - [ ] [#driftrootfix] [clean-session] #agent-doc-bug #semmerge Layer-B root cause of the recurring worktree corruption: live_prompt_drift_after_preflight adopts a mangled content_ours on every finalize this session because the ack-content / editor CRDT buffer splices the new Re: response into the WRONG exchange block (dropped from its own block). Make the converge place a new response turn at the boundary position instead of merging it into a prior block. Overlaps #hap7/#gf5n/#semmerge; coordinate with those. Needs the focused converge-core session. Plan: tasks/agent-doc/plan-recurring-worktree-corruption.md priority=2
 - [ ] [#hap7] [operator-verify] #agent-doc-bug #qdup Operator-reported (2026-06-19): agent-doc duplicated the operator equityfundingsource.md queue prompt (All upload preview dialogs should be full screen, deploy) on a concurrent edit. Second instance of the queue-prompt duplication family (first: virtuousai.md). Fix per operator spec: constrain the CRDT/semantic merge to the structural part it applies to (per-structural-node merges, not whole-component) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; and when the operator deletes a structure that agent content targets, note it in agent:exchange instead of merging. Merge-core change, the corruption source this session, so NOT safe to rush in the in-session loop; needs a focused cycle. Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md
 - [ ] [#fbwire] [operator-verify] #agent-doc-bug Phase 2 live wiring of the #fullboundary convergence gate (Phase 1 decision core + playback shipped, submodule 17010e78). Call convergence_gate_decision inside the supervisor idle-queue-watch/drain inter-item dispatch (start/idle_watch.rs to start.rs): gather the four facts (committed via cycle_state, editor converged==HEAD via emit_postcommit_worktree_check, ipc_socket inflight==0, actor idle), defer the next trigger until Dispatch, on ForceDiskFallback do the real --force-disk write + record_force_disk_fallback. Add SimWorld acceptance. Live-supervisor-critical: needs make check + make tmux-ci across two live panes, so NOT in-session-loop-drainable; needs a focused operator-driven cycle. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md

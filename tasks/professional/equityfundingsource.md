@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -83,7 +83,34 @@ So "Loan Terms" here is accurate for what it shows; "Preferred Terms" would be w
 **One caveat for your eyes (live data):** on a *pre-funding available* deal the TMO record may carry the borrower's submitted/requested numbers rather than funded terms, so the card can *look* like preferred terms. If on the live page you see borrower-requested values under "Loan Terms" and want it relabeled regardless of source, re-queue "rename Loan Terms → Preferred Terms" as an unconditional instruction and I'll ship it (+spec/tests/commit/push).
 
 Confidence: high on the code mapping; the rename was gated on a condition that the code does not satisfy. Escalation: none.
-<!-- agent:boundary:0a2de52f -->
+
+### Re: Funding Commitment should say "Express Interest", not "Awaiting EFS selection" — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+
+Fixed, tested, committed, and pushed (deploy is the separate queued item).
+
+**Note on sequencing:** a prior recovery/replay cycle wrongly struck this queue item before it was addressed (the IPC-degraded retry over-consumed one extra free-text head). I completed the real work this cycle so the strike is now accurate.
+
+**Root cause:** `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — `CommitFundingForm` rendered a single `!deal.selected_for_commitment` branch that always showed **"Awaiting EFS selection"**, even for a lender who had not expressed interest yet. That implies they're already in the running when they haven't entered the Interest workflow at all.
+
+**Fix:** gate the copy on `deal.interested`:
+- **Not interested yet** → title **"Express interest to commit funding"**, body *"Express interest in this loan above so EFS and the borrower know you're interested. Funding commitments open after EFS selects you from the Interest workflow."*
+- **Interested, not yet selected** → unchanged **"Awaiting EFS selection"** / *"Funding commitments open after EFS selects you for this deal from the Interest workflow."*
+
+The "Express interest" CTA already lives in the sidebar card directly above the Funding Commitment card (`DealInterestAction`), so "above" is accurate.
+
+**Changed paths (`src/equityfundingsource-dev`, commit `7ac7b59`, pushed to origin/main):**
+- `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — conditional Funding Commitment copy.
+- `tests/investor-portal-e2e.test.ts` — assert the conditional + new express-interest copy.
+
+**Verification:** `make check` green — full suite **894 pass, 0 fail**, browser + worker bundles built. Superproject pointer bumped to `7ac7b59` (`d4d84334b`).
+
+Confidence: high — source-inspection e2e test pins both branches. Escalation: none. Deploy pending as the next queue item.
+<!-- agent:boundary:23576724 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,13 +123,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Lender Group table is malformed ![img_28.png](img_28.png)~~
-- ~~:pushpin: In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d, is "Loan Terms" the borrower preferred terms? If it is, rename label to "Preferred Terms".~~
-- ~~In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d, if the lender has not expressed interest in the deal, Funding Commitment should instruct the lender to Express Interest in the loan...not "Awaiting EFS selection"~~
-- :pushpin: deploy
-- Lender Group table is malformed ![img_28.png](img_28.png)
-- deploy
-- In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d, is "Loan Terms" the borrower preferred terms? If it is, rename label to "Preferred Terms".
 <!-- /agent:queue -->
 
 ## Backlog

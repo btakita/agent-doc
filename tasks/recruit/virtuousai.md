@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -141,12 +141,13 @@ Good catch — that's a real risk. "Right now I'm building Equity Funding Source
 **Why I didn't just call MRH a "side project" in the body:** that word undercuts the operator-empathy point that makes you stand out — the whole value is "I've *run* a real business and felt the execution gap." So in the forwardable note MRH still reads as a business you own ("I own more than the code: the seasonal campaigns, the catalog, the SEO, the packaging, and whatever broke that week"), and **EFS is reframed as senior delegation** — *"I architected Equity Funding Source... directing a subcontractor through the build."* That removes the full-time-commitment implication and adds an architect-who-delegates signal, which is a plus for engineer #2.
 
 A judge subagent rated the split-note revision **94/100** ("zero bandwidth doubt planted in the forward, availability closed in one confident breath with Laura"), confirming diminishing returns. No numbers, no AI-tells, still your voice. **Nothing sent.**
-<!-- agent:boundary:6e1915ab -->
+<!-- agent:boundary:20cc5dc7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- A concern I having is running both MRH and EFS with a full time job. I have the capacity to take a full time role and I worked extra hours to get a demo out with the Stealth Company. Thoughts?
 <!-- /agent:queue -->
 
 ## Backlog

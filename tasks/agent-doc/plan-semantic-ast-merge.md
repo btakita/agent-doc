@@ -159,9 +159,18 @@ node-keyed substrate — not a second CRDT.
    skill path drives the acknowledgement. New stable `AckReason::token()` wire
    string. The merged document is unchanged (operator already won) — this only adds
    the courtesy acknowledgement.
-5. **`#semmerge-simworld`** — SimWorld coverage for the operator↔agent concurrent
-   matrix (node-disjoint union, delete-vs-edit ack, same-node override),
-   reproducing this session's `queue: stop` + cross-head case deterministically.
+5. **`#semmerge-simworld`** — ✅ DONE (`#smsim`, 0.34.14). Added deterministic
+   SimWorld coverage of the operator↔agent concurrent-edit matrix through the
+   `#smconv` convergence (`SimWorld::converge_semantic_merge` runs the production
+   `semantic_merge_scoped`): node-disjoint auto-merge (agent strike + concurrent
+   operator add both survive), same-node operator-wins + ack in the active area,
+   the identical same-node conflict OUTSIDE the active area auto-resolving
+   operator-wins with NO ack (`#smturnactive` gating), and
+   operator-deleted-an-agent-edited-node keeping the deletion + raising the ack.
+   Four `semmerge_sim_*` scenarios + four coverage counters. Locks the merge/IPC
+   data-loss family against regression.
+
+**All five semmerge phases are now complete.**
 
 ## Quick-win stopgap (independent of the rewrite)
 

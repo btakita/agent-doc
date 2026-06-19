@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -171,7 +171,7 @@ Made the doc consistent with the invariant. It already described offering-close,
 - **§4 system-of-record note** — "**writes back** to TMO" reframed to "**All EFS ↔ TMO communication is bi-directional**" while keeping the ownership/origination clarification.
 
 Docs-only change, no test suite applies. Committed + pushed: EFS `a3f04cb` on `origin/main`, superproject submodule pointer bumped (`7b17ff663`).
-<!-- agent:boundary:03258178 -->
+<!-- agent:boundary:1b23486d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -184,6 +184,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Show bi-directional arrows to TMO in diagram in /home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/docs/deal-pipeline-flow.md
 <!-- /agent:queue -->
 
 ## Backlog

@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -141,18 +141,39 @@ Good catch — that's a real risk. "Right now I'm building Equity Funding Source
 **Why I didn't just call MRH a "side project" in the body:** that word undercuts the operator-empathy point that makes you stand out — the whole value is "I've *run* a real business and felt the execution gap." So in the forwardable note MRH still reads as a business you own ("I own more than the code: the seasonal campaigns, the catalog, the SEO, the packaging, and whatever broke that week"), and **EFS is reframed as senior delegation** — *"I architected Equity Funding Source... directing a subcontractor through the build."* That removes the full-time-commitment implication and adds an architect-who-delegates signal, which is a plus for engineer #2.
 
 A judge subagent rated the split-note revision **94/100** ("zero bandwidth doubt planted in the forward, availability closed in one confident breath with Laura"), confirming diminishing returns. No numbers, no AI-tells, still your voice. **Nothing sent.**
-<!-- agent:boundary:20cc5dc7 -->
+
+### Re: capacity to run MRH + EFS alongside a full-time role — thoughts — opus-4-8
+
+> **Queue prompt:**
+>
+> A concern I having is running both MRH and EFS with a full time job. I have the capacity to take a full time role and I worked extra hours to get a demo out with the Stealth Company. Thoughts?
+
+
+Honest read: you're in a defensible position, but a few things are worth being deliberate about.
+
+**Your instinct to surface it is right.** At a 3-4 person company, engineer #2 is effectively all-in, and founders worry about divided attention far more than a big employer would. Addressing it proactively — privately, to Laura — is the correct move. Don't wait to be asked.
+
+**The capacity claim is credible the way we framed it,** because it's a real structure, not spin: MRH runs on light operational time, and EFS is delegated to a subcontractor with you architecting and reviewing. That's the whole answer. Keep it that simple and steady-state ("calendar open; these run light/delegated"). The more you itemize availability, the more you signal worry about it.
+
+**One caution on the "I worked extra hours for the Stealth demo" point.** To *you*, that's good evidence you have surge capacity, and it's real. But I'd keep it as backup, not as the reassurance you lead with. "I grind extra hours to ship things" can quietly *feed* the divided-attention worry — it reads as "I pile on commitments" — which is the opposite of what calms a founder. Lead with steady-state open availability; bring out the drive/extra-hours story only if they probe for proof.
+
+**The gut-check that actually matters (for you, not them):** a founding role wants your best hours. If EFS ramps or MRH hits a crisis mid-quarter, do you have a plan? The honest version is: EFS stays on the subcontractor with you capped at architect/review, and MRH can run on autopilot or be handed off. If you can answer "yes, both are structured so they don't pull on my core hours," the full-time claim is genuinely honest and you're fine. If you can't yet, better to know that now than three weeks into a 30-day contract.
+
+**Don't undersell the upside, though.** Running your own storefront, building EFS, and pushing a demo out for the Stealth client is founder-mode energy — exactly what engineer #2 at a tiny startup needs. A lot of founders read "builds and ships their own things" as a *plus*, not a liability. So hold the portfolio as evidence of capacity and ownership — just be ready to show, calmly, that it won't divide your focus.
+
+Bottom line: keep the reassurance simple and steady-state, don't over-explain, and have the "what if it ramps" answer ready in your head for the live conversation. I queued a `[recommended]` item to draft that tight verbal answer (`#availanswer`).
+<!-- agent:boundary:8b4fd0b4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- A concern I having is running both MRH and EFS with a full time job. I have the capacity to take a full time role and I worked extra hours to get a demo out with the Stealth Company. Thoughts?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#500r] [recommended] #availanswer Prepare a tight 2-3 sentence verbal answer for the live interview 'do you have the bandwidth?' question — steady-state framing (calendar open; MRH light ops; EFS on a subcontractor with you architecting/reviewing), extra-hours/Stealth-demo story held as backup evidence of drive only if probed.
 <!-- /agent:backlog -->
 
 ## Icebox

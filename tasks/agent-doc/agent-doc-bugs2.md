@@ -149,15 +149,32 @@ I confirmed the gap is real (supervisor resolves the harness once at start and r
 Yes — that's the root-cause direction, sharpened to **editor-IPC convergence** (not just the git commit). Filed `#fullboundary` with the plan, made it the highest-priority queue item (above the `:pushpin:` annotations), and folded in your force-disk-as-loud-error directive.
 
 **Landing this via `--force-disk` per your authorization** — the editor IPC is wedged (`inflight=5` / `send_failed`), so this write is itself an instance of exactly the fallback `#fullboundary` will make loud + replayable. Recycling the PCP/supervisor next.
-<!-- agent:boundary:b2f25775 -->
+
+### Re: JB Run Agent Doc stalled, no notification + free-text items not struck — opus-4-8
+
+> **Queue prompts:**
+>
+> - JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.
+> - My free-text queue items are not immediately struck as if they are addressed.
+
+Triaged both. One was a stale-state condition I cleared this cycle; the other is a genuine new bug now filed.
+
+**(1) Stalled with no notification.** The queue was in a **churn-stop pause** left over from the prior degraded session (control reason: "broken editor IPC … Pausing to stop churn"). That is the deliberate `#41a32133` exception: a churn-stop pause blocks *every* dispatch caller — including an explicit JB `Run Agent Doc` — so the route restarts the stale supervisor first instead of typing into a wedged transport. The stall was that gate working as designed; the **bug is that it surfaced nothing** — no red error, no notification, just a silent no-op. That is the same defect as `#qpauseux`, so I broadened `#qpauseux` to cover this *silent* churn-stop variant (previously it only described the red-error-toast case). It stays `[operator-verify]` — the fix is plugin-side notification rendering, which needs a live install gate.
+
+Operational unblock applied now: this is a fresh `/clear` session and editor IPC is healthy (preflight converged + ack ok), so I cleared the stale pause via the controller — `admin queue resume` (receipt 73, accepted). JB `Run Agent Doc` will dispatch again.
+
+**(2) Free-text queue items not struck when addressed.** Real new bug, filed as `#ftstrike` (priority backlog). Free-text (non-`[#id]`) queue items are only struck when they are the **leading** head consumed on finalize; a free-text item sitting behind another head (these two sat behind `do [#fullboundary]`) is never struck even after the response addresses it — so you can't tell which typed reports have been answered. It's the promoted form of `#733r` Mechanism A (previously deferred as a "future nicety"). Fix direction: strike addressed free-text heads regardless of position, mirroring `strike_done_queue_head_prompts` for id-heads, matching each head to a positively-addressed `### Re:` section (never striking an unaddressed item) and mutating only `queue` nodes per `#semmerge`. Plan: `tasks/agent-doc/plan-freetext-queue-strike-on-address.md`. Queued for a focused implementation cycle since correct free-text "addressed" matching plus tests should not be rushed into this accreted/degraded session.
+
+Note: this exchange is large (8 prior response sections, warn-level accretion) but the queue is active, so I'm not stalling to compact.
+<!-- agent:boundary:962233b8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - do [#fullboundary]
-- ~~:pushpin: do [#qpausego]~~
-- ~~:pushpin: do [#qdurcrash]~~
+- :pushpin: JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.
+- :pushpin: My free-text queue items are not immediately struck as if they are addressed.
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not start. It should have started.
 ```
@@ -166,13 +183,6 @@ Yes — that's the root-cause direction, sharpened to **editor-IPC convergence**
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=4035 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control blocked_head_bytes=10 blocked_head_sha256=530312e6f606f7822758890ee49c7c43ee49243070f547326736709d7bcbd7f4 trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
 ---
-- ~~:pushpin: Response in monsterrodholders.md is committed but then deleted in an uncommitted state.~~
-- ~~:pushpin: In equityfundingsource.md After a recycle restart + queue continuation, the prompt is not submitted after the restart.~~
-- ~~:pushpin: do [#733r]~~
-- ~~:pushpin: do [#docdriftgrace]~~
-- ~~:pushpin: do [#agentrelo adrestart]~~
-- ~~:pushpin: do [#restartagentmenu]~~
-- ~~:pushpin: do [#qpauseux]~~
 - :pushpin: do [#tsiftmdcrash]
 - :pushpin: do [#orphanqhead]
 - :pushpin: As I was typing in a queue item into virtuousai.md, parts of the document was duplicated, corrupting the document. The CRDT/semantic merge should be constrained only to the structural part that it applies to. Do multiple merges for each structural part as needed. This should remove the possibility of structural corruption and should reduce conflicts. If the operator deletes parts of the structure in the document and there is new agent content for a deleted structure, mention the fact in the exchange but do not attempt to merge...as the in-editor document is the source of truth.
@@ -255,6 +265,9 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
+- do [#qpauseux]
+- do [#docdriftgrace]
+- do [#ftstrike]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -281,9 +294,10 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#ftstrike] ftstrike= #agent-doc-bug Free-text (non-[#id]) queue items are only struck when they are the leading head consumed on finalize; a free-text item sitting behind another head (e.g. behind do [#fullboundary]) is never struck even after the response addresses it, so the operator cannot tell which typed bug-reports have been answered (operator report 2026-06-19). This is the promoted form of #733r Mechanism A. Fix: strike addressed free-text heads regardless of position, mirroring strike_done_queue_head_prompts for id-heads, matching a head to an addressed Re: section (never strike an unaddressed item) and mutating only queue nodes per #semmerge. Plan: tasks/agent-doc/plan-freetext-queue-strike-on-address.md
 - [ ] [#fullboundary] #fullboundary #agent-doc-bug convergence-gated inter-queue-item boundary: serialize the queue so item N+1 does NOT dispatch until item N proves a quiescent close (committed AND editor-IPC converged==HEAD AND this doc inflight drained to 0 AND actor idle) — root-fixes the content_ours / live_prompt_drift / #pcwcdiskfree post-commit-worktree-drop / inflight-backlog send_failed race family (the drain lease #kp5z serializes dispatch ownership but NOT editor convergence). Bounded timeout falls back to a LOUD force-disk write logged as an ERROR with an operation-playback artifact (.agent-doc/playback/<doc-hash>/<cycle>.json: ordered IPC attempt sequence + transport + ack outcomes, inflight, snapshot/baseline/HEAD hashes, cycle/gen/supervisor-pid, closeout state-machine transitions) so an agent can root-cause exactly what wedged. Live-supervisor-critical: focused make check + make tmux-ci cycle. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md
 - [ ] [#orphanqhead] Orphaned id-backed queue head has no drain path: after a backlog item is reaped via --done, if the matching id-backed queue head [#id] strike was lost to IPC drift, the head is orphaned — --done <id> is then a no-op ("already resolved") and queue consume rejects id-backed heads ("reap via --done"), so the head is unreachable. preflight marks it queue_drainable_head_count=0 but never auto-strikes it, leaving a permanent phantom head that re-fires the auto-loop. Repro: tasks/recruit/virtuousai.md #p3kj on agent-doc 0.34.11; compounded by a wedged editor IPC (live IntelliJ buffer) refusing queue/pending writes (ack_mismatch/send_failed). Fix: auto-strike id-backed heads whose backing item is already done/absent during preflight reconciliation, or allow queue consume --id <id> to strike an orphaned id-backed head.
-- [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block as a raw red Error: toast instead of an actionable queue paused — resume notification. Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button rather than a dispatch error. **Operator action: install the updated JB plugin, then verify the paused-queue notification renders (live gate).**
+- [ ] [#qpauseux] [operator-verify] [recommended] JB Run Agent Doc surfaces a queue_paused/qflood dispatch block to the operator badly. Two variants: (1) a deliberate/admin pause renders as a raw red Error: toast instead of an actionable notification; (2) a churn-stop pause (reason: broken editor IPC, pausing to stop churn — the #41a32133 exception that blocks every caller including an explicit operator reopen so the route restarts the stale supervisor first) renders as NOTHING — JB Run Agent Doc just silently stalls with no notification at all (operator report 2026-06-19). Plugin should render a paused-queue block (ui_outcome=blocked_with_exact_unblocker unblocker=resume_or_clear_queue_control) as an info/action notification with a Resume button; for the churn-stop variant surface a restart-supervisor / resume action instead of silence. Operator action: install the updated JB plugin, then verify both the paused-queue notification AND the churn-stop notification render (live gate).
 - [ ] [#docdriftgrace] [operator-verify] agent-doc thrashes when the session doc changes mid/between turn in ways unrelated to the current prompt: snapshot>visible drift (operator trimmed old committed Re: blocks + harness switch + queue edits) made preflight refuse commit (looks like a manual cleanup with stale snapshot) and forced a manual reset --from-current. Binary should classify drift by component and silently auto-rebase snapshot/CRDT for unrelated changes, surfacing ONLY structural conflicts on the in-flight prompt/response. **Operator action: watch one live re-baseline cycle to verify the silent auto-rebase.** Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md
 - [ ] [#tsiftmdcrash] [operator-verify] Operator reported that a tsift.md agent-doc turn crashed and killed the session process while the tmux pane stayed active. Supervisor pid 1742954 is alive; pane %78 OpenCode TUI shows Thinking normally; tsift-v0.1.log (994KB) shows NO panic/abort/crash signatures — only two intentional supervisor_binary_stale_self_recycled via=execve_preserve_child entries from cargo install + make install (#supkill-bg blue/green drain-and-supersede). Most plausible: operator saw the brief execve-recycle window (current_exe deleted) as a crash. Not reproducible from logs alone. **Operator action: paste the exact crash error text / pane capture from the crash moment, or the specific cycle id, so it can be root-caused.**
 <!-- /agent:backlog -->

@@ -181,6 +181,29 @@ pub fn consume(file: &Path, count: usize) -> Result<()> {
     Ok(())
 }
 
+/// `agent-doc queue prune-noise <FILE>` — strike every non-drainable noise queue
+/// head at any position (`#goqstall2`), clearing pasted console output / agent
+/// response fragments / bare observations that session-check surfaces as
+/// `queue_stale_noise_lines=N`. Preserves id-backed directives and drainable
+/// free-text heads. Supervisor-safe: routes through the same editor-IPC-converged
+/// write path the closeout strikes use.
+pub fn prune_noise(file: &Path) -> Result<()> {
+    let struck = crate::write::prune_noise_queue_heads(file)?;
+    if struck == 0 {
+        println!(
+            "{}: no non-drainable noise queue heads to prune (queue inactive, empty, or all heads drainable).",
+            file.display()
+        );
+    } else {
+        println!(
+            "{}: pruned {} non-drainable noise queue head(s).",
+            file.display(),
+            struck
+        );
+    }
+    Ok(())
+}
+
 pub fn sync(file: &Path) -> Result<()> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;

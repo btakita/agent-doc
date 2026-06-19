@@ -824,6 +824,17 @@ pub(crate) fn is_drainable_queue_head(text: &str) -> bool {
     is_drainable_queue_head_with_context(text, false)
 }
 
+/// True when `text` is a non-drainable **noise** queue head: the inverse of
+/// [`is_drainable_queue_head_with_context`]. Pasted console output, an
+/// agent-response fragment, or a bare observation that can never drain and only
+/// churns the go-mode loop. Centralized so `queue prune-noise` strikes exactly the
+/// entries [`queue_stale_noise_lines`] counts (`#goqstall2`). `preset_supplies_directive`
+/// must match the active queue's `preset` attribute so a preset-bearing queue
+/// classifies noise identically to the stale-noise counter.
+pub(crate) fn is_noise_queue_head(text: &str, preset_supplies_directive: bool) -> bool {
+    !is_drainable_queue_head_with_context(text, preset_supplies_directive)
+}
+
 fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directive: bool) -> bool {
     // Pasted console-output / agent-response-fragment evidence is NOISE, not a drain
     // target — even under a preset, and even if it incidentally contains a directive

@@ -860,6 +860,108 @@ pub fn strike_answered_free_text_queue_heads(
     Ok(keys.len())
 }
 
+/// Node keys of every active (non-struck) queue head that is non-drainable
+/// **noise** (`#goqstall2` / `#qcontam`): pasted console output, an agent-response
+/// fragment, or a bare observation that carries no `#id`, question mark, or
+/// directive verb. `preset_supplies_directive` is taken from the queue's `preset`
+/// attribute so classification matches `queue_continuation::queue_stale_noise_lines`
+/// exactly. Id-backed directive heads (`do [#id]`) and genuinely drainable free-text
+/// heads are excluded, so pruning never desyncs tracked or runnable work.
+fn noise_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
+    let preset_supplies_directive = component::parse(content)
+        .ok()
+        .and_then(|comps| {
+            comps
+                .iter()
+                .find(|c| c.name == "queue")
+                .map(|c| c.attrs.contains_key("preset"))
+        })
+        .unwrap_or(false);
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("noise prune: failed to derive queue node keys: {err}"))?;
+    let mut keys = Vec::new();
+    for node in nodes {
+        if node.item.struck {
+            continue;
+        }
+        let text = node.item.text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if crate::queue_continuation::is_noise_queue_head(text, preset_supplies_directive) {
+            keys.push(node.node_key);
+        }
+    }
+    Ok(keys)
+}
+
+/// Strike every active queue head that is non-drainable **noise**, at ANY position
+/// (`#goqstall2`). Unlike `queue consume` — which strikes only a contiguous LEADING
+/// free-text run and stops at the first id-backed head — this clears noise
+/// interleaved behind operator-verify `do [#id]` heads, which `queue consume` and
+/// the answered-free-text strike could never reach. Id-backed directives and
+/// genuinely drainable free-text heads are preserved. Strikes the document and
+/// snapshot in sync via the editor-IPC-converged write path (`#fcc0`); returns the
+/// number of heads struck. No-op when the queue is inactive or nothing is noise.
+///
+/// This is the binary-mediated answer to the `queue_stale_noise_lines=N`
+/// session-check diagnostic: noise was previously "never auto-deleted (the live IPC
+/// supervisor races on direct queue edits)", leaving the operator no safe way to
+/// clear pasted bug-report / console-evidence lines. Routing the strike through the
+/// same converge path the closeout strikes use keeps it supervisor-safe.
+pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
+    let _lock = acquire_doc_lock(file)?;
+    let content =
+        std::fs::read_to_string(file).context("noise prune: failed to read document")?;
+    let (fm, _) = frontmatter::parse(&content)?;
+    if fm.queue_active != Some(true) {
+        return Ok(0);
+    }
+    let keys = noise_queue_head_node_keys(&content)?;
+    if keys.is_empty() {
+        return Ok(0);
+    }
+    let new_document = consume_queue_nodes_by_key(&content, &keys)?;
+    if new_document == content {
+        return Ok(0);
+    }
+
+    // Snapshot sync: strike the same noise heads in the snapshot by its own node
+    // keys (keys are position/hash derived and need not equal the document's) so
+    // required closeouts prove both sides converge on the struck state.
+    let new_snapshot = match snapshot::load(file)? {
+        Some(snap) => {
+            let snap_keys = noise_queue_head_node_keys(&snap)?;
+            if snap_keys.is_empty() {
+                None
+            } else {
+                Some(consume_queue_nodes_by_key(&snap, &snap_keys)?)
+            }
+        }
+        None => None,
+    };
+
+    converge_document_or_disk(file, &new_document, &content, "noise_prune")
+        .context("noise prune: failed to write document")?;
+    if let Some(snap) = new_snapshot {
+        snapshot::save(file, &snap)?;
+    }
+
+    eprintln!(
+        "[queue] pruned {} non-drainable noise head(s) (#goqstall2)",
+        keys.len()
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "queue_noise_prune file={} struck={}",
+            file.display(),
+            keys.len()
+        ),
+    );
+    Ok(keys.len())
+}
+
 /// Strike an **orphaned id-backed queue head** by id (#orphanqhead). An id-backed
 /// directive head (`do [#id]` / `[#id]` / `#id`) whose backing backlog item was
 /// already reaped (`--done` reports "already resolved") or is otherwise gone has
@@ -2910,5 +3012,72 @@ Old.
         assert!(!topic_resolves_to_exact_id("#foo halt", "foo"));
         assert!(!topic_resolves_to_exact_id("#foo deferred", "foo"));
         assert!(!topic_resolves_to_exact_id("#other", "foo"));
+    }
+
+    #[test]
+    fn prune_noise_strikes_interleaved_noise_preserves_id_and_drainable_heads() {
+        // #goqstall2: `queue prune-noise` strikes non-drainable NOISE at ANY
+        // position — including noise interleaved BEHIND id-backed `do [#id]` heads,
+        // which the leading-run `queue consume` stops at and can never reach — while
+        // preserving id-backed directives and genuinely drainable free-text heads.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- stale observation about the parser internals\n", // noise (no verb/id/?)
+            "- do [#keepme]\n",                                 // id-backed → preserved
+            "- another bare note that just describes state\n",  // noise BEHIND an id head
+            "- fix the tokenizer now\n",                        // `fix` verb → drainable
+            "- do [#keepme2]\n",                                // id-backed → preserved
+            "- lingering pasted detail line\n",                 // noise (tail)
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let struck = prune_noise_queue_heads(&doc).unwrap();
+        assert_eq!(
+            struck, 3,
+            "exactly the 3 bare-observation noise heads must be struck"
+        );
+        let result = std::fs::read_to_string(&doc).unwrap();
+
+        // id-backed directives preserved (incl. the one with noise behind it).
+        assert!(
+            result.contains("- do [#keepme]\n") && !result.contains("~~do [#keepme]~~"),
+            "id-backed head must be preserved:\n{result}"
+        );
+        assert!(
+            result.contains("- do [#keepme2]\n"),
+            "interleaved id-backed head must be preserved:\n{result}"
+        );
+        // Drainable free-text directive preserved.
+        assert!(
+            result.contains("fix the tokenizer now") && !result.contains("~~fix the tokenizer"),
+            "drainable directive head must be preserved:\n{result}"
+        );
+        // All three noise heads struck — including the one BEHIND `do [#keepme]`,
+        // which a leading-run consume could never reach.
+        assert!(
+            result.contains("~~stale observation about the parser internals~~"),
+            "leading noise struck:\n{result}"
+        );
+        assert!(
+            result.contains("~~another bare note that just describes state~~"),
+            "noise interleaved behind an id head struck:\n{result}"
+        );
+        assert!(
+            result.contains("~~lingering pasted detail line~~"),
+            "tail noise struck:\n{result}"
+        );
+
+        // Idempotent: a second prune finds nothing left to strike.
+        assert_eq!(
+            prune_noise_queue_heads(&doc).unwrap(),
+            0,
+            "second prune must be a no-op"
+        );
     }
 }

@@ -1842,6 +1842,18 @@ enum QueueAction {
         #[arg(long, conflicts_with = "count")]
         id: Option<String>,
     },
+    /// Strike every non-drainable NOISE queue head at any position (#goqstall2):
+    /// pasted console output, agent-response fragments, and bare observations that
+    /// carry no `#id`, question mark, or directive verb, so they can never drain
+    /// and only churn the go-mode loop (surfaced as `queue_stale_noise_lines=N` by
+    /// session-check). Unlike `consume`, clears noise interleaved behind id-backed
+    /// `do [#id]` heads; id-backed directives and genuinely drainable free-text
+    /// heads are preserved.
+    #[command(name = "prune-noise")]
+    PruneNoise {
+        /// Path to the session document
+        file: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -3472,6 +3484,9 @@ fn main() -> anyhow::Result<()> {
                 } else {
                     agent_doc_orchestration::queue_cmd::consume(&file, count)
                 }
+            }
+            QueueAction::PruneNoise { file } => {
+                agent_doc_orchestration::queue_cmd::prune_noise(&file)
             }
         },
         Commands::ResolveGateCmd { gate_type, scope } => {

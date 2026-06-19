@@ -914,10 +914,10 @@ pub(crate) struct QueueState {
     pub(crate) queue_trigger: Option<crate::queue::QueueTrigger>,
     pub(crate) queue_halted: Option<String>,
     /// `#qpausego`: true when an accepted controller `admin queue pause` is the
-    /// effective queue-control state. A pause durably drops
-    /// `queue_continuation_required` (and the drainable head count) even for a
-    /// `go`-mode queue, mirroring the controller dispatch RPC's `queue_paused`
-    /// block, so an accepted pause halts the in-session auto-loop.
+    /// effective queue-control state. Surfaced for visibility and consumed by the
+    /// supervisor idle-watch auto-injection guard; it does NOT gate
+    /// `queue_continuation_required` / `queue_drainable_head_count` (the attended
+    /// in-session `/loop` keeps draining real work). Cleared by `admin queue resume`.
     pub(crate) queue_paused: bool,
     /// `#cleardrainsignal`: count of agent-drainable heads (not deferred/noise) in
     /// the active queue. 0 while `queue_active` is `Some(true)` means a no-op churn
@@ -2082,20 +2082,22 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // / inert noise — a no-op churn cycle. Surfacing it lets the agent and the
     // Claude Code auto-loop stop without re-deriving drainability from prose, even
     // when the route-owned supervisor predates the idle-watch filter (#qchurn).
-    // `#qpausego`: an accepted controller `admin queue pause` durably halts a
-    // queue the controller dispatch RPC already blocks. Honor it here too so an
-    // accepted pause drops `queue_continuation_required` (and the drainable head
-    // count) even for a `go`-mode queue, and surface `queue_paused` so the skill /
-    // auto-loop reports the halt instead of re-deriving it. `resume`/`drain` are
-    // not `paused` and do not gate continuation.
+    // `#qpausego`: an accepted controller `admin queue pause` suppresses the
+    // *unattended* supervisor idle-watch auto-injection (the flood this fixes —
+    // see `start/idle_watch.rs`) and is surfaced here as `queue_paused` for
+    // visibility. It deliberately does NOT drop `queue_continuation_required` or
+    // `queue_drainable_head_count`: the attended in-session `/loop` is the
+    // legitimate single-owner drain of real queue work and must keep going. A
+    // pause stalling the in-session loop strands genuine drainable backlog
+    // (`#qdurcrash`, `#733r`, …) — the operator-rejected over-reach. Use
+    // `queue: stop` frontmatter / `--- stop` fences to stop the in-session loop.
     let queue_paused = crate::queue_continuation::document_queue_controller_paused(file);
-    let queue_drainable_head_count = if activation.active && !queue_paused {
+    let queue_drainable_head_count = if activation.active {
         crate::queue_continuation::drainable_head_count(file, &content)
     } else {
         0
     };
-    let queue_continuation_required =
-        activation.active && !queue_paused && queue_drainable_head_count > 0;
+    let queue_continuation_required = activation.active && queue_drainable_head_count > 0;
 
     Ok(QueueState {
         queue_prompts,
@@ -2722,11 +2724,13 @@ mod tests {
         );
     }
     #[test]
-    fn run_queue_maintenance_controller_pause_halts_go_mode_continuation() {
-        // `#qpausego`: an accepted controller `admin queue pause` must drop
-        // `queue_continuation_required` and `queue_drainable_head_count` to 0 even
-        // for a `go`-mode queue with a live drainable head, and surface
-        // `queue_paused`, so the in-session auto-loop halts. `resume` restores it.
+    fn run_queue_maintenance_controller_pause_surfaces_flag_without_stalling_continuation() {
+        // `#qpausego`: an accepted controller `admin queue pause` surfaces
+        // `queue_paused` (for visibility + the idle-watch auto-injection guard)
+        // but must NOT drop `queue_continuation_required` / drainable head count:
+        // the attended in-session `/loop` keeps draining real queue work. Stalling
+        // the in-session loop on a pause strands genuine backlog (operator-rejected
+        // over-reach). `resume` clears the flag; continuation is unaffected by both.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -2779,15 +2783,15 @@ mod tests {
         let paused = run_queue_maintenance(&doc, None).unwrap();
         assert!(paused.queue_paused, "accepted pause must set queue_paused");
         assert!(
-            !paused.queue_continuation_required,
-            "controller pause must drop continuation for a go-mode queue"
+            paused.queue_continuation_required,
+            "controller pause must NOT stall the in-session loop continuation"
         );
-        assert_eq!(
-            paused.queue_drainable_head_count, 0,
-            "controller pause must zero the drainable head count"
+        assert!(
+            paused.queue_drainable_head_count > 0,
+            "controller pause must NOT zero the drainable head count for the in-session loop"
         );
 
-        // Resume restores continuation.
+        // Resume clears the flag; continuation is unaffected by either state.
         agent_doc_sqlite::state_store::upsert_queue_control_in_db(
             &conn,
             &agent_doc_sqlite::state_store::QueueControlInsert {
@@ -2804,7 +2808,7 @@ mod tests {
         assert!(!resumed.queue_paused, "resume must clear queue_paused");
         assert!(
             resumed.queue_continuation_required && resumed.queue_drainable_head_count > 0,
-            "resume must restore continuation for the active go-mode queue"
+            "resume keeps continuation for the active go-mode queue"
         );
     }
 

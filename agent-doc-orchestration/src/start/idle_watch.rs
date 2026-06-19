@@ -1509,10 +1509,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // controller pause the dispatch RPC already honors, but the
                 // idle-watch injects triggers straight into the pane and so
                 // historically ignored it — a `go`-mode auto-queue kept
-                // re-dispatching after an accepted pause. Defer the drain while
-                // the controller pause is active so the pause durably halts a
-                // go-mode queue too. `resume`/`drain` are not `paused` and do not
-                // block here.
+                // re-dispatching after an accepted pause (the unattended flood
+                // this fixes). Defer the *supervisor's* auto-injection while the
+                // pause is active. This suppresses only the unattended injector:
+                // the attended in-session `/loop` continues to drain via
+                // `queue_continuation_required` (a pause does not stall it).
+                // `resume`/`drain` are not `paused` and do not block here.
                 if active_head.is_some()
                     && crate::queue_continuation::document_queue_controller_paused(&path)
                 {

@@ -71,13 +71,14 @@ pub const CONTINUATION_NO_STALL_GUIDANCE: &str = "queue continuation required �
 /// mirrors the codex-hook `active_auto_queue_prompt` logic in one shared,
 /// testable place.
 pub fn detect(file: &Path) -> Result<Option<QueueContinuation>> {
-    // `#qpausego`: an accepted controller `admin queue pause` durably stops
-    // continuation for every consumer (`session-check`, codex-stop hook,
-    // closeout) even for a `go`-mode queue — the same pause the controller
-    // dispatch RPC honors.
-    if document_queue_controller_paused(file) {
-        return Ok(None);
-    }
+    // `#qpausego` note: a controller `admin queue pause` does NOT short-circuit
+    // continuation here. The pause suppresses the *unattended* supervisor
+    // idle-watch auto-injection (see `start/idle_watch.rs`), but the attended
+    // in-session `/loop` — and `session-check` / the codex-stop continuation
+    // gate that consult this detector — must keep draining real queue work. A
+    // pause stalling the in-session loop strands genuine drainable backlog (the
+    // operator-rejected over-reach); `queue: stop` / `--- stop` is the in-session
+    // stop control.
     let content = match std::fs::read_to_string(file) {
         Ok(content) => content,
         Err(_) => return Ok(None),
@@ -1286,13 +1287,14 @@ mod tests {
         );
     }
 
-    /// `#qpausego`: a `paused` controller state suppresses continuation even for a
-    /// `go`/`auto` queue with a live drainable head — the auto-loop must stop.
+    /// `#qpausego`: a `paused` controller state must NOT short-circuit
+    /// continuation — the attended in-session `/loop` (and `session-check` /
+    /// codex-stop, which consult `detect`) keeps draining real queue work. The
+    /// pause only suppresses the unattended supervisor idle-watch injection.
     #[test]
-    fn detect_returns_none_when_controller_paused() {
+    fn detect_still_continues_when_controller_paused() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(dir.path(), &["do something"], true, true);
-        // Sanity: without a pause, this active auto queue requires continuation.
         assert!(
             detect(&doc).unwrap().is_some(),
             "active auto queue with a live head should require continuation"
@@ -1300,8 +1302,8 @@ mod tests {
 
         set_document_queue_control(dir.path(), &doc, "paused");
         assert!(
-            detect(&doc).unwrap().is_none(),
-            "an accepted controller pause must suppress continuation for a go/auto queue"
+            detect(&doc).unwrap().is_some(),
+            "a controller pause must NOT stall the in-session loop continuation"
         );
     }
 

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -34,71 +34,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260619-175702.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260619-191329.md`*
 
 Compacted content:
-❯ - Archived 2 response topic(s): #kgsameas; #kgconfgate
-❯ - Prior summary/context: prior compacted content: Archived 4 response topic(s): #next-steps to fix tsift bugs; #kgentitycollapse; #kgconfrank;...
-
-### Re: release + publish — v0.1.71 is published except the operator-gated crates.io step — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: release + publish
-
-The release is already done as far as an agent can take it — there is no new agent-doable release work this cycle.
-
-**v0.1.71 state (tsift submodule):**
-- HEAD = tag `v0.1.71` = `396bbdc` (`chore: release v0.1.71`); working tree clean, in sync with `origin/main`. Tag is pushed.
-- CI green. Installed binary `tsift 0.1.71` (matches the release).
-
-**Release workflow run `27841350649` — 6 of 7 jobs succeeded:**
-- ✅ `publish GitHub release` — `v0.1.71` live with all three platform artifacts (`x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`) + `.sha256` sidecars.
-- ✅ `publish OpenCode npm plugin`.
-- ✅ all three cross-target builds + `verify release inputs`.
-- ❌ `publish crates.io package` — the **only** failure:
-  ```
-  Failed to retrieve token from Cargo registry. Status: 400.
-  Error: No Trusted Publishing config found for repository `btakita/tsift`.
-  ```
-
-**This failure is `#vmax`, not a code/release-config bug.** The OIDC migration is already shipped (`#1td4`, `rust-lang/crates-io-auth-action@v1`); the auth handshake reached crates.io and was rejected only because no Trusted Publisher is registered. That registration is **operator-gated** — it needs a crates.io login + browser 2FA to register the Trusted Publisher for each of the 23 crates (agent cannot perform). Once the operator completes `#vmax` (register publishers → force-move `v0.1.71` to HEAD → re-push to re-trigger), the crates.io job authenticates via OIDC and publishes; no code change is required.
-
-**Not auto-looping the remaining `release + publish` queue items** — they request the same already-completed release, and the sole outstanding step (crates.io) is operator-gated under review `#vmax`. Re-running would be a no-op against a clean tree at the already-tagged HEAD.
-
-### Re: release + publish (duplicate head) — no new work — opus-4-8
-
-> **Queue prompt:**
->
-> release + publish
-
-Duplicate of the queue head answered immediately above. The v0.1.71 release is published (GitHub Release + OpenCode npm + all binaries); the only outstanding step is the crates.io publish, which failed solely because no OIDC Trusted Publisher is registered for `btakita/tsift` — the operator-gated `#vmax`. Working tree is clean at the already-tagged `v0.1.71` HEAD, so there is nothing for a second release pass to do. Queue drained; not auto-looping.
-
-### Re: Follow crates.io/docs/trusted-publishing to setup trusted publishing — done + verified — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Follow https://crates.io/docs/trusted-publishing to setup trusted publishing.
-
-
-> **Queue prompt:**
->
-> Follow https://crates.io/docs/trusted-publishing to setup trusted publishing.
-
-Done — this completes the operator-gated `#vmax`/`#1td4` that was the sole remaining gap in the v0.1.71 `release + publish`. Crates.io Trusted Publishing is now configured for **all 23 tsift crates** and the previously-failing OIDC publish is live.
-
-**What I did** (via your authenticated crates.io browser session, driven over chromium-bridge against the crates.io tab so your active tab was never hijacked — confirmed logged in as `btakita`):
-- Registered a GitHub Actions Trusted Publisher for **all 23 crates** in `release.yml`'s publish list — `repository_owner=btakita`, `repository_name=tsift`, `workflow_filename=release.yml`, no environment — via `POST /api/v1/trusted_publishing/github_configs`. All 23 returned HTTP 200.
-- Verified persistence: a follow-up GET per crate returned **23/23** with exactly one config each = `btakita/tsift:release.yml`.
-- Gate var `TSIFT_ENABLE_CRATES_PUBLISH` was already `true` (set 2026-05-21), so no change needed.
-
-**Verification (the actual publish):**
-- Re-ran the failed `publish crates.io package` job from the v0.1.71 release run (`27841350649 --failed`) rather than churning a new tag/GitHub-release/npm pass.
-- The **"Authenticate to crates.io via OIDC trusted publishing" step now succeeds** — this is the exact step that previously failed with `No Trusted Publishing config found for repository btakita/tsift`.
-- The publish is live via OIDC: `tsift-core` already moved to `0.1.71` on crates.io; the remaining crates publish in dependency order (each waits for crates.io to index its dependency). The full 23-crate publish is finishing in the background.
-
-No code or workflow change was required — the OIDC migration (`#1td4`, `rust-lang/crates-io-auth-action@v1`) was already shipped; it only needed the per-crate Trusted Publisher registration, which is what this did. Future `v*` releases now publish to crates.io automatically with no token/secret.
-<!-- agent:boundary:848a2c6e -->
+❯ - Archived 3 response topic(s): release + publish; release + publish (duplicate head); Follow crates.io/docs/trusted-publishing to setup trusted publishing
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54...
+<!-- agent:boundary:0b1caded -->
 <!-- /agent:exchange -->
 
 ## Queue

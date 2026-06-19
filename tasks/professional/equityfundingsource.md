@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -358,7 +358,7 @@ Done, deployed. You issued `do [#8yzs]` rather than picking "keep current behavi
 **Deployed:** `bun run deploy:worker` → Version `c727f3dd-9a93-4ba3-a232-270f3eef5248`, smoke check `/` and `/admin/login` = 200. I deployed because this is a correctness fix to the pipeline that went live last cycle (otherwise prod would keep closing deals at the `Closed` milestone). No data migration needed — no loan is at `Closed`.
 
 That clears the queue. The full request is shipped: lender-selection bug fixed, pipeline steps restructured (Available Deals → Loan Estimate → Intent to Proceed → Processing → Underwriting → Closing → Closed → Funded), Available Deals constrained via the `reserved` status on selection, selection → Loan Estimate, and `Closed` decoupled from closing the offering.
-<!-- agent:boundary:2999ba5b -->
+<!-- agent:boundary:27706333 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -371,6 +371,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- The Deal that I previously had open disappeared from the Deal Pipeline.
 <!-- /agent:queue -->
 
 ## Backlog

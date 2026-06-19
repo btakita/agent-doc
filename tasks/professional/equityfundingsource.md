@@ -272,7 +272,26 @@ Drained the go-mode head. I did the agent-doable half and hit the operator-gated
 - inspecting loan `45ddae53` / deal `7a0c1463` D1 rows once **`#cftk`** (D1-Edit token) is unblocked.
 
 Since only operator-gated work remains on this head, I'm stopping the queue drain here rather than re-churning the same static dead-end.
-<!-- agent:boundary:3ac7ae4c -->
+
+### Re: Lender selected but Loan Status doesn't reflect it (deal 7a0c1463) — opus-4-8
+
+> **Queue prompt:**
+>
+> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=loan, the lender is selected but the Loan Status does not reflect the vendor as being selected.
+
+
+Fixed. Root cause + repair below.
+
+**Root cause.** Deal `7a0c1463` → loan `45ddae53` (GQI751) had a *selected* interest (`selected_at` set) but the loan's `tmo_loan_status` was still `'Application Received'`, and there were **zero** `loan_activity_logs` for it. That means the lender was selected **before** commit `bc7d0de` added the "advance loan to Lender Selected on selection" logic to the dedicated select endpoint (`admin_deal_interests_by_id_select_PUT_`). The new code only advances *new* selections going forward; it never backfilled this legacy record. There's also a second write path — the workflow PATCH (`admin_deal_interests_by_id_workflow_PATCH_`) — that can set `selected_at` without touching loan status, so the inconsistency could recur. A prod query confirmed this was the **only** affected loan.
+
+**Code fix** (`#loan-status-lender-selected-sync`, EFS submodule `b9158af`). In the workflow PATCH handler: when the saved interest has `selected_at` set and the loan is still at `'Application Received'`, advance it to `'Lender Selected'`, log a `loan_status` activity, and fire the `loan_status_changed` admin event — mirroring the select endpoint. This closes the remaining write path and reconciles any legacy selected-but-unadvanced interest on the next workflow save. Added source-inspection test coverage.
+
+**Data repair** (prod D1, applied now). Advanced loan `45ddae53` from `Application Received` → `Lender Selected` (with matching `progress.last_positive_status` + a backfill activity-log entry). Verified: `tmo_loan_status = 'Lender Selected'`. The deal stays `published` (status sync only acts on Funded/Closed). The dialog will now show the lender selection reflected in the Loan Status stepper.
+
+**Verification.** `bun run check` green — 821 tests pass (incl. the new assertions), worker + browser builds succeed. No CI workflow exists in this submodule, so local check is the gate.
+
+Note: the next queued items (constrain Available Deal once a lender is selected, separate out the explicit pipeline steps — Loan Estimate / Intent to Proceed / Processing / Underwriting / Closing / Closed / Funded — and auto-move to "Loan Estimate" on selection) will reshape this step set; this fix uses the current `Lender Selected` model and will compose with that work. Code is committed but **not deployed** — the queued `deploy` item will ship it. (Exchange is large at ~242 lines; queue is active so continuing the drain.)
+<!-- agent:boundary:91fc47d7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -285,7 +304,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=loan, the lender is selected but the Loan Status does not reflect the vendor as being selected.
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=loan, the lender is selected but the Loan Status does not reflect the vendor as being selected.~~
 - We need to constrain Available Deal up to the point to where the lender is selected. Once the lender is selected, the Deal is no longer available to other lenders. We need a separate out "Loan Estimate", "Intent to Proceed", "Processing", "Underwriting", "Closing", "Closed", "Funded". Ensure these steps are in the Deal pipeline.
 - Once the Lender is selected, move to the "Loan Estimate" step.
 - deploy

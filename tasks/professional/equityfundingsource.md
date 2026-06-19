@@ -448,7 +448,7 @@ Striking `do #8667p2` advanced the go-queue to **#8667p3**, which I found alread
 **Scope call** (flag if you'd rather I'd crammed it in): the backlog item's *view rendering* half ("render co-lenders … in the deal-package / interested-lenders views") lands on the same 2,000–3,000-line admin/investor `deal_detail` components that **#8667p4** already targets, and it needs a by-deal participation query that doesn't exist yet. Rather than wedge a risky view change into a backend carry-forward commit on a live app, I shipped the participation **mechanism + API** as Phase 3 and broadened **#8667p4** to own the deal/interest-view rendering (admin **and** the investor deal-package surface) plus the by-deal query. Nothing dropped.
 
 Next in the queue: `#8667p4`.
-<!-- agent:boundary:914fbda2 -->
+<!-- agent:boundary:e10e69d4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -469,7 +469,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#8667p3] Multi-Lender Group Phase 3 — deal participation: pull a group into a deal, set per-deal allocations (lending_group_deal_allocations), render co-lenders + each member percentage in the deal package / interested-lenders views, surface the majority controller (lending_group_control_); tests.
 - [ ] [#8667p4] Multi-Lender Group Phase 4 — deal/interest view rendering: add a by-deal participation query (groups participating in a deal), then render co-lenders + each member's % + the majority controller in the admin deal / interest views AND the investor deal-package view (folds in #8667p3's view-rendering half); tests.
 <!-- /agent:backlog -->
 

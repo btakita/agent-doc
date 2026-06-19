@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -362,12 +362,14 @@ One scope check, since "going back to the realtime agent-doc" could mean two dif
 On the auto-dag specifically: I'm not going to assert how agent-doc's priority orchestration works from memory — if you want me to actually use or reason about it, tell me which doc/feature and I'll read the real state first rather than guess.
 
 So: which way do you want to point — finish the letter (I need the EFS answer), or pivot to agent-doc work in its own doc? Nothing sent on the recruiting side.
-<!-- agent:boundary:79b56870 -->
+<!-- agent:boundary:3c4ff9e4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- [#p3kj]
+- 
 <!-- /agent:queue -->
 
 ## Backlog

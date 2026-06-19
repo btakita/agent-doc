@@ -432,19 +432,17 @@ The recycle took — clean IPC is back, pending/queue writes go through again. C
 **On that cut-off `agent-doc` note** (so it's not left dangling): you pointed at the line claiming agent-doc lets you "steer while it's running" and "redirect mid-task." I softened it in the note to claim only the definitely-true behavior — *"you steer the work by editing the document and queueing direction"* — since this session has been queue-paced between cycles, not true mid-run interruption. If agent-doc actually does support live mid-run steering and I under-sold it, say so and I'll restore the stronger wording. Otherwise the conservative version stands.
 
 That closes everything: the letter is honest and done, the queue is clear, #p3kj is reaped. Nothing sent.
-<!-- agent:boundary:e99222da -->
+
+### Re: closing out the queue on the recycled controller — opus-4-8
+
+Controller recycled — clearing the last bookkeeping: marking **#p3kj done** (the note accuracy fix is finished and committed) and draining the stale queue head. The letter package is complete and honest; nothing substantive was ever blocked, only this session state. Done.
+<!-- agent:boundary:ea0e77b9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
 - [#p3kj]
----
-I donm
-> My current tool, agent-doc, puts an agent's work inside a
-shared document you can read and steer while it's running — you watch the reasoning
-and redirect mid-task instead of waiting for a result and hoping.
----
 <!-- /agent:queue -->
 
 ## Backlog

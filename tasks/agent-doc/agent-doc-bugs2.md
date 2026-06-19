@@ -81,6 +81,11 @@ This is one facet of the broader `#sqedit-race` queue-edit-race item.
 
 > **Queue prompt:**
 >
+> :pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.
+
+
+> **Queue prompt:**
+>
 > :pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.
 
 
@@ -93,14 +98,14 @@ Investigated both JB-`Run Agent Doc` reports. These are route/tmux dispatch issu
 **Why I'm not blind-fixing:** without a live repro + `agent-doc admin detect` (cross-doc pane contamination?) + the ops.log route diagnostics from the failing moment, I can't tell a real new bug from already-fixed behavior, and editing the invariant-heavy route path on a guess is how regressions ship. Capturing this as an operator-verify item that needs one captured repro.
 
 Filed `#jbrundispatch` (operator-verify). The fix needs: the failing `admin detect` + ops.log/route trace at stall time.
-<!-- agent:boundary:c6b2acdf -->
+<!-- agent:boundary:e15e41e8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.~~
-- :pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.
+- ~~:pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.~~
 - :pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.
 - :pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.
 - :pushpin: [#sqedit-race]
@@ -141,6 +146,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#jbrundispatch] [operator-verify] #agent-doc-bug JB Run Agent Doc route reliability: (1) after manual pane kill + autostart, Run Agent Doc stalls; (2) some Run Agent Doc ops do not submit to Claude Code (accepted_only dispatch with no submit). Both are route/tmux/startup-miss issues overlapping shipped work (#jbrunstart, startup-miss supersession, #qdispatchloss) and CANNOT be safely fixed blind in the invariant-heavy route.rs. NEEDS a live repro capture at stall time: agent-doc admin detect (cross-doc pane contamination?) + ops.log route trace + which pane state failed, to distinguish a real new bug from already-fixed behavior.
 - [ ] [#sqedit-race] [operator-verify] #agent-doc-bug Fix the live-IPC-supervisor race on direct queue edits (the "noise heads never auto-deleted - the live IPC supervisor races on direct queue edits" hazard). NOT a single converge-path bug (try_editor_converge is already fail-closed on ack_mismatch); it is the compounding of: (1) multiple live JB plugin consumers re-flushing stale buffers (#8bfz), (2) preflight queue maintenance (#mirrorall mirror + backlog->queue sync + #7r2s pin + live-buffer converge) round-tripping already-malformed entries (double-pins, stray ~~~done / --- runs) and re-mangling them, (3) supervisor idle-watch reading a torn queue. SAFETY-CRITICAL supervisor/commit-path - focused clean cycle with make check + make tmux-ci, NOT a degraded-session drain (same class as the deferred #aqhr/#smconv). Phases: 1 single live plugin owner per doc (absorbs #8bfz), 2 queue-edit lease respected by supervisor idle-watch AND preflight maintenance, 3 idempotent malformed-entry normalization (render/parse fixed point), 4 restart + queue prune-noise cleanup (folds in #prunenoise-live + #qpausemix-verify). Plan: tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md
 - [ ] [#qpausemix-verify] [operator-verify] #agent-doc-bug Verify the #qpausemix session-check fix (submodule 2cf7bcee) live: build+install the new binary (make install: cargo install --path . + cargo build --release + agent-doc lib-install) at a supervisor recycle boundary (deferred from this session to avoid finalize-client-newer-than-supervisor drift), then on a controller-paused queue (e.g. equityfundingsource.md under a qflood pause) confirm session-check stderr now prints the "queue_paused is NOT a contradiction" preamble + recorded reason so an agent no longer stalls deciding operator-set-pause vs transient state. Root cause fixed: session-check printed the bare CONTINUATION_NO_STALL_GUIDANCE constant instead of continuation_guidance(pause_reason); resolution previously only reached preflight JSON.
 - [ ] [#hap7] [operator-verify] #agent-doc-bug #qdup Operator-reported (2026-06-19): agent-doc duplicated the operator equityfundingsource.md queue prompt (All upload preview dialogs should be full screen, deploy) on a concurrent edit. Second instance of the queue-prompt duplication family (first: virtuousai.md). Fix per operator spec: constrain the CRDT/semantic merge to the structural part it applies to (per-structural-node merges, not whole-component) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; and when the operator deletes a structure that agent content targets, note it in agent:exchange instead of merging. Merge-core change, the corruption source this session, so NOT safe to rush in the in-session loop; needs a focused cycle. Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md

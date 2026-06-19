@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -188,7 +188,7 @@ Preview is already implemented and was already live — I verified it end-to-end
 **Deploy:** the previous deploy's worker finished ~16s after the latest commit (`d6c6651`), so I ran a fresh `deploy:worker` to remove all doubt. Result: `No migrations to apply` (D1 already current), `No updated asset files to upload` (the preview frontend bundle was already live — consistent with the verification above), worker redeployed at version `54534f34`. Post-deploy health: home `200`, `/lenders/documents` `303` (auth redirect, expected unauthenticated).
 
 **One gap I noticed (queued as `[recommended]`):** the page renders only *provided-from-request* documents. `/api/investor/documents` also returns the investor's published `documents` bucket (statements/tax/legal) and `public_documents`, but `documents.tsx` reads only `requests` and drops both — so a lender with published or public docs wouldn't see (or preview) them here. For this account only the provided Title Report exists, so nothing's missing today, but rendering those two buckets with the same `DocumentFileLink` preview would complete the page.
-<!-- agent:boundary:40349485 -->
+<!-- agent:boundary:2b42bf6f -->
 <!-- /agent:exchange -->
 ###
 <!--

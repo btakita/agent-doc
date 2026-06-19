@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -59,14 +59,31 @@ Done. `#kgentitycollapse` deduped only the context-pack retrieval surface; graph
 **Verification:** `link_nodes_by_shared_property_stars_duplicates_idempotently` (sqlite — representative choice, idempotency, prefix/singleton skips) + `link_canonical_entities_writes_same_as_edges` (kg wrapper); `cargo test -p tsift-kg -p tsift-sqlite` 60 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `1a451a1`, pushed; superproject pointer `93ba03706`.
 
 Next queue head: `do [#kgconfgate]` (provenance-aware min_confidence gating). `#kgconfreqverify` stays gated (operator-verify).
-<!-- agent:boundary:40a161ae -->
+
+### Re: #kgconfgate — provenance-aware min_confidence gating — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#kgconfgate]
+
+
+Done — this finishes the `#kgconf` operability arc. `#kgconfrank` made *ranking* provenance-aware, but the `min_confidence` *gate* still filtered by raw confidence, so a derived `default 0.500` survived a `0.4` gate while a real model `0.300` was excluded.
+
+- **`ContextCandidate`** gains `confidence_is_default` (set only when `confidence_source=default` explicitly), distinct from `confidence_is_model`. Untagged/legacy (pre-`#kgconf`) nodes are **neither** — so they keep working as before.
+- **`passes_confidence_gate`** — a positive `min_confidence` excludes explicit derived defaults outright (an unknown default isn't a measured score); model-sourced and untagged/legacy nodes gate by raw confidence; `min_confidence==0` admits everything.
+- spec (`local-kg-model.md`) documents the provenance-aware gate as the gating counterpart to `#kgconfrank`.
+
+The three-state distinction (model / explicit-default / untagged-legacy) is the key subtlety: only an *explicit* derived default is gate-excluded, so legacy graphs and the existing raw-gate test keep their behavior.
+
+**Verification:** `confidence_gate_is_provenance_aware` (default 0.9 excluded by a 0.4 gate, model 0.5 + legacy 0.7 admitted) + `confidence_gate_admits_defaults_when_threshold_is_zero`; `cargo test -p tsift-kg` 39 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `254eab0`, pushed; superproject pointer `2d7ce6158`.
+
+Queue drained. The KG-quality arc is complete: `#kgconf` (record confidence) → `#kgrefreshdup` (no refresh dups) → `#kgentitycollapse` (retrieval merge) → `#kgconfrank` (rank model > default) → `#kgsameas` (durable same_as) → `#kgconfgate` (gate model > default). Only `#kgconfreqverify` remains, gated as operator-verify (live-GPU A/B).
+<!-- agent:boundary:013d61b4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#kgsameas]~~
-- do [#kgconfgate]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -75,7 +92,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgconfgate] tsift KG min_confidence gating is provenance-blind (completes #kgconfrank's other half): context_pack.rs line 220 filters by raw confidence, so a derived default 0.500 SURVIVES a min_confidence=0.4 gate while a real model 0.300 is excluded. #kgconfrank fixed ranking (model-tier above default) but not gating. Make the gate provenance-aware — e.g. only model-sourced confidence counts toward min_confidence, or default-sourced entities require min_confidence==0 — so derived defaults are not treated as gate-passing real scores.
 <!-- /agent:backlog -->
 
 ## Review

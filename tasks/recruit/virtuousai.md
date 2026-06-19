@@ -105,7 +105,7 @@ Here's the reasoning, plainly:
 - **Resume:** keep Presence AI prominent; optionally add one supporting line for the stealth-client real-time audio-avatar work (framed as "low-latency production AI systems," since you can't name the client). I've queued that as a `[recommended]` backlog item.
 - **Letter:** no change — keep it focused on builder + operator.
 - **Call with Rory:** lead the real-time/performance story there, where it lands as systems credibility without crowding the note.
-<!-- agent:boundary:5e3990df -->
+<!-- agent:boundary:9c765ac5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -116,7 +116,7 @@ Here's the reasoning, plainly:
 ## Backlog
 
 <!-- agent:backlog -->
-- [recommended] #stealthresume Add one supporting line to `resume/data.toml` for the stealth-client real-time audio-avatar work, framed as "low-latency production AI systems" (client unnamed). Presence AI already leads the experience in `resume/profiles/virtuousai.toml`; this is a secondary real-time depth signal, only if a tighter real-time story is wanted.
+- [ ] [#wsj2] [recommended] #stealthresume Add one supporting line to `resume/data.toml` for the stealth-client real-time audio-avatar work, framed as "low-latency production AI systems" (client unnamed). Presence AI already leads the experience in `resume/profiles/virtuousai.toml`; this is a secondary real-time depth signal, only if a tighter real-time story is wanted.
 <!-- /agent:backlog -->
 
 ## Icebox

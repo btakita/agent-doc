@@ -229,7 +229,25 @@ I did **not** build the schema yet — three one-way-door decisions to confirm f
 ### Re: deploy — opus-4-8
 
 Deployed. Worker version `034efce3-cbb2-436d-b963-9975df1df624` is live at https://equityfundingsource.brian-takita.workers.dev (build + remote D1 migrate clean, new browser bundle uploaded). Verified the calculator removal in the deployed artifact: the production JS bundle has zero `investor-commitment-amount` and zero `Commitment calculator`, and now contains the `Funding terms` panel + the "Each loan funds at full value" note. Remaining items unchanged — lending-groups (`#8667`) stays gated on your name/scope/privacy picks.
-<!-- agent:boundary:f139325d -->
+
+### Re: Fix test suite + "Sold rate %" — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: What is "Sold rate %"?
+
+
+> **Queue prompt:**
+>
+> :pushpin: Fix test suite
+
+
+**Test suite — green.** After fast-forwarding to `origin/main` (`af3f5e1`), `bun run check` is **835 pass / 0 fail**, build + worker build clean. The failures came from the `851eb0b` "Merged 9344962 with 859a1a0" merge landing red; my merge-repair commit (`276754a`, already on origin) restored the dropped `admin_deals_by_id_borrower_selected_proposals_read_PUT_`, put `blended_rate`/`selected_commitment_amount`/`tmo_updated` back in the select-lender response, removed a duplicate `admin_repo_url` decl, and fixed a stale `LOAN_STATUS_STEPS` assertion. There's no CI workflow wired in this repo, so local `bun run check` is the gate. If you're still seeing a red suite somewhere, tell me where (a specific file, or `bun test <path>` output) and I'll chase it — from a clean checkout it's green.
+
+**"Sold rate %"** is the annual interest rate a lender offers to fund the loan at — the rate the loan note is effectively *sold* to that lender. On a deal's interest form (`/lenders/deals/<id>`) the lender submits a **Committed amount** + a **Sold rate %**; together those are their funding proposal (`proposal_interest_rate` in the data). EFS and the borrower compare lender candidates by amount + sold rate. When EFS selects the funding lender(s), the amount-weighted blend of their sold rates becomes the deal's `sold_rate` and is pushed to TMO without changing the loan amount (that's the blending logic in the select-lender flow). In short: it's the lender's quoted yield / the borrower's interest cost for the funded note — distinct from the borrower's "Preferred sold rate," which is the rate the borrower is *asking* for.
+
+Lending-groups (`#8667`) stays gated on your name / scope / privacy picks.
+<!-- agent:boundary:9aa038fb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -242,9 +260,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: In https://equityfundingsource.brian-takita.workers.dev/lenders/available-deals Deal detail, Remove the Committment Calculator section. Each loan is for full value. There can be multiple lenders for a deal, but those lenders already know each other.~~
-- ~~:pushpin: Please create a mechanism for lenders to group deals together. A lender could invite another lender to join a deal. What would this group be called? Should we have a lender group? Should we have a lender be able to start a lender group and add other lenders to the group?~~
-- ~~deploy~~
+- ~~:pushpin: Fix test suite~~
+- ~~:pushpin: What is "Sold rate %"?~~
 - do [#8667]
 <!-- /agent:queue -->
 

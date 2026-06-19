@@ -39,7 +39,25 @@ completed
 Compacted content:
 - Archived 4 response topic(s): Fix equityfundingsource.md "Mixed signals"; Clean up the noise queue heads; Fix live IPC supervisor races on direct queue edits + clean noise after restart; 1 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): queue drain state; JB `Run Agent Doc` is not submitting; #docd...
-<!-- agent:boundary:92886818 -->
+
+### Re: Fix the root cause of already-done / noise heads flooding the queue — opus-4-8
+
+Found and fixed the real root cause. It was never about a stale IDEA buffer — it was that `queue prune-noise` **couldn't see most of the noise**, so nothing could clear it on disk and the convergence kept re-pushing it to the editor.
+
+**Root cause.** The queue has two parsers that disagreed about what a "head" is:
+- `queue::parse` (what preflight surfaces) recognizes `:round_pushpin:`/`---`-fenced blocks and bare ```` ``` ```` console pastes.
+- `item_nodes` (the *strike* path that `prune-noise`/`consume`/dedup use) recognizes **only bulleted `- …` lines and skips fenced code**.
+
+So every operator-pasted console dump — the bulk of the flood — was invisible to the strike path. `prune-noise` reported "nothing to prune" while 18 KB of pasted blocks sat on disk forever. A `#5eq8` stray id inside a console dump even made it look like a *drainable* head.
+
+**The fix (`#qnoise-multiline-strike`, agent-doc 0.34.15):**
+1. New `queue::parse_spans` — one byte-range-aware source of head segmentation. `prune-noise` now excises multiline `---`-fenced noise `Prompt` blocks **and** bare-```` ``` ````-fenced `Freeform` console pastes by exact range, alongside the existing bulleted strike. `is_noise_freeform_line` preserves real `---`/`~~~` separators and `re [#id]` references.
+2. The drainability classifier now demotes any **multi-line** head text to noise (kills the `#5eq8`-in-a-dump false positive) — but a single-line `do [#id]` that merely happens to be `---`-wrapped stays drainable, so no real directive is lost. Drain, the `queue_stale_noise_lines` counter, and `prune-noise` now agree.
+
+**Verified on the actual flooded doc (on a copy):** `prune-noise` excised **61** noise entries — 0 ``` fences / `:round_pushpin:` / `agent:boundary` left — while preserving every id-backed directive, including the `---`-wrapped `#tsiftmdcrash`. New regression test + full queue suite (479) + `make check` green.
+
+This directly unblocks `#prunenoise-live` and the "noise heads never auto-deleted" half of `#sqedit-race`. Next: I'll install 0.34.15 + recycle the supervisor, then run `queue prune-noise` on this live doc to clear the flood with matched binaries.
+<!-- agent:boundary:ddfe2463 -->
 <!-- /agent:exchange -->
 
 ## Queue

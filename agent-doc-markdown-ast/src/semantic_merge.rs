@@ -192,6 +192,91 @@ pub fn semantic_merge(base: &str, ours_agent: &str, theirs_operator: &str) -> Se
     }
 }
 
+/// The set of structural nodes considered "active" in the current agent turn —
+/// the in-flight prompt and its response area (the `exchange` tail). Used by
+/// [`semantic_merge_scoped`] to gate which same-node conflicts raise an
+/// [`AckRequest`].
+///
+/// `#msn6` / `#smturnactive` (semantic_merge Phase 6, turn-active-area merge
+/// gating): a same-node operator↔agent collision OUTSIDE the turn-active area
+/// auto-resolves to the operator value with no ack noise; only a collision
+/// INSIDE the active area produces an ack. The merged document is identical
+/// either way (the operator always wins a same-node conflict) — only ack
+/// emission is scoped, so this can never lose content.
+///
+/// A node is active when its whole component is marked active
+/// ([`active_component`](Self::active_component)) OR the exact `(component, id)`
+/// pair was added ([`with_node`](Self::with_node)). The common caller marks the
+/// `exchange` component active because the turn-active area lives entirely in the
+/// exchange tail (the operator editing the queue / a backlog item while the agent
+/// writes its response is therefore out-of-area and auto-resolves).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ActiveNodes {
+    components: std::collections::HashSet<String>,
+    nodes: std::collections::HashSet<(String, String)>,
+}
+
+impl ActiveNodes {
+    /// An empty active set. In [`semantic_merge_scoped`] this means "nothing is
+    /// active" — every out-of-area conflict auto-resolves and NO acks are emitted.
+    /// Callers that want the legacy all-active behavior call [`semantic_merge`].
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mark an entire component active (every node in it). The typical turn-active
+    /// scoping is `ActiveNodes::new().active_component("exchange")`.
+    pub fn active_component(mut self, component: impl Into<String>) -> Self {
+        self.components.insert(component.into());
+        self
+    }
+
+    /// Mark a single `(component, id)` node active. Use for node-granular scoping
+    /// within a component (e.g. only the current turn's response heading in
+    /// `exchange`, not older turns).
+    pub fn with_node(mut self, component: impl Into<String>, id: impl Into<String>) -> Self {
+        self.nodes.insert((component.into(), id.into()));
+        self
+    }
+
+    /// Is `(component, id)` in the turn-active area?
+    pub fn is_active(&self, component: &str, id: &str) -> bool {
+        self.components.contains(component)
+            || self
+                .nodes
+                .contains(&(component.to_string(), id.to_string()))
+    }
+
+    /// True when no active area was specified.
+    pub fn is_empty(&self) -> bool {
+        self.components.is_empty() && self.nodes.is_empty()
+    }
+}
+
+/// Like [`semantic_merge`], but scope ack emission to a turn-active node-set
+/// (`#msn6` / `#smturnactive`, Phase 6). The merged document and per-node
+/// outcomes are IDENTICAL to [`semantic_merge`] — the operator still wins every
+/// same-node conflict, so no content is ever lost or changed. Only
+/// [`SemanticMerge::requires_ack`] is filtered: a same-node conflict whose node
+/// is NOT in `active` auto-resolves silently (no ack noise), while a conflict
+/// inside the active area still raises its [`AckRequest`].
+///
+/// This lets the live-prompt-drift convergence path ack ONLY when the operator's
+/// concurrent edit collided with the in-flight turn's own response area, instead
+/// of acking every unrelated operator edit (queue strike, backlog tweak,
+/// frontmatter flip) that happened to touch the same node the agent did.
+pub fn semantic_merge_scoped(
+    base: &str,
+    ours_agent: &str,
+    theirs_operator: &str,
+    active: &ActiveNodes,
+) -> SemanticMerge {
+    let mut sm = semantic_merge(base, ours_agent, theirs_operator);
+    sm.requires_ack
+        .retain(|ack| active.is_active(&ack.component, &ack.id));
+    sm
+}
+
 // ===========================================================================
 // Frontmatter
 // ===========================================================================
@@ -1090,6 +1175,87 @@ mod tests {
             m.requires_ack[0].reason,
             AckReason::SameNodeOperatorOverride
         );
+    }
+
+    // ----- #msn6 / #smturnactive: turn-active-area ack gating --------------
+
+    #[test]
+    fn scoped_conflict_outside_active_area_drops_ack_but_keeps_operator_value() {
+        // A same-node conflict in the `queue` component. Unscoped, it acks.
+        let base = q("- do [#a] task\n");
+        let ours = q("- do [#a] task AGENT\n");
+        let theirs = q("- do [#a] task OPERATOR\n");
+
+        let unscoped = semantic_merge(&base, &ours, &theirs);
+        assert_eq!(unscoped.requires_ack.len(), 1, "unscoped acks the conflict");
+
+        // Scope the active area to `exchange` only — the queue conflict is OUTSIDE
+        // it, so the ack is dropped while the merged doc + outcome are unchanged.
+        let active = ActiveNodes::new().active_component("exchange");
+        let scoped = semantic_merge_scoped(&base, &ours, &theirs, &active);
+        assert!(
+            scoped.requires_ack.is_empty(),
+            "out-of-active-area conflict auto-resolves with no ack"
+        );
+        assert_eq!(
+            scoped.merged_doc, unscoped.merged_doc,
+            "merged value identical (operator still wins)"
+        );
+        assert_eq!(
+            outcome_for(&scoped, "a").unwrap().kind,
+            OutcomeKind::OperatorWonConflict,
+            "outcome record is unchanged — only ack emission is scoped"
+        );
+        assert!(scoped.merged_doc.contains("OPERATOR"));
+        assert!(!scoped.merged_doc.contains("AGENT"));
+    }
+
+    #[test]
+    fn scoped_conflict_inside_active_area_keeps_ack() {
+        let base = q("- do [#a] task\n");
+        let ours = q("- do [#a] task AGENT\n");
+        let theirs = q("- do [#a] task OPERATOR\n");
+
+        // The conflict lives in `queue`; marking `queue` active keeps the ack.
+        let active = ActiveNodes::new().active_component("queue");
+        let scoped = semantic_merge_scoped(&base, &ours, &theirs, &active);
+        assert_eq!(scoped.requires_ack.len(), 1, "active-area collision acks");
+        assert_eq!(
+            scoped.requires_ack[0].reason,
+            AckReason::SameNodeOperatorOverride
+        );
+    }
+
+    #[test]
+    fn scoped_active_set_is_node_granular() {
+        // Two conflicting nodes; only one is marked active by exact id.
+        let base = q("- do [#a] one\n- do [#b] two\n");
+        let ours = q("- do [#a] one AGENT\n- do [#b] two AGENT\n");
+        let theirs = q("- do [#a] one OPERATOR\n- do [#b] two OPERATOR\n");
+
+        let active = ActiveNodes::new().with_node("queue", "a");
+        let scoped = semantic_merge_scoped(&base, &ours, &theirs, &active);
+        assert_eq!(scoped.requires_ack.len(), 1, "only the active node acks");
+        assert_eq!(scoped.requires_ack[0].id, "a");
+        // Both operator values still win regardless of ack scoping.
+        assert!(scoped.merged_doc.contains("one OPERATOR"));
+        assert!(scoped.merged_doc.contains("two OPERATOR"));
+    }
+
+    #[test]
+    fn scoped_empty_active_set_drops_all_acks() {
+        let base = q("- do [#a] task\n");
+        let ours = q("- do [#a] task AGENT\n");
+        let theirs = q("- do [#a] task OPERATOR\n");
+
+        let active = ActiveNodes::new();
+        assert!(active.is_empty());
+        let scoped = semantic_merge_scoped(&base, &ours, &theirs, &active);
+        assert!(
+            scoped.requires_ack.is_empty(),
+            "an empty active set means nothing is active → every conflict auto-resolves"
+        );
+        assert!(scoped.merged_doc.contains("OPERATOR"));
     }
 
     #[test]

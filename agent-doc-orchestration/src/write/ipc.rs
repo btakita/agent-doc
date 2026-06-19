@@ -637,7 +637,21 @@ fn try_semantic_merge_convergence(
         return None;
     }
 
-    let sm = agent_doc_markdown_ast::semantic_merge::semantic_merge(base, candidate, content_ours);
+    // #msn6 / #smturnactive (semantic_merge Phase 6): the turn-active area is the
+    // `exchange` tail (the in-flight prompt + its response). Scope ack emission to
+    // it so a same-node operator↔agent collision OUTSIDE exchange — the operator
+    // editing the queue or a backlog item while the agent writes its response —
+    // auto-resolves to the operator value with no ack noise; only an
+    // exchange-area collision raises an AckRequest. The merged document is
+    // identical to the unscoped merge (operator always wins), so this only
+    // narrows ack noise, never content.
+    let active = agent_doc_markdown_ast::semantic_merge::ActiveNodes::new().active_component("exchange");
+    let sm = agent_doc_markdown_ast::semantic_merge::semantic_merge_scoped(
+        base,
+        candidate,
+        content_ours,
+        &active,
+    );
 
     // Gate 1: non-empty and structurally clean (same guard used for `ours`).
     if sm.merged_doc.is_empty() {

@@ -39,14 +39,16 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): Operating effectiveness of tsift kg
 - Prior summary/context: prior compacted content: Archived 9 response topic(s): Integrate memgraphrag + semantic neighborhoods + graphdb as lo...
-<!-- agent:boundary:e83fd731 -->
+<!-- agent:boundary:bd0aecdb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: [#kgeffmeasure]: approved
+- ~~:pushpin: [#kgeffmeasure]: approved~~
 - do [#vmax]
+- do [#kgconf]
+- do [#kgrefreshdup]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -55,7 +57,8 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgeffmeasure] [operator-verify] [recommended] Measure tsift kg extraction effectiveness on a real corpus (operator-gated: loads Qwen3-32B on GPU, mutates graph.db — needs operator go-ahead): run a multi-doc `tsift kg extract --graph-db` pass, then quantify (a) entity-dedup rate with vs without GraphRAG context injection (#kgctxinject before/after), (b) confidence distribution on emitted semantic_entity nodes, (c) a refresh cycle (edit a source, `tsift kg refresh --apply`, confirm stable-id reconciliation not duplication). Current graph: 1 extracted source / 26 entities / 0 with recorded confidence — machinery complete but operationally unexercised.
+- [ ] [#kgconf] tsift kg extract/projection never persists per-entity confidence — 0 of 71 freshly-extracted semantic_entity nodes carry a `confidence` property (verified A/B 2026-06-19). The spec`d confidence/recency gating (#kgctxinject) has no data to act on. Emit a confidence score from the extractor model output (or a derived score) into the semantic_entity projection so gating is operable.
+- [ ] [#kgrefreshdup] tsift kg refresh --apply accumulates duplicate canonical entities. Re-extracting one edited source went 9→18 entities (verified 2026-06-19): all 9 prior stable ids retained, but 9 NEW nodes added with NO tombstone of the prior source projection → tsift-memgraphrag x3, .tsift/graph.db x3, MemGraphRAG x2, #kgwiring x2 for a single source after one refresh. Root cause: node primary-key id derives from chunk+description, not the canonical entity_id (already present as a property and matching across passes). Key the node upsert on canonical entity_id, or tombstone the prior source projection before re-insert.
 - [ ] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 <!-- /agent:backlog -->
 

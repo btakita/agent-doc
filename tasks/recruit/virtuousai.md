@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -345,19 +345,35 @@ That's true, it keeps the operator-empathy that makes you distinct, and it drops
 **One question that decides the whole hook, though:** the note's spine is "builds AI infra *and* has run a business." With MRH now correctly a *client*, where does the "run a business" half actually come from — **Equity Funding Source**? Is EFS your own venture (you + a subcontractor), or also a client engagement? I want the hook resting on something you fully own, so tell me EFS's real shape and I'll make sure the note claims exactly what's yours and nothing more.
 
 I did **not** edit the note or PDF this cycle — this needs your call on framing first. Nothing sent.
-<!-- agent:boundary:0a2a6f06 -->
+
+### Re: realtime agent-doc — queue + light steering + auto-dag — opus-4-8
+
+> **Queue prompt:**
+>
+> Going back to the realtime agent-doc. I add items to the queue and do light steering. agent-doc has an auto-dag for orchestrating tasks by priority.
+
+
+Got it — and yes, that's exactly the loop we've been running this whole session: you drop a prompt in the queue, I drain it and respond in the doc, you steer with the next one. Light touch on your side, the document carries the state. I'm set up to keep going that way — queue as many as you want and I'll work them in order.
+
+One scope check, since "going back to the realtime agent-doc" could mean two different things:
+- **If you mean keep driving *this* letter** via the queue — great, I'm ready. **Heads up: the VirtuousAI note has one open accuracy thread I don't want buried** (I queued it as a backlog item so it won't get lost). Last cycle I flagged that the note still claims you *own* MonsterRodHolders, which isn't true (Steve owns it; Ron brought you in as the developer). I asked where the "run a business" half of the hook should actually come from — **is Equity Funding Source your own venture, or also a client?** Answer that and I'll rewrite the note truthfully and regenerate the PDF.
+- **If you mean switch to working on the agent-doc *tool itself*** (the auto-dag / realtime orchestration) — that's a different project and belongs in its own session doc (e.g. under `tasks/agent-doc/`), not this recruiting doc. Point me at the file and I'll pick it up there, so we keep this `virtuousai.md` scoped to the letter.
+
+On the auto-dag specifically: I'm not going to assert how agent-doc's priority orchestration works from memory — if you want me to actually use or reason about it, tell me which doc/feature and I'll read the real state first rather than guess.
+
+So: which way do you want to point — finish the letter (I need the EFS answer), or pivot to agent-doc work in its own doc? Nothing sent on the recruiting side.
+<!-- agent:boundary:79b56870 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~I don't manager the China supplier relationship. Ron brought me onto the project so Steve can sell product. Ron wants to ensure Steve can buy more product.~~
-- Going back to the realtime agent-doc. I add items to the queue and do light steering. agent-doc has an auto-dag for orchestrating tasks by priority.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#p3kj] Fix forwardable-note accuracy: drop the false 'I own MonsterRodHolders' claim (Steve Douglas owns it; Ron Berkes brought Brian in as the developer to grow sales). Reframe MRH as a client growth engagement and rebase the 'run a business' hook on what is genuinely Brian's. BLOCKED on user answer: is Equity Funding Source Brian's own venture or also a client? Then regenerate mail/drafts/2026-06-18-virtuousai-forward-note.pdf.
 - [ ] [#500r] [recommended] #availanswer Prepare a tight 2-3 sentence verbal answer for the live interview 'do you have the bandwidth?' question — steady-state framing (calendar open; MRH light ops; EFS on a subcontractor with you architecting/reviewing), extra-hours/Stealth-demo story held as backup evidence of drive only if probed.
 <!-- /agent:backlog -->
 

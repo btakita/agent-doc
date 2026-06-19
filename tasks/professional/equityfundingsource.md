@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,87 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260619-215630.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260619-224510.md`*
 
 Compacted content:
-❯ - Archived 6 response topic(s): Lender Group table is malformed; Is "Loan Terms" the borrower preferred terms?; Funding Commitment should say "Express Interest", not "Awaiting EFS selection"; 3 more
+❯ - Archived 3 response topic(s): I still see the TMO loan terms on deal d6b78994; Reinstate loan info (property value, loan amount) alongside preferred terms; Payment Frequency truncation + add borrower info
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: I still see the TMO loan terms on deal d6b78994 — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: I still see the TMO loan terms in https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d. Use Preferred Loan Terms instead when the deal is in available state.
-
-
-Good catch — fixed the discriminator, built, tested, committed, pushed, and deployed. This was exactly the caveat I flagged: my first pass keyed on `tmo_loan` *presence*, but the **TMO cache carries a loan record even for published/reserved deals** (sourced from `tmo_cache_rows_by_source_R_`, defaulting to `{}`), so an available deal still had a non-empty `tmo_loan` and kept showing "Loan Terms".
-
-**Fix:** key off the **deal lifecycle status** instead of `tmo_loan`. `investment_deal_status_T = 'published' | 'reserved' | 'funded' | 'closed'`, and the deal-by-id API already returns `status`. Now `deal_funded = deal.status === 'funded' || deal.status === 'closed'`; funded/closed → "Loan Details" (TMO Loan Terms), published/reserved → "Preferred Terms". Deal d6b78994 is published/available, so it now shows Preferred Terms.
-
-**Changed paths (`src/equityfundingsource-dev`, commit `1c02f38`, pushed + deployed):**
-- `lib/ui--browser--efs/portal/investor/available_deals.tsx` — add `status` to the `InvestorDeal` interface.
-- `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — `deal_funded` discriminator replaces the `tmo_loan` check.
-- `tests/investor-portal-e2e.test.ts` — assert the status-based condition.
-
-**Verify + deploy:** `make check` green — **895 pass, 0 fail**, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `1c02f38` (`5549c0b81`).
-
-Please refresh the deal page and confirm. Confidence: high — `status` is the lender-independent global deal lifecycle, so it won't be fooled by per-lender funding state. Escalation: none. (Note: written via `--force-disk` — the route-owned supervisor was running a stale binary with a wedged IPC listener; `admin recycle` is queued to refresh it at the next idle boundary.)
-
-### Re: Reinstate loan info (property value, loan amount) alongside preferred terms — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Reinstate the loan info that includes the property value and loan amount along side the preferred terms. deploy
-
-
-Done — built, tested, committed, pushed, and deployed. On available deals the deal page now shows a **"Loan Info"** card next to **"Preferred Terms"**.
-
-**What changed:** the available-deal branch (`PreferredLoanTerms`) now renders two stacked cards:
-- **Loan Info** — Property Value, Loan Amount, LTV, Lien Position (the deal's factual loan data, from `deal.property_value` / `deal.loan_amount` / `deal.ltv` / `deal.lien_position`).
-- **Preferred Terms** — Preferred Loan Amount, Sold Rate, Term, Payment Frequency, Day Due (the borrower's preferred financing terms). Relabeled the preferred amount "Preferred Loan Amount" so it reads distinctly from the Loan Info "Loan Amount".
-
-Each card renders only when it has data; if a deal has loan info but no preferred terms set, you still see Loan Info plus a "No preferred terms set yet" note (and vice-versa).
-
-**Changed paths (`src/equityfundingsource-dev`, commit `630816a`, pushed + deployed):**
-- `lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx` — `PreferredLoanTerms` gains a `loan_info` prop + `deal_loan_info_T`; renders the Loan Info card.
-- `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — passes `loan_info` from the deal.
-- `tests/investor-portal-e2e.test.ts` — assert the Loan Info card + property value/loan amount fields.
-
-**Verify + deploy:** `make check` green — **895 pass, 0 fail**, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `630816a` (`d3c45eb51`).
-
-Please refresh the deal page and confirm. Confidence: high — suite-verified. Escalation: none.
-
-### Re: Payment Frequency truncation + add borrower info — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-
-> **Queue prompt:**
->
-> :pushpin: In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d: Payment Frequency should not be truncated ![img_29.png](img_29.png). Add borrower info.
-
-
-Both done — built, tested, committed, pushed, and deployed.
-
-**1. Payment Frequency no longer truncated.** The `img_29.png` showed "Payment Frequency: Mo…" — the label was so long it left no room for the value in the two-column grid. Shortened the label to **"Frequency"** (the value "Monthly" now fits). The fields read: Preferred Loan Amount · Sold Rate · Term · Frequency · Day Due.
-
-**2. Borrower Info added.** Available deals now show a **"Borrower Info"** card above Loan Info / Preferred Terms, with **Borrower** (name), **Property Type**, and **Property Address** — sourced from `deal.borrower_full_name` / `deal.property_type` / `deal.borrower_address`. I exposed `borrower_full_name` and `borrower_address` on the investor deal-by-id response (they weren't returned before). The card renders only when it has data.
-
-**Privacy note:** this surfaces the borrower's name + address to any lender viewing the deal. That's consistent with funded deals (the TMO "Borrower Detail" card already shows borrower identity), and you asked for it — but if you'd rather gate/anonymize it until a lender expresses interest or is selected, say so and I'll add the gate.
-
-**Changed paths (`src/equityfundingsource-dev`, commit `98ca799`, pushed + deployed):**
-- `shared/tmo_loan_details.tsx` — Borrower Info card + `deal_borrower_info_T`; "Frequency" label.
-- `investor/deal_detail.tsx` — passes `borrower_info`.
-- `investor/available_deals.tsx` — `borrower_full_name`/`borrower_address` on `InvestorDeal`.
-- `app/.../investor/deal_marketplace/index.ts` — expose borrower fields on the deal-by-id response.
-- `tests/investor-portal-e2e.test.ts` — assert the Borrower Info card, Frequency label, and backend fields.
-
-**Verify + deploy:** `make check` green — **895 pass, 0 fail**, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `98ca799` (`b396c1c79`).
-
-Please refresh and confirm. Confidence: high — suite-verified. Escalation: none.
-<!-- agent:boundary:c218c8af -->
+<!-- agent:boundary:afc464db -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -126,6 +51,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: /lenders/available-deals should have a "Deals of Interest" just like the /lenders/dashboard page. deploy
 <!-- /agent:queue -->
 
 ## Backlog

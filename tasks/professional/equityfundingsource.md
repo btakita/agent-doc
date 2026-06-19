@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -205,7 +205,27 @@ Done, deployed, and verified live. The `/lenders/documents` page now shows every
 Provided-from-request documents keep their existing section. Section ids (`#investor-published-documents`, `#investor-public-documents`) are asserted by new source-contract tests in `investor-documents.test.ts`.
 
 **Verification:** `bun run check` green (825 tests pass, build + worker build clean). Deployed worker version `acba09f6`. Verified live as DL Dude Lender: the "Your Documents" section now surfaces the lender's previously-hidden accreditation evidence (`tax-k1-2025.pdf`, `account-statement.pdf`), and clicking one opens the in-browser viewer — `<iframe>` rendering the PDF from a `blob:` URL, no forced download, no error.
-<!-- agent:boundary:0d888e00 -->
+
+### Re: Remove commitment calculator + lender grouping mechanism — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Please create a mechanism for lenders to group deals together. A lender could invite another lender to join a deal. What would this group be called? Should we have a lender group? Should we have a lender be able to start a lender group and add other lenders to the group?
+
+
+> **Queue prompt:**
+>
+> :pushpin: In https://equityfundingsource.brian-takita.workers.dev/lenders/available-deals Deal detail, Remove the Committment Calculator section. Each loan is for full value. There can be multiple lenders for a deal, but those lenders already know each other.
+
+
+**1. Commitment calculator removed** — done and pushed (EFS `851eb0b..2399f88`). On `/lenders/available-deals`, the Deal-detail right column no longer shows the per-lender commitment calculator (amount input, EFS-locked proposal preview, position-type split). It's replaced by a read-only **Funding terms** panel: monthly interest, annual yield, a note that each loan funds at full value and co-lenders coordinate directly, and the **Open deal package** CTA. The real funding-commitment flow and proposal-amount locking are untouched — they live on the deal-package page (`deal_detail.tsx`) and marketplace. Dropped the now-dead `annual_yield_calc_`/`position_type_label_` helpers and updated the e2e assertions.
+
+**Heads-up — the base shipped red.** A concurrent merge (`851eb0b`) landed on `origin/main` mid-cycle with a broken suite (749 pass / 5 fail + 3 errors), independent of my change. I repaired it in a separate commit (`276754a`): restored `admin_deals_by_id_borrower_selected_proposals_read_PUT_` (still wired in `admin/routes.ts` but its definition was dropped); put `blended_rate`/`selected_commitment_amount`/`tmo_updated` back into the select-lender response; dropped a duplicate `admin_repo_url` decl; and aligned a stale `LOAN_STATUS_STEPS` assertion to the current 8-step pipeline. `bun run check` now green: 831 pass / 0 fail, build + worker build clean.
+
+**2. Lender grouping** — recommendation + plan committed (`src/equityfundingsource-dev/prds/lending-groups-plan.md`, `2399f88`); queued as gated backlog `#8667`. Answers: (a) **Name → "Lending group"** — plain, matches your "lender group" wording, avoids "pool"/"syndicate" which imply fractional/pooled capital (conflicts with full-value loans). (b) **Yes, a persistent group** — co-lenders who already know each other and repeat-invest benefit from a reusable named group over per-deal re-invites. (c) **Yes, a lender starts a group and adds others** — creator is the **lead** (invite/remove/rename), added lenders are **members**; invite by email (existing lenders match by email, new ones get a sign-up link); a group pulls itself into a deal via the existing `investor_deal_interests` flow so co-lenders share the deal package + conversation.
+
+I did **not** build the schema yet — three one-way-door decisions to confirm first: **Name** ("Lending group" recommended / "Syndicate" / "Lender group" / other); **Scope** (persistent reusable group recommended / deal-scoped invite only / both); **Privacy** (do members see each other's proposal amounts/rates, or only that they share the deal? — recommend shared package + identities, not economics unless the lead opts in). Reply with your picks and I'll build it.
+<!-- agent:boundary:5c436a4d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -218,11 +238,16 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: In https://equityfundingsource.brian-takita.workers.dev/lenders/available-deals Deal detail, Remove the Committment Calculator section. Each loan is for full value. There can be multiple lenders for a deal, but those lenders already know each other.~~
+- ~~:pushpin: Please create a mechanism for lenders to group deals together. A lender could invite another lender to join a deal. What would this group be called? Should we have a lender group? Should we have a lender be able to start a lender group and add other lenders to the group?~~
+- deploy
+- do [#8667]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#8667] Lending groups: build the lender "Lending group" mechanism per src/equityfundingsource-dev/prds/lending-groups-plan.md (Phase 1 schema+repo → 2 group CRUD/invites → 3 deal participation → 4 admin visibility). GATED on operator decision: group name ("Lending group" recommended), persistent-vs-deal-scoped, and member-privacy. Do not build schema until confirmed.
 <!-- /agent:backlog -->
 
 ## Review

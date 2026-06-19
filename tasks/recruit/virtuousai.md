@@ -319,13 +319,39 @@ That broadens your operator depth without adding a third paragraph or a name nob
 **My recommendation:** add "overseas manufacturing" to the MRH line, leave Ron's name out, keep the supplier anecdote in your back pocket for the call. Want me to make that one-line edit to the note and regenerate the PDF? Say the word.
 
 Nothing sent.
-<!-- agent:boundary:1ecbc4c1 -->
+
+### Re: correcting the MRH relationship — Ron brought me on to grow Steve's sales — opus-4-8
+
+> **Queue prompt:**
+>
+> I don't manager the China supplier relationship. Ron brought me onto the project so Steve can sell product. Ron wants to ensure Steve can buy more product.
+
+
+Thank you for the correction — and it matters more than the supplier line, because it means the note currently overclaims. Let me lay out what I now understand and the accuracy problem it creates, then a truthful fix.
+
+**What's actually true (from your contact notes):**
+- **Steve Douglas owns Monster Rod Holders** — he's the founder, "the Catfish Dude."
+- **Ron Berkes is the China supplier** (ManufacturingChina.com), and Steve owes him money. Ron wants Steve selling more so Steve buys more product.
+- **Ron brought *you* in as the developer** to grow MRH's sales — site, SEO, WordPress, server, tech. You don't own MRH and you don't run the supplier relationship.
+
+**The problem: the note says you *own* MRH.** Right now it reads *"With MonsterRodHolders I own the whole thing — the seasonal campaigns, the catalog, the SEO, the packaging..."* That's not accurate. You're the technical operator brought in to grow someone else's business. For a note going through a recruiter to a startup that may reference-check, claiming ownership of a business you were contracted to build is a real liability — it's the kind of thing that surfaces badly in an interview ("tell me about running your storefront") or a reference call. So **I'd retract the ownership framing entirely**, and definitely drop my earlier "overseas manufacturing" suggestion — that was built on my wrong assumption.
+
+**Here's the thing though — the truthful version is still strong, and arguably *better* for this role.** Your real position is: *a supplier hires you to go into a struggling real-world business and make it sell more.* That's not "I owned a store" — it's "I'm the technical person businesses bring in to fix execution and drive outcomes." For an AI-execution platform whose entire pitch is *driving business outcomes from the data*, that's more on-thesis than ownership ever was. Reframed honestly:
+
+> *"I've also built inside real businesses, not just for them. A China manufacturer brought me into Monster Rod Holders — a catfishing-gear brand — to grow its sales: I own the site, the SEO, the WordPress and server stack, and the technical side of turning traffic into orders. I've felt the execution gap from inside an operator's business, which is the gap your platform closes."*
+
+That's true, it keeps the operator-empathy that makes you distinct, and it drops every claim you can't stand behind.
+
+**One question that decides the whole hook, though:** the note's spine is "builds AI infra *and* has run a business." With MRH now correctly a *client*, where does the "run a business" half actually come from — **Equity Funding Source**? Is EFS your own venture (you + a subcontractor), or also a client engagement? I want the hook resting on something you fully own, so tell me EFS's real shape and I'll make sure the note claims exactly what's yours and nothing more.
+
+I did **not** edit the note or PDF this cycle — this needs your call on framing first. Nothing sent.
+<!-- agent:boundary:0a2a6f06 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- I don't manager the China supplier relationship. Ron brought me onto the project so Steve can sell product. Ron wants to ensure Steve can buy more product.
+- ~~I don't manager the China supplier relationship. Ron brought me onto the project so Steve can sell product. Ron wants to ensure Steve can buy more product.~~
 - Going back to the realtime agent-doc. I add items to the queue and do light steering. agent-doc has an auto-dag for orchestrating tasks by priority.
 <!-- /agent:queue -->
 

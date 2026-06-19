@@ -116,7 +116,19 @@ Captured as `#jbrundispatch` (operator-verify) — a route/startup-miss issue th
 Captured as `#jbrundispatch` (operator-verify) — Claude Code dispatch is `accepted_only` (no submit-proof hook); needs the failing pane-state repro to distinguish a real bug from accepted-but-unsubmitted timing.
 
 Net: the only genuinely open work here is `#jbrundispatch` (operator repro needed) plus the deeper `#sqedit-race` queue-CRDT-churn that keeps re-surfacing these heads.
-<!-- agent:boundary:169e691b -->
+
+### Re: "the supervisor should retry until the prompt is submitted" — opus-4-8
+
+Done (`#jbclaudesubmit`, 0.34.17). Implemented your directive for the "doesn't submit to Claude Code" half of `#jbrundispatch`.
+
+**What was already there:** the direct-pane submit path *does* re-send a bare Enter while the routed trigger stays drafted in the composer (`send_direct_pane_enter_resubmit_until_stable`), and it exits the instant the trigger is consumed (submitted). But the cap was a fixed **3** resubmits. Claude Code has no submit-proof hook (dispatch is accepted-only — text+Enter delivered without confirmation), so a slow-to-focus composer could burn through 3 nudges before it actually consumed the Enter, leaving the trigger sitting unsent.
+
+**The change:** raised the default cap to **6** and made it env-tunable — `AGENT_DOC_DIRECT_PANE_MAX_ENTER_RESUBMITS` (`direct_pane_max_enter_resubmits()`). So it now retries longer "until submitted," and you can crank it higher live without a rebuild if 6 still isn't enough. The loop still short-circuits the moment the prompt submits, so the higher cap only costs wall-clock on a genuinely stuck pane.
+
+**Verified:** dispatch suite (129) + `make check` green; FlowCore hot-path budget respected.
+
+**Honest caveat:** this directly implements "retry more until submitted." If the real failure is the composer never *focusing* (not just needing more Enters), more retries won't help and we'll need the live pane-state at failure to confirm. `#jbrundispatch` stays gated for that live verification + its other half (stall after pane kill+restart). Installing 0.34.17 + recycling next.
+<!-- agent:boundary:08262c7e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -127,6 +139,8 @@ Net: the only genuinely open work here is `#jbrundispatch` (operator repro neede
 - ~~:pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.~~
 - ~~:pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.~~
 - :pushpin: [#sqedit-race]
+- :pushpin: "Some Run Agent Doc ops don't submit to Claude Code.": The supervisor should detect a written prompt and retry until the prompt is submitted.
+- "Killed the pane + autostarted a new pane → Run Agent Doc stalled.": The supervisor should detect if the prompt was not dispatched into the session. And send the prompt and submit the prompt.
 ---
 :pushpin: do [#tsiftmdcrash]
 ---

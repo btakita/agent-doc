@@ -1888,6 +1888,40 @@ pub fn extract_pending_ids_from_text(text: &str) -> HashSet<String> {
     ids
 }
 
+/// Extract only each done/archive **item's own** `#id` — the FIRST `[#id]` on a
+/// list-item line (`- <date> [#id] …` / `- [x] [#id] …`) — and ignore any other
+/// `[#id]` cited in that item's prose.
+///
+/// `#donemirrorreap`: the whole-text [`extract_pending_ids_from_text`] harvests
+/// every bracketed id anywhere in the text, so a `[#other]` cited inside one done
+/// entry's body (e.g. "behind do `[#fullboundary]`" inside the `#ftstrike` entry)
+/// is wrongly treated as done — which then falsely reaps a still-open `#other`
+/// review/backlog mirror. An item's identity is its leading id, never a citation
+/// in its description, so done-id collection must use this per-item extractor.
+pub fn extract_done_item_own_ids(text: &str) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        // Only list-item lines carry an item's own id; prose / continuation lines
+        // contribute none (a cited id there is a reference, not an identity).
+        if !(trimmed.starts_with("- ") || trimmed.starts_with("* ")) {
+            continue;
+        }
+        // The item's own id is the FIRST bracketed id on the line; a leading
+        // checkbox (`[x]` / `[ ]` / `[/]`) has no `#` so `find("[#")` skips it.
+        if let Some(start) = trimmed.find("[#") {
+            let after = &trimmed[start + 2..];
+            if let Some(end) = after.find(']') {
+                let id = &after[..end];
+                if is_valid_pending_id(id) {
+                    ids.insert(id.to_ascii_lowercase());
+                }
+            }
+        }
+    }
+    ids
+}
+
 /// Generate a stable 4-char base32 hash from `(text, doc_id, counter)`.
 ///
 /// Backward-compat thin wrapper over [`generate_hash_n`] at width 4. Existing
@@ -2685,6 +2719,45 @@ mod tests {
 
     fn ids() -> HashSet<String> {
         HashSet::new()
+    }
+
+    #[test]
+    fn extract_done_item_own_ids_ignores_prose_citations() {
+        // #donemirrorreap regression: the #ftstrike done entry cites [#fullboundary]
+        // in its prose. The own-id extractor must return only ftstrike, never
+        // fullboundary (which would falsely reap an open #fullboundary mirror).
+        let archive = concat!(
+            "# Agent Doc Completed Work\n\n",
+            "- 2026-06-19 [#733r] reconcile queue heads.\n",
+            "- 2026-06-19 [#ftstrike] strike free-text heads regardless of position, ",
+            "e.g. a head behind do [#fullboundary] is now struck. See [#semmerge].\n",
+        );
+        let got = extract_done_item_own_ids(archive);
+        assert!(got.contains("733r"));
+        assert!(got.contains("ftstrike"));
+        assert!(
+            !got.contains("fullboundary"),
+            "a [#id] cited in prose must NOT be treated as a done item id: {got:?}"
+        );
+        assert!(!got.contains("semmerge"), "trailing prose citation excluded: {got:?}");
+        // Contrast: the whole-text extractor DOES harvest the prose citations.
+        assert!(extract_pending_ids_from_text(archive).contains("fullboundary"));
+    }
+
+    #[test]
+    fn extract_done_item_own_ids_handles_checkbox_and_skips_prose_lines() {
+        let body = concat!(
+            "- [x] [#foo] done thing depends on [#bar].\n",
+            "  continuation prose mentioning [#baz]\n",
+            "- [/] [#gated] gated item\n",
+            "plain prose line with [#qux]\n",
+        );
+        let got = extract_done_item_own_ids(body);
+        assert!(got.contains("foo"));
+        assert!(got.contains("gated"));
+        assert!(!got.contains("bar"), "same-line prose citation excluded: {got:?}");
+        assert!(!got.contains("baz"), "continuation-line citation excluded: {got:?}");
+        assert!(!got.contains("qux"), "non-list prose line excluded: {got:?}");
     }
 
     #[test]

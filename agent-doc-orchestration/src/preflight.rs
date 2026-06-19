@@ -2226,7 +2226,10 @@ fn collect_agent_done_ids_with_root(
         if !crate::component::is_backlog_done_component(&comp.name) {
             continue;
         }
-        for id in crate::pending::extract_pending_ids_from_text(comp.content(content)) {
+        // #donemirrorreap: collect only each done item's OWN leading id, not every
+        // bracketed id cited in its prose — otherwise a `[#other]` mentioned inside
+        // one entry's body falsely marks `#other` done and reaps its open mirror.
+        for id in crate::pending::extract_done_item_own_ids(comp.content(content)) {
             ids.insert(id);
         }
         if let Some(archive) = comp.attrs.get("archive")
@@ -2234,7 +2237,7 @@ fn collect_agent_done_ids_with_root(
         {
             let archive_path = root.join(archive);
             if let Ok(archive_content) = std::fs::read_to_string(&archive_path) {
-                for id in crate::pending::extract_pending_ids_from_text(&archive_content) {
+                for id in crate::pending::extract_done_item_own_ids(&archive_content) {
                     ids.insert(id);
                 }
             }

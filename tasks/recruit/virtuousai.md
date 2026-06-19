@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -242,13 +242,38 @@ Done. The forwardable note is now a standalone client-facing PDF, and the privat
 ---
 
 That's the full send: the message above as the LinkedIn body, with both PDFs attached via the paperclip. The note-PDF carries your builder+operator pitch to the team in your words; the resume backs it. Nothing sent — ready when you are.
-<!-- agent:boundary:725af1fd -->
+
+### Re: sanity check — how will this land? — opus-4-8
+
+> **Queue prompt:**
+>
+> Before I send, I want to do a sanity check. How do you think this will land?
+
+
+Honest read: **it lands well, and the reason is the same as the risk — it's polished.** Let me give you the real picture, not reassurance.
+
+**What lands strongly:**
+- **The one idea is the right idea.** "Builds AI infrastructure *and* has run a business with it" is a genuine differentiator for engineer #2 at a tiny exec-team startup, and it ties cleanly to their white-box thesis. Most applicants will be pure-engineer or pure-operator. You're the rare overlap, and the note makes that the whole point instead of burying it.
+- **The split respects the process.** Private reassurance to Laura, clean forwardable artifact for the team. That reads as someone who understands how recruiting works — itself a senior signal.
+- **Availability handled right.** Stated once, plainly, privately, as fact. You're not over-explaining, which is what would actually plant doubt.
+
+**Where it could miss — three honest risks:**
+
+1. **Formality vs. a 3-person startup's culture.** A standalone, typeset PDF note is clean for forwarding, but to a scrappy founding team it can read slightly corporate — more "cover letter" than "the kind of person who'll move fast with us." It's a *small* risk and the content earns it, but know that the polish cuts both ways. If Laura's read of Chris/Rory is "informal, move-fast types," the alternative is to let the note be plain pasted text she forwards in her own email body. I'd still keep the PDF — clean forwarding wins — but that's the one place I'd defer to your gut on their culture.
+
+2. **"engineer #2" is a small presumption.** You're inferring the headcount/role shape. It's almost certainly right from the screening, but if the framing turns out off (they think of it as "senior #4," or the role's scoped differently), it reads as assuming. Low risk, worth being aware of — it's a confident line, and confidence is good here, just not a fact you were told.
+
+3. **The opener compares you to other engineers.** "Most engineers who can build AI infrastructure have never had to grow a business with it" is the hook and it works, but it's a claim *about peers*. To a generous reader it's insight; to a prickly one it's a touch of positioning-over-others. It scored well and I'd keep it — just naming the one place a reader could bristle.
+
+**The thing that actually determines whether it lands isn't the content — it's the handoff.** This whole package is bet on Laura forwarding it faithfully and the team reading it before they've formed an impression from the resume + call alone. So the highest-leverage move is making Laura *want* to forward it: the private note should make her feel like she's handing her client something that makes *her* look good (a strong, low-maintenance candidate). It currently does. Just make sure that note feels warm and personal, not transactional — she's the gate.
+
+**Bottom line:** I'd send it close to as-is. It's differentiated, honest, and well-targeted. The content risk is low; the real variable is process (Laura forwarding) and a slight formality bet on their culture. If you have any read on how scrappy/informal Chris and Rory are, that's the one input that would change my advice on PDF-vs-pasted-text. Otherwise — it's ready.
+<!-- agent:boundary:a4f24116 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Before I send, I want to do a sanity check. How do you think this will land?
 <!-- /agent:queue -->
 
 ## Backlog

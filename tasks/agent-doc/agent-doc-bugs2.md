@@ -210,7 +210,26 @@ Done — fixed and tested. This is the bug you reported earlier this session ("m
 **Tests** — 10 unit/adversarial: quoted head struck; only-mentioned head **not** struck; sub-4-word head not matched; both heads behind an id head selected (id head never struck); end-to-end strike behind `do [#fullboundary]`; idempotent re-strike. `make check` green. Committed: submodule `00e46fa0`, superproject `e3e4ec351`. SPEC + VERSIONS updated.
 
 Note: the fix strikes heads answered **in the same cycle**. The two reports you filed earlier this session were answered before this fix existed, so they remain historically unstruck — going forward, free-text reports strike the moment a response quotes them. Build + install + recycle follow this commit.
-<!-- agent:boundary:be650c88 -->
+
+### Re: equityfundingsource.md queue prompt duplicated by agent-doc — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: My equityfundingsource.md queue prompt `:pushpin: All upload preview dialogs should be full screen. deploy` was duplicated by agent-doc.
+
+Triaged and filed as **`#qdup`** (priority backlog). This is the **second instance** of the queue-prompt duplication family — the first is your virtuousai.md report still in the queue ("as I was typing in a queue item ... parts of the document was duplicated, corrupting the document"). Both have the same root: the CRDT/semantic merge operates at a wider scope than the structural part actually being edited, so a concurrent operator edit to one queue item gets re-applied against adjacent structure and duplicated.
+
+I captured the fix exactly as you specified it in the virtuousai report, so we implement it once and it covers both:
+
+- **Per-structural-part merges** — constrain each merge to the structural node it applies to (queue item, exchange block), running multiple smaller merges instead of one whole-component/document merge. A concurrent edit to queue-item A then can't duplicate or corrupt queue-item B or the surrounding structure.
+- **Deleted-structure rule** — if you delete a structure and there's new agent content targeting it, note that in `agent:exchange` rather than merging it back; the in-editor document is the source of truth.
+
+It composes with `#fullboundary` (fewer concurrent writers → fewer merges) and `#semmerge` (per-structure constraint); `#qdup` tightens the *granularity* of each merge. Plan: `tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md`.
+
+I'm filing rather than implementing this cycle on purpose: it edits the CRDT/merge core — the same machinery producing this session's live `content_ours`/`live_prompt_drift` adoption — and a merge-core change must not be rushed in a session that is itself actively drifting. It needs a focused cycle with `make check` (+ `make tmux-ci` if the converge path is touched).
+
+(Also queued now: `#fbwire` = the `#fullboundary` Phase 2 live wiring, and `#donemirrorreap` = the false-reap bug, both from last cycle.)
+<!-- agent:boundary:6be49969 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -220,6 +239,7 @@ Note: the fix strikes heads answered **in the same cycle**. The two reports you 
 - ~~:pushpin: do [#ftstrike]~~
 - :pushpin: [#qpauseux]
 - :pushpin: [#docdriftgrace]
+- ~~:pushpin: My equityfundingsource.md queue prompt `:pushpin: All upload preview dialogs should be full screen. deploy` was duplicated by agent-doc.~~
 - :pushpin: JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.
 - :pushpin: My free-text queue items are not immediately struck as if they are addressed.
 ---
@@ -312,6 +332,9 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
+- :pushpin: do [#donemirrorreap]
+- :pushpin: do [#fbwire]
+- do [#hap7]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -338,6 +361,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#hap7] qdup=#agent-doc-bug Operator-reported (2026-06-19): agent-doc duplicated the operator equityfundingsource.md queue prompt ("All upload preview dialogs should be full screen. deploy") on a concurrent edit. Second instance of the queue-prompt duplication family (first: the virtuousai.md report). Fix per operator spec: constrain the CRDT/semantic merge to the structural part it applies to — run per-structural-node merges (not whole-component/document merges) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; and when the operator deletes a structure that agent content targets, note it in agent:exchange instead of merging (in-editor doc is source of truth). Composes with #fullboundary (fewer writers) + #semmerge (per-structure constraint). Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md
 - [ ] [#donemirrorreap] #agent-doc-bug Preflight review reconciliation falsely reaped the gated [/] [#fullboundary] review item as an already-done mirror because the id appears only in PROSE inside an unrelated agent:done entry (the #ftstrike done archive mentions behind do fullboundary). The done-mirror detector must match a reaped id against the DONE items own id/heading token, not a substring mention in another done entrys prose. Repro: gate an id cycle N, archive a different item cycle N+1 whose text mentions that id -> gated review item reaped. Same false-reap family as #opsproofgate.
 - [ ] [#fbwire] #agent-doc-bug Phase 2 live wiring of the #fullboundary convergence gate (Phase 1 decision core + playback shipped, submodule 17010e78; gated review item falsely reaped this cycle, see #donemirrorreap). Call convergence_gate_decision inside the supervisor idle-queue-watch/drain inter-item dispatch (start/idle_watch.rs to start.rs): gather the four facts (committed via cycle_state, editor converged==HEAD via emit_postcommit_worktree_check, ipc_socket inflight==0, actor idle), defer the next trigger until Dispatch, on ForceDiskFallback do the real --force-disk write + record_force_disk_fallback. Add SimWorld acceptance (slow-ACK never piles inflight>1; wedged-editor timeout to force-disk + loadable playback). Live-supervisor-critical: needs make check + make tmux-ci. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md
 - [ ] [#orphanqhead] Orphaned id-backed queue head has no drain path: after a backlog item is reaped via --done, if the matching id-backed queue head [#id] strike was lost to IPC drift, the head is orphaned — --done <id> is then a no-op ("already resolved") and queue consume rejects id-backed heads ("reap via --done"), so the head is unreachable. preflight marks it queue_drainable_head_count=0 but never auto-strikes it, leaving a permanent phantom head that re-fires the auto-loop. Repro: tasks/recruit/virtuousai.md #p3kj on agent-doc 0.34.11; compounded by a wedged editor IPC (live IntelliJ buffer) refusing queue/pending writes (ack_mismatch/send_failed). Fix: auto-strike id-backed heads whose backing item is already done/absent during preflight reconciliation, or allow queue consume --id <id> to strike an orphaned id-backed head.

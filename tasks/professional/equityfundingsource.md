@@ -398,7 +398,26 @@ Why it beats "Lending Group":
 So: **loan = fractionalized; the lenders = a "Multi-Lender Group"; members = "co-lenders."** If you ever want a shorter UI label, "Lender Group" works as the casual form, but "Multi-Lender Group" is the one I'd put in product copy and the schema.
 
 `#8667` stays gated on the last two calls before I build: **persistent vs. deal-scoped** groups, and **member privacy** (do co-lenders see each other?). Lock the name as "Multi-Lender Group" + answer those two and I'll start Phase 1 (`src/equityfundingsource-dev/prds/lending-groups-plan.md`).
-<!-- agent:boundary:b6108f38 -->
+
+### Re: do #8667 — Multi-Lender Group Phase 1 shipped — opus-4-8
+
+> **Queue prompt:** do [#8667]. Persistent. A lender may also be part of multiple lending groups. Co-lenders do see each other... majority stake has more control... each deal may have different percentages of a loan. Admin should set up lending groups (lender accounts auto-created with an email). Lenders should be able to create a group and invite other lenders.
+
+Decisions locked, and **Phase 1 (schema + repo + tests) is built, green, committed, and pushed** to `origin/main` (`ec08508`).
+
+**Decisions captured** (in `src/equityfundingsource-dev/prds/lending-groups-plan.md`): name **"Multi-Lender Group"** (members = co-lenders); **persistent & reusable**, a lender may belong to multiple groups; **co-lenders see each other**; **majority stake => more control** (control derives from stake, not a fixed role); **per-deal percentages** of the loan; **admin- and lender-created** groups with **invite-by-email + auto-created lender accounts**.
+
+**What shipped:**
+- `migrations/0090_lending_groups.sql` — `lending_groups`, `lending_group_members` (role/status/`default_stake_bps`, unique per group+email and group+user), `lending_group_deal_allocations` (per-deal `allocation_bps`, unique per group+deal+member). Percentages stored as **basis points** (0-10000) to avoid float drift, matching the existing `_cents` convention.
+- `lib/lending_groups/repo.ts` — group/member/allocation CRUD + a **pure `lending_group_control_`** helper that computes the majority controller (strict >50%, with tie handling), reused for both group-level and per-deal stakes.
+- `lib/lending_groups/repo.test.ts` — **19 tests**: the control math, plus the repo run against the real migration via a `bun:sqlite` D1 adapter (CHECK/FK/unique constraints, cascade delete, email normalization, accept-stamps-`joined_at`, account linking, per-deal upsert, and a deal where the majority controller differs per deal).
+
+**Verification:** full suite **855 pass / 0 fail**; `build` + `build:worker` clean.
+
+**One design call I made for you** (flag if you'd rather change it): "majority stake => more control" is modeled as control *derived from stake share* rather than a stored "controller" flag — the `lead` (group creator) is recorded, but the controlling vote follows whoever holds the largest stake (group-level `default_stake_bps`, or per-deal `allocation_bps`). That keeps control honest as percentages shift per deal.
+
+**Next:** Phases 2-4 are queued as actionable backlog items — `#8667p2` (group CRUD + invites, incl. admin account auto-create), `#8667p3` (deal participation + per-deal allocations + majority surfacing), `#8667p4` (admin visibility). None are blocked; say the word and I'll take Phase 2.
+<!-- agent:boundary:fbbffa0c -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,51 +33,31 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260619-204320.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260619-210947.md`*
 
 Compacted content:
-❯ - Archived 7 response topic(s): deploy; Lender Groups pages, group-backed interest, and deploy; Duplicate queue head: group-backed interest; 4 more
-❯ - Prior summary/context: prior compacted content: Archived 25 response topic(s): deploy; TMO writeback "unavailable"; Why "TMO writeback not s...
+❯ - Archived 1 response topic(s): Item-of-interest nav counts in lender/borrower/broker portals
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: Item-of-interest nav counts in lender/borrower/broker portals — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: In lender, borrower, and broker portals...the main nav items should have the number of items of interest...similar to what is in the admin portal. loop until you use the most appropriate item of interest count. If there is no quantifiable item of interest, exclude the count. deploy
-
+### Re: Lender Group table is malformed — opus-4-8
 
 > **Queue prompt:**
 >
-> In lender, borrower, and broker portals the main nav items should have the number of items of interest, similar to the admin portal. Loop until the most appropriate item-of-interest count is used; if there is no quantifiable item of interest, exclude the count. deploy
+> :pushpin: Lender Group table is malformed ![img_28.png](img_28.png)
 
-Implemented, tested, pushed, and deployed.
 
-Mirrored the admin sidebar's nav-count badges across all three portals. Each portal got a role-guarded `GET /api/<portal>/nav-counts` endpoint that computes the most appropriate item-of-interest count per nav section (each query isolated, failing closed to `0`), and the layout fetches them and renders an `.sb-count` badge only when the count is `> 0`. Sections with no quantifiable item of interest are omitted entirely.
+Fixed, tested, committed, and pushed (deploy is queued as a separate item).
 
-Per-section counts chosen (looped over every nav item):
-- **Lender (investor):** Available Deals (published deals), My Positions (active positions), Lender Groups (groups joined/owned), Documents (shared docs), Requirements (action-needed: accreditation missing/pending/expired), Vestings (active vestings), Notifications (unread). Dashboard/Settings excluded.
-- **Borrower:** Application status (in-flight: submitted/in-review), Documents (live loan docs), Messages (unread), Notifications (unread). Dashboard / New application / Make a payment / Loan summary / Payment history / Settings excluded (pure actions or history — no item of interest).
-- **Broker:** My Pipeline (active deals), Commissions (pending/unpaid), Documents (docs needed), Notifications (unread). Dashboard / New application / Pre-Qual Tool / Rate Sheets excluded.
+**Root cause:** The "My Lender Groups" table in `lib/ui--browser--efs/portal/shared/lending_groups.tsx` used `class="data-table"` — defined **nowhere** in the EFS stylesheet, the only table in the codebase using that name (every other portal table uses `tbl`). It rendered with raw browser defaults: bold/centered `<th>`s over left-aligned data, no cell padding/borders, and `vertical-align:middle` cells floating against the tall Group cell (name + "Lender created" + wrapped member-email chips) — the misaligned look in the screenshot.
 
-Changed paths (`src/equityfundingsource-dev`, commit `936b733`):
-- New handlers: `app/equityfundingsource/lib/{investor,borrower,broker}/nav_counts/index.ts`.
-- Route registration: `app/equityfundingsource/lib/{investor,borrower,broker}/routes.ts`.
-- Nav badge + fetch: `lib/ui--browser--efs/portal/{investor,borrower,broker}/layout.tsx`.
-- Tests: `tests/portal-nav-counts.test.ts` (12 new).
+**Fix:** Switched to the design-system `tbl` class used by every other portal table — `table-layout:fixed; width:100%`, padded/bordered cells, styled uppercase headers, and `overflow-wrap:anywhere` so long member-email chips wrap cleanly inside the Group cell.
 
-Verification:
-- `make check` passed: **894 tests, 0 fail**, browser build, and worker build (the worker bundle compiles all new imports/types).
-- `make deploy` — no pending D1 migrations (read-only endpoints); deployed Worker version `17f7f602-c101-4464-8c58-a557bb61c278`.
-- Live smoke test: `GET /api/{investor,borrower,broker}/nav-counts` each return `401` unauthenticated (registered + role-guarded, not 404); root returns `200`.
+**Spec + tests:** Regression guard in `tests/investor-portal-e2e.test.ts` asserting the page renders `<table class="tbl">` and no longer contains `data-table`.
 
-Commit/deploy proof:
-- EFS code commit `936b733` pushed to `origin/main`.
-- Superproject submodule pointer commit `719f8ae3f` records `src/equityfundingsource-dev` at `936b733` (local; superproject push left to the operator).
+**Verification:** `bun test tests/investor-portal-e2e.test.ts` 45 pass / 0 fail; `make check` **894 tests, 0 fail**, browser + worker bundles compile.
 
-Confidence: high — full suite green, worker bundles cleanly, endpoints live and guarded. The badge counts reuse existing tested repo functions and isolated SQL that fails closed.
-
-Escalation: none.
-<!-- agent:boundary:89b488ef -->
+**Proof:** EFS `982a110` pushed to `origin/main`; superproject submodule pointer bump `5445bb406` (local; push left to the operator).
+<!-- agent:boundary:2f000e6e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,6 +70,13 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: Lender Group table is malformed ![img_28.png](img_28.png)~~
+- :pushpin: In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d, is "Loan Terms" the borrower preferred terms? If it is, rename label to "Preferred Terms".
+- In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d, if the lender has not expressed interest in the deal, Funding Commitment should instruct the lender to Express Interest in the loan...not "Awaiting EFS selection"
+- :pushpin: deploy
+- Lender Group table is malformed ![img_28.png](img_28.png)
+- deploy
+- In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d, is "Loan Terms" the borrower preferred terms? If it is, rename label to "Preferred Terms".
 <!-- /agent:queue -->
 
 ## Backlog

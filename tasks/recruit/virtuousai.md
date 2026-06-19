@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -105,12 +105,13 @@ Here's the reasoning, plainly:
 - **Resume:** keep Presence AI prominent; optionally add one supporting line for the stealth-client real-time audio-avatar work (framed as "low-latency production AI systems," since you can't name the client). I've queued that as a `[recommended]` backlog item.
 - **Letter:** no change — keep it focused on builder + operator.
 - **Call with Rory:** lead the real-time/performance story there, where it lands as systems credibility without crowding the note.
-<!-- agent:boundary:9c765ac5 -->
+<!-- agent:boundary:d16d7ed6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- [#wsj2]
 <!-- /agent:queue -->
 
 ## Backlog

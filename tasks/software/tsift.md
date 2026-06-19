@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -39,7 +39,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): #kgeffmeasure; measured kg extraction effectiveness on a real corpus; #kgconf; 1 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): Operating effectiveness of tsift kg
-<!-- agent:boundary:4b37fb90 -->
+<!-- agent:boundary:47914965 -->
 <!-- /agent:exchange -->
 
 ## Queue

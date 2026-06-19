@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -59,7 +59,7 @@ How it differs from the neighboring tabs:
 - **Funding Commits** = the actual dollar commitments and their wire/funded state (the money).
 
 So the flow is: a lender shows interest → gets selected → their committed funds show up here as a Pending commitment → you confirm the wire → it becomes Active and is reported to TMO.
-<!-- agent:boundary:d363fce5 -->
+<!-- agent:boundary:5a1d9c68 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,6 +72,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=funds, the selected lender is not in the "Funding Commit".
 <!-- /agent:queue -->
 
 ## Backlog

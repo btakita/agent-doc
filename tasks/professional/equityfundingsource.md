@@ -88,7 +88,29 @@ Commit/deploy proof:
 - Deploy: `make deploy` applied remote D1 migration `0091_investor_interest_lending_group.sql` and deployed Worker version `362d88ac-72d1-47c5-9e3c-0e0741d158bd` at `https://equityfundingsource.brian-takita.workers.dev`.
 
 Confidence: high. The only untouched local change in the submodule is the pre-existing `AGENTS.md` modification, which I left out of the code commit.
-<!-- agent:boundary:3bc90fda -->
+
+### Re: Duplicate queue head: group-backed interest — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: A lender can be interested in a loan on behalf of self or on behalf of a lender group.
+
+
+No additional code changes were needed for this continuation. The previous closeout already implemented the active queue item: lenders can express or update interest as self or as one of their lender groups, with the selected group persisted on `investor_deal_interests.lending_group_id` and group/deal allocation snapshots maintained.
+
+Changed paths: none in this continuation.
+
+Commands/proof carried from the shipped closeout:
+- `make check` passed: 882 tests, browser build, and worker build.
+- `git push origin main` pushed EFS code commit `fa4fd50`.
+- Parent submodule pointer commit `cca7fae14` records `src/equityfundingsource-dev` at `fa4fd50`.
+- `make deploy` applied remote D1 migration `0091_investor_interest_lending_group.sql` and deployed Worker version `362d88ac-72d1-47c5-9e3c-0e0741d158bd`.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows.
+
+Verification: high; this continuation is documentation/queue closeout only, and the underlying implementation was tested and deployed.
+
+Escalation: none.
+<!-- agent:boundary:203f5b34 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,7 +124,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.~~
-- :pushpin: A lender can be interested in a loan on behalf of self or on behalf of a lender group.
+- ~~:pushpin: A lender can be interested in a loan on behalf of self or on behalf of a lender group.~~
 - :pushpin: deploy
 - Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.
 - A lender can be interested in a loan on behalf of self or on behalf of a lender group.

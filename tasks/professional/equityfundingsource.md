@@ -107,7 +107,19 @@ Deployed the EFS Worker to production via `make deploy`. The build picked up the
 **Deploy:** `bunx wrangler deploy` uploaded `equityfundingsource` (8.17s), Worker startup 28 ms, all bindings intact (DB, R2 ×3, Durable Objects, Access env).
 
 **Post-deploy verification:** live smoke test `https://equityfundingsource.brian-takita.workers.dev/` → **200**. The admin Deal-Pipeline "Accept and send to TMO" flow now surfaces the real failure reason (structured JSON) with the message above the button + a toast, instead of the opaque "unavailable".
-<!-- agent:boundary:9d384d9b -->
+
+### Re: Auto-publish on acceptance + deploy — opus-4-8
+
+> **Queue prompt:** Once an application is accepted by the admin, it should immediately be published. deploy
+
+Implemented and deployed. When the admin accepts a full application (`POST /api/admin/full-applications/:id/approve` → TMO writeback succeeds, loan persisted, application → `accepted`), the loan is now **immediately published to the investor marketplace** as an Available Deal.
+
+**Change (`#accept-autopublish`, EFS `d6c6651`):** `application_tmo_writeback_attempt_` calls `admin_deal_publish_(db, loan_id)` right after acceptance. It's **best-effort** — a publish hiccup is caught + logged and does NOT undo the successful TMO writeback/acceptance (re-publishable via `POST /api/admin/loans/:id/deal`); the approve response now carries a `published` boolean. `admin_deal_publish_` is idempotent (upserts the `investment_deals` row, computes terms/LTV). This is the complement of review #214f ("publish only when accepted") — accepted now implies published.
+
+**Verified:** spec + test added (`#accept-autopublish` ordering: accept → publish → return, best-effort); worker build `done`; `make check` full suite **825 pass, 0 fail**.
+
+**Deployed:** `make deploy` → no D1 migrations; uploaded `equityfundingsource` (Worker startup 21 ms); live smoke test `https://equityfundingsource.brian-takita.workers.dev/` → **200**. Pushed: EFS `d6c6651` (origin/main), superproject pointer `541f9a7bb`.
+<!-- agent:boundary:fc90aa80 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -120,6 +132,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=loan&dialog_loan_id=bbd437b0-913f-4a6f-960b-901c72a410c9 is still not published. Should we remove the Published state or make it computed based on the application being accepted?
 <!-- /agent:queue -->
 
 ## Backlog

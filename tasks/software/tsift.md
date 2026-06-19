@@ -56,14 +56,35 @@ The two queue items (`#kgconf`, `#kgrefreshdup`) are done; the backlog was empty
 **Top of backlog: `#kgconfrank`.**
 
 (Heads-up: the exchange is at `session_accretion: warn` — 80 lines / 4 response sections. Say the word and I'll `agent-doc compact tasks/software/tsift.md --commit`.)
-<!-- agent:boundary:f0f685fa -->
+
+### Re: #kgentitycollapse — query-time merge of canonical-entity duplicates — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#kgentitycollapse]
+
+
+Done. The extractor reconciles a recurring entity to a canonical `kgent-…` id (stored as the `entity_id` property), but each chunk/source still projects a distinct node id for it, so the graph holds several provenance-bearing nodes for one logical entity — `#kgctxinject` dedup is naming-convergence + suppression, not node-identity collapse. Retrieval surfaced each as a separate entity.
+
+I took the **query-time identity merge** (the backlog's safer option — no graph mutation, preserves all per-source provenance):
+
+- **`context_pack.rs` — `collect_candidates_from_nodes`** now collapses candidates that share a canonical `entity_id` to one representative (highest confidence → group's max degree → smallest node id, fully deterministic). The graph keeps every node; only the *retrieval surface* dedups.
+- **`canonical_entity_id()`** treats only `kgent-`-prefixed ids as merge keys, so chunk-local model slugs (`e0`/`e1`) never wrongly merge two genuinely distinct entities.
+- The bounded-scan cap now counts **nodes scanned** rather than deduped output, so the never-dump-the-graph guarantee still holds with merging.
+- spec (`local-kg-model.md`) documents the merge under the context-retrieval contract.
+
+**Verification:** `collapses_candidates_sharing_canonical_entity_id` (merged rep keeps max degree; distinct canonical id + local-slug node stay separate); `cargo test -p tsift-kg` 34 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `0648af5`, pushed; superproject pointer `ee8437d34`.
+
+Next queue head: `do [#kgconfrank]` (weight `confidence_source` so derived defaults don't outrank real model scores). `#kgconfreqverify` stays operator-gated.
+<!-- agent:boundary:2bccb00d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#kgentitycollapse]
+- ~~do [#kgentitycollapse]~~
 - do [#kgconfrank]
+- :pushpin: do [#kgconfreqverify]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -73,7 +94,6 @@ https://github.com/chopratejas/headroom
 
 <!-- agent:backlog priority queue -->
 - [ ] [#kgconfreqverify] [operator-verify] Verify the confidence-required schema change (#kgconf, payload_schema in packages/tsift-kg/src/ollama.rs) does not reduce extraction yield on the live local model (Qwen3-32B-Q4) via an A/B over a real corpus; if required-confidence cuts entities/relations or induces hallucinated scores, relax to prompt-only + the derived-default fallback. Needs GPU + Ollama (operator-gated).
-- [ ] [#kgentitycollapse] tsift KG does not collapse entities across chunks by canonical identity: node id = stable_id(chunk.id, entity.id), so same-label entities from different chunks become distinct nodes — duplicate canonical entities even within one extraction (two dup nodes shared canonical entity_id but differed in node id, finding (c)). Add same_as edges keyed on the canonical entity_id property (or a query-time identity-merge) so retrieval sees one logical entity. Preserve per-source provenance — prefer linking over hard delete.
 - [ ] [#kgconfrank] tsift KG context-pack ranking/gating ignores the new confidence_source tag (#kgconf): node_to_candidate in packages/tsift-kg/src/context_pack.rs reads only the raw confidence, so a derived default 0.500 outranks and out-survives a real model 0.300. Thread confidence_source into ranking (model-tier above default-tier) and/or min_confidence gating so derived defaults are distinguishable from model scores — completes the operability #kgconf set up.
 <!-- /agent:backlog -->
 

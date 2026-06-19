@@ -55,7 +55,17 @@ Fixed the agent-actionable half (issue A). Committed + pushed to the agent-doc s
 **Tests/spec:** pure unit test for the shell classifier (runs in `make check`); live tmux SimWorld test `route_refuses_dispatch_into_dead_bare_shell` (bare-shell pane → blocked + `send_command_unchecked` fails closed; harness prompt visible → allowed) gated to `make tmux-ci`; FlowCore hot-path token budget +1 for the audited `reason=` token; invariant documented in `specs/08-session-routing.md`. `make check` green (4721 passed, clippy `-D warnings` clean, sim-medium ok). CI in_progress for `cbc30bca`.
 
 **Still open** (not agent-doable): build/install + the live dead-shell verification, and **issue B** — the upstream harness *crash* root-cause needs your captured crash output / pane scrollback from the `recruit/virtuousai.md` session at the crash moment (the `/model opus` + Opus-4.6-on-restart pin is the lead). Pausing the queue here per your instruction; 12 heads remain.
-<!-- agent:boundary:d39e24b4 -->
+
+### Re: queue auto-re-fired despite the pause — holding per your instruction — opus-4-8
+
+Not draining the next head. You said "drain #1vhn only, then pause" last turn; this cycle is a bare auto-re-dispatch (`queue_trigger: auto`, no new prompt from you), so your pause still stands.
+
+- **Pause isn't holding.** `agent-doc admin queue pause` was accepted twice (receipts 68 + 70 at generation 548) but preflight still reports `queue_active: true`, `queue_paused: None`, `queue_trigger: auto`. The controller pause does not suppress this `go`-mode queue's auto-dispatch (or preflight doesn't surface the controller pause). Filed as `#qpausego` below.
+- **To actually halt it:** set `queue: stop` in the frontmatter (or remove the `go` attribute from the `agent:queue` header) in your editor. I'm not editing queue state myself while the IPC supervisor is live (it races/corrupts).
+- **Next head `do [#supselfheal]` is already shipped** — submodule HEAD `318aceee` is the supselfheal feature commit (wedge-trigger recycle + bounded re-exec escalation, Ph2-5). Draining it under the `#spec-test-build-install-commit-push` preset would just re-run build/install, the hazard you paused for.
+
+Say "go" (or re-point the queue) when you want me to resume; otherwise I'm stopped here.
+<!-- agent:boundary:1329fecf -->
 <!-- /agent:exchange -->
 
 ## Queue

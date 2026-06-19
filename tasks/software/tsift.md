@@ -72,7 +72,26 @@ Operator-approved, so I ran the live measurement. A/B extraction (Qwen3-32B-Q4 o
 **(c) Refresh detects staleness but reconciliation is additive and duplicates entities.** Editing a source correctly flipped its watermark from Unchanged to Stale, and refresh --apply re-extracted it cleanly. But the re-extraction is purely additive: one source went from 9 to 18 entities — all 9 prior stable ids were retained (no id churn), yet 9 new nodes were added with no tombstone of the prior projection, leaving duplicate canonical entities for a single source (tsift-memgraphrag appeared 3 times, the graph-db path 3 times, MemGraphRAG twice). Root cause: the node primary-key id derives from chunk plus description, not the canonical entity_id — which is already present as a property and does match across passes (two duplicate nodes shared one canonical entity_id but had different node ids). The reconciliation key exists in the data; the upsert just does not key on it. Filed as a backlog follow-up (kgrefreshdup).
 
 Net: the machinery runs end-to-end on a real corpus and the context-injection dedup is real and measurable, but two operational gaps block production-grade use — confidence is never persisted, and refresh duplicates entities. Both are now top of the backlog as actionable tsift code work, and the measurement item is done.
-<!-- agent:boundary:a33738bf -->
+
+### Re: #kgconf — KG projection now always persists per-entity confidence — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#kgconf]
+
+
+Root cause confirmed and fixed. The projection layer (`entity_node`/`relation_edge` in `packages/tsift-kg/src/lib.rs`) only wrote a `confidence` property `if entity.confidence.is_some()`. Local-model structured output (Qwen3) drops the optional field, so every freshly-extracted node arrived with `confidence: None` → 0 of 71 nodes carried confidence → `node_to_candidate` in `context_pack.rs` read the missing property as `0.0`, making the `#kgctxinject` `min_confidence` gate and confidence-descending ranking inoperable (every candidate tied at 0.0).
+
+**Fix (3 files, committed `ac423b1`, pushed to origin/main; superproject pointer `bcfae6ce4`):**
+
+- **`lib.rs` — universal guarantee in the projection layer.** `entity_node` and `relation_edge` now *always* persist `confidence` (3-decimal string) plus a `confidence_source` tag: the model value when present (`source=model`), else a neutral derived `DEFAULT_KG_CONFIDENCE = 0.5` (`source=default`). This covers every extractor, not just Ollama, so the gate always has data and can weight model-emitted scores above defaults.
+- **`ollama.rs` — better real signal.** Marked `confidence` `required` on both the entity and relation structured-output schemas so the decoder emits a real per-fact score instead of silently dropping the optional field.
+- **`specs/local-kg-model.md`** — documents the always-persist guarantee under Graph Provenance.
+
+**Verification:** new test `projection_always_persists_confidence_with_source_tag` (model value tagged `model`, omitted value → default tagged `default`, on both nodes and edges) + extended schema-required assertions. `cargo test -p tsift-kg` 32 passed, `clippy` clean, full `make check` exit 0, `cargo install` (root + cli) → `tsift 0.1.70` live. CI run 27812097553 was pending at push time (recorded, not blocking).
+
+Next queue head: `do [#kgrefreshdup]` (refresh accumulates duplicate canonical entities — key the upsert on canonical `entity_id`).
+<!-- agent:boundary:78284515 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -80,7 +99,7 @@ Net: the machinery runs end-to-end on a real corpus and the context-injection de
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: [#kgeffmeasure]: approved~~
 - ~~do [#vmax]~~
-- do [#kgconf]
+- ~~do [#kgconf]~~
 - do [#kgrefreshdup]
 <!-- /agent:queue -->
 <!--
@@ -90,7 +109,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgconf] tsift kg extract/projection never persists per-entity confidence — 0 of 71 freshly-extracted semantic_entity nodes carry a `confidence` property (verified A/B 2026-06-19). The spec`d confidence/recency gating (#kgctxinject) has no data to act on. Emit a confidence score from the extractor model output (or a derived score) into the semantic_entity projection so gating is operable.
 - [ ] [#kgrefreshdup] tsift kg refresh --apply accumulates duplicate canonical entities. Re-extracting one edited source went 9→18 entities (verified 2026-06-19): all 9 prior stable ids retained, but 9 NEW nodes added with NO tombstone of the prior source projection → tsift-memgraphrag x3, .tsift/graph.db x3, MemGraphRAG x2, #kgwiring x2 for a single source after one refresh. Root cause: node primary-key id derives from chunk+description, not the canonical entity_id (already present as a property and matching across passes). Key the node upsert on canonical entity_id, or tombstone the prior source projection before re-insert.
 <!-- /agent:backlog -->
 

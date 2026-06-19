@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -76,7 +76,31 @@ No — the Funding Commit is **EFS-owned**, not driven by TMO. Here's the actual
 So: TMO is the downstream system of record EFS syncs *to* (and reconciles amounts *from*), but a Funding Commit will never appear just because TMO has a funding — it has to exist in EFS first.
 
 **Why this matters for your earlier report:** selecting a lender writes only the interest's `selected_at` + reserves the deal; it creates no `funds` row, and TMO sync won't create one either. So the selected lender stays absent from Funding Commits until an **EFS-side** commit exists. That's exactly the decision I asked about — whether selecting a lender should auto-create that EFS commit (and for what amount), add an admin "Add commitment" action, or leave it to the lender's portal funding. Let me know which and I'll build it.
-<!-- agent:boundary:14a4340a -->
+
+### Re: Document the entire Deal Pipeline flow (all roles + Broker variant) — opus-4-8
+
+> **Queue prompt:**
+>
+> Create a document that explains the entire Deal Pipeline flow...which includes the actions of all roles: Borrower, Admin, Lender. Also include a variant of the deal pipeline for the Broker.
+
+
+Done. Created **`src/equityfundingsource-dev/docs/deal-pipeline-flow.md`** (EFS submodule `7b2e9d2`), grounded in the current code with anchors so it stays maintainable.
+
+What it covers:
+
+1. **The status models** (the key insight — the pipeline is several *independent* status fields, not one):
+   - Loan steps (`tmo_loan_status`): Application Received → Loan Estimate → Intent to Proceed → Processing → Underwriting → Closing → Closed → Funded (+ Denied / Unassigned / On Hold).
+   - Deal offering (`investment_deals.status`): published → reserved → funded → closed.
+   - Funding Commit (`funds.status`): pending → active.
+   - Borrower application (`full_applications.status`): draft → submitted → in_review → accepted / denied.
+2. **End-to-end flow** with a mermaid sequence diagram, then **role-by-role actions** for **Borrower**, **Admin**, and **Lender** — including the Interested-Lenders-vs-Funding-Commits distinction we just clarified, and the EFS→TMO writeback direction.
+3. **Broker variant** — the broker portal's own `broker_deals` status flow (submitted → in_review → docs_needed → approved → funded / declined) + commissions (pending → paid / reversed), with its own mermaid diagram and a note on how an approved broker deal joins the main loan pipeline.
+4. **Quick-reference table** mapping every concern to its field/table/values.
+
+This is documentation only (no code), so no build/deploy needed. Open it at `src/equityfundingsource-dev/docs/deal-pipeline-flow.md`.
+
+Note: the doc describes the current implemented flow. The `Loan Estimate → Intent to Proceed → Closing` steps exist as pipeline statuses but their per-step borrower/admin sub-actions aren't all built out yet — the doc reflects the intended flow at those steps. The open `#closed-step-decouple` is resolved (done), and the Funding-Commit-on-selection decision is still pending your call.
+<!-- agent:boundary:b75cdd6f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,7 +113,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Create a document that explains the entire Deal Pipeline flow...which includes the actions of all roles: Borrower, Admin, Lender. Also include a variant of the deal pipeline for the Broker.
 <!-- /agent:queue -->
 
 ## Backlog

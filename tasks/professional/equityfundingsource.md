@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -381,7 +381,24 @@ Short answer: **"Syndicate" is a real industry-standard term, but it comes from 
 My pick if you want one word that signals seriousness without misrepresenting structure: **"Syndicate"** is fine — go with **"Loan Syndicate" / "Syndicate Participants."** If you'd rather stay accurate to how private deals are actually structured, **"Multi-Lender Loan."**
 
 `#8667` stays gated — once you lock the name, I still need your calls on **persistent vs. deal-scoped** groups and **member privacy** before building. Tell me those two and I'll start (plan: `src/equityfundingsource-dev/prds/lending-groups-plan.md`).
-<!-- agent:boundary:e3a119ff -->
+
+### Re: "Multi-Lender Group" or "Lending Group"? — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Robert W mentioned "Fractionalized", so "Multi-Lender Group" or "Lending Group"?
+
+
+**Go with "Multi-Lender Group."** It's the plain-English version of what Robert means by "Fractionalized": multiple lenders each holding a fractional interest in one loan, funded together. It says exactly what the thing is — a *group of lenders* — with no ambiguity and none of the institutional "syndicate" baggage.
+
+Why it beats "Lending Group":
+- **"Lending Group"** is ambiguous — it reads as "a group that lends" and doesn't signal that there are *multiple co-lenders* on one deal. It could be mistaken for a single lender's brand/team.
+- **"Multi-Lender Group"** is unambiguous, professional, and pairs cleanly with Robert's "Fractionalized" framing: the *loan* is fractionalized across the *Multi-Lender Group*. The members are "co-lenders"; the deal still funds at full value (the group collectively funds 100%, no independent partials — consistent with the express-interest rule).
+
+So: **loan = fractionalized; the lenders = a "Multi-Lender Group"; members = "co-lenders."** If you ever want a shorter UI label, "Lender Group" works as the casual form, but "Multi-Lender Group" is the one I'd put in product copy and the schema.
+
+`#8667` stays gated on the last two calls before I build: **persistent vs. deal-scoped** groups, and **member privacy** (do co-lenders see each other?). Lock the name as "Multi-Lender Group" + answer those two and I'll start Phase 1 (`src/equityfundingsource-dev/prds/lending-groups-plan.md`).
+<!-- agent:boundary:03058804 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -394,7 +411,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Robert W mentioned "Fractionalized", so "Multi-Lender Group" or "Lending Group"?
 <!-- /agent:queue -->
 
 ## Backlog

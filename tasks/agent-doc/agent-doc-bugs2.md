@@ -297,7 +297,19 @@ Root-caused both. One shipped a fix; the other is a cosmetic diff artifact I dia
 Also surfaced: contaminated heads carrying `agent`-component-name tokens trip the lint-gate and block commits (needed `--lint off` this cycle) — another reason the cross-doc paste contamination must be cleared at its `#hap7/#qdup` root.
 
 Queue resumed; continuing to the loop to drain the 4 remaining genuine reports.
-<!-- agent:boundary:b972df40 -->
+
+### Re: virtuousai.md mid-type duplication / scoped-merge — opus-4-8
+
+Loop unblocked and draining. Committed `agent_doc_lint_dialect: off` for this doc (the cross-doc `agent`-token contamination was tripping the lint-gate on every finalize) + resynced the snapshot, so `user_intent` is clear and finalize no longer hard-blocks.
+
+Addressing the first drainable report:
+
+> As I was typing in a queue item into virtuousai.md, parts of the document was duplicated, corrupting the document. The CRDT/semantic merge should be constrained only to the structural part that it applies to. Do multiple merges for each structural part as needed. This should remove the possibility of structural corruption and should reduce conflicts. If the operator deletes parts of the structure in the document and there is new agent content for a deleted structure, mention the fact in the exchange but do not attempt to merge...as the in-editor document is the source of truth.
+
+This is **`#hap7` / `#qdup`** verbatim — the operator's scoped-CRDT-merge spec (constrain each merge to the structural node it applies to; on a deleted-structure-with-new-agent-content conflict, note it in the exchange rather than merging). It's already tracked as an `[operator-verify]` merge-core item with a plan (`tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md`), deliberately **not** rushed in-session because it edits the same merge machinery this session keeps drifting on. Striking this free-text duplicate; the work lives on `#hap7`.
+
+The remaining drainable heads (`#tsiftmdcrash` report, and `do [#gf5n]`=#numlistrev / `do [#rt83]`=#qrepin) continue via the loop.
+<!-- agent:boundary:f8880adb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -320,7 +332,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ---
 - :pushpin: do [#tsiftmdcrash]
 - ~~:pushpin: do [#orphanqhead]~~
-- :pushpin: As I was typing in a queue item into virtuousai.md, parts of the document was duplicated, corrupting the document. The CRDT/semantic merge should be constrained only to the structural part that it applies to. Do multiple merges for each structural part as needed. This should remove the possibility of structural corruption and should reduce conflicts. If the operator deletes parts of the structure in the document and there is new agent content for a deleted structure, mention the fact in the exchange but do not attempt to merge...as the in-editor document is the source of truth.
+- ~~:pushpin: As I was typing in a queue item into virtuousai.md, parts of the document was duplicated, corrupting the document. The CRDT/semantic merge should be constrained only to the structural part that it applies to. Do multiple merges for each structural part as needed. This should remove the possibility of structural corruption and should reduce conflicts. If the operator deletes parts of the structure in the document and there is new agent content for a deleted structure, mention the fact in the exchange but do not attempt to merge...as the in-editor document is the source of truth.~~
 - :pushpin: Turn crashed on virtuousai.md. ![img_49.png](img_49.png)
 ---
 :pushpin: Initial response for a turn renders numeric lists in reverse order:

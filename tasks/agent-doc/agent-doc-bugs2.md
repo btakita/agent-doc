@@ -76,7 +76,13 @@ The latest `src/agent-doc` CI run for `3d3c3605` is completed successfully. `#ha
 Preflight converged the queue through the editor path and reports `queue_active: true` with `queue_continuation_required: false` and `queue_drainable_head_count: 0`. That means this cycle has no agent-drainable queue head to execute.
 
 I treated the two queue text edits as operator-verify/gating edits, not as authorization to run repo work. `#hap7`, `#tsiftmdcrash`, the equityfundingsource items, and the monsterrodholders duplicate-response item remain queued/backlogged or operator-gated according to the current document state. No source files were changed and no tests were run in this cycle.
-<!-- agent:boundary:4b01a9b2 -->
+
+### Re: queue pin edits — gpt-5
+
+I see the queue edits that changed the equityfundingsource and monsterrodholders heads back to `:pushpin:` plus the `(HEAD)` marker artifact on the prior response heading. The binary still reports `queue_active: true`, `queue_continuation_required: false`, and `queue_drainable_head_count: 0`, so I am not dispatching or running repo work from this cycle.
+
+Current closeout: the queue/body edits were preserved through preflight, no source files were changed, and no tests were run. The remaining queue heads are still treated by the agent-doc controller as non-drainable/operator-gated/noise until a future preflight reports a drainable head.
+<!-- agent:boundary:6179486a -->
 <!-- /agent:exchange -->
 
 ## Queue

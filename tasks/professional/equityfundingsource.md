@@ -172,7 +172,23 @@ Commands/proof carried from the shipped closeout:
 Verification: high; duplicate queue closeout only.
 
 Escalation: none.
-<!-- agent:boundary:e65997c7 -->
+
+### Re: Duplicate queue head: deploy — gpt-5
+
+No additional deploy was needed. The deployment already completed in the shipped closeout.
+
+Changed paths: none in this continuation.
+
+Commands/proof:
+- `make deploy` completed successfully.
+- Remote D1 migration applied: `0091_investor_interest_lending_group.sql`.
+- Worker deployed: version `362d88ac-72d1-47c5-9e3c-0e0741d158bd`.
+- Live Worker URL reported by wrangler: `https://equityfundingsource.brian-takita.workers.dev`.
+
+Verification: high; duplicate queue closeout only.
+
+Escalation: none.
+<!-- agent:boundary:9b5f8ef1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -185,12 +201,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.~~
-- ~~:pushpin: A lender can be interested in a loan on behalf of self or on behalf of a lender group.~~
-- ~~:pushpin: deploy~~
-- ~~Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.~~
-- ~~A lender can be interested in a loan on behalf of self or on behalf of a lender group.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

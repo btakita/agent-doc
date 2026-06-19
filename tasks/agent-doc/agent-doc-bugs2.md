@@ -128,7 +128,25 @@ Done (`#jbclaudesubmit`, 0.34.17). Implemented your directive for the "doesn't s
 **Verified:** dispatch suite (129) + `make check` green; FlowCore hot-path budget respected.
 
 **Honest caveat:** this directly implements "retry more until submitted." If the real failure is the composer never *focusing* (not just needing more Enters), more retries won't help and we'll need the live pane-state at failure to confirm. `#jbrundispatch` stays gated for that live verification + its other half (stall after pane kill+restart). Installing 0.34.17 + recycling next.
-<!-- agent:boundary:08262c7e -->
+
+### Re: detect non-dispatch + re-send the prompt (directive #2) — opus-4-8
+
+Built it (`#jbrundispatch` directive 2, 0.34.18). Both of your refined route directives are now implemented:
+
+> "Some Run Agent Doc ops don't submit to Claude Code.": detect a written prompt and retry until the prompt is submitted.
+
+Covered by 0.34.17 (`#jbclaudesubmit`): when the trigger is drafted in the composer (`trigger_visible`), it resubmits Enter until consumed — budget raised to 6, env-tunable.
+
+> "Killed the pane + autostarted → stalled: detect if the prompt was not dispatched into the session. And send the prompt and submit the prompt."
+
+This was the real gap. `poll_direct_pane_acceptance` treated an **empty composer** as a successful submit — even when the trigger was **never seen** there. So a send that silently no-op'd into a not-ready pane (your pane-kill+restart case) was misreported as `Accepted`, and nothing re-dispatched. The stall.
+
+**Fix:** a new `not_dispatched` outcome, set only when the trigger was never observed in the composer **and** the pane is at an **idle dispatch-ready prompt** (`pane_idle_dispatch_ready`). For an agent-doc trigger that starts a turn, a genuine submit leaves the pane *processing* (not idle) — so empty+idle+never-seen reliably means "never landed," and it's safe from re-sending a real submit (which would double-run the agent). On that signal, `send_command_unchecked` re-sends the **full** trigger (text+Enter, not a bare Enter — there's no draft to submit) until it lands, logging `route_redispatch_not_landed`, and reports a genuine `TimedOut` rather than a false `Accepted` if the budget exhausts.
+
+**Verified:** new discriminator test (idle = non-dispatch / processing = real submit, so no double-run) + dispatch suite (130) + `make check` green; FlowCore hot-path budget respected.
+
+**Caveat (same as before):** unit tests can't reproduce the live pane-kill stall, so the real proof is a live repro — but the detection is conservative (never re-sends a processing/real submit). Committing + installing 0.34.18 next; `#jbrundispatch` stays gated for your live confirmation.
+<!-- agent:boundary:82b21794 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -255,7 +255,24 @@ Same out-of-sync deal (`7a0c1463` / loan `45ddae53` / `GQI751`). I traced the fa
 **Not yet fixed — the deal-specific *trigger*.** The fix makes errors diagnosable but isn't itself the cause; some endpoint the deal dialog hits throws for *this* loan. I statically traced the obvious suspects — `admin_deal_R_` → `deal_with_calculated_ltv_` → `loan_ltv_calc_` → `onboarding_data_` → `onboarding_json_`, plus the loans/documents/interests/funds/activity endpoints — and they're **all null/parse-guarded**, so I can't honestly pin the throw from code alone. I couldn't reproduce live either: no prod D1 access (still gated on `#cftk`), and `cf:worker:tail` needs a live click to catch it. I'm not going to guess a culprit.
 
 **Captured `#dealtab500`** (backlog): with the stack now logged, reproduce the loan tab under `bun run cf:worker:tail` to catch the throwing endpoint, then guard it + add a regression test. Strong hypothesis given the prior turn's diagnosis: an admin deal/loan endpoint that assumes a `full_application` / richer onboarding that this thin TMO-synced loan never got. Ties directly back to the `#5q7z`/`#214f` sync gap.
-<!-- agent:boundary:f9d42cf4 -->
+
+### Re: do [#dealtab500] — opus-4-8
+
+Drained the go-mode head. I did the agent-doable half and hit the operator-gated wall honestly — I did **not** fabricate a fix.
+
+**Independent static re-confirmation (the throw can't be pinned from code).** I re-traced the loan-tab path end-to-end myself rather than trusting the prior note:
+- `GET /admin/pipeline?...&deal_tab=loan` server-renders **only a shell** (`portal_shell_page_`) — no server-side deal/dialog processing, so the page request itself can't throw for this deal.
+- The deal dialog's data is all **client-fetched**, and every reachable endpoint is guarded: `/api/admin/deals/:id` → `admin_deal_R_` (JOIN + `deal_with_calculated_ltv_`, whose `onboarding_json_`/`loan_ltv_calc_` are fully `try/catch` + null-guarded); `/api/admin/loans/:id` → `admin_loan_R_` is a plain `SELECT *`; `/documents` is harmless.
+- Every client `fetch` degrades to an **error card** (`'Not found'` / `{documents:[]}`), not the worker's opaque `Internal Error` page. So the literal "Internal Error" is an *uncaught worker throw* whose origin none of the guarded paths explain statically.
+
+**Shipped (efs `a39be3d`) — deterministic regression guard.** The one concrete, non-guess deliverable the task asks for: `tests/gformula.test.ts` now locks the thin/hybrid TMO-synced loan shape (loan row only, `status='submitted'`, no `full_application`, `onboarding_data_json` null/empty/malformed, or a TMO-keyed payload lacking EFS fields). It asserts the deal-economics helpers (`loan_ltv_calc_`, `onboarding_json_`/`onboarding_data_`, `minimum_investment_calc_`, `sold_rate_calc_`, `annual_yield_calc_`, `ownership_pct_calc_`, `position_type_calc_`) degrade to `null`/`{}` and **never throw** for the GQI751 loan — a throw here is exactly what the loan tab would surface. This is a *guard*, not a reproduction: it passes against current code (821 pass / 0 fail, +3 new; `build` + `build:worker` clean), which is itself evidence the bug is **not** in these builders.
+
+**Remaining is operator-gated — keeping `#dealtab500` open, tagged `[operator-verify]` (not done).** Pinning the actual throwing endpoint needs a live stack trace, which I can't get from this session:
+- `bun run cf:worker:tail` + **you clicking the loan tab** in a browser to trigger it (the onError fix now logs the real `message`/`stack`), or
+- inspecting loan `45ddae53` / deal `7a0c1463` D1 rows once **`#cftk`** (D1-Edit token) is unblocked.
+
+Since only operator-gated work remains on this head, I'm stopping the queue drain here rather than re-churning the same static dead-end.
+<!-- agent:boundary:a161b160 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -274,7 +291,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dealtab500] Root-cause the deal 7a0c1463 / loan 45ddae53 loan-tab "Internal Error": app_error_handler_ (app/index.ts) now returns a logged structured JSON 500 instead of undefined (#dealtab500-onerror shipped), so the trigger is now diagnosable. Reproduce the admin deal-dialog loan tab and capture the throwing endpoint + stack via `bun run cf:worker:tail` (or inspect loan 45ddae53/deal 7a0c1463 rows, gated on #cftk D1 token), then guard the specific endpoint (suspect: an admin deal/loan endpoint that assumes full_applications/onboarding for this hybrid TMO-synced loan) and add a deterministic regression test. Relates to #5q7z/#214f sync work.
+- [ ] [#dealtab500] [operator-verify] Root-cause the deal 7a0c1463 / loan 45ddae53 (GQI751) loan-tab "Internal Error". Static trace independently re-confirmed exhausted: GET /admin/pipeline serves only a shell (no server-side deal processing); every client-fetched endpoint is guarded — admin_loan_R_ is a plain SELECT, admin_deal_R_ LTV/onboarding chain (onboarding_json_/loan_ltv_calc_) is fully try/catch + null guarded, /documents is harmless; all client fetches degrade to error cards, not the worker Internal Error page. Regression guard shipped (efs a39be3d) locking the thin-TMO-loan onboarding shape against throws (gformula deal-economics helpers). REMAINING (operator-gated, cannot be agent-done): reproduce live via `bun run cf:worker:tail` + a browser click on the loan tab to capture the real throwing endpoint + stack, OR inspect loan 45ddae53/deal 7a0c1463 D1 rows once the #cftk token lands. Relates to #5q7z/#214f.
 <!-- /agent:backlog -->
 
 ## Review

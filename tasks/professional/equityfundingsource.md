@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -82,7 +82,7 @@ Each card renders only when it has data; if a deal has loan info but no preferre
 **Verify + deploy:** `make check` green — **895 pass, 0 fail**, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `630816a` (`d3c45eb51`).
 
 Please refresh the deal page and confirm. Confidence: high — suite-verified. Escalation: none.
-<!-- agent:boundary:227cefa3 -->
+<!-- agent:boundary:3a958b51 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -95,6 +95,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d: Payment Frequency should not be truncated ![img_29.png](img_29.png). Add borrower info.
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

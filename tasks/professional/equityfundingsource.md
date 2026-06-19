@@ -319,7 +319,25 @@ Done (EFS submodule `5e3116d`). I confirmed the two decisions with you first (st
 **One follow-up to flag (`#closed-step-decouple`, [recommended], adding to backlog):** `Closed` is now both a pipeline step *and* the existing terminal close-deal trigger — `admin_deal_status_sync_by_loan_` flips a deal to `closed` whenever a loan reaches status `Closed`. So advancing a loan to the `Closed` milestone will currently close the investment deal, which conflicts with a strict `Closing → Closed → Funded` progression. Decoupling milestone-`Closed` from the terminal close-deal action is a separate decision — tell me if you want that and I'll do it before deploy.
 
 (Closeout note: the route-owned editor IPC for this doc is still wedged with no live-buffer present, so this committed via the proven force-disk path again. Exchange is ~261 lines; queue active.)
-<!-- agent:boundary:bbc1d352 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Deployed. You re-invoked after my "your call" message, so I took that as the go to ship the pipeline restructure now (the `#closed-step-decouple` follow-up stays queued as `do [#8yzs]` for your decision later — it only bites when an admin manually advances a loan to the `Closed` step).
+
+**Deploy result:**
+- `bun run deploy:worker` succeeded — built the worker, re-checked remote migrations (0085 already applied, skipped), uploaded, and deployed.
+- Live at https://equityfundingsource.brian-takita.workers.dev — Version ID `a47a8307-96c5-4f1e-9426-4ecaf84dbe98`.
+- Smoke check: `/` and `/admin/login` both return HTTP 200.
+
+What's now live: the new pipeline steps (Available Deals → Loan Estimate → Intent to Proceed → Processing → Underwriting → Closing → Closed → Funded), lender-selection → Loan Estimate, and the `reserved` deal status that pulls a deal off the marketplace once a lender is selected (schema migration 0085 was already applied to remote D1 last cycle). The one live loan (GQI751) is at `Loan Estimate` with its deal `reserved`.
+
+**Remaining queue:** `do [#8yzs]` (`#closed-step-decouple`) — a [recommended] design decision that needs your input: should reaching the `Closed` milestone close the investment deal (current behavior), or should milestone-`Closed` be decoupled from the terminal close-deal action so a loan can progress `Closed → Funded` without closing the offering? It's operator-gated, so I'm not auto-draining it — tell me which way you want it.
+<!-- agent:boundary:521b622d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -335,7 +353,7 @@ After 20:30
 - ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=loan, the lender is selected but the Loan Status does not reflect the vendor as being selected.~~
 - ~~We need to constrain Available Deal up to the point to where the lender is selected. Once the lender is selected, the Deal is no longer available to other lenders. We need a separate out "Loan Estimate", "Intent to Proceed", "Processing", "Underwriting", "Closing", "Closed", "Funded". Ensure these steps are in the Deal pipeline.~~
 - ~~Once the Lender is selected, move to the "Loan Estimate" step.~~
-- deploy
+- ~~deploy~~
 - do [#8yzs]
 <!-- /agent:queue -->
 

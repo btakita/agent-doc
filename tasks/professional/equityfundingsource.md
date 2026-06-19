@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -82,7 +82,38 @@ Each card renders only when it has data; if a deal has loan info but no preferre
 **Verify + deploy:** `make check` green — **895 pass, 0 fail**, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `630816a` (`d3c45eb51`).
 
 Please refresh the deal page and confirm. Confidence: high — suite-verified. Escalation: none.
-<!-- agent:boundary:3a958b51 -->
+
+### Re: Payment Frequency truncation + add borrower info — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+
+> **Queue prompt:**
+>
+> :pushpin: In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d: Payment Frequency should not be truncated ![img_29.png](img_29.png). Add borrower info.
+
+
+Both done — built, tested, committed, pushed, and deployed.
+
+**1. Payment Frequency no longer truncated.** The `img_29.png` showed "Payment Frequency: Mo…" — the label was so long it left no room for the value in the two-column grid. Shortened the label to **"Frequency"** (the value "Monthly" now fits). The fields read: Preferred Loan Amount · Sold Rate · Term · Frequency · Day Due.
+
+**2. Borrower Info added.** Available deals now show a **"Borrower Info"** card above Loan Info / Preferred Terms, with **Borrower** (name), **Property Type**, and **Property Address** — sourced from `deal.borrower_full_name` / `deal.property_type` / `deal.borrower_address`. I exposed `borrower_full_name` and `borrower_address` on the investor deal-by-id response (they weren't returned before). The card renders only when it has data.
+
+**Privacy note:** this surfaces the borrower's name + address to any lender viewing the deal. That's consistent with funded deals (the TMO "Borrower Detail" card already shows borrower identity), and you asked for it — but if you'd rather gate/anonymize it until a lender expresses interest or is selected, say so and I'll add the gate.
+
+**Changed paths (`src/equityfundingsource-dev`, commit `98ca799`, pushed + deployed):**
+- `shared/tmo_loan_details.tsx` — Borrower Info card + `deal_borrower_info_T`; "Frequency" label.
+- `investor/deal_detail.tsx` — passes `borrower_info`.
+- `investor/available_deals.tsx` — `borrower_full_name`/`borrower_address` on `InvestorDeal`.
+- `app/.../investor/deal_marketplace/index.ts` — expose borrower fields on the deal-by-id response.
+- `tests/investor-portal-e2e.test.ts` — assert the Borrower Info card, Frequency label, and backend fields.
+
+**Verify + deploy:** `make check` green — **895 pass, 0 fail**, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `98ca799` (`b396c1c79`).
+
+Please refresh and confirm. Confidence: high — suite-verified. Escalation: none.
+<!-- agent:boundary:c218c8af -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -95,8 +126,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d: Payment Frequency should not be truncated ![img_29.png](img_29.png). Add borrower info.
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

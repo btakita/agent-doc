@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -238,7 +238,24 @@ Short version: **this loan has two origin stories the system treats as mutually 
 - **`#dzmm`/`#7a4d`/`#37ah`** — the broader EFS→TMO writeback-replay + field-map work, so EFS-side edits actually flow back keyed by `tmo_loan_rec_id`.
 
 No code changed this turn — diagnosis + reads only. The fix is gated on your `#5q7z` a/b decision.
-<!-- agent:boundary:a4beae48 -->
+
+### Re: Loan tab "Internal Error" on deal 7a0c1463 — opus-4-8
+
+> **Queue prompt:**
+>
+> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=loan has an Internal Error
+
+
+Same out-of-sync deal (`7a0c1463` / loan `45ddae53` / `GQI751`). I traced the failure end-to-end. Two findings — one fixed, one captured.
+
+**What "Internal Error" actually is.** That literal string is **not** in our codebase and there's no React error boundary — it's Cloudflare's runtime default for an *unhandled* worker exception. Tracing it, I found a real defect in the worker's catch-all: `app.onError` (`app/index.ts:78`) only `console.error`'d and **returned `undefined`**. Hono requires `onError` to return a `Response`; returning `undefined` makes the Workers runtime emit its opaque "Internal Error" page — no JSON body, no request id, nothing the client or logs can surface. So any throw anywhere degraded to this blank wall.
+
+**Fixed (committed, submodule `9512487`).** Extracted `app_error_handler_` and made it return a logged, structured `c.json({ error: 'Internal Error', … }, 500)` (full `message`/`stack` off-prod, generic in prod). Now an unhandled throw returns a real 500 the client can read, and the stack is logged for `cf:worker:tail`. Verified: full suite **818 pass / 0 fail** (added `tests/app-error-handler.test.ts`) and `build:worker` compiles clean.
+
+**Not yet fixed — the deal-specific *trigger*.** The fix makes errors diagnosable but isn't itself the cause; some endpoint the deal dialog hits throws for *this* loan. I statically traced the obvious suspects — `admin_deal_R_` → `deal_with_calculated_ltv_` → `loan_ltv_calc_` → `onboarding_data_` → `onboarding_json_`, plus the loans/documents/interests/funds/activity endpoints — and they're **all null/parse-guarded**, so I can't honestly pin the throw from code alone. I couldn't reproduce live either: no prod D1 access (still gated on `#cftk`), and `cf:worker:tail` needs a live click to catch it. I'm not going to guess a culprit.
+
+**Captured `#dealtab500`** (backlog): with the stack now logged, reproduce the loan tab under `bun run cf:worker:tail` to catch the throwing endpoint, then guard it + add a regression test. Strong hypothesis given the prior turn's diagnosis: an admin deal/loan endpoint that assumes a `full_application` / richer onboarding that this thin TMO-synced loan never got. Ties directly back to the `#5q7z`/`#214f` sync gap.
+<!-- agent:boundary:c5446344 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -251,12 +268,12 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=loan has an Internal Error
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#dealtab500] Root-cause the deal 7a0c1463 / loan 45ddae53 loan-tab "Internal Error": app_error_handler_ (app/index.ts) now returns a logged structured JSON 500 instead of undefined (#dealtab500-onerror shipped), so the trigger is now diagnosable. Reproduce the admin deal-dialog loan tab and capture the throwing endpoint + stack via `bun run cf:worker:tail` (or inspect loan 45ddae53/deal 7a0c1463 rows, gated on #cftk D1 token), then guard the specific endpoint (suspect: an admin deal/loan endpoint that assumes full_applications/onboarding for this hybrid TMO-synced loan) and add a deterministic regression test. Relates to #5q7z/#214f sync work.
 <!-- /agent:backlog -->
 
 ## Review

@@ -111,7 +111,15 @@ I found the additive path that sidesteps the carry-forward risk entirely, so the
 - **clear** (every `commit_success`): empties the journal once queue state is durable in the snapshot, bounding it to the crash window.
 
 5 unit tests; `make check` green; built + installed; shipped (submodule `5f8fc4b4`). One honest gap I filed in the plan as a follow-up: an add lost *before any cycle observes it* (pure editor buffer, never flushed to disk) needs a plugin buffer-flush-on-edit — binary can't journal what it never sees. Continuing the drain.
-<!-- agent:boundary:726532db -->
+
+### Re: JB Run Agent Doc didn't start (should have) — opus-4-8
+
+Fixed. The pasted log shows it was blocked by `failed_stage=queue_paused` — a `paused` queue control was halting your explicit `Run Agent Doc`.
+
+That's the inverse of the `#qpausego` correction, same principle: a pause governs **auto-draining the queue**, not whether *you* can run a cycle. So the controller dispatch RPC now admits an explicit operator reopen (JB Run Agent Doc → `managed_reopen` / `dispatch_only_reopen`) past a deliberate operator/admin pause — **one-shot** (the pause row stays, so unattended `idle_queue_continuation` / `/loop` callers remain blocked until `admin queue resume`). The one exception kept intact: a stale-supervisor churn-stop pause (`#jbrestale`) still blocks every caller so the route restarts the stale supervisor first.
+
+New `dispatch_command_kind_is_operator_reopen` classifier; 1 new test (`dispatch_operator_reopen_bypasses_paused_queue`) + two existing pause/marker tests retargeted to an auto command_kind; `make check` green; built + installed; shipped (submodule `41a32133`). Continuing the drain.
+<!-- agent:boundary:58e70b82 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -128,7 +136,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 ---
 - ~~:pushpin: Response in monsterrodholders.md is committed but then deleted in an uncommitted state.~~
-- :pushpin: In equityfundingsource.md After a recycle restart + queue continuation, the prompt is not submitted after the restart.
+- ~~:pushpin: In equityfundingsource.md After a recycle restart + queue continuation, the prompt is not submitted after the restart.~~
 - :pushpin: do [#733r]
 - :pushpin: do [#docdriftgrace]
 - :pushpin: do [#agentreloadrestart]

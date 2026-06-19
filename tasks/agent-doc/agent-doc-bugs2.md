@@ -57,24 +57,43 @@ So every operator-pasted console dump — the bulk of the flood — was invisibl
 **Verified on the actual flooded doc (on a copy):** `prune-noise` excised **61** noise entries — 0 ``` fences / `:round_pushpin:` / `agent:boundary` left — while preserving every id-backed directive, including the `---`-wrapped `#tsiftmdcrash`. New regression test + full queue suite (479) + `make check` green.
 
 This directly unblocks `#prunenoise-live` and the "noise heads never auto-deleted" half of `#sqedit-race`. Next: I'll install 0.34.15 + recycle the supervisor, then run `queue prune-noise` on this live doc to clear the flood with matched binaries.
-<!-- agent:boundary:0b46d597 -->
+
+### Re: agent-doc duplicating queue items — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.
+
+
+Reproduced and fixed (`#qdup-bare-id`, 0.34.16). Your report is corroborated right here — this doc's live queue had `[#sqedit-race]` and `[#qpausemix-verify]` each appearing **twice**.
+
+**Root cause.** The only id-dedup wired into preflight maintenance was the AST **node-key** dedup, which deliberately preserves occurrence-indexed duplicates. The id-aware `dedup_live_prompts` was never wired in — on purpose: a duplicate `do [#id]` **directive** can be intentional "run it twice" intent (the `#queue-dedup-destroys-intentional-duplicates` invariant). But the backlog→queue mirror / CRDT replay re-emits a **bare** `[#id]` reference head (no `do`), and *nothing* collapsed those — so every mirror pass stacked another copy.
+
+**The fix.** New `queue::dedup_bare_id_reference_heads` runs in `run_queue_maintenance` after the node-key dedup. It collapses duplicate **bare** `[#id]` / `#id` reference heads (pin markers stripped) to the first occurrence, while:
+- leaving `do [#id]` **directive** duplicates intact (intentional intent — invariant preserved), and
+- never touching free-text heads (including a directive that merely *cites* an id with trailing text, e.g. `#id continue the drain`) or multiline blocks.
+
+**Verified:** new dedup tests + the intentional-`do`-duplicate invariant + full queue (481) and maintenance (67) suites + `make check` all green. Once 0.34.16 is live (installing + recycling next), the next preflight auto-collapses the duplicate heads on this doc.
+
+This is one facet of the broader `#sqedit-race` queue-edit-race item.
+<!-- agent:boundary:51ab6626 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~:round_pushpin: [#prunenoise-live]~~
+- ~~:pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.~~
+- :pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.
+- :pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.
+- ~~:round_pushpin: [#prunenoise-live]~~
 - [#sqedit-race]
-- [#prunenoise-live]
 - [#qpausemix-verify]
-- In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.
-- In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.
-- Some JB `Run Agent Doc` operations do not submit to Claude Code.
-- [#sqedit-race]
-- [#prunenoise-live]
+- :pushpin: [#sqedit-race]
 ---
 :pushpin: do [#tsiftmdcrash]
 ---
-- [#qpausemix-verify]
+- :pushpin: [#qpausemix-verify]
 - :pushpin: do [#fbwire]
 - :pushpin: do [#hap7]
 - ~~:pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).~~
@@ -83,6 +102,14 @@ This directly unblocks `#prunenoise-live` and the "noise heads never auto-delete
 - ~~:pushpin: **Kept 2 false-positive matches** (real open work): `#2b8q` (live operator-gated NB-Search follow-up — HydroWeb rebalance + phase-2 enable), `#conv-backfill-615-617-verify` (distinct 6/15–6/18 batch, now-due on/after today — not the 5/29–6/14 batch `#2qrx-verify` covered).~~
 - ~~:pushpin: **Resolved 3 genuinely-finished reviews** → archived to `agent:done`: `#2qrx` (apply done; verify handed to archived `#2qrx-verify`), `#7m2s` (GTM v6 fix shipped 6/14; verify owned by open `#convfix-verify`), `#ef5h` (duplicate of archived `#fishloc-curated-rollout`; adapter blocker tracked by open `#3456`).~~
 - ~~:pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).~~
+- [#prunenoise-live]
+- In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.
+- In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.
+- Some JB `Run Agent Doc` operations do not submit to Claude Code.
+- [#prunenoise-live]
+- :round_pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.
+- :round_pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.
+- :round_pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

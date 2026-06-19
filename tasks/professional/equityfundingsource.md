@@ -347,7 +347,17 @@ Done (code committed + pushed; **deploy held** for the next `deploy` queue item,
 **Committed/pushed:** EFS `1637a53..873c9e4` (origin/main), superproject pointer `0834b79ef`.
 
 **Deploy held** — the next `deploy` item will `make deploy` both the Deal Summary removal and this Title Case pass.
-<!-- agent:boundary:f2445920 -->
+
+### Re: deploy — opus-4-8
+
+Deployed. The **Deal Summary removal** + the **Title Case** sweep are now live (EFS `873c9e4`).
+
+- **Deploy:** `make deploy` → remote D1 had no migrations; uploaded the new browser bundle `index.browser-WPLUGH5P.js` (Worker startup 20 ms) to https://equityfundingsource.brian-takita.workers.dev.
+- **Live smoke test:** homepage → **200**; served HTML references `index.browser-WPLUGH5P.js` (matches the uploaded artifact).
+- **Live-bundle verify:** grepped the deployed JS — headings/buttons are Title Case (**"Available Deals"**, **"Broker Dashboard"**, **"Express Interest"**), and **"Deal Summary" has 0 occurrences** (card removed). Remaining lowercase hits are URLs (`/lenders/available-deals`), route ids, and prose — not headings.
+
+Both queued changes shipped in one deploy. `do [#8667]` (Lending groups) stays gated — `[operator-verify]`, awaiting your name/scope/privacy decisions.
+<!-- agent:boundary:5309c1eb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -364,7 +374,7 @@ After 20:30
 - ~~:pushpin: deploy~~
 - ~~Remove "Deal Summary" section from https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d. The terms of the deal have not been settled yet. The lender will propose terms and the buyer will accept, reject, or negotiate the terms. We are simply not in a state where the terms of the deal should be displayed. Another benefit is the main CTA, "Express Interest" is at the top of the dialog.~~
 - ~~Use "Title Case" for all headings and buttons. We are currently using "Sentence case".~~
-- deploy
+- ~~deploy~~
 - do [#8667]
 <!-- /agent:queue -->
 

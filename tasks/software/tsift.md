@@ -39,7 +39,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 ❯ - Archived 6 response topic(s): How to verify #kgconfreqverify; #kgconfreqverify A/B results; do #m27b; 3 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54...
-<!-- agent:boundary:1e7e955f -->
+<!-- agent:boundary:e5a58f7a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -59,6 +59,7 @@ https://github.com/chopratejas/headroom
 ## Review
 
 <!-- agent:review -->
+- [/] [#1yks] [operator] Finish tsift v0.1.72 publish: (1) bootstrap crates.io Trusted Publishing for the two NEW crates tsift-local-model + tsift-kg (browser/passkey 2FA — the prior 23 crates are configured, these two are not and a brand-new crate's first OIDC publish needs its config to exist; if crates.io rejects pre-config for a nonexistent name, do one manual 'cargo publish -p <crate>' to create it); (2) push the v0.1.72 tag (git tag v0.1.72 08d0f65 && git push origin v0.1.72) to trigger Release CI. Without step 1 the crates.io job fails again on the two new crates.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

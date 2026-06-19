@@ -378,7 +378,24 @@ Two things in the queue, and I can't fully act on either yet — here's exactly 
 But I'd rather you confirm than have me assume. **Finish the sentence: "I don't ___"** — what about that description is wrong, and what's the true version?
 
 So I need two short answers to move: (1) is EFS yours or a client? (2) what's the accurate agent-doc capability claim? With those I'll rewrite the whole note honestly in one cycle. Nothing edited or sent this turn.
-<!-- agent:boundary:4b299ded -->
+
+### Re: #p3kj — rewrote the note honestly (and it didn't need the EFS answer after all) — opus-4-8
+
+Done. You re-queued #p3kj, so I went ahead and did it — and realized I'd been over-blocking: the honest fix doesn't actually require knowing whether EFS is yours or a client. Here's what changed and why.
+
+**The fix: remove every ownership claim, reframe around what's true either way.**
+- **Dropped "I own MonsterRodHolders" entirely.** Steve owns it; you do the technical and growth work. The MRH line now reads as exactly that — *"I've spent the last stretch growing Monster Rod Holders, a catfishing-gear e-commerce brand — I run its site, its SEO, and the whole WordPress and server stack, turning traffic into orders."* True, concrete, no ownership implied.
+- **Reframed the hook** from "I've run a business" to *"I build AI infrastructure, and I've also built inside the real businesses it's meant to serve."* That's accurate for both MRH (client work) and EFS, and it keeps the builder + operator-empathy thesis that makes you distinct.
+- **EFS stays as "I architected Equity Funding Source… directing a subcontractor through the build"** — that's true whether EFS is your own venture or a client engagement, which is why I no longer need the answer to ship an honest note. (If EFS *is* your own venture and you want it to carry more weight — "my own fintech platform" — tell me and I'll strengthen just that line. Optional, not blocking.)
+
+**The agent-doc line — I made a judgment call on your cut-off note.** Your "I don't…" was incomplete, but you pointed at the line claiming you "steer while it's running" and "redirect mid-task." Since you've been driving this session through a *queue between cycles* (not true mid-run interruption), I softened it to claim only what's definitely real: *"you steer the work by editing the document and queueing direction, instead of firing off a prompt and hoping."* Under-claiming a tool is safe; over-claiming realtime steering it may not do is the risk. **If I misread your correction, tell me what agent-doc actually does and I'll adjust — easy revert.**
+
+**Files updated & verified:**
+- [`mail/drafts/2026-06-18-virtuousai-forward-note.md`](../../mail/drafts/2026-06-18-virtuousai-forward-note.pdf) — corrected source
+- [`mail/drafts/2026-06-18-virtuousai-forward-note.pdf`](../../mail/drafts/2026-06-18-virtuousai-forward-note.pdf) — regenerated; confirmed the "I own the whole thing" claim is gone and the full corrected text renders
+
+Marked **#p3kj done**. The note is now honest end-to-end — no ownership overclaim, no realtime overclaim, operator credibility intact. Nothing sent.
+<!-- agent:boundary:45b52458 -->
 <!-- /agent:exchange -->
 
 ## Queue

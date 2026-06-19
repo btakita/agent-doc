@@ -33,102 +33,17 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260619-023310.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260619-041018.md`*
 
 Compacted content:
-❯ - Archived 26 response topic(s): JB Restart Supervisor → "Run Agent Doc" dispatch error (qflood queue pause); queue thrash after JB Clear Session + #jbacceptwedge 0.2.170 installed; #tsiftmdcrash re-presented; 23 more
-❯ - Prior summary/context: prior compacted content: Archived 11 response topic(s): #monster60stimeout route ready-prompt barrier; #describe-imag...
-
-### Re: [#1vhn] route dispatching the trigger into a crashed/exited harness shell — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: [#1vhn]
-
-
-Fixed the agent-actionable half (issue A). Committed + pushed to the agent-doc submodule (`cbc30bca`); **build/install deferred** per your "drain #1vhn only" choice (installing mid-session would wedge the live supervisor managing this doc).
-
-**Root cause:** the dispatch-ready prompt proof can go stale between the readiness check and the actual `tmux send-keys`. If the harness crashes/exits to a bare shell in that window (your `/model opus` switch + restart on virtuousai.md), `send_command_unchecked` typed `agent-doc <FILE>` into the dead shell, where it sat as un-run text.
-
-**Fix** (`route/dispatch.rs`): a pre-send dead-harness guard re-verifies a live harness owns the pane immediately before the send. It fails closed only when **both** signals agree — `#{pane_current_command}` reports a bare shell (`zsh`/`bash`/`sh`/`fish`/…, login `-` prefix tolerated) **and** the captured pane shows no harness dispatch-ready prompt — so a brief subshell or a momentary command read can't false-positive. On a dead-harness pane it refuses the send, logs `route_dispatch_into_dead_shell_blocked reason=harness_exited_to_bare_shell`, and surfaces claim/restart guidance instead of dispatching into the shell.
-
-**Tests/spec:** pure unit test for the shell classifier (runs in `make check`); live tmux SimWorld test `route_refuses_dispatch_into_dead_bare_shell` (bare-shell pane → blocked + `send_command_unchecked` fails closed; harness prompt visible → allowed) gated to `make tmux-ci`; FlowCore hot-path token budget +1 for the audited `reason=` token; invariant documented in `specs/08-session-routing.md`. `make check` green (4721 passed, clippy `-D warnings` clean, sim-medium ok). CI in_progress for `cbc30bca`.
-
-**Still open** (not agent-doable): build/install + the live dead-shell verification, and **issue B** — the upstream harness *crash* root-cause needs your captured crash output / pane scrollback from the `recruit/virtuousai.md` session at the crash moment (the `/model opus` + Opus-4.6-on-restart pin is the lead). Pausing the queue here per your instruction; 12 heads remain.
-
-### Re: queue auto-re-fired despite the pause — holding per your instruction — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: do [#8bfz]
-
-
-Not draining the next head. You said "drain #1vhn only, then pause" last turn; this cycle is a bare auto-re-dispatch (`queue_trigger: auto`, no new prompt from you), so your pause still stands.
-
-- **Pause isn't holding.** `agent-doc admin queue pause` was accepted twice (receipts 68 + 70 at generation 548) but preflight still reports `queue_active: true`, `queue_paused: None`, `queue_trigger: auto`. The controller pause does not suppress this `go`-mode queue's auto-dispatch (or preflight doesn't surface the controller pause). Filed as `#qpausego` below.
-- **To actually halt it:** set `queue: stop` in the frontmatter (or remove the `go` attribute from the `agent:queue` header) in your editor. I'm not editing queue state myself while the IPC supervisor is live (it races/corrupts).
-- **Next head `do [#supselfheal]` is already shipped** — submodule HEAD `318aceee` is the supselfheal feature commit (wedge-trigger recycle + bounded re-exec escalation, Ph2-5). Draining it under the `#spec-test-build-install-commit-push` preset would just re-run build/install, the hazard you paused for.
-
-Say "go" (or re-point the queue) when you want me to resume; otherwise I'm stopped here.
-
-### Re: do [#8bfz] — single live plugin-consumer election — opus-4-8
-
-Implemented and shipped. `#fccreap` (0.34.8) only reaped *dead*-pid consumer patch files; this adds the live-dedup half so N open IntelliJ windows can't each apply + `saveDocument` the same broadcast patch into a File Cache Conflict.
-
-**What landed (agent-doc `237f5fb2`, superproject `260b4e42d`, pushed to origin):**
-- **`agent-doc-orchestration::plugin_owner`** — a per-document single-owner lease (`.agent-doc/plugin-owner/<hash>.json`, mirrors `drain_owner`) claimed atomically via `create_new` (O_EXCL) so two instances racing for an unowned/stale lease can't both win. Sticky while the owner keeps applying (heartbeat refreshed each patch event) and self-healing — a stale heartbeat OR a provably-dead owner pid (`kill(pid,0)`) hands ownership to the next live consumer; `release` on dispose hands over immediately (30s TTL, `AGENT_DOC_PLUGIN_OWNER_TTL_SECS` override).
-- **FFI** `agent_doc_plugin_owner_try_acquire` / `agent_doc_plugin_owner_release` (verified exported in the release cdylib).
-- **`PatchWatcher.processPatchFile`** gates only **untargeted** (`editor_id == null`) patches behind the lease — editor-targeted patches already have a unique consumer and bypass it. Non-owners leave the patch file for the owner to apply + delete. Dispose releases owned leases.
-- **Fail-open by construction**: any IO/FFI error, or an older binary missing the symbol, returns "apply" — a single-instance setup is never worse off than before.
-
-**Verification:** `make check` green (full workspace, 4727 tests incl. 5 new `plugin_owner` unit tests covering first-wins/second-defers, dead-pid takeover, stale-heartbeat takeover, own-only release, end-to-end real-path election). `cargo build --release` + `agent-doc lib-install` refreshed the cdylib (2 controllers marked for idle-boundary recycle). Plugin zips built: `agent-doc-jetbrains-0.2.171(-signed).zip`. Submodule CI for `237f5fb2` was in_progress at closeout; proceeding on the green local suite.
-
-**Install note:** did the safe cdylib `lib-install` (new FFI symbols present for when the new plugin is installed); deferred `cargo install --path .` (binary swap) to avoid the documented live-supervisor finalize-drift hazard — it's not needed to activate this change.
-
-**Gated `#8bfz` (operator-verify):** the code is complete/committed/pushed and the plugin zip is built, but activation needs you to install `agent-doc-jetbrains-0.2.171-signed.zip` and run a live **multi-window** test (open the same workspace in 2+ IntelliJ windows, drive a response, confirm only one applies + saves and `.agent-doc/plugin-owner/<hash>.json` shows a single owner). That live-editor proof can't be agent-done, so it's `[/]` in `agent:review`.
-
-### Re: do [#supselfheal] — already shipped, marking done — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: do [#supselfheal]
-
-
-No code to write — `#supselfheal` is fully shipped, so draining the build/install preset again would just re-run it (the hazard the earlier pause flagged). Marking it `--done`.
-
-All five gaps in the item are closed on `origin/main`:
-- **Ph1** (admin recycle reaches the route-owned supervisor via `explicit_admin` override) — `68717eaf`.
-- **Ph2–5** (wedge-trigger recycle from write/converge, `EscalateKillRelaunch` on re-exec failure, bounded kill+relaunch, corrected SKILL/guidance) — `318aceee`, with the default-on test/doc alignment in `e9cf3b74`.
-- VERSIONS.md Unreleased carries the full entry + coverage list (decision-table tests, converge classifier/reader tests, SimWorld reproductions).
-
-The only open descendant is the separate `#supselfheal-adminwire` follow-up (live `admin recycle` → supervisor IPC adapter), which is its own backlog id — not this one.
-
-### Re: do [#msn6] — turn-active-area ack gating — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: do [#msn6]
-
-
-Implemented and shipped. `#smconv` operator-wins on any same-node conflict regardless of turn scope and logs a `semantic_merge_ack_pending` for *every* collision — including the firsthand case where you edit the queue/backlog while the agent writes its response. Phase 6 threads a first-class turn-active node-set so only in-area collisions ack.
-
-**What landed (agent-doc `9751ab29`, superproject `e735bed61`, pushed to origin):**
-- **`ActiveNodes`** (whole-component via `active_component`, node-granular via `with_node`) + **`semantic_merge_scoped(base, ours, theirs, &active)`** in `agent-doc-markdown-ast::semantic_merge`. The merged doc + per-node outcomes are **identical** to `semantic_merge` (operator still wins every same-node conflict — no content lost or changed); only `requires_ack` is filtered: an out-of-active-area conflict auto-resolves silently, an in-area collision still raises its `AckRequest`.
-- **`semantic_merge` unchanged** — legacy all-active behavior preserved for every other caller.
-- **Caller** `write/ipc.rs::try_semantic_merge_convergence` marks the `exchange` component active (the turn-active area is the exchange tail), so operator drift in queue/backlog/frontmatter colliding with an agent edit no longer emits `semantic_merge_ack_pending` noise — only an exchange-response-area collision does.
-
-**Verification:** `make check` green (full workspace; 4 new scoped tests: out-of-area drops ack, in-area keeps ack, node-granular, empty-set). Submodule CI for the prior `#8bfz` push (`237f5fb2`) completed **success**.
-
-**Scope note:** the active area is keyed at the `exchange` *component* level here (the firsthand repro is operator-edits-queue vs agent-writes-exchange, fully covered). Node-granular scoping *within* exchange — acking only the current `### Re:` block vs an older turn — is supported by `ActiveNodes::with_node` but not yet wired at the caller; left as a precise-refinement follow-up since the component-level gate already resolves the observed noise. Marking `#msn6` `--done`.
-<!-- agent:boundary:e5f27274 -->
+- Archived 5 response topic(s): [#1vhn] route dispatching the trigger into a crashed/exited harness shell; queue auto-re-fired despite the pause; do [#8bfz]; 2 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
+<!-- agent:boundary:36690621 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#8bfz]~~
-- ~~:pushpin: do [#supselfheal]~~
-- ~~:pushpin: do [#msn6]~~
 - :pushpin: do [#pk3f]
 - :pushpin: do [#smqstrike]
 - :pushpin: do [#smsim]
@@ -144,6 +59,15 @@ Implemented and shipped. `#smconv` operator-wins on any same-node conflict regar
 - :pushpin: do [#orphanqhead]
 - :pushpin: As I was typing in a queue item into virtuousai.md, parts of the document was duplicated, corrupting the document. The CRDT/semantic merge should be constrained only to the structural part that it applies to. Do multiple merges for each structural part as needed. This should remove the possibility of structural corruption and should reduce conflicts. If the operator deletes parts of the structure in the document and there is new agent content for a deleted structure, mention the fact in the exchange but do not attempt to merge...as the in-editor document is the source of truth.
 - :pushpin: Turn crashed on virtuousai.md. ![img_49.png](img_49.png)
+---
+Initial response for a turn renders numeric lists in reverse order:
+```
+4. **Review back-catalog dry-run** → #review-backcatalog step 1 — read-only segment count, no send.
+3. **6/19 ROAS re-audit** → #pmax-pause-decision + #29h5 — read-only PMax + accessories audits; pause/prune stay operator calls.
+2. **Post-6/14 GTM-v6 conversion QA** → #convfix-verify (this one **unblocks #nbsl2** non-brand Search) — read-only Ads+GA4 parity.
+1. **6/19 offline-conversion re-check** → #2qrx-metrics-lag + #conv-backfill-615-617-verify — read-only Ads action 7649654590 metrics + Woo reconcile.
+<!-- agent:boundary:a5b6cae3 -->
+```
 ---
 :pushpin: JB `Run Agent Doc` on this file
 ```

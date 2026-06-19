@@ -2082,6 +2082,17 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // / inert noise — a no-op churn cycle. Surfacing it lets the agent and the
     // Claude Code auto-loop stop without re-deriving drainability from prose, even
     // when the route-owned supervisor predates the idle-watch filter (#qchurn).
+    // `#qdurcrash`: durably journal the operator queue prompts the binary
+    // observes this cycle so an add survives a supervisor/pane crash+restart
+    // (replayed at startup by `queue_journal::replay_missing`). Best-effort;
+    // never wedges the cycle on a journal hiccup.
+    if let Err(err) = crate::queue_journal::record(file, &content) {
+        eprintln!(
+            "[agent-doc] queue_journal: record failed for {} ({err:#})",
+            file.display()
+        );
+    }
+
     // `#qpausego`: an accepted controller `admin queue pause` suppresses the
     // *unattended* supervisor idle-watch auto-injection (the flood this fixes —
     // see `start/idle_watch.rs`) and is surfaced here as `queue_paused` for

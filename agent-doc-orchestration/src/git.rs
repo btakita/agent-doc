@@ -1197,6 +1197,11 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             if let Err(e) = crate::capture::mark_committed(file) {
                 eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
             }
+            // `#qdurcrash`: a successful commit makes the queue state durable in
+            // the snapshot, so the crash-durability journal is emptied. This
+            // bounds the journal (and thus any replay) to operator queue
+            // additions observed since the last commit — the crash window.
+            crate::queue_journal::clear(file);
             // Reconcile the durable auto-queue continuation marker: write it when
             // a clean closeout still owes an `agent:queue auto` continuation,
             // clear it otherwise. Binary-owned proof that survives missing Codex

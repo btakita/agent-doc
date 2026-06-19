@@ -60,6 +60,43 @@ pub fn run_with_reap_policy(
             .with_context(|| format!("failed to write {}", file.display()))?;
     }
 
+    // `#qdurcrash`: supervisor-startup queue reconcile. An operator queue add can
+    // be lost across a supervisor/pane crash+restart (it lived only in the editor
+    // buffer / in-memory CRDT and the reloaded snapshot predates it). Replay any
+    // journaled operator queue prompt that is absent from the reloaded document,
+    // re-inserting it so the crash+restart does not drop the pending queue edit.
+    // Additive + conservative: only re-adds missing prompts, never removes, and a
+    // journal hiccup degrades to a no-op.
+    let updated_content = {
+        let missing = crate::queue_journal::replay_missing(file, &updated_content);
+        match crate::queue_journal::merge_missing_into_content(&missing, &updated_content) {
+            Ok(Some(merged)) => {
+                if let Err(err) = std::fs::write(file, &merged) {
+                    eprintln!(
+                        "[agent-doc] queue_journal: failed to write replayed queue items to {} ({err:#})",
+                        file.display()
+                    );
+                    updated_content
+                } else {
+                    eprintln!(
+                        "[agent-doc] queue_journal: replayed {} operator queue item(s) lost to a crash+restart for {}",
+                        missing.len(),
+                        file.display()
+                    );
+                    merged
+                }
+            }
+            Ok(None) => updated_content,
+            Err(err) => {
+                eprintln!(
+                    "[agent-doc] queue_journal: replay merge failed for {} ({err:#}) — continuing without replay",
+                    file.display()
+                );
+                updated_content
+            }
+        }
+    };
+
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let (fm, _body) = frontmatter::parse_for_file_with_context(&updated_content, file, &rc)?;
     let global_config = config::load().unwrap_or_default();

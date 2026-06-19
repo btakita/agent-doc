@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -238,7 +238,7 @@ Short version: **this loan has two origin stories the system treats as mutually 
 - **`#dzmm`/`#7a4d`/`#37ah`** — the broader EFS→TMO writeback-replay + field-map work, so EFS-side edits actually flow back keyed by `tmo_loan_rec_id`.
 
 No code changed this turn — diagnosis + reads only. The fix is gated on your `#5q7z` a/b decision.
-<!-- agent:boundary:36aa1789 -->
+<!-- agent:boundary:a4beae48 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -251,6 +251,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=7a0c1463-27bb-4d7c-82f7-2281b3c008d3&deal_tab=loan has an Internal Error
 <!-- /agent:queue -->
 
 ## Backlog

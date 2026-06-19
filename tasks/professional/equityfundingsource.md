@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,162 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260619-194346.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260619-204320.md`*
 
 Compacted content:
-- Archived 25 response topic(s): deploy; TMO writeback "unavailable"; Why "TMO writeback not sent: unavailable" (already answered above); 22 more
-- Prior summary/context: prior compacted content: Archived 9 response topic(s): What is "Funding Commits" in the Deal Pipeline dialog?; Is the...
-
-### Re: deploy — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-
-Deployed the EFS Worker from `src/equityfundingsource-dev` at commit `4f715d6`.
-
-Changed paths: none. The pre-existing `AGENTS.md` instruction-version diff was left untouched and is not part of the Worker build.
-
-Commands run:
-- `make check` — passed: 879 tests, browser/server build, and Worker build.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — found pending `0090_lending_groups.sql` before deploy.
-- `make deploy` — applied `0090_lending_groups.sql` to production D1, then deployed Worker version `ca952176-4ee2-4ffc-ad0d-946ba2166c63`.
-- Post-deploy migration check — passed: no migrations to apply.
-- Live smoke test — `https://equityfundingsource.brian-takita.workers.dev/` returned HTTP `200`.
-
-Verification confidence: high for the deploy path covered by local check, D1 migration state, and live root smoke test.
-
-Escalation: none.
-
-### Re: Lender Groups pages, group-backed interest, and deploy — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.
-
-
-Implemented, pushed, and deployed.
-
-Changed paths:
-- Backend lending-group list/delete helpers, admin list/invite APIs, and lender invite account linking: `app/equityfundingsource/lib/lending_groups/{repo.ts,routes.ts}`.
-- Group-backed interest persistence and allocation cleanup/snapshotting: `app/equityfundingsource/lib/investor/{shared.ts,deal_marketplace/index.ts}` plus migration `0091_investor_interest_lending_group.sql`.
-- Lender and admin portal navigation/pages: `lib/ui--browser--efs/portal/{shared,investor,admin}/lending_groups.tsx`, portal layouts/index routes, and URL constants.
-- Lender deal-detail selector: `lib/ui--browser--efs/portal/investor/deal_detail.tsx` now lets a lender express/update interest as self or a lender group.
-- PRD/tests updated: `prds/lending-groups-plan.md`, `tests/investor-portal-e2e.test.ts`, `tests/admin-dashboard.test.ts`, and lending-group repo tests.
-
-Verification:
-- `bun test app/equityfundingsource/lib/lending_groups/repo.test.ts app/equityfundingsource/lib/lending_groups/service.test.ts tests/investor-portal-e2e.test.ts` passed.
-- `bun test tests/admin-dashboard.test.ts tests/portal-table-dialog.test.ts` passed after aligning new dialogs with the existing `.modal-body` convention.
-- `make check` passed: 882 tests, browser build, and worker build.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this submodule.
-
-Commit/deploy proof:
-- Code commit: `fa4fd50 feat(lending-groups): add portal pages and group interest`, pushed to `origin/main` in `src/equityfundingsource-dev`.
-- Deploy: `make deploy` applied remote D1 migration `0091_investor_interest_lending_group.sql` and deployed Worker version `362d88ac-72d1-47c5-9e3c-0e0741d158bd` at `https://equityfundingsource.brian-takita.workers.dev`.
-
-Confidence: high. The only untouched local change in the submodule is the pre-existing `AGENTS.md` modification, which I left out of the code commit.
-
-### Re: Duplicate queue head: group-backed interest — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: A lender can be interested in a loan on behalf of self or on behalf of a lender group.
-
-
-No additional code changes were needed for this continuation. The previous closeout already implemented the active queue item: lenders can express or update interest as self or as one of their lender groups, with the selected group persisted on `investor_deal_interests.lending_group_id` and group/deal allocation snapshots maintained.
-
-Changed paths: none in this continuation.
-
-Commands/proof carried from the shipped closeout:
-- `make check` passed: 882 tests, browser build, and worker build.
-- `git push origin main` pushed EFS code commit `fa4fd50`.
-- Parent submodule pointer commit `cca7fae14` records `src/equityfundingsource-dev` at `fa4fd50`.
-- `make deploy` applied remote D1 migration `0091_investor_interest_lending_group.sql` and deployed Worker version `362d88ac-72d1-47c5-9e3c-0e0741d158bd`.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows.
-
-Verification: high; this continuation is documentation/queue closeout only, and the underlying implementation was tested and deployed.
-
-Escalation: none.
-
-### Re: Duplicate queue head: deploy — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-
-No additional deploy was needed for this continuation. The requested deploy already completed successfully in the shipped closeout.
-
-Changed paths: none in this continuation.
-
-Commands/proof:
-- `make deploy` completed successfully.
-- Remote D1 migration applied: `0091_investor_interest_lending_group.sql`.
-- Worker deployed: version `362d88ac-72d1-47c5-9e3c-0e0741d158bd`.
-- Live Worker URL reported by wrangler: `https://equityfundingsource.brian-takita.workers.dev`.
-
-Verification: high; this was a no-code queue closeout for an already completed deployment.
-
-Escalation: none.
-
-### Re: Duplicate queue head: Lender Groups pages — gpt-5
-
-> **Queue prompt:**
->
-> Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.
-
-
-No additional code changes were needed. The requested Lender Groups pages were already implemented and deployed in the shipped closeout.
-
-Changed paths: none in this continuation.
-
-Commands/proof carried from the shipped closeout:
-- EFS code commit `fa4fd50` pushed to `origin/main`.
-- Parent submodule pointer commit `cca7fae14` records the EFS submodule at `fa4fd50`.
-- `make check` passed: 882 tests, browser build, and worker build.
-- `make deploy` applied `0091_investor_interest_lending_group.sql` and deployed Worker version `362d88ac-72d1-47c5-9e3c-0e0741d158bd`.
-
-Verification: high; duplicate queue closeout only.
-
-Escalation: none.
-
-### Re: Duplicate queue head: group-backed interest — gpt-5
-
-> **Queue prompt:**
->
-> A lender can be interested in a loan on behalf of self or on behalf of a lender group.
-
-
-No additional code changes were needed. Group-backed interest was already implemented and deployed: lender interest can be recorded as self or as a lender group, persists `lending_group_id`, validates group membership, snapshots group allocations, and cleans old group allocations when switching/removing interest.
-
-Changed paths: none in this continuation.
-
-Commands/proof carried from the shipped closeout:
-- `make check` passed: 882 tests, browser build, and worker build.
-- EFS code commit `fa4fd50` pushed to `origin/main`.
-- `make deploy` applied the remote D1 migration and deployed Worker version `362d88ac-72d1-47c5-9e3c-0e0741d158bd`.
-
-Verification: high; duplicate queue closeout only.
-
-Escalation: none.
-
-### Re: Duplicate queue head: deploy — gpt-5
-
-No additional deploy was needed. The deployment already completed in the shipped closeout.
-
-Changed paths: none in this continuation.
-
-Commands/proof:
-- `make deploy` completed successfully.
-- Remote D1 migration applied: `0091_investor_interest_lending_group.sql`.
-- Worker deployed: version `362d88ac-72d1-47c5-9e3c-0e0741d158bd`.
-- Live Worker URL reported by wrangler: `https://equityfundingsource.brian-takita.workers.dev`.
-
-Verification: high; duplicate queue closeout only.
-
-Escalation: none.
-<!-- agent:boundary:9b5f8ef1 -->
+❯ - Archived 7 response topic(s): deploy; Lender Groups pages, group-backed interest, and deploy; Duplicate queue head: group-backed interest; 4 more
+❯ - Prior summary/context: prior compacted content: Archived 25 response topic(s): deploy; TMO writeback "unavailable"; Why "TMO writeback not s...
+<!-- agent:boundary:2267a2ae -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -201,6 +51,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: In lender, borrower, and broker portals...the main nav items should have the number of items of interest...similar to what is in the admin portal. loop until you use the most appropriate item of interest count. If there is no quantifiable item of interest, exclude the count. deploy
 <!-- /agent:queue -->
 
 ## Backlog

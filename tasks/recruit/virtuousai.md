@@ -105,19 +105,35 @@ Here's the reasoning, plainly:
 - **Resume:** keep Presence AI prominent; optionally add one supporting line for the stealth-client real-time audio-avatar work (framed as "low-latency production AI systems," since you can't name the client). I've queued that as a `[recommended]` backlog item.
 - **Letter:** no change — keep it focused on builder + operator.
 - **Call with Rory:** lead the real-time/performance story there, where it lands as systems credibility without crowding the note.
-<!-- agent:boundary:d16d7ed6 -->
+
+> **Queue prompt:**
+>
+> [#wsj2] — execute the recommended backlog item: add the stealth-client real-time line to the resume.
+
+### Re: #wsj2 — add the stealth-client real-time line to the resume — opus-4-8
+
+Done. Added the stealth-client real-time work to the resume and rebuilt the tailored VirtuousAI PDF.
+
+**What I changed (in the `resume/` submodule, uncommitted for your review):**
+- **`data.toml`** (the authoritative source — `build.py` renders from it via `agent-resume`) — new accomplishment under the *Brian Takita* freelance entry, right after Equity Funding Source: *"Stealth AI client: Built low-latency production AI systems — real-time audio-avatar generation synced to live presentation slides, driving spoken delivery and avatar motion from streaming input. (Client under NDA)"*
+- **`BrianTakita.md`** — same bullet in that file's style (the fallback source `build.py` uses only when `agent-resume` isn't installed; kept in sync so they never drift).
+- **`profiles/virtuousai.toml`** — added `low-latency production AI systems` and `real-time audio-avatar generation` to the highlight phrases so the new line bolds in the tailored render.
+- **Rebuilt `BrianTakita-virtuousai.pdf`** with `make PROFILE=virtuousai`; verified via `pdftotext` that the stealth line is present.
+
+**Framing held to your guardrails:** client unnamed ("under NDA"), framed as *low-latency production AI systems* (engineering depth), reinforcing Presence AI which still leads the experience. No numbers.
+
+Resume changes are **left uncommitted in the `resume/` submodule** for your review, consistent with the prior cycles. Say the word and I'll commit the submodule and bump the superproject pointer.
+<!-- agent:boundary:2ed8b6a5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- [#wsj2]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#wsj2] [recommended] #stealthresume Add one supporting line to `resume/data.toml` for the stealth-client real-time audio-avatar work, framed as "low-latency production AI systems" (client unnamed). Presence AI already leads the experience in `resume/profiles/virtuousai.toml`; this is a secondary real-time depth signal, only if a tighter real-time story is wanted.
 <!-- /agent:backlog -->
 
 ## Icebox

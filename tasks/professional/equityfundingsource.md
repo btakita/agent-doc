@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -117,7 +117,7 @@ Two such lines had this hazard; both now use commas instead:
 - `Loan → Closed / Funded; close offering …` → `Loan → Closed / Funded, close offering …`
 
 Docs-only change (no spec/test surface). Committed + pushed: EFS `32f985c` on `origin/main`, superproject submodule pointer bumped (`421777465`). No mermaid CLI is installed locally, so I validated by matching the parser error to the `;` split rather than rendering; the comma substitution removes the only statement-separator tokens in the message text.
-<!-- agent:boundary:5aecc10b -->
+<!-- agent:boundary:928d7c0d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -130,6 +130,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- "at the Closing stage (borrower-signature API + DB columns retained)." The borrower signs & notarizes the closing paper documents. This is not e-signed. We do want to record the closing documents are signed. This will be a bi-directional sync with TMO.
 <!-- /agent:queue -->
 
 ## Backlog

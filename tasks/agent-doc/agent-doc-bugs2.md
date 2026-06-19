@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -34,73 +34,17 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260619-195910.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260619-202251.md`*
 
 Compacted content:
-- Archived 4 response topic(s): closeout repair; #driftrootfix; queue drain state; 1 more
-- Prior summary/context: prior compacted content: Archived 25 response topic(s): do [#qpausego]; don't stall the loop on a controller pause; d...
-
-### Re: queue drain state — gpt-5
-
-Preflight is doing the right thing for this cycle: `#qpauseux` is an `[operator-verify]` backlog head mirrored into the active queue, and the binary reports `queue_continuation_required=false` with `queue_drainable_head_count=0`. I am not taking implementation work from this in-session loop.
-
-The live gate remains: install the updated JB plugin when available, then verify that both paused-queue blocks and churn-stop blocks render actionable notifications instead of raw errors or silence. The related review warning for `#rt83` also stays separate: it may explain phantom queue churn, but it does not make `#qpauseux` drainable.
-
-Proof: no repo code changes in this cycle; commands run were `agent-doc preflight`, `agent-doc plan`, and document read. Verification is this finalize/session-check closeout. Escalation: none.
-
-### Re: JB `Run Agent Doc` is not submitting — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: [#qpauseux]
-
-
-I’m folding this report into `#qpauseux` rather than opening a second bug. The symptom is the same operator-facing failure family: the JB action reaches a paused/churn-stop dispatch state or a blocked route, but the plugin leaves the operator with either a raw error or no visible submission result.
-
-I updated `#qpauseux` to explicitly include the “appears not to submit” variant. No repo code changed this cycle; this was a tracking/triage response. Commands run: `tsift status`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc write --help`, and `git status --short -- tasks/agent-doc/agent-doc-bugs2.md`. Verification is the finalize/session-check closeout. Confidence: medium, because the queue already contains detailed paused/qflood and broken-IPC Run Agent Doc failures matching this report. Escalation: none.
-
-### Re: #docdriftgrace — gpt-5
-
-This cycle gives partial live evidence for `#docdriftgrace`: preflight did not refuse the document or require a manual snapshot reset, and it reported the document/snapshot bodies aligned after comment stripping before queue/backlog mirroring ran. That means the earlier hard-blocking drift path did not reproduce here.
-
-I am not marking the underlying backlog item complete yet because this was not a clean unrelated-drift reproduction; it was queue maintenance against an already active queue. The item stays operator-verify until an actual operator edit outside the in-flight prompt silently re-baselines without a File Cache Conflict, lost response, or queue churn.
-
-Proof: changed paths before finalize were none for `tasks/agent-doc/agent-doc-bugs2.md`; commands run were `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, and `git status --short`. Verification is this finalize/session-check closeout. Confidence: medium. Escalation: none.
-
-### Re: #docdriftgrace — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: [#docdriftgrace]
-
-
-I checked the linked plan and this cycle does not provide the proof needed to close `#docdriftgrace`. The current preflight reported no visible/snapshot drift after comment stripping, so it did not exercise the failure mode where an unrelated operator edit has to be silently re-baselined.
-
-I corrected the backlog state instead: `#docdriftgrace` is now gated, because the remaining work is the plan's required watched live re-baseline cycle. It should not keep draining as normal agent work until that operator-watched repro either proves the fix or produces fresh logs.
-
-Proof: no code changes by me; existing dirty worktree entries were left untouched. Commands run: `tsift status`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `sed` on `tasks/agent-doc/plan-graceful-doc-drift-resolution.md`, `git status --short`, `git log --oneline`, and `agent-doc write --help`. Verification is this finalize/session-check closeout. Confidence: medium. Escalation: none.
-
-### Re: JB `Run Agent Doc` is not submitting — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: JB `Run Agent Doc` is not submitting
-
-
-This is already represented by `#qpauseux`: JB Run Agent Doc reaches a paused/churn-stop dispatch state but the operator sees either a raw error or no visible submission result. I kept it as that single live-gated item rather than filing a duplicate.
-
-I gated `#qpauseux` so the duplicate queue prompt should not keep draining as normal agent work. The remaining proof is still operator-side: install the updated JB plugin when available, then verify that paused-queue and churn-stop/no-submit states render actionable notifications instead of silence or raw errors.
-
-Proof: no code changes by me. Commands run this cycle: `agent-doc preflight`, `agent-doc plan`, and this finalize/session-check closeout. Verification is the successful committed closeout. Confidence: medium-high, because the existing `#qpauseux` text already covers this exact no-visible-submission variant. Escalation: none.
-<!-- agent:boundary:1c658967 -->
+- Archived 5 response topic(s): queue drain state; JB `Run Agent Doc` is not submitting; #docdriftgrace; 2 more
+- Prior summary/context: prior compacted content: Archived 4 response topic(s): closeout repair; #driftrootfix; queue drain state; 1 more
+<!-- agent:boundary:4e96bed6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: [#qpauseux]~~
-- ~~:pushpin: [#docdriftgrace]~~
-- ~~:pushpin: JB `Run Agent Doc` is not submitting~~
 ---
 :pushpin: Fix equityfundingsource.md "Mixed signals"
 ```
@@ -211,10 +155,6 @@ resync: pruned 5 stale session(s)
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
 - :pushpin: do [#fbwire]
-- ~~:round_pushpin: do [#qstrikeall]~~
-- ~~:pushpin: do [#pcwcfailfix]~~
-- ~~do [#kbkz]~~
-- ~~:pushpin: do [#driftrootfix]~~
 - :pushpin: do [#hap7]
 ---
 :pushpin: Fix equityfundingsource.md "Mixed signals"
@@ -265,9 +205,6 @@ resync: stash pane %93 is unregistered but still hosts live supervisor 62fe1f41-
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=broken editor IPC: content_ours adoption (live_prompt_drift, #semmerge) loses every exchange-finalize response AND consumes queue heads without landing answers (recovered last response via raw git). Remaining heads are already-answered/filed (virtuousai crash=#routedeadshell), cross-doc (equityfundingsource), or operator-gated. Pausing to stop churn. Resume in a clean session (refresh IntelliJ buffer + recycle binary) and take #smconv (the converge.rs fix for this very bug) first. receipt_id=3960 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control blocked_head_bytes=44 blocked_head_sha256=4ec56b3745f04f438f52f8bffc1d7fe8b9e8e0964028b4db7008fffeb4bf4ff5 trigger_bytes=45 trigger_sha256=ce2c7a444f4ae0b6cfce11a6ceac977be5b3811138cfe31a7252a021e9b2c9ad
 ```
 ---
-- ~~:round_pushpin: do [#pcwcfailfix]~~
-- ~~:round_pushpin: do [#driftrootfix]~~
----
 :pushpin: Fix equityfundingsource.md "Mixed signals"
 ```
 ● Mixed signals: queue_paused: true (an explicit pause flag) coexists with queue_continuation_required: true. Let me
@@ -288,7 +225,6 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 ---
 - do [#hap7]
----
 - :pushpin: do [#tsiftmdcrash]
 ---
 <!-- /agent:queue -->

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,148 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260619-210947.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260619-215630.md`*
 
 Compacted content:
-❯ - Archived 1 response topic(s): Item-of-interest nav counts in lender/borrower/broker portals
+❯ - Archived 6 response topic(s): Lender Group table is malformed; Is "Loan Terms" the borrower preferred terms?; Funding Commitment should say "Express Interest", not "Awaiting EFS selection"; 3 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Lender Group table is malformed — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Lender Group table is malformed ![img_28.png](img_28.png)
-
-
-Fixed, tested, committed, and pushed (deploy is queued as a separate item).
-
-**Root cause:** The "My Lender Groups" table in `lib/ui--browser--efs/portal/shared/lending_groups.tsx` used `class="data-table"` — defined **nowhere** in the EFS stylesheet, the only table in the codebase using that name (every other portal table uses `tbl`). It rendered with raw browser defaults: bold/centered `<th>`s over left-aligned data, no cell padding/borders, and `vertical-align:middle` cells floating against the tall Group cell (name + "Lender created" + wrapped member-email chips) — the misaligned look in the screenshot.
-
-**Fix:** Switched to the design-system `tbl` class used by every other portal table — `table-layout:fixed; width:100%`, padded/bordered cells, styled uppercase headers, and `overflow-wrap:anywhere` so long member-email chips wrap cleanly inside the Group cell.
-
-**Spec + tests:** Regression guard in `tests/investor-portal-e2e.test.ts` asserting the page renders `<table class="tbl">` and no longer contains `data-table`.
-
-**Verification:** `bun test tests/investor-portal-e2e.test.ts` 45 pass / 0 fail; `make check` **894 tests, 0 fail**, browser + worker bundles compile.
-
-**Proof:** EFS `982a110` pushed to `origin/main`; superproject submodule pointer bump `5445bb406` (local; push left to the operator).
-
-### Re: Is "Loan Terms" the borrower preferred terms? — opus-4-8
-
-> **Queue prompt:**
->
-> In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d, if the lender has not expressed interest in the deal, Funding Commitment should instruct the lender to Express Interest in the loan...not "Awaiting EFS selection"
-
-
-> **Queue prompt:**
->
-> :pushpin: In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d, is "Loan Terms" the borrower preferred terms? If it is, rename label to "Preferred Terms".
-
-
-No — so I'm **not** renaming it. On the lender deal page (`/lenders/deals/<id>`), the only "Loan Terms" label is the sub-card inside the **"Loan Details"** card, and it shows the **actual TMO loan record**, not the borrower's preferred/proposed terms.
-
-**Evidence (read-only, no change shipped):**
-- `lib/ui--browser--efs/portal/investor/deal_detail.tsx:1106-1108` — left-column card titled "Loan Details" renders `<TmoLoanDetails loan={tmo_loan} />`.
-- `lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx:370` — that component's only "Loan Terms" sub-card lists **Note Rate, Sold Rate, Amortized Over, Day Due, Maturity Date, Funded Date**, each `pick_(loan, …)` from the TMO record (`tmo_record_T`). These are the real loan's origination/servicing terms.
-- The **borrower's preferred terms** are shown elsewhere — the lender's **"Optional — propose loan terms"** form (`deal_detail.tsx:511-542`) uses `preferred_term` / `preferred_frequency` / `preferred_day_due` as the baseline the lender proposes against.
-- The old "Deal Summary" terms card was deliberately removed (`#deal-summary-removed`, `deal_detail.tsx:1124-1129`): "deal terms are not settled at this stage (the lender proposes, the borrower accepts/rejects/negotiates)."
-
-So "Loan Terms" here is accurate for what it shows; "Preferred Terms" would be wrong for a TMO-sourced card.
-
-**One caveat for your eyes (live data):** on a *pre-funding available* deal the TMO record may carry the borrower's submitted/requested numbers rather than funded terms, so the card can *look* like preferred terms. If on the live page you see borrower-requested values under "Loan Terms" and want it relabeled regardless of source, re-queue "rename Loan Terms → Preferred Terms" as an unconditional instruction and I'll ship it (+spec/tests/commit/push).
-
-Confidence: high on the code mapping; the rename was gated on a condition that the code does not satisfy. Escalation: none.
-
-### Re: Funding Commitment should say "Express Interest", not "Awaiting EFS selection" — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-
-Fixed, tested, committed, and pushed (deploy is the separate queued item).
-
-**Note on sequencing:** a prior recovery/replay cycle wrongly struck this queue item before it was addressed (the IPC-degraded retry over-consumed one extra free-text head). I completed the real work this cycle so the strike is now accurate.
-
-**Root cause:** `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — `CommitFundingForm` rendered a single `!deal.selected_for_commitment` branch that always showed **"Awaiting EFS selection"**, even for a lender who had not expressed interest yet. That implies they're already in the running when they haven't entered the Interest workflow at all.
-
-**Fix:** gate the copy on `deal.interested`:
-- **Not interested yet** → title **"Express interest to commit funding"**, body *"Express interest in this loan above so EFS and the borrower know you're interested. Funding commitments open after EFS selects you from the Interest workflow."*
-- **Interested, not yet selected** → unchanged **"Awaiting EFS selection"** / *"Funding commitments open after EFS selects you for this deal from the Interest workflow."*
-
-The "Express interest" CTA already lives in the sidebar card directly above the Funding Commitment card (`DealInterestAction`), so "above" is accurate.
-
-**Changed paths (`src/equityfundingsource-dev`, commit `7ac7b59`, pushed to origin/main):**
-- `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — conditional Funding Commitment copy.
-- `tests/investor-portal-e2e.test.ts` — assert the conditional + new express-interest copy.
-
-**Verification:** `make check` green — full suite **894 pass, 0 fail**, browser + worker bundles built. Superproject pointer bumped to `7ac7b59` (`d4d84334b`).
-
-Confidence: high — source-inspection e2e test pins both branches. Escalation: none. Deploy pending as the next queue item.
-
-### Re: deploy — opus-4-8
-
-Deployed to production. The EFS worker (`equityfundingsource`) was re-uploaded and triggers deployed successfully, so both queued fixes are now live:
-- **Lender Group table malformed** fix (efs `982a110`).
-- **Funding Commitment "Express Interest"** copy fix (efs `7ac7b59`).
-
-No D1 migrations were pending (both changes are UI-only). `make check` was green (894 pass) before deploy.
-
-**Queue hygiene note (`#qover-consume`):** the two `deploy` heads and the duplicate "Lender Group"/"Loan Terms" heads were auto-struck by the IPC-degraded finalize retries before I'd run the deploy. I ran `make deploy` anyway so the queued intent is actually fulfilled — production now matches the pushed code. The root cause of the drift is the route-owned supervisor running a STALE agent-doc binary (session-check `#fcc0/#ipcdrift`); I'm issuing `agent-doc admin recycle` so it refreshes onto the installed 0.34.14 build at the next idle boundary.
-
-Confidence: high — deploy reported success and the code was suite-verified. Escalation: none.
-
-### Re: Do we have preferred terms implemented? — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Since available deals will not have any loan terms yet, ensure loan terms are not rendered.
-
-
-> **Queue prompt:**
->
-> :pushpin: Do we have preferred terms implemented? If yes, use preferred terms instead of loan terms for available deals.
-
-
-Yes — preferred terms are implemented end-to-end (this is the data the "Loan Terms" card was *not* showing). No change shipped; this is a read of what exists.
-
-**Schema (migrations `0087_borrower_preferred_loan_terms.sql`, `0088_deal_preferred_loan_terms.sql`):**
-- `loans` table: `preferred_loan_amount`, `preferred_sold_rate`, `preferred_term_months`, `preferred_payment_frequency` (default `monthly`), `preferred_payment_day_due`, plus `preferred_terms_submitted_at` / `preferred_terms_updated_at`.
-- `investment_deals` table: the same `preferred_*` columns, backfilled from the loan (0088 copies `loans.preferred_*` → `investment_deals.preferred_*`).
-
-**Borrower input:** `lib/ui--browser--efs/portal/borrower/{dashboard,loan_summary}.tsx` — the borrower sets/edits preferred terms; the dashboard nudges *"needs preferred loan terms before lenders can review."*
-
-**Lender view:** `lib/ui--browser--efs/portal/investor/deal_detail.tsx:511-542` — the **"Optional — propose loan terms"** form shows the borrower's `preferred_term` / `preferred_frequency` / `preferred_day_due` as the baseline the lender proposes against; `investor/deal_marketplace/index.ts` surfaces them on the deal.
-
-**Admin:** `admin/repo.ts` (`deal_terms_`, `admin_deal_terms_update_by_loan_`), `admin/loan_management`, `admin/investor_management`, and `admin/{deal_detail,loan_detail}.tsx`.
-
-So: borrower sets preferred terms on the loan → backfilled onto the deal → lenders see them as the proposal baseline. The deal page's "Loan Terms" card is separate (TMO actual loan record), which is why I didn't rename it earlier.
-
-Confidence: high — schema + UI + admin paths all present and indexed. Escalation: none. If you want preferred terms shown more prominently on the lender deal page (e.g., a dedicated "Preferred Terms" card alongside "Loan Details"), queue it and I'll build it.
-
-### Re: Use preferred terms (not loan terms) for available deals; don't render empty loan terms — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-Done — built, tested, committed, pushed, and deployed. (These two directives had been auto-struck by the IPC-degraded retries before they were implemented; I completed the real work so the strikes are now accurate.)
-
-**What changed:** On the lender deal page (`investor/deal_detail.tsx`), the left-column card now branches on `tmo_loan`:
-- **Funded deal (TMO loan record present):** unchanged — "Loan Details" → `TmoLoanDetails` (the real Loan Terms card).
-- **Available deal (no TMO loan yet):** renders **"Preferred Terms"** instead, from the deal's `preferred_*` fields — Loan Amount, Sold Rate, Term, Payment Frequency, Day Due. The empty "Loan Terms" TMO card is no longer rendered for these deals.
-
-New `PreferredLoanTerms` component lives in `shared/tmo_loan_details.tsx`, reusing the same card/grid styling and `rate_display_`/`months_display_`/`money_display_` formatters. If the borrower hasn't set preferred terms either, it shows "No preferred terms set for this deal yet." instead of a misleading empty card.
-
-**Changed paths (`src/equityfundingsource-dev`, commit `e912df5`, pushed):**
-- `lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx` — `PreferredLoanTerms` + `preferred_loan_terms_T`.
-- `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — conditional Loan Details / Preferred Terms render.
-- `tests/investor-portal-e2e.test.ts` — new source-inspection test pinning the conditional.
-
-**Verify + deploy:** `make check` green — **895 pass, 0 fail**, worker bundle built. `make deploy` succeeded (worker live). Superproject pointer bumped to `e912df5` (`fb3741c3f`).
-
-Confidence: high — suite-verified, discriminator is `tmo_loan` presence (sourced from `deal_res.tmo_loan ?? null`). Escalation: none — but note this uses "no TMO loan record" as the proxy for "available deal"; if you'd rather key off an explicit deal status/funded flag, say so and I'll switch the condition.
-<!-- agent:boundary:92fa078b -->
+<!-- agent:boundary:7211a98d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -187,6 +51,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: I still see the TMO loan terms in https://equityfundingsource.brian-takita.workers.dev/lenders/deals/d6b78994-0970-498f-9e10-6f0035902c0d. Use Preferred Loan Terms instead when the deal is in available state.
 <!-- /agent:queue -->
 
 ## Backlog

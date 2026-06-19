@@ -391,13 +391,13 @@ Fixed and pushed (`agent-doc 03a61a92`, filed `#qdup-pin-prefix`).
 **Verification:** 3 new/affected tests pass; full `make check` green (exit 0, 0 FAILED). CI for `03a61a92` will run on push; closing out on local evidence per the test-bearing-turn rule.
 
 Note on the stray `- Do [#kbkz]` head: `#kbkz` was completed and archived to `agent:done` earlier this session, so I'm not re-running it — that duplicate line is itself an instance of the class just fixed (the done/strike pass will clear it).
-<!-- agent:boundary:db513336 -->
+<!-- agent:boundary:d895056d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: Do [#kbkz]. I cleared the previous session.
+- ~~:pushpin: Do [#kbkz]. I cleared the previous session.~~
 - :pushpin: [#qpauseux]
 - :pushpin: [#docdriftgrace]
 ---

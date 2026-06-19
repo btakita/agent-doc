@@ -160,7 +160,23 @@ So the activate/dispatch path no-ops, the operator's edit survives on disk, and 
 **Verification.** `make check` green (4745 passed, clippy `-D warnings` clean). 4 new tests: `route_defers_uncommitted_queue_head_not_in_committed_snapshot`, `route_dispatches_committed_queue_head`, `route_queue_head_unbacked_when_committed_snapshot_has_no_queue`, `route_queue_head_backed_allows_when_no_committed_snapshot`. FlowCore `route.rs` `reason=` budget audited 8→9. SPEC (`08-session-routing.md`) + VERSIONS + plan updated. Binary installed + release built + cdylib hot-reloaded (`lib-install`: 1 controller marked to recycle at next idle boundary). Latest CI run green.
 
 The shared durable-journal "commit the inbound queue edit before dispatch" variant stays with `#qdurcrash`; this fix achieves the same safety by deferring to the preflight-commit path rather than feeding an uncommitted line as the prompt.
-<!-- agent:boundary:e2b7f0c8 -->
+
+### Re: stop-to-recycle → install → restart loop (encoded in agent-doc) — opus-4-8
+
+> **Operator directive (chat):** If you stop the loop to recycle, do the install, then restart the loop. Add to agent-doc as well.
+
+Done both — acted on it live and shipped the rule into the product (`#staleloop-recycle-restart`).
+
+**Live action this turn.** The persistent `live_prompt_drift_after_preflight` was the mid-session-install version skew (new CLI vs old route-owned supervisor). Recovered actively instead of passively waiting: `cargo install --path .` + `cargo build --release` + `agent-doc lib-install` (2 controllers marked to recycle) + `agent-doc admin recycle <FILE>`. After this turn ends the supervisor reaches idle and recycles onto the new binary; I am restarting the loop so the next iteration drains against a matched, proven-IPC supervisor.
+
+**Encoded in agent-doc (so every session does this, not just me).** Per the repo rule that agent-doc behavior fixes are packagable, not per-user memory:
+- `src/skill.rs` `CLAUDE_QUEUE_AUTO_LOOP_SECTION` (canonical source of the Claude auto-loop section) + the rendered `.claude/skills/agent-doc/SKILL.md`: a stale-**binary** supervisor genuinely blocking the drain (`stale_install` warning, or persistent `live_prompt_drift_after_preflight` from a finalize client newer than the running supervisor) is an **active recycle, not a stop** — run the install if stale → `agent-doc admin recycle <FILE>` → **restart the loop** (`/loop agent-doc <FILE>`). Recycling but then stopping instead of restarting the loop is itself called out as the bug.
+- `runbooks/commit.md`: same rule aligned in the closeout runbook.
+
+**Verification.** `make check` green (4745 passed, clippy `-D warnings` clean — held the ClaudeCode skill surface at its ≤150-line compactness budget by merging the rule into the existing stale-supervisor paragraph rather than adding a new one). Shipped: agent-doc `5fe29edd`, superproject `174fdca1e` (both pushed).
+
+Note: HEAD already holds the correct `#qdispatchloss` response + this one; the live editor buffer is still drifted from the pre-recycle supervisor and will re-converge from HEAD once the recycle lands at idle.
+<!-- agent:boundary:7b34cde5 -->
 <!-- /agent:exchange -->
 
 ## Queue

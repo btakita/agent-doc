@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -442,18 +442,31 @@ Controller recycled — clearing the last bookkeeping: marking **#p3kj done** (t
 Closed out #p3kj for real this time. The actual deliverable was already finished — `mail/drafts/2026-06-18-virtuousai-forward-note.md` no longer claims you own Monster Rod Holders (it now reads "growing Monster Rod Holders... I run its site, SEO, and the WordPress/server stack"), and EFS is framed as "architected... directing a subcontractor," which is true whether it's your venture or a client. So the EFS-ownership question that was blocking the backlog item never actually needed answering, and there was nothing substantive left to do.
 
 What kept looping was bookkeeping, not work: the `--done p3kj` reap never stuck because of live-IPC drift, so the id-backed `[#p3kj]` queue head kept re-firing into a no-op cycle. I rebuilt the snapshot/CRDT from the current file (`reset --from-current`) to stop the stale replay, then marked #p3kj done — which reaps the id-backed queue head along with it. Queue is now empty; only #500r (the verbal-bandwidth answer prep, recommended) remains in the backlog. Nothing was sent.
-<!-- agent:boundary:1919c08b -->
+
+### Re: warming up the response to Laura (and clearing the #p3kj queue bug) — opus-4-8
+
+> **Queue prompt:**
+>
+> The response to Laura is a bit cold. Thank her for the interview while keeping that I'm ready for this full-time role.
+
+
+Warmed up the private note to Laura in `mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md`. It now opens by thanking her for the interview and saying the conversation made you more excited about the role, then keeps the plain "I'm ready to commit full-time" line and the availability framing (MRH light ops, EFS on a subcontractor, calendar open, eager to dig in). Same substance, warmer front door. Committed in the `mail` submodule (`bbd4207`).
+
+**One thing to decide before this goes out:** that same file still has a *stale forward body* below the private note — it keeps the old "With MonsterRodHolders I own more than the code" ownership claim and the agent-doc "steer while it runs / redirect mid-task" realtime overclaim, both of which #p3kj already fixed in the canonical `mail/drafts/2026-06-18-virtuousai-forward-note.md` (.pdf). If you forward from this file instead of the canonical note, the false claims ship. I left it intact rather than rewrite your copy unasked, and queued `#lauraltr` (recommended) to either delete that forward-body section here or align it to the canonical note. Tell me which and I'll do it.
+
+**On the #p3kj queue bug you flagged:** you'd already cleared `[#p3kj]` out of the live editor buffer (replacing it with this Laura request), so it was only still sitting in committed HEAD — this finalize commits your cleared queue, so `[#p3kj]` is gone for real now. The root defect is real and I filed it to `agent-doc-bugs2.md` as `#orphanqhead`: once an id-backed queue head gets orphaned (its backlog item reaped but the head-strike lost to IPC drift), there's no drain path — `--done` is a no-op and `queue consume` refuses id-backed heads. It was compounded here by a wedged editor-IPC listener (your live IntelliJ buffer) bouncing every queue/pending write with `ack_mismatch`/`send_failed`. Nothing sent.
+<!-- agent:boundary:a44e1691 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- [#p3kj]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#lauraltr] [recommended] mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md still carries a STALE forward body (the "I own more than the code" MRH ownership claim + the agent-doc "steer while it runs / redirect mid-task" realtime overclaim) that #p3kj already corrected in the canonical mail/drafts/2026-06-18-virtuousai-forward-note.md. Delete that forward-body section (keep only the private note to Laura) or align it to the canonical note so the false claim cannot ship if forwarded from the wrong file.
 - [ ] [#500r] [recommended] #availanswer Prepare a tight 2-3 sentence verbal answer for the live interview 'do you have the bandwidth?' question — steady-state framing (calendar open; MRH light ops; EFS on a subcontractor with you architecting/reviewing), extra-hours/Stealth-demo story held as backup evidence of drive only if probed.
 <!-- /agent:backlog -->
 

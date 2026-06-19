@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -73,12 +73,13 @@ The release is already done as far as an agent can take it — there is no new a
 > release + publish
 
 Duplicate of the queue head answered immediately above. The v0.1.71 release is published (GitHub Release + OpenCode npm + all binaries); the only outstanding step is the crates.io publish, which failed solely because no OIDC Trusted Publisher is registered for `btakita/tsift` — the operator-gated `#vmax`. Working tree is clean at the already-tagged `v0.1.71` HEAD, so there is nothing for a second release pass to do. Queue drained; not auto-looping.
-<!-- agent:boundary:77f063c7 -->
+<!-- agent:boundary:f6cd8730 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: Follow https://crates.io/docs/trusted-publishing to setup trusted publishing.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

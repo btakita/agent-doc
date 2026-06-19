@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -208,12 +208,13 @@ Short answer: **keep the forwardable note, but send it as an attached file — d
 One caveat on the note-as-PDF: right now the forwardable note lives inside the draft at [`mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md`](../../mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md), mixed with the private-to-Laura part. To attach it, it needs to be split out into a standalone, client-facing file (just the forwardable block, no "private note to Laura" framing around it). **Say the word and I'll generate that standalone forwardable note as a PDF** ready to attach — then you have three clean pieces: the LinkedIn message text, the resume PDF, and the forwardable-note PDF.
 
 Nothing sent.
-<!-- agent:boundary:55146557 -->
+<!-- agent:boundary:98bde362 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- Create the message as a pdf. Print the message to Laura.
 <!-- /agent:queue -->
 
 ## Backlog

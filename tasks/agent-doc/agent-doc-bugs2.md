@@ -34,157 +34,24 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260619-213455.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260619-234312.md`*
 
 Compacted content:
-- Archived 4 response topic(s): Fix equityfundingsource.md "Mixed signals"; Clean up the noise queue heads; Fix live IPC supervisor races on direct queue edits + clean noise after restart; 1 more
-- Prior summary/context: prior compacted content: Archived 5 response topic(s): queue drain state; JB `Run Agent Doc` is not submitting; #docd...
-
-### Re: Fix the root cause of already-done / noise heads flooding the queue — opus-4-8
-
-Found and fixed the real root cause. It was never about a stale IDEA buffer — it was that `queue prune-noise` **couldn't see most of the noise**, so nothing could clear it on disk and the convergence kept re-pushing it to the editor.
-
-**Root cause.** The queue has two parsers that disagreed about what a "head" is:
-- `queue::parse` (what preflight surfaces) recognizes `:round_pushpin:`/`---`-fenced blocks and bare ```` ``` ```` console pastes.
-- `item_nodes` (the *strike* path that `prune-noise`/`consume`/dedup use) recognizes **only bulleted `- …` lines and skips fenced code**.
-
-So every operator-pasted console dump — the bulk of the flood — was invisible to the strike path. `prune-noise` reported "nothing to prune" while 18 KB of pasted blocks sat on disk forever. A `#5eq8` stray id inside a console dump even made it look like a *drainable* head.
-
-**The fix (`#qnoise-multiline-strike`, agent-doc 0.34.15):**
-1. New `queue::parse_spans` — one byte-range-aware source of head segmentation. `prune-noise` now excises multiline `---`-fenced noise `Prompt` blocks **and** bare-```` ``` ````-fenced `Freeform` console pastes by exact range, alongside the existing bulleted strike. `is_noise_freeform_line` preserves real `---`/`~~~` separators and `re [#id]` references.
-2. The drainability classifier now demotes any **multi-line** head text to noise (kills the `#5eq8`-in-a-dump false positive) — but a single-line `do [#id]` that merely happens to be `---`-wrapped stays drainable, so no real directive is lost. Drain, the `queue_stale_noise_lines` counter, and `prune-noise` now agree.
-
-**Verified on the actual flooded doc (on a copy):** `prune-noise` excised **61** noise entries — 0 ``` fences / `:round_pushpin:` / `agent:boundary` left — while preserving every id-backed directive, including the `---`-wrapped `#tsiftmdcrash`. New regression test + full queue suite (479) + `make check` green.
-
-This directly unblocks `#prunenoise-live` and the "noise heads never auto-deleted" half of `#sqedit-race`. Next: I'll install 0.34.15 + recycle the supervisor, then run `queue prune-noise` on this live doc to clear the flood with matched binaries.
-
-### Re: agent-doc duplicating queue items — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.
-
-
-Reproduced and fixed (`#qdup-bare-id`, 0.34.16). Your report is corroborated right here — this doc's live queue had `[#sqedit-race]` and `[#qpausemix-verify]` each appearing **twice**.
-
-**Root cause.** The only id-dedup wired into preflight maintenance was the AST **node-key** dedup, which deliberately preserves occurrence-indexed duplicates. The id-aware `dedup_live_prompts` was never wired in — on purpose: a duplicate `do [#id]` **directive** can be intentional "run it twice" intent (the `#queue-dedup-destroys-intentional-duplicates` invariant). But the backlog→queue mirror / CRDT replay re-emits a **bare** `[#id]` reference head (no `do`), and *nothing* collapsed those — so every mirror pass stacked another copy.
-
-**The fix.** New `queue::dedup_bare_id_reference_heads` runs in `run_queue_maintenance` after the node-key dedup. It collapses duplicate **bare** `[#id]` / `#id` reference heads (pin markers stripped) to the first occurrence, while:
-- leaving `do [#id]` **directive** duplicates intact (intentional intent — invariant preserved), and
-- never touching free-text heads (including a directive that merely *cites* an id with trailing text, e.g. `#id continue the drain`) or multiline blocks.
-
-**Verified:** new dedup tests + the intentional-`do`-duplicate invariant + full queue (481) and maintenance (67) suites + `make check` all green. Once 0.34.16 is live (installing + recycling next), the next preflight auto-collapses the duplicate heads on this doc.
-
-This is one facet of the broader `#sqedit-race` queue-edit-race item.
-
-### Re: JB `Run Agent Doc` route stalls (pane-kill+restart / "doesn't submit") — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.
-
-
-> **Queue prompt:**
->
-> :pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.
-
-
-Investigated both JB-`Run Agent Doc` reports. These are route/tmux dispatch issues, and the honest call is that **they can't be safely fixed blind** — `route.rs` carries dozens of shipped invariants (fresh-pane authority, stale startup-miss supersession, late associated-pane proof, dispatch-only accepted-vs-submitted, starting-actor reroute gating), and a guess-edit risks regressing them. Both reports also overlap heavily with already-shipped work (`#jbrunstart` starting-actor refusal, the startup-miss supersession rules, the `#qdispatchloss` uncommitted-head guard).
-
-**Likely mechanisms (from the code, not a confirmed repro):**
-- *"Killed the pane + autostarted a new pane → Run Agent Doc stalled."* After a manual pane kill, the registry/session-log can still name the dead pane as owner; route then either fails closed on late associated-pane proof or waits on a `starting` actor that never reaches a dispatch-ready prompt. The fresh-pane-authority + startup-miss-supersession rules are supposed to cover this, so a stall here is either a gap in superseding the dead pane's `startup_miss` provenance or a readiness-timeout.
-- *"Some Run Agent Doc ops don't submit to Claude Code."* Claude Code has no prompt-submit hook, so dispatch-only is `accepted_only` (keys delivered to the pane) without submit proof. If the pane wasn't truly dispatch-ready when keys landed, the text sits in the composer unsent — accepted but not submitted.
-
-**Why I'm not blind-fixing:** without a live repro + `agent-doc admin detect` (cross-doc pane contamination?) + the ops.log route diagnostics from the failing moment, I can't tell a real new bug from already-fixed behavior, and editing the invariant-heavy route path on a guess is how regressions ship. Capturing this as an operator-verify item that needs one captured repro.
-
-Filed `#jbrundispatch` (operator-verify). The fix needs: the failing `admin detect` + ops.log/route trace at stall time.
-
-### Re: draining the resolved bug-report heads — opus-4-8
-
-These three free-text reports are each duplicated 2–3× in the queue (CRDT-drift replay — the `#sqedit-race`/`#qrepin` instability) and are all now resolved or captured. Striking every copy so the queue drains and stops churning:
-
-> In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.
-
-Resolved — `#qdup-bare-id` (0.34.16, committed `2e5927d4`): preflight now collapses duplicate bare `[#id]` mirror heads. The free-text copies of this very report are themselves a duplication artifact of the same churn, now being struck.
-
-> In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB Run Agent Doc stalled.
-
-Captured as `#jbrundispatch` (operator-verify) — a route/startup-miss issue that needs a live repro (`admin detect` + ops.log route trace at stall time) to fix safely, not a blind edit to the invariant-heavy `route.rs`.
-
-> Some JB Run Agent Doc operations do not submit to Claude Code.
-
-Captured as `#jbrundispatch` (operator-verify) — Claude Code dispatch is `accepted_only` (no submit-proof hook); needs the failing pane-state repro to distinguish a real bug from accepted-but-unsubmitted timing.
-
-Net: the only genuinely open work here is `#jbrundispatch` (operator repro needed) plus the deeper `#sqedit-race` queue-CRDT-churn that keeps re-surfacing these heads.
-
-### Re: "the supervisor should retry until the prompt is submitted" — opus-4-8
-
-Done (`#jbclaudesubmit`, 0.34.17). Implemented your directive for the "doesn't submit to Claude Code" half of `#jbrundispatch`.
-
-**What was already there:** the direct-pane submit path *does* re-send a bare Enter while the routed trigger stays drafted in the composer (`send_direct_pane_enter_resubmit_until_stable`), and it exits the instant the trigger is consumed (submitted). But the cap was a fixed **3** resubmits. Claude Code has no submit-proof hook (dispatch is accepted-only — text+Enter delivered without confirmation), so a slow-to-focus composer could burn through 3 nudges before it actually consumed the Enter, leaving the trigger sitting unsent.
-
-**The change:** raised the default cap to **6** and made it env-tunable — `AGENT_DOC_DIRECT_PANE_MAX_ENTER_RESUBMITS` (`direct_pane_max_enter_resubmits()`). So it now retries longer "until submitted," and you can crank it higher live without a rebuild if 6 still isn't enough. The loop still short-circuits the moment the prompt submits, so the higher cap only costs wall-clock on a genuinely stuck pane.
-
-**Verified:** dispatch suite (129) + `make check` green; FlowCore hot-path budget respected.
-
-**Honest caveat:** this directly implements "retry more until submitted." If the real failure is the composer never *focusing* (not just needing more Enters), more retries won't help and we'll need the live pane-state at failure to confirm. `#jbrundispatch` stays gated for that live verification + its other half (stall after pane kill+restart). Installing 0.34.17 + recycling next.
-
-### Re: detect non-dispatch + re-send the prompt (directive #2) — opus-4-8
-
-Built it (`#jbrundispatch` directive 2, 0.34.18). Both of your refined route directives are now implemented:
-
-> "Some Run Agent Doc ops don't submit to Claude Code.": detect a written prompt and retry until the prompt is submitted.
-
-Covered by 0.34.17 (`#jbclaudesubmit`): when the trigger is drafted in the composer (`trigger_visible`), it resubmits Enter until consumed — budget raised to 6, env-tunable.
-
-> "Killed the pane + autostarted → stalled: detect if the prompt was not dispatched into the session. And send the prompt and submit the prompt."
-
-This was the real gap. `poll_direct_pane_acceptance` treated an **empty composer** as a successful submit — even when the trigger was **never seen** there. So a send that silently no-op'd into a not-ready pane (your pane-kill+restart case) was misreported as `Accepted`, and nothing re-dispatched. The stall.
-
-**Fix:** a new `not_dispatched` outcome, set only when the trigger was never observed in the composer **and** the pane is at an **idle dispatch-ready prompt** (`pane_idle_dispatch_ready`). For an agent-doc trigger that starts a turn, a genuine submit leaves the pane *processing* (not idle) — so empty+idle+never-seen reliably means "never landed," and it's safe from re-sending a real submit (which would double-run the agent). On that signal, `send_command_unchecked` re-sends the **full** trigger (text+Enter, not a bare Enter — there's no draft to submit) until it lands, logging `route_redispatch_not_landed`, and reports a genuine `TimedOut` rather than a false `Accepted` if the budget exhausts.
-
-**Verified:** new discriminator test (idle = non-dispatch / processing = real submit, so no double-run) + dispatch suite (130) + `make check` green; FlowCore hot-path budget respected.
-
-**Caveat (same as before):** unit tests can't reproduce the live pane-kill stall, so the real proof is a live repro — but the detection is conservative (never re-sends a processing/real submit). Committing + installing 0.34.18 next; `#jbrundispatch` stays gated for your live confirmation.
-
-### Re: both route directives shipped — draining the heads — opus-4-8
-
-Both of your refined directives are now implemented, committed, and installed (0.34.18). Striking the heads:
-
-> "Some Run Agent Doc ops don't submit to Claude Code.": The supervisor should detect a written prompt and retry until the prompt is submitted.
-
-Shipped — `#jbclaudesubmit` (0.34.17): detects the drafted trigger in the composer and resubmits Enter until consumed; budget raised 3→6 and env-tunable.
-
-> "Killed the pane + autostarted a new pane → Run Agent Doc stalled.": The supervisor should detect if the prompt was not dispatched into the session. And send the prompt and submit the prompt.
-
-Shipped — `#jbrundispatch` directive 2 (0.34.18): detects when the trigger never landed (empty composer + idle dispatch-ready pane + never seen) and re-sends the full trigger until it lands, reporting a genuine TimedOut instead of a false Accepted.
-
-Both want a live repro of the failing pane state to confirm they close the reports (the detection is conservative — it never re-sends a processing/real submit). `#jbrundispatch` stays gated for that.
-<!-- agent:boundary:4ec40070 -->
+- Archived 7 response topic(s): Fix the root cause of already-done / noise heads flooding the queue; agent-doc duplicating queue items; JB `Run Agent Doc` route stalls (pane-kill+restart / "doesn't submit"); 4 more
+- Prior summary/context: prior compacted content: Archived 4 response topic(s): Fix equityfundingsource.md "Mixed signals"; Clean up the noise...
+<!-- agent:boundary:fd60fed3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.~~
-- ~~:pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.~~
-- ~~:pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.~~
-- ~~:pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.~~
 - :pushpin: [#sqedit-race]
-- ~~:pushpin: "Some Run Agent Doc ops don't submit to Claude Code.": The supervisor should detect a written prompt and retry until the prompt is submitted.~~
-- ~~"Killed the pane + autostarted a new pane → Run Agent Doc stalled.": The supervisor should detect if the prompt was not dispatched into the session. And send the prompt and submit the prompt.~~
 ---
 :pushpin: do [#tsiftmdcrash]
 ---
 - :pushpin: [#qpausemix-verify]
 - :pushpin: do [#fbwire]
 - :pushpin: do [#hap7]
-- ~~:pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.~~
-- ~~[#prunenoise-live]~~
-- ~~:pushpin: In equityfundingsource.md, I typed in queue items and agent-doc duplicated the queue items.~~
-- ~~:pushpin: In equityfundingsource.md, I killed the pane and autostarted a new pane to resolve a wedge issue. After restarting, JB `Run Agent Doc` stalled.~~
-- ~~:pushpin: Some JB `Run Agent Doc` operations do not submit to Claude Code.~~
-- ~~:pushpin: do [#jbrundispatch]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

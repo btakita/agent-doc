@@ -60,6 +60,35 @@ pub struct BacklogTargetRequirement {
     pub baseline_item_ids: Vec<String>,
 }
 
+/// `#semmerge-ack-turn` (semantic_merge Phase 4): a node-keyed acknowledgement
+/// that a node-disjoint semantic merge could NOT apply the agent's change
+/// verbatim — the operator deleted an agent-edited node, overrode the same node,
+/// or revived an agent-deleted node, and the operator value won in `merged_doc`.
+/// The agent's content is never silently discarded: the next cycle surfaces these
+/// so the agent emits an exchange turn acknowledging the non-applied change.
+///
+/// `reason` is the stable [`agent_doc_markdown_ast::semantic_merge::AckReason`]
+/// token (see [`AckReason::token`](agent_doc_markdown_ast::semantic_merge::AckReason::token)).
+/// `recorded_cycle_id` is the cycle whose convergence recorded the ack (forensic
+/// info). `surfaced` drives the one-cycle lifecycle: [`start_preflight_with_task`]
+/// carries forward only un-surfaced acks and marks them surfaced, so each ack
+/// reaches the agent exactly once and drops the cycle after. The flag is used
+/// instead of comparing cycle ids because `cycle_id` is millisecond-derived and
+/// two cycles can collide within the same millisecond.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingSemanticMergeAck {
+    pub component: String,
+    pub id: String,
+    pub reason: String,
+    pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_cycle_id: Option<String>,
+    /// True once this ack has been carried into a cycle for the agent to surface.
+    /// Set by [`start_preflight_with_task`] when it carries the ack forward.
+    #[serde(default)]
+    pub surfaced: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CycleState {
     pub cycle_id: String,
@@ -164,6 +193,13 @@ pub struct CycleState {
     /// for a committed response, binary consume, or explicit deferral proof.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_free_text_queue_heads: Vec<String>,
+    /// `#semmerge-ack-turn` (semantic_merge Phase 4): node-keyed acks carried into
+    /// the NEXT cycle's response. Recorded at convergence time
+    /// ([`record_semantic_merge_acks`]) and carried forward exactly one cycle by
+    /// [`start_preflight_with_task`], which preflight surfaces as
+    /// `semantic_merge_acks` so the agent emits an acknowledgement exchange turn.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_semantic_merge_acks: Vec<PendingSemanticMergeAck>,
 }
 
 /// Extract the queue prompt head texts (e.g. `do [#convqa-rerun]`) from a
@@ -305,6 +341,27 @@ pub fn start_preflight_with_task(
 ) -> Result<CycleState> {
     let now = now_secs();
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    // `#semmerge-ack-turn` (Phase 4): carry forward acks recorded by the prior
+    // cycle's convergence so this cycle's response can acknowledge the non-applied
+    // agent change. Carry only un-surfaced acks and mark them surfaced here — an
+    // ack the prior cycle itself carried IN was already surfaced there, so it
+    // drops. Driven by the `surfaced` flag rather than a cycle-id comparison
+    // because `cycle_id` is millisecond-derived and can collide across cycles.
+    let carried_semantic_merge_acks = load(file)
+        .ok()
+        .flatten()
+        .map(|prior| {
+            prior
+                .pending_semantic_merge_acks
+                .into_iter()
+                .filter(|ack| !ack.surfaced)
+                .map(|mut ack| {
+                    ack.surfaced = true;
+                    ack
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let state = CycleState {
         cycle_id: format!("cycle-{}", now_millis()),
         file: canonical.display().to_string(),
@@ -341,6 +398,7 @@ pub fn start_preflight_with_task(
         active_free_text_queue_heads: file_content
             .map(active_free_text_queue_heads)
             .unwrap_or_default(),
+        pending_semantic_merge_acks: carried_semantic_merge_acks,
     };
     save(file, &state)?;
     append_phase_event_to_session_log(file, &state);
@@ -861,6 +919,45 @@ pub fn record_dropped_queue_prompts(file: &Path, prompts: &[String]) -> Result<O
     Ok(Some(state))
 }
 
+/// `#semmerge-ack-turn` (semantic_merge Phase 4): record node-keyed acks emitted
+/// by the convergence semantic merge so the NEXT cycle can acknowledge the
+/// non-applied agent change in an exchange turn. Tags each ack with the current
+/// cycle id ([`start_preflight_with_task`] carries it forward exactly one cycle).
+/// Appends only previously-unseen `(component, id, reason)` triples.
+pub fn record_semantic_merge_acks(
+    file: &Path,
+    acks: &[agent_doc_markdown_ast::semantic_merge::AckRequest],
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    let cycle_id = state.cycle_id.clone();
+    let mut changed = false;
+    for ack in acks {
+        let reason = ack.reason.token().to_string();
+        if !state.pending_semantic_merge_acks.iter().any(|existing| {
+            existing.component == ack.component
+                && existing.id == ack.id
+                && existing.reason == reason
+        }) {
+            state.pending_semantic_merge_acks.push(PendingSemanticMergeAck {
+                component: ack.component.clone(),
+                id: ack.id.clone(),
+                reason,
+                detail: ack.detail.clone(),
+                recorded_cycle_id: Some(cycle_id.clone()),
+                surfaced: false,
+            });
+            changed = true;
+        }
+    }
+    if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
 /// Clear the recorded dropped-queue markers once they are resolved (the queue
 /// edit reached the committed document or was legitimately consumed).
 pub fn clear_dropped_queue_prompts(file: &Path) -> Result<Option<CycleState>> {
@@ -1091,6 +1188,7 @@ fn synthetic_state_with_id(
         dropped_queue_prompts: Vec::new(),
         active_queue_heads: Vec::new(),
         active_free_text_queue_heads: Vec::new(),
+        pending_semantic_merge_acks: Vec::new(),
     }
 }
 
@@ -1203,6 +1301,119 @@ mod tests {
             CyclePhase::PreflightStarted
         );
         assert!(load(&doc).unwrap().unwrap().is_open());
+    }
+
+    fn ack(
+        component: &str,
+        id: &str,
+        reason: agent_doc_markdown_ast::semantic_merge::AckReason,
+    ) -> agent_doc_markdown_ast::semantic_merge::AckRequest {
+        agent_doc_markdown_ast::semantic_merge::AckRequest {
+            component: component.to_string(),
+            id: id.to_string(),
+            reason,
+            detail: format!("{component}:{id} detail"),
+        }
+    }
+
+    #[test]
+    fn record_semantic_merge_acks_tags_current_cycle_and_dedupes() {
+        use agent_doc_markdown_ast::semantic_merge::AckReason;
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let started = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        record_semantic_merge_acks(
+            &doc,
+            &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)],
+        )
+        .unwrap();
+        // Re-recording the same (component, id, reason) is a no-op.
+        record_semantic_merge_acks(
+            &doc,
+            &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)],
+        )
+        .unwrap();
+
+        let state = load(&doc).unwrap().unwrap();
+        assert_eq!(state.pending_semantic_merge_acks.len(), 1);
+        let recorded = &state.pending_semantic_merge_acks[0];
+        assert_eq!(recorded.component, "exchange");
+        assert_eq!(recorded.id, "a");
+        assert_eq!(recorded.reason, "same_node_operator_override");
+        assert_eq!(
+            recorded.recorded_cycle_id.as_deref(),
+            Some(started.cycle_id.as_str())
+        );
+        assert!(!recorded.surfaced, "freshly recorded ack is not yet surfaced");
+    }
+
+    #[test]
+    fn start_preflight_carries_prior_cycle_acks_forward_exactly_once() {
+        use agent_doc_markdown_ast::semantic_merge::AckReason;
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        // Cycle 1: converge records an ack.
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        record_semantic_merge_acks(
+            &doc,
+            &[ack(
+                "exchange",
+                "a",
+                AckReason::OperatorDeletedAgentEditedNode,
+            )],
+        )
+        .unwrap();
+
+        // Cycle 2: start_preflight must carry the ack forward so it is surfaced.
+        let cycle2 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        assert_eq!(
+            cycle2.pending_semantic_merge_acks.len(),
+            1,
+            "ack carried into the immediately-following cycle"
+        );
+        assert!(
+            cycle2.pending_semantic_merge_acks[0].surfaced,
+            "carried ack is marked surfaced"
+        );
+
+        // Cycle 3: the ack was already surfaced in cycle 2, so it must drop.
+        let cycle3 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        assert!(
+            cycle3.pending_semantic_merge_acks.is_empty(),
+            "ack surfaced once then dropped: {:?}",
+            cycle3.pending_semantic_merge_acks
+        );
+    }
+
+    #[test]
+    fn semantic_merge_ack_recorded_after_carry_chains_to_next_cycle() {
+        use agent_doc_markdown_ast::semantic_merge::AckReason;
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        // Cycle 1 records ack A.
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        record_semantic_merge_acks(&doc, &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)])
+            .unwrap();
+
+        // Cycle 2 surfaces A (carried) AND its own convergence records ack B.
+        let cycle2 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        assert_eq!(cycle2.pending_semantic_merge_acks.len(), 1);
+        record_semantic_merge_acks(
+            &doc,
+            &[ack("exchange", "b", AckReason::OperatorRevivedAgentDeletedNode)],
+        )
+        .unwrap();
+
+        // Cycle 3 surfaces only B (A was surfaced in cycle 2 and dropped).
+        let cycle3 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        assert_eq!(cycle3.pending_semantic_merge_acks.len(), 1);
+        assert_eq!(cycle3.pending_semantic_merge_acks[0].id, "b");
     }
 
     #[test]

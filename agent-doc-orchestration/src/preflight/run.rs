@@ -1186,6 +1186,32 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     let pipeline = resolve_pipeline_state(file)?;
 
+    // #semmerge-ack-turn (Phase 4): surface acks carried forward by
+    // `start_preflight` from the prior cycle's convergence semantic merge. Also
+    // emit a companion warning so the existing "surface warnings" skill path
+    // drives the acknowledgement without a SKILL.md change.
+    let semantic_merge_acks = crate::cycle_state::load(file)
+        .ok()
+        .flatten()
+        .map(|state| state.pending_semantic_merge_acks)
+        .unwrap_or_default();
+    if !semantic_merge_acks.is_empty() {
+        let summary = semantic_merge_acks
+            .iter()
+            .map(|ack| format!("{}:{} ({})", ack.component, ack.id, ack.reason))
+            .collect::<Vec<_>>()
+            .join(", ");
+        warnings.push(PreflightWarning {
+            code: "semantic_merge_ack_pending".to_string(),
+            message: format!(
+                "{} node-keyed semantic-merge ack(s) from the prior cycle: {summary}. The operator's concurrent edit won these node(s); acknowledge the non-applied agent change(s) in an exchange turn this cycle.",
+                semantic_merge_acks.len()
+            ),
+            document_agent: None,
+            active_harness: None,
+        });
+    }
+
     let output = PreflightOutput {
         warnings,
         layout_issues,
@@ -1237,6 +1263,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             .then(|| crate::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE.to_string()),
         session_accretion,
         pipeline,
+        semantic_merge_acks,
     };
 
     let json =

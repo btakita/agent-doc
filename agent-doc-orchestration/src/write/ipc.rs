@@ -832,20 +832,16 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             ),
         );
         if ack_count > 0 {
-            // TODO(#semmerge-ack-turn / Phase 4): turn these into an exchange ack
-            // turn for the next cycle. For now operator-wins is already encoded in
-            // `merged_doc`; record the pending acks durably-as-log so the Phase-4
-            // turn (or a forensic reader) can recover the reasons. No new
-            // cycle_state field is added in this phase.
+            // #semmerge-ack-turn (Phase 4): operator-wins is already encoded in
+            // `merged_doc`, but the agent's non-applied change must be acknowledged
+            // in an exchange turn the NEXT cycle. Persist the acks to cycle_state so
+            // `start_preflight` carries them forward and preflight surfaces them as
+            // `semantic_merge_acks`. Also log the proof marker so a forensic reader
+            // (or `session-check`) can recover the reasons.
             let reasons: Vec<String> = sm
                 .requires_ack
                 .iter()
-                .map(|ack| {
-                    format!(
-                        "{}:{}:{:?}",
-                        ack.component, ack.id, ack.reason
-                    )
-                })
+                .map(|ack| format!("{}:{}:{}", ack.component, ack.id, ack.reason.token()))
                 .collect();
             crate::ops_log::log_op(
                 file,
@@ -858,6 +854,11 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                     reasons.join(","),
                 ),
             );
+            if let Err(e) = crate::cycle_state::record_semantic_merge_acks(file, &sm.requires_ack) {
+                eprintln!(
+                    "[write] warning: failed to record semantic_merge acks for carry-forward: {e}"
+                );
+            }
         }
         decision.replace_snapshot_with_content_ours_for_live_prompt_drift(&merged_doc);
         return true;

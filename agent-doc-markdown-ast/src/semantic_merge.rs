@@ -120,6 +120,20 @@ pub enum AckReason {
     OperatorRevivedAgentDeletedNode,
 }
 
+impl AckReason {
+    /// Stable snake_case token for serialization, logging, and the Phase-4
+    /// `#semmerge-ack-turn` carry-forward (`cycle_state` persists the token, not
+    /// the enum, so the orchestration crate stays decoupled from this type's
+    /// representation).
+    pub fn token(&self) -> &'static str {
+        match self {
+            AckReason::OperatorDeletedAgentEditedNode => "operator_deleted_agent_edited_node",
+            AckReason::SameNodeOperatorOverride => "same_node_operator_override",
+            AckReason::OperatorRevivedAgentDeletedNode => "operator_revived_agent_deleted_node",
+        }
+    }
+}
+
 /// A request for the next agent turn to acknowledge a non-applied agent change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AckRequest {
@@ -1089,6 +1103,24 @@ fn merge_components_into_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ack_reason_tokens_are_stable() {
+        // #semmerge-ack-turn (Phase 4): these tokens are the wire format
+        // cycle_state persists and preflight surfaces — keep them stable.
+        assert_eq!(
+            AckReason::OperatorDeletedAgentEditedNode.token(),
+            "operator_deleted_agent_edited_node"
+        );
+        assert_eq!(
+            AckReason::SameNodeOperatorOverride.token(),
+            "same_node_operator_override"
+        );
+        assert_eq!(
+            AckReason::OperatorRevivedAgentDeletedNode.token(),
+            "operator_revived_agent_deleted_node"
+        );
+    }
 
     // ----- helpers ---------------------------------------------------------
 

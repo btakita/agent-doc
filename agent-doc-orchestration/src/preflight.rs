@@ -472,6 +472,16 @@ pub struct PreflightOutput {
     /// when neither is present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pipeline: Option<crate::frontmatter::AgentDocPipeline>,
+    /// `#semmerge-ack-turn` (semantic_merge Phase 4): node-keyed acks carried from
+    /// the prior cycle's convergence semantic merge. Non-empty when the operator
+    /// deleted an agent-edited node, overrode the same node, or revived an
+    /// agent-deleted node — operator content already won in the committed document,
+    /// and the agent must acknowledge the non-applied change in an exchange turn
+    /// THIS cycle. Cleared automatically next cycle (surfaced exactly once). A
+    /// companion `semantic_merge_ack_pending` warning carries the same summary so
+    /// the existing "surface warnings" skill path drives the acknowledgement.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub semantic_merge_acks: Vec<crate::cycle_state::PendingSemanticMergeAck>,
 }
 
 mod semantic_diff;
@@ -4961,6 +4971,38 @@ mod tests {
         assert!(
             parsed.get("semantic_diff").is_none(),
             "semantic_diff should be omitted when absent"
+        );
+    }
+    #[test]
+    fn preflight_output_semantic_merge_acks_roundtrip() {
+        // #semmerge-ack-turn (Phase 4): carried acks serialize for skill
+        // consumption and are omitted when empty.
+        let empty = PreflightOutput::default();
+        let empty_json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&empty).unwrap()).unwrap();
+        assert!(
+            empty_json.get("semantic_merge_acks").is_none(),
+            "semantic_merge_acks omitted when empty"
+        );
+
+        let output = PreflightOutput {
+            semantic_merge_acks: vec![crate::cycle_state::PendingSemanticMergeAck {
+                component: "exchange".to_string(),
+                id: "p3kj".to_string(),
+                reason: "operator_deleted_agent_edited_node".to_string(),
+                detail: "operator deleted the node the agent edited".to_string(),
+                recorded_cycle_id: Some("cycle-1".to_string()),
+                surfaced: true,
+            }],
+            ..Default::default()
+        };
+        let parsed: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&output).unwrap()).unwrap();
+        assert_eq!(parsed["semantic_merge_acks"][0]["component"], "exchange");
+        assert_eq!(parsed["semantic_merge_acks"][0]["id"], "p3kj");
+        assert_eq!(
+            parsed["semantic_merge_acks"][0]["reason"],
+            "operator_deleted_agent_edited_node"
         );
     }
     #[test]

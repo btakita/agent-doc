@@ -2586,6 +2586,7 @@ mod th {
             dropped_queue_prompts: Vec::new(),
             active_queue_heads: Vec::new(),
             active_free_text_queue_heads: Vec::new(),
+            pending_semantic_merge_acks: Vec::new(),
         }
     }
     pub(crate) fn committed_state_for_doc(

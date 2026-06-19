@@ -110,7 +110,19 @@ The "Express interest" CTA already lives in the sidebar card directly above the 
 **Verification:** `make check` green — full suite **894 pass, 0 fail**, browser + worker bundles built. Superproject pointer bumped to `7ac7b59` (`d4d84334b`).
 
 Confidence: high — source-inspection e2e test pins both branches. Escalation: none. Deploy pending as the next queue item.
-<!-- agent:boundary:23576724 -->
+
+### Re: deploy — opus-4-8
+
+Deployed to production. The EFS worker (`equityfundingsource`) was re-uploaded and triggers deployed successfully, so both queued fixes are now live:
+- **Lender Group table malformed** fix (efs `982a110`).
+- **Funding Commitment "Express Interest"** copy fix (efs `7ac7b59`).
+
+No D1 migrations were pending (both changes are UI-only). `make check` was green (894 pass) before deploy.
+
+**Queue hygiene note (`#qover-consume`):** the two `deploy` heads and the duplicate "Lender Group"/"Loan Terms" heads were auto-struck by the IPC-degraded finalize retries before I'd run the deploy. I ran `make deploy` anyway so the queued intent is actually fulfilled — production now matches the pushed code. The root cause of the drift is the route-owned supervisor running a STALE agent-doc binary (session-check `#fcc0/#ipcdrift`); I'm issuing `agent-doc admin recycle` so it refreshes onto the installed 0.34.14 build at the next idle boundary.
+
+Confidence: high — deploy reported success and the code was suite-verified. Escalation: none.
+<!-- agent:boundary:b5915544 -->
 <!-- /agent:exchange -->
 ###
 <!--

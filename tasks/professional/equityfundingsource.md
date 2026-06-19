@@ -398,7 +398,7 @@ Why it beats "Lending Group":
 So: **loan = fractionalized; the lenders = a "Multi-Lender Group"; members = "co-lenders."** If you ever want a shorter UI label, "Lender Group" works as the casual form, but "Multi-Lender Group" is the one I'd put in product copy and the schema.
 
 `#8667` stays gated on the last two calls before I build: **persistent vs. deal-scoped** groups, and **member privacy** (do co-lenders see each other?). Lock the name as "Multi-Lender Group" + answer those two and I'll start Phase 1 (`src/equityfundingsource-dev/prds/lending-groups-plan.md`).
-<!-- agent:boundary:03058804 -->
+<!-- agent:boundary:b6108f38 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -411,17 +411,22 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- [#8667]. Persistent. A lender may also be part of multiple lending groups. Co-lenders do see each other. The lenders know each other and work together. The majority stake has more control over the group in the real-world. Each deal may have different percentages of a loan. The admin should be able to set up lending groups, where lender accounts are auto-created with an email. Lenders should be able to create a group and invite other lenders as well.
+- do [#8667]. Persistent. A lender may also be part of multiple lending groups. Co-lenders do see each other. The lenders know each other and work together. The majority stake has more control over the group in the real-world. Each deal may have different percentages of a loan. The admin should be able to set up lending groups, where lender accounts are auto-created with an email. Lenders should be able to create a group and invite other lenders as well.
+- do [#8667p2]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#8667p2] Multi-Lender Group Phase 2 — group CRUD + invites (src/equityfundingsource-dev/prds/lending-groups-plan.md): lender create-group + invite-by-email + accept/decline + member list; admin group setup with lender-account auto-create by email (reuse admin-provisioned-account email pattern); in-portal + email notifications; routes + tests. Builds on shipped lib/lending_groups/repo.ts + migration 0090.
+- [ ] [#8667p3] Multi-Lender Group Phase 3 — deal participation: pull a group into a deal, set per-deal allocations (lending_group_deal_allocations), render co-lenders + each member percentage in the deal package / interested-lenders views, surface the majority controller (lending_group_control_); tests.
+- [ ] [#8667p4] Multi-Lender Group Phase 4 — admin visibility: show Multi-Lender Group membership + per-deal allocations in the admin deal / interest views.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#8667] [operator-verify] Lending groups: build the lender "Lending group" mechanism per src/equityfundingsource-dev/prds/lending-groups-plan.md (Phase 1 schema+repo → 2 group CRUD/invites → 3 deal participation → 4 admin visibility). GATED on operator decision: group name ("Lending group" recommended), persistent-vs-deal-scoped, member-privacy. Do not build until confirmed.
 - [/] [#dealtab500] [operator-verify] Root-cause the deal 7a0c1463 / loan 45ddae53 (GQI751) loan-tab "Internal Error". Static trace independently re-confirmed exhausted: GET /admin/pipeline serves only a shell (no server-side deal processing); every client-fetched endpoint is guarded — admin_loan_R_ is a plain SELECT, admin_deal_R_ LTV/onboarding chain (onboarding_json_/loan_ltv_calc_) is fully try/catch + null guarded, /documents is harmless; all client fetches degrade to error cards, not the worker Internal Error page. Regression guard shipped (efs a39be3d) locking the thin-TMO-loan onboarding shape against throws (gformula deal-economics helpers). REMAINING (operator-gated, cannot be agent-done): reproduce live via `bun run cf:worker:tail` + a browser click on the loan tab to capture the real throwing endpoint + stack, OR inspect loan 45ddae53/deal 7a0c1463 D1 rows once the #cftk token lands. Relates to #5q7z/#214f.
 - [/] [#5q7z] [recommended] 'Accept and send to TMO' duplicate-loan bug: for a loan already associated with a TMO record (deal 7a0c1463 / loan 45ddae53 has tmo_loan_number=GQI751, tmo_loan_rec_id=3840D27B..., tmo_loan_application_rec_id=cda67748), the approve flow (admin/applications/index.ts application_tmo_writeback_attempt_ -> tmo_writeback.ts:308 LOS.svc/NewLoan) sends NewLoan with the existing GQI751 -> TMO 400 'Duplicate loan number. Unable to save record.' Fix (2 parts): (1) approve/writeback must detect an existing TMO association (tmo_loan_rec_id / writeback_status='sent') and associate+mark accepted locally instead of calling NewLoan (or call an UpdateLoan endpoint); (2) hide/disable the 'Accept and send to TMO' button in lib/ui--browser--efs/portal/admin/full_applications.tsx:424 when the app/loan is already in TMO. Design Q: on accept of an already-in-TMO loan, associate-only (no TMO call) or also push UpdateLoan? Relates to #dzmm/#37ah/#214f.
 - [/] [#214f] [recommended] Gate investor deal publish on acceptance: admin_deal_publish_ (app/equityfundingsource/lib/admin/repo.ts:2054) + POST /api/admin/loans/:id/deal publish a loan to the investor marketplace with NO acceptance check (only 'if (!loan) throw'); any non-Funded loan becomes status='published'. So a deal can be an Available Deal while its application is not accepted (observed: investment_deal 7a0c1463 published from loan 45ddae53 status='submitted', tmo 'Application Received', with NO full_application row). Decide the business rule ('accepted before available') and add the gate before status='published' (and/or surface why a loan is ineligible to publish). Relates to the full_applications<->loans<->investment_deals decoupling.

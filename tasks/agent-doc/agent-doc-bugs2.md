@@ -484,7 +484,17 @@ Done — `#supselfheal` Phases 2–5 implemented, tested, built, installed, and 
 **Ph5 — `#supselfheal-simworld`:** SimWorld reproductions of the session — `wedged_opted_out_supervisor_recycles_on_write_wedge` and `failed_reexec_escalates_to_bounded_kill_relaunch` — plus exhaustive decision-table tests for every new policy row (`…_write_wedge_overrides_opt_out`, `…_reexec_failure_escalates_to_kill_relaunch`, `reexec_escalation_bound_caps_retries`) and converge classifier/reader tests.
 
 `make check` green (4720 passed, clippy clean); latest CI run is green. The one still-deferred follow-up is `#supselfheal-adminwire` (the live `admin recycle` → supervisor IPC adapter), already tracked separately.
-<!-- agent:boundary:0e113e21 -->
+### Re: pasted IPC/CRDT-drift + dispatch-block diagnostics — opus-4-8
+
+Thanks for the evidence dumps. None of these are new bug classes — they all map to already-tracked items, and they share **one root cause: the live supervisor is running a stale pre-`#smconv`/pre-0.34.11 binary**, which is exactly the wedge I just shipped the fix for this session. No new backlog items — every symptom below is already filed.
+
+- **"More IPC/CRDT drift on virtuousai.md" / responses lost + spliced into the wrong response** → `#semmerge`/`#smconv` (landed): `semantic_merge` already does node-identity (per-structural-part) merge, keeps operator deletions deleted (`OutcomeKind::DeletionKept` + ack), treats the operator buffer as the structural source of truth, and `write/ipc.rs` gates it so it declines rather than dropping any agent `### Re:` heading or queue prompt. The reason you still saw splicing is that the **live supervisor isn't running that code yet** — it predates the build.
+- **"broken editor IPC: content_ours adoption loses every response… resume in a clean session, recycle binary, take `#smconv` first"** → this is the `#supselfheal` stale-binary wedge. `#smconv` is already committed; the missing piece was that nothing recycled the stale supervisor onto it. That is precisely what shipped this session: **0.34.11 `#supselfheal` Ph2–5** — a wedged editor write now *triggers* a supervisor recycle (`write_wedged → RecycleImmediate`), and a failed in-place `execve` escalates to a bounded kill+relaunch instead of looping forever.
+- **`qflood` "re-injecting on an already-drained queue"** → known `#qflood` class (supervisor idle-watch dup-injection); the `drain-claim` lease is the guard.
+- **`#1vhn` / dead-shell dispatch + "JB Run Agent Doc stalled"** → `#routedeadshell` (already answered/planned: `plan-route-dispatch-into-crashed-harness.md`); root-cause why the harness exits to a shell stays operator-gated on a `supervisor-stderr.log` + pane-scrollback capture.
+
+**Unblock (in motion):** 0.34.11 is installed and `lib-install` already marked the controllers to recycle at the next idle boundary. The recycle fires when this pane goes idle — so I'm **stopping the drain here rather than auto-looping**: continuing to keep the session busy on the stale supervisor (a) is the exact churn your pasted note paused, and (b) would prevent the idle-boundary recycle onto the fresh binary from ever firing. Once it recycles onto 0.34.11, the editor-IPC wedge clears and the remaining queue drains cleanly. (This turn's finalize again hit `live_prompt_drift_after_preflight` on the stale supervisor and was recovered via `commit` — same signature, same fix.)
+<!-- agent:boundary:e91102d1 -->
 <!-- /agent:exchange -->
 
 ## Queue

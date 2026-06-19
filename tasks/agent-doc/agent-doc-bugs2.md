@@ -375,7 +375,23 @@ Done — the non-deterministic RED `make check` is fixed, committed, and pushed.
 Resolving `#kbkz` (and its `#smconv-red` framing) to `agent:done`: the deterministic-`make check` goal is met. The converge suite the item feared is already deterministic, so no surgery on the live merge core was needed — the prior session's "implementation-blocked-on-focused-session" gate was based on a misdiagnosis.
 
 This was the only real user prompt; remaining queue heads are operator-verify/noise, so I'm not auto-looping.
-<!-- agent:boundary:5723adcf -->
+
+### Re: `agent:backlog` with `queue` attribute should not re-add an item already present in the queue — opus-4-8
+
+Fixed and pushed (`agent-doc 03a61a92`, filed `#qdup-pin-prefix`).
+
+**Two code paths add to the queue; I checked both.**
+
+1. **Backlog→queue sync** (`sync_backlog_into_queue`, the `queue`-attr path you named) — *already* dedupes correctly. Its `existing_ids` set is built from `entry_do_id`/`do_prompt_id`, which read the `#id` from anywhere in a head's text, including a pinned head (`:pushpin: do [#id]`), so Append/Prepend skip an id that's already present. Locked that in with a regression test (`sync_does_not_readd_id_already_present_as_pinned_head`).
+
+2. **Live-duplicate collapse** (`dedup_live_prompts`) — this was the actual gap, and it's what let the duplicates you saw accumulate. `dedup_key_for_prompt` tested `text.trim().starts_with("do [#")` on the **raw** text, so a re-pinned head `:pushpin: do [#id]` failed the identity check and was never collapsed against its unpinned twin. (A plain capitalized `Do [#id]` already normalized via lowercase — the **pin prefix** was the sole blind spot.) That's exactly how three `#kbkz` heads piled up in this very queue.
+
+**Fix:** strip the leading operator/agent pin marker (`strip_priority_markers`) before the `do [#id]` identity check, so `:pushpin: do [#id]` and `:round_pushpin: Do [#id]` collapse to the same identity. Free-text (non-id) duplicates are still preserved — the prefix check returns `None` for them, so `dedup_live_prompts_preserves_free_text_duplicates` stays green.
+
+**Verification:** 3 new/affected tests pass; full `make check` green (exit 0, 0 FAILED). CI for `03a61a92` will run on push; closing out on local evidence per the test-bearing-turn rule.
+
+Note on the stray `- Do [#kbkz]` head: `#kbkz` was completed and archived to `agent:done` earlier this session, so I'm not re-running it — that duplicate line is itself an instance of the class just fixed (the done/strike pass will clear it).
+<!-- agent:boundary:db513336 -->
 <!-- /agent:exchange -->
 
 ## Queue

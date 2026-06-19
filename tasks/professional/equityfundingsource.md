@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -85,7 +85,7 @@ The recent doc-only changes (bi-directional TMO documentation) carried no code/s
 > **Queue prompt:** Why is there a "TMO writeback not sent: unavailable" error?
 
 Answered in the previous response (section **(2) Why "unavailable"**). In short: `unavailable` is the admin UI's last-resort fallback string, not a server message — it shows only when the `/approve` response can't be parsed as JSON (`res.json().catch(() => null)` → `null`). That happened because `application_tmo_writeback_attempt_` ran its prelude (live-TMO loan-number generation + D1 reads/writes) **outside** its `try/catch`, so a throw there escaped as a non-JSON 500. Fixed by wrapping the whole attempt so it always returns structured JSON `{ ok:false, error }`; admins now see the real reason. Shipped in EFS `e869e73` (origin/main), superproject `5cd5c7c56`, `make check` 824/0.
-<!-- agent:boundary:4a7f71fd -->
+<!-- agent:boundary:db1a9506 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,6 +98,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: deploy error message fix
 <!-- /agent:queue -->
 
 ## Backlog

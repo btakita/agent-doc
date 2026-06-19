@@ -2664,7 +2664,89 @@ fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Op
     {
         return Ok(None);
     }
-    Ok(crate::queue::first_prompt(&activation.entries_after).map(|head| head.text.clone()))
+    let Some(head) = crate::queue::first_prompt(&activation.entries_after) else {
+        return Ok(None);
+    };
+    let head_text = head.text.clone();
+    // #qdispatchloss: never let route consume/dispatch an inactive queue head
+    // that is not backed by the committed snapshot. The head is read from the
+    // live disk buffer, which the JB plugin may have synced from an
+    // *uncommitted* operator edit (possibly half-typed). Activating/dispatching
+    // it moves a bad/partial line into the agent prompt and then loses it — the
+    // consume never lands in a committed snapshot, so the item is gone and the
+    // turn stalls uncommitted. When the head diverges from the committed
+    // snapshot, treat it as "still being edited" and fail closed (defer) so the
+    // next preflight commits the queue edit first and dispatches the head
+    // through the committed path. (Active-queue continuation heads go through
+    // `queue_continuation::live_continuation_head`, not this inactive-activation
+    // path, so the running auto-loop is unaffected.)
+    if !route_queue_head_backed_by_committed_snapshot(file, &head_text) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_uncommitted_head file={} decision=defer reason=head_not_in_committed_snapshot head={:?}",
+                file.display(),
+                crate::secret_redact::redact(&head_text)
+            ),
+        );
+        return Ok(None);
+    }
+    Ok(Some(head_text))
+}
+
+/// `#qdispatchloss`: prove a candidate inactive queue head is backed by the
+/// committed snapshot before route consumes/dispatches it.
+///
+/// Route selects the head from the live on-disk document
+/// (`std::fs::read_to_string`), but the JB plugin may have synced an
+/// uncommitted operator edit to disk before it reaches a git-committed
+/// snapshot. Comparing the candidate head text against the queue prompts in the
+/// committed snapshot (`snapshot::load`) distinguishes a durable, committed head
+/// (safe to dispatch) from a fresh editor-buffer-only edit (must defer).
+///
+/// Conservative by design — only a head that is provably absent from a present
+/// committed queue is treated as uncommitted:
+/// - no committed snapshot yet (untracked scaffold) → allow (bootstrap escape
+///   hatch; nothing to diverge from);
+/// - snapshot unreadable / unparseable / queue body unparseable → allow (cannot
+///   prove divergence, so do not stall a legitimate drain);
+/// - committed snapshot has a queue component but the head text is not among its
+///   prompt/completed entries → NOT backed (fail closed);
+/// - committed snapshot has no queue component at all → NOT backed (the head is
+///   a fresh uncommitted queue edit).
+fn route_queue_head_backed_by_committed_snapshot(file: &Path, head_text: &str) -> bool {
+    let snapshot = match crate::snapshot::load(file) {
+        Ok(Some(snapshot)) => snapshot,
+        Ok(None) => return true,
+        Err(err) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_dispatch_uncommitted_head_snapshot_unreadable file={} err={} decision=allow",
+                    file.display(),
+                    err
+                ),
+            );
+            return true;
+        }
+    };
+    let components = match crate::component::parse(&snapshot) {
+        Ok(components) => components,
+        Err(_) => return true,
+    };
+    let Some(queue_component) = components.iter().find(|component| component.name == "queue") else {
+        return false;
+    };
+    let body = &snapshot[queue_component.open_end..queue_component.close_start];
+    let entries = match crate::queue::parse(body) {
+        Ok(entries) => entries,
+        Err(_) => return true,
+    };
+    entries.iter().any(|entry| match entry {
+        crate::queue::QueueEntry::Prompt(prompt)
+        | crate::queue::QueueEntry::Completed(prompt) => prompt.text == head_text,
+        _ => false,
+    })
 }
 
 fn activate_existing_route_queue_head(
@@ -5700,6 +5782,139 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
         assert_eq!(crate::snapshot::load(&doc).unwrap().unwrap(), content);
+    }
+    #[test]
+    fn route_defers_uncommitted_queue_head_not_in_committed_snapshot() {
+        // #qdispatchloss: the operator typed a fresh queue item into the editor
+        // buffer; the JB plugin synced it to disk but it is NOT yet committed
+        // (the committed snapshot predates the add). Route must NOT consume the
+        // uncommitted head as the dispatch prompt — it would feed a possibly
+        // half-typed line into the agent and lose the item.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let committed = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#committed]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        // Disk has a fresh, uncommitted head (`do [#fresh]`) prepended above the
+        // committed one — exactly what an operator mid-edit produces.
+        let on_disk = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#fresh]\n",
+            "- do [#committed]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, on_disk).unwrap();
+        // Committed snapshot only knows about `#committed`.
+        crate::snapshot::save(&doc, committed).unwrap();
+
+        assert!(
+            !route_queue_head_backed_by_committed_snapshot(&doc, "do [#fresh]"),
+            "a head absent from the committed snapshot queue is not backed"
+        );
+        assert!(
+            route_queue_head_backed_by_committed_snapshot(&doc, "do [#committed]"),
+            "a head present in the committed snapshot queue is backed"
+        );
+
+        // The inactive-head read defers the uncommitted head instead of
+        // surfacing it for dispatch.
+        assert_eq!(
+            inactive_route_queue_head(&doc).unwrap(),
+            None,
+            "route must not surface an uncommitted queue head for dispatch"
+        );
+        // The activate path therefore no-ops: nothing is consumed and the doc /
+        // snapshot are untouched, so the operator's edit survives for the next
+        // committed cycle.
+        assert_eq!(
+            activate_existing_route_queue_head(&doc, "dispatch_only_inactive_queue").unwrap(),
+            None,
+            "route must not activate/consume an uncommitted queue head"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), on_disk);
+        assert_eq!(crate::snapshot::load(&doc).unwrap().unwrap(), committed);
+    }
+    #[test]
+    fn route_dispatches_committed_queue_head() {
+        // #qdispatchloss positive control: when the disk head IS backed by the
+        // committed snapshot, route activates/dispatches it normally.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#committed]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+
+        assert_eq!(
+            inactive_route_queue_head(&doc).unwrap().as_deref(),
+            Some("do [#committed]"),
+            "a committed-backed head is dispatchable"
+        );
+        let outcome = activate_existing_route_queue_head(&doc, "dispatch_only_inactive_queue")
+            .unwrap()
+            .expect("committed-backed head should activate");
+        assert_eq!(outcome.prompt_text, "do [#committed]");
+    }
+    #[test]
+    fn route_queue_head_unbacked_when_committed_snapshot_has_no_queue() {
+        // #qdispatchloss: a committed snapshot with no queue component at all
+        // means any on-disk queue head is a fresh uncommitted edit.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let committed = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        assert!(
+            !route_queue_head_backed_by_committed_snapshot(&doc, "do [#fresh]"),
+            "no committed queue component → head is unbacked"
+        );
+    }
+    #[test]
+    fn route_queue_head_backed_allows_when_no_committed_snapshot() {
+        // #qdispatchloss bootstrap escape hatch: an untracked scaffold with no
+        // committed snapshot must not be blocked — there is nothing to diverge
+        // from.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "scaffold\n").unwrap();
+        assert!(
+            route_queue_head_backed_by_committed_snapshot(&doc, "do [#anything]"),
+            "no committed snapshot → allow (bootstrap)"
+        );
     }
     #[test]
     fn busy_route_defers_to_active_auto_loop_instead_of_refusing() {

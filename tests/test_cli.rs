@@ -837,7 +837,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // the busy-pane reroute now logs when it skips the editor-opening `C-g`
         // because the live Codex pane is not in a shell reverse-i-search /
         // history-search state, and goes straight to the Escape + C-c path.
-        ("agent-doc-orchestration/src/route.rs", "reason=") => 8,
+        // +1 for the audited `#qdispatchloss` diagnostic
+        // `route_dispatch_uncommitted_head ... reason=head_not_in_committed_snapshot`:
+        // the inactive-queue-head read defers (returns None) instead of
+        // consuming a head that is not backed by the committed snapshot (an
+        // uncommitted editor-buffer-only operator edit), so route never feeds a
+        // half-typed/uncommitted line into the agent prompt and loses it.
+        ("agent-doc-orchestration/src/route.rs", "reason=") => 9,
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "guard_") => 4,
         // +1/+1 (#jbsimpleroute): the Codex accepted-only delivery regression
         // asserts the typed `proof=accepted proof_scope=accepted_only` log shape

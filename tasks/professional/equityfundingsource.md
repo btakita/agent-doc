@@ -247,7 +247,28 @@ Deployed. Worker version `034efce3-cbb2-436d-b963-9975df1df624` is live at https
 **"Sold rate %"** is the annual interest rate a lender offers to fund the loan at — the rate the loan note is effectively *sold* to that lender. On a deal's interest form (`/lenders/deals/<id>`) the lender submits a **Committed amount** + a **Sold rate %**; together those are their funding proposal (`proposal_interest_rate` in the data). EFS and the borrower compare lender candidates by amount + sold rate. When EFS selects the funding lender(s), the amount-weighted blend of their sold rates becomes the deal's `sold_rate` and is pushed to TMO without changing the loan amount (that's the blending logic in the select-lender flow). In short: it's the lender's quoted yield / the borrower's interest cost for the funded note — distinct from the borrower's "Preferred sold rate," which is the rate the borrower is *asking* for.
 
 Lending-groups (`#8667`) stays gated on your name / scope / privacy picks.
-<!-- agent:boundary:9aa038fb -->
+
+### Re: All upload preview dialogs should be full screen — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: All upload preview dialogs should be full screen. deploy
+
+
+Done and deployed. The document/upload preview dialogs now open **full screen** (edge-to-edge, no surrounding box) so the image/PDF/text fills the whole viewport.
+
+**What changed** (`src/equityfundingsource-dev`, all in `lib/ui--browser--efs`):
+- Added a reusable `full_screen` prop to the shared `PortalModal` — when set, the panel goes 100% width × `100dvh`, square corners, no backdrop gutter.
+- The shared in-browser document viewer (`#doc-viewer` `DocumentViewer`, used by `DocumentFileLink`/`DocumentViewActionButton` across borrower/admin/investor document surfaces) now opens `full_screen`; image/PDF heights fill the panel instead of the old `max-w-[960px]` box.
+- The admin **Lender Documents** previewer (`LenderDocumentPreviewModal`) is full screen too, and keeps its stacked `z-[1200]` so it still layers over the lender dialog (`#doc-stack-esc`).
+
+**Verified:**
+- Full suite green: `bun test` → **836 pass / 0 fail**; browser + worker builds clean. Updated two tests that pinned the old boxed widths.
+- **Deployed** `make deploy` → no D1 migrations; uploaded `equityfundingsource` (Worker startup 20 ms); live smoke test `https://equityfundingsource.brian-takita.workers.dev/` → **200**. Confirmed the live bundle `index.browser-JCNA7GFP.js` is served and contains the full-screen panel style.
+- Pushed: EFS `af3f5e1..a279f82` (origin/main), superproject pointer `28be2cea5`.
+
+`do [#8667]` (Lending groups) stays gated — it's `[operator-verify]`, still waiting on your name/scope/privacy decisions.
+<!-- agent:boundary:6cd3b647 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -262,7 +283,9 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: Fix test suite~~
 - ~~:pushpin: What is "Sold rate %"?~~
+- ~~:pushpin: All upload preview dialogs should be full screen. deploy~~
 - do [#8667]
+- All upload preview dialogs should be full screen. deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -294,12 +294,13 @@ Yes to both — done. Here's my reasoning and what I changed.
 **One thing to decide now that it's informal:** the more casual the note, the more the *typeset PDF* formality works against it — a polished PDF carrying a chatty note is a slight mismatch. For a small startup I'd lean toward **letting Laura paste this as plain text** into her own forward instead of attaching the PDF. The PDF is still there if you want a clean attachment, but if you're going informal to match their culture, plain text is the more consistent move. Your call — I kept both ready.
 
 Nothing sent.
-<!-- agent:boundary:d5b05e1b -->
+<!-- agent:boundary:5eabd904 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- Should I mention my working relationship with ron-berkes who is the China manufacturing supplier?
 <!-- /agent:queue -->
 
 ## Backlog

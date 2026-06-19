@@ -395,7 +395,23 @@ Done. You re-queued #p3kj, so I went ahead and did it — and realized I'd been 
 - [`mail/drafts/2026-06-18-virtuousai-forward-note.pdf`](../../mail/drafts/2026-06-18-virtuousai-forward-note.pdf) — regenerated; confirmed the "I own the whole thing" claim is gone and the full corrected text renders
 
 Marked **#p3kj done**. The note is now honest end-to-end — no ownership overclaim, no realtime overclaim, operator credibility intact. Nothing sent.
-<!-- agent:boundary:45b52458 -->
+
+### Re: agent loops as the hot topic + recovering a dropped queue edit — opus-4-8
+
+First, preserving your message — the IPC merge dropped it from the queue, so I'm capturing it here so it isn't lost:
+
+> "agent loops are the hot topic right now. I'm more hands-on to save tokens with my Claude, Codex, z.ai subscriptions. But the queue is effectively a loop with my ongoing work that I steer with the agent. Also note that agent-doc has a backlog that the agent can write to schedule tasks."
+
+Agreed on all of it — and yes, that's exactly the model: the queue is a human-paced loop you steer between cycles, and the backlog is the agent's own scheduling surface (it's how I parked #p3kj earlier and just reaped it). Being hands-on to conserve tokens is a sound call; the queue lets you spend a few words of steering instead of re-establishing context each turn. No action needed on this unless you want to take it somewhere — happy to riff on the loop/backlog design in its own doc if you do.
+
+**Status on the note (the substantive work is done and committed):**
+- The honest rewrite of the forwardable note shipped last cycle — MRH ownership claim gone, hook reframed, agent-doc realtime overclaim softened, PDF regenerated and verified. That's real and on disk.
+- **But the bookkeeping didn't stick:** the `--done p3kj` reap and the queue cleanup both failed because the live IPC supervisor is refusing pending/queue disk writes (`reason=ack_mismatch`) — the same wedge that just dropped your queue edit. So the backlog still shows `#p3kj` open and the queue still shows the stale `[#p3kj]` + cut-off `agent-doc` note, even though both are actually handled.
+
+**The honest problem: the supervisor for this doc is wedged and is now losing your edits.** Exchange responses still commit (that's why the note rewrite landed), but anything touching queue/backlog state bounces. That's a degraded supervisor, and it just cost you a message. The clean fix is to recycle it: **`agent-doc admin recycle`** — it promotes a fresh supervisor non-disruptively and should restore queue/pending writes so I can actually clear the queue and mark #p3kj done.
+
+I didn't recycle unilaterally since it touches the live session you're driving. **Want me to run `agent-doc admin recycle`?** Once it's healthy I'll clear the stale queue, mark #p3kj done, and we're clean. The note itself is finished either way — nothing about the letter is blocked. Nothing sent.
+<!-- agent:boundary:e68542aa -->
 <!-- /agent:exchange -->
 
 ## Queue

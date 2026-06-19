@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -268,12 +268,13 @@ Honest read: **it lands well, and the reason is the same as the risk — it's po
 **The thing that actually determines whether it lands isn't the content — it's the handoff.** This whole package is bet on Laura forwarding it faithfully and the team reading it before they've formed an impression from the resume + call alone. So the highest-leverage move is making Laura *want* to forward it: the private note should make her feel like she's handing her client something that makes *her* look good (a strong, low-maintenance candidate). It currently does. Just make sure that note feels warm and personal, not transactional — she's the gate.
 
 **Bottom line:** I'd send it close to as-is. It's differentiated, honest, and well-targeted. The content risk is low; the real variable is process (Laura forwarding) and a slight formality bet on their culture. If you have any read on how scrappy/informal Chris and Rory are, that's the one input that would change my advice on PDF-vs-pasted-text. Otherwise — it's ready.
-<!-- agent:boundary:a4f24116 -->
+<!-- agent:boundary:84252f97 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- Should we remove Engineer #2 and make it more informal?
 <!-- /agent:queue -->
 
 ## Backlog

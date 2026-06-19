@@ -34,55 +34,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260619-191858.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260619-195910.md`*
 
 Compacted content:
-- Archived 25 response topic(s): do [#qpausego]; don't stall the loop on a controller pause; do [#qdurcrash]; 22 more
-- Prior summary/context: prior compacted content: Archived 7 response topic(s): do [#pk3f]; JB Run Agent Doc consumes + loses an uncommitted q...
-- superproject gitlink: `04853f430 chore: bump agent-doc submodule`
-- `src/agent-doc`: `3d3c3605 fix: harden queue pause and postcommit recovery`
-- The superproject has no workflow named `CI`, so there was no root CI run to inspect.
-- Latest agent-doc CI after push is in progress: run `27845274416` for commit `3d3c3605`.
-- `make install` passed (`agent-doc 0.34.14` installed locally).
-- `make check` passed.
-- `cargo test -p agent-doc-orchestration run_queue_maintenance_controller_pause_surfaces_flag_without_stalling_continuation` passed.
-- `cargo test -p agent-doc-orchestration continuation_guidance` passed.
-- `cargo test -p agent-doc-orchestration postcommit_worktree_auto_reconcile` passed.
-- I updated `SPEC.md`, `README.md`, `specs/07-orchestration-commands.md`, and `VERSIONS.md` for both contracts.
-- The equityfundingsource.md mixed-signal path is fixed in the binary output. Controller pauses now carry `queue_pause_reason`, and `queue_continuation_guidance` explains that `queue_paused: true` suppresses only unattended supervisor auto-injection while attended continuation remains valid.
-- `#pcwcfailfix` is done. `send_postcommit_editor_refresh` now returns a real success signal, and the listener-active post-commit repair skips the disk write only after `refresh_content` is acked. If the editor refresh no-acks/errors, the binary restores the working tree from committed `HEAD` and logs `transport=disk_after_failed_editor_refresh`, so a corrupted post-commit tree cannot keep re-seeding the next drift cycle.
-
-### Re: closeout repair — gpt-5
-
-This repairs the same cycle's missing assistant heading through the binary write path. `#pcwcfailfix` is complete and pushed in `src/agent-doc` commit `3d3c3605`; the root submodule pointer is `04853f430`. The queue pause mixed-signal fix also landed: preflight now emits `queue_pause_reason`, and `queue_continuation_guidance` distinguishes controller pauses from attended continuation blockers.
-
-Verification passed: focused `agent-doc-orchestration` tests, `make check`, and `make install` (`agent-doc 0.34.14`). The latest agent-doc CI run after push is `27845274416` and was still in progress when checked; the root repo has no workflow named `CI`. `#driftrootfix`, `#hap7`, and `#tsiftmdcrash` remain open.
-
-### Re: #driftrootfix — gpt-5
-
-I verified `#driftrootfix` against the current `src/agent-doc` `HEAD` and closed it without additional source edits. The Phase 2 fix is already present: `write/ipc.rs::guard_ipc_snapshot_adoption_against_live_prompt_drift` now tries the node-keyed semantic merge before adopting `content_ours`, and `semantic_merge` models `### Re:` heading-prose exchange turns as append-only nodes placed before the exchange boundary. That directly covers the reported failure mode where a live editor `content_ours` image spliced the new response into the wrong block or dropped it from its own block.
-
-Verification passed:
-- `cargo test -p agent-doc-orchestration smconv`
-- `cargo test -p agent-doc-orchestration ipc_live_prompt_drift_content_ours_ignores_unproven_live_queue_deletions`
-- `cargo test -p agent-doc-markdown-ast exchange_appends_agent_new_heading_prose_turn`
-- `cargo test -p agent-doc-markdown-ast exchange_boundary_marker_preserved_and_new_turn_before_it`
-- `make check`
-
-The latest `src/agent-doc` CI run for `3d3c3605` is completed successfully. `#hap7`, `#fbwire`, `#qpauseux`, `#docdriftgrace`, and `#tsiftmdcrash` remain open because they are operator-verify or separate follow-up items.
-
-### Re: queue drain state — gpt-5
-
-Preflight converged the queue through the editor path and reports `queue_active: true` with `queue_continuation_required: false` and `queue_drainable_head_count: 0`. That means this cycle has no agent-drainable queue head to execute.
-
-I treated the two queue text edits as operator-verify/gating edits, not as authorization to run repo work. `#hap7`, `#tsiftmdcrash`, the equityfundingsource items, and the monsterrodholders duplicate-response item remain queued/backlogged or operator-gated according to the current document state. No source files were changed and no tests were run in this cycle.
-
-### Re: queue pin edits — gpt-5
-
-I see the queue edits that changed the equityfundingsource and monsterrodholders heads back to `:pushpin:` plus the `(HEAD)` marker artifact on the prior response heading. The binary still reports `queue_active: true`, `queue_continuation_required: false`, and `queue_drainable_head_count: 0`, so I am not dispatching or running repo work from this cycle.
-
-Current closeout: the queue/body edits were preserved through preflight, no source files were changed, and no tests were run. The remaining queue heads are still treated by the agent-doc controller as non-drainable/operator-gated/noise until a future preflight reports a drainable head.
-<!-- agent:boundary:6179486a -->
+- Archived 4 response topic(s): closeout repair; #driftrootfix; queue drain state; 1 more
+- Prior summary/context: prior compacted content: Archived 25 response topic(s): do [#qpausego]; don't stall the loop on a controller pause; d...
+<!-- agent:boundary:18c91143 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -258,7 +215,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 - ~~:round_pushpin: do [#pcwcfailfix]~~
 - ~~:round_pushpin: do [#driftrootfix]~~
 ---
-:round_pushpin: Fix equityfundingsource.md "Mixed signals"
+:pushpin: Fix equityfundingsource.md "Mixed signals"
 ```
 ● Mixed signals: queue_paused: true (an explicit pause flag) coexists with queue_continuation_required: true. Let me
   check whether this is an operator-set pause (with a reason) or transient drain-coordination state before deciding
@@ -266,7 +223,7 @@ Error: project controller command `dispatch` failed: dispatch blocked for tasks/
 ```
 ---
 ---
-:round_pushpin: monsterrodholders.md sent duplicate uncommitted response
+:pushpin: monsterrodholders.md sent duplicate uncommitted response
 ```
 - :pushpin: **migrate** — folded the 8 legacy gated `agent:backlog` items into `agent:review` (clears `legacy_gated_in_backlog`).
 - :pushpin: **Resolved 3 genuinely-finished reviews** → archived to `agent:done`: `#2qrx` (apply done; verify handed to archived `#2qrx-verify`), `#7m2s` (GTM v6 fix shipped 6/14; verify owned by open `#convfix-verify`), `#ef5h` (duplicate of archived `#fishloc-curated-rollout`; adapter blocker tracked by open `#3456`).

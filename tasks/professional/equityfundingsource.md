@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -63,7 +63,7 @@ Done — spec + tests updated, committed, pushed, and deployed. The full Availab
 **Verify + deploy:** `make check` green — **895 pass, 0 fail**, typecheck clean, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `8590852` (`3424eaf69`, pushed).
 
 One heads-up: this **removes** the separate Selected/Pending sections and the Interested Only filter in favor of dashboard parity. If you'd rather keep those standalone sections *and* add Deals of Interest on top, say so and I'll switch to the additive layout. Confidence: high — suite-verified. Escalation: none. (Note: committed via `--force-disk` — the route-owned supervisor's IPC listener was wedged on a stale binary; `admin recycle` is queued to refresh it at the next idle boundary.)
-<!-- agent:boundary:a92d5aa7 -->
+<!-- agent:boundary:1c1c8001 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,6 +76,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: An email was not sent to btak.dev+lender2@gmail.com after btak.dev+investor@gmail.com invited btak.dev+lender2@gmail.com to the Lender Bros group. deploy
 <!-- /agent:queue -->
 
 ## Backlog

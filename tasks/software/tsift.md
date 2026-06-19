@@ -171,7 +171,19 @@ Done (code-only scope you picked: `status` `use:` + `tsift workflow`, plus spec 
 - `make check` green (full suite, exit 0, no `FAILED`); `cargo install --path .` replaced `~/.cargo/bin/tsift`; live `tsift status` / `tsift workflow kg` / unknown-topic all confirmed.
 
 **CI:** run `27847989538` is `in_progress` on `6af8a07` at finalize time — local suite is fully green; will surface if it goes red. I scoped strictly to code/spec/test per your "code only (use: output)" choice — no SKILL.md/AGENTS.md/runbook edits.
-<!-- agent:boundary:2e551c79 -->
+
+### Re: Promote usage of tsift kg (duplicate) — opus-4-8
+
+This is a duplicate queue entry (qdup re-pin) of the item I completed and pushed in the previous cycle — no rework needed. The binary's own `semantic_completion_match` warning flagged it as already-resolved.
+
+Already shipped last cycle:
+- `tsift status` `use:` promotes `kg` when `.tsift/graph.db` is present (tsift `6af8a07`).
+- `tsift workflow kg` recipe added; unknown topics fail closed listing `search, kg`.
+- Spec + tests updated, `make check` green, `cargo install --path .` done, live-verified.
+- Pushed: tsift `6af8a07` → origin; superproject pointer `c68a910ab` + session doc `a87639b0d` → origin/main.
+
+Consuming this duplicate head only. Nothing else to do.
+<!-- agent:boundary:2c3a12f2 -->
 <!-- /agent:exchange -->
 
 ## Queue

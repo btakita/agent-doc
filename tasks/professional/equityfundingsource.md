@@ -60,7 +60,35 @@ Commands run:
 Verification confidence: high for the deploy path covered by local check, D1 migration state, and live root smoke test.
 
 Escalation: none.
-<!-- agent:boundary:b62d5223 -->
+
+### Re: Lender Groups pages, group-backed interest, and deploy — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.
+
+
+Implemented, pushed, and deployed.
+
+Changed paths:
+- Backend lending-group list/delete helpers, admin list/invite APIs, and lender invite account linking: `app/equityfundingsource/lib/lending_groups/{repo.ts,routes.ts}`.
+- Group-backed interest persistence and allocation cleanup/snapshotting: `app/equityfundingsource/lib/investor/{shared.ts,deal_marketplace/index.ts}` plus migration `0091_investor_interest_lending_group.sql`.
+- Lender and admin portal navigation/pages: `lib/ui--browser--efs/portal/{shared,investor,admin}/lending_groups.tsx`, portal layouts/index routes, and URL constants.
+- Lender deal-detail selector: `lib/ui--browser--efs/portal/investor/deal_detail.tsx` now lets a lender express/update interest as self or a lender group.
+- PRD/tests updated: `prds/lending-groups-plan.md`, `tests/investor-portal-e2e.test.ts`, `tests/admin-dashboard.test.ts`, and lending-group repo tests.
+
+Verification:
+- `bun test app/equityfundingsource/lib/lending_groups/repo.test.ts app/equityfundingsource/lib/lending_groups/service.test.ts tests/investor-portal-e2e.test.ts` passed.
+- `bun test tests/admin-dashboard.test.ts tests/portal-table-dialog.test.ts` passed after aligning new dialogs with the existing `.modal-body` convention.
+- `make check` passed: 882 tests, browser build, and worker build.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this submodule.
+
+Commit/deploy proof:
+- Code commit: `fa4fd50 feat(lending-groups): add portal pages and group interest`, pushed to `origin/main` in `src/equityfundingsource-dev`.
+- Deploy: `make deploy` applied remote D1 migration `0091_investor_interest_lending_group.sql` and deployed Worker version `362d88ac-72d1-47c5-9e3c-0e0741d158bd` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Confidence: high. The only untouched local change in the submodule is the pre-existing `AGENTS.md` modification, which I left out of the code commit.
+<!-- agent:boundary:3bc90fda -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,6 +101,12 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.~~
+- :pushpin: A lender can be interested in a loan on behalf of self or on behalf of a lender group.
+- :pushpin: deploy
+- Add Lender Groups page (main nav) to Lender portal and admin portal. This should include creating a new lender group via a dialog...which enables invite lenders via email address. Match email addresses with existing lender accounts or create a new lender account.
+- A lender can be interested in a loan on behalf of self or on behalf of a lender group.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -381,7 +381,7 @@ Short answer: **"Syndicate" is a real industry-standard term, but it comes from 
 My pick if you want one word that signals seriousness without misrepresenting structure: **"Syndicate"** is fine — go with **"Loan Syndicate" / "Syndicate Participants."** If you'd rather stay accurate to how private deals are actually structured, **"Multi-Lender Loan."**
 
 `#8667` stays gated — once you lock the name, I still need your calls on **persistent vs. deal-scoped** groups and **member privacy** before building. Tell me those two and I'll start (plan: `src/equityfundingsource-dev/prds/lending-groups-plan.md`).
-<!-- agent:boundary:b358bfee -->
+<!-- agent:boundary:e3a119ff -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -394,6 +394,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: Robert W mentioned "Fractionalized", so "Multi-Lender Group" or "Lending Group"?
 <!-- /agent:queue -->
 
 ## Backlog

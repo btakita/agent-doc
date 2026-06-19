@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -58,7 +58,7 @@ Good catch — fixed the discriminator, built, tested, committed, pushed, and de
 **Verify + deploy:** `make check` green — **895 pass, 0 fail**, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `1c02f38` (`5549c0b81`).
 
 Please refresh the deal page and confirm. Confidence: high — `status` is the lender-independent global deal lifecycle, so it won't be fooled by per-lender funding state. Escalation: none. (Note: written via `--force-disk` — the route-owned supervisor was running a stale binary with a wedged IPC listener; `admin recycle` is queued to refresh it at the next idle boundary.)
-<!-- agent:boundary:3427ae84 -->
+<!-- agent:boundary:fa8421f8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,6 +71,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: Reinstate the loan info that includes the property value and loan amount along side the preferred terms. deploy
 <!-- /agent:queue -->
 
 ## Backlog

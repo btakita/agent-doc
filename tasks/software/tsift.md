@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -183,14 +183,21 @@ Already shipped last cycle:
 - Pushed: tsift `6af8a07` → origin; superproject pointer `c68a910ab` + session doc `a87639b0d` → origin/main.
 
 Consuming this duplicate head only. Nothing else to do.
-<!-- agent:boundary:95b3259e -->
+
+### Re: Promote usage of tsift kg (already shipped — striking duplicate) — opus-4-8
+
+> **Queue prompt:**
+>
+> Promote usage of tsift kg
+
+
+Draining this re-pinned duplicate now that the controller recycle cleared the wedged editor IPC, so the strike heuristic can finally consume the head. No rework — the task was completed and pushed earlier: tsift `6af8a07` (origin), superproject pointer `c68a910ab` + session doc `a87639b0d` (origin/main). `tsift status` `use:` promotes `kg` when `.tsift/graph.db` exists, and `tsift workflow kg` is live.
+<!-- agent:boundary:7fe97216 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: Promote usage of tsift kg~~
-- Promote usage of tsift kg
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -76,7 +76,7 @@ I took the **query-time identity merge** (the backlog's safer option — no grap
 **Verification:** `collapses_candidates_sharing_canonical_entity_id` (merged rep keeps max degree; distinct canonical id + local-slug node stay separate); `cargo test -p tsift-kg` 34 passed, clippy clean, full `make check` exit 0, `tsift 0.1.70` reinstalled. Committed `0648af5`, pushed; superproject pointer `ee8437d34`.
 
 Next queue head: `do [#kgconfrank]` (weight `confidence_source` so derived defaults don't outrank real model scores). `#kgconfreqverify` stays operator-gated.
-<!-- agent:boundary:2bccb00d -->
+<!-- agent:boundary:f91a1d84 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -84,7 +84,7 @@ Next queue head: `do [#kgconfrank]` (weight `confidence_source` so derived defau
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#kgentitycollapse]~~
 - do [#kgconfrank]
-- :pushpin: do [#kgconfreqverify]
+- ~~:pushpin: do [#kgconfreqverify]~~
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -93,13 +93,13 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kgconfreqverify] [operator-verify] Verify the confidence-required schema change (#kgconf, payload_schema in packages/tsift-kg/src/ollama.rs) does not reduce extraction yield on the live local model (Qwen3-32B-Q4) via an A/B over a real corpus; if required-confidence cuts entities/relations or induces hallucinated scores, relax to prompt-only + the derived-default fallback. Needs GPU + Ollama (operator-gated).
 - [ ] [#kgconfrank] tsift KG context-pack ranking/gating ignores the new confidence_source tag (#kgconf): node_to_candidate in packages/tsift-kg/src/context_pack.rs reads only the raw confidence, so a derived default 0.500 outranks and out-survives a real model 0.300. Thread confidence_source into ranking (model-tier above default-tier) and/or min_confidence gating so derived defaults are distinguishable from model scores — completes the operability #kgconf set up.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#kgconfreqverify] [operator-verify] Verify the confidence-required schema change (#kgconf, payload_schema in packages/tsift-kg/src/ollama.rs) does not reduce extraction yield on the live local model (Qwen3-32B-Q4) via an A/B over a real corpus; if required-confidence cuts entities/relations or induces hallucinated scores, relax to prompt-only + the derived-default fallback. Needs GPU + Ollama (operator-gated).
 - [/] [#vmax] [operator-verify] Enable crates.io OIDC publishing for tsift (advances review #1td4; code already shipped in fe4144b/f29f7a2, release.yml crates job uses rust-lang/crates-io-auth-action@v1). Operator-gated steps (need crates.io account + browser 2FA — agent cannot perform): (1) On crates.io register a Trusted Publisher for EACH of the 23 tsift crates — GitHub repo btakita/tsift, workflow release.yml, no environment: tsift-core, tsift -md-ast, tsift-graph, tsift-sqlite, tsift-algorithms, tsift-resolution, tsift-cache, tsift-tokensave, tsift-libsql, tsift-index, tsift-summarize, tsift-quality, tsift-agent-doc, tsift-digest, tsift-search, tsift-status, tsift-session, tsift-memory, tsift-memgraphrag, tsift-surrealdb, tsift-cli, tsift, tsift-sim-world. (2) Enable the gate var: gh variable set TSIFT_ENABLE_CRATES_PUBLISH --body true. (3) Force-move the v0.1.70 tag to HEAD and push to re-trigger; confirm the publish-crates.io job authenticates via OIDC (no CARGO_REGISTRY_TOKEN) and publishes.
 - [/] [#1td4] Release infra: crates.io publish job in .github/workflows/release.yml is MIGRATED to OIDC trusted publishing (commit fe4144b, on origin/main f29f7a2; uses rust-lang/crates-io-auth-action@v1, id-token: write, no CARGO_REGISTRY_TOKEN). Code complete. Remaining is operator-gated and tracked as actionable backlog #vmax: register the Trusted Publisher per crate on crates.io (23 crates), set repo var TSIFT_ENABLE_CRATES_PUBLISH=true, then re-tag v0.1.70 to verify OIDC publish. Stays gated until operator completes crates.io registration.
 <!-- /agent:review -->

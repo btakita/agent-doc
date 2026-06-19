@@ -325,6 +325,13 @@ mod tests {
 
     #[test]
     fn key_event_format_is_structured_and_sanitized() {
+        // `format_key_event` appends `editor_attempt_id=` when the process-global
+        // `AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID` env var is set. A concurrent
+        // `input_events_include_editor_route_attempt_when_present` would otherwise
+        // race that var into this exact-match assertion (`#kbkz`: env-var pollution
+        // made `make check` non-deterministically RED). Hold the env lock and pin
+        // the var absent for this test's duration so the read is deterministic.
+        let _attempt_guard = EnvGuard::remove(EDITOR_ROUTE_ATTEMPT_ID_ENV);
         let event = format_key_event(
             "route direct",
             "pane:%42",
@@ -343,6 +350,9 @@ mod tests {
 
     #[test]
     fn payload_event_hashes_text_without_exposing_it() {
+        // Same `#kbkz` env-pollution guard: pin `AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID`
+        // absent so a concurrent setter cannot perturb this event's contents.
+        let _attempt_guard = EnvGuard::remove(EDITOR_ROUTE_ATTEMPT_ID_ENV);
         let event = format_payload_event(
             "queue_dispatch",
             "pane:%7",

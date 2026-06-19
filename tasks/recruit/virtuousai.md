@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -208,13 +208,46 @@ Short answer: **keep the forwardable note, but send it as an attached file — d
 One caveat on the note-as-PDF: right now the forwardable note lives inside the draft at [`mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md`](../../mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md), mixed with the private-to-Laura part. To attach it, it needs to be split out into a standalone, client-facing file (just the forwardable block, no "private note to Laura" framing around it). **Say the word and I'll generate that standalone forwardable note as a PDF** ready to attach — then you have three clean pieces: the LinkedIn message text, the resume PDF, and the forwardable-note PDF.
 
 Nothing sent.
-<!-- agent:boundary:98bde362 -->
+
+### Re: create the message as a PDF + print the message to Laura — opus-4-8
+
+> **Queue prompt:**
+>
+> Create the message as a pdf. Print the message to Laura.
+
+
+Done. The forwardable note is now a standalone client-facing PDF, and the private message to Laura is below for you to paste into LinkedIn.
+
+**PDF created:** [`mail/drafts/2026-06-18-virtuousai-forward-note.pdf`](../../mail/drafts/2026-06-18-virtuousai-forward-note.pdf) (rendered with weasyprint, Palatino to match the resume). It contains only the forward-to-team note — no "private note to Laura" framing — so Laura can pass it straight to Chris and Rory. Verified the full text via `pdftotext`. The standalone source markdown is alongside it at [`2026-06-18-virtuousai-forward-note.md`](../../mail/drafts/2026-06-18-virtuousai-forward-note.md).
+
+**Your two attachments for the LinkedIn message:**
+- `resume/BrianTakita-virtuousai.pdf` — tailored resume
+- `mail/drafts/2026-06-18-virtuousai-forward-note.pdf` — the forwardable note (just made)
+
+---
+
+**Message to Laura (paste this into the LinkedIn message body):**
+
+> Hi Laura,
+>
+> Quick thing to say plainly: I'm ready to commit to this full-time. MonsterRodHolders runs on light operational time, and I architected Equity Funding Source with a subcontractor handling the build, so neither one competes with a full-time role. My calendar is open.
+>
+> I've attached my updated resume and a short note you're welcome to forward to Chris and Rory.
+>
+> Looking forward to continuing the conversation.
+>
+> Thanks,
+> Brian
+
+---
+
+That's the full send: the message above as the LinkedIn body, with both PDFs attached via the paperclip. The note-PDF carries your builder+operator pitch to the team in your words; the resume backs it. Nothing sent — ready when you are.
+<!-- agent:boundary:06fabe27 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Create the message as a pdf. Print the message to Laura.
 <!-- /agent:queue -->
 
 ## Backlog

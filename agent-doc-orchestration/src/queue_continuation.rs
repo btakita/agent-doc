@@ -850,7 +850,14 @@ fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directive: b
     // below made it worse by promoting *every* non-fenced line to a drainable
     // directive. Checked BEFORE the `#id` fast-path so a fragment carrying a stray
     // cross-doc id is still demoted.
-    if text.contains("```")
+    //   4. a MULTI-LINE head (text spans more than one line) — a pasted console dump
+    //      or a `---`-wrapped multi-bullet response paste, even when a line carries a
+    //      stray `[#id]` (the `#5eq8`-in-a-console-dump false positive). A genuine
+    //      directive is a single line; a single-line head wrapped in `---` fences is
+    //      still classified normally below, so a real `---`-wrapped `do [#id]` survives.
+    //      (#qnoise-multiline-strike)
+    if text.contains('\n')
+        || text.contains("```")
         || text.contains("<!-- agent:")
         || text.contains("agent:boundary")
         || leads_with_markdown_bold_report(text)
@@ -904,8 +911,16 @@ pub fn queue_stale_noise_lines(file: &Path) -> usize {
     entries
         .iter()
         .filter(|entry| match entry {
+            // Counts must match EXACTLY what `queue prune-noise` excises
+            // (#qnoise-multiline-strike): a Prompt is noise when not drainable (the
+            // classifier demotes multi-line / fenced text), and a pasted-evidence
+            // `Freeform` line (bare ``` console fence / prose head) is noise while
+            // `---`/`~~~` separators and `re [#id]` references are not.
             crate::queue::QueueEntry::Prompt(prompt) => {
                 !is_drainable_queue_head_with_context(&prompt.text, preset_supplies_directive)
+            }
+            crate::queue::QueueEntry::Freeform(line) => {
+                crate::queue::is_noise_freeform_line(line)
             }
             _ => false,
         })

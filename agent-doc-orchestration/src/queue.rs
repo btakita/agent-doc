@@ -165,11 +165,47 @@ pub fn strip_auto_from_tag(tag: &str) -> String {
 }
 
 pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
-    let mut entries = Vec::new();
-    let lines: Vec<&str> = body.lines().collect();
+    Ok(parse_spans(body)?
+        .into_iter()
+        .map(|(entry, _)| entry)
+        .collect())
+}
+
+/// Parse a queue body into entries paired with their byte range within `body`.
+///
+/// Each range spans the entry's full source extent — including fence open/close
+/// lines and the trailing newline — so a caller can excise an exact entry by
+/// range. [`parse`] is the entry-only thin wrapper over this. This is the SINGLE
+/// source of queue-head segmentation (multiline `---`/```/~~~ fenced Prompt heads
+/// included): any second enumerator that disagrees lets a head class evade the
+/// strike/consume path. That divergence is exactly how multiline `:round_pushpin:`
+/// paste blocks (surfaced here as `Prompt { multiline: true }`, but invisible to
+/// the bullet-only `markdown_ast` `item_nodes`) accumulated in the queue forever
+/// with no way for `queue prune-noise` to clear them (#qnoise-multiline-strike).
+pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>)>> {
+    let body_len = body.len();
+    // Mirror `str::lines()` line content while retaining each line's byte start,
+    // so entry ranges are exact even across `\r\n` and a missing trailing newline.
+    let mut lines: Vec<&str> = Vec::new();
+    let mut line_starts: Vec<usize> = Vec::new();
+    let mut pos = 0usize;
+    for raw in body.split_inclusive('\n') {
+        line_starts.push(pos);
+        let without_nl = raw.strip_suffix('\n').unwrap_or(raw);
+        lines.push(without_nl.strip_suffix('\r').unwrap_or(without_nl));
+        pos += raw.len();
+    }
+    let span = |start_line: usize, end_line: usize| -> std::ops::Range<usize> {
+        let start = line_starts.get(start_line).copied().unwrap_or(body_len);
+        let end = line_starts.get(end_line).copied().unwrap_or(body_len);
+        start..end
+    };
+
+    let mut entries: Vec<(QueueEntry, std::ops::Range<usize>)> = Vec::new();
     let mut i = 0;
 
     while i < lines.len() {
+        let start_i = i;
         let line = lines[i];
         let trimmed = line.trim();
 
@@ -179,10 +215,13 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
         }
 
         if crate::queue_command::is_slash_command(trimmed) {
-            entries.push(QueueEntry::Prompt(QueuePrompt {
-                text: trimmed.to_string(),
-                multiline: false,
-            }));
+            entries.push((
+                QueueEntry::Prompt(QueuePrompt {
+                    text: trimmed.to_string(),
+                    multiline: false,
+                }),
+                span(start_i, start_i + 1),
+            ));
             i += 1;
             continue;
         }
@@ -197,22 +236,23 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             _ => line,
         };
         if let Some(rest) = item_line.strip_prefix("- ") {
-            if let Some(completed) = parse_completed_inline(rest) {
-                entries.push(QueueEntry::Completed(QueuePrompt {
+            let entry = if let Some(completed) = parse_completed_inline(rest) {
+                QueueEntry::Completed(QueuePrompt {
                     text: completed.to_string(),
                     multiline: false,
-                }));
+                })
             } else if is_reference_directive(rest) {
                 // Optional-`do` grammar (Stage 1): a `re [#id]` / `re #id` line
                 // *references* a tracked id without executing it. Preserve it
                 // verbatim as `Freeform` so it is never run, synced, or reaped.
-                entries.push(QueueEntry::Freeform(line.to_string()));
+                QueueEntry::Freeform(line.to_string())
             } else {
-                entries.push(QueueEntry::Prompt(QueuePrompt {
+                QueueEntry::Prompt(QueuePrompt {
                     text: rest.to_string(),
                     multiline: false,
-                }));
-            }
+                })
+            };
+            entries.push((entry, span(start_i, start_i + 1)));
             i += 1;
             continue;
         }
@@ -220,7 +260,7 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
         if let Some(rest) = trimmed.strip_prefix("preset ") {
             let preset = rest.trim();
             if !preset.is_empty() {
-                entries.push(QueueEntry::Preset(preset.to_string()));
+                entries.push((QueueEntry::Preset(preset.to_string()), span(start_i, start_i + 1)));
                 i += 1;
                 continue;
             }
@@ -229,7 +269,10 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
         if let Some(rest) = trimmed.strip_prefix("dispatch ") {
             let preset = rest.trim();
             if !preset.is_empty() {
-                entries.push(QueueEntry::Dispatch(preset.to_string()));
+                entries.push((
+                    QueueEntry::Dispatch(preset.to_string()),
+                    span(start_i, start_i + 1),
+                ));
                 i += 1;
                 continue;
             }
@@ -237,13 +280,13 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
 
         if is_start_fence(trimmed) {
             let datetime = parse_start_datetime(trimmed);
-            entries.push(QueueEntry::StartFence(datetime));
+            entries.push((QueueEntry::StartFence(datetime), span(start_i, start_i + 1)));
             i += 1;
             continue;
         }
 
         if is_stop_fence(trimmed) {
-            entries.push(QueueEntry::StopFence);
+            entries.push((QueueEntry::StopFence, span(start_i, start_i + 1)));
             i += 1;
             continue;
         }
@@ -263,16 +306,17 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
                         text,
                         multiline: true,
                     };
-                    if completed {
-                        entries.push(QueueEntry::Completed(prompt));
+                    let entry = if completed {
+                        QueueEntry::Completed(prompt)
                     } else {
-                        entries.push(QueueEntry::Prompt(prompt));
-                    }
+                        QueueEntry::Prompt(prompt)
+                    };
+                    entries.push((entry, span(start_i, close_idx + 1)));
                 }
                 i = close_idx + 1;
                 continue;
             }
-            entries.push(QueueEntry::Freeform(line.to_string()));
+            entries.push((QueueEntry::Freeform(line.to_string()), span(start_i, start_i + 1)));
             i += 1;
             continue;
         }
@@ -284,15 +328,18 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             if let Some(close_idx) = (i + 1..lines.len()).find(|&j| lines[j].trim() == "---") {
                 let text = lines[i + 1..close_idx].join("\n");
                 if !text.trim().is_empty() {
-                    entries.push(QueueEntry::Prompt(QueuePrompt {
-                        text,
-                        multiline: true,
-                    }));
+                    entries.push((
+                        QueueEntry::Prompt(QueuePrompt {
+                            text,
+                            multiline: true,
+                        }),
+                        span(start_i, close_idx + 1),
+                    ));
                 }
                 i = close_idx + 1;
                 continue;
             }
-            entries.push(QueueEntry::Freeform(line.to_string()));
+            entries.push((QueueEntry::Freeform(line.to_string()), span(start_i, start_i + 1)));
             i += 1;
             continue;
         }
@@ -301,7 +348,7 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
         // queue consume/resume/dispatch guards stay resilient to a polluted
         // queue body (#jb-run-agent-doc-response-queue-contamination). The line
         // is preserved as-is and never treated as an actionable item.
-        entries.push(QueueEntry::Freeform(line.to_string()));
+        entries.push((QueueEntry::Freeform(line.to_string()), span(start_i, start_i + 1)));
         i += 1;
     }
 
@@ -420,6 +467,33 @@ fn is_reference_directive(text: &str) -> bool {
     };
     let rest = rest.trim_start();
     rest.starts_with("[#") || rest.starts_with('#')
+}
+
+/// True when a `Freeform` queue entry is pasted **noise** that `queue prune-noise`
+/// should excise (#qnoise-multiline-strike). The parser routes every unrecognized
+/// line to `Freeform` so a polluted queue cannot break parsing of the real items
+/// below it — but that same bucket also accumulates operator-pasted console/agent
+/// evidence (a ``` code fence and the prose around it) that never drains and can
+/// never be struck. Everything reaching `Freeform` is pasted noise EXCEPT two
+/// legitimate shapes that must be preserved: a structural separator / control fence
+/// (blank, `---`, `~~~…` — an unpaired bare `---`/`~~~` the parser keeps verbatim),
+/// or an optional-`do` `re [#id]` / `re #id` reference (possibly bulleted). A ```
+/// code-fence line, a `:pushpin:`/prose head, or a raw console line is noise.
+pub(crate) fn is_noise_freeform_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed == "---" || trimmed.starts_with("~~~") {
+        return false;
+    }
+    // A `--- start`/`--- stop`/`--- start at …` control line is recognized as a
+    // fence entry, never `Freeform`, but guard the prefix anyway for resilience.
+    if trimmed.starts_with("--- ") {
+        return false;
+    }
+    let de_bulleted = trimmed.strip_prefix("- ").unwrap_or(trimmed);
+    if is_reference_directive(de_bulleted) {
+        return false;
+    }
+    true
 }
 
 /// Extract the `#id` from `do [#id]` (or `do #id`) prompt text, normalized to
@@ -1340,6 +1414,59 @@ fn dedup_key_for_prompt(prompt: &QueuePrompt) -> Option<String> {
     do_prompt_id(&trimmed)
 }
 
+/// Collapse duplicate **bare id-reference** queue heads (`[#id]` / `#id` with
+/// nothing trailing — the pure reference form the backlog→queue mirror and CRDT
+/// replay emit), keeping the first occurrence (#qdup-bare-id).
+///
+/// Unlike [`dedup_live_prompts`], this deliberately does NOT touch `do [#id]`
+/// **directive** heads: a duplicate `do [#id]` can be intentional "run it twice"
+/// user queue intent (`#queue-dedup-destroys-intentional-duplicates`), but a
+/// duplicate bare reference head is always a mirror/replay artifact — the
+/// operator-reported "agent-doc duplicated my queue items" bug (`[#sqedit-race]` /
+/// `[#qpausemix-verify]` appearing twice). Free-text prompts — including a directive
+/// that merely cites an id with trailing text (`#id continue the drain`) — are
+/// preserved, as are multiline blocks. `Completed`/`Preset`/fence entries untouched.
+pub fn dedup_bare_id_reference_heads(entries: &[QueueEntry]) -> Option<Vec<QueueEntry>> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut deduped = Vec::with_capacity(entries.len());
+    let mut dropped = false;
+    for entry in entries {
+        if let QueueEntry::Prompt(prompt) = entry
+            && let Some(key) = bare_id_reference_key(prompt)
+            && !seen.insert(key)
+        {
+            dropped = true;
+            continue;
+        }
+        deduped.push(entry.clone());
+    }
+    if dropped { Some(deduped) } else { None }
+}
+
+fn bare_id_reference_key(prompt: &QueuePrompt) -> Option<String> {
+    if prompt.multiline {
+        return None;
+    }
+    let trimmed = strip_priority_markers(&prompt.text).trim().to_ascii_lowercase();
+    // ONLY a pure `[#id]` / `#id` head — nothing trailing. `do [#id]` is excluded
+    // (it starts with `do`, so neither prefix matches) and a free-text directive
+    // citing an id has trailing text that fails the `id == token` whole-match check.
+    let token = trimmed
+        .strip_prefix("[#")
+        .and_then(|rest| rest.strip_suffix(']'))
+        .or_else(|| trimmed.strip_prefix('#'))?
+        .trim();
+    let id: String = token
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if !id.is_empty() && id == token {
+        Some(id)
+    } else {
+        None
+    }
+}
+
 pub fn first_prompt(entries: &[QueueEntry]) -> Option<&QueuePrompt> {
     entries.iter().find_map(|e| match e {
         QueueEntry::Prompt(p) => Some(p),
@@ -2202,6 +2329,48 @@ mod tests {
             "all three same-id heads collapse to the first occurrence: {deduped:?}"
         );
         assert_eq!(render(&deduped), "- do [#x]\n");
+    }
+
+    #[test]
+    fn dedup_bare_id_reference_heads_collapses_mirror_duplicates() {
+        // #qdup-bare-id: the backlog→queue mirror emits a BARE `[#id]` head (no `do`).
+        // The operator-reported "agent-doc duplicated my queue items" bug was
+        // `[#sqedit-race]` / `[#qpausemix-verify]` appearing twice. Bare reference
+        // dups collapse; `do [#id]` directive dups are PRESERVED (intentional intent,
+        // #queue-dedup-destroys-intentional-duplicates); free-text is preserved.
+        let entries = parse(concat!(
+            "- [#sqedit-race]\n",
+            "- [#qpausemix-verify]\n",
+            "- [#sqedit-race]\n",                    // bare duplicate → collapse
+            "- :pushpin: [#qpausemix-verify]\n",     // pinned bare dup → collapse
+            "- #sqedit-race\n",                      // unbracketed bare dup → collapse
+            "- do [#sqedit-race]\n",                 // `do` directive → PRESERVED
+            "- do [#sqedit-race]\n",                 // intentional `do` duplicate → PRESERVED
+            "- #sqedit-race continue the drain\n",   // free-text citing an id → PRESERVED
+        ))
+        .unwrap();
+        let deduped = dedup_bare_id_reference_heads(&entries)
+            .expect("bare id-reference duplicates should collapse");
+        assert_eq!(
+            render(&deduped),
+            concat!(
+                "- [#sqedit-race]\n",
+                "- [#qpausemix-verify]\n",
+                "- do [#sqedit-race]\n",
+                "- do [#sqedit-race]\n",
+                "- #sqedit-race continue the drain\n",
+            ),
+            "bare refs collapse to first; do-directives + free-text preserved: {deduped:?}"
+        );
+    }
+
+    #[test]
+    fn dedup_bare_id_reference_heads_noop_without_bare_duplicates() {
+        let entries = parse("- do [#a]\n- do [#a]\n- [#b]\n- #c continue\n").unwrap();
+        assert!(
+            dedup_bare_id_reference_heads(&entries).is_none(),
+            "no bare-ref duplicates (do-dups are intentional) → no mutation"
+        );
     }
 
     #[test]

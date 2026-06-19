@@ -1571,6 +1571,34 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         eprintln!("[preflight] queue: collapsed {dropped} duplicate queue node-key(s)");
     }
 
+    // Collapse duplicate BARE id-reference heads (`[#id]` / `#id`) that the
+    // backlog→queue mirror / CRDT replay re-emitted for the same backlog item,
+    // keeping the first (#qdup-bare-id). The node-key dedup above only removes
+    // exact-same-occurrence dups, so a re-emitted `[#sqedit-race]` accumulated as a
+    // visible duplicate ("agent-doc duplicated my queue items"). This deliberately
+    // does NOT collapse `do [#id]` directive duplicates — those can be intentional
+    // "run it twice" intent (#queue-dedup-destroys-intentional-duplicates) — nor any
+    // free-text head.
+    if let Some(deduped_entries) =
+        crate::queue::dedup_bare_id_reference_heads(&activation.entries_after)
+    {
+        let dropped = activation.entries_after.len() - deduped_entries.len();
+        let new_body = crate::queue::render(&deduped_entries);
+        current_content = {
+            let comps = crate::component::parse(&current_content)?;
+            let q = comps
+                .iter()
+                .find(|c| c.name == "queue")
+                .context("queue maintenance: queue component vanished before id-dedup")?;
+            q.replace_content(&current_content, &new_body)
+        };
+        activation.entries_after = deduped_entries;
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: collapsed {dropped} duplicate id-backed queue head(s) (#qdup-bare-id)"
+        );
+    }
+
     // Consume start fence if needed
     if activation.consumed_start_fence {
         let new_body = crate::queue::render(&activation.entries_after);

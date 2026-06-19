@@ -909,6 +909,16 @@ fn noise_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
 /// supervisor races on direct queue edits)", leaving the operator no safe way to
 /// clear pasted bug-report / console-evidence lines. Routing the strike through the
 /// same converge path the closeout strikes use keeps it supervisor-safe.
+///
+/// Two head shapes are cleared (#qnoise-multiline-strike):
+///   1. **Bulleted** single-line noise (`- <prose>`) — struck via durable node keys
+///      (`markdown_ast` `item_nodes`), preserving the strike-through marker so a
+///      closeout can prove the struck state.
+///   2. **Multiline** `---`/```/~~~-fenced noise Prompt blocks (operator-pasted
+///      `:round_pushpin:` console dumps) — these are NOT bulleted list items and
+///      contain a fenced region, so `item_nodes` never enumerated them and they
+///      accumulated forever. They are excised by exact byte range from the single
+///      source of queue-head segmentation (`queue::parse_spans`).
 pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
     let _lock = acquire_doc_lock(file)?;
     let content =
@@ -917,26 +927,17 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
     if fm.queue_active != Some(true) {
         return Ok(0);
     }
-    let keys = noise_queue_head_node_keys(&content)?;
-    if keys.is_empty() {
-        return Ok(0);
-    }
-    let new_document = consume_queue_nodes_by_key(&content, &keys)?;
-    if new_document == content {
+    let (new_document, struck) = strike_all_noise_queue_heads(&content)?;
+    if struck == 0 || new_document == content {
         return Ok(0);
     }
 
-    // Snapshot sync: strike the same noise heads in the snapshot by its own node
-    // keys (keys are position/hash derived and need not equal the document's) so
-    // required closeouts prove both sides converge on the struck state.
+    // Snapshot sync: clear the same noise heads in the snapshot (its own node keys /
+    // spans, derived independently) so required closeouts prove both sides converge.
     let new_snapshot = match snapshot::load(file)? {
         Some(snap) => {
-            let snap_keys = noise_queue_head_node_keys(&snap)?;
-            if snap_keys.is_empty() {
-                None
-            } else {
-                Some(consume_queue_nodes_by_key(&snap, &snap_keys)?)
-            }
+            let (new_snap, _) = strike_all_noise_queue_heads(&snap)?;
+            if new_snap == snap { None } else { Some(new_snap) }
         }
         None => None,
     };
@@ -947,19 +948,71 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
         snapshot::save(file, &snap)?;
     }
 
-    eprintln!(
-        "[queue] pruned {} non-drainable noise head(s) (#goqstall2)",
-        keys.len()
-    );
+    eprintln!("[queue] pruned {struck} non-drainable noise head(s) (#goqstall2)");
     crate::ops_log::log_op(
         file,
-        &format!(
-            "queue_noise_prune file={} struck={}",
-            file.display(),
-            keys.len()
-        ),
+        &format!("queue_noise_prune file={} struck={}", file.display(), struck),
     );
-    Ok(keys.len())
+    Ok(struck)
+}
+
+/// Clear every non-drainable **noise** queue head from `content`, returning the
+/// rewritten document and the number struck. Multiline fenced noise blocks are
+/// excised by byte range (`queue::parse_spans`); bulleted single-line noise is
+/// struck by durable node key (`item_nodes`). Multiline removal runs first so the
+/// node-key pass sees stable post-excision offsets. (#qnoise-multiline-strike)
+fn strike_all_noise_queue_heads(content: &str) -> Result<(String, usize)> {
+    let comps = component::parse(content)?;
+    let Some(queue) = comps.iter().find(|c| c.name == "queue") else {
+        return Ok((content.to_string(), 0));
+    };
+    let preset_supplies_directive = queue.attrs.contains_key("preset");
+    let body_start = queue.open_end;
+    let body = &content[body_start..queue.close_start];
+
+    // 1. Multiline noise Prompt blocks AND pasted-evidence `Freeform` lines, by exact
+    //    byte range (#qnoise-multiline-strike). A multiline `---`/~~~-fenced Prompt is
+    //    excised only when its text is noise (multi-line console dump, nested ``` fence,
+    //    agent-marker, or bold-report) — a single-line `do [#id]` directive that merely
+    //    happens to be `---`-wrapped stays drainable and is preserved. A bare ```` ``` ````
+    //    console paste (the most common operator flood) is not a recognized queue fence,
+    //    so it lands as a run of `Freeform` lines instead; `is_noise_freeform_line`
+    //    excises those while preserving `---`/`~~~` separators and `re [#id]` references.
+    let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+    for (entry, range) in crate::queue::parse_spans(body)? {
+        let is_noise = match &entry {
+            crate::queue::QueueEntry::Prompt(prompt) => {
+                prompt.multiline
+                    && crate::queue_continuation::is_noise_queue_head(
+                        &prompt.text,
+                        preset_supplies_directive,
+                    )
+            }
+            crate::queue::QueueEntry::Freeform(line) => {
+                crate::queue::is_noise_freeform_line(line)
+            }
+            _ => false,
+        };
+        if is_noise {
+            ranges.push((body_start + range.start)..(body_start + range.end));
+        }
+    }
+    let multiline_struck = ranges.len();
+    let mut working = content.to_string();
+    ranges.sort_by_key(|r| r.start);
+    // Excise back-to-front so earlier offsets stay valid.
+    for range in ranges.into_iter().rev() {
+        working.replace_range(range, "");
+    }
+
+    // 2. Bulleted single-line noise heads, struck via durable node keys.
+    let keys = noise_queue_head_node_keys(&working)?;
+    let bulleted_struck = keys.len();
+    if !keys.is_empty() {
+        working = consume_queue_nodes_by_key(&working, &keys)?;
+    }
+
+    Ok((working, multiline_struck + bulleted_struck))
 }
 
 /// Strike an **orphaned id-backed queue head** by id (#orphanqhead). An id-backed
@@ -3071,6 +3124,74 @@ Old.
         assert!(
             result.contains("~~lingering pasted detail line~~"),
             "tail noise struck:\n{result}"
+        );
+
+        // Idempotent: a second prune finds nothing left to strike.
+        assert_eq!(
+            prune_noise_queue_heads(&doc).unwrap(),
+            0,
+            "second prune must be a no-op"
+        );
+    }
+
+    #[test]
+    fn prune_noise_excises_multiline_fenced_paste_blocks_under_a_preset() {
+        // #qnoise-multiline-strike: operator-pasted `:round_pushpin:` console dumps
+        // land in the queue as multiline `---`-fenced Prompt blocks. They are NOT
+        // bulleted list items and contain a ``` fence, so the bullet-only
+        // `item_nodes` strike path never enumerated them — `queue prune-noise`
+        // reported "nothing to prune" while the flood persisted on disk forever
+        // (only an editor reload appeared to clear it). They must now be excised by
+        // byte range. A `preset` attr makes bare free-text drainable, so the ONLY
+        // thing pruned here is the fenced paste block; id-backed heads survive.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue preset=\"#spec-test-build-install-commit-push\" go -->\n",
+            "- [#sqedit-race]\n",  // id-backed → preserved
+            "- [#keepme]\n",       // id-backed → preserved
+            // Shape 1: `---`-wrapped block whose text contains a nested ``` fence.
+            "---\n",
+            ":round_pushpin: Fix the root cause of the HEAD issue with already done items.\n",
+            "```\n",
+            "  The one thing I can't fix from here — please reload the doc in IDEA.\n",
+            "```\n",
+            "---\n",
+            // Shape 2: bare ```-fenced console dump whose text carries a stray `#id`
+            // (`#5eq8`) — previously misclassified as a drainable id-backed head, so it
+            // evaded both the noise counter and prune-noise.
+            ":pushpin: JB `Run Agent Doc` on equityfundingsource.md did not start.\n",
+            "```\n",
+            "Error: dispatch blocked: only the gated #5eq8 (design-blocked) remains.\n",
+            "```\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        // 5 noise entries: the `---`-wrapped block (1) + the bare-```-fenced block's
+        // 4 `Freeform` lines (`:pushpin:` head, ```, console line, ```).
+        let struck = prune_noise_queue_heads(&doc).unwrap();
+        assert_eq!(struck, 5, "both pasted blocks (all their lines) must be excised");
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- [#sqedit-race]\n") && result.contains("- [#keepme]\n"),
+            "id-backed heads must survive:\n{result}"
+        );
+        assert!(
+            !result.contains(":round_pushpin: Fix the root cause"),
+            "the `---`-wrapped block head must be gone:\n{result}"
+        );
+        assert!(
+            !result.contains("please reload the doc in IDEA"),
+            "the `---`-wrapped block body must be gone:\n{result}"
+        );
+        assert!(
+            !result.contains("dispatch blocked") && !result.contains("#5eq8"),
+            "the bare-fenced console dump (with stray #id) must be gone:\n{result}"
         );
 
         // Idempotent: a second prune finds nothing left to strike.

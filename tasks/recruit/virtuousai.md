@@ -17,7 +17,7 @@ prompt_presets:
   '#spec-test-commit': update spec + tests. commit
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -182,13 +182,38 @@ Bottom line: keep the reassurance simple and steady-state, don't over-explain, a
 So the answer to "attach both the email and the message to the engineers?" — there's no separate send to the engineers. One email to Laura, resume PDF attached, two-part body. She handles the client side.
 
 Nothing sent — the draft's ready when you are.
-<!-- agent:boundary:96c0c2a6 -->
+
+### Re: LinkedIn-only — attach the forwardable note as a file, or skip it? — opus-4-8
+
+> **Queue prompt:**
+>
+> I don't have Laura's email. So it has to be the LinkedIn message. Should I add the message as an attachment file or should I even have it?
+
+
+Short answer: **keep the forwardable note, but send it as an attached file — don't paste it into the LinkedIn message body.**
+
+**Yes, you can attach files on LinkedIn.** 1:1 LinkedIn messages support file attachments (the paperclip icon, ~20MB, PDFs are fine). So the channel difference from email is smaller than it seemed — you can still hand Laura both the resume PDF and a clean forwardable note.
+
+**Yes, still have the forwardable note — it earns its place.** Laura uploads your materials to the client herself. Without the note, Chris and Rory get resume + recruiter summary. With it, your framing (builder *and* operator) reaches the engineers in **your** words. That's the whole point of having crafted it. Don't drop it.
+
+**But make it an attached file, not body text.** Two reasons:
+- **LinkedIn message bodies are plain and cramped.** A two-part wall of text (private note + forwardable block) reads as clutter and the formatting dies. A file keeps it clean.
+- **A standalone file is trivially forwardable.** Laura can pass the file straight to the client without copy-pasting or editing — same reason email-with-attachment was the original recommendation. The file *is* the forwardable artifact.
+
+**So the LinkedIn send looks like this:**
+- **Message body:** short and personal to Laura — the availability reassurance, plus one line: *"Attached is my updated resume and a short note you're welcome to forward to Chris and Rory."* This is also where your *"Looking forward to continuing the conversation"* closer fits perfectly (you've actually talked to her).
+- **Attachment 1:** `BrianTakita-virtuousai.pdf` (the tailored resume).
+- **Attachment 2:** the forwardable note as its own PDF — so it travels clean to the client.
+
+One caveat on the note-as-PDF: right now the forwardable note lives inside the draft at [`mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md`](../../mail/drafts/2026-06-18-laura-virtuousai-value-forward-to-chris.md), mixed with the private-to-Laura part. To attach it, it needs to be split out into a standalone, client-facing file (just the forwardable block, no "private note to Laura" framing around it). **Say the word and I'll generate that standalone forwardable note as a PDF** ready to attach — then you have three clean pieces: the LinkedIn message text, the resume PDF, and the forwardable-note PDF.
+
+Nothing sent.
+<!-- agent:boundary:55146557 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- I don't have Laura's email. So it has to be the LinkedIn message. Should I add the message as an attachment file or should I even have it?
 <!-- /agent:queue -->
 
 ## Backlog

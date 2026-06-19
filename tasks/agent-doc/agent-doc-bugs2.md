@@ -18,7 +18,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -65,15 +65,15 @@ Not draining the next head. You said "drain #1vhn only, then pause" last turn; t
 - **Next head `do [#supselfheal]` is already shipped** — submodule HEAD `318aceee` is the supselfheal feature commit (wedge-trigger recycle + bounded re-exec escalation, Ph2-5). Draining it under the `#spec-test-build-install-commit-push` preset would just re-run build/install, the hazard you paused for.
 
 Say "go" (or re-point the queue) when you want me to resume; otherwise I'm stopped here.
-<!-- agent:boundary:1329fecf -->
+<!-- agent:boundary:24a3b5ea -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
 - ~~:pushpin: [#1vhn]~~
-- :pushpin: do [#supselfheal]
 - :pushpin: As I was typing in a queue item into virtuousai.md, parts of the document was duplicated, corrupting the document. The CRDT/semantic merge should be constrained only to the structural part that it applies to. Do multiple merges for each structural part as needed. This should remove the possibility of structural corruption and should reduce conflicts. If the operator deletes parts of the structure in the document and there is new agent content for a deleted structure, mention the fact in the exchange but do not attempt to merge...as the in-editor document is the source of truth.
+- :pushpin: do [#supselfheal]
 - :pushpin: Turn crashed on virtuousai.md. ![img_49.png](img_49.png)
 ---
 :pushpin: JB `Run Agent Doc` on this file
@@ -172,6 +172,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qpausego] #agent-doc-bug `agent-doc admin queue pause <FILE>` is accepted (durable receipt, e.g. ids 68/70 at generation 548) but does NOT halt a `go`-mode queue: after pause, preflight still reports queue_active=true / queue_paused=None / queue_trigger=auto and the supervisor/auto-loop keeps re-dispatching the next head (observed 3 consecutive auto-re-dispatches of agent-doc-bugs2.md after an accepted pause). Either the controller pause receipt is not consulted by the auto-dispatch path for a queue whose `agent:queue` header carries `go`, or preflight does not surface the controller pause (queue_paused stays None despite an accepted pause). Investigate: (1) does the supervisor idle-watch / queue auto-dispatch read the controller pause receipt before injecting, and does `go` override it? (2) should preflight expose queue_paused=true and drop queue_continuation_required when a controller pause is active? Today the only effective halt for a go-queue is editing `queue: stop` frontmatter / removing `go` by hand (done this session), which races the live IPC supervisor. Fix so an accepted `admin queue pause` durably suppresses auto-dispatch (and is reflected in preflight) even for go-mode queues.
 - [ ] [#qdurcrash] #agent-doc-bug queue-edit durability across a supervisor/pane crash+restart: operator adds a queue item, the turn starts, the supervisor+tmux pane crashes and restarts, and the operator added queue item is GONE (virtuousai.md repro, same crash event as #routedeadshell/#1vhn). Root-cause hypothesis: the operator queue add lived only in the editor buffer / supervisor in-memory CRDT and was never journaled to a crash-durable on-disk store before the process died, so restart reloaded from the last snapshot/HEAD (predating the add) and dropped it. Fix (agent-actionable, binary-side): persist inbound operator queue patches to the on-disk snapshot/journal immediately on receipt (before the supervisor mutates queue state / before ack), and add a supervisor-startup reconcile that merges the on-disk document queue against the reloaded snapshot, so a crash+restart replays the pending queue edit instead of losing it. Verify: add a queue item, kill -9 the supervisor mid-turn, restart, confirm the item survives. Distinct from #semmerge (live-merge drop during a turn) and #routedeadshell (route dispatch into a dead shell).
 - [ ] [#8bfz] #fcconeowner #agent-doc-bug elect a SINGLE live IntelliJ plugin consumer per document so concurrent windows/instances cannot race patch application + saveDocument into File Cache Conflicts. Today each IntelliJ plugin process generates its own consumer id jetbrains-<pid>-<uuid> (TypingTracker.kt) and every live instance that has the project open watches .agent-doc/patches/ and consumes patches independently = N live consumers for one doc when N windows are open. #fccreap (0.34.8) reaps DEAD-pid consumer files but does not dedupe LIVE ones. Add single-owner election: the plugin acquires a per-document owner lease (lock file under .agent-doc/, or via the sessions.json registry) and non-owner instances defer patch application + saveDocument for that doc, so exactly one live consumer applies/saves. Owner lease is short-TTL/self-healing so closing the owner window hands ownership to another live instance. Plugin-side change (PatchWatcher + a lease) + binary lease primitive; operator-verify (needs multi-window live test).
 - [ ] [#msn6] #smturnactive #semmerge Phase 6 (turn-active-area merge gating): extend semantic_merge so the binary knows what part of the structure is ACTIVE in the current turn (the in-flight prompt + its response area in the exchange tail) vs unrelated areas, and only surfaces a conflict when the merge changes the turn-active area. Today #smconv (0.34.7) applies node-disjoint changes + operator-wins on any same-node conflict regardless of turn scope; the affectedness signal exists (op_affectedness.turn_affected, response_target_disjoint_from_user_edit) but is not threaded into semantic_merge as a first-class input. Thread a turn-active node-set into semantic_merge(base, ours, theirs, active_nodes) so a conflict OUTSIDE the active area auto-resolves (operator value, no ack noise) and only an active-area collision produces an AckRequest. Plan: tasks/agent-doc/plan-semantic-ast-merge.md

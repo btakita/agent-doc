@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -150,7 +150,31 @@ Yes — preferred terms are implemented end-to-end (this is the data the "Loan T
 So: borrower sets preferred terms on the loan → backfilled onto the deal → lenders see them as the proposal baseline. The deal page's "Loan Terms" card is separate (TMO actual loan record), which is why I didn't rename it earlier.
 
 Confidence: high — schema + UI + admin paths all present and indexed. Escalation: none. If you want preferred terms shown more prominently on the lender deal page (e.g., a dedicated "Preferred Terms" card alongside "Loan Details"), queue it and I'll build it.
-<!-- agent:boundary:34a44997 -->
+
+### Re: Use preferred terms (not loan terms) for available deals; don't render empty loan terms — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Done — built, tested, committed, pushed, and deployed. (These two directives had been auto-struck by the IPC-degraded retries before they were implemented; I completed the real work so the strikes are now accurate.)
+
+**What changed:** On the lender deal page (`investor/deal_detail.tsx`), the left-column card now branches on `tmo_loan`:
+- **Funded deal (TMO loan record present):** unchanged — "Loan Details" → `TmoLoanDetails` (the real Loan Terms card).
+- **Available deal (no TMO loan yet):** renders **"Preferred Terms"** instead, from the deal's `preferred_*` fields — Loan Amount, Sold Rate, Term, Payment Frequency, Day Due. The empty "Loan Terms" TMO card is no longer rendered for these deals.
+
+New `PreferredLoanTerms` component lives in `shared/tmo_loan_details.tsx`, reusing the same card/grid styling and `rate_display_`/`months_display_`/`money_display_` formatters. If the borrower hasn't set preferred terms either, it shows "No preferred terms set for this deal yet." instead of a misleading empty card.
+
+**Changed paths (`src/equityfundingsource-dev`, commit `e912df5`, pushed):**
+- `lib/ui--browser--efs/portal/shared/tmo_loan_details.tsx` — `PreferredLoanTerms` + `preferred_loan_terms_T`.
+- `lib/ui--browser--efs/portal/investor/deal_detail.tsx` — conditional Loan Details / Preferred Terms render.
+- `tests/investor-portal-e2e.test.ts` — new source-inspection test pinning the conditional.
+
+**Verify + deploy:** `make check` green — **895 pass, 0 fail**, worker bundle built. `make deploy` succeeded (worker live). Superproject pointer bumped to `e912df5` (`fb3741c3f`).
+
+Confidence: high — suite-verified, discriminator is `tmo_loan` presence (sourced from `deal_res.tmo_loan ?? null`). Escalation: none — but note this uses "no TMO loan record" as the proxy for "available deal"; if you'd rather key off an explicit deal status/funded flag, say so and I'll switch the condition.
+<!-- agent:boundary:92fa078b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -163,9 +187,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Do we have preferred terms implemented? If yes, use preferred terms instead of loan terms for available deals.~~
-- ~~:pushpin: Since available deals will not have any loan terms yet, ensure loan terms are not rendered.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

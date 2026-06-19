@@ -362,14 +362,35 @@ One scope check, since "going back to the realtime agent-doc" could mean two dif
 On the auto-dag specifically: I'm not going to assert how agent-doc's priority orchestration works from memory — if you want me to actually use or reason about it, tell me which doc/feature and I'll read the real state first rather than guess.
 
 So: which way do you want to point — finish the letter (I need the EFS answer), or pivot to agent-doc work in its own doc? Nothing sent on the recruiting side.
-<!-- agent:boundary:3c4ff9e4 -->
+
+### Re: #p3kj + "I meant I don't…" (agent-doc description) — opus-4-8
+
+Two things in the queue, and I can't fully act on either yet — here's exactly what each needs.
+
+**#p3kj (the MRH accuracy fix): still blocked on one answer.** I can't rewrite the note truthfully until I know where the "run a business" half of the hook comes from now that MRH is correctly a *client*. **Is Equity Funding Source your own venture, or also a client engagement?** Give me that and I'll do #p3kj in one pass — reframe MRH as a client growth project, rebase the operator claim on whatever is genuinely yours, and regenerate the PDF.
+
+**Your "I meant I don't…" note is cut off.** You quoted the note's agent-doc line:
+
+> *"My current tool, agent-doc, puts an agent's work inside a shared document you can read and steer while it's running — you watch the reasoning and redirect mid-task instead of waiting for a result and hoping."*
+
+…and started "I meant I don't" but the sentence didn't finish. I don't want to guess and put a wrong correction into the note. My best read is that you're flagging this line **overclaims what agent-doc actually does today** — e.g. the live "read and steer *while it's running* / redirect *mid-task*" part may not be fully real yet (you've been driving this session through a *queue* between cycles, not truly mid-run steering). If that's it, tell me what agent-doc genuinely does right now and I'll make the description accurate — claiming realtime mid-task steering it doesn't have would be the same kind of overclaim as the MRH ownership line.
+
+But I'd rather you confirm than have me assume. **Finish the sentence: "I don't ___"** — what about that description is wrong, and what's the true version?
+
+So I need two short answers to move: (1) is EFS yours or a client? (2) what's the accurate agent-doc capability claim? With those I'll rewrite the whole note honestly in one cycle. Nothing edited or sent this turn.
+<!-- agent:boundary:4b299ded -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
 - [#p3kj]
-- 
+---
+I donm
+> My current tool, agent-doc, puts an agent's work inside a
+shared document you can read and steer while it's running — you watch the reasoning
+and redirect mid-task instead of waiting for a result and hoping.
+---
 <!-- /agent:queue -->
 
 ## Backlog

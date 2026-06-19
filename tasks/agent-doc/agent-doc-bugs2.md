@@ -39,7 +39,15 @@ completed
 Compacted content:
 - Archived 4 response topic(s): closeout repair; #driftrootfix; queue drain state; 1 more
 - Prior summary/context: prior compacted content: Archived 25 response topic(s): do [#qpausego]; don't stall the loop on a controller pause; d...
-<!-- agent:boundary:18c91143 -->
+
+### Re: queue drain state — gpt-5
+
+Preflight is doing the right thing for this cycle: `#qpauseux` is an `[operator-verify]` backlog head mirrored into the active queue, and the binary reports `queue_continuation_required=false` with `queue_drainable_head_count=0`. I am not taking implementation work from this in-session loop.
+
+The live gate remains: install the updated JB plugin when available, then verify that both paused-queue blocks and churn-stop blocks render actionable notifications instead of raw errors or silence. The related review warning for `#rt83` also stays separate: it may explain phantom queue churn, but it does not make `#qpauseux` drainable.
+
+Proof: no repo code changes in this cycle; commands run were `agent-doc preflight`, `agent-doc plan`, and document read. Verification is this finalize/session-check closeout. Escalation: none.
+<!-- agent:boundary:679866d2 -->
 <!-- /agent:exchange -->
 
 ## Queue

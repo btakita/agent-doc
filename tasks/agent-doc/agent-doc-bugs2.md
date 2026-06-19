@@ -357,12 +357,31 @@ Localized the root cause; gating the fix for a focused converge-core session (ru
 **Head start for that session:** (1) make `converge` / `guard_ipc_snapshot_adoption_against_live_prompt_drift` decide operator-wins/agent-wins explicitly, not via `yrs` client-id ordering; (2) only then seed client-ids in the *tests* for reproducibility; (3) assert the deterministic operator-wins outcome for `smconv_same_node_conflict_is_safe` + the disjoint/heading-prose cases. Gating `#kbkz` (`#smconv-red`) as investigation-complete, implementation-blocked-on-focused-session.
 
 This was the last drainable head — queue drains to operator-verify + noise. Loop ends.
-<!-- agent:boundary:f3c38454 -->
+
+### Re: Do [#kbkz]. I cleared the previous session. — opus-4-8
+
+Done — the non-deterministic RED `make check` is fixed, committed, and pushed. The root cause was **not** what the prior (gated) investigation concluded.
+
+**What the prior session believed:** the `#smconv` converge suite (`smconv_*` + `guard_adopts_clean_content_ours_on_drift`) was RED because `yrs::Doc::new()` assigns a random client-id and `yrs` tie-breaks same-node conflicts by client-id order.
+
+**What's actually true at HEAD:** that converge suite is **green and deterministic**. `semantic_merge` is a pure node-keyed merge — it contains no `yrs`/`Doc`/`client_id` code at all (operator-wins is already explicit), so there is no client-id tie-break to flip. I hammered it directly: the 4 named tests passed **40/40** in isolation, the full `ack_content_snapshot_tests` module **20/20**, and the `markdown-ast` crdt suite **15/15**. No flake.
+
+**The real cause — env-var pollution under parallel tests.** `format_key_event` (`input_diag.rs`) appends `editor_attempt_id=` whenever the **process-global** env var `AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID` is set. The sibling test `input_events_include_editor_route_attempt_when_present` sets that var (correctly holding the env lock), but `key_event_format_is_structured_and_sanitized` read ambient env in an **exact-match `assert_eq!` without acquiring the lock** — so under parallel scheduling it intermittently saw the setter's value and failed. This is the classic "green this morning, red now, time/seed-dependent" symptom — it's scheduler-dependent, not seed-dependent. Reproduced **4/10** full-suite runs at HEAD.
+
+**Fix** (`agent-doc` `36116b31`, pushed to origin/main): the two reader tests now acquire the env lock and pin the var absent via `EnvGuard::remove(...)`. The `route.rs` copy of the same `editor_attempt_id` pattern is immune — its message tests use substring `contains`, never exact-match — so no change there (audited).
+
+**Verification:** post-fix the full orchestration lib ran **0 failures / 20 runs** (was 4/10), and `make check` is **green (exit 0, 0 FAILED)**. CI for `36116b31` is in progress; closing out on local evidence per the test-bearing-turn rule rather than blocking on it.
+
+Resolving `#kbkz` (and its `#smconv-red` framing) to `agent:done`: the deterministic-`make check` goal is met. The converge suite the item feared is already deterministic, so no surgery on the live merge core was needed — the prior session's "implementation-blocked-on-focused-session" gate was based on a misdiagnosis.
+
+This was the only real user prompt; remaining queue heads are operator-verify/noise, so I'm not auto-looping.
+<!-- agent:boundary:5723adcf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- :pushpin: Do [#kbkz]. I cleared the previous session.
 - :pushpin: [#qpauseux]
 - :pushpin: [#docdriftgrace]
 ---
@@ -492,7 +511,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#kbkz] #smconv-red #agent-doc-bug [recommended] PRE-EXISTING + HIGH PRIORITY: the CRDT-converge test suite is RED — agent-doc-orchestration write::ipc::ack_content_snapshot_tests::{smconv_same_node_conflict_is_safe, smconv_disjoint_drift_merges_both_change_sets, smconv_merges_heading_prose_response_preserving_both_changesets} + guard_adopts_clean_content_ours_on_drift fail deterministically (3/3 runs) at HEAD, and fail even at dd3f231d's ipc.rs — so NOT from #orphanqhead/#qcontam/#qstrikeall. They are time/seed-dependent (make check was GREEN earlier today at the same source b9c8f31c, RED now), pointing at non-deterministic yrs client-id/merge seeding in the #smconv converge path. This is the content_ours/live_prompt_drift converge machinery that has been corrupting THIS session all along (every finalize fell back to content_ours). Fix: make the converge tests deterministic (seed yrs client ids) AND root-cause why same_node_conflict / content_ours-on-drift now fail — this is likely the actual source of the session-wide drift, higher priority than the gated symptom items #numlistrev/#qrepin. Repro: cargo test -p agent-doc-orchestration smconv.
 - [/] [#gf5n] #numlistrev #agent-doc-bug Operator-reported: numbered/ordered lists rendered REVERSED (4,3,2,1) on an initial turn, boundary after the block. INVESTIGATED 2026-06-19: NOT reproducible in a clean stream/CRDT finalize — a 1-2-3-4 list renders 1-2-3-4 correctly (verified /tmp repro). It manifested only in the drift-heavy monsterrodholders turn, so it is a SYMPTOM of the CRDT merge-corruption family (#hap7/#qdup/#semmerge: the merge inverting list-item order under a live-buffer race), not an independent ordered-list render bug. Resolves when #hap7 scoped-merge lands. Kept open as a #hap7 verification check: confirm numbered-list order survives a merge-during-finalize cycle.
 - [/] [#rt83] #qrepin #agent-doc-bug The active-queue stripped diff perpetually reports a phantom pushpin-add of the operator-verify head #qpauseux every preflight even when the doc and snapshot raw queue bodies are byte-identical, keeping no_changes:false and re-triggering the supervisor idle-watch. Investigated: sync_backlog_into_queue (entry_do_id/do_prompt_id), the #mirrorall mirror, and the #7r2s auto-pin (annotate_manual_queue_additions) all correctly recognize and skip the already-pinned bare-id head, so it is NOT a content mutation. Root is in the preflight stripped-diff/boundary-reposition path: commit repositions the boundary in the snapshot but skips the working-tree reposition while a live IPC listener is active, so the post-commit snapshot queue and the post-maintenance doc queue diverge on the pinned operator-verify head position/strip, surfacing a phantom pin add. Cosmetic (no corruption) but it sustains qchurn. Fix: normalize operator-verify mirror pins symmetrically in the stripped diff, or converge the snapshot boundary reposition with the working tree even under a live listener. Needs instrumented per-phase queue-body tracing.
 - [/] [#restartagentmenu] restart-agent Phase 2 (after #agentreloadrestart): add a Restart Agent JB plugin menu command — new RestartAgentAction.kt mirroring RestartSupervisorProcessAction.kt, registered in plugin.xml beside AgentDoc.RestartSupervisorProcess, wired through the TerminalUtil restart path; after Phase 1 re-resolves the harness on restart this brings up a changed agent. Decide alongside-vs-replace the existing Restart Supervisor Process action (do not remove without operator confirmation). Bump pluginVersion (gradle.properties, currently 0.2.170), build unsigned + signed zips. LOGGING (operator-install live-gate prove/disprove): log the action invocation + resolved harness. Plan: tasks/agent-doc/plan-restart-agent.md

@@ -538,6 +538,22 @@ pub struct Frontmatter {
         rename = "agent_doc_supervisor_auto_recycle"
     )]
     pub supervisor_auto_recycle: Option<bool>,
+    /// Explicit per-document opt-in/opt-out for restart-agent on a harness change
+    /// (`#agentreloadrestart`). When the resolved harness from current frontmatter
+    /// (`agent:`) differs from the one the running supervisor launched with,
+    /// `true` lets the supervisor auto-restart the agent at the next idle/turn
+    /// boundary so changing `agent` (e.g. claude→opencode) takes effect without a
+    /// manual restart; `false` disables that auto-restart (the change then applies
+    /// only on the next manual restart). Resolution: env
+    /// `AGENT_DOC_AGENT_CHANGE_RESTART`, then this frontmatter value, then the
+    /// project config `agent_doc_agent_change_restart`, then the built-in default
+    /// of ON.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_agent_change_restart"
+    )]
+    pub agent_change_restart: Option<bool>,
     /// Explicit per-document opt-in/opt-out for supervisor auto-install
     /// (`#supautoinstall`). When a DOGFOODING supervisor (an agent-doc session
     /// editing agent-doc's own source) finds the source newer than the installed
@@ -1969,6 +1985,7 @@ mod tests {
             gate_autoverify: None,
             clear_threshold: None,
             supervisor_auto_recycle: None,
+            agent_change_restart: None,
             supervisor_auto_install: None,
             model_tier: None,
             pending_capture_guard: None,

@@ -244,6 +244,16 @@ pub struct ProjectConfig {
     /// supervisor always promotes the latest build automatically).
     #[serde(default, alias = "supervisor_auto_recycle")]
     pub agent_doc_supervisor_auto_recycle: Option<bool>,
+    /// Per-project opt-in/opt-out for restart-agent on a harness change
+    /// (`#agentreloadrestart`). When the resolved harness from current frontmatter
+    /// (`agent:`) differs from the one the running supervisor launched with, true
+    /// lets the supervisor auto-restart the agent at the next idle/turn boundary so
+    /// changing `agent` (e.g. claude→opencode) takes effect without a manual
+    /// restart. Resolution precedence: env `AGENT_DOC_AGENT_CHANGE_RESTART`, then
+    /// per-document frontmatter `agent_doc_agent_change_restart`, then this project
+    /// value, then the built-in default of ON.
+    #[serde(default, alias = "agent_change_restart")]
+    pub agent_doc_agent_change_restart: Option<bool>,
     /// Per-project opt-in/opt-out for supervisor auto-install (`#supautoinstall`).
     /// When a DOGFOODING supervisor finds agent-doc's own source newer than the
     /// installed binary at an idle boundary, this controls whether it rebuilds +

@@ -294,6 +294,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // onto it. Resolved ONCE: a disabled path does zero extra work (no source
             // walk, no crate-root probe), and only an agent-doc dogfood document may
             // resolve a crate root.
+            // `#agentreloadrestart`: capture the harness this supervisor launched
+            // with + the agent-change-restart knob. A later frontmatter `agent:`
+            // change (e.g. claude->opencode) makes the freshly-resolved harness
+            // differ; at a quiet dispatch-ready boundary the watch logs the
+            // detected change + the gate decision (`harness_change_detected` /
+            // `agent_restart_boundary_gate`) so the operator can prove detection
+            // live. Executing the restart (Phase 1b) is the focused-cycle wiring.
+            let agent_change_restart_enabled =
+                crate::project_controller::agent_change_restart_enabled(&path);
+            let launch_harness_binary = harness.binary.clone();
+            let mut agent_change_logged_for: Option<String> = None;
             let auto_install_enabled =
                 crate::project_controller::supervisor_auto_install_enabled(&path);
             let install_crate_root = if auto_install_enabled {
@@ -395,6 +406,57 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 }
                 let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
                 let turn_active = turn_active_for_owned_pane(&path, &shared);
+
+                // `#agentreloadrestart` Phase 1a: detect a frontmatter `agent:`
+                // change and log the boundary-gate decision. Re-resolve the
+                // harness from CURRENT frontmatter and compare to the one this
+                // supervisor launched with; on a change (deduped per new harness),
+                // emit `harness_change_detected` + `agent_restart_boundary_gate`.
+                // The restart execution itself (spawn the new harness fresh) is the
+                // focused-cycle Phase 1b wiring; until then a detected change is
+                // surfaced so `agent:` edits are observable + operator-verifiable.
+                if agent_change_restart_enabled
+                    && let Ok(content) = std::fs::read_to_string(&path)
+                    && let Ok((fm, _)) = crate::frontmatter::parse(&content)
+                {
+                    let global = crate::config::load().unwrap_or_default();
+                    let resolved = crate::harness::HarnessConfig::from_context(&fm, &global);
+                    let harness_changed = resolved.binary != launch_harness_binary;
+                    let already_logged =
+                        agent_change_logged_for.as_deref() == Some(resolved.binary.as_str());
+                    if harness_changed && !already_logged {
+                        let decision = crate::start::decisions::agent_change_restart_decision(
+                            harness_changed,
+                            agent_change_restart_enabled,
+                            prompt_visible,
+                            turn_active,
+                        );
+                        crate::ops_log::log_op(
+                            &path,
+                            &format!(
+                                "harness_change_detected file={} old={} new={} gate={:?}",
+                                path.display(),
+                                launch_harness_binary,
+                                resolved.binary,
+                                decision,
+                            ),
+                        );
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "agent_restart_boundary_gate old={} new={} decision={:?} prompt_visible={} turn_active={} note=phase1b_execution_pending",
+                                launch_harness_binary,
+                                resolved.binary,
+                                decision,
+                                prompt_visible,
+                                turn_active,
+                            ),
+                        );
+                        // Dedupe: only re-log when the resolved harness changes
+                        // again (avoid per-tick spam for a standing change).
+                        agent_change_logged_for = Some(resolved.binary.clone());
+                    }
+                }
                 let route_submit_in_flight =
                     match crate::route_in_flight::route_submit_in_flight(&path) {
                         Ok(active) => active,

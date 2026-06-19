@@ -478,6 +478,46 @@ pub fn supervisor_recycle_action(
     }
 }
 
+/// `#agentreloadrestart` — what the idle/turn-boundary supervisor watch should do
+/// about a detected harness change: the harness resolved from current frontmatter
+/// (`agent:`) differs from the one the running supervisor launched with. Gated
+/// exactly like the `#supselfheal` auto-recycle ([`supervisor_recycle_action`]):
+/// only act at a quiet dispatch-ready boundary, never mid-turn, and only when the
+/// operator opted in (knob ON, the default). Pure so the boundary policy is
+/// unit-testable without a live pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentChangeRestartAction {
+    /// No harness change, the knob is off, or nothing to do.
+    None,
+    /// Harness changed + knob on + the pane is at a quiet dispatch-ready prompt —
+    /// restart the agent with the freshly-resolved harness now.
+    Restart,
+    /// Harness changed + knob on, but the pane is not at a quiet boundary yet
+    /// (no prompt visible / mid-turn) — wait for the next boundary; never
+    /// interrupt an in-flight turn.
+    WaitForBoundary,
+}
+
+/// Decide the agent-change-restart action for one watch tick. Restart only when
+/// the harness actually changed, the knob is on, AND the pane is idle at a
+/// dispatch-ready prompt; otherwise wait (changed-but-busy) or no-op (unchanged /
+/// opted out). Keeping this pure makes the boundary gate trivially testable and
+/// guarantees an unchanged harness is a complete no-op.
+pub fn agent_change_restart_decision(
+    harness_changed: bool,
+    knob_on: bool,
+    prompt_visible: bool,
+    turn_active: bool,
+) -> AgentChangeRestartAction {
+    if !harness_changed || !knob_on {
+        return AgentChangeRestartAction::None;
+    }
+    if !prompt_visible || turn_active {
+        return AgentChangeRestartAction::WaitForBoundary;
+    }
+    AgentChangeRestartAction::Restart
+}
+
 /// `#supautoinstall` — what the idle supervisor watch should do about agent-doc's OWN
 /// source being newer than the installed binary (the dogfood "a finalize just committed
 /// a source edit but nobody built+installed it" state). Pure so the policy is
@@ -787,6 +827,36 @@ impl ReexecState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_change_restart_decision_policy() {
+        use AgentChangeRestartAction as A;
+        // Unchanged harness → always None (complete no-op), regardless of boundary.
+        assert_eq!(
+            agent_change_restart_decision(false, true, true, false),
+            A::None
+        );
+        // Knob off → None even when the harness changed at a quiet boundary.
+        assert_eq!(
+            agent_change_restart_decision(true, false, true, false),
+            A::None
+        );
+        // Changed + knob on + quiet dispatch-ready boundary → Restart.
+        assert_eq!(
+            agent_change_restart_decision(true, true, true, false),
+            A::Restart
+        );
+        // Changed + knob on but mid-turn → wait (never interrupt).
+        assert_eq!(
+            agent_change_restart_decision(true, true, true, true),
+            A::WaitForBoundary
+        );
+        // Changed + knob on but no prompt visible yet → wait.
+        assert_eq!(
+            agent_change_restart_decision(true, true, false, false),
+            A::WaitForBoundary
+        );
+    }
 
     #[test]
     fn clean_session_head_forces_context_reset_policy() {

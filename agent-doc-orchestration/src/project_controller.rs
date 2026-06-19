@@ -85,6 +85,9 @@ const RECYCLE_IDLE_GRACE_SECS_ENV: &str = "AGENT_DOC_RECYCLE_IDLE_GRACE_SECS";
 /// validation lands; when off the supervisor only logs `supervisor_binary_stale_detected`
 /// and the operator restarts the session to pick up the new build.
 const SUPERVISOR_AUTO_RECYCLE_ENV: &str = "AGENT_DOC_SUPERVISOR_AUTO_RECYCLE";
+/// `#agentreloadrestart` — env override for the agent-change-restart knob
+/// (truthy enables, `0`/`false`/`off` force-disables). Default ON.
+const AGENT_CHANGE_RESTART_ENV: &str = "AGENT_DOC_AGENT_CHANGE_RESTART";
 /// `#supautoinstall` — opt-in flag for the DOGFOODING `start --route-owned` supervisor
 /// (an agent-doc session editing agent-doc's OWN source) to build+install that source at
 /// an idle boundary after a finalize edits it, so the installed binary catches up and the

@@ -1305,6 +1305,39 @@ pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
     resolve_supervisor_auto_recycle(env.as_deref(), frontmatter, project)
 }
 
+/// `#agentreloadrestart` — resolve the agent-change-restart knob with the same
+/// env > frontmatter > project > default precedence as auto-recycle. Default ON:
+/// a frontmatter `agent:` change should normally take effect on the next
+/// boundary without a manual restart.
+pub(crate) fn resolve_agent_change_restart(
+    env: Option<&str>,
+    frontmatter: Option<bool>,
+    project: Option<bool>,
+) -> bool {
+    if let Some(raw) = env {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => return true,
+            "0" | "false" | "no" | "off" => return false,
+            _ => {}
+        }
+    }
+    frontmatter.or(project).unwrap_or(true)
+}
+
+/// `#agentreloadrestart` — is agent-change-restart enabled for the supervisor
+/// hosting `doc`? Reads env `AGENT_DOC_AGENT_CHANGE_RESTART`, the document's
+/// frontmatter, and its project config. Default ON.
+pub(crate) fn agent_change_restart_enabled(doc: &std::path::Path) -> bool {
+    let env = std::env::var(AGENT_CHANGE_RESTART_ENV).ok();
+    let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
+        crate::frontmatter::parse(&content)
+            .ok()
+            .and_then(|(fm, _)| fm.agent_change_restart)
+    });
+    let project = crate::project_config::load_project_for_doc(doc).agent_doc_agent_change_restart;
+    resolve_agent_change_restart(env.as_deref(), frontmatter, project)
+}
+
 /// `#supautoinstall` — pure: is agent-doc's OWN source newer than the installed binary?
 /// Both are unix-epoch seconds. True only when the source is STRICTLY newer (a
 /// build+install is pending). Equal timestamps (clock granularity / a just-installed
@@ -5557,6 +5590,24 @@ mod tests {
         // `#supselfheal` — nothing set anywhere → default ON (turn-boundary
         // blue/green self-recycle is the hands-off self-heal). Opt out via a
         // falsey env/frontmatter/project knob (asserted above).
+        assert!(r(None, None, None));
+        assert!(r(Some(""), None, None));
+    }
+    #[test]
+    fn resolve_agent_change_restart_precedence() {
+        use super::resolve_agent_change_restart as r;
+        // Env wins.
+        assert!(r(Some("on"), Some(false), Some(false)));
+        assert!(!r(Some("off"), Some(true), Some(true)));
+        // Unrecognized env → fall through to frontmatter.
+        assert!(r(Some("garbage"), Some(true), Some(false)));
+        // Frontmatter over project.
+        assert!(r(None, Some(true), Some(false)));
+        assert!(!r(None, Some(false), Some(true)));
+        // Project decides when frontmatter absent.
+        assert!(r(None, None, Some(true)));
+        assert!(!r(None, None, Some(false)));
+        // `#agentreloadrestart` — nothing set → default ON.
         assert!(r(None, None, None));
         assert!(r(Some(""), None, None));
     }

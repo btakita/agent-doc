@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -39,13 +39,31 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): #kgeffmeasure; measured kg extraction effectiveness on a real corpus; #kgconf; 1 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): Operating effectiveness of tsift kg
-<!-- agent:boundary:47914965 -->
+
+### Re: #next-steps to fix tsift bugs — opus-4-8
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix tsift bugs?
+
+
+The two queue items (`#kgconf`, `#kgrefreshdup`) are done; the backlog was empty. From the gaps those fixes exposed, here are the grounded next steps, now queued in priority order:
+
+1. **`#kgconfrank` (high)** — `#kgconf` makes every node carry a `confidence` + `confidence_source` tag, but nothing consumes the tag yet: `node_to_candidate` in `context_pack.rs` reads only the raw `confidence`, so a *derived* `default 0.500` outranks and out-survives a *real* model `0.300` under `min_confidence`/ranking. Weight model-emitted confidence above derived defaults. This directly completes the operability `#kgconf` set up, so it leads.
+2. **`#kgentitycollapse` (med)** — `#kgctxinject` dedup is naming-convergence + suppression, **not** node-identity collapse: node id = `stable_id(chunk.id, entity.id)`, so same-label entities from different chunks stay distinct nodes (two dup nodes shared one canonical `entity_id` but had different node ids — finding (c)). Add `same_as` edges keyed on the canonical `entity_id` (or a query-time merge) so retrieval sees one logical entity; preserve per-source provenance by linking rather than deleting.
+3. **`#kgconfreqverify` (operator-verify)** — `#kgconf` made `confidence` a *required* schema field to elicit real scores. Verify on the live Qwen3-32B model that this doesn't cut extraction yield or induce hallucinated scores; relax to prompt-only + default fallback if it does. Needs GPU + Ollama, so it's operator-gated.
+
+**Top of backlog: `#kgconfrank`.**
+
+(Heads-up: the exchange is at `session_accretion: warn` — 80 lines / 4 response sections. Say the word and I'll `agent-doc compact tasks/software/tsift.md --commit`.)
+<!-- agent:boundary:ff8316cd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- What are #next-steps to fix tsift bugs?
+- do [#kgentitycollapse]
+- do [#kgconfrank]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -54,6 +72,9 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#kgconfreqverify] [operator-verify] Verify the confidence-required schema change (#kgconf, payload_schema in packages/tsift-kg/src/ollama.rs) does not reduce extraction yield on the live local model (Qwen3-32B-Q4) via an A/B over a real corpus; if required-confidence cuts entities/relations or induces hallucinated scores, relax to prompt-only + the derived-default fallback. Needs GPU + Ollama (operator-gated).
+- [ ] [#kgentitycollapse] tsift KG does not collapse entities across chunks by canonical identity: node id = stable_id(chunk.id, entity.id), so same-label entities from different chunks become distinct nodes — duplicate canonical entities even within one extraction (two dup nodes shared canonical entity_id but differed in node id, finding (c)). Add same_as edges keyed on the canonical entity_id property (or a query-time identity-merge) so retrieval sees one logical entity. Preserve per-source provenance — prefer linking over hard delete.
+- [ ] [#kgconfrank] tsift KG context-pack ranking/gating ignores the new confidence_source tag (#kgconf): node_to_candidate in packages/tsift-kg/src/context_pack.rs reads only the raw confidence, so a derived default 0.500 outranks and out-survives a real model 0.300. Thread confidence_source into ranking (model-tier above default-tier) and/or min_confidence gating so derived defaults are distinguishable from model scores — completes the operability #kgconf set up.
 <!-- /agent:backlog -->
 
 ## Review

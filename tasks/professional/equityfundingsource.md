@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -417,7 +417,7 @@ Decisions locked, and **Phase 1 (schema + repo + tests) is built, green, committ
 **One design call I made for you** (flag if you'd rather change it): "majority stake => more control" is modeled as control *derived from stake share* rather than a stored "controller" flag — the `lead` (group creator) is recorded, but the controlling vote follows whoever holds the largest stake (group-level `default_stake_bps`, or per-deal `allocation_bps`). That keeps control honest as percentages shift per deal.
 
 **Next:** Phases 2-4 are queued as actionable backlog items — `#8667p2` (group CRUD + invites, incl. admin account auto-create), `#8667p3` (deal participation + per-deal allocations + majority surfacing), `#8667p4` (admin visibility). None are blocked; say the word and I'll take Phase 2.
-<!-- agent:boundary:fbbffa0c -->
+<!-- agent:boundary:fd13ae73 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -430,15 +430,14 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- [#8667]. Persistent. A lender may also be part of multiple lending groups. Co-lenders do see each other. The lenders know each other and work together. The majority stake has more control over the group in the real-world. Each deal may have different percentages of a loan. The admin should be able to set up lending groups, where lender accounts are auto-created with an email. Lenders should be able to create a group and invite other lenders as well.
-- do [#8667]. Persistent. A lender may also be part of multiple lending groups. Co-lenders do see each other. The lenders know each other and work together. The majority stake has more control over the group in the real-world. Each deal may have different percentages of a loan. The admin should be able to set up lending groups, where lender accounts are auto-created with an email. Lenders should be able to create a group and invite other lenders as well.
-- do [#8667p2]
+- :pushpin: do [#8667p2]
+- :pushpin: [#8667p3]
+- :pushpin: [#8667p4]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#8667p2] Multi-Lender Group Phase 2 — group CRUD + invites (src/equityfundingsource-dev/prds/lending-groups-plan.md): lender create-group + invite-by-email + accept/decline + member list; admin group setup with lender-account auto-create by email (reuse admin-provisioned-account email pattern); in-portal + email notifications; routes + tests. Builds on shipped lib/lending_groups/repo.ts + migration 0090.
 - [ ] [#8667p3] Multi-Lender Group Phase 3 — deal participation: pull a group into a deal, set per-deal allocations (lending_group_deal_allocations), render co-lenders + each member percentage in the deal package / interested-lenders views, surface the majority controller (lending_group_control_); tests.
 - [ ] [#8667p4] Multi-Lender Group Phase 4 — admin visibility: show Multi-Lender Group membership + per-deal allocations in the admin deal / interest views.
 <!-- /agent:backlog -->

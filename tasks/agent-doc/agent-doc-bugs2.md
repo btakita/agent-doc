@@ -149,12 +149,13 @@ I confirmed the gap is real (supervisor resolves the harness once at start and r
 Yes — that's the root-cause direction, sharpened to **editor-IPC convergence** (not just the git commit). Filed `#fullboundary` with the plan, made it the highest-priority queue item (above the `:pushpin:` annotations), and folded in your force-disk-as-loud-error directive.
 
 **Landing this via `--force-disk` per your authorization** — the editor IPC is wedged (`inflight=5` / `send_failed`), so this write is itself an instance of exactly the fallback `#fullboundary` will make loud + replayable. Recycling the PCP/supervisor next.
-<!-- agent:boundary:258c4464 -->
+<!-- agent:boundary:b2f25775 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#fullboundary]
 - ~~:pushpin: do [#qpausego]~~
 - ~~:pushpin: do [#qdurcrash]~~
 ---
@@ -254,7 +255,6 @@ resync: pruned 5 stale session(s)
 [route] target tmux session: 0
 Error: project controller command `dispatch` failed: dispatch blocked for tasks/professional/equityfundingsource.md: failed_stage=queue_paused reason=qflood: supervisor idle-watch is re-injecting agent-doc triggers on an already-drained queue (4 consecutive no-op /agent-doc cycles). All real work shipped+deployed (c9aa3a6 / worker fb99f394); only the gated #5eq8 (design-blocked) remains, which must not auto-drain. Leaving paused until operator adds new work / un-gates #5eq8. receipt_id=3934 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control trigger_bytes=52 trigger_sha256=a4b904c65fa35ab9631efaf329f3f2b595b448d1976b7c8738c6ba9b4a3af3c9
 ```
-- do [#fullboundary]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

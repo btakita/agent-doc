@@ -148,7 +148,32 @@ So removing it or fully computing it would actually regress the deal lifecycle. 
 - **Optional follow-up:** add a reconcile affordance in the pipeline loan dialog — when an app is accepted but has no published deal, surface a one-click **Publish** (or auto-reconcile on open). That gives you the consistency without throwing away the stored lifecycle.
 
 This is a prod write that makes the loan publicly visible in the investor marketplace, so I haven't run it. **Want me to backfill FTM631 — quiet (no email) or with the lender notification?** Captured as `#ftm631-publish-backfill`.
-<!-- agent:boundary:89af9c47 -->
+
+### Re: do #e9fy — FTM631 one-time publish backfill (quiet) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#e9fy]
+
+Done. Backfilled the missing `investment_deals` row for **FTM631** (loan `bbd437b0`) so it's now an Available Deal in the investor marketplace. I used the **quiet** path — no lender email — exactly replicating what `#accept-autopublish` would have done on acceptance, which is the gap this loan fell through.
+
+**What I did (faithful to the auto-publish path, not POST /deal):** the auto-publish hook calls `admin_deal_publish_(db, loan_id)` with **no terms input** (`applications/index.ts:1137`), so it uses `DEFAULT_PLATFORM_SETTINGS`. Traced through `deal_terms_` + `gformula.ts` against the live loan, that produces:
+
+- `status = 'published'` — loan `tmo_loan_status = 'Application Received'` (not `Funded`).
+- `term_months = 12` (constant).
+- `sold_rate = NULL` — empty terms input means `sold_rate_calc_(undefined, 1)` is null. (The richer POST /deal path would pull TMO `SoldRate`/`NoteRate`, but that path also emails lenders; auto-publish does not.)
+- `min_investment_amount = 10000` — default `constant` mode.
+- `ltv = NULL` — onboarding has `proposed_loan_amount=100000` but **no `appraised_value`/`purchase_price`**, so `loan_ltv_calc_` returns null.
+
+**Executed** as a single raw INSERT against prod D1 (`equityfundingsource`, `280e1539…`) via the `cf:d1:query:remote` wrapper — no `notify_email_`, so **no lender notification fired**:
+
+- New deal `d6b78994-0970-498f-9e10-6f0035902c0d`, `published_at = 1781852961` (now), `created_at`/`updated_at` matched, `closed_at` NULL.
+- `changes: 1`; verified the row reads back with the exact field set above and joins to FTM631.
+
+**Pre-flight confirmed exactly one gap, as expected:** before the write, `deal_count = 0` for this loan (INSERT branch, not the UPDATE branch), consistent with the earlier finding that FTM631 was the single accepted loan with no deal. Stored Published state is preserved — I did **not** remove it or make it computed.
+
+**Scope notes:** this is a one-time data backfill, not a code change — the EFS working tree is clean, so the queue preset's `#spec-test-commit-push` steps (spec/test/commit/push) are N/A; there's nothing to commit or deploy. (Separately, preflight flagged a `stale_install` for the agent-doc binary itself — unrelated to EFS; leaving it for a post-session `make install` rather than rebuilding against the live supervisor.)
+<!-- agent:boundary:afae9a37 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -167,7 +192,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#e9fy] #ftm631-publish-backfill [recommended] One-time backfill: loan FTM631/bbd437b0 (app 94fd3f07) is accepted but was accepted ~8min BEFORE #accept-autopublish deployed, so it has no investment_deals row. Exactly 1 such loan exists. Publish it via admin_deal_publish_ (quiet, no lender email) or POST /api/admin/loans/bbd437b0.../deal (emails lenders). Keep stored Published state; do NOT remove or fully-compute it.
+- [x] [#e9fy] #ftm631-publish-backfill [recommended] One-time backfill: loan FTM631/bbd437b0 (app 94fd3f07) is accepted but was accepted ~8min BEFORE #accept-autopublish deployed, so it has no investment_deals row. Exactly 1 such loan exists. Publish it via admin_deal_publish_ (quiet, no lender email) or POST /api/admin/loans/bbd437b0.../deal (emails lenders). Keep stored Published state; do NOT remove or fully-compute it.
 <!-- /agent:backlog -->
 
 ## Review

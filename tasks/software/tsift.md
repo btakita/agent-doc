@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -56,7 +56,7 @@ The two queue items (`#kgconf`, `#kgrefreshdup`) are done; the backlog was empty
 **Top of backlog: `#kgconfrank`.**
 
 (Heads-up: the exchange is at `session_accretion: warn` — 80 lines / 4 response sections. Say the word and I'll `agent-doc compact tasks/software/tsift.md --commit`.)
-<!-- agent:boundary:ff8316cd -->
+<!-- agent:boundary:f0f685fa -->
 <!-- /agent:exchange -->
 
 ## Queue

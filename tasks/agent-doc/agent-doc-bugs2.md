@@ -151,7 +151,23 @@ Log check (honoring "for operator-verify issues, look in the logs"):
 3. **Bonus — `#opslogts` is already live-confirmed.** That same recycle picked up the new binary: the EFS session log timestamps flip from epoch `[1781917…]` to ISO `[2026-06-20T01:05:26Z]` right at the recycle, so the readable-timestamp change is working in a live supervisor.
 
 No drainable queue work remains (`queue_continuation_required=false`); the remaining heads are all operator-verify (`#sqedit-race`, `#qheadstrike`, `#hap7`, `#fbwire`, `#qpausemix-verify`, `#tsiftmdcrash-verify`) and need a live editor/pane or the deferred install. Not looping.
-<!-- agent:boundary:898fd50f -->
+
+### Re: JB `Run Agent Doc` on equityfundingsource.md did not submit — opus-4-8
+
+Diagnosed against the log you pasted. This is the **stale-supervisor-at-hot-reload window**, not a live defect in the installed binary — and the silent-loss class is already fixed in the binary the supervisor was mid-reload onto.
+
+**What the log shows:** the dispatch landed while the harness child had cleanly exited (`claude exited cleanly. Press Enter to restart`) **and** the supervisor was hot-reloading onto a freshly-installed binary (`supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve`). The `reconciled stale busy actor to ready from idle pane evidence` line that promoted the dead pane to "ready" **no longer exists in current source** — it was emitted by the OLD binary still in control during the recycle. So the submit went into the supervisor restart prompt and was lost by a binary that predates today's fixes.
+
+**Why the installed 0.34.18 doesn't reproduce the silent loss:**
+- `idle_projection_needs_reconciliation` (session_actor_cmd.rs:2422) now gates the idle→ready promotion on `prompt_ready == Some(true)`.
+- `prompt_ready` is computed by `live_pane_prompt_ready` keyed off a **real harness dispatch-ready prompt** (`is_dispatch_ready_prompt_line`). The supervisor `Press Enter to restart` screen is not one → the pane reads `AliveBusy`, not idle-ready (locked by `operator_clear_allows_clean_exit_prompt`, `prompt_ready: false`).
+- The dispatch barrier (`classify_prompt_ready_barrier`) requires `prompt_ready`, and a dispatch-only run against a busy/not-ready pane **fails closed with a visible "session still running" signal** (`dispatch_only_focus_only_should_fail_closed`, `#jb-run-agent-doc-command-route-miss`) instead of silently reporting success.
+- The freshly-installed binary also ships today's `#jbclaudesubmit` (retry Enter until the trigger submits) and `#jbrundispatch` directive 2 (detect non-dispatch + re-send full trigger).
+
+**Recovery (no code change needed for the reported loss):** the log shows the recycle already in progress — let the supervisor finish reloading onto 0.34.18 (idle-boundary `execve`), then re-run `Run Agent Doc`. This is the known `#staleloop-recycle-restart` window: a dispatch that races the old binary at the install boundary; nothing can fix the already-running old binary retroactively, only the recycle.
+
+**Residual gap I did capture (`#runexitrestart`, recommended):** even on 0.34.18, when claude has *cleanly exited* and you click `Run Agent Doc`, the route currently **fails closed** rather than restarting the harness and submitting — `route.rs`'s dispatch path has no clean-exit handling (only `session_restart` checks `pane_shows_clean_exit_prompt`). The improvement is to have the managed route / supervisor idle-watch detect a clean-exit pane with prompt-bearing work, press Enter to restart, wait for the dispatch-ready prompt, then submit — so a cleanly-exited harness never drops a run. That's a live-supervisor / two-pane-tmux change, so it's queued for a focused cycle, not the in-session loop.
+<!-- agent:boundary:cfc728e2 -->
 <!-- /agent:exchange -->
 
 ## Queue

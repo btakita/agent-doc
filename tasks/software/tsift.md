@@ -50,7 +50,15 @@ The exchange was compacted (8 response topics archived to `…-20260620-064417.m
 - **Next (operator-scheduled):** Phase 3b — wire the env-flagged FTS path into the CLI `SearchResponse`. Say **"do #015t"** to continue. The queued `do [#015t]` is the go-mode re-mirror of the operator-verify umbrella (non-drainable), not a fresh directive.
 
 **Unchanged blocker (out of scope here):** `stale_install` — installed agent-doc `0.34.20` predates source `d48b30ea`, `src/agent-doc` has uncommitted WIP. Durable fix is an operator `make install` in `src/agent-doc` + supervisor restart.
-<!-- agent:boundary:eb4b988f -->
+
+### Re: queue re-mirror — no new directive — opus-4-8
+
+Nothing new was requested. The only change this cycle is the go-mode re-mirror of `do [#015t]` back into the queue. Preflight classifies it correctly: `queue_drainable_head_count: 0`, `queue_continuation_required: false` — `#015t` is `[operator-verify]` and is deferred from auto-drain, so the in-session loop does not take it. I'm not re-running work and not looping.
+
+**`#015t` state (unchanged):** Phases 0/1/2 + Phase 3 core (3a) done + pushed (tsift `4105aba`). NEXT = Phase 3b — wire the env-flagged FTS search path into the CLI (`run_sift_search` / `__search-worker` + `SearchResponse`), default off. It's operator-scheduled and multi-session: say **"do #015t"** / **"do phase 3b"** to start it. The queued `do [#015t]` is the umbrella mirror, not that directive.
+
+**Standing blocker (out of scope here):** `stale_install` — installed agent-doc `0.34.23` vs source WIP in `src/agent-doc`. Durable fix is an operator `make install` in `src/agent-doc` + supervisor restart.
+<!-- agent:boundary:7de804f0 -->
 <!-- /agent:exchange -->
 
 ## Queue

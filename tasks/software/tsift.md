@@ -58,7 +58,18 @@ Yes — three of the article's ideas map cleanly onto tsift's actual substrate (
 **Honest "skip" list** (don't over-borrow): morsel-driven parallelism and the sink/combine/finalize model are real but tsift's `__search-worker` already parallelizes and embedding/LLM latency dominates, so it's a minor win; vectorized execution, the CSV sniffer, and block checksums are not where tsift's bottlenecks are.
 
 Net: #1 is a standalone tsift-layer feature worth doing regardless of backend choice; #2/#3 are *decision inputs* that should raise DuckDB/DuckPGQ's weight in the existing `BackendEval` / #g5kw substrate-promotion evaluation, with "partial remote Parquet index" as the standout differentiator. Both captured as `[recommended]` backlog items.
-<!-- agent:boundary:d90cf612 -->
+
+### Re: drain #sbtk / #wzg6 — plan only, no push — opus-4-8
+
+You chose **plan only, no push** for the two recommendations that auto-drained into the go-queue. Done:
+
+- **`#sbtk` → plan delivered.** Wrote [`tasks/software/plan-tsift-zonemap-segment-stats.md`](plan-tsift-zonemap-segment-stats.md) — a concrete, schema-grounded, phased plan for the DuckDB-zonemap analog. It confirms the feature is additive (tsift's `file_state` already has per-file `mtime`; `symbols` already has per-symbol `line`/`end_line`/`kind` indexed by `file`; `source_content_hash` already computed), and breaks it into Phase 0 baseline → 1 schema (`min/max_line`, `symbol_count`, `kind_mask`, `content_hash` + `meta` schema-version bump) → 2 populate at index time → 3 query-time pruning in `sift.rs`/`impact.rs` with a **soundness invariant (pruned ⊆ unpruned, zero false negatives)** → 4 deterministic tests → 5 ship (operator-gated). Marked `--done`.
+- **`#wzg6` → folded into the plan as a weighting note.** Captured in the plan's *Related* section: the zonemap work is **substrate-agnostic** — it lands in tsift's own SQLite/sift layer and pays off on SQLite today, independent of whether DuckDB/DuckPGQ is later promoted as a GraphStore (if it is, zonemaps become native row-group stats for free). Marked `--done`.
+
+**No tsift code written, nothing pushed.** Only the session doc + plan file are committed to `agent-loop`. Phase 5 (build + spec + tests + commit + push to the tsift repo) waits for your explicit go — say "implement the zonemap plan" when you want it built.
+
+Both queue heads drained; the queue is now empty.
+<!-- agent:boundary:03a8b240 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -74,8 +85,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#sbtk] [recommended] Add zone-map / min-max segment statistics to the tsift index (per-file/per-segment line-range, mtime, kind histogram, content hash) so scoped/--path searches can skip whole segments before scanning — the DuckDB row-group zonemap analog. Self-contained in the SQLite/sift layer; no backend swap required. (from duckdb-internals-part-1 review)
-- [ ] [#wzg6] [recommended] Feed duckdb-internals findings into the existing BackendEval harness + #g5kw substrate-promotion: weight DuckDB/DuckPGQ for (a) in-process zero-copy single-file reads, (b) partial REMOTE Parquet reads (footer + column-chunk fetch over HTTP) enabling a publishable shareable .tsift index agents query without full download, and (c) predicate/join pushdown to make deeper evidence/call-graph hops affordable (ties to #4z0w max-hop caps).
 <!-- /agent:backlog -->
 
 ## Review

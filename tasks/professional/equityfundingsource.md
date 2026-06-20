@@ -104,7 +104,32 @@ Scope note: I left the matching Google button on the **signup** page (`signup.ts
 **Tests:** added `tests/auth-login-ui.test.ts` (regression guard: no "Continue with Google" / `/login/google` / `google_url`; core login affordances intact). Full suite green — **910 pass / 0 fail** — build clean.
 
 **Shipped:** committed + pushed EFS `54a7eb8`, superproject pointer `e2547395a`. The `deploy` queued behind these will push it live.
-<!-- agent:boundary:b1adbde3 -->
+
+### Re: invite email auto-login + first-time account completion — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: An invite email should have a code to automatically log the user in. If it's the first time, the user should be presented with a form to complete their account.
+
+
+Done. Invitation emails now carry a **single-use auto-login link**; clicking it signs the lender in. First-timers are routed to a new **account-completion** page; returning lenders go straight to their portal.
+
+**Token model** (`lib/auth/invite_login.ts` + migration `0092_invite_login_tokens`): mirrors the password-reset pattern — a 32-byte random token, **SHA-256-hashed at rest** (raw token never stored), **single-use** (consumed on first click), **14-day TTL**, and minting a new invite supersedes the prior unused one.
+
+**Flow** (`lib/auth/routes.ts`):
+- `GET /login/invite?token=…` — validates + consumes the token, mints the session, then branches: empty `password_hash` (first-time) → `/account/complete`; otherwise → the lender's portal. Invalid/expired → login page with a friendly notice.
+- `GET`/`POST /account/complete` — session-gated. The first-timer confirms name + sets a password (≥8, confirmed); `user__complete_account_` writes name + first password in one update, and the session is re-minted with the completed profile. An already-complete account is bounced to its portal.
+
+**Invite email** (`lending_groups/notify.ts`): now embeds `/login/invite?token=…` instead of "set your password from the sign-in page."
+
+**Why empty-password = first-time:** invited accounts are created with `password_hash: ''` (existing behavior). A non-empty hash now means "fully set up", so the gate is unambiguous — and password login already rejects empty-hash accounts, so the token is the only way in until completion.
+
+**Tests:** `invite-login-token.test.ts` (real in-memory SQLite — single-use, expiry, supersede, unknown-token) + `invite-autologin-wiring.test.ts` (routes/notify/page/migration/export). Full suite **917 pass / 0 fail**, builds clean.
+
+**Scope:** wired into the **lending-group invite** (the invite path that auto-creates accounts). Borrower invites already have their own `/apply/finish` token flow, and admin-provisioning emails are separate — say the word if you want the auto-login link extended to those too.
+
+**Shipped:** committed + pushed EFS `475b90e`, superproject pointer `edbaf5b42`. Migration `0092` applies on the next deploy. The `deploy` queued behind this will push it live.
+<!-- agent:boundary:bc6f907b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -120,7 +145,7 @@ After 20:30
 - ~~:pushpin: In /lenders/groups, have a row for each member of the group. If a member is invited but has not yet signed in, have a "Resend Invite" button to that lender.~~
 - ~~:pushpin: deploy~~
 - ~~:pushpin: Remove "Continue with Google" button on the login page.~~
-- :pushpin: An invite email should have a code to automatically log the user in. If it's the first time, the user should be presented with a form to complete their account.
+- ~~:pushpin: An invite email should have a code to automatically log the user in. If it's the first time, the user should be presented with a form to complete their account.~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

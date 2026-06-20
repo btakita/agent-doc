@@ -641,6 +641,7 @@ struct Coverage {
     sidecar_normalization_divergences: usize,
     stale_source_buffer_skips: usize,
     reconnect_reread_decisions: usize,
+    editorless_disk_fallbacks: usize,
     ipc_snapshot_live_prompt_blocks: usize,
     live_prompt_forward_merges: usize,
     already_applied_response_recoveries: usize,
@@ -861,6 +862,7 @@ impl Coverage {
         self.sidecar_normalization_divergences += other.sidecar_normalization_divergences;
         self.stale_source_buffer_skips += other.stale_source_buffer_skips;
         self.reconnect_reread_decisions += other.reconnect_reread_decisions;
+        self.editorless_disk_fallbacks += other.editorless_disk_fallbacks;
         self.already_applied_response_recoveries += other.already_applied_response_recoveries;
         self.ack_sidecar_only_repairs += other.ack_sidecar_only_repairs;
         self.visible_duplicate_repairs += other.visible_duplicate_repairs;
@@ -3479,6 +3481,42 @@ fn reconnect_buffer_sim_rereads_stale_then_keeps_user_edits() {
     assert_eq!(
         world.coverage.reconnect_reread_decisions, 1,
         "exactly one stale buffer should be re-read in this scenario"
+    );
+}
+
+#[test]
+fn editorless_cli_sim_force_disk_but_live_editor_fail_closed() {
+    use agent_doc_orchestration::flow::document_mutation::{
+        decide_editorless_disk_fallback, EditorlessDiskFallbackDecision,
+    };
+    let mut world = SimWorld::new(2_046);
+    world.append_to_exchange("❯ finalize me\n").unwrap();
+    let threshold = 3;
+
+    // #kcb5 CLI-only actor: connectable controller socket, NO editor endpoint,
+    // every send no_acks → route to the controller-host disk write.
+    let cli = decide_editorless_disk_fallback(true, false, threshold, threshold, false);
+    assert_eq!(
+        cli,
+        EditorlessDiskFallbackDecision::ForceDiskNoEditor,
+        "an editor-less CLI actor must route finalize to disk, not wedge on no_ack"
+    );
+    if cli == EditorlessDiskFallbackDecision::ForceDiskNoEditor {
+        world.coverage.editorless_disk_fallbacks += 1;
+    }
+
+    // A live editor actor with the same failing delivery must STILL fail closed
+    // (no regression of the editor-buffer / #editorbufwin protection).
+    let live = decide_editorless_disk_fallback(true, true, threshold, threshold, false);
+    assert_eq!(
+        live,
+        EditorlessDiskFallbackDecision::FailClosed,
+        "a live editor buffer must never be disk-clobbered on unproven delivery"
+    );
+
+    assert_eq!(
+        world.coverage.editorless_disk_fallbacks, 1,
+        "exactly the editor-less actor should force the disk fallback"
     );
 }
 

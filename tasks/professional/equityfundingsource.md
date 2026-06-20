@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -46,8 +46,8 @@ Compacted content:
 ❯ > The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.
 
 
-❯ > **Queue prompt:**
-❯ >
+> **Queue prompt:**
+>
 > :pushpin: The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.
 
 
@@ -236,6 +236,11 @@ Untouched (different turns, not part of this revert): the `#proprate` rate findi
 
 > **Queue prompt:**
 >
+❯ > :pushpin: Add an "Unselect Lender" button with a confirmation dialog in case a lender was mistakenly selected. Does "Select Lender" send an email to the lender(s)?
+
+
+❯ > **Queue prompt:**
+❯ >
 > :pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests, Move "Select Lender" and "Mark Package Sent" buttons above the Show/Hide Workflow button.
 
 
@@ -250,7 +255,19 @@ In the admin deal interests row (`admin/deal_detail.tsx`), the two lender-action
 They were moved out of the collapsible *Deal Interest Workflow* section (no longer duplicated there). Suite **976 pass / 0 fail**, worker build clean.
 
 Two small notes: I kept the existing button labels ("Select proposal" / "Mark package sent") rather than renaming to "Select Lender" — say so if you'd prefer the rename. And I ordered them Select-then-Mark above the toggle per your listing; easy to flip to package-first if you'd rather follow the workflow sequence.
-<!-- agent:boundary:96ec1310 -->
+
+### Re: Unselect Lender button + confirmation + does Select email the lender? — opus-4-8
+
+**Does "Select Lender" email the lender? — No.** Selecting a proposal (`PUT /api/admin/deal-interests/:id/select`) validates accreditation / TMO loan number / lender account / amount limits, sets `selected_at`, recomputes + stores the **blended sold rate**, runs a TMO writeback + `tmo_cache_outbox` sync enqueue, and may advance the loan status — but it sends **no email** to the lender. (The `lender_email` in that handler is only metadata in the TMO outbox payload.)
+
+**Unselect — the button already existed**, just hidden: the "Select proposal" button **toggles to "Deselect proposal"** once a lender is selected (`select_interest_` flips on `!selected_at`). With this turn's earlier change it's now in the row header (above the Workflow toggle), so it's visible without expanding.
+
+**What I added: the confirmation dialog.** Deselecting now pops a danger confirm ("Unselect {lender} for this deal? This clears the selection and updates the blended rate and TMO sync.") via the shared `use_confirm_dialog_` hook, so a selected lender can't be unselected by a misclick. Shipped + deployed.
+
+EFS `266de43`, superproject `78a518a2d`, worker **Version ID `dbf4590d-20d1-4730-9617-2d0ef349ea69`**. Suite 976 pass / 0 fail.
+
+(Heads-up: I'd briefly mis-struck this queued item before answering it — it's fully addressed now.)
+<!-- agent:boundary:819011f6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -259,12 +276,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 After 20:30
 - login to TMO. Make sure we are using the correct credentials.
 - TMO Sync
----
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests, Move "Select Lender" and "Mark Package Sent" buttons above the Show/Hide Workflow button.~~
-- :pushpin: Add an "Unselect Lender" button with a confirmation dialog in case a lender was mistakenly selected. Does "Select Lender" send an email to the lender(s)?
+- ~~:pushpin: Add an "Unselect Lender" button with a confirmation dialog in case a lender was mistakenly selected. Does "Select Lender" send an email to the lender(s)?~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

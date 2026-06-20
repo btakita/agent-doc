@@ -44,7 +44,26 @@ Compacted content:
 Context compacted — 5 prior response topics archived to `.agent-doc/archives/…-20260620-022443.md` (the `#214f-gate` publish-on-acceptance gate, the `#5q7z` TMO duplicate-loan fix, and the *publishable*/*funded-vs-available* clarifications). All of that work is committed + pushed; nothing is pending.
 
 The only open queue head is the operator-gated **`#5q7z-ship`** deploy (deferred — needs `#commit-push-deploy` / `bun run deploy:worker` + live-verify). Ready for your next prompt.
-<!-- agent:boundary:fd6717dd -->
+
+### Re: deploy — production worker deployed — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+
+Deployed the EFS worker to production. **Version `0dd3c983-40a9-48d2-8f2b-e3a6272ecf6c`**, live at `https://equityfundingsource.brian-takita.workers.dev`. The `#5q7z` TMO duplicate-loan fix and the `#214f-gate` publish-on-acceptance gate (both already committed + pushed) are now live.
+
+**Build fix en route:** the first `deploy:worker` aborted in `pack:worker` on a stale **0-byte** CSS artifact (`index.server-ZFSW4ULG_N63YTD5X.css` — the complete Tailwind+component bundle had been truncated). Removed the stale CSS files and rebuilt clean; the regenerated bundle passed and deployed.
+
+**Deploy steps:** remote D1 migrate ran clean → worker uploaded (1 new asset, 43 cached) → triggers deployed.
+
+**Smoke check:** homepage `HTTP 200` (72 KB, CSS bundle intact); `/lenders/available-deals` → `HTTP 303` redirect to login (the `require_auth_('investor')` gate is live).
+
+`#5q7z-ship`: the **deploy sub-step is done**. The only thing left is the operator live-verify — open the admin approve flow on an already-in-TMO loan (deal `7a0c1463` / loan `45ddae53` GQI751) and confirm it no longer 400s and the button reads "Already in TMO". Left it as `[operator-verify]`.
+
+Note: this is the `workers.dev` deployment (the live app). The `equityfundingsource.com` custom-domain + SSO cutover is separate and still gated on `#cftk`/`#efs-cutover-sso-plan`.
+<!-- agent:boundary:23a3cc2f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -59,13 +78,14 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: "a loan is publishable only": Does publishable mean on the public webite?~~
 - ~~:pushpin: Why would a loan be publishable as available to be funded when it is funded? If it's funded, it's not available by definition.~~
-- do [#5q7z-ship]
+- ~~:pushpin: deploy~~
+- ~~do [#5q7z-ship]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#5q7z-ship] [operator-verify] Deploy the #5q7z TMO duplicate-loan fix (operator-gated: needs the #commit-push-deploy preset / bun run deploy:worker; code already committed+pushed EFS d8c17b4, pointer 58a2c5fea) then live-verify: the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) no longer returns TMO 400 Duplicate loan number, and the Accept-and-Send button now reads Already in TMO. Advances #5q7z.
+- [ ] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [/] [#67v2-aa-local] [recommended] Admin pipeline auto-advance local half (advances #67v2-auto-advance): define stage-requirement checks from the TMO-aligned Kanban and enqueue audited status updates to tmo_cache_outbox; replay stays gated on #dzmm. Depends on the #67v2 Kanban stages being built first.
 <!-- /agent:backlog -->

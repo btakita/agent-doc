@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -175,13 +175,56 @@ Correcting my earlier message in this turn: the `v0.34.24` tag triggered the Rel
 **Solid / shipped:** code on origin (submodule `72c65017`, tag `v0.34.24`, superproject `03e285335`); installed live (`cargo install` + `cargo build --release` + `lib-install` → `agent-doc 0.34.24`). Supervisor recycle marked for the next idle boundary.
 
 **Not shipped:** GitHub Release binary + PyPI wheel — blocked by the `agent-kit` (and likely `tmux-router`) sibling path-dep in CI. Fixing `release.yml` to check out the sibling crates (or point those deps at crates.io versions for CI) is a separate infra task. The tag stays at the correct commit so a re-run after the fix publishes cleanly.
-<!-- agent:boundary:498349f9 -->
+
+### Re: why are there unstruck free-text items? cause fixed (#ftstrike-fence) — opus-4-8
+
+**Cause:** the position-independent answered-free-text strike (`strike_answered_free_text_queue_heads`, `#ftstrike`) decides a head is "answered" by checking whether the head's **entire normalized node text** appears inside the response's quoted-prompt blockquotes. For a head whose body is a short prose lead followed by a **pasted code-fence log** — e.g. this answered head:
+
+> JB `Run Agent Doc` on equityfundingsource.md did not submit
+
+— the node text is dominated by the log, which nobody ever quotes back in full, so the `contains()` match always failed and the head was never struck. It then fell behind newer heads and orphaned. That's why answered items kept piling up unstruck while the leading-head consume (which uses topic matching, not full-text) struck only the current head.
+
+**Fix (shipped 0.34.25, `#ftstrike-fence`):** match on the head's **prose prefix** (lines before the first ` ``` `/`~~~` fence) via new `free_text_head_match_prose`, so a code-fenced report strikes when its prose lead is quoted. The ≥4-word guard + blockquote-only requirement stay, so an all-log head (empty prose prefix) still never matches — no false strikes. Regression test `code_fenced_free_text_head_strikes_on_prose_lead_match`; `make check` green.
+
+Shipped + live: submodule `27692f01` + tag `v0.34.25`, superproject `9237fccd2`, `cargo install` + `lib-install` → `agent-doc 0.34.25` (supervisor recycles onto it at this turn's idle boundary). This very closeout quotes the efs head above, so the new logic strikes it — the live demonstration.
+
+**Left intact (correctly):** the `img_53` "/login duplicated the prompt, no submit" head is a **new, unanswered** report — same class as `#rdypoll`/§D (post-login/restart duplicate-no-submit; the `dispatch_inject attempt=N` marker shipped 0.34.23). It stays an active queue head until the operator live-verify (`#rdypoll-deploy`) proves it. New unanswered reports SHOULD be unstruck.
+<!-- agent:boundary:2d5bbf2b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-~~~done
+- monsterrodholders.md turn had a major wedge issue that corrupted the document.
+---
+Why is the 0.1.0 supervisor being used in monsterrodholders.md?
+```
+● Pointer bumped — the full chain is now correct (aa70ccd2d). All substantive work is safe in git. The session doc is
+  still being raced into malformed states by the stale 0.1.0 supervisor (recycle queued for the idle boundary = turn
+  end). Per the yield pattern, I must not hand-edit the racing file or finalize over it — I end the turn so the
+  supervisor recycles. Let me record this diagnostic signature to memory first.
+```
+```
+[agent-doc] supervisor auto-install: rebuilding + installing agent-doc from /home/brian/work/btakita/agent-loop/src/agent-doc so the next queue item runs on the freshly-committed source
+   Compiling agent-doc-orchestration v0.1.0 (/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration)
+   Compiling agent-doc v0.34.24 (/home/brian/work/btakita/agent-loop/src/agent-doc)
+    Finished `release` profile [optimized] target(s) in 2m 41s
+[lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.25.so (symlink: libagent_doc.so)
+[lib-install] auto-recycle: 2 controller(s) marked to recycle at next idle boundary, 3 skipped (set AGENT_DOC_RECYCLE_ON_INSTALL=0 to disable)
+[agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve
+[agent-doc] queue_journal: replayed 2 operator queue item(s) lost to a crash+restart for tasks/professional/equityfundingsource.md
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+```
+---
 JB `Run Agent Doc` after a restart on monsterrodholders.md. I tried again and it worked. The restart state should not lag.
 ```
 [route] target tmux session: 0
@@ -207,7 +250,7 @@ JB `Run Agent Doc` after a restart on monsterrodholders.md. I tried again and it
 [route] claude blocked after 29.1s in pane %176: active claude turn
 Error: dispatch-only claude reopen refused to inject into pane %176 for tasks/monsterrodholders.md because the latest run is still booting and never reached a dispatch-ready prompt (active claude turn); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
 ```
-~~~
+---
 JB `Run Agent Doc` on equityfundingsource.md did not submit
 ```
 claude exited cleanly.
@@ -221,7 +264,6 @@ Press Enter to restart, or 'q' to exit.
 [agent-doc] auto-trigger: timed out waiting for claude prompt
 ```
 ---
-- After a /login, JB `Run Agent Doc` on monsterrodholders.md duplicated the prompt into the agent input without submitting ![img_53.png](img_53.png).
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

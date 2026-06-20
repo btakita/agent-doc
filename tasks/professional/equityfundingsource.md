@@ -72,7 +72,7 @@ Shipped the concrete ask: each **INVITED — PENDING** member in the admin deal 
 > :pushpin: deploy
 
 Deployed. `make deploy` pushed the worker live at `https://equityfundingsource.brian-takita.workers.dev` (startup ~20 ms, bindings unchanged) on commit `3de4e09`. The "Send Reminder to Accept Invite" action is now live in production.
-<!-- agent:boundary:d5d2a21c -->
+<!-- agent:boundary:fe9aa493 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,8 +85,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests > Multi-Lender Groups should have a UI to message a lender individually. The use case is if the lender is in an Invited Pending state, then we should be able to notify the lender. The natural request is to "Send Reminder to Accept Invite" and to expose the messaging. Perhaps we should have a message link that opens a message dialog?~~
-- deploy
+- :pushpin: Please diagnose the issue with btak.dev+lender2@gmail.com blocking EFS from accepting the lender group for the available deal? The messaging is not clear. The lender needs to have alerts of what needs to be done next. Is it because the lender is not accredited?
 <!-- /agent:queue -->
 
 ## Backlog

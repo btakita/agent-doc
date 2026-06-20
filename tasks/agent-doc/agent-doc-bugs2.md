@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -74,15 +74,28 @@ Queue corrected: the 3 answered free-text operator heads ("Why is the 0.1.0 supe
 - **Operator/agent guidance:** never `git checkout` / `Edit` / `sed` a session doc that has a live editor open — only `reset --from-current` + `commit` (listener-guarded). My use of `git checkout HEAD` and `Edit` during recovery *was itself* an FCC trigger this session.
 
 This **confirms `#cyh0`'s hypothesis**: the live trigger is the recovery/manual disk-write paths, not the guarded hot path. The stale "What are #next-steps" head (already answered + archived in the compaction) is cleared alongside this.
-<!-- agent:boundary:ddd32f5f -->
+
+### Re: Implemented #evmh (binary half) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#evmh]
+
+
+Audited every production session-doc disk-write site for the recovery-path FCC trigger. Most were already listener-guarded: `apply_compacted_document` (`#w42v`), the post-commit worktree reconcile (editor-IPC-first), and `write.rs` `atomic_write` (the intentional `--force-disk`/IPC-unavailable fallback). The `stream.rs`/`snapshot.rs` writes are init-time session-UUID assignment, before any editor listener — out of scope.
+
+The **one genuine unguarded gap was `reset --from-current`** (default, without `--preserve-session`): clearing the `resume` pointer rewrote the document with a bare `std::fs::write`, diverging a live editor buffer → File Cache Conflict. Fixed: it now routes through `write::converge_or_disk_write(..., "reset_resume_clear")` — a live listener converges through the buffer (no FCC); no listener falls back to the same CLI disk write, so headless `reset` is byte-identical. (`reset --from-current --preserve-session`, which I used repeatedly this session, only rebuilds sidecars and never touched the document — it was never a trigger.)
+
+Shipped: agent-doc submodule `9b13d529` (0.34.27), pushed to origin/main. New regression test `from_current_routes_resume_clear_through_converge_seam` (asserts the `ops.log` source-labelled seam routing); `make check` (clippy + full suite) green. `#evmh` done.
+
+**Remaining (filed as `#evmhplugin`):** the plugin-side reconnect re-read (when the editor buffer is stale vs HEAD on reconnect, re-read disk instead of pushing the stale buffer — the `#postcommit-ipc-worktree-corruption` direction). That's separate Kotlin/FFI work. I'll `cargo install` 0.34.27 + recycle the supervisor *after* this finalize commits, to avoid the mid-session client-newer-than-supervisor drift.
+<!-- agent:boundary:5e49e3cb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~What are #next-steps to fix agent-doc bugs?~~
-- ~~:pushpin: Please diagnose JB file cache conflict dialogs.~~
-- do [#evmh]
+- do [#yzer]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -109,7 +122,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#evmh] #cyh0fix #agent-doc-bug Close the #cyh0 FCC trigger now identified live this session: (1) route ALL recovery-path session-doc disk writes (reset --from-current rebuild, the git checkout HEAD recovery, any non-hot-path write) through the listener-guarded converge_or_disk_write seam instead of bare disk writes while a plugin listener is registered; (2) on plugin reconnect, when the editor buffer is stale vs HEAD, re-read disk (HEAD) instead of pushing the buffer via save_document — binary/HEAD wins for unsynced control-plane edits, editor wins only for genuine user edits (per #editorbufwin P1). Add SimWorld coverage for the two-sided divergence: a binary disk write behind a live editor, and a stale-buffer save_document reverting a binary write (#postcommit-ipc-worktree-corruption).
+- [ ] [#yzer] #evmhplugin #agent-doc-bug Plugin-side half of #evmh: on JB plugin IPC reconnect, when the editor buffer is stale vs HEAD (committed content the binary wrote while the plugin was disconnected), re-read disk/HEAD into the buffer instead of pushing the stale buffer via save_document (the #postcommit-ipc-worktree-corruption revert direction that overwrote binary disk writes this session). Binary/HEAD wins for unsynced control-plane edits; editor wins only for genuine user edits (per #editorbufwin P1). Kotlin PatchWatcher/reconnect path + FFI staleness check + SimWorld/multi-window reconnect coverage. operator-verify (needs a live reconnect test). Also live-verify the shipped binary half (0.34.27, commit 9b13d529) at the next install/recycle boundary: a default reset --from-current on a doc open in a live JB editor must NOT raise a File Cache Conflict and ops.log should show reset_resume_clear_writeback transport=editor_ipc.
 <!-- /agent:backlog -->
 
 ## Review

@@ -870,7 +870,14 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // dead-harness guard logs `route_dispatch_into_dead_shell_blocked` when
         // the harness has crashed/exited to a bare interactive shell, so route
         // fails closed instead of typing the trigger into the dead shell.
-        ("agent-doc-orchestration/src/route/dispatch.rs", "reason=") => 1,
+        // +2 (#jbtsiftnosub
+        // `reason=harness_not_dispatch_ready_before_auto_start_send`,
+        // `reason=harness_exited_to_bare_shell_before_auto_start_send`): the
+        // auto-start cold-start re-verify gate (`reverify_auto_start_dispatch_ready`)
+        // fails closed and logs `dispatch_into_starting_pane` / `dispatch_into_shell`
+        // when a freshly created pane is still cold-starting (or dropped to a bare
+        // shell) at send time, instead of typing into a not-yet-submit-ready composer.
+        ("agent-doc-orchestration/src/route/dispatch.rs", "reason=") => 3,
         ("agent-doc-orchestration/src/route/busy_pane.rs", "reason=") => 1,
         // +8 for the audited `#do-id-closeout-open-backlog` guard:
         // `expect_done_or_gate_guard_fired` ops_log diagnostic plus seven

@@ -2,6 +2,14 @@
 
 use super::*;
 
+/// `#jbtsiftnosub`: bounded re-verify window for the auto-start cold-start gate.
+/// After `wait_for_agent_ready` reports ready, the pane should already show a
+/// dispatch-ready prompt, so this is the small race window between the readiness
+/// proof and the actual send; if the composer is still cold-starting past this
+/// bound the auto-start dispatch fails closed instead of typing into a
+/// not-yet-submit-ready composer.
+const AUTO_START_DISPATCH_READY_REVERIFY_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Auto-start a new agent session in tmux using the default session name.
 /// Public so `sync.rs` can call it for unresolved files.
 ///
@@ -513,6 +521,20 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                 )?;
                 RoutedDispatchStartProof::CommandAcceptedOnly
             } else {
+                // #jbtsiftnosub: close the cold-start race. `wait_for_agent_ready`
+                // can prove a transient dispatch-ready prompt while the harness TUI
+                // is still coming up; re-verify immediately before the send that the
+                // composer is actually submit-ready, and fail closed (logging
+                // `dispatch_into_starting_pane`) rather than typing the trigger into
+                // a not-yet-ready composer.
+                super::dispatch::reverify_auto_start_dispatch_ready(
+                    tmux,
+                    file,
+                    &dispatch_pane,
+                    file_path,
+                    harness,
+                    AUTO_START_DISPATCH_READY_REVERIFY_TIMEOUT,
+                )?;
                 dispatch_routed_reopen(tmux, file, &dispatch_pane, file_path, harness)?
             }
         } else {

@@ -146,6 +146,14 @@ enum SimCommand {
     DriftProjection,
     RepairProjection,
     PromoteStartingPromptReady,
+    /// `#jbtsiftnosub`: model the JB `Run Agent Doc` auto-start dispatch path. The
+    /// re-verify gate sends only when the freshly created pane shows a harness
+    /// dispatch-ready prompt; while the actor is still `Starting` (cold-starting
+    /// composer, input-accepting but not yet submit-ready) it must fail closed and
+    /// record `dispatch_into_starting_pane` instead of typing into a not-ready
+    /// composer. Driven only by targeted tests, not the random generator, so the
+    /// seed corpus traces are unchanged.
+    DispatchAutoStartRoutePrompt,
     BusyInterruptRecoveryReady,
     RepairBusyProjectionWithReadyPrompt,
     AdminPauseQueue,
@@ -620,6 +628,10 @@ struct Coverage {
     visible_duplicate_repairs: usize,
     post_commit_follow_up_handoffs: usize,
     starting_prompt_promotions: usize,
+    /// `#jbtsiftnosub`: the JB auto-start dispatch re-verify gate refused to send
+    /// into a freshly created pane whose harness was still cold-starting (no
+    /// dispatch-ready prompt), recording `dispatch_into_starting_pane`.
+    auto_start_starting_pane_blocks: usize,
     busy_dispatch_blocks: usize,
     closed_dispatch_blocks: usize,
     busy_interrupt_recoveries: usize,
@@ -826,6 +838,7 @@ impl Coverage {
         self.visible_duplicate_repairs += other.visible_duplicate_repairs;
         self.post_commit_follow_up_handoffs += other.post_commit_follow_up_handoffs;
         self.starting_prompt_promotions += other.starting_prompt_promotions;
+        self.auto_start_starting_pane_blocks += other.auto_start_starting_pane_blocks;
         self.busy_dispatch_blocks += other.busy_dispatch_blocks;
         self.closed_dispatch_blocks += other.closed_dispatch_blocks;
         self.busy_interrupt_recoveries += other.busy_interrupt_recoveries;
@@ -1743,6 +1756,59 @@ fn route_sim_promotes_starting_prompt_ready_before_dispatch() {
     assert_eq!(world.coverage.starting_prompt_promotions, 1);
     assert_eq!(world.coverage.route_dispatch_acceptances, 1);
     assert_eq!(world.coverage.route_dispatch_proofs, 1);
+}
+
+#[test]
+fn route_sim_auto_start_dispatch_waits_for_dispatch_ready_prompt_before_send() {
+    // #jbtsiftnosub: JB `Run Agent Doc` auto-started a fresh pane/supervisor, typed
+    // the `agent-doc <FILE>` trigger into the harness composer, but did NOT submit
+    // — a cold-start race where the harness TUI had not reached a dispatch-ready
+    // prompt when the trigger was typed. The auto-start dispatch must wait for the
+    // harness dispatch-ready prompt and re-verify it immediately before the send;
+    // if the send is attempted while the pane is still starting it must fail closed
+    // and record `dispatch_into_starting_pane` instead of typing into a
+    // not-yet-submit-ready composer.
+    let mut world = SimWorld::new(2_005);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+
+    // Cold-start: the fresh pane's actor is still `Starting` (composer accepts
+    // input but is not yet submit-ready). The auto-start dispatch must fail closed.
+    world
+        .apply(SimCommand::DispatchAutoStartRoutePrompt)
+        .unwrap();
+    assert_eq!(
+        world.coverage.auto_start_starting_pane_blocks, 1,
+        "auto-start dispatch must fail closed while the harness is still cold-starting"
+    );
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 0,
+        "the trigger must NOT be sent into a still-starting composer"
+    );
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("dispatch_into_starting_pane")
+            && ops_log.contains("reason=harness_not_dispatch_ready_before_auto_start_send"),
+        "ops log must record dispatch_into_starting_pane for the cold-start race:\n{ops_log}"
+    );
+
+    // Once the harness dispatch-ready prompt is observed (the re-verify gate
+    // clears), the same auto-start dispatch sends and is proven submitted.
+    world.apply(SimCommand::PromoteStartingPromptReady).unwrap();
+    world
+        .apply(SimCommand::DispatchAutoStartRoutePrompt)
+        .unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+
+    assert_eq!(world.coverage.starting_prompt_promotions, 1);
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 1,
+        "after the dispatch-ready prompt is observed the auto-start trigger must submit"
+    );
+    assert_eq!(world.coverage.route_dispatch_proofs, 1);
+    assert_eq!(
+        world.coverage.auto_start_starting_pane_blocks, 1,
+        "the ready auto-start dispatch must not re-trip the starting-pane block"
+    );
 }
 
 #[test]

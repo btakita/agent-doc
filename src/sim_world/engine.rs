@@ -317,6 +317,11 @@ impl SimWorld {
                     self.coverage.record_block(&err.to_string());
                 }
             }
+            SimCommand::DispatchAutoStartRoutePrompt => {
+                if let Err(err) = self.dispatch_auto_start_route_prompt() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
             SimCommand::BusyInterruptRecoveryReady => {
                 if let Err(err) = self.recover_busy_interrupt_to_ready() {
                     self.coverage.record_block(&err.to_string());
@@ -1603,6 +1608,36 @@ impl SimWorld {
         self.transition_supervisor(self.route.durable.generation, SupervisorLifecycle::Ready)?;
         self.coverage.starting_prompt_promotions += 1;
         Ok(())
+    }
+
+    /// `#jbtsiftnosub`: model the JB `Run Agent Doc` auto-start dispatch path's
+    /// cold-start re-verify gate. The auto-start path creates a fresh pane and may
+    /// observe a transient dispatch-ready prompt while the harness TUI is still
+    /// coming up. Before the send, route re-verifies the harness dispatch-ready
+    /// prompt; if the pane is still `Starting` (the composer accepts input but is
+    /// not yet submit-ready), the gate fails closed and records
+    /// `dispatch_into_starting_pane` rather than typing the trigger into a
+    /// not-yet-submit-ready composer. Once the dispatch-ready prompt is observed
+    /// (`promote_starting_prompt_ready`), the same auto-start dispatch proceeds
+    /// through the normal route dispatch path.
+    pub(crate) fn dispatch_auto_start_route_prompt(&mut self) -> Result<()> {
+        let pane_id = self.current_dispatch_pane()?;
+        if self.route.durable.lifecycle == SupervisorLifecycle::Starting {
+            self.coverage.auto_start_starting_pane_blocks += 1;
+            self.record_ops_proof(format!(
+                "dispatch_into_starting_pane pane={} generation={} reason=harness_not_dispatch_ready_before_auto_start_send",
+                pane_id, self.route.durable.generation
+            ));
+            bail!(
+                "auto-start route dispatch refused: harness still starting (no dispatch-ready prompt) for pane {}; seed={} trace={:?}",
+                pane_id,
+                self.seed,
+                self.trace
+            );
+        }
+        // Past the cold-start gate the auto-start send rejoins the normal route
+        // dispatch path (the same readiness/coalesce/acceptance invariants apply).
+        self.dispatch_route_prompt_with(true)
     }
 
     pub(crate) fn recover_busy_interrupt_to_ready(&mut self) -> Result<()> {

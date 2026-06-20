@@ -554,6 +554,128 @@ pub(crate) fn dead_harness_shell_dispatch_block(
     Some(current_command)
 }
 
+/// Why a `#jbtsiftnosub` cold-start re-verify refuses an auto-start dispatch. The
+/// distinction matters for diagnostics: a `StartingPane` is a freshly created
+/// pane whose harness is still booting (the composer accepts keystrokes but is
+/// not yet submit-ready), while a `DeadShell` is the issue-A case where the
+/// harness already crashed/exited to a bare interactive shell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AutoStartDispatchBlock {
+    /// The pane is still cold-starting: no harness dispatch-ready prompt yet, but
+    /// the foreground process is NOT a bare shell (the harness is coming up).
+    StartingPane,
+    /// The harness crashed/exited to a bare interactive shell (issue A). Carries
+    /// the shell command name reported by `#{pane_current_command}`.
+    DeadShell(String),
+}
+
+/// `#jbtsiftnosub`: re-verify, immediately before an auto-start send, that the
+/// freshly created pane has reached a harness dispatch-ready prompt. The
+/// cold-start race is that `wait_for_agent_ready` proved a transient dispatch-ready
+/// prompt while the harness TUI was still coming up, but by send time the composer
+/// is not yet submit-ready, so the trigger keystrokes land without a real submit.
+///
+/// Returns `None` when the pane shows a harness dispatch-ready prompt (the send
+/// may proceed). Returns `Some(DeadShell)` when the harness exited to a bare shell
+/// (the issue-A guard), or `Some(StartingPane)` when the harness is the foreground
+/// process but no dispatch-ready prompt is visible yet (still cold-starting).
+pub(crate) fn auto_start_dispatch_ready_block(
+    tmux: &Tmux,
+    pane: &str,
+    harness: &HarnessConfig,
+) -> Option<AutoStartDispatchBlock> {
+    // A visible harness dispatch-ready prompt means the composer is submit-ready;
+    // let the send proceed.
+    let pane_shows_dispatch_ready_prompt = sessions::capture_pane(tmux, pane)
+        .ok()
+        .and_then(|content| super::startup::ready_prompt_candidate(&content, harness))
+        .is_some();
+    if pane_shows_dispatch_ready_prompt {
+        return None;
+    }
+    // No dispatch-ready prompt: distinguish a dead bare shell (issue A) from a
+    // still-starting harness composer (issue C) by the foreground command.
+    match super::pane_display_value(tmux, pane, "#{pane_current_command}")
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+    {
+        Some(cmd) if pane_current_command_is_bare_shell(&cmd) => {
+            Some(AutoStartDispatchBlock::DeadShell(cmd))
+        }
+        _ => Some(AutoStartDispatchBlock::StartingPane),
+    }
+}
+
+/// `#jbtsiftnosub`: gate an auto-start send behind a bounded re-verify that the
+/// freshly created pane has reached a harness dispatch-ready prompt. Polls
+/// [`auto_start_dispatch_ready_block`] up to `timeout`; a clear (`None`) result
+/// lets the caller proceed with the normal send. If the bound elapses while the
+/// pane is still cold-starting (or has dropped to a dead shell), fails closed with
+/// claim/restart guidance and records `dispatch_into_starting_pane` /
+/// `dispatch_into_shell` in ops.log instead of typing into a not-yet-submit-ready
+/// composer.
+pub(crate) fn reverify_auto_start_dispatch_ready(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+    timeout: Duration,
+) -> Result<()> {
+    let start = Instant::now();
+    let poll_interval = Duration::from_millis(150);
+    let last_block = loop {
+        match auto_start_dispatch_ready_block(tmux, pane, harness) {
+            None => return Ok(()),
+            Some(block) if start.elapsed() >= timeout => break block,
+            Some(_) => {}
+        }
+        std::thread::sleep(poll_interval);
+    };
+    match last_block {
+        AutoStartDispatchBlock::StartingPane => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "dispatch_into_starting_pane file={} pane={} harness={} timeout_secs={} reason=harness_not_dispatch_ready_before_auto_start_send",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    timeout.as_secs()
+                ),
+            );
+            anyhow::bail!(
+                "route refusing to dispatch {} into pane {}: harness '{}' is still starting (no dispatch-ready prompt after {}s). The cold-start composer is not yet submit-ready — re-run `agent-doc route`/`Run Agent Doc` once the {} prompt is up, or claim/restart the harness.",
+                harness.trigger_command(file_path),
+                pane,
+                harness.binary,
+                timeout.as_secs(),
+                harness.binary,
+            );
+        }
+        AutoStartDispatchBlock::DeadShell(shell) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "dispatch_into_shell file={} pane={} harness={} pane_current_command={} timeout_secs={} reason=harness_exited_to_bare_shell_before_auto_start_send",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    shell,
+                    timeout.as_secs()
+                ),
+            );
+            anyhow::bail!(
+                "route refusing to dispatch {} into pane {}: harness '{}' is not running (pane is a bare '{}' shell). The harness crashed/exited during cold-start — claim/restart the harness before routing.",
+                harness.trigger_command(file_path),
+                pane,
+                harness.binary,
+                shell,
+            );
+        }
+    }
+}
+
 pub(crate) fn send_command_unchecked(
     tmux: &Tmux,
     pane: &str,

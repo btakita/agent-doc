@@ -11,7 +11,7 @@ This is a **real multi-phase project**, not a one-cycle change. Each phase is in
 
 ## Progress (2026-06-20)
 
-**Phases 0, 1, 2 landed** (tsift submodule, written-but-unread; `make check` green, release built + installed). Phase 3 (query path + parity gate) is the next, behavior-changing cycle.
+**Phases 0, 1, 2, and Phase 3 core (3a) landed** (tsift submodule, written-but-unread; `make check` green, release built + installed). Phase 3 engine + both soundness gates are proven; the remaining **Phase 3b** (CLI env-flag wiring + `SearchResponse` construction) is the next increment, then Phase 4 cutover.
 
 ### Phase 0 spike findings (settled)
 - **FTS5 availability: confirmed, no new dep.** Bundled `rusqlite` (0.40, `features=["bundled"]`) compiles SQLite with FTS5. Already used in-repo by `tsift-tokensave` (`nodes_fts`) and `tsift-memory` (`memory_events_fts`) with passing tests — reference implementations exist.
@@ -33,9 +33,11 @@ This is a **real multi-phase project**, not a one-cycle change. Each phase is in
 ### Phase 2 — Populate incrementally ✅ DONE
 - In the `apply_changes` New/Modified branch (where source is already read), upsert the file's content into `content_fts`; delete on Deleted; clear on `rebuild`. Mirror the `file_zonemap` lifecycle exactly (same transaction, same delete sites). **Landed:** `insert_fts`/`delete_fts` prepared statements mirror `insert_zonemap`/`delete_zonemap` at every site; 3 lifecycle tests (populate code-files-only + MATCH/BM25, modify-replaces-no-dup + delete-removes, rebuild-repopulates).
 
-### Phase 3 — Query path behind a flag
+### Phase 3 — Query path behind a flag — 🟡 CORE DONE (engine + soundness gates); 3b wiring pending
 - Add an `index.db`-backed search that runs an FTS5 `MATCH` + BM25 rank, **zone-map-pruned** (`files_possibly_containing_kind` / a new `files_in_path_scope`) for kind/path-filtered queries. Gate behind a config/env flag; default stays `TokenIndex`.
 - **Soundness gate:** on a fixture corpus, FTS results ⊇ the relevance set; for shared queries, assert the flagged path's top-K matches the `TokenIndex` path's top-K (or document deliberate ranking differences). This is where the zone-map prune earns its `pruned == unpruned` regression.
+- **Landed (3a, engine + gates):** `IndexDb::content_fts_search_pruned(query, kind, limit)` (zone-map-pruned BM25; the zone-map's first consumer) + `sift::fts_match_query` (OR-union query translation preserving TokenIndex semantics). Two soundness tests: `content_fts_search_pruned_is_sound` (pruned ⊆ unpruned, no false negatives, sound retention of zonemap-less files) and `fts_content_index_supersets_token_index_candidates` (FTS ⊇ TokenIndex). Finding: FTS5 defaults a multi-token MATCH to an adjacency *phrase*; `fts_match_query` ORs the tokens to keep union semantics.
+- **Remaining (3b):** wire the env-flagged search path into the CLI (`run_sift_search` / `__search-worker`), constructing a `SearchResponse` from `content_fts_search` (resolve `.tsift/index.db`, line numbers/previews, BM25-vs-substring top-K reconciliation), default off. A `files_in_path_scope` zone-map prune for path-filtered queries is also a 3b add. THEN the Phase 4 cutover can flip the default.
 
 ### Phase 4 — Cutover + retire TokenIndex
 - Flip the default to the FTS5 path; remove the JSON `TokenIndex` build/cache once parity holds. Update the rewrite/hook surfaces and `search-cache` docs.

@@ -125,7 +125,7 @@ Good questions — I dug into `idle_watch.rs` to answer precisely rather than gu
 **Can we hot-swap mid-turn?** Not safely as built — and this is the core reason for the boundary gate. The supervisor doesn't just host the harness PTY; it **owns the in-flight cycle's control-plane state**: the CRDT document, the pending write queue, `cycle_state`, and the IPC socket listeners. `execve` preserves the child PTY, but that in-memory control-plane is **rebuilt fresh** after re-exec. Swapping mid-write would drop/corrupt the in-flight cycle — the precise drift class we've been fighting all session. A real mid-turn hot-swap would require serializing the entire control-plane across the `execve` and restoring it atomically; the in-process supervisor migration laid groundwork (the supervisor now owns this state in-process) but state-handoff-across-execve isn't built.
 
 **The actionable fix** (captured as a backlog item): automate `#staleloop-recycle-restart`. When `idle_watch` detects its *own* binary is stale **and** a drain is in progress, it should signal the in-session loop to yield at the next inter-item boundary so the `execve` recycle fires on its own — instead of relying on me to notice the staleness and manually install+recycle+end-turn. That closes the "self-draining session can't recycle itself" gap without touching the mid-turn invariant. It's supervisor-core (live-supervisor-critical, needs `make tmux-ci`), so it's a focused cycle, not an in-loop change.
-<!-- agent:boundary:4c6c74cd -->
+<!-- agent:boundary:35e34a93 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -134,6 +134,7 @@ Good questions — I dug into `idle_watch.rs` to answer precisely rather than gu
 - ~~:pushpin: Why is the supervisor hot-swap not deploying whenever a new agent-doc version is installed? Can we hot-swap the supervisor mid-turn?~~
 - ~~I deleted a couple of queue items while a turn was running, but I did not save to disk. agent-doc reverted my deletion.~~
 - ~~do [#wd40]~~
+- do [#vgat]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

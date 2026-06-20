@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -68,7 +68,7 @@ Verified: updated `tests/email-login.test.ts` asserts the guard runs before toke
 > :pushpin: deploy
 
 Already deployed this cycle — the admin log-out-notice fix (`b1424ba`) went out as worker **version `6c634c0d`** via `make deploy` (no D1 migration; none needed). Live smoke checks confirmed the new behavior is serving: `GET /?notice=…` renders the persistent banner and the signed-out verify path still `303`s. Nothing changed since, so this is the live production worker.
-<!-- agent:boundary:e557211a -->
+<!-- agent:boundary:33537c0e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,6 +81,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: I still don't see any notification. Use chromium-bridge on https://equityfundingsource.brian-takita.workers.dev/login/invite?token=iI2YN6l4MHgYHx-HJpLgIDtxY86htclRIdDb2pI-5g4
+ to verify.
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -169,7 +169,15 @@ Done and deployed. The expired/used-invite notice (shown on the login page to a 
 **Why it's wired this way:** the flash banner HTML-escapes its message, and `?info=` is user-controllable (an XSS vector), so I couldn't just put a link in the query text. Instead the invalid-invite redirect now passes a **notice code** — `/login/invite` → `/login?notice=invite_expired` — and the login page renders the full notice as server-built trusted HTML via a new `flash_info_html_()` variant (the mailto address comes from `ctx.site.email`). No user input is ever rendered as HTML.
 
 Verified live on the worker after deploy: a signed-out invalid invite link `303`s to `/login?notice=invite_expired`, and that page renders the notice with `mailto:info@equityfundingsource.com?subject=Request%20a%20new%20invitation`. (Verified via curl since the notice is server-rendered and only shows for signed-out visitors — `/login` bounces your signed-in admin session to home.) Full `bun run check` **951 pass / 0 fail** (updated the invite wiring test). Committed (`9533a99`) + pushed, **deployed** (worker version `d98be19b`).
-<!-- agent:boundary:68f7da76 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Already deployed this cycle — the expired-invite "contact Equity Funding Source" mailto link (`9533a99`) went out as worker **version `d98be19b`** (no D1 migration). Confirmed live: `/login?notice=invite_expired` renders the EFS mailto link. Live production worker.
+<!-- agent:boundary:c06d1635 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -182,8 +190,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: In addition to contacting the lender who sent the invite, add " or contact Equity Funding Source" with a link to email EFS to send another invite.~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

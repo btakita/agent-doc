@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -99,7 +99,7 @@ Diagnosed against **prod D1**. Short answer: **No — it is not accreditation, a
 2. On accept, lender2@ becomes `active`, their 40% allocation lands, and the deal shows 100% confirmed.
 
 I held off building it this turn because the ask was "diagnose" and the UX (banner placement, accept+decline, dashboard vs groups page) is a design choice — **say "build the lender accept-invite alert" and I'll ship it** (UI-only; the endpoint is already there). On the admin side, the **"Send Reminder to Accept Invite"** button I shipped last cycle (live now) is the complementary nudge to prompt lender2@ to do exactly this.
-<!-- agent:boundary:4892817e -->
+<!-- agent:boundary:83a4c60a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,6 +112,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#bmvk]
 <!-- /agent:queue -->
 
 ## Backlog

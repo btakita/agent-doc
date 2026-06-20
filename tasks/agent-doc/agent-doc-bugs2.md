@@ -34,147 +34,17 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260619-234312.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260620-020748.md`*
 
 Compacted content:
-- Archived 7 response topic(s): Fix the root cause of already-done / noise heads flooding the queue; agent-doc duplicating queue items; JB `Run Agent Doc` route stalls (pane-kill+restart / "doesn't submit"); 4 more
-- Prior summary/context: prior compacted content: Archived 4 response topic(s): Fix equityfundingsource.md "Mixed signals"; Clean up the noise...
-
-### Re: #sqedit-race (queue-edit race) — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: [#sqedit-race]
-
-
-You pinned `#sqedit-race` to the top of a freshly-cleared session — the focused clean cycle this safety-critical commit-path item asks for. I scoped it against the actual code first, and the headline is that it was further along than the plan/backlog showed:
-
-**Phase 1 (#8bfz — single live plugin owner per doc) was already SHIPPED** (commit `237f5fb2`): `plugin_owner.rs` lease (`.agent-doc/plugin-owner/<hash>.json`, 30s TTL) + FFI (`agent_doc_plugin_owner_try_acquire`/`_release`) + `PatchWatcher.ownsDocument()` gate + release-on-dispose + 5 unit tests. Non-owner IntelliJ instances already defer patch application + saveDocument, so the multi-consumer re-flush source is closed. The plan now records this.
-
-**Phase 2 (queue-edit lease) — implemented + committed this cycle** (`d9a0ae58`, superproject `9ec17cc81`):
-- New `queue_edit_owner` module — a per-document `.agent-doc/queue-edit-owner/<hash>.json` lease (~15s self-healing TTL, mirrors the `drain-owner` lease) held for the whole `queue prune-noise` / `queue consume` read-modify-write via an RAII `QueueEditGuard` (released on drop, including early return / error).
-- The two *other* concurrent queue writers now defer while a **different, live** process holds a fresh lease: `run_queue_maintenance` returns early without mutating (logs `queue_maintenance_deferred reason=queue_edit_lease`), and the supervisor idle-queue-watch skips the dispatch tick (logs `idle_queue_watch_drain_skipped reason=queue_edit_in_flight`). The short TTL makes this a brief yield, not a stall.
-- This closes the preflight half of source (2) and source (3) from the plan: preflight maintenance / idle-watch can no longer round-trip a torn intermediate queue mid-edit.
-- 5 lease unit tests + `run_queue_maintenance_defers_while_foreign_queue_edit_lease_held` (proves zero mutation under a foreign lease, then resumes once cleared). FlowCore budget bumped (`maintenance.rs` `reason=` 3→4). **Full suite 4796 passed + clippy clean.**
-
-**Remaining:**
-- **Phase 3** (idempotent normalization) is *mostly landed* already — `#qdup-bare-id`, `#qnoise-multiline-strike`, `#pushpinaccum`. What's left is a `render(parse(x))` fixed-point property/SimWorld test over an already-malformed queue (double-pins + stray `~~~done`/`---` runs together) to prove convergence vs amplification.
-- **Phase 4** is the operator-gated finish and the only live-verify step: `make install` → `agent-doc admin recycle` → `queue prune-noise` on this doc, confirming `queue_stale_noise_lines` → 0 and the prune sticks across a later preflight.
-
-**Install deliberately deferred:** this session + the running supervisor (pid 3024307) both use `~/.cargo/bin/agent-doc`, so a mid-session `cargo install` would make the finalize client newer than the supervisor → `live_prompt_drift`. The new binary ships at the Phase 4 `make install` + recycle boundary. CI for `d9a0ae58` is in progress; local evidence is green.
-
-No agent-drainable queue heads remain (all `[operator-verify]`), so I'm not auto-looping.
-
-### Re: Fix the root cause of the degraded session — opus-4-8
-
-Found and fixed the actual root cause (not the stale binary I first suspected — that was a secondary factor).
-
-**Root cause: the realtime cross-editor broadcast was storming patches to dead editors.** `realtime_model::broadcast_editor_change` built its peer set from *every* `.agent-doc/live-buffer` sidecar with **no liveness check**. This document had accumulated **187 dead-`jetbrains-<pid>` orphan sidecars** (one per closed IntelliJ window, over days). So a single live editor (pid 3873180) reporting a buffer change fanned out to all 187 dead peers — I caught **247 `realtime_broadcast_queued` events in a few minutes**. Each broadcast (a) re-created the dead-pid patch file the `#fccreap` reaper had just cleared, and (b) merged against that dead editor's *divergent stale buffer* (merged_len 6300…73989). One of those stale merged buffers (19278 bytes) is what surfaced in my last finalize as the `socket_ack_content` drift candidate → `live_prompt_drift_after_preflight` + the post-commit working-tree reconcile, on *every* finalize.
-
-**Code fix (durable, shipped — agent-doc `5397b89f`):** `broadcast_editor_change` now liveness-filters both ends:
-- a dead-pid **originator** skips the whole broadcast (`reason=dead_origin_editor`);
-- dead-pid **peers** are dropped *and* their orphan live-buffer sidecars reaped (`realtime_broadcast_dead_peers_reaped`).
-
-JetBrains ids carry the owning pid; non-JetBrains ids (no embedded pid) are conservatively treated as live. 3 new tests; full suite **4799 + clippy green**.
-
-**Live session fixed (operational):** I removed the 187 dead-jetbrains orphan sidecars for this doc (leaving the 4 live-editor + 19 legacy no-id sidecars untouched, and the concurrent equityfundingsource session untouched). The storm stopped immediately — **0 broadcasts since** — because with the dead peers gone there are no stale targets to fan out to, regardless of the running binary version.
-
-**Secondary factor (noted, not the cause):** the swapped binary timing — `~/.cargo/bin/agent-doc` was reinstalled at 20:01 (concurrent EFS session/build) while this session's supervisor (pid 3024307) keeps running its 17:20 image — exercised `#supselfheal`. I deliberately did **not** `cargo install` (it would re-stale the concurrent EFS supervisor too); the supervisor self-recycles at its next idle boundary, and the broadcast fix itself ships at the next proper install boundary.
-
-**Follow-up queued** (`#lbreap`, recommended): extend `#fccreap` to proactively reap dead-pid live-buffer sidecars at closeout, so orphans never accumulate to 187 between broadcasts in the first place.
-
-### Re: #lbreap done + "deleted queue items came back after a File Cache Conflict" — opus-4-8
-
-**`#lbreap` shipped** (agent-doc `c5b5cc35`): closeout now reaps dead-PID live-buffer sidecars (`reap_stale_jetbrains_live_buffers`, beside the existing `#fccreap` patch-file reaper), so closed-IntelliJ orphans self-clear every cycle instead of accumulating to the 187 that fueled the storm. 3 tests; full suite **4802 + clippy green**. Marked done.
-
-**On your queued observation** ("I deleted struck queue items in monsterrodholders.md, then got a JB File Cache Conflict and they came back — the editor buffer should be the source of truth"): that is the **same root cause** I just fixed this session. The deleted items came back because the realtime broadcast was re-injecting a *stale/dead editor's* buffer (which still contained the struck items) back over your edit — and the File Cache Conflict was the stale buffer fighting the on-disk truth. Concretely:
-- A closed/stale IntelliJ left an orphan live-buffer sidecar holding the pre-deletion queue.
-- The broadcast fanned that stale buffer out as a "peer" with no liveness check, re-materializing the struck items + raising the FCC.
-- `#sqdrift` (liveness-filter the broadcast origin + peers, reap dead peers) + `#lbreap` (proactively reap dead sidecars at closeout) stop both: a dead/stale editor can no longer originate or receive a broadcast, so it can't resurrect deleted items.
-
-Your principle — *the live editor buffer is the source of truth* — is preserved: the fix removes only **dead** editors from the picture; a single **live** editor's buffer still wins. (The remaining residual this session is a separate, pre-existing class — a *live* IntelliJ, pid 3873180, holding a stale buffer for this doc; each finalize detects that drift and commits the correct `content_ours` to HEAD, so the response is never lost, just noisier. Tracked under the `#cyh0`/`#fccaudit` stale-live-editor family, distinct from the storm.)
-
-Net: the degraded session's root cause (broadcast storming dead editors → regenerated patch files + stale-buffer drift on every finalize) is fixed in code and the live storm is stopped (0 broadcasts since cleanup). Remaining queue heads are all `[operator-verify]`.
-
-### Re: do [#tsiftmdcrash] — found the crash in the logs + fixed it — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: For all `[operator-verify]` issues, look in the logs for verification.
-
-
-You asked me to look in the logs for the crash. **Found it** — and it was a real agent-doc bug, not the execve-recycle window I guessed at last time (the log was 994KB then; it's 1.5MB now and the smoking gun is in it).
-
-**The crash signature:** the managed OpenCode session on pane `%78` (the tsift.md TUI) was killed **twice** with `opencode_exit code=143` — and 143 = 128 + 15 = **SIGTERM**. Both kills land at the *exact same timestamp* as the line right above them:
-
-```
-[1781771180] opencode_capability_proof status=failed attempts=3 error="opencode child network probe timed out after 45s; stderr="
-[1781771180] supervisor_host_inprocess_exit pane=%78 harness=opencode exit_code=143 heartbeat=3531
-[1781771180] opencode_exit code=143 ... action=restart_after
-```
-
-(Identical pair again at `1781775311`.)
-
-**Root cause:** the managed capability-proof thread, after its network probe failed 3× (45s timeout each), called `shared.kill_child()` (`start.rs:1844`) — SIGTERM-ing the **live, healthy OpenCode session you were actively using**. The probe is a *separate background* `opencode run` child; it timed out (a false negative — your real TUI was "Thinking normally"), and that false negative killed your live turn. Because the *supervisor* owns the kill, the supervisor stayed alive and pane `%78` stayed active, then auto-restarted the child 2s later — which is precisely your report: *a turn crashed and killed the session process while the tmux pane stayed active.*
-
-**Why the kill was wrong (and safe to remove):** the `Failed` proof gate **already** blocks every prompt dispatch (`capability_dispatch_blocker`). So the SIGTERM bought zero extra safety — no unsafe work can be auto-dispatched whether the child lives or dies — it only destroyed a session you were using.
-
-**Fix (shipped — agent-doc submodule `a281ae3e`):** the give-up branch no longer kills the child. It keeps the gate `Failed` (dispatch disabled), marks the actor `Blocked`, surfaces the diagnostic, and logs a new line you can grep to prove the fix: `<harness>_capability_proof_live_child_preserved reason=dispatch_gated_not_killed`. Your live session survives a flaky probe; you fix the environment / stop / restart to re-prove. Test `failed_capability_proof_gate_blocks_dispatch_so_live_child_need_not_be_killed` locks in that the gate alone is the complete dispatch block. **`make check` green (4803 tests + clippy)**; release built; SPEC + README + VERSIONS updated.
-
-**Deliberately deferred the install:** this session's supervisor runs `~/.cargo/bin/agent-doc`, so a mid-turn `cargo install` would make my finalize client newer than the running supervisor → `live_prompt_drift`. The fix ships at your next `make install` + recycle boundary. I queued `#tsiftmdcrash-verify` with the exact log line to confirm once it's live.
-
-### Re: ops.logs should have each entry contain a [readable] timestamp — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: ops.logs should have each entry contain a timestamp.
-
-
-Done (agent-doc submodule `57fc75ed`). Each log entry already had a prefix, but it was a **bare Unix epoch** — `[1781771180]` — which is why diagnosing `#tsiftmdcrash` meant mentally converting epochs to wall-clock time. Now every operational log entry carries a **human-readable ISO-8601 UTC timestamp**: `[2026-06-18T08:26:20Z] …`.
-
-**What changed:**
-- New `agent_doc_core::log_time` module — `format_log_timestamp` (epoch → `YYYY-MM-DDTHH:MM:SSZ`) and `parse_log_timestamp` (the reader). **No chrono/date dependency** (the code deliberately avoids one) — it uses Howard Hinnant's civil-date algorithms.
-- All writers now emit ISO: `ops.log`, the supervisor session log (`log_event`, `startup_miss`), `cycles.jsonl`, and the `/tmp` write-dedup + sync debug logs.
-
-**Why this needed care (not just a format swap):** the epoch was being **read back** as a `u64` in several staleness-critical places — `session_accretion` (recent-cycle / recent-restart windows), `startup_miss` windows, and the `gate_verify` ops.log scanner (including the `s760_clear_decision_clear_true` verifier, which compares marker times to a gate's `set_at`). A naive switch to ISO would have silently broken all of those (every timestamp parse → `None` → mis-windowed staleness / un-provable gates). So `parse_log_timestamp` is **backward-compatible**: it accepts *either* a bare epoch (old log lines + old cycles.jsonl) *or* ISO, and I routed every reader through it. The helper lives in `agent-doc-core` so the core `gate_verify` scanner and the orchestration writers share one implementation.
-
-**Verification:** `log_time` tests cover known vectors, an epoch↔ISO round-trip (incl. a leap day), and garbage-rejection (fails closed to `None`, never `0`); the `ops.log` integration test now asserts an ISO bracket that round-trips; the existing `gate_verify` epoch test still passes (proving backward-compat). **`make check` green (4805)**, release rebuilt. SPEC updated (`supervisor.md`, `07-core-commands.md`, `07-closeout-commands.md`). Goes live at the same deferred install boundary as `#tsiftmdcrash`.
-
-### Re: JB `Run Agent Doc` on equityfundingsource.md did not submit — opus-4-8
-
-Log check (honoring "for operator-verify issues, look in the logs"):
-
-1. **Most likely `#qpauseux` (paused queue), not a new dispatch bug.** The EFS session log and `ops.log` show a continuous flood of `idle_queue_watch_drain_skipped reason=queue_control_paused` / `queue_dispatch_skipped reason=queue_control_paused` for `equityfundingsource.md` — its queue is **controller-paused**. With the queue paused, a `Run Agent Doc` dispatch is intentionally blocked and surfaces as "nothing submitted" — that is exactly `#qpauseux` variant 3 ("Run Agent Doc is not submitting / no visible submission result"). If that pause is stale/unintended, `agent-doc admin queue resume tasks/professional/equityfundingsource.md` clears it.
-
-2. **The pasted console is a concurrent supervisor recycle, not the cause.** "claude exited cleanly / Press Enter to restart" + "hot-reloading onto freshly-installed binary (execve)" are the EFS supervisor recycling onto the just-installed binary. *If* a dispatch landed on that restart prompt, that is the separate `#jbrundispatch` (directive 1) / `#1routedeadshell` "dispatch into a non-ready harness" class. Distinguishing paused-queue vs restart-prompt needs a live repro at the failing moment, per those review items — `route.rs` is invariant-heavy and not safe to blind-fix.
-
-3. **Bonus — `#opslogts` is already live-confirmed.** That same recycle picked up the new binary: the EFS session log timestamps flip from epoch `[1781917…]` to ISO `[2026-06-20T01:05:26Z]` right at the recycle, so the readable-timestamp change is working in a live supervisor.
-
-No drainable queue work remains (`queue_continuation_required=false`); the remaining heads are all operator-verify (`#sqedit-race`, `#qheadstrike`, `#hap7`, `#fbwire`, `#qpausemix-verify`, `#tsiftmdcrash-verify`) and need a live editor/pane or the deferred install. Not looping.
-
-### Re: JB `Run Agent Doc` on equityfundingsource.md did not submit — opus-4-8
-
-Diagnosed against the log you pasted. This is the **stale-supervisor-at-hot-reload window**, not a live defect in the installed binary — and the silent-loss class is already fixed in the binary the supervisor was mid-reload onto.
-
-**What the log shows:** the dispatch landed while the harness child had cleanly exited (`claude exited cleanly. Press Enter to restart`) **and** the supervisor was hot-reloading onto a freshly-installed binary (`supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve`). The `reconciled stale busy actor to ready from idle pane evidence` line that promoted the dead pane to "ready" **no longer exists in current source** — it was emitted by the OLD binary still in control during the recycle. So the submit went into the supervisor restart prompt and was lost by a binary that predates today's fixes.
-
-**Why the installed 0.34.18 doesn't reproduce the silent loss:**
-- `idle_projection_needs_reconciliation` (session_actor_cmd.rs:2422) now gates the idle→ready promotion on `prompt_ready == Some(true)`.
-- `prompt_ready` is computed by `live_pane_prompt_ready` keyed off a **real harness dispatch-ready prompt** (`is_dispatch_ready_prompt_line`). The supervisor `Press Enter to restart` screen is not one → the pane reads `AliveBusy`, not idle-ready (locked by `operator_clear_allows_clean_exit_prompt`, `prompt_ready: false`).
-- The dispatch barrier (`classify_prompt_ready_barrier`) requires `prompt_ready`, and a dispatch-only run against a busy/not-ready pane **fails closed with a visible "session still running" signal** (`dispatch_only_focus_only_should_fail_closed`, `#jb-run-agent-doc-command-route-miss`) instead of silently reporting success.
-- The freshly-installed binary also ships today's `#jbclaudesubmit` (retry Enter until the trigger submits) and `#jbrundispatch` directive 2 (detect non-dispatch + re-send full trigger).
-
-**Recovery (no code change needed for the reported loss):** the log shows the recycle already in progress — let the supervisor finish reloading onto 0.34.18 (idle-boundary `execve`), then re-run `Run Agent Doc`. This is the known `#staleloop-recycle-restart` window: a dispatch that races the old binary at the install boundary; nothing can fix the already-running old binary retroactively, only the recycle.
-
-**Residual gap I did capture (`#runexitrestart`, recommended):** even on 0.34.18, when claude has *cleanly exited* and you click `Run Agent Doc`, the route currently **fails closed** rather than restarting the harness and submitting — `route.rs`'s dispatch path has no clean-exit handling (only `session_restart` checks `pane_shows_clean_exit_prompt`). The improvement is to have the managed route / supervisor idle-watch detect a clean-exit pane with prompt-bearing work, press Enter to restart, wait for the dispatch-ready prompt, then submit — so a cleanly-exited harness never drops a run. That's a live-supervisor / two-pane-tmux change, so it's queued for a focused cycle, not the in-session loop.
-<!-- agent:boundary:2f9489d8 -->
+❯ - Archived 7 response topic(s): #sqedit-race (queue-edit race); Fix the root cause of the degraded session; #lbreap done + "deleted queue items came back after a File Cache Conflict"; 4 more
+❯ - Prior summary/context: prior compacted content: Archived 7 response topic(s): Fix the root cause of already-done / noise heads flooding the ...
+<!-- agent:boundary:a6f91e8f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: For all `[operator-verify]` issues, look in the logs for verification.~~
-- ~~:pushpin: ops.logs should have each entry contain a timestamp.~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.
 
@@ -192,14 +62,13 @@ Press Enter to restart, or 'q' to exit.
 [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
 ```
 ---
-- ~~:pushpin: do [#tsiftmdcrash]: Look in the logs for the crash.~~
 - :pushpin: [#sqedit-race]
 - :pushpin: [#qheadstrike]
 - :pushpin: do [#hap7]
 - :pushpin: do [#fbwire]
 - :pushpin: [#qpausemix-verify]
 - do [#tsiftmdcrash-verify]
-- ~~do [#runexitrestart]~~
+- do [#runexitrestart]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

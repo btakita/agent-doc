@@ -253,7 +253,7 @@ So the evented path is available in both. The win: feed those deltas straight in
 (1) and (2) are the cheap wins that remove most of what this session hit; (3) is the real isolation guarantee.
 
 I've kept this to analysis — I did **not** add backlog items or touch the queue, because you're actively curating it and concurrent backlog edits are exactly what's been corrupting convergence this session. Say the word and I'll file a plan (`plan-document-isolation-evented-ipc.md`) decomposed into those three rungs and queue them as proper phase IDs.
-<!-- agent:boundary:af6f22be -->
+<!-- agent:boundary:712f94c0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -262,7 +262,9 @@ I've kept this to analysis — I did **not** add backlog items or touch the queu
 - :pushpin: [#kcb5]
 - :pushpin: do [#6b5h]
 - #hap7
-- complete [#j9ja]pushpin: [#1jec]
+- complete [#j9ja]
+- :pushpin: [#1jec]
+- :pushpin: Why is there so much drift? Can we tighten the window that causes drift by using evented and reactive techniques? Does the JB + VSCode environments support events whenever a document changes? Can we have a low-latency multi-channel streaming IPC mechanism from the plugin to the CPC? Or would it be better to one stream per document going to the CPC with a thread updating the document model? Can we isolate parts of the document so to reduce conflict? For example, I was typing into this queue item so it should not have any effect on the running job and it should not stall the queue since this is not the current item being run.
 - :pushpin: Why does monsterrodholders.md keep on reporting a stale 0.1.0 supervisor if we are using a recent version? `(Housekeeping: recycled a stale 0.1.0 supervisor that was producing the IPC-drift dialogs, and reconciled the agent-loop→boost-client parent pointer.)`
 ---
 JB `Run Agent Doc` on monsterrodholders.md sent duplicate prompts and did not submit.
@@ -298,6 +300,7 @@ Press Enter to restart, or 'q' to exit.
 [agent-doc] idle_queue_watch: clear cooldown active for tasks/agent-doc/agent-doc-bugs2.md, skipping passive queue dispatch
 [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
 ```
+- :pushpin: do [#qprtloss]
 - do [#6b5h]
 <!-- /agent:queue -->
 <!--

@@ -89,7 +89,22 @@ Deployed. **Version `89bc78ab-0c11-48ca-a5d7-b4841e7614c0`**, live at `https://e
 **Smoke check:** homepage `HTTP 200`; `/lenders/groups` → `HTTP 303` to login (auth gate live).
 
 Queue drained except the operator-gated `#5q7z-ship` (deploy done earlier; only your live-verify of the TMO duplicate-loan fix remains). Stopping here.
-<!-- agent:boundary:c09316a9 -->
+
+### Re: remove "Continue with Google" on login — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Remove "Continue with Google" button on the login page.
+
+
+Done. Removed the **Continue with Google** button from the login page (`lib/ui--server--efs/auth/login.ts`), along with its now-orphaned **"Or"** divider and the unused `google_url`. Email/password login is unchanged.
+
+Scope note: I left the matching Google button on the **signup** page (`signup.ts:92`) in place — the directive named the login page specifically. Say the word if you want it gone from signup too.
+
+**Tests:** added `tests/auth-login-ui.test.ts` (regression guard: no "Continue with Google" / `/login/google` / `google_url`; core login affordances intact). Full suite green — **910 pass / 0 fail** — build clean.
+
+**Shipped:** committed + pushed EFS `54a7eb8`, superproject pointer `e2547395a`. The `deploy` queued behind these will push it live.
+<!-- agent:boundary:b1adbde3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -104,7 +119,9 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: In /lenders/groups, have a row for each member of the group. If a member is invited but has not yet signed in, have a "Resend Invite" button to that lender.~~
 - ~~:pushpin: deploy~~
-- do [#5q7z-ship]
+- ~~:pushpin: Remove "Continue with Google" button on the login page.~~
+- :pushpin: An invite email should have a code to automatically log the user in. If it's the first time, the user should be presented with a form to complete their account.
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

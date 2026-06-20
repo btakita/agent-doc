@@ -68,7 +68,21 @@ Standing state (all prior, already committed):
 - **Queue churn** — the answered free-text JB head keeps re-surfacing via `#qheadstrike` (free-text heads don't auto-strike) plus a live JB editor buffer diverging from HEAD (`ack_mismatch` blocks `queue consume`). Needs the stale editor instance reloaded; not agent-fixable from the binary.
 
 Note: this compaction's `### Session Summary` lines were emitted with spurious `❯` prompt-prefix glyphs, which made `session-check` read the summary as an unanswered prompt-only tail — captured below as `#compactprefix`.
-<!-- agent:boundary:f41f1938 -->
+
+### Re: Fix the root cause of the corruption — opus-4-8
+
+Found and fixed it. Shipped as `#qdup-freetext` (agent-doc 0.34.19, committed `023be469`, installed + `lib-install`ed).
+
+**Root cause (proven, not guessed).** The corruption is a *deterministic* convergence failure, not a concurrent-edit race. ops.log shows **557 consecutive `ipc_snapshot_adoption_blocked` events for this doc and ZERO `live_prompt_drift_semantic_merged` successes** — the per-node semantic merge declined *every single time*, so every IPC write fell through to the blocked `content_ours` carry-forward path (the permanent `ack_mismatch` / churn you saw, that "only an IDE reload clears").
+
+Why it declined every time: `semantic_merge` reconstructs a non-`exchange` component **only from its `- ` bullet list items** (`merge_components_into_body`). This doc's JB queue head is **multi-line free text** — a `:pushpin:` line plus a fenced ` ``` ` console block between `---` rules — which `overlay::components` never parses as an item (it only registers `- ` bullets). So the reconstruction **dropped the entire free-text head**, which tripped its own `dropped_queue_prompt_lines_after_content_ours` anti-data-loss gate → the merge declined → fail-closed → blocked. Forever. (The constant 459-byte `target − recovered` delta across both pre- and post-compaction failures was the tell: the same structural element dropped each time.)
+
+**The fix.** New `merge_nonexchange_inner` preserves operator non-bullet inner content (free-text heads, fenced blocks, `---` separators) verbatim while still merging the bullet items — generalizing the buffering already used for `exchange` heading-prose to all components, and tracking fenced spans so a `- ` inside a fence isn't mistaken for a bullet. Now a disjoint operator/agent edit around a free-text head **converges** instead of blocking.
+
+**Verification.** Two new regression tests — `freetext_fenced_queue_head_survives_per_node_merge` (markdown-ast unit) and `smconv_preserves_freetext_fenced_queue_head_on_drift` (IPC convergence: the guard now *adopts* the merge, head preserved verbatim, instead of blocking). Full suite **4807 passed** + clippy green. FlowCore budget updated for the new test's guard call.
+
+**Live status.** Binary installed (`0.34.19`), cdylib hot-reloaded via `lib-install`, and this doc's supervisor is marked to recycle onto the new binary at the next idle boundary. Once it recycles, this session's free-text-head merges converge and the queue churn stops. This is the merge-core fix `#hap7`/`#qdup` called for (plan: `plan-scoped-crdt-merge-no-structural-duplication.md`).
+<!-- agent:boundary:afec8f6f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -92,7 +106,7 @@ Press Enter to restart, or 'q' to exit.
 ```
 ---
 - ~~:pushpin: [#sqedit-race]~~
-- :pushpin: [#qheadstrike]
+- ~~:pushpin: [#qheadstrike]~~
 - :pushpin: do [#hap7]
 - :pushpin: do [#fbwire]
 - :pushpin: [#qpausemix-verify]

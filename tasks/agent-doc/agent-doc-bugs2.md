@@ -64,19 +64,37 @@ You pinned `#sqedit-race` to the top of a freshly-cleared session — the focuse
 **Install deliberately deferred:** this session + the running supervisor (pid 3024307) both use `~/.cargo/bin/agent-doc`, so a mid-session `cargo install` would make the finalize client newer than the supervisor → `live_prompt_drift`. The new binary ships at the Phase 4 `make install` + recycle boundary. CI for `d9a0ae58` is in progress; local evidence is green.
 
 No agent-drainable queue heads remain (all `[operator-verify]`), so I'm not auto-looping.
-<!-- agent:boundary:917838e9 -->
+
+### Re: Fix the root cause of the degraded session — opus-4-8
+
+Found and fixed the actual root cause (not the stale binary I first suspected — that was a secondary factor).
+
+**Root cause: the realtime cross-editor broadcast was storming patches to dead editors.** `realtime_model::broadcast_editor_change` built its peer set from *every* `.agent-doc/live-buffer` sidecar with **no liveness check**. This document had accumulated **187 dead-`jetbrains-<pid>` orphan sidecars** (one per closed IntelliJ window, over days). So a single live editor (pid 3873180) reporting a buffer change fanned out to all 187 dead peers — I caught **247 `realtime_broadcast_queued` events in a few minutes**. Each broadcast (a) re-created the dead-pid patch file the `#fccreap` reaper had just cleared, and (b) merged against that dead editor's *divergent stale buffer* (merged_len 6300…73989). One of those stale merged buffers (19278 bytes) is what surfaced in my last finalize as the `socket_ack_content` drift candidate → `live_prompt_drift_after_preflight` + the post-commit working-tree reconcile, on *every* finalize.
+
+**Code fix (durable, shipped — agent-doc `5397b89f`):** `broadcast_editor_change` now liveness-filters both ends:
+- a dead-pid **originator** skips the whole broadcast (`reason=dead_origin_editor`);
+- dead-pid **peers** are dropped *and* their orphan live-buffer sidecars reaped (`realtime_broadcast_dead_peers_reaped`).
+
+JetBrains ids carry the owning pid; non-JetBrains ids (no embedded pid) are conservatively treated as live. 3 new tests; full suite **4799 + clippy green**.
+
+**Live session fixed (operational):** I removed the 187 dead-jetbrains orphan sidecars for this doc (leaving the 4 live-editor + 19 legacy no-id sidecars untouched, and the concurrent equityfundingsource session untouched). The storm stopped immediately — **0 broadcasts since** — because with the dead peers gone there are no stale targets to fan out to, regardless of the running binary version.
+
+**Secondary factor (noted, not the cause):** the swapped binary timing — `~/.cargo/bin/agent-doc` was reinstalled at 20:01 (concurrent EFS session/build) while this session's supervisor (pid 3024307) keeps running its 17:20 image — exercised `#supselfheal`. I deliberately did **not** `cargo install` (it would re-stale the concurrent EFS supervisor too); the supervisor self-recycles at its next idle boundary, and the broadcast fix itself ships at the next proper install boundary.
+
+**Follow-up queued** (`#lbreap`, recommended): extend `#fccreap` to proactively reap dead-pid live-buffer sidecars at closeout, so orphans never accumulate to 187 between broadcasts in the first place.
+<!-- agent:boundary:d788670a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: [#sqedit-race]~~
----
-:pushpin: do [#tsiftmdcrash]
----
-- :pushpin: [#qpausemix-verify]
-- :pushpin: do [#fbwire]
+- :pushpin: do [#tsiftmdcrash]
+- :pushpin: [#sqedit-race]
+- :pushpin: [#qheadstrike]
 - :pushpin: do [#hap7]
+- :pushpin: do [#fbwire]
+- :pushpin: [#qpausemix-verify]
+- do [#lbreap]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -103,6 +121,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lbreap] [recommended] #agent-doc-bug Extend #fccreap to reap dead-pid live-buffer sidecars at closeout (today only patch files are reaped; #sqdrift reaps dead-peer sidecars only during a broadcast). This doc had 187 dead-jetbrains orphan live-buffer sidecars accumulated over days. Add a closeout reaper that removes .agent-doc/live-buffer sidecars whose embedded jetbrains-<pid> is dead, mirroring reap_stale_jetbrains_consumers. Also consider reaping legacy no-editor-id live-buffer orphans by mtime.
 - [ ] [#qheadstrike] [operator-verify] #agent-doc-bug Completed free-text queue heads (no #id) are not struck after a proven closeout. Repro: a single equityfundingsource.md cycle (2026-06-19) answered 4 operator queue heads, reached committed + session-check ok via the reset --from-current -> commit recovery path, yet preflight still showed queue_drainable_head_count=4 / queue_continuation_required=true, so the loop churns and the operator must clear them by hand. Three causes: (1) the finalize strike heuristic only consumes ONE free-text head per cycle; (2) the force-disk / reset->commit recovery paths bypass the strike entirely; (3) queue consume exact-matches and rejects when the live buffer mutated the head (pushpin glyph + item split: "snapshot head prompts do not match document head prompts"). Fix: strike ALL answered free-text heads, move the strike onto the committed seam so recovery paths converge, and normalize head matching. Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md
 - [ ] [#sqedit-race] [operator-verify] #agent-doc-bug Live-IPC-supervisor race on direct queue edits. Phase 1 (#8bfz single live plugin owner per doc) SHIPPED 237f5fb2. Phase 2 (queue-edit lease: prune-noise/consume hold a queue_edit_owner lease that preflight queue maintenance + supervisor idle-watch defer to while a different live process holds it) SHIPPED d9a0ae58 — full suite 4796 + clippy green. REMAINING: Phase 3 add a render(parse(x)) fixed-point property/SimWorld test over an already-malformed queue (normalization itself mostly landed via #qdup-bare-id / #qnoise-multiline-strike / #pushpinaccum); Phase 4 [operator-gated] make install -> agent-doc admin recycle -> queue prune-noise this doc, confirm queue_stale_noise_lines drops to 0 and the prune sticks across a later preflight (no re-injection). Plan: tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md
 - [ ] [#qpausemix-verify] [operator-verify] #agent-doc-bug Verify the #qpausemix session-check fix (submodule 2cf7bcee) live: build+install the new binary (make install: cargo install --path . + cargo build --release + agent-doc lib-install) at a supervisor recycle boundary (deferred from this session to avoid finalize-client-newer-than-supervisor drift), then on a controller-paused queue (e.g. equityfundingsource.md under a qflood pause) confirm session-check stderr now prints the "queue_paused is NOT a contradiction" preamble + recorded reason so an agent no longer stalls deciding operator-set-pause vs transient state. Root cause fixed: session-check printed the bare CONTINUATION_NO_STALL_GUIDANCE constant instead of continuation_guidance(pause_reason); resolution previously only reached preflight JSON.

@@ -68,7 +68,28 @@ Verified: updated `tests/email-login.test.ts` asserts the guard runs before toke
 > :pushpin: deploy
 
 Already deployed this cycle — the admin log-out-notice fix (`b1424ba`) went out as worker **version `6c634c0d`** via `make deploy` (no D1 migration; none needed). Live smoke checks confirmed the new behavior is serving: `GET /?notice=…` renders the persistent banner and the signed-out verify path still `303`s. Nothing changed since, so this is the live production worker.
-<!-- agent:boundary:33537c0e -->
+
+### Re: Still no notification — it was the INVITE flow; verified live with chromium-bridge — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: I still don't see any notification. Use chromium-bridge on https://equityfundingsource.brian-takita.workers.dev/login/invite?token=iI2YN6l4MHgYHx-HJpLgIDtxY86htclRIdDb2pI-5g4
+
+
+> **Queue prompt:**
+>
+> :pushpin: I still don't see any notification. Use chromium-bridge on https://equityfundingsource.brian-takita.workers.dev/login/invite?token=… to verify.
+
+You were right — and the link you gave is the key. That's the **invite** flow (`/login/invite`), a *different* handler than the email-login link I'd been fixing. The invitation email you've been testing (the lender2 "Lender Bros" invite) uses `/login/invite`, so my earlier email-login fix never touched the flow you were actually clicking.
+
+**Verified the bug live with chromium-bridge** (signed in as admin): navigating that invite link redirected to `/` with **no toast and no banner** (`flashJson: null`, `notice: null`) — exactly "I still don't see any notification." Root cause: the invite handler silently switched accounts on a valid token (`#invite-switch-account`) or silent-redirected to home on a used one — neither path showed a message.
+
+**Fix:** both link flows now share one `signed_in_link_notice_()` helper. When you're already signed in, `/login/invite` **and** `/login/email/verify` show the log-out notice as **both** a toast (the `efs_flash` cookie) **and** a persistent home-page banner, run the guard **before** consuming the token (a still-valid link works after you log out), and **no longer switch accounts silently** (drops the old `#invite-switch-account` takeover).
+
+**Re-verified live with chromium-bridge** after deploy: the same invite link now lands on `/?notice=…`, renders the persistent banner *"You're already signed in. Please log out, then open your invitation link again."* (screenshot confirmed), and embeds the toast flash payload — and your admin session stays intact (no silent switch). Full `bun run check` **949 pass / 0 fail** (added invite + shared-helper wiring tests, updated the old `#invite-switch-account` assertion). Committed (`bfc6b9b`) + pushed, **deployed** (worker version `47ef12f6`).
+
+Note: this means an invite link can no longer be used to *switch into* another account while signed in — you log out first. If you actually relied on the old auto-switch (e.g. to jump into a lender's view as admin), say so and I'll add it back as an explicit confirm step instead.
+<!-- agent:boundary:4f0f315f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,7 +102,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: I still don't see any notification. Use chromium-bridge on https://equityfundingsource.brian-takita.workers.dev/login/invite?token=iI2YN6l4MHgYHx-HJpLgIDtxY86htclRIdDb2pI-5g4
+- ~~:pushpin: I still don't see any notification. Use chromium-bridge on https://equityfundingsource.brian-takita.workers.dev/login/invite?token=iI2YN6l4MHgYHx-HJpLgIDtxY86htclRIdDb2pI-5g4~~
  to verify.
 - :pushpin: deploy
 <!-- /agent:queue -->

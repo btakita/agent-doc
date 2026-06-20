@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -39,80 +39,12 @@ completed
 Compacted content:
 ❯ - Archived 9 response topic(s): JB Run Agent Doc "did not submit" / duplicate prompts after restart (img_52); What are #next-steps to fix agent-doc bugs?; do [#rdypoll]; 6 more
 ❯ - Prior summary/context: prior compacted content: Archived 1 response topic(s): still not submitting after restart (img_52) + the cascade causes
-<!-- agent:boundary:f523e832 -->
+<!-- agent:boundary:954e1e87 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
----
-Why is the 0.1.0 supervisor being used in monsterrodholders.md?
-```
-● Pointer bumped — the full chain is now correct (aa70ccd2d). All substantive work is safe in git. The session doc is
-  still being raced into malformed states by the stale 0.1.0 supervisor (recycle queued for the idle boundary = turn
-  end). Per the yield pattern, I must not hand-edit the racing file or finalize over it — I end the turn so the
-  supervisor recycles. Let me record this diagnostic signature to memory first.
-```
-```
-[agent-doc] supervisor auto-install: rebuilding + installing agent-doc from /home/brian/work/btakita/agent-loop/src/agent-doc so the next queue item runs on the freshly-committed source
-   Compiling agent-doc-orchestration v0.1.0 (/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration)
-   Compiling agent-doc v0.34.24 (/home/brian/work/btakita/agent-loop/src/agent-doc)
-    Finished `release` profile [optimized] target(s) in 2m 41s
-[lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.25.so (symlink: libagent_doc.so)
-[lib-install] auto-recycle: 2 controller(s) marked to recycle at next idle boundary, 3 skipped (set AGENT_DOC_RECYCLE_ON_INSTALL=0 to disable)
-[agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve
-[agent-doc] queue_journal: replayed 2 operator queue item(s) lost to a crash+restart for tasks/professional/equityfundingsource.md
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-```
----
-JB `Run Agent Doc` after a restart on monsterrodholders.md. I tried again and it worked. The restart state should not lag.
-```
-[route] target tmux session: 0
-[route] Still waiting for claude (1s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
-[route] Still waiting for claude (3s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
-[route] Still waiting for claude (4s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
-[route] Still waiting for claude (6s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
-[route] Still waiting for claude (8s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
-[route] Still waiting for claude (9s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
-[route] Still waiting for claude (11s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
-[route] Still waiting for claude (12s)... last line:   search prompts: monst  ⏵⏵ bypass permissions on · 1 shell
-[route] Still waiting for claude (14s)... last line:   ⏵⏵ bypass permissions on · 1 shell
-[route] Still waiting for claude (15s)... last line:   ⏵⏵ bypass permissions on · 1 shell
-[route] Still waiting for claude (17s)... last line:   ⏵⏵ bypass permissions on · 1 shell
-[route] Still waiting for claude (18s)... last line:   ⏵⏵ bypass permissions on · 1 shell
-[route] Still waiting for claude (20s)... last line:   ⏵⏵ bypass permissions on · 1 shell
-[route] Still waiting for claude (21s)... last line:   ⏵⏵ bypass permissions on · 1 shell
-[route] Still waiting for claude (23s)... last line:   ⏵⏵ bypass permissions on · 1 shell
-[route] Still waiting for claude (24s)... last line:   ⏵⏵ bypass permissions on · 1 shell
-[route] Still waiting for claude (26s)... last line:   ⏵⏵ bypass permissions on · 1 shell
-[route] Still waiting for claude (27s)... last line:   ⏵⏵ bypass permissions on · 1 shell
-[route] Still waiting for claude (29s)... last line:   ⏵⏵ bypass permissions on · 1 shell
-[route] claude blocked after 29.1s in pane %176: active claude turn
-Error: dispatch-only claude reopen refused to inject into pane %176 for tasks/monsterrodholders.md because the latest run is still booting and never reached a dispatch-ready prompt (active claude turn); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
-```
----
-JB `Run Agent Doc` on equityfundingsource.md did not submit
-```
-claude exited cleanly.
-Press Enter to restart, or 'q' to exit.
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] auto-trigger: timed out waiting for claude prompt
-```
----
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

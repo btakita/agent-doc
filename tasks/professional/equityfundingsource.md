@@ -140,6 +140,16 @@ So my prior `#cmtsec` "blank committed amount" hypothesis was **wrong for this d
 
 ### Re: was a record created with default rate/duration? — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#proprate]
+
+
+> **Queue prompt:**
+>
+> :pushpin: The amount was committed. But the other terms are not yet finalized...such as the interest rate and frequency. Was a record created with the interest rate and duration using default values? It should not have.
+
+
 **Rate: yes — a default got persisted. Duration: no — nothing was stored.** (Queried the live row + schema.)
 
 **The interest record has only 4 proposal columns** — `proposal_amount`, `proposal_interest_rate`, `proposal_points`, `proposal_submitted_at`. There is **no term/frequency/duration column** on `investor_deal_interests` at all.
@@ -160,7 +170,7 @@ The submit (`:425-435`) then sends `proposal_interest_rate: rate` whenever an am
 **So the rate is the real issue.** Filed as **`#proprate`**: stop pre-filling the rate with the deal default, allow `proposal_interest_rate = null` ("amount committed, rate TBD"), and relax the `:421` validation + admin display to match.
 
 Want me to **null `proposal_interest_rate` on the `d6b78994` row** (live D1 write) so it reflects "amount committed, rate not finalized"? I'll only do that on your go.
-<!-- agent:boundary:df353629 -->
+<!-- agent:boundary:b51699b1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -173,13 +183,11 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: The amount was committed. But the other terms are not yet finalized...such as the interest rate and frequency. Was a record created with the interest rate and duration using default values? It should not have.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#proprate] Lender proposal persists a DEFAULT interest rate that was never finalized. investor/deal_detail.tsx:362 pre-fills proposal_rate from deal.monthly_interest (the deal display rate) when deal.proposal_interest_rate==null, and submit (:425-435) sends proposal_interest_rate=rate whenever an amount is present; :421 validation REQUIRES a finite rate, so a lender cannot commit an amount with rate left TBD — the pre-filled default (6.5% on d6b78994, deal sold_rate/preferred_sold_rate both null) gets persisted as if finalized. Duration is NOT affected: investor_deal_interests has no proposal_term_months/frequency column (only proposal_amount/_interest_rate/_points/_submitted_at); the form term is client-side validation/payment-preview only and is discarded on save (admin "Amortized over" pill reads a non-existent field -> "-"). Fix: do NOT pre-fill the rate with the deal default; allow proposal_interest_rate=null ("amount committed, rate TBD"); relax :421 validation + admin LoanTermProposalSummary display. Optional data cleanup: null proposal_interest_rate on the d6b78994 interest row (operator go required).
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
@@ -189,6 +197,7 @@ After 20:30
 ## Review
 
 <!-- agent:review -->
+- [/] [#proprate] Lender proposal persists a DEFAULT interest rate that was never finalized. investor/deal_detail.tsx:362 pre-fills proposal_rate from deal.monthly_interest (the deal display rate) when deal.proposal_interest_rate==null, and submit (:425-435) sends proposal_interest_rate=rate whenever an amount is present; :421 validation REQUIRES a finite rate, so a lender cannot commit an amount with rate left TBD — the pre-filled default (6.5% on d6b78994, deal sold_rate/preferred_sold_rate both null) gets persisted as if finalized. Duration is NOT affected: investor_deal_interests has no proposal_term_months/frequency column (only proposal_amount/_interest_rate/_points/_submitted_at); the form term is client-side validation/payment-preview only and is discarded on save (admin "Amortized over" pill reads a non-existent field -> "-"). Fix: do NOT pre-fill the rate with the deal default; allow proposal_interest_rate=null ("amount committed, rate TBD"); relax :421 validation + admin LoanTermProposalSummary display. Optional data cleanup: null proposal_interest_rate on the d6b78994 interest row (operator go required).
 - [/] [#nthc] [operator-verify] DEPLOYED 2026-06-20 (worker version 17b06176-fc91-44b6-b35d-1cd61beed01b; EFS 8889a4c). Remaining = operator live-verify only: open the Lender Bros group Edit overlay on deal d6b78994, bump lender2 from 0%, confirm the split saves and the "60% confirmed (partial)" badge reconciles.
 - [/] [#pmhf] [recommended] Reuse the rebalancing share editor (lib/ui--browser--efs/portal/shared/lending_groups_alloc.ts: rebalance_stakes_/distribute_evenly_/lock pins) in the per-deal split UI (deal_detail allocations) so per-deal % editing gets the same 100%-balanced, lockable inputs.
 - [/] [#dealtab500] [operator-verify] Root-cause the deal 7a0c1463 / loan 45ddae53 (GQI751) loan-tab "Internal Error". Static trace independently re-confirmed exhausted: GET /admin/pipeline serves only a shell (no server-side deal processing); every client-fetched endpoint is guarded — admin_loan_R_ is a plain SELECT, admin_deal_R_ LTV/onboarding chain (onboarding_json_/loan_ltv_calc_) is fully try/catch + null guarded, /documents is harmless; all client fetches degrade to error cards, not the worker Internal Error page. Regression guard shipped (efs a39be3d) locking the thin-TMO-loan onboarding shape against throws (gformula deal-economics helpers). REMAINING (operator-gated, cannot be agent-done): reproduce live via `bun run cf:worker:tail` + a browser click on the loan tab to capture the real throwing endpoint + stack, OR inspect loan 45ddae53/deal 7a0c1463 D1 rows once the #cftk token lands. Relates to #5q7z/#214f.

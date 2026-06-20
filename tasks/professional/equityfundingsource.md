@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -85,7 +85,38 @@ Deployed the `#admin-deal-alloc-edit` admin per-deal allocation editor (EFS `888
 The agent-doable half of `#nthc` is now complete (deploy). **Remaining is operator live-verify only** (can't be agent-done): open the Lender Bros group **Edit** overlay on deal `d6b78994`, bump `lender2` from 0%, confirm the split saves and the "60% confirmed (partial)" badge reconciles. Gated `#nthc` as `[operator-verify]`.
 
 (Left the unrelated `AGENTS.md` tsift code-nav version bump uncommitted — not part of this deploy.)
-<!-- agent:boundary:1016e00f -->
+
+### Re: "Committed amount and sold rate by this lender" showing with no committed amount — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests, "Committed amount and sold rate by this lender" is present but when I did not commit to any amount with the lender account. Why is this section showing up?
+
+
+That section is gated on a **submitted proposal**, not on a committed *amount* — and a proposal is stamped the moment the lender submits **any one** of amount, sold rate, or points. So that lender account submitted a proposal carrying a **sold rate and/or points** (possibly with a blank amount), which is enough to surface the block.
+
+**Render condition** (`lib/ui--browser--efs/portal/admin/deal_detail.tsx:730-745`): `interest_has_proposal_(interest) = Boolean(interest.proposal_submitted_at)`. Truthy → renders "Committed amount and sold rate by this lender"; falsy → "No committed amount or sold rate submitted by this lender yet."
+
+**What stamps `proposal_submitted_at`** — single write path (`app/equityfundingsource/lib/investor/shared.ts:504-522`):
+
+```
+if (proposal_amount != null || proposal_interest_rate != null || proposal_points != null) {
+  UPDATE investor_deal_interests SET proposal_submitted_at = now ...
+}
+```
+
+- A committed **amount** is NOT required — a sold rate alone (or points alone) trips it.
+- Merely clicking "Interested" (all three null) does **not** stamp it → no section.
+- No admin path writes `proposal_submitted_at` (admin only reads it), so it came from the lender's own deal-submit flow.
+
+**So:** "I did not commit to any amount" can be literally true (`proposal_amount` is null) while the section still shows because a **sold rate or points** was submitted — the committed-amount pill in that block would then read "-".
+
+Note this is the lender's soft **proposal**, distinct from the **group allocation/confirmation** (the earlier Lender Bros 60%-confirmed / lender2 0% — that's `lending_group_deal_split`, not `proposal_*`). A lender can have a proposal here without a confirmed group allocation, and vice versa.
+
+I couldn't confirm the exact D1 row (which of amount/rate/points is populated for deal `d6b78994`) — D1 read is still gated on **#cftk** (no D1-scoped token). Once it lands I can show the row.
+
+**Recommendation (filed `[recommended]` #cmtsec):** if this block should only appear for an actual committed amount, gate `interest_has_proposal_` on `proposal_amount != null`, or relabel it "Proposed terms" so showing a rate/points doesn't imply a committed amount.
+<!-- agent:boundary:e44d63fe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,7 +129,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests, "Committed amount and sold rate by this lender" is present but when I did not commit to any amount with the lender account. Why is this section showing up?
 <!-- /agent:queue -->
 
 ## Backlog

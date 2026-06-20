@@ -220,7 +220,18 @@ Done (deal side) — implemented + committed + pushed, **no deploy** per your pa
 **No prod apply** — the migration + backport land when you next deploy + `cf:d1:migrate:remote`. Nothing was written to live D1 this cycle.
 
 **Scope note:** I made the **deal** column nullable (the "available deal" you named) and gated the loan→deal copy, but left the central **`loans`** table physically unchanged — rebuilding it is disproportionate risk and the deal is the displayed surface. The borrower's preferred-terms form still pre-selects Monthly at the loan level. If you also want that form truly blank-until-chosen (a `loans`-table rebuild), say so — filed `#freqnull-borrower` `[recommended]`.
-<!-- agent:boundary:fd839dbd -->
+
+### Re: revert this turn — keep Monthly default — opus-4-8
+
+Reverted. The frequency-nullable change is fully undone and Monthly-default behavior is restored.
+
+- **EFS** — `git revert` of `4df5488` → **`c9cf538`**, pushed to `origin/main`. Migration `0094` deleted, `repo.ts` publish path back to `loan.preferred_payment_frequency ?? 'monthly'`, the deal API / UI `?? 'monthly'` fallbacks and label coercions restored, the new test removed. Suite back to **976 pass / 0 fail**, worker build clean (bundle back to `FYEISPPM`).
+- **Superproject** — pointer bumped to the reverted EFS HEAD (`cfe1ff6b6`).
+- **Nothing hit live D1** — the migration was never applied remotely, so there's nothing to undo there; production was always on the Monthly default.
+- **Backlog** — cancelled `#freqnull-borrower` (the borrower-side follow-up to the reverted work).
+
+Untouched (different turns, not part of this revert): the `#proprate` rate finding and the earlier one-off null of the `d6b78994` proposal_interest_rate. Tell me if you want those reverted too.
+<!-- agent:boundary:6fd2db07 -->
 <!-- /agent:exchange -->
 ###
 <!--

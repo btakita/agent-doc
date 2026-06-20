@@ -131,7 +131,20 @@ Fixed and deployed. Thanks for the screenshot — it pinpointed the bug.
 I verified the layout with a standalone render of the exact grid (one Joined row + one Invited/Resend row): both share inputs sit at the same x, locks align, and the Status column shares one right edge.
 
 Shipped: full suite **931 pass / 0 fail**, worker rebuilt. Committed (`79680d4`) + pushed, **deployed to production** (version `3272ab26`). Hard-refresh `/lenders/groups` (the JS bundle hash changed to `index.browser-MRVULXJE.js`) and the columns should line up.
-<!-- agent:boundary:b7ae0220 -->
+
+### Re: Move the Status column after the Lender column — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In /lenders/groups, move the status column after the lender column.
+
+
+Done and deployed. The share editor now reads **Lender | Status | Share % | Lock** — Status moved into column 2, right after the lender, with its pill/Resend-Invite content left-aligned so it sits flush against the lender column.
+
+The columns still line up across rows (same single-grid + `display:contents` approach), which I re-verified with a standalone render: both status pills left-align at the same x, share inputs align, and locks align.
+
+Committed (`6c35e31`) + pushed, **deployed to production** (version `c57823b8`; bundle `index.browser-3X5JG7OP.js`). Hard-refresh `/lenders/groups` to see the reordered columns. Tests 931 pass / 0 fail.
+<!-- agent:boundary:2672e459 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -144,6 +157,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: In /lenders/groups, move the status column after the lender column.~~
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

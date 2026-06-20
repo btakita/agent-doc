@@ -1059,7 +1059,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `guard_ipc_snapshot_adoption_against_live_prompt_drift(` in the new
         // `#smconv` semantic-merge convergence tests — not production hot-path
         // guards (the production guard count is unchanged).
-        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 16,
+        // 16 -> 17 (#qdup-freetext): +1 more test-assertion call to the same guard
+        // in `smconv_preserves_freetext_fenced_queue_head_on_drift`, which proves a
+        // multi-line free-text queue head now converges instead of blocking. Still a
+        // test call, not a production guard boundary.
+        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 17,
         // 17 -> 18 (#smconv): +1 production `reason=node_keyed_semantic_merge` on
         // the new `live_prompt_drift_semantic_merged` ops_log — the node-keyed
         // merge success path, mirroring the sibling `#fintol2`

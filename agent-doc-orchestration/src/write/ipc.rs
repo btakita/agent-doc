@@ -2636,6 +2636,73 @@ mod ack_content_snapshot_tests {
     }
 
     #[test]
+    fn smconv_preserves_freetext_fenced_queue_head_on_drift() {
+        // `#qdup-freetext` (root cause of the persistent live_prompt_drift churn):
+        // when the queue carries a multi-line free-text fenced head (a pasted-
+        // console bug report — not a `- ` list item), the per-node reconstruction
+        // used to DROP it, trip `dropped_queue_prompt_lines_after_content_ours`,
+        // and decline the merge on EVERY cycle, blocking every IPC write. It must
+        // now converge AND preserve the head verbatim.
+        let head = concat!(
+            "---\n",
+            ":pushpin: JB `Run Agent Doc` did not submit.\n",
+            "\n",
+            "```\n",
+            "claude exited cleanly.\n",
+            "[agent-doc] idle-queue watch: reconciled stale busy actor to ready\n",
+            "```\n",
+            "---\n",
+        );
+        let base = format!(
+            "---\nsession: test\nqueue: start\n---\n\n\
+<!-- agent:exchange -->\n- re [#prior] prior turn\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n{head}- do [#a]\n<!-- /agent:queue -->\n"
+        );
+        // candidate (live editor buffer): head intact, agent struck the queue item
+        // (an outside-exchange change, so the drift guard engages as in the real case).
+        let candidate = format!(
+            "---\nsession: test\nqueue: start\n---\n\n\
+<!-- agent:exchange -->\n- re [#prior] prior turn\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n{head}- ~~do [#a]~~\n<!-- /agent:queue -->\n"
+        );
+        // content_ours: head intact, operator flipped frontmatter (disjoint node).
+        let content_ours = format!(
+            "---\nsession: test\nqueue: stop\n---\n\n\
+<!-- agent:exchange -->\n- re [#prior] prior turn\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n{head}- do [#a]\n<!-- /agent:queue -->\n"
+        );
+
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let mut decision = IpcRepairDecision::file_read(candidate.clone());
+        let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &file,
+            "test",
+            Some("fthead"),
+            Some(&base),
+            Some(&content_ours),
+            &mut decision,
+        );
+        assert!(
+            adopted,
+            "free-text-head drift must converge via semantic merge, not block forever"
+        );
+        let merged = &decision.snapshot_content;
+        assert!(
+            merged.contains(":pushpin: JB `Run Agent Doc` did not submit."),
+            "free-text head line lost in merge:\n{merged}"
+        );
+        assert!(
+            merged.contains("[agent-doc] idle-queue watch: reconciled stale busy actor to ready"),
+            "fenced head body lost in merge:\n{merged}"
+        );
+        assert!(
+            component::structural_corruption_reason(merged).is_none(),
+            "merged result must re-parse cleanly"
+        );
+    }
+
+    #[test]
     fn smconv_merges_heading_prose_response_preserving_both_changesets() {
         // The real-session `### Re:` heading-prose exchange turn is now modeled by
         // semantic_merge as an append-only node (#semmerge-owner heading-prose

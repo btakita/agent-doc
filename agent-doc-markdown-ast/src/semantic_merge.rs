@@ -953,6 +953,62 @@ fn close_marker_name(trimmed: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
+/// Reconstruct a non-`exchange` component's inner body from its buffered operator
+/// lines (`inner`, each still carrying its trailing `\n`) and the merged item set.
+///
+/// `#qdup-freetext` — root cause of the persistent `live_prompt_drift` churn: a
+/// queue head that is multi-line *free text* (e.g. a pasted-console bug report: a
+/// `:pushpin:` line plus a fenced code block, between `---` rules) is not a `- `
+/// list item, so the overlay never parses it as an [`Item`]. The previous
+/// reconstruction emitted only the bullet items and dropped every other inner
+/// line, so the semantic merge silently lost that free-text head, tripped the
+/// `dropped_queue_prompt_lines_after_content_ours` anti-data-loss gate, and
+/// declined the merge on every cycle — leaving every IPC write stuck on the
+/// blocked `content_ours` carry-forward path.
+///
+/// Preserve operator non-bullet lines (free text, fenced blocks, separators,
+/// blanks) verbatim, and place the merged bullet-item block at the position of the
+/// first bullet (the common shape: a free-text head followed by a contiguous run
+/// of `- ` items). Fenced code spans are tracked so a `- ` inside a fence is not
+/// mistaken for a list bullet. When the component has no operator bullet items
+/// (all free text, or items added only by the agent), the merged items are
+/// appended after the preserved prose.
+fn merge_nonexchange_inner(inner: &[String], merged_items: &[String]) -> String {
+    let mut out = String::new();
+    let mut emitted_items = false;
+    let mut in_fence = false;
+    for raw in inner {
+        let trimmed = raw.trim_start();
+        let is_fence_marker = trimmed.starts_with("```") || trimmed.starts_with("~~~");
+        let is_bullet = !in_fence
+            && !is_fence_marker
+            && crate::overlay::strip_bullet(raw.trim_end_matches('\n')).is_some();
+        if is_fence_marker {
+            in_fence = !in_fence;
+        }
+        if is_bullet {
+            if !emitted_items {
+                for ml in merged_items {
+                    out.push_str(ml);
+                    out.push('\n');
+                }
+                emitted_items = true;
+            }
+            // Drop the original bullet line — replaced by the merged item block.
+            continue;
+        }
+        // Operator non-bullet line — preserve verbatim (newline already included).
+        out.push_str(raw);
+    }
+    if !emitted_items {
+        for ml in merged_items {
+            out.push_str(ml);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 /// Rebuild the operator body, replacing each component's inner items with the
 /// merged item set, and appending any agent-only components at the end.
 ///
@@ -971,11 +1027,13 @@ fn merge_components_into_body(
 ) -> String {
     let mut out = String::new();
     let mut open: Option<String> = None; // currently-open component name
-    // While inside the `exchange` component, the inner lines are buffered verbatim
-    // (heading-prose `### Re:` turns are not list items, so the item merge cannot
-    // reconstruct them; they must be preserved as-is). At the close marker the
-    // buffer is rewritten by [`merge_exchange_inner`] to append agent-new turns.
-    let mut exchange_inner: Vec<String> = Vec::new();
+    // The inner lines of the currently-open component are buffered verbatim so the
+    // reconstruction can preserve operator content the item model cannot represent:
+    // `### Re:` heading-prose turns in `exchange`, and free-text / fenced / separator
+    // lines in any other component (e.g. a multi-line pasted-console queue head).
+    // At the close marker the buffer is rewritten — by [`merge_exchange_inner`] for
+    // `exchange`, or [`merge_nonexchange_inner`] elsewhere.
+    let mut component_inner: Vec<String> = Vec::new();
 
     for line in theirs_body.split_inclusive('\n') {
         let content = line.trim_end_matches('\n');
@@ -993,7 +1051,7 @@ fn merge_components_into_body(
                     // Exchange: preserve theirs' inner lines verbatim, then append
                     // any `### Re:` heading-blocks that exist only in the agent body.
                     let merged_inner = merge_exchange_inner(
-                        &exchange_inner,
+                        &component_inner,
                         base_comp,
                         ours_comp,
                         theirs_comp,
@@ -1002,23 +1060,26 @@ fn merge_components_into_body(
                         acks,
                     );
                     out.push_str(&merged_inner);
-                    exchange_inner.clear();
                 } else if let Some(tc) = theirs_comp {
+                    // `#qdup-freetext`: rebuild the component preserving operator
+                    // non-bullet inner content (free-text heads, fenced blocks,
+                    // separators) verbatim while replacing the bullet-item region
+                    // with the merged item set. Dropping that content used to make
+                    // the merge silently lose a free-text queue head, trip the
+                    // anti-data-loss gate, and decline forever (the persistent
+                    // `live_prompt_drift` churn).
                     let merged = merge_component_items(
                         name, base_comp, ours_comp, tc, outcomes, acks,
                     );
-                    for ml in &merged {
-                        out.push_str(ml);
-                        out.push('\n');
-                    }
+                    out.push_str(&merge_nonexchange_inner(&component_inner, &merged));
                 }
+                component_inner.clear();
                 out.push_str(line); // close marker line, verbatim
                 open = None;
-            } else if name == EXCHANGE_COMPONENT {
-                // Buffer the exchange inner line verbatim for the append pass.
-                exchange_inner.push(line.to_string());
+            } else {
+                // Buffer the inner line verbatim for the reconstruction pass.
+                component_inner.push(line.to_string());
             }
-            // else: drop the original inner line (replaced by merged items above)
             continue;
         }
 
@@ -1039,7 +1100,7 @@ fn merge_components_into_body(
         if name == EXCHANGE_COMPONENT {
             let theirs_comp = find_comp(theirs_comps, &name);
             let merged_inner = merge_exchange_inner(
-                &exchange_inner,
+                &component_inner,
                 base_comp,
                 ours_comp,
                 theirs_comp,
@@ -1056,10 +1117,7 @@ fn merge_components_into_body(
             if !out.ends_with('\n') && !out.is_empty() {
                 out.push('\n');
             }
-            for ml in &merged {
-                out.push_str(ml);
-                out.push('\n');
-            }
+            out.push_str(&merge_nonexchange_inner(&component_inner, &merged));
         }
     }
 
@@ -1640,6 +1698,62 @@ queue: stop
         let m = semantic_merge(base, ours, theirs);
         assert!(m.merged_doc.contains("OPERATOR-PROSE"));
         assert!(!m.merged_doc.contains("AGENT-PROSE"));
+    }
+
+    #[test]
+    fn freetext_fenced_queue_head_survives_per_node_merge() {
+        // `#qdup-freetext`: a multi-line free-text queue head (a pasted-console bug
+        // report — a `:pushpin:` line + a fenced block between `---` rules) is not a
+        // `- ` list item, so the overlay never parses it as an Item. The
+        // reconstruction must preserve it verbatim while still merging the bullet
+        // items, otherwise the `dropped_queue_prompt_lines_after_content_ours`
+        // anti-data-loss gate sees it dropped and declines the merge on every cycle
+        // — the persistent live_prompt_drift churn this fixes.
+        let head = "\
+---
+:pushpin: JB `Run Agent Doc` did not submit.
+
+```
+claude exited cleanly.
+Press Enter to restart, or 'q' to exit.
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready
+```
+---
+";
+        let base = format!(
+            "<!-- agent:queue -->\n{head}- :pushpin: [#a] one\n- :pushpin: [#b] two\n<!-- /agent:queue -->\n"
+        );
+        // Agent struck #a this cycle (an item merge alongside the free-text head).
+        let ours = format!(
+            "<!-- agent:queue -->\n{head}- ~~:pushpin: [#a] one~~\n- :pushpin: [#b] two\n<!-- /agent:queue -->\n"
+        );
+        // Operator buffer unchanged from base — still carries the free-text head.
+        let theirs = base.clone();
+
+        let m = semantic_merge(&base, &ours, &theirs);
+
+        // Every meaningful line of the free-text head survives the merge.
+        for needle in [
+            ":pushpin: JB `Run Agent Doc` did not submit.",
+            "claude exited cleanly.",
+            "Press Enter to restart, or 'q' to exit.",
+            "[agent-doc] idle-queue watch: reconciled stale busy actor to ready",
+        ] {
+            assert!(
+                m.merged_doc.contains(needle),
+                "free-text head line must survive the merge: {needle:?}\n---\n{}",
+                m.merged_doc
+            );
+        }
+        // The bullet items still merge: #b kept, #a's strike applied.
+        assert!(m.merged_doc.contains("[#b] two"));
+        assert!(
+            m.merged_doc.contains("~~:pushpin: [#a] one~~"),
+            "agent strike must apply:\n{}",
+            m.merged_doc
+        );
+        // The fenced separators survive too.
+        assert!(m.merged_doc.contains("---"));
     }
 
     // ----- exchange heading-prose turns (`#semmerge` real format) ----------

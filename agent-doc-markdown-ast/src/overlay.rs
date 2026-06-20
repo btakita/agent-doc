@@ -133,7 +133,7 @@ fn parse_close_marker(trimmed: &str) -> Option<String> {
 }
 
 /// Strip a leading list bullet (`- `, `* `, `N. `) returning the item content.
-fn strip_bullet(line: &str) -> Option<&str> {
+pub(crate) fn strip_bullet(line: &str) -> Option<&str> {
     let t = line.trim_start();
     if let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
         return Some(rest);

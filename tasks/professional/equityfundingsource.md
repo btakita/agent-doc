@@ -38,7 +38,22 @@ completed
 Compacted content:
 ❯ - Archived 7 response topic(s): session compacted; deploy; /lenders/groups; 4 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:e9585bac -->
+
+### Re: invite link should switch accounts — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: When I'm logged in as btak.dev+investor@gmail.com and I click on the btak.dev+lender@gmail.com invite link, btak.dev+investor@gmail.com should be logged out and btak.dev+lender@gmail.com should be logged in.
+
+
+Fixed. A valid `/login/invite` token now **wins over an existing session**: signed in as `btak.dev+investor@gmail.com` and clicking `btak.dev+lender@gmail.com`'s invite link logs the investor out and signs the lender in.
+
+**What changed** (`lib/auth/routes.ts`, `GET /login/invite`): removed the early "already signed in → go home" guard. The handler now validates + consumes the token first, then `login_and_redirect_` **overwrites the session cookie** — replacing whoever was signed in. A missing/invalid token leaves an already-signed-in visitor where they are (redirects home, not to login); a signed-out visitor still gets the "invalid or expired" notice.
+
+**Tests:** wiring test extended for the switch behavior (`#invite-switch-account`). Full suite **917 pass / 0 fail**, build clean.
+
+**Shipped:** committed + pushed EFS `d431cb4`, pointer `bb83a14dd`. The `deploy` queued behind this (after the expiration item) will push it live.
+<!-- agent:boundary:13b884cc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,8 +66,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: When I'm logged in as btak.dev+investor@gmail.com and I click on the btak.dev+lender@gmail.com invite link, btak.dev+investor@gmail.com should be logged out and btak.dev+lender@gmail.com should be logged in.
-- :pushpin: The invite token should have 1 week expiration. If the user attempts to use the link after the expriration
+- ~~:pushpin: When I'm logged in as btak.dev+investor@gmail.com and I click on the btak.dev+lender@gmail.com invite link, btak.dev+investor@gmail.com should be logged out and btak.dev+lender@gmail.com should be logged in.~~
+- :pushpin: The invite token should have 1 week (configurable) expiration. If the user attempts to use the link after the expiration, there should be an error message to contact the lender who sent the invite to resend the invite.
 - :pushpin: deploy
 <!-- /agent:queue -->
 

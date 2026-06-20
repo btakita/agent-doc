@@ -55,19 +55,19 @@ Each phase needs `make check`; phases touching the supervisor/editor need
   integration test; full suite (4796) + clippy green. Install/recycle deferred to
   Phase 4.
 
-- **Phase 3 — idempotent malformed-entry normalization. ~ MOSTLY LANDED**
+- **Phase 3 — idempotent malformed-entry normalization. ✅ SHIPPED**
   (incremental: `#qdup-bare-id` collapses duplicate bare `[#id]` mirror heads,
   `#qnoise-multiline-strike` excises fenced/multiline pasted-evidence heads,
-  `#pushpinaccum` idempotent operator pin). Remaining: a property/SimWorld
-  `render(parse(x))` fixed-point test over an already-malformed queue (double-pins
-  + stray `~~~done`/`---` runs together) to prove convergence, not amplification.
-  Make the queue
-  parse/render path collapse double-pins, strip stray `~~~done` / consecutive `---`
-  separator runs, and de-duplicate identical adjacent heads **idempotently**, routed
-  through the converge path (never a bare disk write under a live listener). A
-  round-trip on an already-malformed queue must converge, not amplify. Add
-  property/SimWorld coverage that render(parse(x)) is a fixed point. Removes the
-  amplification half of (2).
+  `#pushpinaccum` idempotent operator pin). The queue parse/render path collapses
+  empty `---`/`~~~` fence runs, preserves real heads verbatim, and never amplifies
+  pins or re-splits/drops a head, routed through the converge path (never a bare
+  disk write under a live listener). The remaining `render(parse(x))` fixed-point
+  proof landed in commit `3c4c8bbb`: `render_parse_is_fixed_point_on_malformed_queue`
+  (single compounded malformed body — double-pins + orphaned `~~~done` + stray
+  `---` runs; second pass is a no-op, all real heads survive, pins don't amplify,
+  empty `---` runs collapse) and `render_parse_fixed_point_property_over_malformed_family`
+  (the fixed-point property over a family of independently-malformed bodies). Full
+  suite + clippy green. Removes the amplification half of (2).
 
 - **Phase 4 — restart + noise cleanup (the operator-gated finish).** After Phases
   1–3 ship: `make install` → `agent-doc admin recycle` (fresh editor buffer, no

@@ -122,7 +122,21 @@ Scope note: I linked it in the **persistent banner** (the lasting element). The 
 > :pushpin: deploy
 
 Already deployed this cycle — the clickable-"log out" banner change (`5af28e0`) went out as worker **version `1487617b`** (no D1 migration). Confirmed live with chromium-bridge: the banner renders `form[action="/logout"]` with the "log out" link. Live production worker.
-<!-- agent:boundary:ac04dd04 -->
+
+### Re: A signed-in click must not consume / expire the link — already enforced, now proven — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: If the link is clicked while another user is logged in, that should not count as a usage and should not expire the link.
+
+Good news — this is **already the deployed behavior**, and I've now proven it. The fix that unified the sign-in/invite flows (worker `47ef12f6`) runs the already-signed-in guard **before** any token lookup or `*_token_use_()` call, so a click while another user is logged in returns the log-out notice and **never touches the token** — `used_at` stays NULL and `expires_at` is untouched.
+
+**Why your link looked "used up":** I queried prod D1 for your test token directly. Its `used_at` is `2026-06-20 03:09:57 UTC` — **~203 minutes BEFORE** the invite fix deployed (06:33 UTC). So it was burned by a **pre-fix** click (back when a valid invite click while signed in consumed the token + switched accounts), *not* by the current code. That token is permanently spent; you'll need a fresh invite to test the full happy path — but new signed-in clicks won't burn it.
+
+**Locked it in with a real behavioral test** (`tests/auth.test.ts`): I extended the fake D1 to back `invite_login_tokens` and assert, through the actual worker handler, that a `/login/invite` request carrying an admin session cookie → `303 /?notice=…` with the token's `used_at` **still NULL**, while a signed-out click still consumes it + signs the invitee in. Full `bun run check` **951 pass / 0 fail**. Committed (`6415751`) + pushed.
+
+No new deploy needed — the enforcing code already shipped in `47ef12f6`/`1487617b`; this cycle only added the regression test.
+<!-- agent:boundary:3e4a785b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,6 +149,10 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: If the link is clicked while another user is logged in, that should not count as a usage and should not expire the link.~~
+- :pushpin: deploy
+- ~~If the link is clicked while another user is logged in, that should not count as a usage and should not expire the link.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

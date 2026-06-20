@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -53,7 +53,26 @@ Fixed. The member rows were crammed into the narrow "Group" column, so emails el
 **Tests:** e2e source-assertions updated (full-width colspan + non-truncating email cell). Full suite **920 pass / 0 fail**, builds clean.
 
 **Shipped:** committed + pushed EFS `1a522af`, pointer `1c97edbee`. (No `deploy` is queued — queue one, or I'll fold it into the next deploy.)
-<!-- agent:boundary:82f5f11c -->
+
+### Re: member table should have a default deal-share % — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: The lender group member table should have a default % of shares in deals. The deal % can be customized, but the default is the preset % values.
+
+
+Done — and the functional half already existed; the gap was making it **visible** in the member table.
+
+**Already in place (backend):** when a lender group joins a deal, `lending_group_interest_allocations_sync_` sets the per-deal split to each member's **`default_stake_bps`** (the preset %), falling back to an even split if none are set. That split is **customizable per deal** via `lending_group_deal_split_set_`. So "default = preset %, customizable per deal" was already the behavior.
+
+**Added this cycle (UI):** the member table now **surfaces each member's default deal share** — a labelled `X% default` badge per member (or "No default %" when unset), with a caption: *"Default deal share — the preset % each lender takes when this group joins a deal (customizable per deal)."* This pairs with the full-width member rows so the preset is clearly visible.
+
+**Tests:** e2e source-assertions for the default-share badge/caption + the backend default-allocation. Full suite **920 pass / 0 fail**, builds clean.
+
+**Shipped:** committed + pushed EFS `cbe850e`, pointer `816af47a0`.
+
+Note: the default % is currently **set at group creation / invite** (and used as the deal default). If you also want to **edit each member's default % inline in this table**, that's a small follow-up — say the word.
+<!-- agent:boundary:1c2a0054 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,8 +85,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Lender group member rows should fill the entire width of the parent ![img_30.png](img_30.png). The email should not be truncated.~~
-- :pushpin: The lender group member table should have a default % of shares in deals. The deal % can be customized, but the default is the preset % values.
 <!-- /agent:queue -->
 
 ## Backlog

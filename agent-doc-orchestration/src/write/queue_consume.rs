@@ -740,16 +740,42 @@ fn response_blockquote_text(response_body: &str) -> String {
     normalize_for_answer_match(&joined)
 }
 
+/// The prose prefix of a free-text queue head used for answer-matching: every
+/// line before the first fenced code block (` ``` ` or `~~~`). A head whose body
+/// is dominated by a pasted console/route log (the common shape of an operator
+/// bug report) is answered by quoting its prose lead, never the whole log, so
+/// matching on the *entire* normalized node text (`#ftstrike-fence`) could never
+/// strike it — the response blockquote can't possibly `contains` the full log.
+/// Matching on the prose prefix instead lets a code-fenced report strike when its
+/// lead is quoted. Falls back to the whole text when there is no fence.
+fn free_text_head_match_prose(head_text: &str) -> String {
+    let mut prose = String::new();
+    for line in head_text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            break;
+        }
+        prose.push_str(line);
+        prose.push('\n');
+    }
+    prose
+}
+
 /// True when the committed `response_body` answers the free-text queue head
-/// `head_text`: its normalized text appears inside the response's quoted-prompt
-/// blockquote region. Requires a head of at least four significant words so a
-/// short/empty head cannot match incidentally — the conservative direction,
-/// because a false positive silently drops an unaddressed operator report.
+/// `head_text`: the head's normalized **prose prefix** (text before any fenced
+/// code block — see [`free_text_head_match_prose`]) appears inside the response's
+/// quoted-prompt blockquote region. Requires a prose prefix of at least four
+/// significant words so a short/empty head cannot match incidentally — the
+/// conservative direction, because a false positive silently drops an unaddressed
+/// operator report.
 pub(crate) fn free_text_head_answered_by_response(response_body: &str, head_text: &str) -> bool {
     // Strip the leading operator/agent pin (`:pushpin:` …) first — its literal
     // shortcode word would otherwise survive normalization and break the match.
     let head_clean = crate::queue::strip_priority_markers(head_text);
-    let head_norm = normalize_for_answer_match(&head_clean);
+    // `#ftstrike-fence`: match on the prose prefix, not the full node text — a head
+    // whose body is a pasted log is only ever quoted by its lead line(s).
+    let head_prose = free_text_head_match_prose(&head_clean);
+    let head_norm = normalize_for_answer_match(&head_prose);
     if head_norm.split(' ').filter(|w| !w.is_empty()).count() < 4 {
         return false;
     }
@@ -2909,6 +2935,42 @@ mod core_tests {
     fn free_text_head_too_short_is_not_matched() {
         let resp = "### Re: x\n\n> - fix it now\n";
         assert!(!free_text_head_answered_by_response(resp, "fix it now"));
+    }
+
+    #[test]
+    fn code_fenced_free_text_head_strikes_on_prose_lead_match() {
+        // #ftstrike-fence regression: an operator bug report whose body is a short
+        // prose lead followed by a pasted console/route log. The response quotes ONLY
+        // the prose lead as a blockquote (nobody quotes the whole log), so matching on
+        // the full normalized node text never struck it. Matching on the prose prefix
+        // must now strike it.
+        let head = concat!(
+            "JB `Run Agent Doc` on equityfundingsource.md did not submit\n",
+            "```\n",
+            "claude exited cleanly.\n",
+            "Press Enter to restart, or 'q' to exit.\n",
+            "[agent-doc] auto-trigger: timed out waiting for claude prompt\n",
+            "```",
+        );
+        let response = concat!(
+            "### Re: did not submit — opus\n\n",
+            "> **Queue prompt:**\n",
+            "> JB `Run Agent Doc` on equityfundingsource.md did not submit.\n\n",
+            "Triaged.\n",
+        );
+        assert!(
+            free_text_head_answered_by_response(response, head),
+            "a code-fenced report quoted by its prose lead must count as answered"
+        );
+        // Prose prefix is just the lead line, not the whole log.
+        assert_eq!(
+            free_text_head_match_prose(head).trim(),
+            "JB `Run Agent Doc` on equityfundingsource.md did not submit"
+        );
+        // FALSE-STRIKE GUARD: a head that is ALL log (no prose lead) has an empty
+        // prose prefix and must never match.
+        let log_only = "```\nsome pasted log line one\nsome pasted log line two\n```";
+        assert!(!free_text_head_answered_by_response(response, log_only));
     }
 
     #[test]

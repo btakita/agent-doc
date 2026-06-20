@@ -191,13 +191,23 @@ So the single most useful next move is a focused `/agent-doc` cycle on **`#edito
 
 > **Queue prompt:**
 >
+> JB `Run Agent Doc` on tsift.md auto-started a new supervisor/tmux pane, added the prompt into the Claude input, but did  not submit the prompt.
+
+
+> **Queue prompt:**
+>
+> Still getting JB `File Cache Conflicts`.
+
+
+> **Queue prompt:**
+>
 > What are #next-steps to fix agent-doc bugs?
 
 
 Captured as **`#jbtsiftnosub`**. The new wrinkle vs the existing dispatch-no-submit items is the **cold-start race**: Run Agent Doc auto-started a fresh supervisor/pane, then typed into it before the harness was dispatch-ready, so the submit never landed. The fix direction: the route must positively re-verify a harness dispatch-ready prompt *after* the auto-start pane comes up and immediately *before* send (wait+retry or fail closed), not type into a still-starting pane. If it recurs, grab `.agent-doc/logs/supervisor-stderr.log` + the pane scrollback at send time so the cold-start window is in the trace.
 
 (The "Still getting File Cache Conflicts" head was answered last cycle — it's the `#editorbufwin`/`#pcwc` disk-reconcile trigger; striking it now.)
-<!-- agent:boundary:237273cd -->
+<!-- agent:boundary:ae4b7359 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -205,8 +215,8 @@ Captured as **`#jbtsiftnosub`**. The new wrinkle vs the existing dispatch-no-sub
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#editorbufwin]~~
 - ~~What are #next-steps to fix agent-doc bugs?~~
-- Still getting JB `File Cache Conflicts`.
-- JB `Run Agent Doc` on tsift.md auto-started a new supervisor/tmux pane, added the prompt into the Claude input, but did  not submit the prompt.
+- ~~Still getting JB `File Cache Conflicts`.~~
+- ~~JB `Run Agent Doc` on tsift.md auto-started a new supervisor/tmux pane, added the prompt into the Claude input, but did  not submit the prompt.~~
 - do [#jbtsiftnosub]
 - do [#avgwire]
 <!-- /agent:queue -->

@@ -103,14 +103,32 @@ So exactly one gate qualified today. The "need a marker added first" route/plugi
 **Connection to the flood I just paused.** Same root: a dispatch that never proves *submitted* gets retried, and each retry re-acts — here as duplicate typed lines, on `agent-doc-bugs2.md` as the `#rt83` phantom-pin re-trigger (`#qflood`). The stale supervisor CRDT has been driving both all session; the recycle clears it.
 
 **After the recycle**, please try Run Agent Doc on monsterrodholders.md once more. If the duplicates/no-submit persist on the *fresh* 0.34.20 supervisor, grab `.agent-doc/logs/supervisor-stderr.log` + the pane scrollback at send time — that tells us whether it's cold-start (should now be fixed) or the busy-pane no-submit variant, which needs its own route fix. Captured all of this on `#vgat`/`#jbdupnosub`.
-<!-- agent:boundary:1748e76d -->
+
+### Re: why doesn't the supervisor hot-swap on install, and can it be mid-turn? — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Why is the supervisor hot-swap not deploying whenever a new agent-doc version is installed? Can we hot-swap the supervisor mid-turn?
+
+
+Good questions — I dug into `idle_watch.rs` to answer precisely rather than guess.
+
+**It *is* marked on every install — but it only swaps at a boundary, never mid-turn.** `lib-install` auto-marks every running controller to recycle (`AGENT_DOC_RECYCLE_ON_INSTALL` — you saw "2 controllers marked to recycle at next idle boundary"). But the actual swap is an `execve` hot-reload done by the supervisor's `idle_watch` loop, and it only fires at `boundary=idle` (the harness is idle + a debounce grace elapsed) or `boundary=next_queue_item` (between drained queue items). It is gated on **`not turn_active`** by design.
+
+**Why it didn't deploy this whole session** — this is the real bug, and it bit us repeatedly: a continuously-active self-draining session **never reaches that boundary**. While the in-session `/loop` was draining, it held the `drain-claim` lease (which tells the supervisor to *defer*) and kept the harness `turn_active` back-to-back. So the supervisor sat on the stale binary the entire time — which is exactly what produced the `content_ours` finalize drift and the `#rt83` phantom-pin flood. `#supselfheal` already documents the corollary: a stale *binary* (vs a merely busy supervisor) does **not** self-heal by lease expiry — nothing swaps it on its own; it needs an explicit `admin recycle` or a genuine idle boundary. That's why the manual `make install` → `admin recycle` → end-turn I just ran was necessary: it forced the boundary.
+
+**Can we hot-swap mid-turn?** Not safely as built — and this is the core reason for the boundary gate. The supervisor doesn't just host the harness PTY; it **owns the in-flight cycle's control-plane state**: the CRDT document, the pending write queue, `cycle_state`, and the IPC socket listeners. `execve` preserves the child PTY, but that in-memory control-plane is **rebuilt fresh** after re-exec. Swapping mid-write would drop/corrupt the in-flight cycle — the precise drift class we've been fighting all session. A real mid-turn hot-swap would require serializing the entire control-plane across the `execve` and restoring it atomically; the in-process supervisor migration laid groundwork (the supervisor now owns this state in-process) but state-handoff-across-execve isn't built.
+
+**The actionable fix** (captured as a backlog item): automate `#staleloop-recycle-restart`. When `idle_watch` detects its *own* binary is stale **and** a drain is in progress, it should signal the in-session loop to yield at the next inter-item boundary so the `execve` recycle fires on its own — instead of relying on me to notice the staleness and manually install+recycle+end-turn. That closes the "self-draining session can't recycle itself" gap without touching the mid-turn invariant. It's supervisor-core (live-supervisor-critical, needs `make tmux-ci`), so it's a focused cycle, not an in-loop change.
+<!-- agent:boundary:cd53834c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md still has multiple prompts with no submit ![img_51.png](img_51.png)~~
-- ~~:pushpin: do [#vgat]~~
+- ~~:pushpin: Why is the supervisor hot-swap not deploying whenever a new agent-doc version is installed? Can we hot-swap the supervisor mid-turn?~~
+- I deleted a couple of queue items while a turn was running, but I did not save to disk. agent-doc reverted my deletion.
+- do [#wd40]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -137,6 +155,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#wd40] [recommended] #agent-doc-bug Supervisor stale-binary auto-recycle does not fire during a continuously-active self-draining session. lib-install marks every controller to recycle (AGENT_DOC_RECYCLE_ON_INSTALL), but idle_watch.rs only execve-hot-reloads at boundary=idle (harness idle + debounced grace) or boundary=next_queue_item, and NEVER mid-turn (the not-turn_active gate). A long in-session /loop drain holds the drain-claim lease AND keeps the harness turn_active back-to-back, so the supervisor never reaches its recycle boundary and the stale binary persists — the root of this session content_ours drift + #rt83 flood (#supselfheal already notes a stale BINARY does not self-heal by lease expiry; needs explicit admin recycle). Fix direction: when idle_watch detects its own binary is stale AND a drain is in progress, signal the in-session loop to yield at the next inter-item boundary so the execve recycle fires automatically (automate #staleloop-recycle-restart) instead of requiring the agent to manually run make install + admin recycle + end-turn. Mid-turn execve stays OUT of scope: the supervisor owns the in-flight cycle CRDT/write-queue/IPC/cycle_state, which is rebuilt fresh after re-exec, so a mid-write swap drops/corrupts the cycle; a true mid-turn hot-swap would need the control-plane state serialized across execve and restored atomically. Supervisor-core (idle_watch.rs / drain lease / recycle gating), live-supervisor-critical: focused cycle with make check + make tmux-ci, not in-loop.
 - [ ] [#vgat] #jbdupnosub #agent-doc-bug [operator-verify] JB Run Agent Doc on src/boost-client/tasks/monsterrodholders.md types the agent-doc <FILE> trigger MULTIPLE times (5-6 duplicate lines; screenshots img_50.png + img_51.png) into the input and never submits. STILL reproducing 2026-06-20 on the OLD pre-0.34.20 supervisor binary. Two layers: (1) cold-start typing into a not-yet-ready pane = the #jbtsiftnosub gate shipped in 0.34.20 (installed + recycled 2026-06-20); (2) repeated dispatch into a running-but-not-submit-ready pane, each re-typing the trigger with no submit proof = the broader #jbrundispatch/#1vhn accepted_only-no-submit family, plus a missing clear-before-retype so duplicates accumulate. If it persists AFTER the 0.34.20 recycle, capture .agent-doc/logs/supervisor-stderr.log + pane scrollback + pane state (cold-start vs busy) at send time. Likely the same no-submit-proof retry loop as the #qflood idle-watch re-dispatch.
 <!-- /agent:backlog -->
 

@@ -97,7 +97,24 @@ Note: this means an invite link can no longer be used to *switch into* another a
 > :pushpin: deploy
 
 Already deployed this cycle — the invite-flow notice fix (`bfc6b9b`) went out as worker **version `47ef12f6`** (no D1 migration). Confirmed live with chromium-bridge: the invite link now shows the persistent log-out banner + toast flash payload. This is the live production worker.
-<!-- agent:boundary:2679612e -->
+
+### Re: Link "log out" in the notice to actually log out — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In "You’re already signed in. Please log out, then open your invitation link again.", link "log out" to log out.
+
+
+> **Queue prompt:**
+>
+> :pushpin: In "You're already signed in. Please log out, then open your invitation link again.", link "log out" to log out.
+
+Done and deployed. In the persistent home-page banner, the phrase **"log out"** is now a clickable control instead of plain text. `home_notice_()` replaces the literal phrase with an inline `<form method="post" action="/logout">` submit button styled as an underlined link — POST, because `/logout` is a POST endpoint (CSRF-safe and tokenless, exactly like the header account-menu logout). One click signs you out (and lands you back on home, signed out), after which your invitation link works.
+
+Verified live with chromium-bridge on the worker after deploy: the banner now contains `form[action="/logout"][method="post"]` with button text "log out" (screenshot confirmed the underlined link). I did **not** submit it — that would have logged out your live admin session across all tabs. Full `bun run check` **949 pass / 0 fail** (home-notice test now asserts the logout control). Committed (`5af28e0`) + pushed, **deployed** (worker version `1487617b`).
+
+Scope note: I linked it in the **persistent banner** (the lasting element). The transient toast still shows the same text but isn't clickable — the toast auto-dismisses, so a click target belongs on the banner that stays. Say the word if you also want the toast itself clickable.
+<!-- agent:boundary:6831cc7a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -110,6 +127,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: In "You’re already signed in. Please log out, then open your invitation link again.", link "log out" to log out.~~
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

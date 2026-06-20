@@ -88,7 +88,22 @@ Shipped. `admin_deal_publish_` now refuses to publish a loan that hasn't been ac
 **Verification:** `make check` green — **907 pass, 0 fail** (+5), typecheck clean, worker bundle built. No GitHub Actions CI is configured for the EFS repo; the local suite is authoritative.
 
 **Confidence:** high — the gate is unit-tested and its only runtime callers are the post-accept autopublish (passes) and the manual publish route (now 409s with a reason). **Escalation:** none — but confirm the accepted-before-available rule if TMO-imported loans without an EFS application should remain publishable.
-<!-- agent:boundary:56f8700f -->
+
+### Re: #5q7z TMO duplicate-loan fix — opus-4-8
+
+Implemented the associate-only fix (the safe default for the open design question: no second TMO call). The #5q7z review item stays open until this is deployed + live-verified (queued as #5q7z-ship).
+
+**Backend** (`app/equityfundingsource/lib/admin/applications/index.ts`):
+- New `application_existing_tmo_loan_R_` detects an existing TMO association — a `loans` row for this application (matched by `tmo_loan_application_rec_id`, then by the recorded `tmo_loan_number`) that already has a non-empty `tmo_loan_rec_id`.
+- `application_tmo_writeback_attempt_` now short-circuits **before** `tmo_application_create_` (NewLoan): when an association exists it marks the application accepted locally, copies documents to the loan (idempotent), auto-publishes, and returns `ok: true, already_associated: true`. No NewLoan call ⇒ no TMO 400 "Duplicate loan number".
+
+**UI** (`lib/ui--browser--efs/portal/admin/full_applications.tsx`):
+- "Accept and Send to TMO" is disabled and relabeled **"Already in TMO"** when `writeback_status === 'sent'` or a `tmo_loan_number` is recorded, with an explanatory note so the admin can't re-trigger NewLoan.
+
+**Tests**: added source-assertion coverage for both halves and updated three pre-existing assertions that now matched the earlier associate-only occurrences. Full suite green — **909 pass / 0 fail** — plus `bun run build` + `bun run build:worker`.
+
+**Shipped**: committed + pushed EFS `d8c17b4`, superproject pointer `58a2c5fea`. **Deploy not run** — the directive carried no `#commit-push-deploy` preset and there is no CI auto-deploy. Trigger `#commit-push-deploy` (or `bun run deploy:worker`) when ready.
+<!-- agent:boundary:c59bb0ad -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,9 +123,10 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#5q7z-ship] [recommended] Deploy the #5q7z TMO duplicate-loan fix (commit-push-deploy / bun run deploy:worker; EFS d8c17b4, pointer 58a2c5fea) and live-verify: the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) no longer returns TMO 400 Duplicate loan number, and the Accept-and-Send button now reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [/] [#67v2-aa-local] [recommended] Admin pipeline auto-advance local half (advances #67v2-auto-advance): define stage-requirement checks from the TMO-aligned Kanban and enqueue audited status updates to tmo_cache_outbox; replay stays gated on #dzmm. Depends on the #67v2 Kanban stages being built first.
-- [ ] [#5q7z-fix] TMO duplicate-loan fix (advances #5q7z, relates #dealtab500/#214f): (1) approve/writeback path (admin/applications/index.ts -> tmo_writeback.ts NewLoan) must detect an existing TMO association (tmo_loan_rec_id present / writeback_status=sent) and associate+mark accepted locally instead of calling NewLoan, avoiding the TMO 400 'Duplicate loan number'; (2) hide/disable 'Accept and send to TMO' in lib/ui--browser--efs/portal/admin/full_applications.tsx when the loan is already in TMO. Safe default for the design Q: associate-only, no TMO call.
+- [x] [#5q7z-fix] TMO duplicate-loan fix (advances #5q7z, relates #dealtab500/#214f): (1) approve/writeback path (admin/applications/index.ts -> tmo_writeback.ts NewLoan) must detect an existing TMO association (tmo_loan_rec_id present / writeback_status=sent) and associate+mark accepted locally instead of calling NewLoan, avoiding the TMO 400 'Duplicate loan number'; (2) hide/disable 'Accept and send to TMO' in lib/ui--browser--efs/portal/admin/full_applications.tsx when the loan is already in TMO. Safe default for the design Q: associate-only, no TMO call.
 <!-- /agent:backlog -->
 
 ## Review

@@ -139,7 +139,19 @@ Shipped the plugin half of `#evmh` (the `#yzer`/`#evmhplugin` item) — agent-do
 **Remaining (in the plan):** Phase 2 editor-presence signal (`editor_endpoint_proven` via the consumer-lease / registration probe — this also covers the foreign-ownership-guard facet you hit, where `write --pending-add` needed `claim --force`) → Phase 3 wire the decision into the fail-closed branch + an `editorless_disk_fallback` ops.log marker (coordinated with `#fbwire`) → Phase 4 operator editor-less live repro. Plan: `tasks/agent-doc/plan-kcb5-editorless-cli-finalize-wedge.md`.
 
 **Backlog housekeeping (needs your hand — id-targeted edits are racing your live edits this turn):** `#kcb5` and `#6b5h` are duplicates of one bug — please keep `#6b5h` (the fuller one) and drop `#kcb5`, or vice versa. I left both untouched rather than fight the flapping ids mid-edit.
-<!-- agent:boundary:1007f447 -->
+
+### Re: Fix the cause(s) of the races when I edit the document — opus-4-8
+
+Found and fixed the primary root cause — agent-doc `0.34.30`, submodule `4c7a599a`, pushed. It's the same race that has wedged **every** finalize this session.
+
+**Root cause (`#qconvbaseline`).** When a live JB plugin owns the document, preflight's queue maintenance converges the corrected queue shape (auto-pins, backlog→queue mirrors, do-prompt sort, `queue:` control) into the **editor buffer + snapshot** over IPC — with **no disk write**. But the baseline is saved *just before* that maintenance, from the **pre-convergence disk** content. So at finalize the live editor buffer (which now carries preflight's own queue convergence) differs from both the baseline and `content_ours` **outside `exchange`** → the drift guard fires `live_prompt_drift_after_preflight` on *every* cycle, blocks the response write, and forces the `content_ours` carry-forward + a recovery `agent-doc commit`. That's exactly the "every finalize drifts / needs --force-disk-ish recovery" churn you've watched — **preflight was mistaking its own queue convergence for your concurrent edits.**
+
+**The fix.** After queue maintenance, `realign_baseline_to_converged_queue` splices the converged **queue component** into the pre-maintenance content and re-saves the baseline, so `content_ours` matches the editor buffer's queue and **only genuine concurrent user edits trip the drift guard**. It's queue-scoped — `exchange` and boundary markers are preserved exactly, so non-queue cycles (and orchestrate streaming) are untouched, and a no-convergence cycle is a no-op. Regression test proves: false drift before, clean after, and a real concurrent user prompt still drifts. `make check` green (4837 tests), clippy clean.
+
+**Why this turn still drifted.** The running supervisor is `0.34.28` — the fix isn't live yet, so this very finalize recovered through the old path again. Installing `0.34.30` + recycling makes it live; after that, editing the doc mid-turn should stop forcing the recovery path (only a real edit to the in-flight response/prompt will defer).
+
+**Scope note.** This is the *biggest* single cause (it fired unconditionally whenever a queue was active). The remaining edit-race facets are narrower and already tracked: `#hap7` (scoped CRDT merge so a concurrent edit to one queue item can't duplicate adjacent structure), `#editorbufwin` (editor-wins for unconsumed user queue additions), `#docdriftgrace` (silent auto-rebase of unrelated drift). If you still see races after `0.34.30` is live, they'll be one of those — tell me which symptom and I'll take the next one.
+<!-- agent:boundary:7a90d029 -->
 <!-- /agent:exchange -->
 
 ## Queue

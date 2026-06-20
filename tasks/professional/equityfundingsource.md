@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -129,7 +129,18 @@ Done. Invitation emails now carry a **single-use auto-login link**; clicking it 
 **Scope:** wired into the **lending-group invite** (the invite path that auto-creates accounts). Borrower invites already have their own `/apply/finish` token flow, and admin-provisioning emails are separate — say the word if you want the auto-login link extended to those too.
 
 **Shipped:** committed + pushed EFS `475b90e`, superproject pointer `edbaf5b42`. Migration `0092` applies on the next deploy. The `deploy` queued behind this will push it live.
-<!-- agent:boundary:bc6f907b -->
+
+### Re: deploy — login + invite auto-login live — opus-4-8
+
+Deployed. **Version `37955c6b-dad8-4fb0-a1ff-7971d00a4d5e`**, live at `https://equityfundingsource.brian-takita.workers.dev`. Both queued changes shipped: the **Continue-with-Google removal** and the **invite email auto-login + account completion** (migration `0092` applied to remote D1).
+
+**Smoke check (live):**
+- `/login` → `200`, **"Continue with Google" absent** (grep count 0).
+- `/login/invite` (no token) → `303` → login with "invitation link is invalid or has expired" notice.
+- `/account/complete` (no session) → `303` → `login?next=/account/complete` (session-gated, as designed).
+
+Queue drained — the only remaining head is the operator-gated `#5q7z-ship` (TMO duplicate-loan fix deployed earlier; just your live-verify left). Stopping.
+<!-- agent:boundary:605bec56 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,11 +153,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: In /lenders/groups, have a row for each member of the group. If a member is invited but has not yet signed in, have a "Resend Invite" button to that lender.~~
-- ~~:pushpin: deploy~~
-- ~~:pushpin: Remove "Continue with Google" button on the login page.~~
-- ~~:pushpin: An invite email should have a code to automatically log the user in. If it's the first time, the user should be presented with a form to complete their account.~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -612,6 +612,31 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         QueueState::default()
     });
     warnings.extend(queue_state.warnings.clone());
+    // #qconvbaseline: the queue maintenance above may converge the live editor
+    // buffer to a corrected queue shape (auto-pins, backlog→queue mirrors, do-prompt
+    // sort, queue-control frontmatter) via IPC WITHOUT a disk write when a plugin
+    // listener is active — the converged shape lands in the editor buffer + the
+    // snapshot, but disk (and the baseline saved just above, from pre-maintenance
+    // disk) stay behind. At finalize the converged editor buffer then reads as
+    // `live_prompt_drift_after_preflight` on EVERY cycle: its queue body differs
+    // outside `exchange` from both the baseline and `content_ours`, so the drift
+    // guard blocks the response write and forces the `content_ours` carry-forward +
+    // a recovery commit (the race the operator hit repeatedly editing the doc).
+    // Re-align the baseline with the post-maintenance snapshot (the queue shape now
+    // in the editor buffer) so `content_ours` matches the buffer outside `exchange`
+    // and ONLY genuine concurrent user edits trip the guard. No-listener sessions
+    // are unaffected — their disk write already matches the snapshot, and when
+    // nothing converged the snapshot equals the pre-maintenance content so this is
+    // a no-op.
+    if let Ok(Some(converged_snapshot)) = crate::snapshot::load(file)
+        && let Some(realigned) = realign_baseline_to_converged_queue(
+            &diff_result_with_current.current,
+            &converged_snapshot,
+        )
+    {
+        let _ = save_baseline_content(file, &realigned);
+        eprintln!("[preflight] baseline re-aligned to converged queue shape (#qconvbaseline)");
+    }
     // `#agent-doc-bug` auto-queue stall: when there is no real user/document diff
     // this cycle, an active queue head is synthesized as the cycle's prompt diff.
     // That synthetic head is queue *continuation*, not user intent — so it must
@@ -1292,6 +1317,30 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     Ok(())
 }
 
+/// #qconvbaseline: when queue maintenance converged a live editor buffer to a new
+/// queue shape (pushed via IPC with no disk write), splice that converged queue
+/// component into the pre-maintenance disk `current` so the re-saved baseline
+/// matches the editor buffer's queue WITHOUT disturbing `exchange` / boundary
+/// markers. Returns `None` when the queue component is unchanged (the common
+/// no-convergence case — so non-queue preflights are untouched) or when either
+/// document lacks a parseable queue component.
+fn realign_baseline_to_converged_queue(current: &str, converged: &str) -> Option<String> {
+    let cur_comps = crate::component::parse(current).ok()?;
+    let conv_comps = crate::component::parse(converged).ok()?;
+    let cur_q = cur_comps.iter().find(|c| c.name == "queue")?;
+    let conv_q = conv_comps.iter().find(|c| c.name == "queue")?;
+    let cur_q_text = &current[cur_q.open_start..cur_q.close_end];
+    let conv_q_text = &converged[conv_q.open_start..conv_q.close_end];
+    if cur_q_text == conv_q_text {
+        return None;
+    }
+    let mut spliced = String::with_capacity(current.len() + conv_q_text.len());
+    spliced.push_str(&current[..cur_q.open_start]);
+    spliced.push_str(conv_q_text);
+    spliced.push_str(&current[cur_q.close_end..]);
+    Some(spliced)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -1636,6 +1685,106 @@ mod tests {
             );
         }
     }
+    use super::realign_baseline_to_converged_queue;
+
+    #[test]
+    fn queue_convergence_realigns_baseline_so_finalize_sees_no_false_drift() {
+        // #qconvbaseline regression: when queue maintenance converges the live
+        // buffer to a corrected queue shape, the baseline saved BEFORE maintenance
+        // (pre-convergence) makes every finalize read the converged queue as
+        // `live_prompt_drift_after_preflight`. Re-aligning the baseline with the
+        // post-maintenance snapshot must clear that false drift while a genuine
+        // user edit would still trip the guard.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let pre = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#alpha] run the alpha task\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, pre).unwrap();
+        snapshot::save(&doc, pre).unwrap();
+
+        // Simulate run.rs:570 — baseline captured from pre-maintenance content.
+        save_baseline_content(&doc, pre);
+
+        // Queue maintenance mirrors the backlog `queue`-attr id into the queue and
+        // updates the snapshot to that converged shape.
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        let converged = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_ne!(
+            converged, pre,
+            "precondition: queue maintenance must have converged the queue shape"
+        );
+
+        // Helper: splice an agent response into the exchange (no user edit).
+        let with_response = |d: &str| {
+            d.replace(
+                "<!-- /agent:exchange -->",
+                "### Re: do [#alpha] — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->",
+            )
+        };
+        let candidate = with_response(&converged); // editor buffer + response
+        let content_ours_pre = with_response(pre); // OLD baseline + response
+
+        // The bug: with the pre-maintenance baseline, the converged queue reads as drift.
+        assert!(
+            crate::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+                pre,
+                &candidate,
+                &content_ours_pre,
+            ),
+            "pre-maintenance baseline must (incorrectly) flag the convergence as drift"
+        );
+
+        // The fix: re-align the baseline by splicing the converged queue into the
+        // pre-maintenance content (preserving exchange/boundary).
+        let realigned = realign_baseline_to_converged_queue(pre, &converged)
+            .expect("queue convergence delta must produce a re-aligned baseline");
+        save_baseline_content(&doc, &realigned);
+        let baseline_after = std::fs::read_to_string(snapshot::baseline_path_for(&doc).unwrap())
+            .unwrap();
+        assert!(
+            baseline_after.contains("[#alpha]"),
+            "re-aligned baseline must carry the converged queue shape"
+        );
+        let content_ours_aligned = with_response(&realigned);
+        assert!(
+            !crate::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+                &realigned,
+                &candidate,
+                &content_ours_aligned,
+            ),
+            "re-aligned baseline must NOT flag the queue convergence as drift"
+        );
+
+        // Guard preserved: a GENUINE concurrent user edit still trips the drift guard.
+        let user_edited = candidate.replace(
+            "<!-- /agent:exchange -->",
+            "❯ a brand new user prompt typed mid-turn\n<!-- /agent:exchange -->",
+        );
+        assert!(
+            crate::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+                &realigned,
+                &user_edited,
+                &content_ours_aligned,
+            ),
+            "a real concurrent user prompt edit must STILL be detected as drift"
+        );
+    }
+
     #[test]
     fn run_queue_maintenance_does_not_sync_icebox_into_empty_queue() {
         // Parked icebox work must not become the next active prompt just because the

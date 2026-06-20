@@ -45,14 +45,39 @@ Compacted content:
 Compaction landed (archive `483039e7…-20260620-082845.md`, 9 topics). Recovered the stale-snapshot drift it left (`reset --from-current --preserve-session` + `commit`), so HEAD holds the compacted document.
 
 Queue corrected: the 3 answered free-text operator heads ("Why is the 0.1.0 supervisor…", the two `JB Run Agent Doc` reports) were never struck — the `#qheadstrike` class. Drained them via `agent-doc queue consume` (×2, all answered/superseded by existing review items); queue block is now empty and `queue: stop`. All 21 gated `[/]` review items intact. Committed `48f1f024a`.
-<!-- agent:boundary:c46b11e4 -->
+
+### Re: Diagnose JB File Cache Conflict dialogs — opus-4-8
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix agent-doc bugs?
+
+
+**Symptom.** The IntelliJ "File Cache Conflict" dialog fires when the plugin sees the session doc on **disk** diverge from the editor's in-memory **buffer** — i.e. someone wrote the file by a path that bypassed the editor IPC.
+
+**Root cause (observed live this session).** The documented hot-path disk writes are already listener-guarded (`#fcczero`: post-commit reconcile skips disk with a listener, boundary reposition uses file-IPC, queue/pending/status route through `converge_or_disk_write`). So `#cyh0`'s "unidentified trigger" is **the recovery + manual-edit paths, which are NOT guarded**. This session reproduced both sides of the divergence:
+
+1. **Binary/manual disk writes behind the editor's back** → disk ≠ buffer → FCC:
+   - `git checkout HEAD -- FILE` (manual recovery) — ran twice this session.
+   - the compaction's direct 30KB disk write + `reset --from-current` rebuild, while the editor still held its ~53KB buffer.
+   - direct `Edit`/`sed` writes to the open file.
+2. **The inverse — the editor's stale buffer winning** on `save_document` and reverting the binary's disk writes: `postcommit_worktree_check match=false` (`#postcommit-ipc-worktree-corruption`). That revert then re-diverges disk from the *next* binary write → another FCC. The two sides re-trigger each other = the churn loop you watched.
+
+**Fix direction (folds into `#cyh0`):**
+- Route **every recovery-path disk write** (`reset --from-current`, the `git checkout HEAD` recovery) through the same listener-guarded `converge_or_disk_write` seam the hot path uses — never a bare disk write while a listener is registered.
+- On reconnect, when the editor buffer is **stale vs HEAD**, the plugin should re-read disk (HEAD) instead of pushing its buffer via `save_document` — binary/HEAD wins for unsynced control-plane edits; the editor wins only for genuine user edits (`#editorbufwin` P1).
+- **Operator/agent guidance:** never `git checkout` / `Edit` / `sed` a session doc that has a live editor open — only `reset --from-current` + `commit` (listener-guarded). My use of `git checkout HEAD` and `Edit` during recovery *was itself* an FCC trigger this session.
+
+This **confirms `#cyh0`'s hypothesis**: the live trigger is the recovery/manual disk-write paths, not the guarded hot path. The stale "What are #next-steps" head (already answered + archived in the compaction) is cleared alongside this.
+<!-- agent:boundary:1119ccf6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- What are #next-steps to fix agent-doc bugs?
+- ~~What are #next-steps to fix agent-doc bugs?~~
 - :pushpin: Please diagnose JB file cache conflict dialogs.
+- do [#evmh]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -79,6 +104,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#evmh] #cyh0fix #agent-doc-bug Close the #cyh0 FCC trigger now identified live this session: (1) route ALL recovery-path session-doc disk writes (reset --from-current rebuild, the git checkout HEAD recovery, any non-hot-path write) through the listener-guarded converge_or_disk_write seam instead of bare disk writes while a plugin listener is registered; (2) on plugin reconnect, when the editor buffer is stale vs HEAD, re-read disk (HEAD) instead of pushing the buffer via save_document — binary/HEAD wins for unsynced control-plane edits, editor wins only for genuine user edits (per #editorbufwin P1). Add SimWorld coverage for the two-sided divergence: a binary disk write behind a live editor, and a stale-buffer save_document reverting a binary write (#postcommit-ipc-worktree-corruption).
 <!-- /agent:backlog -->
 
 ## Review

@@ -38,7 +38,26 @@ completed
 Compacted content:
 ❯ - Archived 4 response topic(s): Group-interest deals surface as Deals of Interest; "Share %" → "Default Share %" with tooltip; Set credentials must be the first step when missing; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:a453a284 -->
+
+### Re: Email sign-in link — message when already signed in + deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: If I'm logged into another account, the email link goes to the home page with no message. Add something like "Please log out of your current account and try again."
+>
+> :pushpin: deploy
+
+Fixed and deployed. When a passwordless `/login/email/verify` link was clicked while signed into **another** account, the single-use token had usually already been spent (commonly an email-client link **prefetch** consumes it), so it hit the invalid-token path — which, for a signed-in visitor, redirected to the home page **silently**. Now that case sets the home-page flash toast: **"Please log out of your current account and try the sign-in link again."**
+
+**How it works:**
+- In the verify handler's `invalid_redirect_`, the already-signed-in branch now calls `flash_cookie_set_(c, { title: 'Already signed in', message: '...', status: 'info' })` before redirecting to `/` — the same 30s flash-cookie mechanism the logout flow already uses. The header toast script renders it on any server-page, so the message appears on the home page where they land (the page itself reads no `?info=` param, which is exactly why nothing showed before).
+- The signed-out invalid path is unchanged (still redirects to `/login/email` with the "expired or already used" notice).
+- Valid-token behavior is unchanged: a fresh link still signs the visitor in and routes them to their portal.
+
+Verified: new wiring test in `tests/email-login.test.ts` asserts the log-out notice + `#email-login-signed-in-notice` tag; full `bun run check` (test + build + build:worker) **946 pass / 0 fail**. Committed (`227a9a2`) + pushed, **deployed** (worker version `ba75ee98`). Live smoke check on the worker: `GET /login/email/verify` with no token → `303` → `/login/email?info=…` (the new signed-in flash branch sits on that same path).
+
+**Verify it here:** test on the worker host (`…brian-takita.workers.dev`) or whichever host your sign-in emails link to — *not* `www.equityfundingsource.com`. That `www` domain is still fronted by the legacy **Apache** origin for nested routes (`/login/invite`, `/admin/login`, `/login/email/verify` all 404 there — pre-existing, unrelated to this change); the Cloudflare worker is the new platform and serves the fix. The emailed link uses the request origin (`SITE_URL`), so real users clicking a link reach the worker.
+<!-- agent:boundary:c17733c9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +70,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: If I'm logged into another account, the email link goes to the home page with no message. Add something like "Please log out of your current account and try again."
+- ~~:pushpin: If I'm logged into another account, the email link goes to the home page with no message. Add something like "Please log out of your current account and try again."~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

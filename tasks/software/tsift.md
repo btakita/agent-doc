@@ -39,7 +39,18 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 ❯ - Archived 8 response topic(s): DuckDB internals; drain #sbtk / #wzg6; implement plan-tsift-zonemap-segment-stats.md; 5 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54...
-<!-- agent:boundary:68e5620b -->
+
+### Re: session compaction — state recap — opus-4-8
+
+The exchange was compacted (8 response topics archived to `…-20260620-064417.md`); committing it left a prompt-only summary tail, so this response closes the turn. No new work was requested.
+
+**Current state of `#015t` (FTS5 content index):**
+- **Phases 0/1/2 + Phase 3 core (3a) — done + pushed** (tsift `4105aba`, superproject `c64241785`): `content_fts` scaffold, `content_fts_search_pruned` (zone-map's first consumer), `fts_match_query` (OR-union translation), both soundness gates green. All written-but-unread — zero search-behavior change.
+- **`#ph7n` — done** (crates.io trusted-publishing runbook).
+- **Next (operator-scheduled):** Phase 3b — wire the env-flagged FTS path into the CLI `SearchResponse`. Say **"do #015t"** to continue. The queued `do [#015t]` is the go-mode re-mirror of the operator-verify umbrella (non-drainable), not a fresh directive.
+
+**Unchanged blocker (out of scope here):** `stale_install` — installed agent-doc `0.34.20` predates source `d48b30ea`, `src/agent-doc` has uncommitted WIP. Durable fix is an operator `make install` in `src/agent-doc` + supervisor restart.
+<!-- agent:boundary:eb4b988f -->
 <!-- /agent:exchange -->
 
 ## Queue

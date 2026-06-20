@@ -115,13 +115,45 @@ You queued `do phase 4b`, so I worked it. On inspection the three Phase 4b items
 **Verification:** `make check` green (exit 0; fixed a clippy `too_many_arguments` with the codebase's standard `#[allow]`); new test `run_sift_search_honors_threaded_freshness_verdict` (Some(true)→fts, Some(false)→lexical); built + installed; live-verified the worker path still returns `strategy: fts`.
 
 **NEXT:** Phase 4b's two deferred items need your call (keep/retire `TokenIndex` for degraded-read-only; whether the path-prune enhancement is worth it), and **Phase 5** is the operator-gated crates.io release. Say **"do #015t"** with a direction, or schedule the release.
-<!-- agent:boundary:26ff09b8 -->
+
+### Re: would token-index.json be useful if the behavior is fixed, or purely a redundant vestige? — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Would token-index.json be useful if the behavior is fix or is it purely a redundant vestige?
+
+
+> **Queue prompt:**
+>
+> :pushpin: Would token-index.json be useful if the behavior is fix[ed] or is it purely a redundant vestige?
+
+**Short answer: purely a redundant vestige.** Fixing the invalidation behavior would make `token-index.json` *correct*, but not *useful* — because the reason to delete it (structural redundancy) is untouched by any behavior fix, and a correct freshness gate actually makes the other two problems *worse*.
+
+Walk the three problems from the prior answer against the hypothetical "behavior is fixed":
+
+1. **Never invalidates** — this is the *only* one a behavior fix addresses. Add an mtime/content-hash gate and the cache returns correct results. But "correct" here just means it now returns *what `.tsift/index.db` already returns*. Correctness is table stakes the real index already meets.
+2. **All-or-nothing whole-tree rebuild** — a working freshness gate makes this strictly *worse*. A cache that actually invalidates means it rebuilds the entire `HashMap<token, Vec<path>>` inversion on *any* source change, while `.tsift/index.db` updates **incrementally**. You'd be paying full-rebuild cost on every edit to reproduce results the incremental FTS5 index already has for free.
+3. **Redundant second index** — untouched by any behavior fix, and this is the fatal one. After the fix you still have two lexical indexes over the same corpus: FTS5/BM25-ranked, incrementally maintained, freshness-gated (`index.db`) **vs** a flat token→files HashMap with no ranking and whole-tree rebuilds. The fixed JSON is strictly dominated on every axis — it's never the better answer for any default-path query.
+
+So as a **default-path search structure**: delete it. Fixing the behavior is polishing something you should remove.
+
+**The one non-vestigial sliver is the engine, not the cache.** The degraded-read-only fallback (a concurrent writer holds a stale `index.db`) genuinely needs *live* results, and a fresh in-memory `TokenIndex::build` is a legitimate way to serve that. But two things follow:
+
+- That path is **live by definition**, so it must NOT read a persisted `token-index.json` at all — caching a must-be-live path is wrong by construction. Even in its one defensible use case, the **JSON file is dead**; only the build engine has a possible role.
+- And `rg -F` exact would serve that same fallback without maintaining a bespoke inversion at all.
+
+**Bottom line / recommendation for #015t:**
+- `token-index.json` (the persisted cache) → **delete unconditionally**, in every scenario. The behavior fix is not worth doing.
+- `TokenIndex::build` (the engine) → keep *only* if you want an in-process degraded-read-only live fallback; otherwise replace that one call site with `rg -F` and drop the type entirely.
+
+That collapses the two deferred phase-4b items into a single decision: **drop the cache; keep-or-replace the engine for degraded read-only.** Say **"do #015t"** with that direction (delete cache + which fallback you want) and I'll ship it.
+<!-- agent:boundary:5ee4ad30 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- re #015t: Explain what is wrong with the TokenIndex build/cache. Is sift still useful for tsift?
+- ~~:pushpin: Would token-index.json be useful if the behavior is fix or is it purely a redundant vestige?~~
 - do [#015t]
 <!-- /agent:queue -->
 <!--

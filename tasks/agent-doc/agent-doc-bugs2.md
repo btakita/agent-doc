@@ -107,47 +107,20 @@ Not stalling — shipped the agent-doable rung this cycle.
 **Heads-up (live recurrence of #sqedit-race's own hazard):** while committing, the concurrent EFS supervisor's git op cleared my staged superproject index and absorbed my plan + pointer into *its* commit (`0ec626d9f`). No data loss — but it's the multi-writer race #sqedit-race tracks, now hitting git index staging, not just the queue body. Worth a follow-up on superproject-commit staging isolation.
 
 Not auto-looping: `queue_drainable_head_count: 0`, every remaining head is `[operator-verify]`.
-<!-- agent:boundary:96709877 -->
+<!-- agent:boundary:08ff7def -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
----
-:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.
-
-```
-claude exited cleanly.
-Press Enter to restart, or 'q' to exit.
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-```
----
-All this should have been automated without stalling. 
-```
-  Why I'm stopping rather than auto-looping: the closeout went through --force-disk because the route-owned supervisor
-  (pid 587955) is mapping a stale agent-doc binary (session-check #fcc0/#ipcdrift warning) — three editor-IPC finalize
-  attempts failed with supervisor_binary_stale / live_prompt_drift. I queued admin recycle (fires at the next idle
-  boundary, i.e. when this turn ends) and recovered the post-commit worktree drift (git checkout HEAD + reset
-  --from-current — HEAD already held the correct response). Per the force-disk + stale-binary closeout rule, looping
-  in-session would just re-hit the same wedge. The supervisor recycles onto 0.34.18 when this turn ends; re-invoke
-  /agent-doc tasks/monsterrodholders.md (or /loop) to continue draining #4jgj against a fresh supervisor.
-```
----
-- :pushpin: do [#hap7]
-- :pushpin: do [#fbwire]
-- :pushpin: [#qpausemix-verify]
-- do [#tsiftmdcrash-verify]
-- do [#runexitrestart]
-- do [#qheadstrike]
-- do [#sqedit-race]
+- :pushpin: Move the remaining [operator-verify] tasks in the backlog into review.
+- :pushpin: do [#runexitrestart]
+- :pushpin: do [#tsiftmdcrash-verify]
+- :pushpin: do [#qheadstrike]
+- :pushpin: do [#sqedit-race]
+- do [#qpausemix-verify]
+- do [#hap7]
+- do [#fbwire]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

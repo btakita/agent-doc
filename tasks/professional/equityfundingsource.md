@@ -144,7 +144,7 @@ Done and deployed. The share editor now reads **Lender | Status | Share % | Lock
 The columns still line up across rows (same single-grid + `display:contents` approach), which I re-verified with a standalone render: both status pills left-align at the same x, share inputs align, and locks align.
 
 Committed (`6c35e31`) + pushed, **deployed to production** (version `c57823b8`; bundle `index.browser-3X5JG7OP.js`). Hard-refresh `/lenders/groups` to see the reordered columns. Tests 931 pass / 0 fail.
-<!-- agent:boundary:2672e459 -->
+<!-- agent:boundary:50dbf80c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -157,8 +157,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: In /lenders/groups, move the status column after the lender column.~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -91,7 +91,7 @@ Fixed and deployed. The gap: the invite auto-login link (`/login/invite?token=`)
 Verified: new gate-wiring test + SSO-exclusion assert; full suite **937 pass / 0 fail**, worker rebuilt. Committed (`1e68b16`) + pushed, **deployed to production** (version `d0cf6448`).
 
 Note: if `btak.dev+lender2@gmail.com` already set a password in an earlier test, it won't re-prompt (that's correct — credentials aren't missing). To re-test the flow, invite a fresh address.
-<!-- agent:boundary:cf8d0a30 -->
+<!-- agent:boundary:a2f57a2c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -105,7 +105,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: I clicked on the invite for btak.dev+lender2@gmail.com and was logged in. But I was not presented with setting a password. Setting credentials should be the 1st step if the credentials are missing for any portal account.~~
-- Add a login by email link...where an email is sent with a link that has the token.
+- Add a login by email link...where an email is sent with a link that has the auth token. The a
 - :pushpin: deploy
 <!-- /agent:queue -->
 

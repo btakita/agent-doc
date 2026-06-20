@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,70 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-030900.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-032127.md`*
 
 Compacted content:
-❯ - Archived 7 response topic(s): session compacted; deploy; /lenders/groups; 4 more
+❯ - Archived 3 response topic(s): invite link should switch accounts; invite token should have expiration; deploy
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: invite link should switch accounts — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: When I'm logged in as btak.dev+investor@gmail.com and I click on the btak.dev+lender@gmail.com invite link, btak.dev+investor@gmail.com should be logged out and btak.dev+lender@gmail.com should be logged in.
-
-
-Fixed. A valid `/login/invite` token now **wins over an existing session**: signed in as `btak.dev+investor@gmail.com` and clicking `btak.dev+lender@gmail.com`'s invite link logs the investor out and signs the lender in.
-
-**What changed** (`lib/auth/routes.ts`, `GET /login/invite`): removed the early "already signed in → go home" guard. The handler now validates + consumes the token first, then `login_and_redirect_` **overwrites the session cookie** — replacing whoever was signed in. A missing/invalid token leaves an already-signed-in visitor where they are (redirects home, not to login); a signed-out visitor still gets the "invalid or expired" notice.
-
-**Tests:** wiring test extended for the switch behavior (`#invite-switch-account`). Full suite **917 pass / 0 fail**, build clean.
-
-**Shipped:** committed + pushed EFS `d431cb4`, pointer `bb83a14dd`. The `deploy` queued behind this (after the expiration item) will push it live.
-
-### Re: invite token should have expiration — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: The invite token should have 1 week (configurable) expiration. If the user attempts to use the link after the expiration, there should be an error message to contact the lender who sent the invite to resend the invite.
-
-
-The token already expires — and now it's visible to the recipient.
-
-**Already enforced (server-side):** invite tokens are single-use and carry a **14-day TTL** (`INVITE_LOGIN_TTL_SECONDS`). `invite_login_user_id_R_` only matches `used_at IS NULL AND expires_at > now`, so an expired or already-used link resolves to nothing and falls through to the "invalid or has expired" notice. (Unit tests already cover expiry, single-use, and supersede.)
-
-**Added this cycle:** the invitation email now **states the expiry** — "This secure sign-in link expires on YYYY-MM-DD and can be used once." — so the time limit is clear to the invitee.
-
-If 14 days is longer than you'd like for an auto-login link, say a number and I'll tighten `INVITE_LOGIN_TTL_SECONDS`.
-
-**Tests:** wiring assertions for the email expiry line + the TTL/expiry-filter. Full suite **918 pass / 0 fail**, build clean.
-
-**Shipped:** committed + pushed EFS `7cf8c1c`, pointer `fcbde9d63`. The `deploy` queued behind this will push it live.
-
-### Re: deploy — invite switch + 1-week expiry live — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-
-Deployed. **Version `bd91a1db-41d1-4939-9141-49f15e158e59`**, live at `https://equityfundingsource.brian-takita.workers.dev`.
-
-This ships two things — and note: the expiration item was **refined after it was consumed** (you changed it to "1 week (configurable)" + an expired-link message while I was mid-implementation), so I completed the **full refined scope** here:
-
-- **Account switch:** a valid `/login/invite` link now logs out whoever's signed in and signs in the invited lender.
-- **Expiry → 1 week, configurable:** default invite-link lifetime is now **7 days** (was 14), tunable per environment via `INVITE_LOGIN_TTL_DAYS` (clamped 1–90). Still single-use, server-enforced.
-- **Expired-link guidance:** an expired/used link now shows **"This invitation link has expired or already been used. Please contact the lender who sent your invite and ask them to resend it."** (and the invite email says the same).
-
-**Live smoke check:** `/login/invite?token=bogus` → `303` → login carrying that exact "contact the lender… resend" message. ✓
-
-**Tests:** 920 pass / 0 fail (added configurable-TTL + expired-link-message coverage); build clean.
-**Shipped:** EFS `3fd2948`, pointer `fdb270366`.
-
-Queue drained. The only open item is the operator-gated `#5q7z-ship` live-verify. Stopping.
-
-_Heads-up: session-check now confirms the route-owned supervisor (pid 585012) is running a **stale binary** — that's the root cause of the IPC wedge I've been routing around with `--force-disk`. I'll attempt an `admin recycle` to refresh it now that the turn is closing._
-<!-- agent:boundary:e039fb63 -->
+<!-- agent:boundary:487c45fa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,6 +51,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: Lender group member rows should fill the entire width of the parent ![img_30.png](img_30.png). The email should not be truncated.
+- :pushpin: The lender group member table should have a default % of shares in deals. The deal % can be customized, but the default is the preset % values.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -202,7 +202,25 @@ So `monthly` as the **stored default** is domain-correct — the real defect is 
 **② True nullable (literal ask)** — a migration rebuilding **both** `loans` and `investment_deals` to drop `NOT NULL DEFAULT 'monthly'`, + the ~11 code/UI/test changes, + backport nulls. Bigger and riskier — `loans` is a central table — even with no deploy this cycle.
 
 I held off implementing only because these diverge a lot and it's a production schema/behavior change. **Which do you want — ① (my recommendation) or ②?** Say the word and I'll implement it this cycle (spec + tests + commit + push, no deploy, per the preset).
-<!-- agent:boundary:aad2b198 -->
+
+### Re: make Frequency nullable in db + UI / backport — opus-4-8
+
+> **Queue prompt:**
+>
+> Frequency is autopopulated with Monthly, but the lender did not select Monthly. It was the default. Please make the Frequency nullable in the db and UI. Backport the existing available deal.
+
+
+Done (deal side) — implemented + committed + pushed, **no deploy** per your params. EFS `4df5488`, superproject pointer `3f895b27d`.
+
+- **Migration `0094`** rebuilds `investment_deals` to drop `NOT NULL DEFAULT 'monthly'` → `preferred_payment_frequency` is now **nullable**. Embedded backport nulls it on every deal whose preferred terms were never submitted (`preferred_terms_submitted_at IS NULL`) — covers both `d6b78994` + `7a0c1463` (your "all never-submitted" choice).
+- **Publish path** (`admin/repo.ts`) no longer copies a loan's defaulted `'monthly'` onto a deal unless the loan's terms were actually submitted.
+- **Deal API + investor/admin UI** now surface null as **"-"** instead of "Monthly" (coercion returns null, `?? 'monthly'` fallbacks removed, payment preview returns null without a frequency).
+- **Tests**: new `tests/deal-frequency-nullable.test.ts` (applies 0094 → asserts nullable + backport CASE + label "-"). Full suite **981 pass / 0 fail**; worker build clean. Spec: `#freqnull`.
+
+**No prod apply** — the migration + backport land when you next deploy + `cf:d1:migrate:remote`. Nothing was written to live D1 this cycle.
+
+**Scope note:** I made the **deal** column nullable (the "available deal" you named) and gated the loan→deal copy, but left the central **`loans`** table physically unchanged — rebuilding it is disproportionate risk and the deal is the displayed surface. The borrower's preferred-terms form still pre-selects Monthly at the loan level. If you also want that form truly blank-until-chosen (a `loans`-table rebuild), say so — filed `#freqnull-borrower` `[recommended]`.
+<!-- agent:boundary:db0c34e4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -215,8 +233,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Frequency is autopopulated with Monthly, but the lender did not select Monthly. It was the default. Please make the Frequency nullable in the db and UI. Backport the existing available deal.~~
-- Frequency is autopopulated with Monthly, but the lender did not select Monthly. It was the default. Please make the Frequency nullable in the db and UI. Backport the existing available deal.
 <!-- /agent:queue -->
 
 ## Backlog

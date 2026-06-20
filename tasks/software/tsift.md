@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -178,13 +178,32 @@ Wrote [`runbooks/crates-io-trusted-publishing.md`](../../runbooks/crates-io-trus
 This drains the queue head. #ph7n was the last drainable item — the queue is now empty.
 
 **Session health note (operator action needed, out of scope here):** preflight flags `stale_install` — the installed `~/.cargo/bin/agent-doc` (0.34.20) **predates agent-doc source commit `d48b30ea`**, and `src/agent-doc` has uncommitted dev changes. So this session's route-owned supervisor (pane %184) runs older agent-doc code, which is what's been dropping granular backlog writes all session (both responses still committed correctly at HEAD via `content_ours` recovery, and the queue heads consumed cleanly). I scheduled an `admin recycle` but it hasn't landed — the durable fix is **`make install` in `src/agent-doc`** (after you review/commit the WIP there) + a supervisor restart. I'm deliberately **not** running that from this tsift session: it would build uncommitted, out-of-scope agent-doc code, and mid-session agent-doc installs are themselves a known drift source.
-<!-- agent:boundary:138ce5ca -->
+
+### Re: do #015t — FTS5 Phase 3 core (engine + soundness gates) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#015t]
+
+
+> **Queue prompt:** do [#015t]
+
+Did the next increment: **Phase 3 core (3a)** — the FTS5 query engine + both soundness gates, the part that finally gives the `file_zonemap` substrate a real consumer. Committed + pushed (tsift `4105aba`). Still **written-but-unread by the CLI**, so search behavior is unchanged.
+
+**What landed:**
+- **`IndexDb::content_fts_search_pruned(query, kind, limit)`** — BM25 MATCH, then drop any hit the zone-map *proves* can't contain the kind (`files_possibly_containing_kind`). This is the zone-map's first consumer. Sound: a file lacking a zone-map row is retained, so pruned ⊆ unpruned and a true match is never dropped.
+- **`sift::fts_match_query`** — translates a query into an FTS5 `MATCH` that preserves `TokenIndex` **OR-union** semantics. Phase 3 finding: FTS5 treats a bare multi-token string as an adjacency *phrase* (stricter than the TokenIndex union), so the tokens must be OR'd or the FTS path would silently drop candidates.
+- **Two soundness gates (tested green):** `content_fts_search_pruned_is_sound` (pruned ⊆ unpruned, no false negatives, sound retention) and `fts_content_index_supersets_token_index_candidates` (**FTS ⊇ TokenIndex** candidate set). `make check` green, clippy `-D warnings` clean, release built + installed.
+
+**Deliberately split off — Phase 3b (next `do`):** wiring the env-flagged FTS path into the CLI `SearchResponse` (resolve `.tsift/index.db`, line numbers/previews, BM25-vs-substring top-K reconciliation). The CLI search path spawns a `__search-worker` subprocess and builds rich hits; a degraded path-and-score-only result would mislead, so I kept the proven engine + gates as this turn's deliverable rather than ship half-wired plumbing in a drift-degraded session. `#015t` stays operator-scheduled — say **"do #015t"** for Phase 3b.
+
+**Supervisor note (unchanged from prior turns):** the `stale_install` is still present — installed agent-doc `0.34.20` predates source `d48b30ea`, `src/agent-doc` has uncommitted WIP — so this session's supervisor keeps dropping standalone granular writes (the response still commits at HEAD via `content_ours` recovery, and the `--pending-edit` is carried on this finalize to land reliably). Durable fix remains an operator `make install` in `src/agent-doc` + supervisor restart; out of scope from this tsift session.
+<!-- agent:boundary:f440312c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#015t]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -193,7 +212,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 DONE + pushed (content_fts scaffold, written-but-unread; tsift 592ab08). NEXT: Phase 3 = index.db-backed FTS query behind a flag + pruned==unpruned / top-K parity gate vs TokenIndex; then Phase 4 cutover (retire TokenIndex) + Phase 5 ship. Multi-session, operator-scheduled — say "do phase 3".
+- [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 + Phase 3 CORE (3a) DONE + pushed (tsift 4105aba): content_fts scaffold, content_fts_search_pruned (zone-map consumer), fts_match_query (OR-union translation), both soundness gates green. NEXT = Phase 3b: wire the env-flagged FTS search path into the CLI (run_sift_search / __search-worker) + SearchResponse construction (resolve .tsift/index.db, line numbers/previews, BM25 top-K reconciliation), default off; then Phase 4 cutover + Phase 5 ship. Multi-session, operator-scheduled — say "do #015t" / "do phase 3b".
 <!-- /agent:backlog -->
 
 ## Review

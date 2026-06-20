@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -89,7 +89,15 @@ You were right — and the link you gave is the key. That's the **invite** flow 
 **Re-verified live with chromium-bridge** after deploy: the same invite link now lands on `/?notice=…`, renders the persistent banner *"You're already signed in. Please log out, then open your invitation link again."* (screenshot confirmed), and embeds the toast flash payload — and your admin session stays intact (no silent switch). Full `bun run check` **949 pass / 0 fail** (added invite + shared-helper wiring tests, updated the old `#invite-switch-account` assertion). Committed (`bfc6b9b`) + pushed, **deployed** (worker version `47ef12f6`).
 
 Note: this means an invite link can no longer be used to *switch into* another account while signed in — you log out first. If you actually relied on the old auto-switch (e.g. to jump into a lender's view as admin), say so and I'll add it back as an explicit confirm step instead.
-<!-- agent:boundary:4f0f315f -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Already deployed this cycle — the invite-flow notice fix (`bfc6b9b`) went out as worker **version `47ef12f6`** (no D1 migration). Confirmed live with chromium-bridge: the invite link now shows the persistent log-out banner + toast flash payload. This is the live production worker.
+<!-- agent:boundary:2679612e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,9 +110,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: I still don't see any notification. Use chromium-bridge on https://equityfundingsource.brian-takita.workers.dev/login/invite?token=iI2YN6l4MHgYHx-HJpLgIDtxY86htclRIdDb2pI-5g4~~
- to verify.
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

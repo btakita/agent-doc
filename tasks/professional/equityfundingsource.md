@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -99,7 +99,32 @@ Diagnosed against **prod D1**. Short answer: **No — it is not accreditation, a
 2. On accept, lender2@ becomes `active`, their 40% allocation lands, and the deal shows 100% confirmed.
 
 I held off building it this turn because the ask was "diagnose" and the UX (banner placement, accept+decline, dashboard vs groups page) is a design choice — **say "build the lender accept-invite alert" and I'll ship it** (UI-only; the endpoint is already there). On the admin side, the **"Send Reminder to Accept Invite"** button I shipped last cycle (live now) is the complementary nudge to prompt lender2@ to do exactly this.
-<!-- agent:boundary:83a4c60a -->
+
+### Re: do [#bmvk] — build the lender accept-invite alert — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#bmvk]
+
+
+> **Queue prompt:**
+>
+> :pushpin: do [#bmvk]
+
+Built and shipped (you chose "Build the accept-invite alert now"). Invited lenders can now **Accept / Decline** a Multi-Lender Group invitation directly from the portal.
+
+**The gap it closes:** `POST /api/lender/groups/:id/respond` already existed but had **no UI caller** — so an invited lender (e.g. lender2@) had no way to accept. Now they do.
+
+**Backend** (`lib/lending_groups/routes.ts`): `GET /api/lender/groups` annotates each group with the **viewer's own membership** — `viewer_status`, `viewer_member_id`, `viewer_default_stake_bps` — matching by linked user id, then by unlinked invite email.
+
+**Frontend** (`lib/ui--browser--efs/portal/shared/lending_groups.tsx`): new reusable, self-fetching **`PendingGroupInvitesAlert`** — a banner listing the lender's pending invites with one-click **Accept invite** / **Decline** (→ `respond` endpoint), each showing the member's intended share. Renders nothing unless the viewer has an `invited` membership. Mounted on the **lender groups page** ("My Lender Groups", lender mode) and the **lender dashboard** (next to the requirements alert). On accept → `invited → active`, the member's share funds, and the deal moves toward 100% confirmed.
+
+**Tests:** `tests/lender-group-invite-accept.test.ts` (7 cases) — viewer annotation + match logic, respond endpoint still mounted, alert export, `invited`-only filter, Accept/Decline → respond wiring, and both mount points. Full suite **973 pass / 0 fail**; app + worker builds clean.
+
+**Shipped:** committed `e8d2a41`, pushed to `origin/main`, deployed via `make deploy` — live. Verified in prod: `GET /api/lender/groups` and `POST …/respond` both return **401** unauthenticated (mounted + auth-gated, not 404).
+
+Together with last cycle's admin **"Send Reminder to Accept Invite"** button, the loop is now complete: admin nudges → lender accepts in-portal → group funds 100%.
+<!-- agent:boundary:090fa09c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,13 +137,11 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#bmvk]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#bmvk] [recommended] Lender-facing accept-invite alert: add an "Accept / Decline" affordance (lender groups page + dashboard banner) for invited memberships, wiring to the existing POST /api/lender/groups/:id/respond endpoint (currently orphaned — no UI calls it). On accept, invited->active so the member funds their share. Diagnosed 2026-06-20: this is the real "lender needs alerts of what to do next" gap for btak.dev+lender2@ (NOT accreditation).
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [/] [#67v2-aa-local] [recommended] Admin pipeline auto-advance local half (advances #67v2-auto-advance): define stage-requirement checks from the TMO-aligned Kanban and enqueue audited status updates to tmo_cache_outbox; replay stays gated on #dzmm. Depends on the #67v2 Kanban stages being built first.

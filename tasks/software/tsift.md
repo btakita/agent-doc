@@ -174,16 +174,15 @@ Implemented the high-value, low-risk half of my recommendation — **deleting th
 2. **`files_in_path_scope` path-prune:** captured as a `[recommended]` backlog item — a net-new *enhancement* (not cleanup); skip unless you want `--path` sub-narrowing of FTS hits.
 
 Then **Phase 5** is the operator-gated crates.io release. Say **"do #015t"** with a direction (or "release") to continue.
-<!-- agent:boundary:90ca0241 -->
+<!-- agent:boundary:8b478728 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: Implement your recommendations.~~
+- do [#ve5f]
 - do [#015t]
 - :pushpin: Implement your recommendations.
-- do [#ve5f]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

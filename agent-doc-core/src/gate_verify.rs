@@ -114,12 +114,15 @@ impl VerifyOutcome {
     }
 }
 
-/// Parse `[<epoch>] <message>` into `(epoch, message)`. Returns `None` for
-/// lines that do not start with a numeric epoch bracket.
+/// Parse `[<timestamp>] <message>` into `(epoch, message)`. The bracketed
+/// timestamp may be a bare Unix epoch (pre-`#opslogts` lines) or an ISO-8601
+/// UTC string; both resolve to epoch seconds via
+/// [`crate::log_time::parse_log_timestamp`]. Returns `None` for lines that do
+/// not start with a parseable timestamp bracket.
 fn parse_ops_line(line: &str) -> Option<(u64, &str)> {
     let rest = line.strip_prefix('[')?;
     let close = rest.find(']')?;
-    let ts: u64 = rest[..close].trim().parse().ok()?;
+    let ts = crate::log_time::parse_log_timestamp(rest[..close].trim())?;
     let msg = rest[close + 1..].trim_start();
     Some((ts, msg))
 }

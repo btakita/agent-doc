@@ -88,14 +88,18 @@ fn git_head_hash(file: &Path) -> Option<String> {
     }
 }
 
-/// Get the current timestamp in ISO 8601 format.
+/// Human-readable log timestamp helpers (`#opslogts`) live in `agent-doc-core`
+/// so both this crate's writers and `agent-doc-core::gate_verify`'s ops.log
+/// scanner share one implementation.
+pub use agent_doc_core::log_time::{format_log_timestamp, parse_log_timestamp};
+
+/// Get the current timestamp in ISO 8601 (UTC) format.
 fn iso_timestamp() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    // Simple UTC format without chrono dependency
-    format!("{}", now)
+    format_log_timestamp(now)
 }
 
 /// Append a structured cycle entry to `.agent-doc/logs/cycles.jsonl`.
@@ -166,7 +170,7 @@ fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()>
         .append(true)
         .open(&log_path)
         .ok()?;
-    writeln!(f, "[{}] {}", ts, message).ok()
+    writeln!(f, "[{}] {}", format_log_timestamp(ts), message).ok()
 }
 
 #[cfg(test)]
@@ -202,7 +206,9 @@ mod tests {
             "second line should contain message"
         );
 
-        // Verify timestamp format [epoch_secs]
+        // `#opslogts` — entries carry a human-readable ISO-8601 UTC timestamp
+        // in `[...]`, preserving the `[` prefix + `] ` separator that readers
+        // split on.
         assert!(
             lines[0].starts_with('['),
             "should start with timestamp bracket"
@@ -210,6 +216,19 @@ mod tests {
         assert!(
             lines[0].contains("] "),
             "should have ] separator after timestamp"
+        );
+        let inner = lines[0]
+            .strip_prefix('[')
+            .and_then(|r| r.split_once(']'))
+            .map(|(ts, _)| ts)
+            .expect("bracketed timestamp");
+        assert!(
+            inner.contains('T') && inner.ends_with('Z'),
+            "ops.log timestamp should be ISO-8601 UTC, got {inner:?}"
+        );
+        assert!(
+            parse_log_timestamp(inner).is_some(),
+            "the ops.log timestamp must round-trip through parse_log_timestamp"
         );
     }
 

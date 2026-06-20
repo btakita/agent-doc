@@ -1106,10 +1106,12 @@ fn sync_log(msg: &str) {
         .append(true)
         .open("/tmp/agent-doc-sync.log")
     {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let ts = crate::ops_log::format_log_timestamp(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        );
         let _ = writeln!(f, "[{}] {}", ts, msg);
     }
 }

@@ -581,7 +581,7 @@ fn recent_cycle_metrics(file: &Path, now: u64) -> Result<(usize, usize)> {
         if entry.file != relative_file {
             continue;
         }
-        let Some(timestamp) = entry.timestamp.parse::<u64>().ok() else {
+        let Some(timestamp) = crate::ops_log::parse_log_timestamp(&entry.timestamp) else {
             continue;
         };
         if timestamp < window_start {
@@ -624,7 +624,7 @@ fn recent_restart_metrics(file: &Path, session_id: &str, now: u64) -> Result<usi
         let timestamp = line
             .strip_prefix('[')
             .and_then(|rest| rest.split_once(']'))
-            .and_then(|(ts, _)| ts.parse::<u64>().ok());
+            .and_then(|(ts, _)| crate::ops_log::parse_log_timestamp(ts));
         let Some(timestamp) = timestamp else {
             continue;
         };

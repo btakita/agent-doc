@@ -3376,10 +3376,12 @@ fn log_dedup(file: &Path, context: &str) {
         .append(true)
         .open("/tmp/agent-doc-write-dedup.log")
     {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let ts = crate::ops_log::format_log_timestamp(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        );
         let bt = std::backtrace::Backtrace::force_capture();
         let _ = writeln!(f, "[{}] {} backtrace:\n{}", ts, msg, bt);
     }

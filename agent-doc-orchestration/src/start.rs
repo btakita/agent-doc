@@ -201,8 +201,11 @@ fn timestamp() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    // Format as ISO-ish: just use epoch seconds for simplicity in logs
-    format!("{}", now)
+    // `#opslogts` — human-readable ISO-8601 UTC so operators reading the
+    // supervisor session log can correlate events to wall-clock time. The
+    // staleness/startup-miss parsers read this back via
+    // `ops_log::parse_log_timestamp`, which still accepts bare epoch lines.
+    crate::ops_log::format_log_timestamp(now)
 }
 
 fn current_epoch_secs() -> u64 {

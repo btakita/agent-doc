@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -41,6 +41,16 @@ Compacted content:
 
 ### Re: Group-interest deals surface as Deals of Interest — opus-4-8
 
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+
+> **Queue prompt:**
+>
+> :pushpin: On /lenders/available-deals & /lenders/dashboard, if a lender is part of a lender group that is already interested in an available deal, that deal should show up as as a Deal of Interest.
+
+
 Done and deployed. If a co-lender marks an available deal as interesting **on behalf of a lender group**, that deal now shows up as a **Deal of Interest** for every member of that group — on both `/lenders/available-deals` and `/lenders/dashboard` — even if the member never personally clicked "interested."
 
 **How it works:**
@@ -51,7 +61,7 @@ Done and deployed. If a co-lender marks an available deal as interesting **on be
 **Scope notes:** "interest on behalf of a group" means an `investor_deal_interests` row carrying that `lending_group_id` (created when a member expresses interest *as* the group). A purely personal interest by another member does **not** leak to the group. Membership is read via `lending_groups_for_user_R_` (groups you created + active/invited membership).
 
 Verified: new real-D1 unit test (`investor_deal_interest_group_by_deal_R_`) + marketplace wiring asserts; full suite **936 pass / 0 fail**, worker rebuilt. Committed (`f329e86`) + pushed, **deployed to production** (version `36d6b774`).
-<!-- agent:boundary:c6ea452e -->
+<!-- agent:boundary:d56d793e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,8 +74,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: On /lenders/available-deals & /lenders/dashboard, if a lender is part of a lender group that is already interested in an available deal, that deal should show up as as a Deal of Interest.
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

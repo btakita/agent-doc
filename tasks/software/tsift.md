@@ -34,39 +34,36 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260619-210254.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260619-224444.md`*
 
 Compacted content:
-❯ - Archived 6 response topic(s): How to verify #kgconfreqverify; #kgconfreqverify A/B results; do #m27b; 3 more
+❯ - Archived 1 response topic(s): release + publish (#spec-test-build-install-commit-push)
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54...
 
-### Re: release + publish (#spec-test-build-install-commit-push) — opus-4-8
+### Re: DuckDB internals — anything that benefits tsift? — opus-4-8
 
-> **Queue prompt:**
->
-> :pushpin: release + publish
+> **Queue prompt:** Read through https://www.greybeam.ai/blog/duckdb-internals-part-1. Is there anything in here that can benefit tsift?
 
+Yes — three of the article's ideas map cleanly onto tsift's actual substrate (SQLite `.tsift/index.db` + `graph.db`, lexical/sift corpus, the `BackendEval` harness already benchmarking DuckDB/DuckPGQ/FalkorDB/Ladybug/Kuzu/SurrealDB, and the deferred native FTS work). Filtered for what's transferable to a *code-RAG* tool, not generic OLAP:
 
-Did every agent-doable substep; the publish itself is operator-gated. Current state of `src/tsift`:
+**1. Zone maps (min/max segment statistics) → pre-scan pruning.** DuckDB skips entire 122K-row groups by checking per-group min/max + null counts before reading. tsift's analog: stamp each file/segment with cheap stats (line-range, mtime, symbol-kind histogram, content hash) so scoped and `--path` searches skip whole segments before touching the corpus. This is self-contained in the SQLite/sift layer — **no backend swap** — and is the highest-leverage, lowest-risk borrow. The article's caveat applies directly: zonemaps only help when the pruning column is well-ordered, so the win is largest for path/scope-clustered indexes. → backlog item `#sbtk`.
 
-- **commit + push** — already done. HEAD `08d0f65 chore: release v0.1.72` == origin/main, working tree clean.
-- **spec + tests** — nothing to update (clean tree). `make check` → exit 0, 0 failures.
-- **build + install (local testing)** — `cargo install --path .` and `-p packages/tsift-cli`; both `tsift` and `tsift-cli` binaries now at 0.1.72.
+**2. DuckDB-as-substrate is reinforced, especially partial *remote* reads.** The blog is strong supporting evidence for the DuckDB/DuckPGQ candidate already in `BackendEval`:
+   - *In-process, zero-copy, single-file* — matches tsift's embedded model; no server protocol tax (the article calls the row-by-row client protocol "the slowest single step").
+   - *Partial remote Parquet reads* — DuckDB fetches only the footer + needed column chunks over HTTP with predicate pruning, never the whole file. For tsift this unlocks a genuinely new capability: a **publishable, shareable `.tsift` index as Parquet** that agents query *partially over HTTP* without downloading the full index — a feature SQLite alone doesn't give you cheaply.
+   - *Columnar layout* — tsift's ranking reads mostly `name`/`path`/`kind`/span metadata, not bodies; a columnar store avoids pulling body bytes for the 90% of the query that never needs them.
 
-**Publish is blocked on an operator step (#1yks), not on me.** crates.io has `tsift` at 0.1.69; `tsift-local-model` and `tsift-kg` do **not** exist there yet. A brand-new crate's first publish can't use OIDC trusted publishing (no config can attach to a nonexistent crate), and `tsift-cli` depends on both new crates — so the *whole* publish chain fails until they exist. That's why the v0.1.70/v0.1.71 tags never reached crates.io.
+**3. Predicate/join pushdown + DPhyp join ordering → cheaper deep hops.** Multi-hop evidence/call-graph queries are graph joins. DuckPGQ's filter pushdown + runtime min-max join bounds are exactly what makes deeper traversal affordable — directly relevant to icebox **#4z0w (increase max-hop caps)**. The pruning currently enforced by hard hop caps could instead be driven by pushed-down predicates + zonemaps. → folded into backlog item `#wzg6`.
 
-I did **not** push the v0.1.72 tag: doing so now would just re-fail Release CI identically. Correct order is #1yks(1) first, then #1yks(2):
+**Honest "skip" list** (don't over-borrow): morsel-driven parallelism and the sink/combine/finalize model are real but tsift's `__search-worker` already parallelizes and embedding/LLM latency dominates, so it's a minor win; vectorized execution, the CSV sniffer, and block checksums are not where tsift's bottlenecks are.
 
-1. **Operator (browser/passkey 2FA):** `cargo publish -p tsift-local-model` then `cargo publish -p tsift-kg` to create the crates, then enable Trusted Publishing for each on crates.io.
-2. **Then push the tag:** `git tag v0.1.72 08d0f65 && git push origin v0.1.72` to trigger Release CI; the OIDC publish (incl. the 23 already-configured crates + the two newly-bootstrapped ones) will then go green.
-
-Keeping #1yks gated as the operator's actionable.
-<!-- agent:boundary:55a9682d -->
+Net: #1 is a standalone tsift-layer feature worth doing regardless of backend choice; #2/#3 are *decision inputs* that should raise DuckDB/DuckPGQ's weight in the existing `BackendEval` / #g5kw substrate-promotion evaluation, with "partial remote Parquet index" as the standout differentiator. Both captured as `[recommended]` backlog items.
+<!-- agent:boundary:a9942b4c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -75,6 +72,8 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#sbtk] [recommended] Add zone-map / min-max segment statistics to the tsift index (per-file/per-segment line-range, mtime, kind histogram, content hash) so scoped/--path searches can skip whole segments before scanning — the DuckDB row-group zonemap analog. Self-contained in the SQLite/sift layer; no backend swap required. (from duckdb-internals-part-1 review)
+- [ ] [#wzg6] [recommended] Feed duckdb-internals findings into the existing BackendEval harness + #g5kw substrate-promotion: weight DuckDB/DuckPGQ for (a) in-process zero-copy single-file reads, (b) partial REMOTE Parquet reads (footer + column-chunk fetch over HTTP) enabling a publishable shareable .tsift index agents query without full download, and (c) predicate/join pushdown to make deeper evidence/call-graph hops affordable (ties to #4z0w max-hop caps).
 <!-- /agent:backlog -->
 
 ## Review

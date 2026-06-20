@@ -63,7 +63,7 @@ Deployed the EFS worker to production. **Version `0dd3c983-40a9-48d2-8f2b-e3a627
 `#5q7z-ship`: the **deploy sub-step is done**. The only thing left is the operator live-verify — open the admin approve flow on an already-in-TMO loan (deal `7a0c1463` / loan `45ddae53` GQI751) and confirm it no longer 400s and the button reads "Already in TMO". Left it as `[operator-verify]`.
 
 Note: this is the `workers.dev` deployment (the live app). The `equityfundingsource.com` custom-domain + SSO cutover is separate and still gated on `#cftk`/`#efs-cutover-sso-plan`.
-<!-- agent:boundary:23a3cc2f -->
+<!-- agent:boundary:083ec89c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,10 +76,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: "a loan is publishable only": Does publishable mean on the public webite?~~
-- ~~:pushpin: Why would a loan be publishable as available to be funded when it is funded? If it's funded, it's not available by definition.~~
-- ~~:pushpin: deploy~~
-- ~~do [#5q7z-ship]~~
+- :pushpin: In /lenders/groups, have a row for each member of the group. If a member is invited but has not yet signed in, have a "Resend Invite" button to that lender.
+- :pushpin: deploy
+- do [#5q7z-ship]
 <!-- /agent:queue -->
 
 ## Backlog

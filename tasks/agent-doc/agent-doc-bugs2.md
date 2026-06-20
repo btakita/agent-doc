@@ -34,107 +34,20 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260620-040615.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260620-051118.md`*
 
 Compacted content:
-❯ - Archived 10 response topic(s): Session compacted; Fix the root cause of the corruption; do #qheadstrike / #sqedit-race; 7 more
-❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-
-### Re: do #jbtsiftnosub — opus-4-8
-
-Shipped the cold-start dispatch gate. The bug: JB `Run Agent Doc` auto-started a fresh pane and typed the `agent-doc <FILE>` trigger before the harness TUI was dispatch-ready, so the keystrokes landed in a not-yet-submit-ready composer and the submit never registered.
-
-**Fix (submodule `e279ceef`, 0.34.20, pushed).** The binary already had a "starting actor reroutes are prompt-gated" predicate (promote `starting`→`ready` only after a harness dispatch-ready prompt is observed); the auto-start path was bypassing it and sending as soon as the pane existed. The auto-start dispatch now **waits for the harness dispatch-ready prompt** on the fresh pane (bounded 5s poll using route's existing prompt-shape detection), **re-verifies immediately before the send**, and **fails closed** (ops.log `dispatch_into_starting_pane reason=harness_not_dispatch_ready_before_auto_start_send`) instead of typing into a starting composer — mirroring the existing `#1vhn` dead-shell guard.
-
-**Verification.** New SimWorld test `route_sim_auto_start_dispatch_waits_for_dispatch_ready_prompt_before_send`: an auto-start dispatch into a still-`Starting` pane fails closed (no acceptance, logs the diagnostic); after the dispatch-ready prompt is observed the same dispatch sends and is proven submitted. Full suite **4810 passed**, clippy clean, `cargo build --release` done (refreshes `.bin/agent-doc`).
-
-**Gated `[operator-verify]`** — like the rest of this route family, the live proof is a two-pane tmux repro that can't be agent-run. Unblock: `make install` at a supervisor-recycle boundary (deliberately NOT installed mid-session — it would swap the binary under a live route-owned supervisor and drift finalize), then live `Run Agent Doc` auto-starting a cold pane: confirm the trigger waits for dispatch-ready then submits, and `dispatch_into_starting_pane` appears if a send is attempted early.
-
-### Re: JB Run Agent Doc on monsterrodholders.md duplicates + no submit — opus-4-8
-
-> **Queue prompt:**
->
-> do [#jbtsiftnosub]
-
-
-> **Queue prompt:**
->
-> :pushpin: JB `Run Agent Doc` on monsterrodholders.md adds duplicates of the prompt into the input and does not submit ![img_50.png](img_50.png).
-
-Captured as **`#jbdupnosub`**. `img_50.png` shows the `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` trigger typed **five times** as un-submitted draft lines — duplicate injection plus the same no-submit you've been hitting.
-
-This is the **same root** as `#jbtsiftnosub`, seen from the other side: the route attempted the send repeatedly into a pane that was never dispatch-ready, and each retry **re-typed** the trigger instead of submitting — so five copies accumulated and none went through. The cold-start gate I just shipped (0.34.20) addresses the root directly: it **fails closed before re-typing** into a starting/not-ready composer, so the retry-accumulation can't happen. There's one distinct sub-issue worth a separate fix regardless: a not-ready or failed dispatch must **not leave N copies in the composer** — it should clear the input or never type at all.
-
-Like the rest of the family this needs a live repro capture to fully root-cause *why* five retries (cold-start vs dead-shell, what the retry loop saw). **Operator capture at repro:** `.agent-doc/logs/supervisor-stderr.log` + the pane scrollback at send time. Tagged `[operator-verify]`; queued behind the cold-start gate which likely already neutralizes it once 0.34.20 is installed.
-
-### Re: do #avgwire — opus-4-8
-
-> **Queue prompt:**
->
-> do [#avgwire]
-
-
-Wired the auto-verify mechanism where it genuinely applies, and the audit turned out optimistic about the rest. Honest state:
-
-**Wired (1):** `#tsiftmdcrash-verify` now carries `verify=ops_log:capability_proof_live_child_preserved`. That marker is emitted *only* when the shipped fix works (capability-proof gives up but preserves the live harness child), so your live test auto-resolves the gate from ops.log — no manual clearing.
-
-**Why the other audited "already emits a marker" candidates don't cleanly wire yet** — each needs a distinct *success* marker added at its proof site first:
-
-- **`#jbtsiftnosub`** — the success path emits nothing distinctive (it just proceeds to a normal dispatch); only the *fail-closed refusal* logs `dispatch_into_starting_pane`. There's no clean success signal to key auto-resolve on. (I shipped this fix this session; adding a success line on the gate's OK path is the follow-up.)
-- **`#agentreloadrestart` / `#restartagentmenu`** — restart-agent Phase 1/2, not shipped: `agent_restart_performed` has **0 emission sites** in the code, so nothing fires in a live test.
-- **`#fbwire`** — `record_force_disk_fallback` exists, but its Phase 2 supervisor wiring is the still-gated remaining work, so it won't fire live yet.
-- **`#qpausemix-verify`** — its fix prints to `session-check` **stderr**, not `ops.log`, so an `ops_log:` predicate can't observe it.
-
-So exactly one gate qualified today. The "need a marker added first" route/plugin bucket (`#qpauseux`/`#jbrundispatch`/`#1vhn`/`#cyh0`/`#8bfz`/`#qheadstrike`/`#hap7`…) plus the per-proof-site success markers above are all captured as **`#avmark`** — that's the real enabling work to make "test → log → gate auto-closes" cover the whole review list. The mechanism is sound; most gates just don't emit a clean success signal yet.
-
-### Re: monsterrodholders still has multiple prompts with no submit — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: JB `Run Agent Doc` on monsterrodholders.md still has multiple prompts with no submit ![img_51.png](img_51.png)
-
-
-`img_51.png` shows the same pattern as before — the `agent-doc …/monsterrodholders.md` trigger typed ~6× as un-submitted lines. You're right that it's still happening, and here's the honest why:
-
-**The fix isn't live yet.** The running supervisor is still the **old pre-0.34.20 binary**. The cold-start dispatch gate I shipped (`e279ceef`, 0.34.20) only takes effect once that binary is installed and the supervisor recycles onto it. Until then the bug reproduces exactly as before. So this cycle I'm doing the agent-side deploy: **`make install` 0.34.20 + `admin recycle`** — that's running now, after this response commits.
-
-**What the fix does and doesn't cover.** The 0.34.20 gate stops the route from typing into a *cold-starting* pane (waits for the harness dispatch-ready prompt, else fails closed). If your monsterrodholders duplicates are the cold-start race, this neutralizes them. But the repeated *typing without submit* you're seeing may also be the broader **dispatch-no-submit family** (`#jbrundispatch`/`#1vhn`): the route re-dispatches into a running-but-not-submit-ready pane and each attempt re-types the trigger with no submit proof — so copies pile up. That layer isn't fully closed by the cold-start gate, and there's a distinct missing behavior: a failed/not-ready dispatch should **clear** the composer rather than leave another copy.
-
-**Connection to the flood I just paused.** Same root: a dispatch that never proves *submitted* gets retried, and each retry re-acts — here as duplicate typed lines, on `agent-doc-bugs2.md` as the `#rt83` phantom-pin re-trigger (`#qflood`). The stale supervisor CRDT has been driving both all session; the recycle clears it.
-
-**After the recycle**, please try Run Agent Doc on monsterrodholders.md once more. If the duplicates/no-submit persist on the *fresh* 0.34.20 supervisor, grab `.agent-doc/logs/supervisor-stderr.log` + the pane scrollback at send time — that tells us whether it's cold-start (should now be fixed) or the busy-pane no-submit variant, which needs its own route fix. Captured all of this on `#vgat`/`#jbdupnosub`.
-
-### Re: why doesn't the supervisor hot-swap on install, and can it be mid-turn? — opus-4-8
-
-> **Queue prompt:**
->
-> I deleted a couple of queue items while a turn was running, but I did not save to disk. agent-doc reverted my deletion.
-
-
-> **Queue prompt:**
->
-> :pushpin: Why is the supervisor hot-swap not deploying whenever a new agent-doc version is installed? Can we hot-swap the supervisor mid-turn?
-
-
-Good questions — I dug into `idle_watch.rs` to answer precisely rather than guess.
-
-**It *is* marked on every install — but it only swaps at a boundary, never mid-turn.** `lib-install` auto-marks every running controller to recycle (`AGENT_DOC_RECYCLE_ON_INSTALL` — you saw "2 controllers marked to recycle at next idle boundary"). But the actual swap is an `execve` hot-reload done by the supervisor's `idle_watch` loop, and it only fires at `boundary=idle` (the harness is idle + a debounce grace elapsed) or `boundary=next_queue_item` (between drained queue items). It is gated on **`not turn_active`** by design.
-
-**Why it didn't deploy this whole session** — this is the real bug, and it bit us repeatedly: a continuously-active self-draining session **never reaches that boundary**. While the in-session `/loop` was draining, it held the `drain-claim` lease (which tells the supervisor to *defer*) and kept the harness `turn_active` back-to-back. So the supervisor sat on the stale binary the entire time — which is exactly what produced the `content_ours` finalize drift and the `#rt83` phantom-pin flood. `#supselfheal` already documents the corollary: a stale *binary* (vs a merely busy supervisor) does **not** self-heal by lease expiry — nothing swaps it on its own; it needs an explicit `admin recycle` or a genuine idle boundary. That's why the manual `make install` → `admin recycle` → end-turn I just ran was necessary: it forced the boundary.
-
-**Can we hot-swap mid-turn?** Not safely as built — and this is the core reason for the boundary gate. The supervisor doesn't just host the harness PTY; it **owns the in-flight cycle's control-plane state**: the CRDT document, the pending write queue, `cycle_state`, and the IPC socket listeners. `execve` preserves the child PTY, but that in-memory control-plane is **rebuilt fresh** after re-exec. Swapping mid-write would drop/corrupt the in-flight cycle — the precise drift class we've been fighting all session. A real mid-turn hot-swap would require serializing the entire control-plane across the `execve` and restoring it atomically; the in-process supervisor migration laid groundwork (the supervisor now owns this state in-process) but state-handoff-across-execve isn't built.
-
-**The actionable fix** (captured as a backlog item): automate `#staleloop-recycle-restart`. When `idle_watch` detects its *own* binary is stale **and** a drain is in progress, it should signal the in-session loop to yield at the next inter-item boundary so the `execve` recycle fires on its own — instead of relying on me to notice the staleness and manually install+recycle+end-turn. That closes the "self-draining session can't recycle itself" gap without touching the mid-turn invariant. It's supervisor-core (live-supervisor-critical, needs `make tmux-ci`), so it's a focused cycle, not an in-loop change.
-<!-- agent:boundary:35e34a93 -->
+- Archived 5 response topic(s): do #jbtsiftnosub; JB Run Agent Doc on monsterrodholders.md duplicates + no submit; do #avgwire; 2 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
+<!-- agent:boundary:eea2a368 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: Why is the supervisor hot-swap not deploying whenever a new agent-doc version is installed? Can we hot-swap the supervisor mid-turn?~~
-- ~~I deleted a couple of queue items while a turn was running, but I did not save to disk. agent-doc reverted my deletion.~~
-- ~~do [#wd40]~~
-- do [#vgat]
+- :pushpin: [#vgat]: JB `Run Agent Doc` on monsterrodholders.md did not reproduce the issue. Is this done?
+- JB `Run Agent Doc` on equityfundingsource.md did not submit.
+- What are #next-steps to fix agent-doc bugs?
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -161,7 +74,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#vgat] #jbdupnosub #agent-doc-bug [operator-verify] JB Run Agent Doc on src/boost-client/tasks/monsterrodholders.md types the agent-doc <FILE> trigger MULTIPLE times (5-6 duplicate lines; screenshots img_50.png + img_51.png) into the input and never submits. STILL reproducing 2026-06-20 on the OLD pre-0.34.20 supervisor binary. Two layers: (1) cold-start typing into a not-yet-ready pane = the #jbtsiftnosub gate shipped in 0.34.20 (installed + recycled 2026-06-20); (2) repeated dispatch into a running-but-not-submit-ready pane, each re-typing the trigger with no submit proof = the broader #jbrundispatch/#1vhn accepted_only-no-submit family, plus a missing clear-before-retype so duplicates accumulate. If it persists AFTER the 0.34.20 recycle, capture .agent-doc/logs/supervisor-stderr.log + pane scrollback + pane state (cold-start vs busy) at send time. Likely the same no-submit-proof retry loop as the #qflood idle-watch re-dispatch.
+- [x] [#vgat] #jbdupnosub #agent-doc-bug [operator-verify] JB Run Agent Doc on src/boost-client/tasks/monsterrodholders.md types the agent-doc <FILE> trigger MULTIPLE times (5-6 duplicate lines; screenshots img_50.png + img_51.png) into the input and never submits. STILL reproducing 2026-06-20 on the OLD pre-0.34.20 supervisor binary. Two layers: (1) cold-start typing into a not-yet-ready pane = the #jbtsiftnosub gate shipped in 0.34.20 (installed + recycled 2026-06-20); (2) repeated dispatch into a running-but-not-submit-ready pane, each re-typing the trigger with no submit proof = the broader #jbrundispatch/#1vhn accepted_only-no-submit family, plus a missing clear-before-retype so duplicates accumulate. If it persists AFTER the 0.34.20 recycle, capture .agent-doc/logs/supervisor-stderr.log + pane scrollback + pane state (cold-start vs busy) at send time. Likely the same no-submit-proof retry loop as the #qflood idle-watch re-dispatch.
 <!-- /agent:backlog -->
 
 ## Review
@@ -169,7 +82,6 @@ What are #next-steps to fix bugs?
 <!-- agent:review -->
 - [/] [#wd40] [recommended] #agent-doc-bug Supervisor stale-binary auto-recycle does not fire during a continuously-active self-draining session. lib-install marks every controller to recycle (AGENT_DOC_RECYCLE_ON_INSTALL), but idle_watch.rs only execve-hot-reloads at boundary=idle (harness idle + debounced grace) or boundary=next_queue_item, and NEVER mid-turn (the not-turn_active gate). A long in-session /loop drain holds the drain-claim lease AND keeps the harness turn_active back-to-back, so the supervisor never reaches its recycle boundary and the stale binary persists — the root of this session content_ours drift + #rt83 flood (#supselfheal already notes a stale BINARY does not self-heal by lease expiry; needs explicit admin recycle). Fix direction: when idle_watch detects its own binary is stale AND a drain is in progress, signal the in-session loop to yield at the next inter-item boundary so the execve recycle fires automatically (automate #staleloop-recycle-restart) instead of requiring the agent to manually run make install + admin recycle + end-turn. Mid-turn execve stays OUT of scope: the supervisor owns the in-flight cycle CRDT/write-queue/IPC/cycle_state, which is rebuilt fresh after re-exec, so a mid-write swap drops/corrupts the cycle; a true mid-turn hot-swap would need the control-plane state serialized across execve and restored atomically. Supervisor-core (idle_watch.rs / drain lease / recycle gating), live-supervisor-critical: focused cycle with make check + make tmux-ci, not in-loop.
 - [/] [#j9ja] avmark [recommended] Add a distinctive SUCCESS ops.log marker at each gated review item proof site so #optverify auto-verify (--pending-set-verify verify=ops_log:<marker>) can resolve them from a live operator test. Per-item work: #jbtsiftnosub log a success line (e.g. auto_start_dispatch_ready_confirmed) on the reverify gate Ok path (today only the fail-closed refusal logs dispatch_into_starting_pane); ship the unshipped restart-agent features then wire their markers (#agentreloadrestart agent_restart_performed has 0 emission sites, #restartagentmenu); wire #fbwire once its Phase 2 supervisor path emits record_force_disk_fallback live; route #qpausemix-verify queue_paused preamble to ops.log or add an ops_log marker (it currently prints to session-check stderr only); add markers for the route/plugin bucket #qpauseux/#jbrundispatch/#1vhn/#cyh0/#8bfz/#qheadstrike/#hap7/#gf5n/#rt83/#docdriftgrace. Only #tsiftmdcrash-verify (capability_proof_live_child_preserved) was cleanly wireable in the #avgwire cycle.
-- [/] [#jbtsiftnosub] #agent-doc-bug Operator-reported (2026-06-19): JB Run Agent Doc on tsift.md auto-started a new supervisor/tmux pane, typed the prompt into the Claude input, but did NOT submit it. Dispatch-no-submit on a COLD START — the route typed into a pane that was not yet dispatch-ready (harness still starting), so the submit never landed. Same family as #jbrundispatch (accepted_only dispatch with no submit), #1vhn (typed into a not-ready pane), #runexitrestart (fail-closed instead of restart-then-submit), but the new wrinkle is the cold-start race: route must positively re-verify a harness dispatch-ready prompt AFTER the auto-start pane comes up and immediately BEFORE send, and fail closed (or wait+retry) instead of typing into a starting pane. Capture at repro: .agent-doc/logs/supervisor-stderr.log + route trace + pane state at send time. Overlaps the route/startup invariants in route.rs; needs a live two-pane repro. Plan candidate: extend tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md (starting-pane variant).
 - [/] [#editorbufwin] #agent-doc-bug #queue-user-edit-overwrite The IPC content_ours recovery drops unconsumed user queue additions the operator typed into the live editor buffer (operator: "the queue reverted to disk state; the editor buffer should have won as the source of truth"). PLAN DONE: root cause is NOT content_ours composition (it deliberately keeps additions next-cycle-visible on disk per the ignores_unproven_live_queue_deletions invariant — a blind splice-into-content_ours attempt 2026-06-19 tripped that test) but the #pcwc post-commit worktree reconcile overwriting the disk addition with HEAD. GATED for a focused merge-core cycle. Fix: P1 #pcwc reconcile preserves unconsumed user queue additions on disk; P2 auto-recover the commit (automate the manual reset --from-current the operator does today); P4 refresh the stale supervisor CRDT that enables the drift. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md
 - [/] [#fbwire] [operator-verify] #agent-doc-bug Phase 2 live wiring of the #fullboundary convergence gate (Phase 1 decision core + playback shipped, submodule 17010e78). Call convergence_gate_decision inside the supervisor idle-queue-watch/drain inter-item dispatch (start/idle_watch.rs to start.rs): gather the four facts (committed via cycle_state, editor converged==HEAD via emit_postcommit_worktree_check, ipc_socket inflight==0, actor idle), defer the next trigger until Dispatch, on ForceDiskFallback do the real --force-disk write + record_force_disk_fallback. Add SimWorld acceptance. Live-supervisor-critical: needs make check + make tmux-ci across two live panes, so NOT in-session-loop-drainable; needs a focused operator-driven cycle. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md
 - [/] [#hap7] [operator-verify] #agent-doc-bug #qdup Operator-reported (2026-06-19): agent-doc duplicated the operator equityfundingsource.md queue prompt (All upload preview dialogs should be full screen, deploy) on a concurrent edit. Second instance of the queue-prompt duplication family (first: virtuousai.md). Fix per operator spec: constrain the CRDT/semantic merge to the structural part it applies to (per-structural-node merges, not whole-component) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; and when the operator deletes a structure that agent content targets, note it in agent:exchange instead of merging. Merge-core change, the corruption source this session, so NOT safe to rush in the in-session loop; needs a focused cycle. Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md

@@ -3306,4 +3306,103 @@ mod tests {
         assert_eq!(prompts(&entries).len(), 1);
         assert_eq!(prompts(&entries)[0].text, "do [#real]");
     }
+
+    /// #sqedit-race Phase 3: prove the queue parse/render round-trip is a fixed
+    /// point on an already-malformed queue — it must **converge, not amplify**.
+    ///
+    /// The live-corruption shapes a prior supervisor/editor race left behind
+    /// (double-pinned heads, stray `~~~done` openers without closers, runs of
+    /// empty `---` separators that previously split or dropped a real head like
+    /// `#fbwire`) must collapse to a stable canonical form after a single
+    /// `render(parse(x))` pass, and every subsequent pass must be a no-op. If the
+    /// round-trip ever grew the body (re-mangled an entry, multiplied a pin, or
+    /// re-injected a stray separator) it would feed the qchurn loop forever.
+    #[test]
+    fn render_parse_is_fixed_point_on_malformed_queue() {
+        let normalize = |s: &str| render(&parse(s).expect("parse must never fail on a polluted queue"));
+        let pin_count = |s: &str| s.matches(":pushpin:").count();
+
+        // The compounded malformed shape: empty `---` separator runs top and
+        // bottom, a double-pinned id head, an orphaned `~~~done` opener with no
+        // matching closer, a stray `:round_pushpin:` note line, and two real
+        // directive heads plus a free-text question that must all survive.
+        let malformed = "\
+---
+---
+- :pushpin: :pushpin: do [#dup]
+~~~done
+- do [#real]
+:round_pushpin: orphan note line
+---
+---
+- a genuine free-text question?
+";
+
+        let once = normalize(malformed);
+        let twice = normalize(&once);
+
+        // (1) The round-trip is a fixed point: a second pass changes nothing.
+        assert_eq!(
+            once, twice,
+            "render(parse(x)) must be a fixed point — got amplification:\n--- once ---\n{once}\n--- twice ---\n{twice}"
+        );
+
+        // (2) No real directive/free-text head is dropped (the #fbwire-style
+        //     head-loss amplification bug).
+        let parsed_once = parse(&once).unwrap();
+        let prompts_once = prompts(&parsed_once);
+        let texts: Vec<&str> = prompts_once.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(
+            prompts_once.len(),
+            3,
+            "all three real heads must survive normalization, got {texts:?}"
+        );
+        assert!(texts.iter().any(|t| t.contains("do [#dup]")));
+        assert!(texts.iter().any(|t| t.contains("do [#real]")));
+        assert!(texts.iter().any(|t| t.contains("a genuine free-text question?")));
+
+        // (3) Pins converge, never amplify: the double pin is preserved verbatim
+        //     (canonical-collapse to a single pin is `apply_operator_pin`'s job
+        //     during maintenance), but the count must not grow pass-over-pass.
+        assert_eq!(
+            pin_count(&once),
+            pin_count(&twice),
+            "pin markers must not amplify across round-trips"
+        );
+
+        // (4) The stray empty `---` separator runs are collapsed away, not
+        //     re-injected or re-split into more separators.
+        assert!(
+            !once.contains("---"),
+            "empty `---` separator runs must collapse, not survive/amplify:\n{once}"
+        );
+    }
+
+    /// #sqedit-race Phase 3 (property form): the round-trip is a fixed point over
+    /// a family of independently-malformed queue bodies, so the convergence
+    /// guarantee is not specific to one hand-picked corruption shape.
+    #[test]
+    fn render_parse_fixed_point_property_over_malformed_family() {
+        let normalize = |s: &str| render(&parse(s).expect("parse must never fail"));
+        let cases = [
+            // double pins + trailing empty fence run
+            "- :pushpin: :pushpin: do [#a]\n---\n---\n",
+            // orphan completed-fence opener wedged above a real item
+            "~~~done\n- do [#b]\n",
+            // interleaved stray separators and a free-text head
+            "---\n- first?\n---\n---\n- second?\n",
+            // stray prose note between two id heads
+            "- do [#c]\nrandom pasted log line\n- do [#d]\n",
+            // a real multiline `---` fenced head sandwiched in separator runs
+            "---\n---\nmulti line\nhead body\n---\n- do [#e]\n",
+        ];
+        for case in cases {
+            let once = normalize(case);
+            let twice = normalize(&once);
+            assert_eq!(
+                once, twice,
+                "render(parse(x)) must be a fixed point for case:\n{case}\n--- once ---\n{once}\n--- twice ---\n{twice}"
+            );
+        }
+    }
 }

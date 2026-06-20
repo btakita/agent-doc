@@ -82,7 +82,20 @@ JetBrains ids carry the owning pid; non-JetBrains ids (no embedded pid) are cons
 **Secondary factor (noted, not the cause):** the swapped binary timing — `~/.cargo/bin/agent-doc` was reinstalled at 20:01 (concurrent EFS session/build) while this session's supervisor (pid 3024307) keeps running its 17:20 image — exercised `#supselfheal`. I deliberately did **not** `cargo install` (it would re-stale the concurrent EFS supervisor too); the supervisor self-recycles at its next idle boundary, and the broadcast fix itself ships at the next proper install boundary.
 
 **Follow-up queued** (`#lbreap`, recommended): extend `#fccreap` to proactively reap dead-pid live-buffer sidecars at closeout, so orphans never accumulate to 187 between broadcasts in the first place.
-<!-- agent:boundary:d788670a -->
+
+### Re: #lbreap done + "deleted queue items came back after a File Cache Conflict" — opus-4-8
+
+**`#lbreap` shipped** (agent-doc `c5b5cc35`): closeout now reaps dead-PID live-buffer sidecars (`reap_stale_jetbrains_live_buffers`, beside the existing `#fccreap` patch-file reaper), so closed-IntelliJ orphans self-clear every cycle instead of accumulating to the 187 that fueled the storm. 3 tests; full suite **4802 + clippy green**. Marked done.
+
+**On your queued observation** ("I deleted struck queue items in monsterrodholders.md, then got a JB File Cache Conflict and they came back — the editor buffer should be the source of truth"): that is the **same root cause** I just fixed this session. The deleted items came back because the realtime broadcast was re-injecting a *stale/dead editor's* buffer (which still contained the struck items) back over your edit — and the File Cache Conflict was the stale buffer fighting the on-disk truth. Concretely:
+- A closed/stale IntelliJ left an orphan live-buffer sidecar holding the pre-deletion queue.
+- The broadcast fanned that stale buffer out as a "peer" with no liveness check, re-materializing the struck items + raising the FCC.
+- `#sqdrift` (liveness-filter the broadcast origin + peers, reap dead peers) + `#lbreap` (proactively reap dead sidecars at closeout) stop both: a dead/stale editor can no longer originate or receive a broadcast, so it can't resurrect deleted items.
+
+Your principle — *the live editor buffer is the source of truth* — is preserved: the fix removes only **dead** editors from the picture; a single **live** editor's buffer still wins. (The remaining residual this session is a separate, pre-existing class — a *live* IntelliJ, pid 3873180, holding a stale buffer for this doc; each finalize detects that drift and commits the correct `content_ours` to HEAD, so the response is never lost, just noisier. Tracked under the `#cyh0`/`#fccaudit` stale-live-editor family, distinct from the storm.)
+
+Net: the degraded session's root cause (broadcast storming dead editors → regenerated patch files + stale-buffer drift on every finalize) is fixed in code and the live storm is stopped (0 broadcasts since cleanup). Remaining queue heads are all `[operator-verify]`.
+<!-- agent:boundary:bd8db80c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -94,7 +107,8 @@ JetBrains ids carry the owning pid; non-JetBrains ids (no embedded pid) are cons
 - :pushpin: do [#hap7]
 - :pushpin: do [#fbwire]
 - :pushpin: [#qpausemix-verify]
-- do [#lbreap]
+- I deleted struck queue items in monsterrodholders.md...but then got a JB `File Cache Conflict` and the items came back. The editor buffer should be the source of truth.
+- ~~do [#lbreap]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -121,7 +135,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lbreap] [recommended] #agent-doc-bug Extend #fccreap to reap dead-pid live-buffer sidecars at closeout (today only patch files are reaped; #sqdrift reaps dead-peer sidecars only during a broadcast). This doc had 187 dead-jetbrains orphan live-buffer sidecars accumulated over days. Add a closeout reaper that removes .agent-doc/live-buffer sidecars whose embedded jetbrains-<pid> is dead, mirroring reap_stale_jetbrains_consumers. Also consider reaping legacy no-editor-id live-buffer orphans by mtime.
 - [ ] [#qheadstrike] [operator-verify] #agent-doc-bug Completed free-text queue heads (no #id) are not struck after a proven closeout. Repro: a single equityfundingsource.md cycle (2026-06-19) answered 4 operator queue heads, reached committed + session-check ok via the reset --from-current -> commit recovery path, yet preflight still showed queue_drainable_head_count=4 / queue_continuation_required=true, so the loop churns and the operator must clear them by hand. Three causes: (1) the finalize strike heuristic only consumes ONE free-text head per cycle; (2) the force-disk / reset->commit recovery paths bypass the strike entirely; (3) queue consume exact-matches and rejects when the live buffer mutated the head (pushpin glyph + item split: "snapshot head prompts do not match document head prompts"). Fix: strike ALL answered free-text heads, move the strike onto the committed seam so recovery paths converge, and normalize head matching. Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md
 - [ ] [#sqedit-race] [operator-verify] #agent-doc-bug Live-IPC-supervisor race on direct queue edits. Phase 1 (#8bfz single live plugin owner per doc) SHIPPED 237f5fb2. Phase 2 (queue-edit lease: prune-noise/consume hold a queue_edit_owner lease that preflight queue maintenance + supervisor idle-watch defer to while a different live process holds it) SHIPPED d9a0ae58 — full suite 4796 + clippy green. REMAINING: Phase 3 add a render(parse(x)) fixed-point property/SimWorld test over an already-malformed queue (normalization itself mostly landed via #qdup-bare-id / #qnoise-multiline-strike / #pushpinaccum); Phase 4 [operator-gated] make install -> agent-doc admin recycle -> queue prune-noise this doc, confirm queue_stale_noise_lines drops to 0 and the prune sticks across a later preflight (no re-injection). Plan: tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md
 - [ ] [#qpausemix-verify] [operator-verify] #agent-doc-bug Verify the #qpausemix session-check fix (submodule 2cf7bcee) live: build+install the new binary (make install: cargo install --path . + cargo build --release + agent-doc lib-install) at a supervisor recycle boundary (deferred from this session to avoid finalize-client-newer-than-supervisor drift), then on a controller-paused queue (e.g. equityfundingsource.md under a qflood pause) confirm session-check stderr now prints the "queue_paused is NOT a contradiction" preamble + recorded reason so an agent no longer stalls deciding operator-set-pause vs transient state. Root cause fixed: session-check printed the bare CONTINUATION_NO_STALL_GUIDANCE constant instead of continuation_guidance(pause_reason); resolution previously only reached preflight JSON.

@@ -127,7 +127,19 @@ Shipped the plugin half of `#evmh` (the `#yzer`/`#evmhplugin` item) — agent-do
 **Verified.** `decide_reconnect_buffer` unit tests (all three branches) + a `reconnect_buffer_sim_rereads_stale_then_keeps_user_edits` SimWorld scenario (re-reads a prior-commit buffer, keeps an offline-edited buffer). `make check` green — 4832 tests, clippy clean. Plugin Kotlin compiles; both 0.2.172 zips built.
 
 **Closeout.** `#yzer` done (code complete + shipped). The `cargo install`/`lib-install` + **live reconnect** proof is genuinely operator-gated — a mid-session install would make the finalize client newer than the running supervisor and drift this very closeout — so I filed `#yzerverify` `[operator-verify]` with the exact repro and the `ops.log` marker to check. The `reconnect_buffer_decision` marker means you can prove/disprove it from the logs (the `#j9ja` avmark pattern).
-<!-- agent:boundary:c09fe626 -->
+
+### Re: do [#kcb5] / [#6b5h] — planned + Phase 1 groundwork shipped — opus-4-8
+
+`#kcb5` and `#6b5h` are the **same bug** (the editor-less CLI finalize wedge — your fuller `#6b5h` re-file + the standalone `tasks/agent-doc/ipc-wedge-cli-no-editor.md` report match the original). It's a deep, interconnected supervisor-core bug touching the editor-IPC **safety guard** (the thing that stops a write from clobbering a live editor buffer). Blind-rewriting that guard in this accreted session would risk regressing real editor sessions, so I followed the `#agent-doc-bug` convention: wrote a plan, then landed only the safe, seam-isolated Phase 1.
+
+**Root cause (confirmed by your report).** `ipc_socket::is_listener_active` returns true whenever the editor-IPC socket is *connectable*. After the 08b in-process-supervisor cutover the **controller** hosts that socket even with no JB plugin attached — so a pure-CLI session has a connectable socket with **no editor endpoint behind it**. The finalize/converge fail-closed guard keys off `is_listener_active` alone, refuses the disk write (`no_ack` → `retry_without_disk_write`), and wedges; only `--force-disk` works, and it never self-heals (actor not orphaned, binary not stale). "Socket connectable" ≠ "live editor present." It's the editor-less cousin of `#fbwire`/`#fullboundary`.
+
+**Shipped (Phase 1, agent-doc 0.34.29, submodule `92cd624e`, pushed):** the pure decision core `decide_editorless_disk_fallback(socket_connectable, editor_endpoint_proven, consecutive_no_ack, threshold, force_disk_requested) → {FailClosed | ForceDiskNoEditor | ConvergeViaEditor}`, with the **safety invariant** that a *proven* live editor still fail-closes on unproven delivery (no `#editorbufwin` regression) while an editor-less / no-listener / `--force-disk` case routes to the controller-host disk write. Unit truth-table + an `editorless_cli_sim` SimWorld scenario (editor-less actor forces disk; live-editor actor stays fail-closed). `make check` green — 4836 tests, clippy clean. **No live-path rewire** — the finalize guard behaves identically today; this is the groundwork the next phases wire in.
+
+**Remaining (in the plan):** Phase 2 editor-presence signal (`editor_endpoint_proven` via the consumer-lease / registration probe — this also covers the foreign-ownership-guard facet you hit, where `write --pending-add` needed `claim --force`) → Phase 3 wire the decision into the fail-closed branch + an `editorless_disk_fallback` ops.log marker (coordinated with `#fbwire`) → Phase 4 operator editor-less live repro. Plan: `tasks/agent-doc/plan-kcb5-editorless-cli-finalize-wedge.md`.
+
+**Backlog housekeeping (needs your hand — id-targeted edits are racing your live edits this turn):** `#kcb5` and `#6b5h` are duplicates of one bug — please keep `#6b5h` (the fuller one) and drop `#kcb5`, or vice versa. I left both untouched rather than fight the flapping ids mid-edit.
+<!-- agent:boundary:1007f447 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -169,6 +181,7 @@ Press Enter to restart, or 'q' to exit.
 [agent-doc] idle_queue_watch: clear cooldown active for tasks/agent-doc/agent-doc-bugs2.md, skipping passive queue dispatch
 [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
 ```
+- do [#6b5h]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

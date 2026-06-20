@@ -144,7 +144,28 @@ Done and deployed. The share editor now reads **Lender | Status | Share % | Lock
 The columns still line up across rows (same single-grid + `display:contents` approach), which I re-verified with a standalone render: both status pills left-align at the same x, share inputs align, and locks align.
 
 Committed (`6c35e31`) + pushed, **deployed to production** (version `c57823b8`; bundle `index.browser-3X5JG7OP.js`). Hard-refresh `/lenders/groups` to see the reordered columns. Tests 931 pass / 0 fail.
-<!-- agent:boundary:50dbf80c -->
+
+### Re: Still not lining up — format to highest standard — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Still not lining up well ![img_32.png](img_32.png). Please loop until you can format this to the highest standard.
+
+
+Now I see it. The columns *were* internally aligned, but the editor was stretched across the entire full-width group row: the `1fr` Lender column ate all the slack and flung Status / Share % / Lock to the far right with a big empty gap, so it read as sprawling and disconnected rather than a tidy table.
+
+**What I changed:**
+- **Capped the panel to a compact 760px** and left-grouped it, so the columns sit tightly under the lender instead of spanning the whole row.
+- **Hairline header underline** (Lender · Status · Share % · Lock) and a **divider above the footer** for a clean, real-table read.
+- Action buttons (**Distribute evenly / Save shares**) now align to the table's right edge; **Total** anchors the left.
+- Single-grid + `display:contents` still guarantees every Status pill, Share % input, and Lock lines up across rows.
+
+I rendered the exact markup before shipping (Joined row + Invited/Resend row at a wide viewport) to confirm it's tidy and aligned — screenshot verified.
+
+Shipped: tests **931 pass / 0 fail**, committed (`5338231`) + pushed, **deployed to production** (version `496add51`; bundle `index.browser-J2JASOC6.js`). Hard-refresh `/lenders/groups` to see it.
+
+If any specific element still reads off to you, point at it (or drop another screenshot) and I'll tighten it further — a subjective "highest standard" is easiest to converge with your eye on the live page.
+<!-- agent:boundary:02a162c0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -157,6 +178,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: Still not lining up well ![img_32.png](img_32.png). Please loop until you can format this to the highest standard.~~
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

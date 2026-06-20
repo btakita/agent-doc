@@ -147,14 +147,43 @@ So as a **default-path search structure**: delete it. Fixing the behavior is pol
 - `TokenIndex::build` (the engine) → keep *only* if you want an in-process degraded-read-only live fallback; otherwise replace that one call site with `rg -F` and drop the type entirely.
 
 That collapses the two deferred phase-4b items into a single decision: **drop the cache; keep-or-replace the engine for degraded read-only.** Say **"do #015t"** with that direction (delete cache + which fallback you want) and I'll ship it.
-<!-- agent:boundary:5ee4ad30 -->
+
+### Re: implemented your recommendations — token-index.json persistence deleted — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Implement your recommendations.
+
+**Done — shipped + pushed** (tsift `34bbbb1`, superproject pointer `8d6b392dd`, both on `origin/main`; lockstep `0.1.72 → 0.1.73`).
+
+Implemented the high-value, low-risk half of my recommendation — **deleting the broken `token-index.json` cache** — and deliberately scoped *out* the risky protocol surgery:
+
+- **Persistence deleted.** `load_or_build_token_index` is gone; the `TokenIndex` fallback now **always rebuilds the inversion in-memory** (`TokenIndex::build`). Removed `TokenIndex::save`/`load` (the JSON persistence API) and the `Serialize`/`Deserialize` derive — the type is in-memory only now. The cache that returned `token-index.json` whenever it merely existed (no mtime/content invalidation → stale-forever) no longer exists.
+- **Engine kept** (my recommended default). `TokenIndex::build` stays as the degraded-read-only live fallback. The companion decision — keep it vs. replace that one call site with a live `rg -F` walk — is the **one operator call I left open** (it changes degraded-read-only behavior; not mechanical).
+- **Scope I intentionally did NOT touch:** the generic `cache_dir` engine hook and the `__search-worker --cache-dir` subprocess protocol. That plumbing is a *separate concern* from the token-index cache (it's woven through the worker arg protocol and several tests); ripping it out is a riskier refactor for zero correctness gain. It's retained as a home for a future, *properly-invalidated* cache and no longer backs the token index — exactly the "no cache; build live" shape I recommended.
+
+**Verification:**
+- `make check` green — clippy `--all-targets -D warnings` clean; full suite passing (tsift-cli 397 + 190, tsift-search 15, etc.).
+- New regression test `search_reflects_files_added_after_first_search` — a file created *after* the first search is now found (the old cache hid it); flipped the existing assert to prove **no** `token-index.json` is persisted.
+- **Live-verified** the installed `0.1.73` binary: adding a second file mid-session surfaces it immediately, and no `token-index.json` is written anywhere.
+- SPEC (`specs/architecture.md`) + VERSIONS updated; release built + `cargo install`ed (`tsift 0.1.73`).
+- **CI:** run `27879975858` is *in progress* at finalize; local `make check` is the closeout evidence — will not block on it.
+
+**NEXT (Phase 4b remainder — both need your call, not blocked work):**
+1. **Degraded-read-only engine:** keep `TokenIndex::build` (current) or replace it with a live `rg -F` exact walk and delete the type. Default is "keep" — say the word to switch.
+2. **`files_in_path_scope` path-prune:** captured as a `[recommended]` backlog item — a net-new *enhancement* (not cleanup); skip unless you want `--path` sub-narrowing of FTS hits.
+
+Then **Phase 5** is the operator-gated crates.io release. Say **"do #015t"** with a direction (or "release") to continue.
+<!-- agent:boundary:90ca0241 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: Would token-index.json be useful if the behavior is fix or is it purely a redundant vestige?~~
+- ~~:pushpin: Implement your recommendations.~~
 - do [#015t]
+- :pushpin: Implement your recommendations.
+- do [#ve5f]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -163,6 +192,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#ve5f] [recommended] #015t Phase 4b enhancement: add a files_in_path_scope path-prune so --path sub-narrows FTS hits (net-new capability, not cleanup; implement only if the operator wants --path sub-narrowing).
 - [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 + 3a + 3b + Phase 4 cutover + Phase 4b item 3 (thread precheck freshness) DONE + pushed (tsift 475262b). FTS5 index.db BM25 is the DEFAULT lexical path; run_sift_search/run_search_with_timeout/__search-worker take an fts_index_fresh verdict so the FTS path no longer re-walks the tree on every search; degraded read-only routes to the live TokenIndex fallback. NEXT (Phase 4b remaining, optional): (a) retire TokenIndex build/cache — DEFERRED, the degraded-read-only fallback still needs the live-walk; needs an operator/design decision on degraded-read-only behavior (keep TokenIndex vs live rg -F); (b) files_in_path_scope zone-map path-prune — net-new enhancement, not cleanup. Then Phase 5 = operator-gated crates.io release. Say "do #015t" for (a)/(b) or to ship.
 <!-- /agent:backlog -->
 

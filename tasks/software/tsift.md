@@ -91,6 +91,11 @@ Implemented the zone-map segment-statistics substrate (plan Phases 1/2/4). **Com
 
 ### Re: do #b56m (Phase 3 zonemap cutover) — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#b56m]: What is the most effective? Sift search index.db-aware?
+
+
 I attempted Phase 3 and audited every `index.db`-backed consumer. **Finding: there is no current consumer where the zonemap prune yields a win, so wiring it now would be speculative indirection.** I did not wire anything.
 
 Why no beneficiary today:
@@ -102,15 +107,21 @@ So the substrate (`file_zonemap` + `files_possibly_containing_kind`) is sound an
 1. **Make lexical `Sift` search `index.db`-aware** so the zonemap prunes the *content* scan (mtime/path/kind). Biggest win, but a genuine `Sift` architecture change.
 2. **Add a new `--kind`-filtered symbol/search command** that consumes `files_possibly_containing_kind` — a small new feature that creates the consumer.
 3. **Leave the substrate inert** as a tested foundation until a consumer naturally appears.
+- **Default until FTS is greenlit: option 3, leave inert** — it's additive, tested, and cheap to carry; it starts paying the day FTS5 lands.
+- **Option 1 as a thin wiring: no** (reasons above).
+- **Option 2 (`--kind` command): skip it** — a `WHERE kind = ?` query with a `CREATE INDEX idx_symbols_kind` beats a file-level zonemap prune for symbol-kind lookups. Doesn't need the zonemap.
+- **Best (if you want the zonemap to earn its keep): native FTS5 content index in `index.db`** — a real project, but it's the architecturally coherent direction and subsumes option 1 properly. The zonemap is already the first brick.
 
 `#b56m` is gated pending your pick (1/2/3); finding recorded in the plan (superproject `HEAD`). Nothing pushed.
-<!-- agent:boundary:79bb523a -->
+<!-- agent:boundary:1d53dacd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#b56m]
+- ~~do [#b56m]: What is the most effective? Sift search index.db-aware?~~
+- [#b56m]: do the "Best" option
+- [#1yks]: Automate setting up crates.io trusted publishing using the procedure on crates.io. Add a dedicated runbook to agent-loop for adding trusted publishing to crates.io.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

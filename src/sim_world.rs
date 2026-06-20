@@ -154,6 +154,19 @@ enum SimCommand {
     /// composer. Driven only by targeted tests, not the random generator, so the
     /// seed corpus traces are unchanged.
     DispatchAutoStartRoutePrompt,
+    /// `#runexitrestart`: model the supervisor idle-watch queue-drain dispatch
+    /// AFTER a session restart. A freshly-restarted pane's actor is still
+    /// `Starting` (the harness composer is coming up — a prompt glyph may render
+    /// from the edge-triggered pty buffer but it is not yet submit-ready). The
+    /// drain gate must re-verify a fresh-capture dispatch-ready prompt before
+    /// injecting the `agent-doc <FILE>` trigger; while still `Starting` it must
+    /// fail closed and record `dispatch_into_restarting_pane` rather than typing
+    /// (and re-typing each idle tick → the operator-observed duplicate triggers
+    /// with no submit). Once the dispatch-ready prompt is observed
+    /// (`PromoteStartingPromptReady`) the same drain dispatches once. Driven only
+    /// by targeted tests, not the random generator, so seed corpus traces are
+    /// unchanged.
+    DispatchIdleQueueDrainAfterRestart,
     BusyInterruptRecoveryReady,
     RepairBusyProjectionWithReadyPrompt,
     AdminPauseQueue,
@@ -632,6 +645,12 @@ struct Coverage {
     /// into a freshly created pane whose harness was still cold-starting (no
     /// dispatch-ready prompt), recording `dispatch_into_starting_pane`.
     auto_start_starting_pane_blocks: usize,
+    /// `#runexitrestart`: the supervisor idle-watch drain gate refused to inject
+    /// the `agent-doc <FILE>` trigger into a freshly-RESTARTED pane whose harness
+    /// was still coming up (a prompt glyph visible but not yet submit-ready),
+    /// recording `dispatch_into_restarting_pane` instead of typing — so a not-ready
+    /// restarted composer never accumulates duplicate un-submitted triggers.
+    drain_into_restarting_pane_blocks: usize,
     busy_dispatch_blocks: usize,
     closed_dispatch_blocks: usize,
     busy_interrupt_recoveries: usize,
@@ -839,6 +858,7 @@ impl Coverage {
         self.post_commit_follow_up_handoffs += other.post_commit_follow_up_handoffs;
         self.starting_prompt_promotions += other.starting_prompt_promotions;
         self.auto_start_starting_pane_blocks += other.auto_start_starting_pane_blocks;
+        self.drain_into_restarting_pane_blocks += other.drain_into_restarting_pane_blocks;
         self.busy_dispatch_blocks += other.busy_dispatch_blocks;
         self.closed_dispatch_blocks += other.closed_dispatch_blocks;
         self.busy_interrupt_recoveries += other.busy_interrupt_recoveries;
@@ -1808,6 +1828,73 @@ fn route_sim_auto_start_dispatch_waits_for_dispatch_ready_prompt_before_send() {
     assert_eq!(
         world.coverage.auto_start_starting_pane_blocks, 1,
         "the ready auto-start dispatch must not re-trip the starting-pane block"
+    );
+}
+
+#[test]
+fn route_sim_restart_drain_waits_for_dispatch_ready_prompt_before_send() {
+    // #runexitrestart: the operator RESTARTED an agent-doc session, then JB
+    // `Run Agent Doc` / the supervisor idle-watch drain re-injected the
+    // `agent-doc <FILE>` trigger into the freshly-restarted pane while its harness
+    // was still coming up — the trigger was typed ~7 times into the composer, none
+    // submitted. Distinct from the cold AUTO-START race (#jbtsiftnosub): here the
+    // SAME pane is restarted (Starting), and the supervisor idle-watch drain gate
+    // (`idle_queue_prompt_visible`) trusted the weak pty-buffer prompt-glyph signal
+    // off the `Ready` fast path. The drain must re-verify a fresh-capture
+    // dispatch-ready prompt before injecting; while the pane is still restarting it
+    // must fail closed, record `dispatch_into_restarting_pane`, and inject NOTHING
+    // (so repeated idle ticks cannot stack duplicate un-submitted triggers).
+    let mut world = SimWorld::new(2_006);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    // Restart the live session: the same pane drops back to `Starting` (the
+    // restarted harness composer is coming up, not yet submit-ready).
+    world.apply(SimCommand::SessionRestartForce).unwrap();
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Starting);
+
+    // The idle-watch drain must fail closed on EVERY tick while the pane is still
+    // restarting — and never type the trigger (no duplicate accumulation).
+    for _ in 0..7 {
+        world
+            .apply(SimCommand::DispatchIdleQueueDrainAfterRestart)
+            .unwrap();
+    }
+    assert_eq!(
+        world.coverage.drain_into_restarting_pane_blocks, 7,
+        "the restart drain must fail closed on every tick while the harness is still restarting"
+    );
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 0,
+        "the trigger must NOT be sent into a still-restarting composer (no ~7 duplicate triggers)"
+    );
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 0,
+        "no drain may dispatch while the restarted pane is not yet dispatch-ready"
+    );
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("dispatch_into_restarting_pane")
+            && ops_log.contains("reason=harness_not_dispatch_ready_before_restart_drain_send"),
+        "ops log must record dispatch_into_restarting_pane for the restart race:\n{ops_log}"
+    );
+
+    // Once the restarted harness reaches a dispatch-ready prompt the same drain
+    // sends and is proven submitted, exactly once.
+    world.apply(SimCommand::PromoteStartingPromptReady).unwrap();
+    world
+        .apply(SimCommand::DispatchIdleQueueDrainAfterRestart)
+        .unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+
+    assert_eq!(world.coverage.starting_prompt_promotions, 1);
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 1,
+        "after the dispatch-ready prompt is observed the restart drain must submit once"
+    );
+    assert_eq!(world.coverage.route_dispatch_proofs, 1);
+    assert_eq!(
+        world.coverage.drain_into_restarting_pane_blocks, 7,
+        "the ready restart drain must not re-trip the restarting-pane block"
     );
 }
 

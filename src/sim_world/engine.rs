@@ -322,6 +322,11 @@ impl SimWorld {
                     self.coverage.record_block(&err.to_string());
                 }
             }
+            SimCommand::DispatchIdleQueueDrainAfterRestart => {
+                if let Err(err) = self.dispatch_idle_queue_drain_after_restart() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
             SimCommand::BusyInterruptRecoveryReady => {
                 if let Err(err) = self.recover_busy_interrupt_to_ready() {
                     self.coverage.record_block(&err.to_string());
@@ -1637,6 +1642,39 @@ impl SimWorld {
         }
         // Past the cold-start gate the auto-start send rejoins the normal route
         // dispatch path (the same readiness/coalesce/acceptance invariants apply).
+        self.dispatch_route_prompt_with(true)
+    }
+
+    /// `#runexitrestart`: model the supervisor idle-watch queue-drain dispatch
+    /// AFTER a session restart. The production gate (`idle_queue_prompt_visible`)
+    /// dispatches off the `Ready` fast path, but when the actor is NOT yet `Ready`
+    /// it must re-verify a fresh-capture dispatch-ready prompt
+    /// (`supervisor_pane_dispatch_ready` → `ready_prompt_candidate`) before trusting
+    /// the weak pty-buffer prompt-glyph signal. A freshly-restarted pane sits in
+    /// `Starting` (composer coming up, not yet submit-ready), so the drain must fail
+    /// closed — record `dispatch_into_restarting_pane`, do NOT inject the trigger,
+    /// and (crucially) leave nothing in the composer to re-type, so repeated idle
+    /// ticks cannot stack duplicate un-submitted triggers. Once the dispatch-ready
+    /// prompt is observed (`PromoteStartingPromptReady`) the same drain dispatches
+    /// exactly once through the normal drain path.
+    pub(crate) fn dispatch_idle_queue_drain_after_restart(&mut self) -> Result<()> {
+        let pane_id = self.current_dispatch_pane()?;
+        if self.route.durable.lifecycle == SupervisorLifecycle::Starting {
+            self.coverage.drain_into_restarting_pane_blocks += 1;
+            self.record_ops_proof(format!(
+                "dispatch_into_restarting_pane pane={} generation={} reason=harness_not_dispatch_ready_before_restart_drain_send",
+                pane_id, self.route.durable.generation
+            ));
+            bail!(
+                "idle-watch restart drain refused: harness still restarting (no dispatch-ready prompt) for pane {}; seed={} trace={:?}",
+                pane_id,
+                self.seed,
+                self.trace
+            );
+        }
+        // Past the restart-dispatch gate the drain rejoins the normal route
+        // dispatch path (the same readiness/coalesce/acceptance invariants apply),
+        // so a proven-ready restarted pane drains exactly once.
         self.dispatch_route_prompt_with(true)
     }
 

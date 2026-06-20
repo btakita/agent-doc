@@ -95,7 +95,53 @@ pub(crate) fn idle_queue_prompt_visible(
     {
         return true;
     }
-    child_output_prompt_visible(harness, &output)
+    // `#runexitrestart`: the actor is NOT yet `Ready` (e.g. `Starting` right
+    // after a session restart / "Press Enter to restart" / supervisor re-exec).
+    // The edge-triggered pty `terminal_screen` buffer can show a prompt *glyph*
+    // (`matches_prompt`) while the freshly-restarted harness composer is not yet
+    // submit-ready — the same cold-start dispatch race the route auto-start gate
+    // (`#jbtsiftnosub`) closes, but here in the supervisor idle-watch drain loop.
+    // Treating that transient glyph as dispatchable lets the per-tick drain
+    // re-inject the `agent-doc <FILE>` trigger into a not-yet-ready composer (the
+    // Enter never submits), and each idle tick stacks another un-submitted copy
+    // (the operator-observed ~7 duplicate triggers with no submit). Before the
+    // weak pty-buffer signal is trusted off the `Ready` fast path, re-verify
+    // against a *fresh* tmux capture using the same `ready_prompt_candidate`
+    // dispatch-ready predicate the route gate uses. A fresh capture that cannot
+    // prove a submit-ready prompt fails closed (defers the drain this tick); a
+    // failed/absent capture (`None`) falls back to the pty-buffer signal so an
+    // unreadable pane never permanently suppresses a legitimate drain.
+    if !child_output_prompt_visible(harness, &output) {
+        return false;
+    }
+    // A fresh capture proving submit-ready dispatches; one that is only a
+    // not-yet-ready glyph fails closed (defers); an unreadable/absent capture
+    // (`None`) conservatively falls back to the prior pty-buffer signal.
+    supervisor_pane_dispatch_ready(shared, harness).unwrap_or(true)
+}
+
+/// `#runexitrestart`: fresh-tmux-capture dispatch-ready evidence for the
+/// supervisor idle-watch drain gate. Captures the owned pane live (mirroring
+/// [`supervisor_pane_has_busy_cue`], not the edge-triggered pty `terminal_screen`
+/// buffer that can miss a restarted composer's redraw) and reports whether it
+/// proves a harness dispatch-ready prompt via the same
+/// [`crate::route::ready_prompt_candidate`] predicate the route /
+/// cold-start gates use (latest prompt is `is_dispatch_ready_prompt_line` — a
+/// genuinely empty, submit-ready composer — with no busy cue). `Some(true)` =
+/// submit-ready; `Some(false)` = a prompt glyph but not yet submit-ready (still
+/// starting / drafted composer); `None` = no pane id or the capture failed, so
+/// the caller must never let unreadable evidence suppress a legitimate drain.
+pub(crate) fn supervisor_pane_dispatch_ready(
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+) -> Option<bool> {
+    let pane = shared
+        .inject_pane
+        .clone()
+        .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
+    let tmux = crate::sessions::Tmux::default_server();
+    let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
+    Some(crate::route::ready_prompt_candidate(&content, harness).is_some())
 }
 
 /// Whether the authoritative in-memory actor state is `busy` or `starting` —

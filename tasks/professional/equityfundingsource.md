@@ -116,7 +116,7 @@ Note this is the lender's soft **proposal**, distinct from the **group allocatio
 I couldn't confirm the exact D1 row (which of amount/rate/points is populated for deal `d6b78994`) — D1 read is still gated on **#cftk** (no D1-scoped token). Once it lands I can show the row.
 
 **Recommendation (filed `[recommended]` #cmtsec):** if this block should only appear for an actual committed amount, gate `interest_has_proposal_` on `proposal_amount != null`, or relabel it "Proposed terms" so showing a rate/points doesn't imply a committed amount.
-<!-- agent:boundary:e44d63fe -->
+<!-- agent:boundary:c2c7e781 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -134,6 +134,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#cmtsec] [recommended] Admin deal interests shows "Committed amount and sold rate by this lender" whenever proposal_submitted_at is set, which is stamped on ANY of proposal_amount/proposal_interest_rate/proposal_points (lib/investor/shared.ts:504). So a lender who entered only a sold rate or points (blank committed amount) still surfaces the block (amount pill reads "-"). Decide: gate interest_has_proposal_ (admin/deal_detail.tsx:730) on proposal_amount != null, OR relabel the block "Proposed terms" so a rate/points alone does not imply a committed amount. Verify the d6b78994 row once #cftk D1 token lands.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [/] [#67v2-aa-local] [recommended] Admin pipeline auto-advance local half (advances #67v2-auto-advance): define stage-requirement checks from the TMO-aligned Kanban and enqueue audited status updates to tmo_cache_outbox; replay stays gated on #dzmm. Depends on the #67v2 Kanban stages being built first.

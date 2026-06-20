@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -43,6 +43,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+❯ > The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.
+
+
+❯ > **Queue prompt:**
+❯ >
 > :pushpin: The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.
 
 
@@ -62,6 +67,11 @@ Committed + pushed to EFS `origin/main` (`8889a4c`). Per the `#spec-test-commit-
 
 ### Re: deploy #admin-deal-alloc-edit — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#nthc]
+
+
 Deployed the `#admin-deal-alloc-edit` admin per-deal allocation editor (EFS `8889a4c`, already pushed) to the production worker.
 
 - **Build + upload** — worker bundle built clean; uploaded `index.browser-FYEISPPM.js` (1 new asset, 43 unchanged). Total 1116 KiB / 256 KiB gzip, 17 ms startup.
@@ -70,7 +80,7 @@ Deployed the `#admin-deal-alloc-edit` admin per-deal allocation editor (EFS `888
 The agent-doable half of `#nthc` is now complete (deploy). **Remaining is operator live-verify only** (can't be agent-done): open the Lender Bros group **Edit** overlay on deal `d6b78994`, bump `lender2` from 0%, confirm the split saves and the "60% confirmed (partial)" badge reconciles. Gated `#nthc` as `[operator-verify]`.
 
 (Left the unrelated `AGENTS.md` tsift code-nav version bump uncommitted — not part of this deploy.)
-<!-- agent:boundary:ba0ed56d -->
+<!-- agent:boundary:9e818965 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -83,15 +93,13 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.~~
-- The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.
-- do [#nthc]
+- ~~do [#nthc]~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#nthc] [recommended] Deploy #admin-deal-alloc-edit (admin per-deal allocation editor) to the EFS worker, then operator live-verify on deal d6b78994: open the Lender Bros group Edit overlay, bump lender2 from 0%, confirm the split saves and the "60% confirmed (partial)" badge reconciles. Shipped+pushed 2026-06-20 (EFS 8889a4c); deploy deferred (preset was spec-test-commit-push, no deploy).
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [/] [#67v2-aa-local] [recommended] Admin pipeline auto-advance local half (advances #67v2-auto-advance): define stage-requirement checks from the TMO-aligned Kanban and enqueue audited status updates to tmo_cache_outbox; replay stays gated on #dzmm. Depends on the #67v2 Kanban stages being built first.
@@ -100,6 +108,7 @@ After 20:30
 ## Review
 
 <!-- agent:review -->
+- [/] [#nthc] [operator-verify] DEPLOYED 2026-06-20 (worker version 17b06176-fc91-44b6-b35d-1cd61beed01b; EFS 8889a4c). Remaining = operator live-verify only: open the Lender Bros group Edit overlay on deal d6b78994, bump lender2 from 0%, confirm the split saves and the "60% confirmed (partial)" badge reconciles.
 - [/] [#pmhf] [recommended] Reuse the rebalancing share editor (lib/ui--browser--efs/portal/shared/lending_groups_alloc.ts: rebalance_stakes_/distribute_evenly_/lock pins) in the per-deal split UI (deal_detail allocations) so per-deal % editing gets the same 100%-balanced, lockable inputs.
 - [/] [#dealtab500] [operator-verify] Root-cause the deal 7a0c1463 / loan 45ddae53 (GQI751) loan-tab "Internal Error". Static trace independently re-confirmed exhausted: GET /admin/pipeline serves only a shell (no server-side deal processing); every client-fetched endpoint is guarded — admin_loan_R_ is a plain SELECT, admin_deal_R_ LTV/onboarding chain (onboarding_json_/loan_ltv_calc_) is fully try/catch + null guarded, /documents is harmless; all client fetches degrade to error cards, not the worker Internal Error page. Regression guard shipped (efs a39be3d) locking the thin-TMO-loan onboarding shape against throws (gformula deal-economics helpers). REMAINING (operator-gated, cannot be agent-done): reproduce live via `bun run cf:worker:tail` + a browser click on the loan tab to capture the real throwing endpoint + stack, OR inspect loan 45ddae53/deal 7a0c1463 D1 rows once the #cftk token lands. Relates to #5q7z/#214f.
 - [/] [#5q7z] [recommended] 'Accept and send to TMO' duplicate-loan bug: for a loan already associated with a TMO record (deal 7a0c1463 / loan 45ddae53 has tmo_loan_number=GQI751, tmo_loan_rec_id=3840D27B..., tmo_loan_application_rec_id=cda67748), the approve flow (admin/applications/index.ts application_tmo_writeback_attempt_ -> tmo_writeback.ts:308 LOS.svc/NewLoan) sends NewLoan with the existing GQI751 -> TMO 400 'Duplicate loan number. Unable to save record.' Fix (2 parts): (1) approve/writeback must detect an existing TMO association (tmo_loan_rec_id / writeback_status='sent') and associate+mark accepted locally instead of calling NewLoan (or call an UpdateLoan endpoint); (2) hide/disable the 'Accept and send to TMO' button in lib/ui--browser--efs/portal/admin/full_applications.tsx:424 when the app/loan is already in TMO. Design Q: on accept of an already-in-TMO loan, associate-only (no TMO call) or also push UpdateLoan? Relates to #dzmm/#37ah/#214f.

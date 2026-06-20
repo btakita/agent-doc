@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -88,12 +88,13 @@ Implemented the zone-map segment-statistics substrate (plan Phases 1/2/4). **Com
 **Discovery → Phase 3 deferred (operator-gated).** While wiring Phase 3 I found the lexical `Sift` search builds its **own `TokenIndex`** (a JSON token cache) and never reads `index.db` — token-level pruning already exists there. So the zone-map's real consumers are the **index.db-backed** path/kind/scope queries (`explain`/`graph`/evidence), not the lexical corpus. I updated the plan with a revised Phase 3 (wire `files_possibly_containing_kind` + a future `files_in_path_scope` into those consumers, with a per-consumer pruned==unpruned regression) and queued it as an `[operator-verify]` backlog item so go-mode defers it — it's a behavior-changing cutover.
 
 **Held for your word:** `git push` of both repos, and the Phase 3 cutover. Say "push" and/or "do phase 3" when ready.
-<!-- agent:boundary:6d8719df -->
+<!-- agent:boundary:44a1fc2b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- do [#b56m]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

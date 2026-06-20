@@ -58,7 +58,24 @@ Nothing new was requested. The only change this cycle is the go-mode re-mirror o
 **`#015t` state (unchanged):** Phases 0/1/2 + Phase 3 core (3a) done + pushed (tsift `4105aba`). NEXT = Phase 3b — wire the env-flagged FTS search path into the CLI (`run_sift_search` / `__search-worker` + `SearchResponse`), default off. It's operator-scheduled and multi-session: say **"do #015t"** / **"do phase 3b"** to start it. The queued `do [#015t]` is the umbrella mirror, not that directive.
 
 **Standing blocker (out of scope here):** `stale_install` — installed agent-doc `0.34.23` vs source WIP in `src/agent-doc`. Durable fix is an operator `make install` in `src/agent-doc` + supervisor restart.
-<!-- agent:boundary:7de804f0 -->
+
+### Re: do #015t — Phase 3b shipped — opus-4-8
+
+You chose **Advance Phase 3b now**, so I implemented and pushed it (the umbrella `#015t` stays `[operator-verify]` because Phase 4/5 remain).
+
+**What landed** (tsift `f69f6a6`, superproject pointer `38bef064a`):
+- **`sift::fts_search(db_path, root, query, limit)`** — builds a `SearchResponse` from the `index.db` content hits. **BM25 owns file ordering**; the lexical `score_file` picks each file's representative line + snippet from the **inline FTS body** (no disk re-read) — the plan's "BM25-vs-substring top-K reconciliation". `strategy="fts"`.
+- **`IndexDb::content_fts_search_with_body`** — BM25 search returning the inline body so the CLI can reconcile ranking with substring line selection.
+- **`run_sift_search` gate** — opt-in `TSIFT_FTS_SEARCH` (`1/true/yes/on`), resolves `<root>/.tsift/index.db`, **falls back to lexical on a missing db** (sound: never worse than today). Both the in-process and `__search-worker` subprocess routes pass through it. **Default off** — the JSON `TokenIndex` stays authoritative until the Phase 4 cutover.
+
+**Verification:**
+- `make check` green (clippy + full suite, exit 0).
+- New tests: `fts_search` response/ordering/empty (tsift-search), flag parser + default-off lexical path (tsift-cli), `content_fts_search_with_body` (tsift-index).
+- **Live-verified** on the tsift repo: `tsift search "fts_match_query" --strategy lexical` returns `strategy: lexical`; with `TSIFT_FTS_SEARCH=1` it returns `strategy: fts` with correct line numbers/snippets on the actual matching lines. Default `tsift search` (exact/ripgrep) is unaffected.
+- Release built + `cargo install`ed (local `tsift` refreshed). CI run `27864747385` was **in_progress** at closeout — closing from local evidence per the in-progress-CI rule.
+
+**NEXT = Phase 4 cutover** (operator-scheduled, multi-session): flip the default to the FTS path, add a `files_in_path_scope` zone-map prune for path-filtered queries, retire the JSON `TokenIndex`; then Phase 5 ship (SPEC/VERSIONS). Say **"do #015t"** / **"do phase 4"** to continue.
+<!-- agent:boundary:efcda17f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -73,7 +90,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 + Phase 3 CORE (3a) DONE + pushed (tsift 4105aba): content_fts scaffold, content_fts_search_pruned (zone-map consumer), fts_match_query (OR-union translation), both soundness gates green. NEXT = Phase 3b: wire the env-flagged FTS search path into the CLI (run_sift_search / __search-worker) + SearchResponse construction (resolve .tsift/index.db, line numbers/previews, BM25 top-K reconciliation), default off; then Phase 4 cutover + Phase 5 ship. Multi-session, operator-scheduled — say "do #015t" / "do phase 3b".
+- [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 + 3a + 3b DONE + pushed (tsift f69f6a6): flag-gated index.db FTS5 search path wired into run_sift_search / __search-worker behind TSIFT_FTS_SEARCH (default off); sift::fts_search builds a SearchResponse with BM25 file ordering + lexical score_file line/snippet from the inline FTS body; IndexDb::content_fts_search_with_body. make check green, live-verified (--strategy lexical flips lexical->fts). NEXT = Phase 4 cutover: flip the default to FTS, add a files_in_path_scope path-prune, retire the JSON TokenIndex; then Phase 5 ship (SPEC/VERSIONS). Multi-session, operator-scheduled — say "do #015t" / "do phase 4".
 <!-- /agent:backlog -->
 
 ## Review

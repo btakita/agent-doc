@@ -52,7 +52,15 @@ Investigated against prod — **not a state bug; it's the `#credentials-first` f
 **Design call:** this collided with the "a passwordless link shouldn't require a password" intuition, so I asked how you wanted credential-less accounts to behave. You chose **"Keep requiring a password"** — keep `#credentials-first` as-is so no account stays password-less. **No code change** this cycle; the behavior is intended.
 
 (If a passwordless lender ever needs to get in without setting a password, that'd be the "make password optional / fully passwordless" direction we discussed — say the word and I'll build it. For now it stays as-is.)
-<!-- agent:boundary:75a5eb3b -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Nothing to deploy this cycle — the set-password behavior is **working as intended** (you chose to keep `#credentials-first`), so there was no code change. The production worker (`d98be19b`) is unchanged and current.
+<!-- agent:boundary:ea327cb3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,7 +73,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: When I clicked on the passwordless link for btak.dev+lender2@gmail.com, I was presented with a set password dialog. I believe this account does not have a password. I think this is a bug.
+- ~~:pushpin: When I clicked on the passwordless link for btak.dev+lender2@gmail.com, I was presented with a set password dialog. I believe this account does not have a password. I think this is a bug.~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

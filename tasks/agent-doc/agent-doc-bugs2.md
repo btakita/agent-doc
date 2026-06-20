@@ -86,15 +86,26 @@ Did the agent-actionable part of §D and shipped it (agent-doc submodule `138dc6
 **On "the restart state should not lag":** the ~29s "Still waiting for claude … active claude turn" window is the route *correctly* polling for the harness dispatch-ready prompt without typing (the §D fix — poll silently, inject once). It's a slow harness boot, not the route lagging; the fail-closed-then-retry is the safe shape that prevents the stacking. Reducing the boot wait itself is a separate tuning knob, not part of §D.
 
 **Operator-gated remainder** (filed as `#rdypoll-deploy`): the live two-pane restart verify + the `cargo install` / `agent-doc lib-install` / `admin recycle` deploy are deferred from this in-session run to avoid a finalize-client-newer-than-supervisor drift mid-session. After you deploy, restart a session and JB `Run Agent Doc`: `ops.log` should show a single `dispatch_inject … attempt=1` and zero `attempt=2`.
-<!-- agent:boundary:137e3448 -->
+
+### Re: queue cleanup — sole remaining head is operator-gated — opus-4-8
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix agent-doc bugs?
+
+
+You deleted the two already-struck `do [#rdypoll]` heads; the queue converged that (no action needed — those answers are already committed above). The **only** remaining live queue head is `do [#rdypoll-deploy]`, which is `[operator-verify]`: its agent-actionable code (the `dispatch_inject … attempt=N` marker + SimWorld) already shipped and pushed (submodule `138dc658`, 0.34.23). What's left is the live two-pane restart proof — that needs a live editor and can't be agent-done.
+
+**Why I am not running the `make install` / `admin recycle` deploy sub-step this cycle:** the agent-doc submodule has **uncommitted WIP** sitting on top of `138dc658` — a new `recycle_yield.rs` plus edits to `idle_watch.rs`, `queue_continuation.rs`, `session_check.rs`, `start.rs`, `start/decisions.rs`, and `preflight/run.rs`. A `cargo build --release` / `cargo install` now would bake that half-finished work into the live binary and supervisor, which is exactly the finalize-client-newer-than-supervisor drift `#rdypoll-deploy` was written to avoid. The deploy must wait until that WIP is either committed (its own cycle) or stashed.
+
+Queue is paused (`#rt83/#qflood` pause reason, now well past the 0.34.20 it referenced) with **0 drainable heads** — not looping. Next concrete step is operator-side: finish/commit the submodule WIP, then run the `#rdypoll-deploy` deploy + live restart proof at a supervisor-recycle boundary.
+<!-- agent:boundary:4300623a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Run Agent Doc` on equityfundingsource.md did not submit.~~
-- ~~After restarting an agent-doc session, then JB `Run Agent Doc` on equityfundingsource.md, the duplicate prompts with no submit occurred ![img_52.png](img_52.png). I thought this issue was fixed but it's not fixed.~~
-- What are #next-steps to fix agent-doc bugs?
+- ~~What are #next-steps to fix agent-doc bugs?~~
 ---
 JB `Run Agent Doc` after a restart on monsterrodholders.md. I tried again and it worked. The restart state should not lag.
 ```
@@ -135,8 +146,9 @@ Press Enter to restart, or 'q' to exit.
 [agent-doc] auto-trigger: timed out waiting for claude prompt
 ```
 ---
-- :pushpin: do [#rdypoll]: It worked after a restart.
-- do [#rdypoll]: It worked after a restart.
+- ~~:pushpin: do [#rdypoll]: It worked after a restart.~~
+- ~~do [#rdypoll]: It worked after a restart.~~
+- do [#rdypoll-deploy]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

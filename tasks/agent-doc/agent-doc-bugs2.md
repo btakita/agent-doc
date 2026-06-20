@@ -127,14 +127,15 @@ Shipped the plugin half of `#evmh` (the `#yzer`/`#evmhplugin` item) — agent-do
 **Verified.** `decide_reconnect_buffer` unit tests (all three branches) + a `reconnect_buffer_sim_rereads_stale_then_keeps_user_edits` SimWorld scenario (re-reads a prior-commit buffer, keeps an offline-edited buffer). `make check` green — 4832 tests, clippy clean. Plugin Kotlin compiles; both 0.2.172 zips built.
 
 **Closeout.** `#yzer` done (code complete + shipped). The `cargo install`/`lib-install` + **live reconnect** proof is genuinely operator-gated — a mid-session install would make the finalize client newer than the running supervisor and drift this very closeout — so I filed `#yzerverify` `[operator-verify]` with the exact repro and the `ops.log` marker to check. The `reconnect_buffer_decision` marker means you can prove/disprove it from the logs (the `#j9ja` avmark pattern).
-<!-- agent:boundary:bc829501 -->
+<!-- agent:boundary:63d1c5dc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:round_pushpin: What are #next-steps to fix agent-doc bugs?~~
-- do [#yzer]
+- ~~do [#yzer]~~
+- :pushpin: [#1jec]
 ---
 JB `Run Agent Doc` on monsterrodholders.md sent duplicate prompts and did not submit.
 ```
@@ -195,6 +196,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#kcb5] #agent-doc-bug Pure-CLI agent-doc session (no live JB editor) wedges every finalize on editor-IPC no_ack, forcing --force-disk. Live repro 2026-06-20, equityfundingsource.md driven from a Claude Code pane (%158) with NO JetBrains IDE running and the controller (controller serve, pid 2014438, 0.34.27) as the sole daemon: admin list shows the doc actor ready with an active editor-IPC listener, but there is no editor endpoint behind it. Every finalize: socket "ack status: error" -> file-IPC fallback writes a patch no editor applies -> no_ack -> recovery=retry_without_disk_write -> fail-closed "refusing direct disk write; editor IPC listener active". Only finalize --force-disk succeeds (it did every cycle; commits landed via CRDT merge). A controller-mediated write --pending-add into THIS bugs doc also wedged identically (reason=send_failed) - the bug blocks capturing itself. Never self-heals: actor not orphaned and binary not stale, so neither M1b orphan-reap, drain-lease expiry, nor stale-binary recycle fires. Extends #cyh0/#fcczero, #wd40, #rt83 (queue_control_paused dispatch flood observed live ~2/sec on this doc + orphaned save-document.signal patch), #editorbufwin. Fix direction: detect "editor-IPC listener registered but no live editor endpoint" for a CLI-only actor and route finalize to the controller-host disk write instead of no_ack wedge; OR do not arm the editor-IPC disk-write guard when no plugin editor is attached. Supervisor-core; needs editor-less live repro + SimWorld coverage.
 - [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
 <!-- /agent:backlog -->
 

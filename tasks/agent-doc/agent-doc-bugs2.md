@@ -220,7 +220,40 @@ Applied the Layer A resolution to the failsafe-driven re-dispatch of this queue 
 **The granular-write path is live-wedged (`#6b5h`).** `write --pending-add` just failed `refused direct disk write ... editor IPC listener active (reason=send_failed)` — the exact pure-CLI / no-live-editor IPC wedge `#6b5h` describes. `--pending-edit` and `finalize` (content_ours recovery) still commit, but `--pending-add` is blocked, which is why I couldn't file the orphan-head bug in the backlog. This is more live evidence for prioritizing `#6b5h`.
 
 **Stopping, not looping:** the only remaining "drainable" head is the unreapable `#kcb5` orphan — a binary-miscounted no-op (`#qchurn`), not real work. Per the skip rule that a no-op head is reported-and-stopped, I'm stopping. Net this cycle: 0.34.34 flood hotfix live, focused-cycle items tagged, two real bugs surfaced (orphan-head unreapable + live `#6b5h` wedge). You can clear the `#kcb5` orphan head by hand, or it's the first focused-cycle fix.
-<!-- agent:boundary:2abeeff0 -->
+
+### Re: Why so much drift — and can evented/reactive + document isolation kill it? — opus-4-8
+
+Good question, and your instinct points at exactly the right fix. The drift isn't one bug — it's an architectural mismatch. Three properties of the current design *manufacture* drift:
+
+**1. Whole-document merge (the big one).** `crdt.rs::merge(base_state, ours_text, theirs_text)` reconciles the **entire file as one text blob**. There is no region isolation. So when you type into a queue item while the agent is writing an `exchange` response, both edits land in the *same* three-way merge — your keystrokes and the agent's response are competing inserts into one Yrs `Text`. That's literally why "typing into a queue item stalled the running job": the system has no concept that those two edits are independent. The `dedup_adjacent_blocks` pass and the `<50% common prefix → replace base` heuristic are both cleanup hacks for duplicate insertions this blob-merge produces (the duplicate `:pushpin: do [#6b5h]` / `:pushpin: do [#qprtloss]` lines in the queue right now are that exact artifact).
+
+**2. Pull-at-finalize, not push-on-change.** The binary largely *samples* the editor buffer at finalize and diffs it against a snapshot taken earlier in the cycle. "Drift" is just: anything that changed in that window. Slow finalize, background work, or a retry widens the window; you typing in it guarantees a hit. The window is the bug surface.
+
+**3. Multiple writers per document.** The idle-queue watch, the file-watcher, and the finalize client can all write. A stale-binary supervisor replaying its in-memory CRDT re-commits old state on top of a clean commit (the churn you've been fighting all session). No single owner serializes mutations.
+
+**Now your specific proposals — all correct, here's the concrete shape:**
+
+**Do JB/VSCode support document-change events?** Yes, natively and with deltas, which is the important part:
+- **JetBrains:** `DocumentListener` / `BulkAwareDocumentListener` fires on every change with exact `(offset, oldLength, newFragment)` — a true CRDT-ready delta, not a "something changed" ping. (`TypingTracker.kt` / `PatchWatcher.kt` already tap part of this; `#dsqa` made the WatchService read-only.)
+- **VSCode:** `workspace.onDidChangeTextDocument` gives `TextDocumentContentChangeEvent[]` with `range + rangeLength + text` per edit. Same delta quality.
+
+So the evented path is available in both. The win: feed those deltas straight into the document model as they arrive (client_id = user) so the supervisor's CRDT is *continuously current*. Then finalize is "apply the agent's delta onto an already-converged base" — there's no stale snapshot to drift against, because there's no sample window.
+
+**Multi-channel streaming IPC plugin→CPC / one stream per document + a thread updating the model.** This is the right model and it's a standard **actor-per-document** design. Because the plugin loads `agent-doc` as an in-process cdylib (FFI — `NativeLib.kt` / `native.ts`), the lowest-latency channel isn't a socket at all: push each `DocumentListener` delta over FFI into a Rust-side **per-document actor** (one owning thread, bounded channel). That actor serializes *every* mutation — operator deltas, agent finalize deltas, queue ops. Single-writer-per-document eliminates property #3's races outright (it's also the natural completion of the 08b in-process hosting you already shipped). The socket/file-IPC only matters for the out-of-editor supervisor; in-editor it's a direct in-VM channel.
+
+**Can we isolate parts of the document?** Yes — this is the highest-leverage fix for your exact complaint, and Yrs already supports it: **multiple named shared types in one doc.** Instead of one `Text` for the whole file, model each `<!-- agent:* -->` component (`exchange`, `queue`, `backlog`, `review`, `status`) as its **own** Yrs shared type, keyed off the component segmentation that already exists in `component.rs` / `template.rs` (the granular `--pending-*` write flags already mutate exactly one component). Then:
+- An edit to a `queue` item touches only the `queue` type → it *cannot* conflict with the agent writing `exchange` → no drift, no stall. The thing you asked for falls out for free.
+- Finalize merges only the component(s) the agent changed, against that component's own base — a much smaller merge surface and far fewer false-drift events.
+
+**Recommended sequencing** (cheapest-first, each removes a drift *category*):
+1. **Per-document single-writer actor** — kills the multi-writer re-commit races (#3). Partly done via 08b in-process hosting; this finishes it. Biggest immediate payoff.
+2. **Push deltas from `DocumentListener`/`onDidChangeTextDocument` into that actor** — kills the sample-at-finalize window (#2).
+3. **Per-component Yrs shared types** — kills cross-region false drift and delivers the "queue edit is isolated from the running job" guarantee (#1). Deeper refactor (merge/snapshot/diff all assume full text today), but structurally the correct end state.
+
+(1) and (2) are the cheap wins that remove most of what this session hit; (3) is the real isolation guarantee.
+
+I've kept this to analysis — I did **not** add backlog items or touch the queue, because you're actively curating it and concurrent backlog edits are exactly what's been corrupting convergence this session. Say the word and I'll file a plan (`plan-document-isolation-evented-ipc.md`) decomposed into those three rungs and queue them as proper phase IDs.
+<!-- agent:boundary:6bac6e26 -->
 <!-- /agent:exchange -->
 
 ## Queue

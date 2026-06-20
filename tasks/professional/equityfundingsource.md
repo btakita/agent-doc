@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,82 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-045343.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-054124.md`*
 
 Compacted content:
-❯ - Archived 7 response topic(s): member rows should fill full width, no email truncation; member table should have a default deal-share %; deploy; 4 more
+❯ - Archived 4 response topic(s): Group-interest deals surface as Deals of Interest; "Share %" → "Default Share %" with tooltip; Set credentials must be the first step when missing; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Group-interest deals surface as Deals of Interest — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-
-> **Queue prompt:**
->
-> :pushpin: On /lenders/available-deals & /lenders/dashboard, if a lender is part of a lender group that is already interested in an available deal, that deal should show up as as a Deal of Interest.
-
-
-Done and deployed. If a co-lender marks an available deal as interesting **on behalf of a lender group**, that deal now shows up as a **Deal of Interest** for every member of that group — on both `/lenders/available-deals` and `/lenders/dashboard` — even if the member never personally clicked "interested."
-
-**How it works:**
-- New `investor_deal_interest_group_by_deal_R_(group_ids, deal_ids)` returns, for the lender's groups, which deals any group is interested in (earliest interest wins for the group attribution).
-- `investor_deals_GET_` (the list endpoint that powers *both* pages) now loads the lender's groups, ORs group-interest into the `interested` flag, keeps those deals visible, and reports the interested group id. Both pages already bucket by `deal.interested`, so the deal moves into the "Deals of Interest" section automatically.
-- `investor_deals_by_id_GET_` (single deal) does the same, so opening the deal stays consistent and the commit flow can preselect the group.
-
-**Scope notes:** "interest on behalf of a group" means an `investor_deal_interests` row carrying that `lending_group_id` (created when a member expresses interest *as* the group). A purely personal interest by another member does **not** leak to the group. Membership is read via `lending_groups_for_user_R_` (groups you created + active/invited membership).
-
-Verified: new real-D1 unit test (`investor_deal_interest_group_by_deal_R_`) + marketplace wiring asserts; full suite **936 pass / 0 fail**, worker rebuilt. Committed (`f329e86`) + pushed, **deployed to production** (version `36d6b774`).
-
-### Re: "Share %" → "Default Share %" with tooltip — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: In the admin and lender portal Lender Group table, "Share %" should be "Default Share %" with a tooltip that explains that this is the default share percentage for a deal.
-
-
-Done and deployed. In the lender-group share editor, the column header now reads **"Default Share % ⓘ"** with a help-cursor tooltip: *"Default Share % — the preset percentage of a deal each lender takes when this group joins a deal. It is the default split and stays customizable per deal."*
-
-Because admin and lender portals render the **same** shared `MemberAllocations` component, this updates both at once. I widened that column to `max-content` so the longer label sits on one line without disturbing the aligned columns (verified with a render — Default Share % stays right-aligned over the inputs, everything else still lines up).
-
-Tests **57/57** in the touched suites (full suite already green this session), worker rebuilt. Committed (`a32949c`) + pushed, **deployed to production** (version `14ec4fc7`; bundle `index.browser-AB7OWMDM.js`). Hard-refresh to see the new header + tooltip.
-
-### Re: Set credentials must be the first step when missing — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: I clicked on the invite for btak.dev+lender2@gmail.com and was logged in. But I was not presented with setting a password. Setting credentials should be the 1st step if the credentials are missing for any portal account.
-
-
-Fixed and deployed. The gap: the invite auto-login link (`/login/invite?token=`) *does* route a brand-new lender (empty password) to account completion — but only at that one click. If they navigated away (bookmark, refresh to `/lenders/dashboard`), nothing forced them back, so they could use the portal with no credentials set.
-
-**Fix — enforce it on every portal page.** `require_auth_` (the gate every portal page runs through) now redirects any account with **no local password AND no linked SSO identity** to `/account/complete` before serving the page. So setting credentials is genuinely the first step, regardless of how they got in — and it generalizes to *any* role/portal, not just lenders.
-
-**Why the SSO carve-out:** Cloudflare Access / Google users are provisioned with an empty `password_hash` but a linked `access_identity_sub` (their credential is the SSO identity). The condition is `!password_hash && !access_identity_sub`, so SSO users are **not** forced to create a local password — only truly credential-less accounts (like an invite-auto-created lender) are.
-
-Verified: new gate-wiring test + SSO-exclusion assert; full suite **937 pass / 0 fail**, worker rebuilt. Committed (`1e68b16`) + pushed, **deployed to production** (version `d0cf6448`).
-
-Note: if `btak.dev+lender2@gmail.com` already set a password in an earlier test, it won't re-prompt (that's correct — credentials aren't missing). To re-test the flow, invite a fresh address.
-
-### Re: Passwordless "login by email link" — opus-4-8
-
-> **Queue prompt:**
->
-> Add a login by email link...where an email is sent with a link that has the auth token. The auth token should expire in 24h or less...use best practice for the expiration.
-
-
-Built and deployed. The login page now has an **"Email me a sign-in link"** option: the user enters their email, we email a single-use link, and clicking it signs them straight into their portal — no password.
-
-**Flow (mirrors forgot-password, but logs them in):**
-- `GET /login/email` — the request form; `POST /login/email` mints a token and emails the link. **Enumeration-safe**: it always returns the same "if an account exists, we sent a link" notice.
-- `GET /login/email/verify?token=` — validates + consumes the token, signs them in, and routes first-timers (no password yet) to account completion, everyone else to their portal.
-
-**Token / expiry (best practice):** single-use, raw token never stored (only a SHA-256 hash), and **short-lived — 30 minutes by default**, configurable via `EMAIL_LOGIN_TTL_MINUTES` and hard-clamped to ≤ 24h. (Magic-link best practice is a short window, well under the 24h ceiling you set.) It lives in its own `email_login_tokens` table (migration 0093) so requesting a login link never invalidates a pending **group invite** token.
-
-**Verified live:** migration 0093 applied on deploy; `GET /login/email` → 200, `POST /login/email` → 200 (generic notice — confirms the table exists), `verify` with no token → 303. Full suite **945 pass / 0 fail** (new real-D1 token-lifecycle + TTL + wiring tests). Committed (`b888b9b`) + pushed, **deployed to production** (version `747fff2c`).
-<!-- agent:boundary:ead0cf11 -->
+<!-- agent:boundary:a453a284 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -121,6 +51,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: If I'm logged into another account, the email link goes to the home page with no message. Add something like "Please log out of your current account and try again."
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

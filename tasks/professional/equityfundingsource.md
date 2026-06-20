@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -72,7 +72,23 @@ Done — and the functional half already existed; the gap was making it **visibl
 **Shipped:** committed + pushed EFS `cbe850e`, pointer `816af47a0`.
 
 Note: the default % is currently **set at group creation / invite** (and used as the deal default). If you also want to **edit each member's default % inline in this table**, that's a small follow-up — say the word.
-<!-- agent:boundary:3d01be30 -->
+
+### Re: deploy — lender-group table changes live — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+
+Deployed. **Version `afcf3ebd-c8b3-4ec8-afff-3f35f37b7f75`**, live at `https://equityfundingsource.brian-takita.workers.dev`. Both pending lender-group UI changes are now in production:
+
+- **Full-width member rows** — no more email truncation (the colspan sub-row).
+- **Default deal-share %** surfaced per member (the `X% default` badge + caption).
+
+**Smoke check:** homepage `200`; `/lenders/groups` → `303` to login (auth gate live). The member-table changes render in the authenticated lender portal — sign in to `/lenders/groups` to eyeball the full-width rows + default-share badges.
+
+Queue drained — only the operator-gated `#5q7z-ship` live-verify remains. Stopping.
+<!-- agent:boundary:b81a4929 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,7 +101,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

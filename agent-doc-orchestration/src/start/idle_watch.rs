@@ -1704,20 +1704,31 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // the attended in-session `/loop` continues to drain via
                 // `queue_continuation_required` (a pause does not stall it).
                 // `resume`/`drain` are not `paused` and do not block here.
+                // Single-owner tie-break (computed ONCE, before the pause gate so the
+                // gate and the drain decision agree): a fresh drain-owner lease means
+                // either the Claude Code `/loop` auto-loop owns this drain (#kp5z /
+                // #qflood) OR the supervisor's OWN failsafe claim from a recent tick is
+                // still live (`#qstallguard` Layer C rate-limit). Either way the
+                // supervisor must defer this tick rather than re-dispatching.
+                let drain_owner_lease =
+                    crate::drain_owner::fresh_drain_owner_lease(&file, current_epoch_secs());
+
                 if active_head.is_some()
                     && crate::queue_continuation::document_queue_controller_paused(&path)
                 {
                     // `#qstallguard` Layer C: pause throttles to single-owner; it does
-                    // not disable the failsafe. Skip ONLY when an in-session `/loop`
-                    // owns the drain (defer to it). With no loop owner and a drainable
-                    // head, fall through to the normal guarded drain so the queue is
-                    // not stranded when the loop abandons it.
-                    let loop_owner_fresh = crate::drain_owner::fresh_drain_owner_lease(
-                        &file,
-                        current_epoch_secs(),
-                    )
-                    .is_some();
-                    if paused_idle_watch_should_skip(true, active_head.is_some(), loop_owner_fresh) {
+                    // not disable the failsafe. Skip when a fresh lease exists (an
+                    // in-session `/loop` owner OR our own recent failsafe claim — the
+                    // rate-limit) or nothing is drainable. With NO fresh lease and a
+                    // drainable head, claim the lease as `supervisor-failsafe` so this
+                    // fires at most once per drain-owner TTL (single-owner cadence,
+                    // NOT the per-tick #rt83 flood), then fall through to dispatch ONCE
+                    // using the pre-claim lease value below.
+                    if paused_idle_watch_should_skip(
+                        true,
+                        active_head.is_some(),
+                        drain_owner_lease.is_some(),
+                    ) {
                         log_event(
                             &mut session_log,
                             &format!(
@@ -1736,7 +1747,16 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         );
                         continue;
                     }
-                    // No in-session loop owner + drainable head: single-owner failsafe.
+                    // No fresh lease + drainable head: single-owner failsafe. Claim the
+                    // lease NOW so the NEXT tick sees it fresh and defers (rate-limit).
+                    if let Err(err) =
+                        crate::drain_owner::refresh_drain_owner_lease(&file, "supervisor-failsafe")
+                    {
+                        eprintln!(
+                            "[agent-doc] warning: failed to claim failsafe drain lease for {}: {err}",
+                            path.display()
+                        );
+                    }
                     log_event(
                         &mut session_log,
                         &format!(
@@ -1748,12 +1768,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     crate::ops_log::log_op(
                         &path,
                         &format!(
-                            "queue_paused_failsafe_single_owner_drain file={} harness={} reason=no_in_session_loop_owner (#qstallguard Layer C)",
+                            "queue_paused_failsafe_single_owner_drain file={} harness={} reason=no_in_session_loop_owner cadence=drain_owner_ttl (#qstallguard Layer C)",
                             path.display(),
                             harness.binary
                         ),
                     );
-                    // fall through to the guarded drain decision below.
+                    // fall through to the guarded drain decision below, which uses the
+                    // PRE-CLAIM `drain_owner_lease` (None this tick) so it dispatches once.
                 }
 
                 // #sqedit-race Phase 2: a direct `queue prune-noise` / `queue
@@ -1772,12 +1793,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     );
                     continue;
                 }
-
-                // Single-owner tie-break: if the Claude Code `/loop` auto-loop holds
-                // a fresh drain-owner lease it owns this drain, so the supervisor
-                // must defer instead of double-injecting (#kp5z / #qflood).
-                let drain_owner_lease =
-                    crate::drain_owner::fresh_drain_owner_lease(&file, current_epoch_secs());
                 match idle_queue_drain_decision(
                     clear_cooldown_active,
                     prompt_visible,

@@ -33,112 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-002118.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-022443.md`*
 
 Compacted content:
-❯ - Archived 4 response topic(s): /lenders/available-deals should have a "Deals of Interest"; No invite email sent for the Lender Bros group; Lending-group email on by default + friendlier duplicate-invite handling + resend button; 1 more
+❯ - Archived 5 response topic(s): Go through the review items; do #214f-gate; #5q7z TMO duplicate-loan fix; 2 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Go through the review items — triaged into backlog + queue — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Go through the review items. Add actionable items into the backlog and queue.
-
-
-Went through all 18 gated review items and split them by whether an agent session can actually move them now — no external credential, operator decision, or unbuilt dependency in the way.
-
-**Queued for the go-loop (added to backlog + queue):**
-- **#5q7z-fix** — TMO "Accept and send to TMO" duplicate-loan bug. Clear local fix: (1) approve/writeback detects an existing TMO association (`tmo_loan_rec_id` / `writeback_status=sent`) and associates+marks accepted locally instead of calling `NewLoan` (kills the TMO 400 "Duplicate loan number"); (2) hide/disable the button in `full_applications.tsx` when the loan is already in TMO. Safe default for the embedded design Q: associate-only, no TMO call. Also unblocks the #dealtab500 investigation.
-- **#214f-gate** — publish-on-acceptance gate. `admin_deal_publish_` + `POST /api/admin/loans/:id/deal` currently publish with no acceptance check. Add the gate + surface ineligibility; default rule "accepted-before-available" (operator can revise). Complements the already-shipped #accept-autopublish.
-
-**Added to backlog, gated (actionable but need a precondition/decision first, so not auto-drained):**
-- **#cutover-checklist** — write (not execute) the workers.dev→custom-domain + Google Workspace SSO cutover checklist; execution gated on #m6ch creds.
-- **#67v2-aa-local** — admin pipeline auto-advance local half; depends on the #67v2 Kanban stages being built first.
-
-**Likely already shipped — recommend closing the review item, didn't re-queue:**
-- **#zwws-vestings-local** — its scope (capture/display vestings + special instructions, EFS-local half, TMO push gated) matches the completed **#zwws-local-first** (done.md, 2026-06-05). Verify in the investor UI and strike the review item if confirmed.
-
-**Left in review — externally gated, not agent-actionable now:**
-- #dealtab500 (live repro / #cftk token), #cftk (operator mints the Cloudflare D1 token), #5eq8 (closing-docs redesign, design-blocked), #efs-cutover-sso-plan (parent; writeable half is #cutover-checklist), #xcvg / #xcvg-prod-email (Resend domain #f4rq + SMTP #m6ch/#p40t), #dzmm / #dzmm-writeback-replay (TMO write field-map #7a4d + support #k2xg), #jnzs / #jnzs-approval-followup (await Judith/EFS reviewer), #67v2 (Kanban; partly TMO-gated), #zwws (remaining phases externally gated), #next-steps (custom-domain cutover deferred), #dropbox-sync-adapter (needs Dropbox access).
-
-No code changed this cycle — this was a triage pass. #5q7z-fix and #214f-gate are queued for the go-loop.
-
-### Re: do #214f-gate — gate investor deal publish on loan acceptance — opus-4-8
-
-> **Queue prompt:**
->
-> do [#214f-gate]
-
-
-Shipped. `admin_deal_publish_` now refuses to publish a loan that hasn't been accepted, closing the #214f gap where a `submitted` loan with no `full_application` row could surface as an Available Deal.
-
-**What changed**
-- New `loan_publish_eligibility_R_(db, loan)` in `app/equityfundingsource/lib/admin/repo.ts`: a loan is publishable only if it is **Funded** (`tmo_loan_status='Funded'`) or its originating full application has reached **`status='accepted'`** (resolved by `tmo_loan_application_rec_id`, then `tmo_loan_number` — mirroring `admin_deal_by_loan_R_`'s `application_id` COALESCE).
-- `admin_deal_publish_` runs the gate before any `investment_deals` insert/update and throws `loan … cannot be published: <reason>` when ineligible. The existing `POST /api/admin/loans/:id/deal` handler already maps that throw to a **409** carrying the reason, so the admin UI surfaces *why* a loan is ineligible.
-- The #accept-autopublish path is unaffected — acceptance (`status='accepted'`) is set immediately before its `admin_deal_publish_` call, so it passes the gate.
-
-**Business rule:** accepted-before-available (the operator-stated default). A TMO-sourced loan that is neither Funded nor backed by an accepted EFS full application is now blocked — broaden `loan_publish_eligibility_R_` if that proves too strict.
-
-**Changed paths** (`src/equityfundingsource-dev`, commit `5491393`, pushed; superproject pointer `04964fce0`):
-- `app/equityfundingsource/lib/admin/repo.ts` — eligibility helper + gate.
-- `tests/admin-deal-publish-gate.test.ts` — new (5 tests: Funded short-circuit, accepted→eligible, submitted→blocked, no-application→blocked, gate-runs-before-write source check).
-- `prds/apply4-full-application-build-plan.md` — documented #214f-gate under the #accept-autopublish section.
-
-**Verification:** `make check` green — **907 pass, 0 fail** (+5), typecheck clean, worker bundle built. No GitHub Actions CI is configured for the EFS repo; the local suite is authoritative.
-
-**Confidence:** high — the gate is unit-tested and its only runtime callers are the post-accept autopublish (passes) and the manual publish route (now 409s with a reason). **Escalation:** none — but confirm the accepted-before-available rule if TMO-imported loans without an EFS application should remain publishable.
-
-### Re: #5q7z TMO duplicate-loan fix — opus-4-8
-
-> **Queue prompt:**
->
-> do [#5q7z-ship]
-
-
-Implemented the associate-only fix (the safe default for the open design question: no second TMO call). The #5q7z review item stays open until this is deployed + live-verified (queued as #5q7z-ship).
-
-**Backend** (`app/equityfundingsource/lib/admin/applications/index.ts`):
-- New `application_existing_tmo_loan_R_` detects an existing TMO association — a `loans` row for this application (matched by `tmo_loan_application_rec_id`, then by the recorded `tmo_loan_number`) that already has a non-empty `tmo_loan_rec_id`.
-- `application_tmo_writeback_attempt_` now short-circuits **before** `tmo_application_create_` (NewLoan): when an association exists it marks the application accepted locally, copies documents to the loan (idempotent), auto-publishes, and returns `ok: true, already_associated: true`. No NewLoan call ⇒ no TMO 400 "Duplicate loan number".
-
-**UI** (`lib/ui--browser--efs/portal/admin/full_applications.tsx`):
-- "Accept and Send to TMO" is disabled and relabeled **"Already in TMO"** when `writeback_status === 'sent'` or a `tmo_loan_number` is recorded, with an explanatory note so the admin can't re-trigger NewLoan.
-
-**Tests**: added source-assertion coverage for both halves and updated three pre-existing assertions that now matched the earlier associate-only occurrences. Full suite green — **909 pass / 0 fail** — plus `bun run build` + `bun run build:worker`.
-
-**Shipped**: committed + pushed EFS `d8c17b4`, superproject pointer `58a2c5fea`. **Deploy not run** — the directive carried no `#commit-push-deploy` preset and there is no CI auto-deploy. Trigger `#commit-push-deploy` (or `bun run deploy:worker`) when ready.
-
-### Re: "publishable" — does it mean the public website? — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: "a loan is publishable only": Does publishable mean on the public webite?
-
-
-**No.** "Published" is an internal marketplace state, not public-web visibility.
-
-When `admin_deal_publish_` runs it sets `investment_deals.status='published'`, which makes the loan an **"Available Deal"** in the **authenticated lender/investor portal** at `/lenders/available-deals` (`INVESTOR = '/lenders'`). That route is gated by `require_auth_(c, 'investor')` and sits behind the accredited-investor confirmation — so only a logged-in (accredited) lender account ever sees it. There is no public deal listing (nothing under `lib/.../public/` renders published deals), so a published loan does **not** appear on the public marketing site.
-
-So "a loan is publishable only [when accepted]" (#214f) is about whether an accepted loan is allowed into that **authenticated investor marketplace** — it never controls public-website visibility. Publishing exposes a deal to your logged-in lenders, not to the open web.
-
-### Re: funded vs. available — why is a funded loan still "publishable"? — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Why would a loan be publishable as available to be funded when it is funded? If it's funded, it's not available by definition.
-
-
-A funded deal is **not** offered as available-to-fund. The system separates **visible** from **available**:
-
-- **"Available Deals" = published only.** The available-deals nav count is `admin_deals_R_(db, 'published')` — funded deals are excluded from the available list.
-- **A funded deal stays *visible* in the marketplace** (`deal_viewable_` allows `published` **and** `funded`), so a lender can still see it — but each lender's badge is computed from *their own* position (`deal_user_status_`): `available` only when they hold no fund, else `funding_pending` / `funded`. A funded deal renders as **Funded**, never Available.
-- **The funding action is hard-capped by remaining capacity.** A commit is rejected when `amount_funded > available_amount`, where `available_amount = loan_amount − reserved`. A fully-funded deal has zero remaining capacity, so it can't be funded again (and the lender must be EFS-selected first). So "available by definition" holds at the action level — you cannot fund a funded deal.
-
-The `funded → published` mapping you likely saw (in the loan-status sync) is **not** "funded becomes available" — it's the *un-funding reset*: it only fires when TMO reports the loan is **no longer** `Funded` while the deal still says funded (a funding reversal), re-opening it as published. The forward path is `published → funded → closed`.
-
-So there's no contradiction: funded ≠ available; only *visibility* is shared, and capacity + selection guards prevent re-funding. If the product intent is that funded deals should disappear from the lender marketplace entirely (not just show a Funded badge), that's a one-line filter to gate `deal_viewable_`/the listing to `published` only — say the word and I'll do it.
-<!-- agent:boundary:cb8a6989 -->
+<!-- agent:boundary:d5dcfaa1 -->
 <!-- /agent:exchange -->
 ###
 <!--

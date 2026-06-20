@@ -68,14 +68,32 @@ Priority order of the active route/dispatch cluster (all share the post-restart-
 I did **not** blind-patch `route.rs` this cycle — it is invariant-heavy and needs `make check` + `make tmux-ci` across two live panes, so #rdypoll carries `[operator-verify]` for the live gate. The monsterrodholders restart-lag report (queue head 2) is the same root and is already covered by #rdypoll; it'll strike as the same cluster.
 
 **Top backlog id: `#rdypoll`**
-<!-- agent:boundary:f6b98b8d -->
+
+### Re: do [#rdypoll] — "It worked after a restart" (§D / img_52) — opus-4-8
+
+> **Queue prompt:**
+>
+> After restarting an agent-doc session, then JB `Run Agent Doc` on equityfundingsource.md, the duplicate prompts with no submit occurred ![img_52.png](img_52.png). I thought this issue was fixed but it's not fixed.
+
+
+Did the agent-actionable part of §D and shipped it (agent-doc submodule `138dc658`, **0.34.23**, pushed to origin/main). "It worked after a restart" confirms the readiness *behavior* is already correct — the gates that stop the ~7-stacked-trigger pile landed in 0.34.21 (`#jbtsiftnosub` cold-start) and 0.34.22 (`#runexitrestart` restart-drain). What was still missing for §D was the **proof hook** you asked for ("adequate logging to prove/disprove… you check the logs"): nothing logged *how many times* the trigger actually got typed, so you couldn't disprove a re-type regression from `ops.log`.
+
+**What shipped:**
+- A `dispatch_inject file=… pane=… harness=… transport=<direct_pane|supervisor_ipc> attempt=N` marker at both real injection funnels (`send_command_once_unchecked`, `dispatch_via_supervisor_ipc_with_mode`), keyed off a process-global monotonic counter. One `agent-doc route` invocation = one logical dispatch, so a healthy dispatch logs **`attempt=1` exactly once**; a multi-inject regression shows `attempt=2`, `attempt=3`, … — the img_52 stacking is now directly auditable.
+- SimWorld: `route_sim_restart_drain_waits_for_dispatch_ready_prompt_before_send` now asserts the marker is **absent** across all 7 not-ready restart ticks and present exactly once as `attempt=1` after ready — never `attempt=2`.
+- `make check` (clippy + full suite) green; release binary built; latest CI green.
+
+**On "the restart state should not lag":** the ~29s "Still waiting for claude … active claude turn" window is the route *correctly* polling for the harness dispatch-ready prompt without typing (the §D fix — poll silently, inject once). It's a slow harness boot, not the route lagging; the fail-closed-then-retry is the safe shape that prevents the stacking. Reducing the boot wait itself is a separate tuning knob, not part of §D.
+
+**Operator-gated remainder** (filed as `#rdypoll-deploy`): the live two-pane restart verify + the `cargo install` / `agent-doc lib-install` / `admin recycle` deploy are deferred from this in-session run to avoid a finalize-client-newer-than-supervisor drift mid-session. After you deploy, restart a session and JB `Run Agent Doc`: `ops.log` should show a single `dispatch_inject … attempt=1` and zero `attempt=2`.
+<!-- agent:boundary:44b342a6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~JB `Run Agent Doc` on equityfundingsource.md did not submit.~~
-- After restarting an agent-doc session, then JB `Run Agent Doc` on equityfundingsource.md, the duplicate prompts with no submit occurred ![img_52.png](img_52.png). I thought this issue was fixed but it's not fixed.
+- ~~After restarting an agent-doc session, then JB `Run Agent Doc` on equityfundingsource.md, the duplicate prompts with no submit occurred ![img_52.png](img_52.png). I thought this issue was fixed but it's not fixed.~~
 - What are #next-steps to fix agent-doc bugs?
 ---
 JB `Run Agent Doc` after a restart on monsterrodholders.md. I tried again and it worked. The restart state should not lag.
@@ -104,6 +122,21 @@ JB `Run Agent Doc` after a restart on monsterrodholders.md. I tried again and it
 Error: dispatch-only claude reopen refused to inject into pane %176 for tasks/monsterrodholders.md because the latest run is still booting and never reached a dispatch-ready prompt (active claude turn); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
 ```
 ---
+JB `Run Agent Doc` on equityfundingsource.md did not submit
+```
+claude exited cleanly.
+Press Enter to restart, or 'q' to exit.
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] auto-trigger: timed out waiting for claude prompt
+```
+---
+- :pushpin: do [#rdypoll]: It worked after a restart.
+- do [#rdypoll]: It worked after a restart.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -130,7 +163,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rdypoll] [operator-verify] #agent-doc-bug Post-restart JB Run Agent Doc re-types the agent-doc trigger N times into a not-ready/booting pane with NO submit (img_52: ~7 stacked copies on equityfundingsource.md; same root as the monsterrodholders 29s "active claude turn" boot stall + #1vhn routedeadshell). The route conflates readiness-polling with injection. Fix: poll for the harness dispatch-ready prompt WITHOUT typing; inject the trigger exactly once after a positively-identified dispatch-ready prompt; re-verify immediately before the single send; clear the composer before any retry (or never re-type); fail closed on a not-ready/shell pane without injecting any text. Add dispatch_inject attempt=N ops.log marker + SimWorld asserting zero injects while not-ready and exactly one after ready. Live two-pane verify. Plan: tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md (§D)
 <!-- /agent:backlog -->
 
 ## Review

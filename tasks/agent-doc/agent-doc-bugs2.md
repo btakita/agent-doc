@@ -45,19 +45,14 @@ Compacted content:
 Compaction landed (archive `483039e7…-20260620-082845.md`, 9 topics). Recovered the stale-snapshot drift it left (`reset --from-current --preserve-session` + `commit`), so HEAD holds the compacted document.
 
 Queue corrected: the 3 answered free-text operator heads ("Why is the 0.1.0 supervisor…", the two `JB Run Agent Doc` reports) were never struck — the `#qheadstrike` class. Drained them via `agent-doc queue consume` (×2, all answered/superseded by existing review items); queue block is now empty and `queue: stop`. All 21 gated `[/]` review items intact. Committed `48f1f024a`.
-
-### Re: Session compacted + queue corrected — opus-4-8
-
-Compaction landed (archive `483039e7…-20260620-082845.md`, 9 topics). Recovered the stale-snapshot drift via `reset --from-current --preserve-session` + `commit`.
-
-Queue corrected: the 3 answered free-text operator heads ("Why is the 0.1.0 supervisor…", the two `JB Run Agent Doc` reports) were never struck (the `#qheadstrike` class). Drained them via `agent-doc queue consume`; queue block is now empty and `queue: stop`. All 21 gated `[/]` review items intact. Committed `48f1f024a`.
-<!-- agent:boundary:47d9a218 -->
+<!-- agent:boundary:c46b11e4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - What are #next-steps to fix agent-doc bugs?
+- :pushpin: Please diagnose JB file cache conflict dialogs.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

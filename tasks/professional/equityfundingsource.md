@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,117 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260619-224510.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-002118.md`*
 
 Compacted content:
-❯ - Archived 3 response topic(s): I still see the TMO loan terms on deal d6b78994; Reinstate loan info (property value, loan amount) alongside preferred terms; Payment Frequency truncation + add borrower info
+❯ - Archived 4 response topic(s): /lenders/available-deals should have a "Deals of Interest"; No invite email sent for the Lender Bros group; Lending-group email on by default + friendlier duplicate-invite handling + resend button; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: /lenders/available-deals should have a "Deals of Interest" — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: /lenders/available-deals should have a "Deals of Interest" just like the /lenders/dashboard page. deploy
-
-Done — spec + tests updated, committed, pushed, and deployed. The full Available Deals page now uses the **same either/or grouping as the dashboard preview**: a deal the lender has marked interest in, been selected for, or has a pending funding commitment leaves the Available bucket and renders in a single **"Deals of Interest"** section.
-
-**What changed (faithful dashboard parity):**
-- New `deals_of_interest = !active && (pending || selected_for_commitment || interested)`; `available_deals` now excludes all three (a deal is in **either** Available **or** Deals of Interest, never both — the dashboard's `set_deals` / `set_deals_of_interest` split).
-- The standalone **Selected Deals** + **Pending Deals** sections are folded into the one Deals of Interest section.
-- The **Interested Only** filter is removed — the Deals of Interest section now serves that purpose (the dashboard has no such filter).
-- Card behavior in the section: pending/selected deals render **read-only** (`pending` badge — "Funding commitment under review" / "Selected for commitment"); an **interested-but-uncommitted** deal keeps its interest heart so the lender can drop it back into Available.
-- **Active Funded Deals** stays its own section (unchanged).
-- Page subtitle now reads "N open opportunities · M deals of interest · K active funded deals".
-
-**Changed paths (`src/equityfundingsource-dev`, commit `8590852`, pushed + deployed):**
-- `lib/ui--browser--efs/portal/investor/available_deals.tsx` — grouping, Deals of Interest section, filter/section removal.
-- `tests/investor-portal-e2e.test.ts` — updated `#pending-deals` assertions to the new grouping/section, dropped the Interested Only assertions.
-- `prds/rpzm-investor-dashboard-rework.md` — recorded the full-page parity under Phase 2b (#deals-of-interest).
-
-**Verify + deploy:** `make check` green — **895 pass, 0 fail**, typecheck clean, worker bundle built. `make deploy` succeeded (live). Superproject pointer bumped to `8590852` (`3424eaf69`, pushed).
-
-One heads-up: this **removes** the separate Selected/Pending sections and the Interested Only filter in favor of dashboard parity. If you'd rather keep those standalone sections *and* add Deals of Interest on top, say so and I'll switch to the additive layout. Confidence: high — suite-verified. Escalation: none. (Note: committed via `--force-disk` — the route-owned supervisor's IPC listener was wedged on a stale binary; `admin recycle` is queued to refresh it at the next idle boundary.)
-
-### Re: No invite email sent for the Lender Bros group — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: An email was not sent to btak.dev+lender2@gmail.com after btak.dev+investor@gmail.com invited btak.dev+lender2@gmail.com to the Lender Bros group. deploy
-
-Fixed, tested, committed, pushed, and deployed. Two root causes:
-
-**1. The invite email was gated off in production.** Multi-Lender Group invite/joined emails are gated behind `LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED`, and that flag was **never set in `wrangler.toml`** — so the gate defaulted off and every invite silently no-op'd the email (the in-app notification still fired). I enabled it, plus `LENDING_GROUP_NOTIFICATION_FROM` pointed at the Cloudflare-verified `info@briantakita.me` sender (same delivery path/token as the working contact + secure-message emails; the default `info@equityfundingsource.com` isn't verified in Cloudflare Email yet — #f4rq).
-
-**2. The invite email link was a 404.** The email body linked to `/investors/dashboard`, which doesn't exist — the investor portal lives under `/lenders`. Switched it to `URLS.portal_investor_dashboard` (`/lenders/dashboard`) for both the invite and member-joined emails.
-
-**Changed paths (`src/equityfundingsource-dev`, commit `5b3d72b`, pushed + deployed):**
-- `wrangler.toml` — `LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED = "true"` + `LENDING_GROUP_NOTIFICATION_FROM`.
-- `app/equityfundingsource/lib/lending_groups/notify.ts` — import `URLS`; fix both portal links.
-- `tests/lending-group-notify.test.ts` — new: flag gate, correct portal path (not `/investors/dashboard`), prod wrangler config, route wiring.
-- `prds/lending-groups-plan.md` — recorded the prod-enable + link fix (#lender-group-invite-email).
-
-**Verify + deploy:** `make check` green — **899 pass, 0 fail** (4 new), typecheck clean. `make deploy` succeeded; the live worker now shows `LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED ("true")` bound. Superproject pointer bumped to `5b3d72b` (`d447381db`, pushed).
-
-Please re-run the invite (btak.dev+investor → btak.dev+lender2 into "Lender Bros") and confirm lender2 receives the email. One caveat to verify live: delivery depends on the `CLOUDFLARE_EMAIL_API_TOKEN` secret being present in prod (it is for the working message/contact emails, which share the exact same gate + token). Confidence: high — same delivery path as the already-working email flows. Escalation: none. (Note: committed via `--force-disk` — the route-owned supervisor's IPC listener is still wedged on the stale binary; `admin recycle` remains queued for the next idle boundary.)
-
-### Re: Lending-group email on by default + friendlier duplicate-invite handling + resend button — opus-4-8
-
-> **Queue prompt:**
->
-> Remove LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED gate. It should be on by default. Send email to btak.dev+lender2@gmail.com. deploy 
-
-
-> **Queue prompt:**
->
-> deploy
-
-
-> **Queue prompt:**
->
-> Adding btak.dev+lender2@gmail.com had an error "D1_ERROR: UNIQUE constraint failed: lending_group_members.group_id, lending_group_members.user_id: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)". Make the error friendlier. Add resend invite button.
-
-
-> **Queue prompt:**
->
-> :pushpin: Remove LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED gate. It should be on by default.
-
-
-All three queue items shipped and deployed. The root cause of "no email sent to lender2" turned out to be the duplicate-invite bug you flagged mid-cycle — re-inviting an already-seated member threw `D1_ERROR: UNIQUE constraint failed` *before* the email ever fired. Both that and the email gate are now fixed.
-
-**1. Email gate removed → on by default (`cd2d227`)**
-- `lib/lending_groups/notify.ts` — `lending_group_email_enabled_` no longer requires `LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED`. Email is **on by default**; the flag is now an explicit opt-out only (`false`/`0`/`no`/`off`). Delivery still needs configured Cloudflare Email or local capture; in-app notifications are unaffected.
-- `wrangler.toml` — dropped the now-redundant `= "true"` line (kept `LENDING_GROUP_NOTIFICATION_FROM`). Prod bindings confirm the flag is gone.
-
-**2. Friendlier duplicate-invite + resend button (`86aa7aa`)**
-- `lib/lending_groups/service.ts` — `lending_group_invite_member_` is now idempotent: an existing membership is re-used instead of INSERTing a duplicate (which hit the `(group_id, invited_email)`/`(group_id, user_id)` UNIQUE index). Re-inviting a pending member re-sends the invite; a declined/removed invite is re-activated; an already-active member returns a friendly "already a member" result. New `already_member`/`resent` flags drive the route.
-- `lib/lending_groups/routes.ts` — lender + admin invite routes email on a fresh invite or a resend (never re-email an active member), return a friendly `message`, and map any residual UNIQUE-race error to "already in this group" instead of a raw D1 blob.
-- `lib/ui--browser--efs/portal/shared/lending_groups.tsx` — the Invite Co-Lenders dialog now lists pending invitations with a **"Resend invite"** button each, and shows a green confirmation ("Invitation re-sent to …").
-
-**Verification**
-- `bun test`: **902 pass / 0 fail** (added 3 resend/idempotency tests).
-- `bun run build` + `build:worker`: clean.
-- `deploy:worker`: deployed (gate removal `752f1def`, resend feature `b1bdea0f`).
-
-**lender2 / "Lender Bros":** btak.dev+lender2 is already an `invited` member with an account. Open the group's **Invite Co-Lenders** dialog and click **Resend invite** next to btak.dev+lender2 — it now re-sends the email (on by default) instead of erroring. (I couldn't trigger the send myself: the worker invite route needs an investor/admin session, and the EFS deploy token returns 401 on the Cloudflare Email Sending API — it lacks `email:send` scope.)
-
-Confidence: high — code + deploy binding-verified, regression covered by tests. Escalation: none.
-
-### Re: Free-text queue heads should have auto-struck (#agent-doc-bug) — opus-4-8
-
-Agreed — they should have. Two parts: I cleaned up this session now, and filed the product fix per `#agent-doc-bug` (plan only, not implemented).
-
-**Immediate cleanup (this session):** struck the 4 stranded heads with `agent-doc queue consume --count 4` — queue is now drained and `queue_active` cleared (`queue_drainable_head_count: 0`). They matched cleanly now that the post-recovery snapshot equals the document.
-
-**Why they weren't struck automatically — 3 compounding causes:**
-1. The finalize strike heuristic **only consumes one free-text head per cycle** (`main.rs` `queue consume` doc), so a cycle answering 4 heads leaves 3 stragglers.
-2. My closeout went through the **recovery path** (wedged IPC → `reset --from-current` → `commit`), which **bypasses the strike entirely** — it's coupled to the happy-path finalize, not to "the cycle reached `committed`." So zero heads struck.
-3. `queue consume` earlier **exact-matched and rejected** ("snapshot head prompts do not match document head prompts") because the live buffer had mutated the heads (added a 📌 prefix, split one prompt into several).
-
-**Fix filed (NOT implemented):** `tasks/agent-doc/plan-freetext-queue-head-autostrike.md` — strike *all* answered free-text heads, move the strike onto the `committed` seam so recovery paths (`--force-disk`, `reset→commit`) converge, and normalize head matching (pushpin/emoji/whitespace/split). Scoped to free-text heads; id-backed heads still reaped via `--done`.
-
-**Backlog:** I couldn't add it to `agent-doc-bugs2.md` — that doc is owned by a live session (pane %125) and the binary blocked the cross-pane write (correctly; I didn't `claim` it to avoid disrupting that session). Add this line to its backlog from that session:
-`- [ ] [#qheadstrike] [operator-verify] #agent-doc-bug Completed free-text queue heads not struck after a proven closeout (one-head-per-finalize + recovery-path bypass + exact head-match rejects on live-buffer drift). Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md`
-<!-- agent:boundary:d171290e -->
+<!-- agent:boundary:fcd1200a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -156,6 +51,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: Go through the review items. Add actionable items into the backlog and queue.
 <!-- /agent:queue -->
 
 ## Backlog

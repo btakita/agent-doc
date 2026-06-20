@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -72,7 +72,34 @@ Shipped the concrete ask: each **INVITED — PENDING** member in the admin deal 
 > :pushpin: deploy
 
 Deployed. `make deploy` pushed the worker live at `https://equityfundingsource.brian-takita.workers.dev` (startup ~20 ms, bindings unchanged) on commit `3de4e09`. The "Send Reminder to Accept Invite" action is now live in production.
-<!-- agent:boundary:fe9aa493 -->
+
+### Re: Is lender2@ blocking group selection — and is it accreditation? — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Please diagnose the issue with btak.dev+lender2@gmail.com blocking EFS from accepting the lender group for the available deal? The messaging is not clear. The lender needs to have alerts of what needs to be done next. Is it because the lender is not accredited?
+
+Diagnosed against **prod D1**. Short answer: **No — it is not accreditation, and lender2@ is not actually blocking selection.** The group *can* be selected right now; lender2@ is simply a **pending (un-accepted) invite**, and the real gap is that **lender2@ has no way in their portal to accept it**.
+
+**Prod facts (deal `d6b78994…`, group "Lender Bros" `bbfb89d2…`):**
+
+| Member | group status | accreditation_status | accredited_confirmed_at | stake |
+|---|---|---|---|---|
+| `investor@` (lead) | **active** | pending | **set** (self-attested) | 60% |
+| `lender2@` | **invited** | pending | **set** (self-attested) | 40% |
+
+**Why it's not accreditation:** the selection gate (`#group-accreditation-gate`) checks *active* members only, and treats a member as accredited if `accreditation_status='verified'` **OR** `accredited_confirmed_at` is set (self-attested at signup — `investor_is_accredited_`). lender2@ has `accredited_confirmed_at` set, **and** is `invited` (not active), so the gate doesn't even evaluate them. The one active member, investor@, *is* accredited. So `lending_group_unaccredited_members_R_` returns empty → the accreditation gate **passes**. (The "pending" label is just the formal-verification status; it does not block selection.)
+
+**Why nothing else blocks it either:** I checked the other two select-gates against prod — the loan has a TMO number (`tmo_loan_number=FTM631`) and investor@ (the controlling lender, who funds the confirmed share) has a TMO lender account (`lender_account="123"`). All three server gates pass, and `select_lender_` has no client-side block. **So the admin can select Lender Bros today — it will fund investor@'s 60%.** lender2@'s 40% stays reserved-but-unfunded ("60% confirmed · 100% intended") until they accept.
+
+**The real gap (this is what "the lender needs alerts of what to do next" is pointing at):** the *only* pending action is **lender2@ accepting the group invite** (status `invited → active`). But there is **no accept affordance anywhere in the lender portal** — the backend `POST /api/lender/groups/:id/respond` (accept/decline) endpoint exists, yet **no UI calls it**. The invite email signs them in, but the destination portal has no "Accept invitation" button. So lender2@ is effectively stuck: they can't self-serve the one thing that would complete the group.
+
+**Recommended fix (lender-facing, low-risk — wires to the existing endpoint):**
+1. **Pending-invite alert** on the lender's groups page (and a dashboard banner): "You've been invited to **Lender Bros** (40%) — **Accept** / **Decline**", calling `POST /api/lender/groups/:id/respond`.
+2. On accept, lender2@ becomes `active`, their 40% allocation lands, and the deal shows 100% confirmed.
+
+I held off building it this turn because the ask was "diagnose" and the UX (banner placement, accept+decline, dashboard vs groups page) is a design choice — **say "build the lender accept-invite alert" and I'll ship it** (UI-only; the endpoint is already there). On the admin side, the **"Send Reminder to Accept Invite"** button I shipped last cycle (live now) is the complementary nudge to prompt lender2@ to do exactly this.
+<!-- agent:boundary:e42d7622 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,7 +112,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Please diagnose the issue with btak.dev+lender2@gmail.com blocking EFS from accepting the lender group for the available deal? The messaging is not clear. The lender needs to have alerts of what needs to be done next. Is it because the lender is not accredited?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,28 @@ completed
 Compacted content:
 - Archived 4 response topic(s): Message a lender individually; deploy; Is lender2@ blocking group selection; 1 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:2061e991 -->
+
+### Re: Lender Bros 60% committed vs group 100% allocated — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.
+
+
+The screenshot (`img_33.png`) confirms the two numbers measure different things, so they aren't actually in conflict:
+
+- **Group → deal allocation**: the *Lender Bros* group is allocated **100%** of deal `d6b78994` (it takes the whole loan).
+- **Member → group confirmation**: within the group, `investor@` (CONTROLS) is at **60%** and `lender2@` at **0%** → the badge reads **"60% confirmed (partial)"**. The split (`lending_group_deal_split_set_`) imposes no 100%-sum rule, so partial is legal — there was no "requirement" actually blocking anything.
+
+You chose **fix the admin display** + *let the admin edit the allocations via an overlay dialog*, so I built exactly that:
+
+- **Backend** — `POST /api/admin/lending-groups/:id/deals/:dealId/allocations` (`require_admin_`, reuses the already-tested `lending_group_deal_split_set_`; partial splits allowed).
+- **Admin UI** — an **Edit** action on each group header in the deal panel opens `AdminDealAllocationEditorModal` (built on the shared `PortalModal`): a per-member % editor that surfaces the running confirmed total and only blocks Save when it exceeds 100% — it does **not** force-rebalance to 100% like the default member-stakes editor.
+- **Tests** — data-layer read→edit→save round-trip (the exact 60%→reconcile case) + route/overlay wiring assertions. Full suite **976 pass / 0 fail**; browser + worker bundles build clean.
+- **Spec** — documented as `#admin-deal-alloc-edit` in `prds/lending-groups-plan.md`.
+
+Committed + pushed to EFS `origin/main` (`8889a4c`). Per the `#spec-test-commit-push` preset I did **not** deploy — filed a `[recommended]` backlog item to deploy to the worker and live-verify the overlay on deal `d6b78994` when you're ready.
+<!-- agent:boundary:0d0817a2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +72,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.
+- ~~:pushpin: The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.~~
 - The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.
 - do [#nthc]
 <!-- /agent:queue -->

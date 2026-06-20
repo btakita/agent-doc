@@ -38,7 +38,41 @@ completed
 Compacted content:
 ❯ - Archived 5 response topic(s): Set-password dialog on a passwordless link for lender2; deploy; Gate lender-group selection on all members being accredited; 2 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:9c0c1d2c -->
+
+### Re: Message a lender individually — "Send Reminder to Accept Invite" — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In …/admin/pipeline?…deal_tab=interests > Multi-Lender Groups should have a UI to message a lender individually. Use case: if the lender is in an Invited–Pending state, notify them. Natural request: "Send Reminder to Accept Invite" / a message link that opens a message dialog.
+
+Shipped the concrete ask: each **INVITED — PENDING** member in the admin deal panel's **Multi-Lender Groups** card now has a one-click **"Send Reminder to Accept Invite"** button.
+
+**What it does:** the button re-sends the original invitation — an **in-app notification** plus an **email containing a secure, single-use sign-in link** (the same `notify_lender_group_invite_` path the first invite uses, so the lender clicks straight into their portal to accept). The button shows `Sending…` while in flight and `Reminder sent ✓` afterward, with a success/error toast.
+
+**Backend** (`lib/lending_groups/routes.ts`): new admin-only endpoint
+`POST /api/admin/lending-groups/:id/members/:memberId/remind`. It looks the member up by id, verifies they belong to the group, and **only sends when the member is still `invited`** (an already-active/declined member returns **409**, so the UI only offers it for genuine pending invites). Member with no invite email → 422.
+
+**Frontend** (`lib/ui--browser--efs/portal/admin/deal_detail.tsx`): the pending-member row in `AdminDealLendingGroups` now renders the button next to the `INVITED — PENDING` badge, with per-member sending/sent state.
+
+**Tests:** added `tests/lender-group-invite-reminder.test.ts` (8 cases) pinning the route mount, admin gate, group-membership check, `invited`-only 409 guard, notification firing, and the UI button → endpoint wiring. Full suite **966 pass / 0 fail**; app + worker builds clean.
+
+**Shipped:** committed `3de4e09`, pushed to `origin/main`, deployed the worker via `make deploy` — live at `https://equityfundingsource.brian-takita.workers.dev`. Verified the endpoint is live in prod (`POST …/remind` → **401** unauthenticated, i.e. mounted + admin-gated, not 404).
+
+*Scoped to the canned reminder (the concrete "Send Reminder to Accept Invite" you described). The "**message link that opens a message dialog**" for arbitrary free-text admin→lender messages is a natural follow-up — say the word and I'll add a compose dialog on top of this same plumbing. (Filed as a `[recommended]` follow-up; the live editor's pending-write IPC was degraded this cycle so it's noted here rather than in the backlog.)*
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests > Multi-Lender Groups should have a UI to message a lender individually. The use case is if the lender is in an Invited Pending state, then we should be able to notify the lender. The natural request is to "Send Reminder to Accept Invite" and to expose the messaging. Perhaps we should have a message link that opens a message dialog?
+
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Deployed. `make deploy` pushed the worker live at `https://equityfundingsource.brian-takita.workers.dev` (startup ~20 ms, bindings unchanged) on commit `3de4e09`. The "Send Reminder to Accept Invite" action is now live in production.
+<!-- agent:boundary:d5d2a21c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +85,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests > Multi-Lender Groups should have a UI to message a lender individually. The use case is if the lender is in an Invited Pending state, then we should be able to notify the lender. The natural request is to "Send Reminder to Accept Invite" and to expose the messaging. Perhaps we should have a message link that opens a message dialog?
+- ~~:pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests > Multi-Lender Groups should have a UI to message a lender individually. The use case is if the lender is in an Invited Pending state, then we should be able to notify the lender. The natural request is to "Send Reminder to Accept Invite" and to expose the messaging. Perhaps we should have a message link that opens a message dialog?~~
 - deploy
 <!-- /agent:queue -->
 

@@ -292,37 +292,42 @@ You're right, and the live evidence is sitting **in this very document**: my con
 **One deliberate hold:** I am **not** starting the merge-layer surgery in *this* session. The merge path is load-bearing for every write, and this session is actively drifting (your prompt itself triggered a splice) — a half-applied CRDT change here would worsen corruption, not fix it. `#qcellmerge1` is scoped to run in a fresh, clean-context focused cycle against the now-matched 0.34.35 supervisor. That's a sequencing decision to protect your data, not a gate to dodge work — say "go" and I'll drive `#qcellmerge1` as the next cycle.
 
 (This cycle also made the `#orphanqhead` prune durable — `#kcb5`/`#hap7`/`#j9ja` struck at HEAD — and the supervisor is now fresh on 0.34.35, which is why this finalize lands cleanly where the last few drifted.)
-<!-- agent:boundary:c7422e76 -->
+
+### Re: Why so much drift — and can evented/reactive/isolation techniques fix it? — opus-4-8
+
+You said "go" by putting `do [#qcellmerge1]` at the queue head, so I drove it this fresh cycle. Phase 1 of the answer is now **shipped** — and it's exactly your fourth question (isolate parts of the document so typing into a queue item can't disturb a running job).
+
+**Why there is so much drift.** Almost all of it traces to one thing: `crdt::merge` reconciled the **entire document as one text blob**. Every write/finalize/convergence threw the whole file into a single 3-way merge. So your queue keystroke and the agent's `exchange` write competed in the *same* merge even though they touch unrelated regions — and with no notion of "cell," text could land in the wrong place. That's literally how console output ("● Supervisor is now fresh…") ended up spliced **into** `agent:queue`. The stale-base detection and `dedup_adjacent_blocks` hacks were band-aids over duplicates that blob-merging itself produced.
+
+**Can we isolate parts of the document? — yes, shipped (`#qcellmerge1`, submodule `52458f47`).** New `crdt::merge_by_component` splits ours/theirs/base into the existing `<!-- agent:* -->` cells (`exchange`, `queue`, `backlog`, …) and merges **each cell against its own base**, then recombines in document order. Result: an `exchange` write and a `queue` edit no longer contend, and content can't cross a cell wall. Both FFI merge entry points now route through it. Guardrails: a component added/removed on one side falls back to the whole-doc merge (logged, never silent); a component-less inline doc delegates straight to the legacy merge. Four tests cover it (cross-component isolation, the console-in-queue corruption class now unreproducible, inline-degeneration equals legacy, structural-divergence fallback); `make check` green at 4853.
+
+This is the merge-layer rung underneath the whole `#editorbufwin`/`#hap7`/`#qdup`/`#gf5n` corruption family — those are symptoms of blob-merge, and they should stop reproducing once this is installed and live.
+
+**Can we tighten the drift window with evented/reactive techniques? — partly already, and it's the right direction for the rest.** Two distinct levers:
+
+1. **Cell isolation (just landed)** shrinks *what* can conflict. Even with the current latency, a queue keystroke and an exchange write can no longer corrupt each other.
+2. **Evented reflection** shrinks *when* things diverge. Today the agent's edits are reconciled at `finalize`; the window between "agent changed the model" and "document reflects it" is where a concurrent keystroke races. Pushing agent-side deltas into the per-cell model *on write* (rather than reconciling at finalize) closes that window. That's `#qcellmerge4` in the plan, and it couples directly to your IPC question.
+
+**Do JB + VS Code expose document-change events? — yes, both.** IntelliJ has `DocumentListener` (`documentChanged`) on the editor `Document`, and VS Code has `workspace.onDidChangeTextDocument`. The plugins already watch `.agent-doc/patches/` and apply via the Document API. The reactive plumbing exists; what's missing is making the agent→model direction evented too rather than finalize-batched.
+
+**Low-latency multi-channel streaming IPC vs one stream-per-document?** The cleaner model is **one bidirectional stream per document** with a dedicated thread owning that document's cell model — not many channels. Per-document gives you a natural lock domain (the document is the unit of contention), keeps ordering trivial (one writer thread per doc), and matches the cell model: the stream carries per-cell deltas, the thread applies them to the right cell. Many channels would reintroduce the cross-talk we just eliminated. We already have the socket IPC substrate (`ipc_socket.rs`, `agent_doc_start_ipc_listener`); the work is to make it carry per-cell deltas continuously instead of whole-patch-at-finalize. I'd sequence that as `#qcellmerge2` (durable per-cell state) → `#qcellmerge3` (item-level cells, your literal "queue items as cells") → `#qcellmerge4` (evented per-cell streaming), since each needs the one before it.
+
+**What I did NOT do, deliberately.** No version bump, install, `lib-install`, or recycle this cycle — per your standing "stop cutting releases until the per-cell merge corruption is fixed," and because installing mid-live-session makes the finalize client newer than the running supervisor and *causes* drift. The code is committed and pushed; I filed `#qcm1verify` as the operator-gated install + live-eyeball (drive one edit-during-finalize cycle at a recycle boundary and confirm zero cross-component splice). `#qcellmerge2/3` are queued as actionable follow-ons. CI for the push is in progress (prior two runs green); local `make check` is the verification of record.
+<!-- agent:boundary:d30941ea -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: [#kcb5]~~
-- ~~Stop cutting release. We should not have even released 0.34.0. There is too much churn and IPC issues to release.~~
-- :pushpin: do [#6b5h]
-- ~~#hap7~~
-- ~~complete [#j9ja]~~
-- :pushpin: [#1jec]
+- :pushpin: do [#qcellmerge1]
+- We should generalize cell merge. It should be applied to the entire structure of the document AST. So if someone writes a prompt interleaved with an exchange response, the cell is the particular exchange response. The key is isolation of merges. To avoid conflicts and drift. The React Virtual DOM may be a good example of what we are trying to do.435
 - :pushpin: Why is there so much drift? Can we tighten the window that causes drift by using evented and reactive techniques? Does the JB + VSCode environments support events whenever a document changes? Can we have a low-latency multi-channel streaming IPC mechanism from the plugin to the CPC? Or would it be better to one stream per document going to the CPC with a thread updating the document model? Can we isolate parts of the document so to reduce conflict? For example, I was typing into this queue item so it should not have any effect on the running job and it should not stall the queue since this is not the current item being run.
-- :pushpin: Why does monsterrodholders.md keep on reporting a stale 0.1.0 supervisor if we are using a recent version? `(Housekeeping: recycled a stale 0.1.0 supervisor that was producing the IPC-drift dialogs, and reconciled the agent-loop→boost-client parent pointer.)`
----
-Any changes made by agent-doc should immediately be reflected in the document model. As I was typing this prompt, the duplicate content document corruption occurred. We need to isolate queue items as cells for content merges. Not an entire document CRDT merge...to prevent merge corrupting the editor buffer events.
-```
-● Supervisor is now fresh (recycled to 0.34.35, matched). But there are 2 real user prompt changes this cycle (UIPC: 2,
-  multi_topic). Let me see what the operator actually edited:
-
-● Bash(python3 -c "
-      import json…)
-  ⎿  === user_intent_prompt_changes ===
-     - content_edit :: - ~~complete [#j9ja]~~
-     - content_edit :: - :pushpin: do [#6b5h]
-```
----
-- :pushpin: do [#qprtloss]
 - :pushpin: do [#6b5h]
-- do [#6b5h]
-- do [#qcellmerge1]
+- :pushpin: [#1jec]
+- :pushpin: do [#qprtloss]
+- :pushpin: Why does monsterrodholders.md keep on reporting a stale 0.1.0 supervisor if we are using a recent version? `(Housekeeping: recycled a stale 0.1.0 supervisor that was producing the IPC-drift dialogs, and reconciled the agent-loop→boost-client parent pointer.)`
+- do [#qcellmerge2]
+- do [#qcellmerge3]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -349,7 +354,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#qcellmerge1] #agent-doc-bug Component-scoped CRDT merge — the anti-corruption rung. Replace the whole-document crdt::merge(base, ours_text, theirs_text) with a per-component merge so unrelated cells (exchange vs queue) never contend and content cannot splice across components. Live repro 2026-06-20: agent console output ("Supervisor is now fresh...") was merged INTO agent:queue as a fenced block while the operator typed a prompt. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (phases qcellmerge1..4). Implement in a focused clean-context cycle, not mid-drift.
+- [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qcellmerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
+- [ ] [#qcellmerge2] #agent-doc-bug Per-component CRDT state persistence — persist .agent-doc/crdt/<hash>.<component>.yrs (or one multi-cell state) so each cell carries its own stable base across cycles instead of one whole-doc <hash>.yrs. Migration: decode existing whole-doc state and split, or rebuild per-component lazily. Acceptance: round-trip per-component encode/decode; a cell's base advances independently; compaction GCs per cell. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 2). Builds on shipped #qcellmerge1.
+- [ ] [#qcellmerge3] #agent-doc-bug Item-level cells inside queue/backlog — treat each list item (by durable node key, already used by strike paths) as its own merge cell so two concurrent edits to different queue items never contend and an in-progress item edit cannot stall the queue (operator's literal 'isolate queue items as cells'). Acceptance: SimWorld — editing queue item B while item A is the running head does not touch A and does not stall the drain. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 3). Sequenced after #qcellmerge2.
 - [ ] [#qprtloss] [focused-cycle] #agent-doc-bug Silent user-prompt loss: a user-typed queue line ("- re #cftk: Would passage... work?") was deleted by preflight queue-convergence during a concurrent admin recycle, and the cycle reported no_changes so the prompt was never answered. Smoking gun: preflight #1 no_changes:false diff_type:simple_question diff:null, then preflight #2 no_changes:true; prior turn logged "converged live editor buffer (auto=false, queue_active=false)" + "admin recycle ... at next idle boundary". Distinct from #6b5h (finalize IPC wedge) — this is preflight-side data loss before any response is composed. Fix dirs: convergence must CRDT-merge (never overwrite) an uncommitted live-buffer queue/exchange edit; no_changes:false + diff:null with non-empty prompt_changes must fail closed (reconstruct from semantic diff, never resolve to no_changes:true); sequence recycle after pending-prompt capture; add SimWorld coverage. Plan: tasks/agent-doc/plan-prompt-loss-queue-convergence.md. DO NOT IMPLEMENT yet.
 - [ ] [#6b5h] [focused-cycle] #agent-doc-bug Pure-CLI agent-doc session (no live JB editor) wedges every finalize on editor-IPC no_ack, forcing --force-disk. Live repro 2026-06-20, equityfundingsource.md driven from a Claude Code pane (%158) with NO JetBrains IDE running and the controller (controller serve, pid 2014438, 0.34.27) as the sole daemon: admin list shows the doc actor ready with an active editor-IPC listener, but there is no editor endpoint behind it. Every finalize: socket "ack status: error" -> file-IPC fallback writes a patch no editor applies -> no_ack -> recovery=retry_without_disk_write -> fail-closed "refusing direct disk write; editor IPC listener active". Only finalize --force-disk succeeds (commits landed via CRDT merge). Controller-mediated write --pending-add into THIS bugs doc also wedged identically (send_failed) and the foreign-ownership guard required claim --force - the bug plus ownership guard block capturing the bug via the normal path. Never self-heals: actor not orphaned and binary not stale, so neither M1b orphan-reap, drain-lease expiry, nor stale-binary recycle fires. Extends #cyh0/#fcczero, #wd40, #rt83 (queue_control_paused dispatch flood ~2/sec on this doc + orphaned save-document.signal), #editorbufwin. Full report: tasks/agent-doc/ipc-wedge-cli-no-editor.md. Fix direction: detect editor-IPC-listener-registered-but-no-live-editor for a CLI-only actor and route finalize to the controller-host disk write instead of no_ack wedge; OR do not arm the editor-IPC disk-write guard when no plugin editor is attached. Supervisor-core; needs editor-less live repro + SimWorld coverage.
 - [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).

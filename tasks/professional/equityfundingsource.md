@@ -66,6 +66,11 @@ No code changed this cycle — this was a triage pass. #5q7z-fix and #214f-gate 
 
 ### Re: do #214f-gate — gate investor deal publish on loan acceptance — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#214f-gate]
+
+
 Shipped. `admin_deal_publish_` now refuses to publish a loan that hasn't been accepted, closing the #214f gap where a `submitted` loan with no `full_application` row could surface as an Available Deal.
 
 **What changed**
@@ -83,7 +88,7 @@ Shipped. `admin_deal_publish_` now refuses to publish a loan that hasn't been ac
 **Verification:** `make check` green — **907 pass, 0 fail** (+5), typecheck clean, worker bundle built. No GitHub Actions CI is configured for the EFS repo; the local suite is authoritative.
 
 **Confidence:** high — the gate is unit-tested and its only runtime callers are the post-accept autopublish (passes) and the manual publish route (now 409s with a reason). **Escalation:** none — but confirm the accepted-before-available rule if TMO-imported loans without an EFS application should remain publishable.
-<!-- agent:boundary:223fc669 -->
+<!-- agent:boundary:56f8700f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,7 +101,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#214f-gate]
+- ~~do [#214f-gate]~~
 - do [#5q7z-fix]
 <!-- /agent:queue -->
 

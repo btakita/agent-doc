@@ -162,7 +162,19 @@ Created the plan (`plan-editor-buffer-wins-queue-merge.md`, committed `17b3f8f8b
 **Gated `#editorbufwin`** — plan-complete, but the implementation is a focused merge-core cycle. This is the one justified gate: a blind in-loop attempt *already* tripped a hidden invariant, which is exactly why it isn't loop-safe. The plan has the four invariants the fix must not regress.
 
 **Live irony:** this very cycle kept hitting `#editorbufwin` — every granular write drifted on `content_ours`, needing `agent-doc commit` recovery. The `admin recycle` I queued fires when this turn ends and should clear the stale CRDT.
-<!-- agent:boundary:2357af3a -->
+
+### Re: Still getting JB File Cache Conflicts — opus-4-8
+
+I think this session is *showing you* the unidentified `#cyh0` FCC trigger in real time. Here's the connection:
+
+The FCC dialog fires when agent-doc writes the session doc **to disk** while your JB editor holds it. This session, every `content_ours` drift recovery did exactly that: `finalize` hit `live_prompt_drift_after_preflight`, then `agent-doc commit` logged `postcommit_worktree_check match=false → auto-reconciled to HEAD via disk_after_failed_editor_refresh` — a **disk write to the session doc**. That's the FCC. So the FCC you're still seeing is the **`#pcwc` disk reconcile during the `#editorbufwin` drift**, not a separate unknown trigger.
+
+That ties `#cyh0` (FCC, "unidentified trigger") to `#editorbufwin` (the content_ours drift): the editor-buffer-wins fix (P1 — the `#pcwc` reconcile preserves additions via editor IPC instead of overwriting disk) removes this FCC trigger as a side effect. I've noted that linkage; `#cyh0`'s "capture the exact action" ask is, for this session, answered: the action is the drift-recovery disk reconcile.
+
+Near-term: the `admin recycle` I queued fires when this turn ends and refreshes the stale supervisor CRDT — that stops the `content_ours` drift, which stops the `disk_after_failed_editor_refresh` writes, which stops these FCCs. If they persist after the recycle on a clean (non-drifting) cycle, that's a genuinely separate trigger and I'll need the exact `ops.log` line at the dialog moment (`write_authority action=... transport=disk`) to find it.
+
+I'm stopping the drain here rather than piling more writes onto a drifting supervisor — the recycle needs this turn to end so it can clear the stale CRDT.
+<!-- agent:boundary:c952cdda -->
 <!-- /agent:exchange -->
 
 ## Queue

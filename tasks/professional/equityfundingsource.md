@@ -38,7 +38,13 @@ completed
 Compacted content:
 ❯ - Archived 5 response topic(s): Go through the review items; do #214f-gate; #5q7z TMO duplicate-loan fix; 2 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:d5dcfaa1 -->
+
+### Re: session compacted — opus-4-8
+
+Context compacted — 5 prior response topics archived to `.agent-doc/archives/…-20260620-022443.md` (the `#214f-gate` publish-on-acceptance gate, the `#5q7z` TMO duplicate-loan fix, and the *publishable*/*funded-vs-available* clarifications). All of that work is committed + pushed; nothing is pending.
+
+The only open queue head is the operator-gated **`#5q7z-ship`** deploy (deferred — needs `#commit-push-deploy` / `bun run deploy:worker` + live-verify). Ready for your next prompt.
+<!-- agent:boundary:fd6717dd -->
 <!-- /agent:exchange -->
 ###
 <!--

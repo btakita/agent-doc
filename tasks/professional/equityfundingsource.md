@@ -165,7 +165,7 @@ I rendered the exact markup before shipping (Joined row + Invited/Resend row at 
 Shipped: tests **931 pass / 0 fail**, committed (`5338231`) + pushed, **deployed to production** (version `496add51`; bundle `index.browser-J2JASOC6.js`). Hard-refresh `/lenders/groups` to see it.
 
 If any specific element still reads off to you, point at it (or drop another screenshot) and I'll tighten it further — a subjective "highest standard" is easiest to converge with your eye on the live page.
-<!-- agent:boundary:02a162c0 -->
+<!-- agent:boundary:979232c0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -178,8 +178,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Still not lining up well ![img_32.png](img_32.png). Please loop until you can format this to the highest standard.~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

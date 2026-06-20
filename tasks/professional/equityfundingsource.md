@@ -38,7 +38,29 @@ completed
 Compacted content:
 ❯ - Archived 2 response topic(s): Email sign-in link; deploy
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:5c340f74 -->
+
+### Re: Admin sees no log-out message on passwordless link — toast + persistent banner — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: When I click the passwordless list while logged in as an admin, I don't see a message to log out. There should be a toast message and a message that remains after the toast disappears.
+
+
+> **Queue prompt:**
+>
+> :pushpin: When I click the passwordless link while logged in as an admin, I don't see a message to log out. There should be a toast message and a message that remains after the toast disappears.
+
+Fixed and deployed. **Root cause of "no message":** my prior fix only handled the *used/expired* token branch. As an admin you almost certainly had a **valid** token, which fell through to `login_and_redirect_` and **silently switched your session** to the link's account — so the log-out notice never fired at all.
+
+**What changed** (`lib/auth/routes.ts`): the already-signed-in guard now runs **before** any token validation/consumption in `/login/email/verify`. When you're signed in it:
+- **never switches accounts** — a passwordless link can't take over an existing session;
+- **does not consume the token**, so a still-valid link works the moment you log out and click it again;
+- shows the notice **two ways**, exactly as requested — a transient **toast** (the `efs_flash` cookie the logout flow already uses) **and** a **persistent banner** that stays on the page after the toast fades (`/?notice=…` → new `home_notice_()` on the home page).
+
+Message: **"You're already signed in. Please log out, then open your email sign-in link again."**
+
+Verified: updated `tests/email-login.test.ts` asserts the guard runs before token consumption + both delivery paths; fixed two brittle source-string tests in `public-content.test.ts` that pinned the old `home__doc_html_` call. Full `bun run check` (test + build + build:worker) **947 pass / 0 fail**. Committed (`b1424ba`) + pushed. Live worker checks: `GET /?notice=…` renders the persistent banner; home with no notice has none; signed-out verify still `303`s to `/login/email`. (Test on the worker host — `www.equityfundingsource.com` is still the legacy Apache origin, as noted last cycle.)
+<!-- agent:boundary:3216bc02 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +73,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: When I click the passwordless list while logged in as an admin, I don't see a message to log out. There should be a toast message and a message that remains after the toast disappears.
+- ~~:pushpin: When I click the passwordless list while logged in as an admin, I don't see a message to log out. There should be a toast message and a message that remains after the toast disappears.~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

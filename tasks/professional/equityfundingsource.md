@@ -116,7 +116,28 @@ Note this is the lender's soft **proposal**, distinct from the **group allocatio
 I couldn't confirm the exact D1 row (which of amount/rate/points is populated for deal `d6b78994`) — D1 read is still gated on **#cftk** (no D1-scoped token). Once it lands I can show the row.
 
 **Recommendation (filed `[recommended]` #cmtsec):** if this block should only appear for an actual committed amount, gate `interest_has_proposal_` on `proposal_amount != null`, or relabel it "Proposed terms" so showing a rate/points doesn't imply a committed amount.
-<!-- agent:boundary:844f03d6 -->
+
+### Re: would `passage btak/equityfundingsource/cloudflare_api_token` work? — opus-4-8
+
+**Yes — it works.** I tested it (token never printed): `token verify` = **active**, and it has **D1 access** — both a D1 database list and a `SELECT` query succeeded against account `1e7e194ff8da4ad9e40ce041aea84f76` / DB `280e1539` (the `equityfundingsource` DB). The D1 `/query` API requires *Account D1 Edit*, so write scope is confirmed too.
+
+And your **`.env` line 7 already references this exact path** (`CLOUDFLARE_API_TOKEN=[REDACTED] So **`#cftk` is resolved** with no change needed — the token at that passage entry must have been re-scoped with D1 since the last test (which had failed on 10000/wrong-acct). The cf-wrangler / `cf:d1:query:remote` tooling and the D1-gated investigations (`#dealtab500`, `#cmtsec`) are unblocked.
+
+**Bonus — I queried the `d6b78994` row, which corrects my earlier answer:** the "Committed amount and sold rate by this lender" section is showing a **real submitted proposal**, not a null-amount artifact:
+
+| field | value |
+|---|---|
+| lender | `btak.dev+investor@gmail.com` (investor@, the group controller) |
+| proposal_amount | **$100,000** |
+| proposal_interest_rate | **6.5%** |
+| proposal_points | null |
+| proposal_submitted_at | 2026-06-19 6:26pm EDT |
+| selected_at | null (not yet blended into the deal) |
+
+So my prior `#cmtsec` "blank committed amount" hypothesis was **wrong for this deal** — there genuinely is a $100k @ 6.5% proposal recorded under the **investor@** account (the same account at 60% group-confirmed). If you didn't intend to commit $100k, that's stale/test data on the investor@ interest row — clearing that proposal removes the section. (`#cmtsec` updated with this; the latent UI behavior — showing on a rate/points-only proposal — still stands for *other* rows.)
+
+**On the dropped prompt** — you're right, my last turn lost it. The `no_changes:false → diff:null → no_changes:true` was the preflight queue-convergence wiping your uncommitted live-buffer line during the concurrent supervisor recycle. That's silent user-data loss; I filed it per `#agent-doc-bug` as **`#qprtloss`** in `agent-doc-bugs2.md` with a plan (`tasks/agent-doc/plan-prompt-loss-queue-convergence.md`) — distinct from the `#6b5h` finalize-wedge, and **not** implemented per the preset. Apologies for the round-trip.
+<!-- agent:boundary:6de2ca3f -->
 <!-- /agent:exchange -->
 ###
 <!--

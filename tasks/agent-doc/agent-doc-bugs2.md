@@ -39,13 +39,42 @@ completed
 Compacted content:
 - Archived 1 response topic(s): still not submitting after restart (img_52) + the cascade causes
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): do #jbtsiftnosub; JB Run Agent Doc on monsterrodholders.md dup...
-<!-- agent:boundary:7d21f255 -->
+
+### Re: JB Run Agent Doc "did not submit" / duplicate prompts after restart (img_52) — opus-4-8
+
+`img_52.png` is the smoking gun: it shows `agent-doc …/equityfundingsource.md` typed into the pane **~7 times, none submitted**. Combined with the monsterrodholders route log (29s of `Still waiting for claude … active claude turn`, then `blocked … never reached a dispatch-ready prompt`), all three reports are **one root cluster, not three bugs**:
+
+- **Same root:** post-restart dispatch into a harness pane that is **not yet dispatch-ready** (still booting / showing the `bypass permissions on · 1 shell` loading line, or a bare shell after a crash).
+- **Three surface symptoms** of that one root:
+  1. **no submit** (efs report #1) — trigger typed into a not-ready composer, Enter never registers as a submitted prompt.
+  2. **duplicate prompts + no submit** (efs report #2 / img_52) — the readiness **retry loop re-types the trigger on every poll**, stacking ~7 copies, still never submitting.
+  3. **fail-closed stall / "restart state should not lag"** (monsterrod) — the route waits ~29s, never sees a dispatch-ready prompt, and bails.
+
+This maps onto existing review items #1vhn (routedeadshell), #jbrundispatch, #runexitrestart, and the not-actually-fixed wait-for-ready path (#jbrunstart). The **new, agent-actionable facet** img_52 reveals is the retry shape: the route conflates *readiness polling* with *injection*, so it re-types instead of polling silently. I captured it as **§D** in `plan-route-dispatch-into-crashed-harness.md` with a SimWorld acceptance (zero injects while not-ready, exactly one after ready).
+
+### Re: What are #next-steps to fix agent-doc bugs? — opus-4-8
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` on equityfundingsource.md did not submit.
+
+
+Backlog was empty (all work sat as 20 gated review items). I added the top follow-up and put it at the head:
+
+- **Top of backlog: `#rdypoll`** — *Post-restart Run Agent Doc re-types the trigger N times into a not-ready pane with no submit.* This is the highest-priority fix because it is **reproducible and high-pain** (it's what you just hit twice), and its core is **agent-actionable** in `route.rs`: separate readiness-polling from injection, inject exactly once after a positively-identified harness dispatch-ready prompt, clear the composer before any retry, fail closed on a shell/booting pane without typing. Only the final two-pane live check is operator-gated. Plan §D carries the SimWorld + `dispatch_inject attempt=N` log marker so you can prove/disprove it from ops.log after you test.
+
+Priority order of the active route/dispatch cluster (all share the post-restart-not-ready root): **#rdypoll → #1vhn → #jbrundispatch → #runexitrestart → #qpauseux**. The remaining review items (#wd40, #editorbufwin, #hap7, etc.) are separate families (supervisor recycle, CRDT merge) and stay below the dispatch cluster until this user-visible breakage is closed.
+
+I did **not** blind-patch `route.rs` this cycle — it is invariant-heavy and needs `make check` + `make tmux-ci` across two live panes, so #rdypoll carries `[operator-verify]` for the live gate. The monsterrodholders restart-lag report (queue head 2) is the same root and is already covered by #rdypoll; it'll strike as the same cluster.
+
+**Top backlog id: `#rdypoll`**
+<!-- agent:boundary:f6b98b8d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- JB `Run Agent Doc` on equityfundingsource.md did not submit.
+- ~~JB `Run Agent Doc` on equityfundingsource.md did not submit.~~
 - After restarting an agent-doc session, then JB `Run Agent Doc` on equityfundingsource.md, the duplicate prompts with no submit occurred ![img_52.png](img_52.png). I thought this issue was fixed but it's not fixed.
 - What are #next-steps to fix agent-doc bugs?
 ---
@@ -101,6 +130,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rdypoll] [operator-verify] #agent-doc-bug Post-restart JB Run Agent Doc re-types the agent-doc trigger N times into a not-ready/booting pane with NO submit (img_52: ~7 stacked copies on equityfundingsource.md; same root as the monsterrodholders 29s "active claude turn" boot stall + #1vhn routedeadshell). The route conflates readiness-polling with injection. Fix: poll for the harness dispatch-ready prompt WITHOUT typing; inject the trigger exactly once after a positively-identified dispatch-ready prompt; re-verify immediately before the single send; clear the composer before any retry (or never re-type); fail closed on a not-ready/shell pane without injecting any text. Add dispatch_inject attempt=N ops.log marker + SimWorld asserting zero injects while not-ready and exactly one after ready. Live two-pane verify. Plan: tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md (§D)
 <!-- /agent:backlog -->
 
 ## Review

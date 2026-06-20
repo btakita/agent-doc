@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -51,7 +51,7 @@ Queue corrected: the 3 answered free-text operator heads ("Why is the 0.1.0 supe
 Compaction landed (archive `483039e7…-20260620-082845.md`, 9 topics). Recovered the stale-snapshot drift via `reset --from-current --preserve-session` + `commit`.
 
 Queue corrected: the 3 answered free-text operator heads ("Why is the 0.1.0 supervisor…", the two `JB Run Agent Doc` reports) were never struck (the `#qheadstrike` class). Drained them via `agent-doc queue consume`; queue block is now empty and `queue: stop`. All 21 gated `[/]` review items intact. Committed `48f1f024a`.
-<!-- agent:boundary:d1903b04 -->
+<!-- agent:boundary:47d9a218 -->
 <!-- /agent:exchange -->
 
 ## Queue

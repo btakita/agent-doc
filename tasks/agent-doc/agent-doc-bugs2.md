@@ -39,7 +39,7 @@ completed
 Compacted content:
 - Archived 5 response topic(s): do #jbtsiftnosub; JB Run Agent Doc on monsterrodholders.md duplicates + no submit; do #avgwire; 2 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:50e07e8c -->
+<!-- agent:boundary:6d06fcbc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -47,6 +47,7 @@ Compacted content:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - :pushpin: [#vgat]: JB `Run Agent Doc` on monsterrodholders.md did not reproduce the issue. Is this done?
 - JB `Run Agent Doc` on equityfundingsource.md did not submit.
+- After restarting an agent-doc session, then JB `Run Agent Doc` on equityfundingsource.md, the duplicate prompts with no submit occurred ![img_52.png](img_52.png). I thought this issue was fixed but it's not fixed.
 - What are #next-steps to fix agent-doc bugs?
 <!-- /agent:queue -->
 <!--

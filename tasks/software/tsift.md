@@ -126,13 +126,45 @@ It's a real multi-phase project, so per my offer I wrote the **plan** rather tha
 **On your #1yks refinement** ("automate crates.io trusted publishing + add a runbook"): captured as a backlog item. Note the honest constraint — per-crate trusted-publishing config is a crates.io **web-UI + browser/passkey 2FA** step that can't be fully API-automated; the runbook will script the repeatable parts and document the 2FA step as yours. I'll write it in a focused cycle (it's separate from the tsift code work). #1yks itself stays gated on that 2FA bootstrap for the two new crates.
 
 Session note: this doc is drift-heavy from a stale route-owned supervisor (pane %184) — responses are landing at HEAD via recovery, but if you see churn that's the cause, not the content.
-<!-- agent:boundary:4b7e1016 -->
+
+### Re: #015t verified — FTS5 Phases 0/1/2 shipped — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#015t]: verified
+
+
+> **Queue prompt:** :pushpin: [#015t]: verified
+
+Read "verified" as lifting #015t's `[operator-verify]` gate + the `#spec-test-build-install-commit-push` preset = start the FTS5 build. Did Phase 0 (spike) → 1 (schema) → 2 (populate), **committed + pushed** (tsift `592ab08`, superproject `15c04b585`). It's additive and **written-but-unread**, so zero search-behavior change yet — the JSON `TokenIndex` stays authoritative until the Phase 3 parity gate.
+
+**Phase 0 spike — decisions settled:**
+- **FTS5 is available, no new dep** — bundled `rusqlite` compiles it in; already used in-repo by `tsift-tokensave` + `tsift-memory` (passing tests = reference impls).
+- **Tokenizer `unicode61`** — matches the current `TokenIndex` tokenization exactly, so Phase 3 top-K parity is reachable. Exact-identifier lookups use external `rg -F`, so **zero exact-lookup regression**.
+- **Inline `body` storage** — corrected my earlier "external-content saves space" note: tsift has no pre-existing body table to reference, so external-content would duplicate the body anyway. Inline is simplest, snippets+BM25 work, costs ~+12 MB on a 22 MB `index.db`. Contentless logged as a Phase 4 size-optimization.
+
+**Phases 1/2 — what landed (`packages/tsift-index/src/index.rs`):**
+- `content_fts(path UNINDEXED, body, tokenize='unicode61')` virtual table + a `meta` `content_fts_version` stamp.
+- Maintained transactionally, **mirroring the `file_zonemap` lifecycle exactly** — upsert at index time, replace on modify, remove on delete, clear+repopulate on `rebuild`.
+- Read API `content_fts_count` / `content_fts_search` (BM25-ranked), unused by search until Phase 3.
+- 3 lifecycle tests. `make check` green, clippy `-D warnings` clean. **Live:** rebuilt the tsift index → `content_fts` == `file_state` == 199 rows; BM25 MATCH ranks `index.rs` top for "content_fts".
+
+**Honest findings carried to Phase 3:**
+- **Scope difference** — `apply_changes` only source-reads recognized-language files (rust/markdown/bash/js/ts here), so `content_fts` excludes unrecognized extensions (`.txt`, extensionless) that `TokenIndex` does index. The cutover must reconcile this (extend index.db reads, or consciously narrow lexical search to recognized files — arguably right for a code-RAG tool).
+- **Delete is an O(n) scan** (`DELETE ... WHERE path` on an UNINDEXED column) — fine at current scale; deterministic-rowid optimization logged for Phase 4.
+
+CI for `592ab08` is **in progress** (recorded, not gating — local `make check` + live rebuild are the evidence).
+
+**#015t stays open** (multi-session): Phases 0/1/2 done, **Phase 3 next** = the `index.db`-backed FTS query behind a flag with the `pruned == unpruned` / top-K parity gate. That's the behavior-changing increment — say **"do phase 3"** when you want it. #ph7n (crates.io trusted-publishing runbook) is still queued as separate, non-tsift work.
+
+Note: this doc is still drift-heavy from the stale route-owned supervisor (pane %184) — responses land at HEAD via recovery.
+<!-- agent:boundary:d6053ca1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: [#015t]: verified
+- ~~:pushpin: [#015t]: verified~~
 - :pushpin: [#ph7n]
 <!-- /agent:queue -->
 <!--
@@ -142,7 +174,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#015t] [operator-verify] Implement native FTS5 content index per tasks/software/plan-tsift-fts5-content-index.md — phased schema -> populate -> flagged query -> cutover -> ship; gives the file_zonemap substrate its consumer. Multi-session project, operator-scheduled.
+- [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 DONE + pushed (content_fts scaffold, written-but-unread; tsift 592ab08). NEXT: Phase 3 = index.db-backed FTS query behind a flag + pruned==unpruned / top-K parity gate vs TokenIndex; then Phase 4 cutover (retire TokenIndex) + Phase 5 ship. Multi-session, operator-scheduled — say "do phase 3".
 - [ ] [#ph7n] Write a crates.io trusted-publishing runbook in agent-loop: procedure to add a NEW crate to OIDC trusted publishing (the per-crate config is web-UI + browser/passkey 2FA, so document that as the operator step) plus any scriptable parts. Refines #1yks automation ask.
 <!-- /agent:backlog -->
 

@@ -170,7 +170,22 @@ The submit (`:425-435`) then sends `proposal_interest_rate: rate` whenever an am
 **So the rate is the real issue.** Filed as **`#proprate`**: stop pre-filling the rate with the deal default, allow `proposal_interest_rate = null` ("amount committed, rate TBD"), and relax the `:421` validation + admin display to match.
 
 Want me to **null `proposal_interest_rate` on the `d6b78994` row** (live D1 write) so it reflects "amount committed, rate not finalized"? I'll only do that on your go.
-<!-- agent:boundary:c59fbd2c -->
+
+### Re: [#proprate] do cleanup — opus-4-8
+
+Done — nulled the defaulted rate on the live `d6b78994` row (D1 `changes=1`):
+
+| field | before | after |
+|---|---|---|
+| proposal_amount | $100,000 | **$100,000** (kept) |
+| proposal_interest_rate | 6.5 | **null** |
+| proposal_points | null | null |
+| proposal_submitted_at | 2026-06-19 | unchanged (kept) |
+
+So the investor@ interest now reads **"amount committed ($100k), rate not finalized"** — the admin "Sold rate" pill will show "-". Safe to do: the deal isn't selected (`selected_at` null), so no blended-rate recompute was triggered.
+
+The **code fix** half of `#proprate` (stop pre-filling the rate default, allow `proposal_interest_rate = null`, relax the `:421` validation + admin display) is still **gated pending your go** — without it, the next proposal submit would re-default the rate. Say the word and I'll implement + test it.
+<!-- agent:boundary:5b95fe5d -->
 <!-- /agent:exchange -->
 ###
 <!--

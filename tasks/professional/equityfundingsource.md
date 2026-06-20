@@ -63,7 +63,27 @@ Went through all 18 gated review items and split them by whether an agent sessio
 - #dealtab500 (live repro / #cftk token), #cftk (operator mints the Cloudflare D1 token), #5eq8 (closing-docs redesign, design-blocked), #efs-cutover-sso-plan (parent; writeable half is #cutover-checklist), #xcvg / #xcvg-prod-email (Resend domain #f4rq + SMTP #m6ch/#p40t), #dzmm / #dzmm-writeback-replay (TMO write field-map #7a4d + support #k2xg), #jnzs / #jnzs-approval-followup (await Judith/EFS reviewer), #67v2 (Kanban; partly TMO-gated), #zwws (remaining phases externally gated), #next-steps (custom-domain cutover deferred), #dropbox-sync-adapter (needs Dropbox access).
 
 No code changed this cycle — this was a triage pass. #5q7z-fix and #214f-gate are queued for the go-loop.
-<!-- agent:boundary:efabd3b4 -->
+
+### Re: do #214f-gate — gate investor deal publish on loan acceptance — opus-4-8
+
+Shipped. `admin_deal_publish_` now refuses to publish a loan that hasn't been accepted, closing the #214f gap where a `submitted` loan with no `full_application` row could surface as an Available Deal.
+
+**What changed**
+- New `loan_publish_eligibility_R_(db, loan)` in `app/equityfundingsource/lib/admin/repo.ts`: a loan is publishable only if it is **Funded** (`tmo_loan_status='Funded'`) or its originating full application has reached **`status='accepted'`** (resolved by `tmo_loan_application_rec_id`, then `tmo_loan_number` — mirroring `admin_deal_by_loan_R_`'s `application_id` COALESCE).
+- `admin_deal_publish_` runs the gate before any `investment_deals` insert/update and throws `loan … cannot be published: <reason>` when ineligible. The existing `POST /api/admin/loans/:id/deal` handler already maps that throw to a **409** carrying the reason, so the admin UI surfaces *why* a loan is ineligible.
+- The #accept-autopublish path is unaffected — acceptance (`status='accepted'`) is set immediately before its `admin_deal_publish_` call, so it passes the gate.
+
+**Business rule:** accepted-before-available (the operator-stated default). A TMO-sourced loan that is neither Funded nor backed by an accepted EFS full application is now blocked — broaden `loan_publish_eligibility_R_` if that proves too strict.
+
+**Changed paths** (`src/equityfundingsource-dev`, commit `5491393`, pushed; superproject pointer `04964fce0`):
+- `app/equityfundingsource/lib/admin/repo.ts` — eligibility helper + gate.
+- `tests/admin-deal-publish-gate.test.ts` — new (5 tests: Funded short-circuit, accepted→eligible, submitted→blocked, no-application→blocked, gate-runs-before-write source check).
+- `prds/apply4-full-application-build-plan.md` — documented #214f-gate under the #accept-autopublish section.
+
+**Verification:** `make check` green — **907 pass, 0 fail** (+5), typecheck clean, worker bundle built. No GitHub Actions CI is configured for the EFS repo; the local suite is authoritative.
+
+**Confidence:** high — the gate is unit-tested and its only runtime callers are the post-accept autopublish (passes) and the manual publish route (now 409s with a reason). **Escalation:** none — but confirm the accepted-before-available rule if TMO-imported loans without an EFS application should remain publishable.
+<!-- agent:boundary:223fc669 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,7 +105,6 @@ After 20:30
 <!-- agent:backlog priority queue -->
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [/] [#67v2-aa-local] [recommended] Admin pipeline auto-advance local half (advances #67v2-auto-advance): define stage-requirement checks from the TMO-aligned Kanban and enqueue audited status updates to tmo_cache_outbox; replay stays gated on #dzmm. Depends on the #67v2 Kanban stages being built first.
-- [ ] [#214f-gate] Gate investor deal publish on acceptance (advances #214f): add an acceptance check before status='published' in admin_deal_publish_ (lib/admin/repo.ts) + POST /api/admin/loans/:id/deal, blocking publish of a non-accepted loan and surfacing why it is ineligible. Default business rule: accepted-before-available (operator may revise). Complements the shipped #accept-autopublish auto-publish-on-accept flow.
 - [ ] [#5q7z-fix] TMO duplicate-loan fix (advances #5q7z, relates #dealtab500/#214f): (1) approve/writeback path (admin/applications/index.ts -> tmo_writeback.ts NewLoan) must detect an existing TMO association (tmo_loan_rec_id present / writeback_status=sent) and associate+mark accepted locally instead of calling NewLoan, avoiding the TMO 400 'Duplicate loan number'; (2) hide/disable 'Accept and send to TMO' in lib/ui--browser--efs/portal/admin/full_applications.tsx when the loan is already in TMO. Safe default for the design Q: associate-only, no TMO call.
 <!-- /agent:backlog -->
 

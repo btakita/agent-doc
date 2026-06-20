@@ -3,7 +3,7 @@ members = ["agent-doc-core", "agent-doc-sqlite", "agent-doc-orchestration", "age
 
 [package]
 name = "agent-doc"
-version = "0.34.23"
+version = "0.34.24"
 edition = "2024"
 description = "Interactive document sessions with AI agents"
 license = "MIT"

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -137,7 +137,7 @@ And your **`.env` line 7 already references this exact path** (`CLOUDFLARE_API_T
 So my prior `#cmtsec` "blank committed amount" hypothesis was **wrong for this deal** — there genuinely is a $100k @ 6.5% proposal recorded under the **investor@** account (the same account at 60% group-confirmed). If you didn't intend to commit $100k, that's stale/test data on the investor@ interest row — clearing that proposal removes the section. (`#cmtsec` updated with this; the latent UI behavior — showing on a rate/points-only proposal — still stands for *other* rows.)
 
 **On the dropped prompt** — you're right, my last turn lost it. The `no_changes:false → diff:null → no_changes:true` was the preflight queue-convergence wiping your uncommitted live-buffer line during the concurrent supervisor recycle. That's silent user-data loss; I filed it per `#agent-doc-bug` as **`#qprtloss`** in `agent-doc-bugs2.md` with a plan (`tasks/agent-doc/plan-prompt-loss-queue-convergence.md`) — distinct from the `#6b5h` finalize-wedge, and **not** implemented per the preset. Apologies for the round-trip.
-<!-- agent:boundary:6de2ca3f -->
+<!-- agent:boundary:5a730319 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -150,11 +150,14 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: The amount was committed. But the other terms are not yet finalized...such as the interest rate and frequency. Was a record created with the interest rate and duration using default values? It should not have.
+- do [#proprate]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#proprate] Lender proposal persists a DEFAULT interest rate that was never finalized. investor/deal_detail.tsx:362 pre-fills proposal_rate from deal.monthly_interest (the deal display rate) when deal.proposal_interest_rate==null, and submit (:425-435) sends proposal_interest_rate=rate whenever an amount is present; :421 validation REQUIRES a finite rate, so a lender cannot commit an amount with rate left TBD — the pre-filled default (6.5% on d6b78994, deal sold_rate/preferred_sold_rate both null) gets persisted as if finalized. Duration is NOT affected: investor_deal_interests has no proposal_term_months/frequency column (only proposal_amount/_interest_rate/_points/_submitted_at); the form term is client-side validation/payment-preview only and is discarded on save (admin "Amortized over" pill reads a non-existent field -> "-"). Fix: do NOT pre-fill the rate with the deal default; allow proposal_interest_rate=null ("amount committed, rate TBD"); relax :421 validation + admin LoanTermProposalSummary display. Optional data cleanup: null proposal_interest_rate on the d6b78994 interest row (operator go required).
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.

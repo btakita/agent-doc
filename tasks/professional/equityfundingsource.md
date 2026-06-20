@@ -91,7 +91,19 @@ Fixed and deployed. The gap: the invite auto-login link (`/login/invite?token=`)
 Verified: new gate-wiring test + SSO-exclusion assert; full suite **937 pass / 0 fail**, worker rebuilt. Committed (`1e68b16`) + pushed, **deployed to production** (version `d0cf6448`).
 
 Note: if `btak.dev+lender2@gmail.com` already set a password in an earlier test, it won't re-prompt (that's correct — credentials aren't missing). To re-test the flow, invite a fresh address.
-<!-- agent:boundary:a2f57a2c -->
+
+### Re: Passwordless "login by email link" — opus-4-8
+
+Built and deployed. The login page now has an **"Email me a sign-in link"** option: the user enters their email, we email a single-use link, and clicking it signs them straight into their portal — no password.
+
+**Flow (mirrors forgot-password, but logs them in):**
+- `GET /login/email` — the request form; `POST /login/email` mints a token and emails the link. **Enumeration-safe**: it always returns the same "if an account exists, we sent a link" notice.
+- `GET /login/email/verify?token=` — validates + consumes the token, signs them in, and routes first-timers (no password yet) to account completion, everyone else to their portal.
+
+**Token / expiry (best practice):** single-use, raw token never stored (only a SHA-256 hash), and **short-lived — 30 minutes by default**, configurable via `EMAIL_LOGIN_TTL_MINUTES` and hard-clamped to ≤ 24h. (Magic-link best practice is a short window, well under the 24h ceiling you set.) It lives in its own `email_login_tokens` table (migration 0093) so requesting a login link never invalidates a pending **group invite** token.
+
+**Verified live:** migration 0093 applied on deploy; `GET /login/email` → 200, `POST /login/email` → 200 (generic notice — confirms the table exists), `verify` with no token → 303. Full suite **945 pass / 0 fail** (new real-D1 token-lifecycle + TTL + wiring tests). Committed (`b888b9b`) + pushed, **deployed to production** (version `747fff2c`).
+<!-- agent:boundary:e2cbc3d1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -105,7 +117,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: I clicked on the invite for btak.dev+lender2@gmail.com and was logged in. But I was not presented with setting a password. Setting credentials should be the 1st step if the credentials are missing for any portal account.~~
-- Add a login by email link...where an email is sent with a link that has the auth token. The a
+- Add a login by email link...where an email is sent with a link that has the auth token. The auth token should expire in 24h or less...use best practice for the expiration.
 - :pushpin: deploy
 <!-- /agent:queue -->
 

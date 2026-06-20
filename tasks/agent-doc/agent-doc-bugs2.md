@@ -196,7 +196,19 @@ Implemented + shipped agent-doc `0.34.32` (submodule `fb75e58e`, superproject `3
 All three pure decision functions are unit-tested (the part that "remains after changes"); full suite + clippy + `make tmux-ci` green. Two pieces are appropriately operator-gated and tracked as a `[focused-cycle]` follow-up (dogfooding the new tag): the end-to-end SimWorld scenario for the Layer C pause-failsafe (the SimWorld engine doesn't model the pause gate yet) and the live two-pane verification — both are supervisor-core and need live tmux, exactly the category `[focused-cycle]` exists for.
 
 Your queue (`#kcb5`, `do [#6b5h]`, `#hap7`, `complete [#j9ja]`) is intact and drainable. With Layer C now live, after the supervisor recycles onto 0.34.32 the failsafe will keep it draining even under the pause — and if I ever stall it again, Layer B will say so out loud.
-<!-- agent:boundary:f304d9ee -->
+
+### Re: Queue curation + a Layer C flood regression I shipped, caught, and fixed — opus-4-8
+
+Acknowledged your queue curation: `#hap7` and `complete [#j9ja]` struck, `do [#6b5h]` pinned, `do [#qprtloss]` added.
+
+**But the important thing this cycle: my own `#qstallguard` Layer C had a flood regression — and it fired live.** When the supervisor recycled onto 0.34.32 it started logging `queue_paused_failsafe_single_owner_drain` ~2/sec (3000+ ops.log lines). My Layer C fall-through had **no rate-limit**: every idle-watch tick where the paused queue had a drainable head and no in-session loop owner fell through, reintroducing the exact `#rt83`/`#qflood` per-tick flood the pause exists to prevent. It was log-only (the `turn_active` guard blocked actual pane dispatch), but the supervisor never reached an idle recycle boundary — so it couldn't self-heal onto the fix.
+
+**Root cause + fix (0.34.34, submodule `6a2b99ae`, pushed, installed, host recycled onto it):** the failsafe now CLAIMS the drain-owner lease as `supervisor-failsafe` when it dispatches, computed once before the pause gate, so the gate defers every subsequent tick until the 90s lease TTL — single-owner cadence (≤1 dispatch / 90s), never per-tick. Confirmed live: flood rate dropped from ~16/8s to **0/15s** after the host recycled. Full suite + clippy + `make tmux-ci` green.
+
+There's an honest irony here: I shipped a queue-stall guard and its own pause-failsafe layer caused a queue *flood*. The pure decision functions were unit-tested, but the **cadence** (an integration property — "how often does this fire") wasn't, and that's exactly where it broke. The end-to-end SimWorld coverage of the pause-failsafe — which would have caught this — is the `[focused-cycle]` follow-up I flagged; this incident makes it higher priority. I also found the drain-owner lease path is keyed on the raw doc-path string (relative-vs-absolute callers hash to different lease files), tracked as a follow-up; within one supervisor process the claim/read agree so the rate-limit holds.
+
+**On the remaining heads (`#kcb5`, `#6b5h`, `#qprtloss`):** all three declare in their own text that they're supervisor-core / need editor-less live repro / "DO NOT IMPLEMENT yet" — i.e. they need dedicated cycles, not in-loop drains. The right move per Layer A is to tag them `[focused-cycle]` so the binary classifies them as non-drainable (not me deciding from prose). I did **not** apply the tags this cycle: you're actively curating the queue and the supervisor is mid-recycle, so a concurrent backlog edit risks the exact convergence corruption that's plagued this session. Say the word and I'll tag them, or drain `#6b5h`'s agent-doable fix in a dedicated cycle.
+<!-- agent:boundary:07b7726a -->
 <!-- /agent:exchange -->
 
 ## Queue

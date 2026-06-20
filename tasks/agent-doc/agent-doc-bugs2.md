@@ -189,13 +189,40 @@ Correcting my earlier message in this turn: the `v0.34.24` tag triggered the Rel
 Shipped + live: submodule `27692f01` + tag `v0.34.25`, superproject `9237fccd2`, `cargo install` + `lib-install` → `agent-doc 0.34.25` (supervisor recycles onto it at this turn's idle boundary). This very closeout quotes the efs head above, so the new logic strikes it — the live demonstration.
 
 **Left intact (correctly):** the `img_53` "/login duplicated the prompt, no submit" head is a **new, unanswered** report — same class as `#rdypoll`/§D (post-login/restart duplicate-no-submit; the `dispatch_inject attempt=N` marker shipped 0.34.23). It stays an active queue head until the operator live-verify (`#rdypoll-deploy`) proves it. New unanswered reports SHOULD be unstruck.
-<!-- agent:boundary:2d5bbf2b -->
+
+### Re: the monsterrodholders.md wedge + "why the 0.1.0 supervisor" — one root, fixed at the trigger — opus-4-8
+
+> **Queue prompt:**
+>
+> monsterrodholders.md turn had a major wedge issue that corrupted the document.
+
+
+> monsterrodholders.md turn had a major wedge issue that corrupted the document.
+
+> Why is the 0.1.0 supervisor being used in monsterrodholders.md?
+
+**There is no "0.1.0 supervisor."** The `v0.1.0` in your log is the `agent-doc-orchestration` **sub-crate** version on the cargo compile line (`Compiling agent-doc-orchestration v0.1.0`), not the supervisor binary. The very next line of that same block is `Compiling agent-doc v0.34.24` — that's the real binary — and `lib-install` then placed `libagent_doc-0.34.25.so`. Internal workspace path-dep crates (`agent-doc-orchestration`, `agent-kit`, …) carry their own independent `0.x` versions and are never released on their own; only the top-level `agent-doc` version (now **0.34.25**) is the supervisor. Nothing 0.1.0 is running — that line is a cargo build label, not a supervisor identity.
+
+**What was genuinely stale — and what wedged the doc — is `#wd40`.** During a continuously self-draining `/loop`, the in-session drain holds a fresh drain-owner lease and keeps the harness `turn_active` back-to-back, so the route-owned supervisor never reaches its idle/turn-boundary recycle. `lib-install` marks the controllers to recycle, but the boundary is never reached, so a freshly-installed binary never hot-reloads and the **older 0.34.x supervisor keeps running**. That stale supervisor replays a stale in-memory CRDT and races the live doc into malformed states (`content_ours` finalize drift, the `#rt83` phantom-pin flood). That is the real "stale supervisor" you felt — not a 0.1.0 one.
+
+**The corruption itself is the CRDT scoped-merge family (`#hap7` / `#editorbufwin` / `#gf5n`).** When you edit the queue *while a turn is running*, the whole-component CRDT/semantic merge can duplicate, reverse, or drop adjacent structure. Your own note in the instruction block — *"much churn after I edited the queue while a turn was running… one churn item included deleting a queue item that I added"* — is exactly `#editorbufwin` (`content_ours` recovery dropping an unconsumed user queue addition) plus `#hap7` (concurrent-edit structural duplication). The reversed numbered list (`#gf5n`) is the same merge inverting item order under a live-buffer race. So the wedge is **not a new bug** — it is a fresh, high-pain repro of the already-tracked stale-supervisor + scoped-merge family.
+
+**Status — the trigger fix is now live, the containment fix is the next cycle:**
+- **`#wd40` (the trigger) shipped + installed in 0.34.25.** The recycle-yield makes the supervisor reach its recycle boundary *during* a self-draining loop, so the stale-binary race that drove this wedge closes as soon as the live supervisor execve-recycles onto 0.34.25 (queued for this turn's idle boundary — preflight already shows it auto-installed + recycled). Going forward the supervisor won't sit stale under a continuous drain.
+- **`#hap7` (the containment) is the one remaining code fix** that would have stopped the *actual corruption*: scope the CRDT merge to the structural node it applies to so a concurrent queue edit can't duplicate/reverse/drop adjacent structure, and surface operator-deleted structure in `agent:exchange` instead of merging it. It is invariant-heavy merge-core, needs `make check` + `make tmux-ci` across two live panes, and is explicitly **not in-loop-safe** — patching it blind in this still-degraded, just-recycled session is how you cause the *next* wedge. It's the next focused clean-supervisor cycle, now the top of the non-dispatch work.
+
+**On "no more gates after this round":** the 21 gated items split into two honest classes, and only one is agent-completable:
+1. **Agent-actionable code** — `#hap7`, `#editorbufwin` P1, `#fbwire`, `#agentreloadrestart`/`#restartagentmenu`, and the `#j9ja` avmark log-marker wiring. These are real backlog and get done in focused cycles (merge-core / supervisor-core, with full `make check` + `tmux-ci`). I won't relabel-and-drop them.
+- 2. **Genuinely operator-live-verify** (`#rdypoll-deploy`, `#cyh0`, `#jbrundispatch`, `#qpauseux`, `#1vhn`, …) — these match *your own* model ("I test, file bugs, you check logs"): the code is shipped, only a live two-pane editor test can prove them, so they can't be agent-"completed," only operator-tested. The right move for these is finishing `#j9ja` so each has a distinctive ops.log SUCCESS marker your test can prove/disprove from — that's the agent-doable part of "clear the gates."
+
+I deliberately did **not** attempt the full 21-item review→backlog triage in this cycle: the session is still settling onto the freshly-recycled 0.34.25 supervisor (preflight reported session drift across 2 tmux sessions + a just-fired auto-recycle), and a bulk multi-marker review edit mid-settle is precisely the concurrent-edit pattern that wedges. The next clean cycle on the recycled supervisor does the triage + starts `#hap7`.
+<!-- agent:boundary:0566759d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- monsterrodholders.md turn had a major wedge issue that corrupted the document.
+- ~~monsterrodholders.md turn had a major wedge issue that corrupted the document.~~
 ---
 Why is the 0.1.0 supervisor being used in monsterrodholders.md?
 ```

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -93,6 +93,11 @@ Queue drained — only the operator-gated `#5q7z-ship` live-verify remains. Stop
 
 > **Queue prompt:**
 >
+> The Lender Group members should be in a display: table or display: flex, where the columns line up. Add an input to change the percentages. The percentages should add up to 100%. Use best UI practices for the input logic. Should we have a lock icon to lock or unlock other lender % to rebalance changes to another lender %? deploy
+
+
+> **Queue prompt:**
+>
 > :pushpin: The Lender Group members should be in a display: table or display: flex, where the columns line up. Add an input to change the percentages. The percentages should add up to 100%. Use best UI practices for the input logic. Should we have a lock icon to lock or unlock other lender % to rebalance changes to another lender %? deploy
 
 
@@ -109,7 +114,7 @@ What shipped:
 - Rebalance math is a pure, unit-tested module (`lending_groups_alloc.ts`).
 
 Verification: full suite **931 pass / 0 fail**, `bun run build` + `build:worker` clean. Committed (`79daf10`) + pushed, and **deployed to production** (version `366a229c`) — the new endpoints return 401 (auth-gated) live on the origin, matching the existing routes.
-<!-- agent:boundary:b8d60c06 -->
+<!-- agent:boundary:ca60d526 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -123,7 +128,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: The Lender Group members should be in a display: table or display: flex, where the columns line up. Add an input to change the percentages. The percentages should add up to 100%. Use best UI practices for the input logic. Should we have a lock icon to lock or unlock other lender % to rebalance changes to another lender %? deploy~~
-- The Lender Group members should be in a display: table or display: flex, where the columns line up. Add an input to change the percentages. The percentages should add up to 100%. Use best UI practices for the input logic. Should we have a lock icon to lock or unlock other lender % to rebalance changes to another lender %? deploy
+- ~~The Lender Group members should be in a display: table or display: flex, where the columns line up. Add an input to change the percentages. The percentages should add up to 100%. Use best UI practices for the input logic. Should we have a lock icon to lock or unlock other lender % to rebalance changes to another lender %? deploy~~
 - do [#pmhf]
 <!-- /agent:queue -->
 

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -158,14 +158,32 @@ CI for `592ab08` is **in progress** (recorded, not gating — local `make check`
 **#015t stays open** (multi-session): Phases 0/1/2 done, **Phase 3 next** = the `index.db`-backed FTS query behind a flag with the `pruned == unpruned` / top-K parity gate. That's the behavior-changing increment — say **"do phase 3"** when you want it. #ph7n (crates.io trusted-publishing runbook) is still queued as separate, non-tsift work.
 
 Note: this doc is still drift-heavy from the stale route-owned supervisor (pane %184) — responses land at HEAD via recovery.
-<!-- agent:boundary:d6053ca1 -->
+
+### Re: #ph7n — crates.io trusted-publishing runbook — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#ph7n]
+
+
+> **Queue prompt:** :pushpin: [#ph7n]
+
+Wrote [`runbooks/crates-io-trusted-publishing.md`](../../runbooks/crates-io-trusted-publishing.md) (committed `7761dbca1`), grounded in tsift's working `release.yml`. It covers:
+- **What/why** — OIDC short-lived token minted from the GitHub Actions identity; no stored secret, nothing to rotate.
+- **Scriptable CI side** — `permissions: id-token: write` + `rust-lang/crates-io-auth-action@v1` + `cargo publish -p <crate> --locked`; delete the old `CARGO_REGISTRY_TOKEN`/`NPM_TOKEN` secret.
+- **Operator-only step** — per-crate registration at `crates.io/crates/<crate>/settings` → Trusted Publishing (owner/repo/`release.yml`), confirmed via **browser/passkey 2FA** — the part that can't be API-automated (the honest constraint from #1yks).
+- **Bootstrap gotcha** — a brand-new crate name has no settings page yet: pre-register from account settings, or do one tokened `cargo publish` to reserve the name, then register.
+- **Multi-crate completeness** — every dep (incl. optional feature deps) must exist + be a trusted publisher + be in the publish loop, else `-p <top>` fails "no matching package found"; publishes are idempotent.
+
+This drains the queue head. #ph7n was the last drainable item — the queue is now empty.
+
+**Session health note (operator action needed, out of scope here):** preflight flags `stale_install` — the installed `~/.cargo/bin/agent-doc` (0.34.20) **predates agent-doc source commit `d48b30ea`**, and `src/agent-doc` has uncommitted dev changes. So this session's route-owned supervisor (pane %184) runs older agent-doc code, which is what's been dropping granular backlog writes all session (both responses still committed correctly at HEAD via `content_ours` recovery, and the queue heads consumed cleanly). I scheduled an `admin recycle` but it hasn't landed — the durable fix is **`make install` in `src/agent-doc`** (after you review/commit the WIP there) + a supervisor restart. I'm deliberately **not** running that from this tsift session: it would build uncommitted, out-of-scope agent-doc code, and mid-session agent-doc installs are themselves a known drift source.
+<!-- agent:boundary:f067c57a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: [#015t]: verified~~
-- :pushpin: [#ph7n]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -175,7 +193,6 @@ https://github.com/chopratejas/headroom
 
 <!-- agent:backlog priority queue -->
 - [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 DONE + pushed (content_fts scaffold, written-but-unread; tsift 592ab08). NEXT: Phase 3 = index.db-backed FTS query behind a flag + pruned==unpruned / top-K parity gate vs TokenIndex; then Phase 4 cutover (retire TokenIndex) + Phase 5 ship. Multi-session, operator-scheduled — say "do phase 3".
-- [ ] [#ph7n] Write a crates.io trusted-publishing runbook in agent-loop: procedure to add a NEW crate to OIDC trusted publishing (the per-crate config is web-UI + browser/passkey 2FA, so document that as the operator step) plus any scriptable parts. Refines #1yks automation ask.
 <!-- /agent:backlog -->
 
 ## Review

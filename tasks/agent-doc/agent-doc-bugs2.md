@@ -122,14 +122,31 @@ You asked me to look in the logs for the crash. **Found it** — and it was a re
 **Fix (shipped — agent-doc submodule `a281ae3e`):** the give-up branch no longer kills the child. It keeps the gate `Failed` (dispatch disabled), marks the actor `Blocked`, surfaces the diagnostic, and logs a new line you can grep to prove the fix: `<harness>_capability_proof_live_child_preserved reason=dispatch_gated_not_killed`. Your live session survives a flaky probe; you fix the environment / stop / restart to re-prove. Test `failed_capability_proof_gate_blocks_dispatch_so_live_child_need_not_be_killed` locks in that the gate alone is the complete dispatch block. **`make check` green (4803 tests + clippy)**; release built; SPEC + README + VERSIONS updated.
 
 **Deliberately deferred the install:** this session's supervisor runs `~/.cargo/bin/agent-doc`, so a mid-turn `cargo install` would make my finalize client newer than the running supervisor → `live_prompt_drift`. The fix ships at your next `make install` + recycle boundary. I queued `#tsiftmdcrash-verify` with the exact log line to confirm once it's live.
-<!-- agent:boundary:4deb4eda -->
+
+### Re: ops.logs should have each entry contain a [readable] timestamp — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: ops.logs should have each entry contain a timestamp.
+
+
+Done (agent-doc submodule `57fc75ed`). Each log entry already had a prefix, but it was a **bare Unix epoch** — `[1781771180]` — which is why diagnosing `#tsiftmdcrash` meant mentally converting epochs to wall-clock time. Now every operational log entry carries a **human-readable ISO-8601 UTC timestamp**: `[2026-06-18T08:26:20Z] …`.
+
+**What changed:**
+- New `agent_doc_core::log_time` module — `format_log_timestamp` (epoch → `YYYY-MM-DDTHH:MM:SSZ`) and `parse_log_timestamp` (the reader). **No chrono/date dependency** (the code deliberately avoids one) — it uses Howard Hinnant's civil-date algorithms.
+- All writers now emit ISO: `ops.log`, the supervisor session log (`log_event`, `startup_miss`), `cycles.jsonl`, and the `/tmp` write-dedup + sync debug logs.
+
+**Why this needed care (not just a format swap):** the epoch was being **read back** as a `u64` in several staleness-critical places — `session_accretion` (recent-cycle / recent-restart windows), `startup_miss` windows, and the `gate_verify` ops.log scanner (including the `s760_clear_decision_clear_true` verifier, which compares marker times to a gate's `set_at`). A naive switch to ISO would have silently broken all of those (every timestamp parse → `None` → mis-windowed staleness / un-provable gates). So `parse_log_timestamp` is **backward-compatible**: it accepts *either* a bare epoch (old log lines + old cycles.jsonl) *or* ISO, and I routed every reader through it. The helper lives in `agent-doc-core` so the core `gate_verify` scanner and the orchestration writers share one implementation.
+
+**Verification:** `log_time` tests cover known vectors, an epoch↔ISO round-trip (incl. a leap day), and garbage-rejection (fails closed to `None`, never `0`); the `ops.log` integration test now asserts an ISO bracket that round-trips; the existing `gate_verify` epoch test still passes (proving backward-compat). **`make check` green (4805)**, release rebuilt. SPEC updated (`supervisor.md`, `07-core-commands.md`, `07-closeout-commands.md`). Goes live at the same deferred install boundary as `#tsiftmdcrash`.
+<!-- agent:boundary:1d587b91 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: For all `[operator-verify]` issues, look in the logs for verification.~~
-- :pushpin: ops.logs should have each entry contain a timestamp.
+- ~~:pushpin: ops.logs should have each entry contain a timestamp.~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.
 

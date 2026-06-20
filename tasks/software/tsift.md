@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -115,14 +115,14 @@ You queued `do phase 4b`, so I worked it. On inspection the three Phase 4b items
 **Verification:** `make check` green (exit 0; fixed a clippy `too_many_arguments` with the codebase's standard `#[allow]`); new test `run_sift_search_honors_threaded_freshness_verdict` (Some(true)→fts, Some(false)→lexical); built + installed; live-verified the worker path still returns `strategy: fts`.
 
 **NEXT:** Phase 4b's two deferred items need your call (keep/retire `TokenIndex` for degraded-read-only; whether the path-prune enhancement is worth it), and **Phase 5** is the operator-gated crates.io release. Say **"do #015t"** with a direction, or schedule the release.
-<!-- agent:boundary:d3d14300 -->
+<!-- agent:boundary:26ff09b8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: [#015t]: do phase 4b~~
-- [#015t]: do phase 4b
+- re #015t: Explain what is wrong with the TokenIndex build/cache. Is sift still useful for tsift?
+- do [#015t]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

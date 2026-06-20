@@ -271,7 +271,7 @@ Implemented and pushed (agent-doc `7b18567d`, **0.34.35**). But first an honest 
 **To clear THIS doc's churn now:** with 0.34.35 installed, `agent-doc queue prune-noise tasks/agent-doc/agent-doc-bugs2.md` will strike the orphan `[#kcb5]`, which unblocks `queue consume` to strike the two answered Qs — count drops to 0 and the loop settles. I'm doing the install + `lib-install` + `admin recycle` right after this commit (deferred until after closeout so the finalize client stays matched with the running supervisor — installing mid-finalize is what drifted this session).
 
 Remaining churn root that's *not* this fix: `#qheadstrike` (answered free-text heads not auto-struck through recovery paths) is still its own tracked item — `#orphanqhead` removes the head that *blocks* striking them, but the auto-strike-on-recovery gap is separate.
-<!-- agent:boundary:afc6f6dd -->
+<!-- agent:boundary:2f5c7306 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -280,12 +280,15 @@ Remaining churn root that's *not* this fix: `#qheadstrike` (answered free-text h
 - ~~:pushpin: [#kcb5]~~
 - :pushpin: do [#6b5h]
 - ~~#hap7~~
-- complete [#j9ja]
+- ~~complete [#j9ja]~~
 - :pushpin: [#1jec]
 - :pushpin: Why is there so much drift? Can we tighten the window that causes drift by using evented and reactive techniques? Does the JB + VSCode environments support events whenever a document changes? Can we have a low-latency multi-channel streaming IPC mechanism from the plugin to the CPC? Or would it be better to one stream per document going to the CPC with a thread updating the document model? Can we isolate parts of the document so to reduce conflict? For example, I was typing into this queue item so it should not have any effect on the running job and it should not stall the queue since this is not the current item being run.
 - :pushpin: Why does monsterrodholders.md keep on reporting a stale 0.1.0 supervisor if we are using a recent version? `(Housekeeping: recycled a stale 0.1.0 supervisor that was producing the IPC-drift dialogs, and reconciled the agent-loop→boost-client parent pointer.)`
 ---
+Any changes made by agent-doc should immediately be reflected in the
+---
 - :pushpin: do [#qprtloss]
+- :pushpin: do [#6b5h]
 - do [#6b5h]
 <!-- /agent:queue -->
 <!--

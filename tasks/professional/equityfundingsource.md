@@ -38,7 +38,22 @@ completed
 Compacted content:
 ❯ - Archived 3 response topic(s): invite link should switch accounts; invite token should have expiration; deploy
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:487c45fa -->
+
+### Re: member rows should fill full width, no email truncation — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Lender group member rows should fill the entire width of the parent ![img_30.png](img_30.png). The email should not be truncated.
+
+
+Fixed. The member rows were crammed into the narrow "Group" column, so emails ellipsis-truncated (`btak.dev+lend…` in your screenshot). They now render in a **full-width sub-row** spanning all columns.
+
+**What changed** (`lib/ui--browser--efs/portal/shared/lending_groups.tsx`, `GroupRow`): the per-member list moved out of the Group cell into a `<tr><td colspan={5}>` beneath each group's summary row. Each member's email cell is `flex:1 1 auto; min-width:0; word-break:break-all` — it fills the available width and wraps if ever needed, instead of truncating. The "Joined/Invited" badge + "Resend Invite" button stay right-aligned.
+
+**Tests:** e2e source-assertions updated (full-width colspan + non-truncating email cell). Full suite **920 pass / 0 fail**, builds clean.
+
+**Shipped:** committed + pushed EFS `1a522af`, pointer `1c97edbee`. (No `deploy` is queued — queue one, or I'll fold it into the next deploy.)
+<!-- agent:boundary:82f5f11c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +66,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Lender group member rows should fill the entire width of the parent ![img_30.png](img_30.png). The email should not be truncated.
+- ~~:pushpin: Lender group member rows should fill the entire width of the parent ![img_30.png](img_30.png). The email should not be truncated.~~
 - :pushpin: The lender group member table should have a default % of shares in deals. The deal % can be customized, but the default is the preset % values.
 <!-- /agent:queue -->
 

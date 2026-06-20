@@ -107,7 +107,23 @@ Not stalling — shipped the agent-doable rung this cycle.
 **Heads-up (live recurrence of #sqedit-race's own hazard):** while committing, the concurrent EFS supervisor's git op cleared my staged superproject index and absorbed my plan + pointer into *its* commit (`0ec626d9f`). No data loss — but it's the multi-writer race #sqedit-race tracks, now hitting git index staging, not just the queue body. Worth a follow-up on superproject-commit staging isolation.
 
 Not auto-looping: `queue_drainable_head_count: 0`, every remaining head is `[operator-verify]`.
-<!-- agent:boundary:b7a174ee -->
+
+### Re: Move the remaining [operator-verify] tasks into review — opus-4-8
+
+Done. All 7 backlog items were `[operator-verify]`, so the backlog is now empty and they sit in `agent:review` (gated `[/]`), ids preserved:
+
+- `#runexitrestart` — clean-exit route restart-then-submit (live two-pane verify)
+- `#tsiftmdcrash-verify` — capability-proof give-up no longer SIGTERMs the child (live)
+- `#qheadstrike` — strike-all-answered-free-text-heads on the committed seam
+- `#sqedit-race` — Phases 1–3 shipped; only Phase 4 (install → recycle → prune) left
+- `#qpausemix-verify` — session-check pause-preamble (live, controller-paused queue)
+- `#hap7` — scoped per-node CRDT merge (no structural duplication)
+- `#fbwire` — `#fullboundary` convergence-gate Phase 2 live wiring
+
+`agent:review` is now 17 items (was 10) — above the usual <10 target, but that's the explicit consolidation you asked for: every operator-gated item now lives in one place and the backlog holds only agent-actionable work (currently none). This also stops the `#mirrorall` churn that kept re-mirroring those operator-verify backlog heads into the active queue each preflight.
+
+Nothing agent-drainable remains — the review items each need your live editor/pane verification.
+<!-- agent:boundary:a9c5dc35 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -86,17 +86,31 @@ Wired the auto-verify mechanism where it genuinely applies, and the audit turned
 - **`#qpausemix-verify`** — its fix prints to `session-check` **stderr**, not `ops.log`, so an `ops_log:` predicate can't observe it.
 
 So exactly one gate qualified today. The "need a marker added first" route/plugin bucket (`#qpauseux`/`#jbrundispatch`/`#1vhn`/`#cyh0`/`#8bfz`/`#qheadstrike`/`#hap7`…) plus the per-proof-site success markers above are all captured as **`#avmark`** — that's the real enabling work to make "test → log → gate auto-closes" cover the whole review list. The mechanism is sound; most gates just don't emit a clean success signal yet.
-<!-- agent:boundary:df671de5 -->
+
+### Re: monsterrodholders still has multiple prompts with no submit — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` on monsterrodholders.md still has multiple prompts with no submit ![img_51.png](img_51.png)
+
+
+`img_51.png` shows the same pattern as before — the `agent-doc …/monsterrodholders.md` trigger typed ~6× as un-submitted lines. You're right that it's still happening, and here's the honest why:
+
+**The fix isn't live yet.** The running supervisor is still the **old pre-0.34.20 binary**. The cold-start dispatch gate I shipped (`e279ceef`, 0.34.20) only takes effect once that binary is installed and the supervisor recycles onto it. Until then the bug reproduces exactly as before. So this cycle I'm doing the agent-side deploy: **`make install` 0.34.20 + `admin recycle`** — that's running now, after this response commits.
+
+**What the fix does and doesn't cover.** The 0.34.20 gate stops the route from typing into a *cold-starting* pane (waits for the harness dispatch-ready prompt, else fails closed). If your monsterrodholders duplicates are the cold-start race, this neutralizes them. But the repeated *typing without submit* you're seeing may also be the broader **dispatch-no-submit family** (`#jbrundispatch`/`#1vhn`): the route re-dispatches into a running-but-not-submit-ready pane and each attempt re-types the trigger with no submit proof — so copies pile up. That layer isn't fully closed by the cold-start gate, and there's a distinct missing behavior: a failed/not-ready dispatch should **clear** the composer rather than leave another copy.
+
+**Connection to the flood I just paused.** Same root: a dispatch that never proves *submitted* gets retried, and each retry re-acts — here as duplicate typed lines, on `agent-doc-bugs2.md` as the `#rt83` phantom-pin re-trigger (`#qflood`). The stale supervisor CRDT has been driving both all session; the recycle clears it.
+
+**After the recycle**, please try Run Agent Doc on monsterrodholders.md once more. If the duplicates/no-submit persist on the *fresh* 0.34.20 supervisor, grab `.agent-doc/logs/supervisor-stderr.log` + the pane scrollback at send time — that tells us whether it's cold-start (should now be fixed) or the busy-pane no-submit variant, which needs its own route fix. Captured all of this on `#vgat`/`#jbdupnosub`.
+<!-- agent:boundary:1748e76d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#jbtsiftnosub]~~
-- ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md adds duplicates of the prompt into the input and does not submit ![img_50.png](img_50.png).~~
-- ~~do [#avgwire]~~
-- :pushpin: do [#vgat]
-- ~~do [#j9ja]~~
+- ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md still has multiple prompts with no submit ![img_51.png](img_51.png)~~
+- ~~:pushpin: do [#vgat]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -123,7 +137,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#vgat] #jbdupnosub #agent-doc-bug [operator-verify] JB Run Agent Doc on src/boost-client/tasks/monsterrodholders.md typed the agent-doc <FILE> trigger FIVE times (duplicate injection) into the input and did NOT submit any (screenshot tasks/agent-doc/img_50.png: 5 identical un-submitted trigger lines). Same dispatch-no-submit family as #jbtsiftnosub / #jbrundispatch / #1vhn, NEW symptom = duplicate accumulation: the route re-typed the trigger on each send-retry into a not-yet-dispatch-ready pane without clearing or submitting. The #jbtsiftnosub cold-start gate (0.34.20, e279ceef) should PREVENT the accumulation by failing closed before re-typing into a starting composer; the distinct sub-issue is that a not-ready / failed dispatch must NOT leave N copies in the composer (clear the input or never type). Needs operator capture at repro: .agent-doc/logs/supervisor-stderr.log + pane scrollback at send time + whether the pane was cold-starting or a dead shell. Plan: extend tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md (duplicate-retry-injection variant).
+- [ ] [#vgat] #jbdupnosub #agent-doc-bug [operator-verify] JB Run Agent Doc on src/boost-client/tasks/monsterrodholders.md types the agent-doc <FILE> trigger MULTIPLE times (5-6 duplicate lines; screenshots img_50.png + img_51.png) into the input and never submits. STILL reproducing 2026-06-20 on the OLD pre-0.34.20 supervisor binary. Two layers: (1) cold-start typing into a not-yet-ready pane = the #jbtsiftnosub gate shipped in 0.34.20 (installed + recycled 2026-06-20); (2) repeated dispatch into a running-but-not-submit-ready pane, each re-typing the trigger with no submit proof = the broader #jbrundispatch/#1vhn accepted_only-no-submit family, plus a missing clear-before-retype so duplicates accumulate. If it persists AFTER the 0.34.20 recycle, capture .agent-doc/logs/supervisor-stderr.log + pane scrollback + pane state (cold-start vs busy) at send time. Likely the same no-submit-proof retry loop as the #qflood idle-watch re-dispatch.
 <!-- /agent:backlog -->
 
 ## Review

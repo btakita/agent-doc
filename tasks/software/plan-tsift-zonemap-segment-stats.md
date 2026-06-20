@@ -2,7 +2,15 @@
 
 **Source:** `#sbtk` (from the duckdb-internals-part-1 review). DuckDB skips entire 122K-row row-groups by checking per-group min/max + null counts before reading any data. tsift's analog: stamp cheap per-file/per-segment statistics into the index so scoped / `--path` / kind-filtered searches skip whole files **before** building or scanning the BM25 corpus.
 
-**Status:** plan only — no tsift code written, nothing pushed (operator chose "Plan only, no push" 2026-06-20). Implementation phases below are queued for a deliberate, operator-greenlit build.
+**Status (updated 2026-06-20):** operator greenlit implementation ("implement [this plan]"). **Phases 1, 2, 4 are DONE** in `tsift-index` (additive `file_zonemap` table + populate/delete + read API + soundness tests; `make check` green, 0 failures). **Phase 3 (live query-time pruning) is deferred pending redesign** — see the discovery note below. Committed locally to the tsift submodule; **push held** for operator review.
+
+### Discovery (2026-06-20): the lexical search path does not read `index.db`
+While wiring Phase 3 I found the lexical `Sift` search (`packages/tsift-search/src/sift.rs`, `search()`) builds/loads its **own `TokenIndex`** (a JSON token cache) and prunes via `files_matching_any(query_tokens)` — it never consults `index.db`'s `file_state`/`symbols`. So the original Phase 3 premise ("consult the index zonemap in `sift.rs`") is wrong: token-level pruning already exists there, and the zonemap's natural consumers are the **`index.db`-backed** commands (symbol/kind/scope/path queries, `explain`, `graph`, evidence), not the lexical corpus. The shipped read API `files_possibly_containing_kind` is the first sound consumer for that path. Revised Phase 3 below.
+
+### Revised Phase 3 — wire sound pruning into index.db-backed consumers
+- Identify the index.db-backed commands that iterate files/symbols with a kind or path predicate, and route them through `files_possibly_containing_kind` / a new `files_in_path_scope` zonemap helper.
+- Keep the soundness invariant (pruned ⊇ true matches); add a per-consumer regression that the pruned result equals the unpruned result on a fixture.
+- This is the operator-gated cutover; the substrate + read API it depends on are already landed and tested.
 
 ## Why it fits tsift (grounded in current schema)
 

@@ -165,13 +165,23 @@ Done — no more asking. Shipped 0.34.24 with the `#wd40` recycle-yield feature 
 **Recycle:** I did NOT force-recycle this document's supervisor (it's my own session parent). It execve-hot-reloads onto `0.34.24` at the idle boundary when this turn ends — and `#wd40` is exactly the fix that makes that boundary reachable during self-draining loops going forward.
 
 **Only remaining (operator live eyeball, non-blocking):** `#rdypoll-deploy`'s two-pane restart proof — restart a session, JB `Run Agent Doc`, confirm `ops.log` shows a single `dispatch_inject … attempt=1` and zero `attempt=2`. Every agent-doable step under it is now done.
-<!-- agent:boundary:e618ee06 -->
+
+### Re: correction — CI Release/PyPI publish FAILED (pre-existing); local deploy stands — opus-4-8
+
+Correcting my earlier message in this turn: the `v0.34.24` tag triggered the Release workflow but it **FAILED** (run `27864113488`) — there is **no GitHub Release and no PyPI wheel**. I should not have implied the publish succeeded.
+
+**Root cause (pre-existing, not my change):** `agent-doc-orchestration/Cargo.toml` declares `agent-kit = { path = "../../agent-kit", version = "0.4.0" }` — a sibling submodule that only exists in the agent-loop monorepo. The standalone `btakita/agent-doc` CI checkout has no `../agent-kit`, so cargo can't load the manifest and all build targets fail. The previous 0.34.23 release run failed identically — CI Release + PyPI have been broken across releases; the real distribution channel is the local `cargo install --path .` from the monorepo (which I did).
+
+**Solid / shipped:** code on origin (submodule `72c65017`, tag `v0.34.24`, superproject `03e285335`); installed live (`cargo install` + `cargo build --release` + `lib-install` → `agent-doc 0.34.24`). Supervisor recycle marked for the next idle boundary.
+
+**Not shipped:** GitHub Release binary + PyPI wheel — blocked by the `agent-kit` (and likely `tmux-router`) sibling path-dep in CI. Fixing `release.yml` to check out the sibling crates (or point those deps at crates.io versions for CI) is a separate infra task. The tag stays at the correct commit so a re-run after the fix publishes cleanly.
+<!-- agent:boundary:498349f9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
----
+~~~done
 JB `Run Agent Doc` after a restart on monsterrodholders.md. I tried again and it worked. The restart state should not lag.
 ```
 [route] target tmux session: 0
@@ -197,7 +207,7 @@ JB `Run Agent Doc` after a restart on monsterrodholders.md. I tried again and it
 [route] claude blocked after 29.1s in pane %176: active claude turn
 Error: dispatch-only claude reopen refused to inject into pane %176 for tasks/monsterrodholders.md because the latest run is still booting and never reached a dispatch-ready prompt (active claude turn); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
 ```
----
+~~~
 JB `Run Agent Doc` on equityfundingsource.md did not submit
 ```
 claude exited cleanly.
@@ -211,7 +221,7 @@ Press Enter to restart, or 'q' to exit.
 [agent-doc] auto-trigger: timed out waiting for claude prompt
 ```
 ---
-- After a /login, JB `Run Agent Doc` duplicated the prompt into the agent input without submitting ![img_53.png](img_53.png).
+- After a /login, JB `Run Agent Doc` on monsterrodholders.md duplicated the prompt into the agent input without submitting ![img_53.png](img_53.png).
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

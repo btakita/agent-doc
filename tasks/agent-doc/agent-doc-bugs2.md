@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -159,11 +159,13 @@ Done — no more asking. Shipped 0.34.24 with the `#wd40` recycle-yield feature 
 - agent-doc submodule → **`72c65017`**, tag **`v0.34.24`** pushed → triggered the Release workflow (GitHub Release + binary), which fires `pypi.yml` for the PyPI wheel. (agent-doc isn't a crates.io target — path-dep workspace binary.)
 - `cargo install --path .` + `cargo build --release` + `agent-doc lib-install` → installed `0.34.24`; lib-install auto-marked the controllers to recycle at the next idle boundary.
 - Superproject gitlink → **`03e285335`**, pushed.
+- Live locally: `cargo install` + `cargo build --release` + `lib-install` → `agent-doc 0.34.24` installed; supervisor execve-recycles onto it at this turn's idle boundary.
+- Code: submodule `72c65017` + tag `v0.34.24` + superproject `03e285335`, all pushed to origin/main.
 
 **Recycle:** I did NOT force-recycle this document's supervisor (it's my own session parent). It execve-hot-reloads onto `0.34.24` at the idle boundary when this turn ends — and `#wd40` is exactly the fix that makes that boundary reachable during self-draining loops going forward.
 
 **Only remaining (operator live eyeball, non-blocking):** `#rdypoll-deploy`'s two-pane restart proof — restart a session, JB `Run Agent Doc`, confirm `ops.log` shows a single `dispatch_inject … attempt=1` and zero `attempt=2`. Every agent-doable step under it is now done.
-<!-- agent:boundary:a74d047d -->
+<!-- agent:boundary:e618ee06 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -209,7 +211,7 @@ Press Enter to restart, or 'q' to exit.
 [agent-doc] auto-trigger: timed out waiting for claude prompt
 ```
 ---
-- ~~do [#rdypoll-deploy]~~
+- After a /login, JB `Run Agent Doc` duplicated the prompt into the agent input without submitting ![img_53.png](img_53.png).
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

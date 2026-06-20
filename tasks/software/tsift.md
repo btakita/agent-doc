@@ -113,7 +113,20 @@ So the substrate (`file_zonemap` + `files_possibly_containing_kind`) is sound an
 - **Best (if you want the zonemap to earn its keep): native FTS5 content index in `index.db`** — a real project, but it's the architecturally coherent direction and subsumes option 1 properly. The zonemap is already the first brick.
 
 `#b56m` is gated pending your pick (1/2/3); finding recorded in the plan (superproject `HEAD`). Nothing pushed.
-<!-- agent:boundary:1d53dacd -->
+
+### Re: #b56m — do the "Best" option (FTS5 content index) — opus-4-8
+
+Greenlit. The "Best" option is the **native SQLite FTS5 content index in `index.db`** — moving the lexical inverted index out of the parallel JSON `TokenIndex` and into the DB, which retires that redundant structure, gives in-DB BM25 maintained alongside `symbols`/`file_state`, and finally gives the `file_zonemap` substrate a real consumer (FTS scan pruning).
+
+It's a real multi-phase project, so per my offer I wrote the **plan** rather than rushing an implementation: [`tasks/software/plan-tsift-fts5-content-index.md`](plan-tsift-fts5-content-index.md) (superproject `1c608f6d3`). Phases: 0 spike+baseline (tokenizer choice, index-size measure) → 1 additive FTS5 schema → 2 incremental populate (mirrors the `file_zonemap` lifecycle) → 3 flagged zone-map-pruned query with a `pruned==unpruned` + top-K parity soundness gate → 4 cutover + retire `TokenIndex` → 5 ship. Every phase stays behavior-preserving (TokenIndex authoritative) until parity is proven.
+
+- `#b56m` closed — the direction question is answered (FTS5).
+- Implementation queued as `#015t` (`[operator-verify]`, operator-scheduled — it's a multi-session build, won't auto-drain). Say "do #015t" / "start phase 0" to kick it off.
+
+**On your #1yks refinement** ("automate crates.io trusted publishing + add a runbook"): captured as a backlog item. Note the honest constraint — per-crate trusted-publishing config is a crates.io **web-UI + browser/passkey 2FA** step that can't be fully API-automated; the runbook will script the repeatable parts and document the 2FA step as yours. I'll write it in a focused cycle (it's separate from the tsift code work). #1yks itself stays gated on that 2FA bootstrap for the two new crates.
+
+Session note: this doc is drift-heavy from a stale route-owned supervisor (pane %184) — responses are landing at HEAD via recovery, but if you see churn that's the cause, not the content.
+<!-- agent:boundary:adcd78ba -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -130,12 +143,13 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#015t] [operator-verify] Implement native FTS5 content index per tasks/software/plan-tsift-fts5-content-index.md — phased schema -> populate -> flagged query -> cutover -> ship; gives the file_zonemap substrate its consumer. Multi-session project, operator-scheduled.
+- [ ] [#ph7n] Write a crates.io trusted-publishing runbook in agent-loop: procedure to add a NEW crate to OIDC trusted publishing (the per-crate config is web-UI + browser/passkey 2FA, so document that as the operator step) plus any scriptable parts. Refines #1yks automation ask.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#b56m] [operator-verify] Phase 3 zonemap cutover BLOCKED on direction (see tasks/software/plan-tsift-zonemap-segment-stats.md): audit found NO current index.db consumer benefits — symbol queries are SQL-indexed (no file-scan to prune), lexical scan uses a separate TokenIndex, graph/explain follow call_edges. Pick a direction: (1) make Sift search index.db-aware for content-scan pruning [biggest, architectural]; (2) add a --kind-filtered command consuming files_possibly_containing_kind [new feature]; or (3) leave the substrate inert as a tested foundation.
 - [/] [#1yks] [operator] Finish tsift v0.1.72 publish: (1) bootstrap crates.io Trusted Publishing for the two NEW crates tsift-local-model + tsift-kg (browser/passkey 2FA — the prior 23 crates are configured, these two are not and a brand-new crate's first OIDC publish needs its config to exist; if crates.io rejects pre-config for a nonexistent name, do one manual 'cargo publish -p <crate>' to create it); (2) push the v0.1.72 tag (git tag v0.1.72 08d0f65 && git push origin v0.1.72) to trigger Release CI. Without step 1 the crates.io job fails again on the two new crates.
 <!-- /agent:review -->
 

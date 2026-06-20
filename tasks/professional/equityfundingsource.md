@@ -220,7 +220,7 @@ Done (deal side) — implemented + committed + pushed, **no deploy** per your pa
 **No prod apply** — the migration + backport land when you next deploy + `cf:d1:migrate:remote`. Nothing was written to live D1 this cycle.
 
 **Scope note:** I made the **deal** column nullable (the "available deal" you named) and gated the loan→deal copy, but left the central **`loans`** table physically unchanged — rebuilding it is disproportionate risk and the deal is the displayed surface. The borrower's preferred-terms form still pre-selects Monthly at the loan level. If you also want that form truly blank-until-chosen (a `loans`-table rebuild), say so — filed `#freqnull-borrower` `[recommended]`.
-<!-- agent:boundary:db0c34e4 -->
+<!-- agent:boundary:f890f3a5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -233,11 +233,13 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#freqnull-borrower]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#freqnull-borrower] [recommended] Borrower-side frequency nullable (follow-up to #freqnull, which made only the DEAL column nullable): the loans.preferred_payment_frequency column is still TEXT NOT NULL DEFAULT monthly and the borrower preferred-terms form (lib/ui--browser--efs/portal/borrower/loan_summary.tsx:578/645) pre-selects Monthly. To let a borrower leave frequency truly blank-until-chosen, rebuild the loans table (drop NOT NULL DEFAULT, same 0085/0094 pattern), add a blank option + null state to the borrower selector, and null-handle the borrower/loans consumers. Deferred from #freqnull because loans is a central table = disproportionate risk; deal display (the reported symptom) is already fixed.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.

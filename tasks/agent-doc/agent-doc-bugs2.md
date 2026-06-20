@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -128,6 +128,16 @@ Nothing agent-drainable remains — the review items each need your live editor/
 
 > **Queue prompt:**
 >
+> As I was typing in the previous queue item, the queue reverted back to the disk state. The editor buffer should have won as the editor buffer is the source of truth.
+
+
+> **Queue prompt:**
+>
+> #advance-review. Any operator-verify should have logging so automate verification.
+
+
+> **Queue prompt:**
+>
 > :pushpin: Move the remaining [operator-verify] tasks in the backlog into review.
 
 
@@ -140,15 +150,12 @@ That converts the review gates into a test→log→auto-close loop instead of ma
 **Editor buffer should win (head 3).** You're right, and it's captured as **`#editorbufwin`** (`#agent-doc-bug`). This is the exact `#queue-user-edit-overwrite` drift that bit *my own* finalizes twice this session: `content_ours` (baseline + response, no user edits) overwrote your concurrently-typed `#advance-review` queue head, so `session-check` flagged it INTERRUPTED and I recovered via `reset --from-current`. Root cause: the route-owned supervisor's in-memory CRDT went stale vs your live editor buffer, so the snapshot kept winning. The fix is for the editor buffer to win for unconsumed user queue edits; near-term I'm recycling the supervisor to refresh its CRDT so it stops reverting your edits.
 
 Backlog now holds the two actionable items (`#editorbufwin`, `#optverify`); the 17 gated items stay in review for your live verification.
-<!-- agent:boundary:5021dda1 -->
+<!-- agent:boundary:9cafc3a8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: Move the remaining [operator-verify] tasks in the backlog into review.~~
-- #advance-review. Any operator-verify should have logging so automate verification.
-- As I was typing in the previous queue item, the queue reverted back to the disk state. The editor buffer should have won as the editor buffer is the source of truth.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

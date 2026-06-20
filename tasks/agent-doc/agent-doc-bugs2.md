@@ -146,7 +146,24 @@ All layers were already wired and tested — nothing was half-done:
 The commit also swept in the leftover working-tree `SKILL.md`/`AGENTS.md` version-pointer bumps (you said commit the WIP).
 
 **Not done (not requested):** no version bump, no push, no `make install` / `lib-install`. This feature isn't live in the running supervisor until it's released + installed — which is exactly the operator-gated deploy boundary (same gate as `#rdypoll-deploy`). Say the word to release + deploy at a recycle boundary.
-<!-- agent:boundary:2d69aa75 -->
+
+### Re: just do it + record the preference — opus-4-8
+
+Done — no more asking. Shipped 0.34.24 with the `#wd40` recycle-yield feature and recorded the standing preference.
+
+**Preference recorded in `AGENTS.md` (`#deploy-just-do-it`):** agents execute *every* agent-doable release/deploy sub-step autonomously (version bump, `VERSIONS.md`, `make check`, commit, `cargo install` + `cargo build --release` + `lib-install`, push, tag, publish, `admin recycle`). The only operator-gated step is the live human eyeball, recorded as a non-blocking `[operator-verify]` follow-up — it never blocks the deploy. Also rewrote the Release Process "manual testing gate" step that previously blocked publishing on operator confirmation. (CLAUDE.md is a symlink to AGENTS.md, so both surfaces updated.)
+
+**Full deploy executed:**
+- Bumped 0.34.23 → **0.34.24** (`Cargo.toml` + `pyproject.toml` + both `SKILL.md` pointers), `VERSIONS.md` entry.
+- `make check` green (clippy `-D warnings` + full suite).
+- agent-doc submodule → **`72c65017`**, tag **`v0.34.24`** pushed → triggered the Release workflow (GitHub Release + binary), which fires `pypi.yml` for the PyPI wheel. (agent-doc isn't a crates.io target — path-dep workspace binary.)
+- `cargo install --path .` + `cargo build --release` + `agent-doc lib-install` → installed `0.34.24`; lib-install auto-marked the controllers to recycle at the next idle boundary.
+- Superproject gitlink → **`03e285335`**, pushed.
+
+**Recycle:** I did NOT force-recycle this document's supervisor (it's my own session parent). It execve-hot-reloads onto `0.34.24` at the idle boundary when this turn ends — and `#wd40` is exactly the fix that makes that boundary reachable during self-draining loops going forward.
+
+**Only remaining (operator live eyeball, non-blocking):** `#rdypoll-deploy`'s two-pane restart proof — restart a session, JB `Run Agent Doc`, confirm `ops.log` shows a single `dispatch_inject … attempt=1` and zero `attempt=2`. Every agent-doable step under it is now done.
+<!-- agent:boundary:a74d047d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -219,12 +236,12 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rdypoll-deploy] [operator-verify] #agent-doc-bug Deploy + live-verify the #rdypoll §D dispatch_inject marker (agent-doc submodule 138dc658, 0.34.23). Agent-actionable code shipped+pushed (dispatch_inject attempt=N marker at both injection funnels + SimWorld assertion). REMAINING (operator-gated, deferred from session to avoid finalize-client-newer-than-supervisor drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then the two-pane restart repro: restart a session, JB Run Agent Doc, confirm ops.log shows a single dispatch_inject ... attempt=1 and ZERO attempt=2 (proves no post-restart re-type stacking). Plan: tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md (§D)
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#rdypoll-deploy] [operator-verify] #agent-doc-bug Deploy + live-verify the #rdypoll §D dispatch_inject marker (agent-doc submodule 138dc658, 0.34.23). Agent-actionable code shipped+pushed (dispatch_inject attempt=N marker at both injection funnels + SimWorld assertion). REMAINING (operator-gated, deferred from session to avoid finalize-client-newer-than-supervisor drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then the two-pane restart repro: restart a session, JB Run Agent Doc, confirm ops.log shows a single dispatch_inject ... attempt=1 and ZERO attempt=2 (proves no post-restart re-type stacking). Plan: tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md (§D)
 - [/] [#wd40] [recommended] #agent-doc-bug Supervisor stale-binary auto-recycle does not fire during a continuously-active self-draining session. lib-install marks every controller to recycle (AGENT_DOC_RECYCLE_ON_INSTALL), but idle_watch.rs only execve-hot-reloads at boundary=idle (harness idle + debounced grace) or boundary=next_queue_item, and NEVER mid-turn (the not-turn_active gate). A long in-session /loop drain holds the drain-claim lease AND keeps the harness turn_active back-to-back, so the supervisor never reaches its recycle boundary and the stale binary persists — the root of this session content_ours drift + #rt83 flood (#supselfheal already notes a stale BINARY does not self-heal by lease expiry; needs explicit admin recycle). Fix direction: when idle_watch detects its own binary is stale AND a drain is in progress, signal the in-session loop to yield at the next inter-item boundary so the execve recycle fires automatically (automate #staleloop-recycle-restart) instead of requiring the agent to manually run make install + admin recycle + end-turn. Mid-turn execve stays OUT of scope: the supervisor owns the in-flight cycle CRDT/write-queue/IPC/cycle_state, which is rebuilt fresh after re-exec, so a mid-write swap drops/corrupts the cycle; a true mid-turn hot-swap would need the control-plane state serialized across execve and restored atomically. Supervisor-core (idle_watch.rs / drain lease / recycle gating), live-supervisor-critical: focused cycle with make check + make tmux-ci, not in-loop.
 - [/] [#j9ja] avmark [recommended] Add a distinctive SUCCESS ops.log marker at each gated review item proof site so #optverify auto-verify (--pending-set-verify verify=ops_log:<marker>) can resolve them from a live operator test. Per-item work: #jbtsiftnosub log a success line (e.g. auto_start_dispatch_ready_confirmed) on the reverify gate Ok path (today only the fail-closed refusal logs dispatch_into_starting_pane); ship the unshipped restart-agent features then wire their markers (#agentreloadrestart agent_restart_performed has 0 emission sites, #restartagentmenu); wire #fbwire once its Phase 2 supervisor path emits record_force_disk_fallback live; route #qpausemix-verify queue_paused preamble to ops.log or add an ops_log marker (it currently prints to session-check stderr only); add markers for the route/plugin bucket #qpauseux/#jbrundispatch/#1vhn/#cyh0/#8bfz/#qheadstrike/#hap7/#gf5n/#rt83/#docdriftgrace. Only #tsiftmdcrash-verify (capability_proof_live_child_preserved) was cleanly wireable in the #avgwire cycle.
 - [/] [#editorbufwin] #agent-doc-bug #queue-user-edit-overwrite The IPC content_ours recovery drops unconsumed user queue additions the operator typed into the live editor buffer (operator: "the queue reverted to disk state; the editor buffer should have won as the source of truth"). PLAN DONE: root cause is NOT content_ours composition (it deliberately keeps additions next-cycle-visible on disk per the ignores_unproven_live_queue_deletions invariant — a blind splice-into-content_ours attempt 2026-06-19 tripped that test) but the #pcwc post-commit worktree reconcile overwriting the disk addition with HEAD. GATED for a focused merge-core cycle. Fix: P1 #pcwc reconcile preserves unconsumed user queue additions on disk; P2 auto-recover the commit (automate the manual reset --from-current the operator does today); P4 refresh the stale supervisor CRDT that enables the drift. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md

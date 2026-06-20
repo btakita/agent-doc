@@ -88,7 +88,28 @@ Deployed. **Version `afcf3ebd-c8b3-4ec8-afff-3f35f37b7f75`**, live at `https://e
 **Smoke check:** homepage `200`; `/lenders/groups` → `303` to login (auth gate live). The member-table changes render in the authenticated lender portal — sign in to `/lenders/groups` to eyeball the full-width rows + default-share badges.
 
 Queue drained — only the operator-gated `#5q7z-ship` live-verify remains. Stopping.
-<!-- agent:boundary:b81a4929 -->
+
+### Re: Lender Group members table + editable, rebalancing share % (lock pins) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: The Lender Group members should be in a display: table or display: flex, where the columns line up. Add an input to change the percentages. The percentages should add up to 100%. Use best UI practices for the input logic. Should we have a lock icon to lock or unlock other lender % to rebalance changes to another lender %? deploy
+
+
+Done and deployed. The Lender Group member rows are now an aligned editor instead of right-floated chips, and each member's default deal-share % is editable inline.
+
+**On the lock-icon question — yes, I built it.** A lock is the right call for a "must total 100%" set: without it, editing one lender silently shoves *every* other lender's % around, including ones the user already deliberately set. With per-row 🔒/🔓, you pin the rows you're happy with and only the unlocked rows absorb the rebalance.
+
+What shipped:
+- **Aligned table** — one CSS-grid template (`Lender | Share % | Lock | Status`) shared by the header and every row, so columns line up regardless of email length (long emails wrap, never truncate).
+- **Editable % inputs** — number inputs commit on blur (no fighting decimals while typing). Editing one share rebalances the remainder across the other *unlocked* members so the total always converges to **100%**; rounding uses largest-remainder so the integer bps sum exactly.
+- **Lock pins** — a locked row keeps its %, is excluded from auto-rebalance, and its input disables (unlock to edit). An edited share can't exceed the headroom locked rows leave.
+- **"Distribute evenly"** + **Reset**, and a live **Total: NN% ✓** indicator (amber until balanced). **Save shares** is gated on a balanced *and* dirty split.
+- **Persistence** — new `POST /api/lender/groups/:id/member-stakes` and `POST /api/admin/lending-groups/:id/member-stakes`, backed by `lending_group_member_stakes_set_`, which re-enforces the 100% split server-side.
+- Rebalance math is a pure, unit-tested module (`lending_groups_alloc.ts`).
+
+Verification: full suite **931 pass / 0 fail**, `bun run build` + `build:worker` clean. Committed (`79daf10`) + pushed, and **deployed to production** (version `366a229c`) — the new endpoints return 401 (auth-gated) live on the origin, matching the existing routes.
+<!-- agent:boundary:b8d60c06 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,11 +122,15 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: The Lender Group members should be in a display: table or display: flex, where the columns line up. Add an input to change the percentages. The percentages should add up to 100%. Use best UI practices for the input logic. Should we have a lock icon to lock or unlock other lender % to rebalance changes to another lender %? deploy~~
+- The Lender Group members should be in a display: table or display: flex, where the columns line up. Add an input to change the percentages. The percentages should add up to 100%. Use best UI practices for the input logic. Should we have a lock icon to lock or unlock other lender % to rebalance changes to another lender %? deploy
+- do [#pmhf]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#pmhf] [recommended] Reuse the rebalancing share editor (lib/ui--browser--efs/portal/shared/lending_groups_alloc.ts: rebalance_stakes_/distribute_evenly_/lock pins) in the per-deal split UI (deal_detail allocations) so per-deal % editing gets the same 100%-balanced, lockable inputs.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [/] [#67v2-aa-local] [recommended] Admin pipeline auto-advance local half (advances #67v2-auto-advance): define stage-requirement checks from the TMO-aligned Kanban and enqueue audited status updates to tmo_cache_outbox; replay stays gated on #dzmm. Depends on the #67v2 Kanban stages being built first.

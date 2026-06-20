@@ -74,7 +74,24 @@ Done and deployed. In the lender-group share editor, the column header now reads
 Because admin and lender portals render the **same** shared `MemberAllocations` component, this updates both at once. I widened that column to `max-content` so the longer label sits on one line without disturbing the aligned columns (verified with a render — Default Share % stays right-aligned over the inputs, everything else still lines up).
 
 Tests **57/57** in the touched suites (full suite already green this session), worker rebuilt. Committed (`a32949c`) + pushed, **deployed to production** (version `14ec4fc7`; bundle `index.browser-AB7OWMDM.js`). Hard-refresh to see the new header + tooltip.
-<!-- agent:boundary:d4957d44 -->
+
+### Re: Set credentials must be the first step when missing — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: I clicked on the invite for btak.dev+lender2@gmail.com and was logged in. But I was not presented with setting a password. Setting credentials should be the 1st step if the credentials are missing for any portal account.
+
+
+Fixed and deployed. The gap: the invite auto-login link (`/login/invite?token=`) *does* route a brand-new lender (empty password) to account completion — but only at that one click. If they navigated away (bookmark, refresh to `/lenders/dashboard`), nothing forced them back, so they could use the portal with no credentials set.
+
+**Fix — enforce it on every portal page.** `require_auth_` (the gate every portal page runs through) now redirects any account with **no local password AND no linked SSO identity** to `/account/complete` before serving the page. So setting credentials is genuinely the first step, regardless of how they got in — and it generalizes to *any* role/portal, not just lenders.
+
+**Why the SSO carve-out:** Cloudflare Access / Google users are provisioned with an empty `password_hash` but a linked `access_identity_sub` (their credential is the SSO identity). The condition is `!password_hash && !access_identity_sub`, so SSO users are **not** forced to create a local password — only truly credential-less accounts (like an invite-auto-created lender) are.
+
+Verified: new gate-wiring test + SSO-exclusion assert; full suite **937 pass / 0 fail**, worker rebuilt. Committed (`1e68b16`) + pushed, **deployed to production** (version `d0cf6448`).
+
+Note: if `btak.dev+lender2@gmail.com` already set a password in an earlier test, it won't re-prompt (that's correct — credentials aren't missing). To re-test the flow, invite a fresh address.
+<!-- agent:boundary:cf8d0a30 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,6 +104,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: I clicked on the invite for btak.dev+lender2@gmail.com and was logged in. But I was not presented with setting a password. Setting credentials should be the 1st step if the credentials are missing for any portal account.~~
+- Add a login by email link...where an email is sent with a link that has the token.
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

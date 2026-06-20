@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -58,12 +58,14 @@ Yes — three of the article's ideas map cleanly onto tsift's actual substrate (
 **Honest "skip" list** (don't over-borrow): morsel-driven parallelism and the sink/combine/finalize model are real but tsift's `__search-worker` already parallelizes and embedding/LLM latency dominates, so it's a minor win; vectorized execution, the CSV sniffer, and block checksums are not where tsift's bottlenecks are.
 
 Net: #1 is a standalone tsift-layer feature worth doing regardless of backend choice; #2/#3 are *decision inputs* that should raise DuckDB/DuckPGQ's weight in the existing `BackendEval` / #g5kw substrate-promotion evaluation, with "partial remote Parquet index" as the standout differentiator. Both captured as `[recommended]` backlog items.
-<!-- agent:boundary:a9942b4c -->
+<!-- agent:boundary:d90cf612 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: [#sbtk]
+- :pushpin: [#wzg6]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

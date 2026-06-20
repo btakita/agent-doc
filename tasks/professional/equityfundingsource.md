@@ -33,91 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-071324.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-082957.md`*
 
 Compacted content:
-❯ - Archived 11 response topic(s): Admin sees no log-out message on passwordless link; deploy; Still no notification; 8 more
+❯ - Archived 5 response topic(s): Set-password dialog on a passwordless link for lender2; deploy; Gate lender-group selection on all members being accredited; 2 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Set-password dialog on a passwordless link for lender2 — working as intended (your call) — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: When I clicked on the passwordless link for btak.dev+lender2@gmail.com, I was presented with a set password dialog. I believe this account does not have a password. I think this is a bug.
-
-Investigated against prod — **not a state bug; it's the `#credentials-first` flow you asked for earlier**, and you've now chosen to keep it.
-
-**What actually happened:** I queried prod D1 for `btak.dev+lender2@gmail.com`. At the moment you clicked, the account had **no** password, so both the sign-in handler (`first_time = !password_hash && !access_identity_sub` → `/account/complete`) and the `require_auth_` gate (`#credentials-first`, "no local password AND no SSO ⇒ set credentials first") correctly routed you to the set-password screen. The row now shows `has_password = 1` with `last_login_at` ~4 min before this report — i.e. **you set the password via that very dialog**, which is why the account has one now. So it wasn't shown in error, and it won't re-prompt for this account.
-
-**Design call:** this collided with the "a passwordless link shouldn't require a password" intuition, so I asked how you wanted credential-less accounts to behave. You chose **"Keep requiring a password"** — keep `#credentials-first` as-is so no account stays password-less. **No code change** this cycle; the behavior is intended.
-
-(If a passwordless lender ever needs to get in without setting a password, that'd be the "make password optional / fully passwordless" direction we discussed — say the word and I'll build it. For now it stays as-is.)
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-Nothing to deploy this cycle — the set-password behavior is **working as intended** (you chose to keep `#credentials-first`), so there was no code change. The production worker (`d98be19b`) is unchanged and current.
-
-### Re: Gate lender-group selection on all members being accredited — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Ensure that all lenders in a group are accredited before the EFS admin can select the lender group for an available deal.
-
-Done — enforced **server-side** so it can't be bypassed from the UI.
-
-**Where the gate lives:** `admin_deal_interests_by_id_select_PUT_` (`PUT /api/admin/deal-interests/:id/select`) in `lib/admin/investor_management/index.ts`. Selecting a lender for an available deal goes through this handler. When the selected interest is a **lender-group** interest (`investor_deal_interests.lending_group_id` is set), the handler now reads the group's **active** members and, if any are not accredited, rejects the selection with **HTTP 409** naming who's blocking:
-
-> *All lenders in this group must be accredited before selection. N member(s) not accredited: Name1, Name2.*
-
-Personal (non-group) interests are unaffected.
-
-**What "accredited" means** (mirrors the existing `investor_is_accredited_`): `accreditation_status = 'verified'` **OR** a non-null `accredited_confirmed_at` (the investor self-attested at signup). Defensive edges: only `status='active'` members count (invited/declined/removed are ignored), and an active member with no linked user row counts as **not** accredited.
-
-**New readers** (`lib/lending_groups/deal_participation.ts`): `lending_group_members_accreditation_R_` and `lending_group_unaccredited_members_R_` — kept in the lending-groups module so it stays free of an admin-layer import. The admin select query now also reads `i.lending_group_id`, and `investor_deal_interest_admin_row_T` carries it.
-
-**Spec + tests:** added an "Accreditation gate on selection (`#group-accreditation-gate`)" section to `prds/lending-groups-plan.md`, and `tests/lender-group-accreditation-gate.test.ts` (5 cases: all-accredited passes; pending/rejected member blocks + is named; non-active members ignored; unlinked active member blocks). Full suite green: **956 pass / 0 fail**, plus app + worker builds.
-
-*(The server 409 is authoritative. A UI affordance that pre-disables the select button + shows "group requires accreditation" on the admin Interested-Lenders tab would be a nice follow-up — say the word and I'll add it.)*
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-Deployed. Committed `baac434` and pushed to `origin/main` (equityfundingsource-dev), then `make deploy` pushed the worker live — **version `bcf747a4-eb03-4fdb-9633-21a6e2e23c4d`** at `https://equityfundingsource.brian-takita.workers.dev` (startup 19 ms, bindings unchanged). The accreditation gate is now live in production.
-
-### Re: Lender Bros group shows only 60% — lender2 and their 40% are missing — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests shows 60% funded by the Lender Bros group. The 60% seems to come from the controlling lender btak.dev+investor@gmail.com. btak.dev+lender2@gmail.com does not show up anywhere...neither does btak.dev+lender2@gmail.com 40% position in the loan.
-
-
-> **Queue prompt:**
->
-> :pushpin: …/admin/pipeline?…deal_tab=interests shows 60% funded by the Lender Bros group. The 60% seems to come from the controlling lender btak.dev+investor@gmail.com. btak.dev+lender2@gmail.com does not show up anywhere…neither does btak.dev+lender2@gmail.com 40% position in the loan.
-
-Diagnosed against prod, then fixed. **It wasn't a math bug — `lender2@` hasn't accepted the group invite yet.**
-
-**Root cause (prod D1):** `investor@` created the "Lender Bros" group and invited `lender2@`. `investor@` is an **active** member (60% stake); `lender2@` is still **`status='invited'`** — they never accepted, so they're not an active member and have no per-deal allocation row (only `investor@`'s 60% allocation exists). The admin deal panel filtered to **active members only**, so `lender2@` and their intended 40% were hidden entirely, and the deal showed only the confirmed 60%.
-
-**Fix (you chose display-only):** `lending_group_deal_participation_R_` now also returns invited members as `participation.pending_members`, each carrying its **intended** position (the member's default group stake). The admin "Multi-Lender Groups" panel renders them with an **"INVITED — PENDING"** badge and shows the header as **`60% confirmed · 100% intended`** when invitations are outstanding. So you'll now see:
-
-> **Lender Bros** — 60% confirmed · 100% intended
-> • investor@   60%   CONTROLS
-> • lender2@   40%   INVITED — PENDING
-
-This is **display-only** by design: `members` / `total_bps` / `control`, the funding split, and the accreditation gate I shipped earlier all stay **active-only** — a pending invite reserves a share but doesn't fund the deal until `lender2@` accepts. If you instead want a way to activate/confirm a pending member from the admin (writing their real 40% allocation), say the word and I'll add that.
-
-**Tests + spec:** added pending-member cases to `deal_participation.test.ts` (mirroring the live 60/40 Lender Bros shape) and a `#group-pending-visibility` section to `prds/lending-groups-plan.md`. Full suite **958 pass / 0 fail**, app + worker builds clean.
-
-**Shipped:** committed `b22613c`, pushed to `origin/main`, deployed worker **`9d6c1733`** — live now. Reload the deal's Interested-Lenders tab and `lender2@`'s pending 40% will show.
-<!-- agent:boundary:3f5d7fa2 -->
+<!-- agent:boundary:9c0c1d2c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -130,9 +51,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests shows 60% funded by the Lender Bros group. The 60% seems to come from the controlling lender btak.dev+investor@gmail.com. btak.dev+lender2@gmail.com does not show up anywhere...neither does btak.dev+lender2@gmail.com 40% position in the loan.~~
+- :pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests > Multi-Lender Groups should have a UI to message a lender individually. The use case is if the lender is in an Invited Pending state, then we should be able to notify the lender. The natural request is to "Send Reminder to Accept Invite" and to expose the messaging. Perhaps we should have a message link that opens a message dialog?
 - deploy
-- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests shows 60% funded by the Lender Bros group. The 60% seems to come from the controlling lender btak.dev+investor@gmail.com. btak.dev+lender2@gmail.com does not show up anywhere...neither does btak.dev+lender2@gmail.com 40% position in the loan.
 <!-- /agent:queue -->
 
 ## Backlog

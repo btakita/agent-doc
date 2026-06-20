@@ -283,7 +283,7 @@ EFS `266de43`, superproject `78a518a2d`, worker **Version ID `dbf4590d-20d1-4730
 Done + deployed. The collapsed toggle now reads **"Show workflow"** (was "Workflow"); the expanded state keeps **"Hide workflow"** unchanged, as you asked. I matched the existing lowercase-w style so the pair reads "Show workflow" / "Hide workflow" — say the word if you'd rather capitalize both ("Show Workflow" / "Hide Workflow").
 
 EFS `d5803a8`, superproject `421619ff9`, worker **Version ID `9f7151ba-bcda-407a-b284-7797ca004bb9`**. Suite 976 pass / 0 fail.
-<!-- agent:boundary:262cdebd -->
+<!-- agent:boundary:a3dba752 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -295,8 +295,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests, "Workflow" button should be "Show Workflow"...keep "Hide Workflow"~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

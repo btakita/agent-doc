@@ -99,7 +99,7 @@ Diagnosed against **prod D1**. Short answer: **No — it is not accreditation, a
 2. On accept, lender2@ becomes `active`, their 40% allocation lands, and the deal shows 100% confirmed.
 
 I held off building it this turn because the ask was "diagnose" and the UX (banner placement, accept+decline, dashboard vs groups page) is a design choice — **say "build the lender accept-invite alert" and I'll ship it** (UI-only; the endpoint is already there). On the admin side, the **"Send Reminder to Accept Invite"** button I shipped last cycle (live now) is the complementary nudge to prompt lender2@ to do exactly this.
-<!-- agent:boundary:e42d7622 -->
+<!-- agent:boundary:4892817e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,6 +117,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#bmvk] [recommended] Lender-facing accept-invite alert: add an "Accept / Decline" affordance (lender groups page + dashboard banner) for invited memberships, wiring to the existing POST /api/lender/groups/:id/respond endpoint (currently orphaned — no UI calls it). On accept, invited->active so the member funds their share. Diagnosed 2026-06-20: this is the real "lender needs alerts of what to do next" gap for btak.dev+lender2@ (NOT accreditation).
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [/] [#67v2-aa-local] [recommended] Admin pipeline auto-advance local half (advances #67v2-auto-advance): define stage-requirement checks from the TMO-aligned Kanban and enqueue audited status updates to tmo_cache_outbox; replay stays gated on #dzmm. Depends on the #67v2 Kanban stages being built first.

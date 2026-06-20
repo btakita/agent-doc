@@ -60,7 +60,37 @@ Investigated against prod — **not a state bug; it's the `#credentials-first` f
 > :pushpin: deploy
 
 Nothing to deploy this cycle — the set-password behavior is **working as intended** (you chose to keep `#credentials-first`), so there was no code change. The production worker (`d98be19b`) is unchanged and current.
-<!-- agent:boundary:e6caa250 -->
+
+### Re: Gate lender-group selection on all members being accredited — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Ensure that all lenders in a group are accredited before the EFS admin can select the lender group for an available deal.
+
+Done — enforced **server-side** so it can't be bypassed from the UI.
+
+**Where the gate lives:** `admin_deal_interests_by_id_select_PUT_` (`PUT /api/admin/deal-interests/:id/select`) in `lib/admin/investor_management/index.ts`. Selecting a lender for an available deal goes through this handler. When the selected interest is a **lender-group** interest (`investor_deal_interests.lending_group_id` is set), the handler now reads the group's **active** members and, if any are not accredited, rejects the selection with **HTTP 409** naming who's blocking:
+
+> *All lenders in this group must be accredited before selection. N member(s) not accredited: Name1, Name2.*
+
+Personal (non-group) interests are unaffected.
+
+**What "accredited" means** (mirrors the existing `investor_is_accredited_`): `accreditation_status = 'verified'` **OR** a non-null `accredited_confirmed_at` (the investor self-attested at signup). Defensive edges: only `status='active'` members count (invited/declined/removed are ignored), and an active member with no linked user row counts as **not** accredited.
+
+**New readers** (`lib/lending_groups/deal_participation.ts`): `lending_group_members_accreditation_R_` and `lending_group_unaccredited_members_R_` — kept in the lending-groups module so it stays free of an admin-layer import. The admin select query now also reads `i.lending_group_id`, and `investor_deal_interest_admin_row_T` carries it.
+
+**Spec + tests:** added an "Accreditation gate on selection (`#group-accreditation-gate`)" section to `prds/lending-groups-plan.md`, and `tests/lender-group-accreditation-gate.test.ts` (5 cases: all-accredited passes; pending/rejected member blocks + is named; non-active members ignored; unlinked active member blocks). Full suite green: **956 pass / 0 fail**, plus app + worker builds.
+
+*(The server 409 is authoritative. A UI affordance that pre-disables the select button + shows "group requires accreditation" on the admin Interested-Lenders tab would be a nice follow-up — say the word and I'll add it.)*
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Deployed. Committed `baac434` and pushed to `origin/main` (equityfundingsource-dev), then `make deploy` pushed the worker live — **version `bcf747a4-eb03-4fdb-9633-21a6e2e23c4d`** at `https://equityfundingsource.brian-takita.workers.dev` (startup 19 ms, bindings unchanged). The accreditation gate is now live in production.
+<!-- agent:boundary:abdb2bc9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,6 +103,10 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: Ensure that all lenders in a group are accredited before the EFS admin can select the lender group for an available deal.~~
+- :pushpin: deploy
+- ~~Ensure that all lenders in a group are accredited before the EFS admin can select the lender group for an available deal.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

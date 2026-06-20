@@ -393,12 +393,48 @@ pub fn compute_broadcast_plan(
     Ok(targets)
 }
 
+/// Parse the owning process id from a JetBrains plugin editor id
+/// (`jetbrains-<pid>-<uuid>`). Returns `None` for non-JetBrains editor ids
+/// (e.g. `vscode-…`) or malformed ids — callers treat those as live.
+fn jetbrains_editor_id_pid(editor_id: &str) -> Option<u32> {
+    let rest = editor_id.strip_prefix("jetbrains-")?;
+    let pid_str = rest.split('-').next()?;
+    if pid_str.is_empty() || !pid_str.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    pid_str.parse::<u32>().ok()
+}
+
+/// Whether an editor id refers to a live process (`#sqdrift` / `#fccreap2`).
+///
+/// JetBrains ids carry the owning pid (`jetbrains-<pid>-<uuid>`); a dead pid
+/// means the IntelliJ instance is gone and its live-buffer sidecar is an orphan.
+/// A dead editor must never be a broadcast origin or target: broadcasting to it
+/// re-creates the dead-pid patch file the `#fccreap` reaper just cleared and
+/// merges against its divergent stale buffer, which then leaks into the finalize
+/// IPC-proof path as `live_prompt_drift_after_preflight`. Non-JetBrains ids (no
+/// embedded pid) are conservatively treated as live so we never drop a peer we
+/// cannot assess (mirrors the `#fccreap` dead-consumer liveness stance).
+fn editor_id_is_live(editor_id: &str) -> bool {
+    match jetbrains_editor_id_pid(editor_id) {
+        Some(pid) => crate::hooks::pid_is_live(pid),
+        None => true,
+    }
+}
+
 /// Broadcast one editor's new full-buffer report to every other open editor
 /// sidecar for the same document.
 ///
 /// This is the FFI-first production delivery rung for `#rtwbcast`: plugins only
 /// report their visible buffer and consume targeted patch files. Rust owns the
 /// merge, echo suppression, per-editor patch filename, and payload shape.
+///
+/// Dead-editor liveness filtering (`#sqdrift` / `#fccreap2`): a dead originator
+/// cannot produce a fresh change, and a dead peer's sidecar is an orphan, so both
+/// are skipped (and dead peers' orphan sidecars reaped). Without this, a pile of
+/// closed-IntelliJ sidecars makes this fan out a storm of patches to dozens of
+/// dead consumers — regenerating the reaped patch files and feeding stale buffers
+/// into the finalize IPC-proof path.
 pub fn broadcast_editor_change(
     file: &std::path::Path,
     originator_editor_id: &str,
@@ -406,6 +442,21 @@ pub fn broadcast_editor_change(
 ) -> anyhow::Result<Vec<BroadcastDelivery>> {
     let originator_editor_id = originator_editor_id.trim();
     if originator_editor_id.is_empty() {
+        return Ok(Vec::new());
+    }
+    // `#sqdrift`: a dead editor cannot originate a fresh change. If the
+    // originator's IntelliJ process is gone, this is a stale replay/echo — skip the
+    // whole broadcast so we never storm patches to (and merge stale buffers from)
+    // dead peers.
+    if !editor_id_is_live(originator_editor_id) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "realtime_broadcast_skipped file={} origin_editor_id={} reason=dead_origin_editor",
+                file.display(),
+                originator_editor_id
+            ),
+        );
         return Ok(Vec::new());
     }
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
@@ -418,6 +469,12 @@ pub fn broadcast_editor_change(
         return Ok(Vec::new());
     }
     let disk = std::fs::read_to_string(&canonical).unwrap_or_default();
+    // `#sqdrift`: drop dead-editor peers and reap their orphan live-buffer
+    // sidecars. A closed IntelliJ leaves its sidecar behind; without this, every
+    // such orphan becomes a broadcast target, the fan-out re-creates the dead-pid
+    // patch file the reaper just cleared, and the merge against its divergent
+    // stale buffer leaks into the finalize IPC-proof path.
+    let mut reaped_dead_peers = 0usize;
     let peers: Vec<BroadcastPeer> = crate::debounce::live_buffer_snapshots(&canonical_str)
         .into_iter()
         .filter_map(|snapshot| {
@@ -425,7 +482,32 @@ pub fn broadcast_editor_change(
             let content = snapshot.content?;
             Some(BroadcastPeer::new(editor_id, content))
         })
+        .filter(|peer| {
+            if editor_id_is_live(&peer.editor_id) {
+                return true;
+            }
+            reaped_dead_peers += 1;
+            if let Err(err) =
+                crate::debounce::clear_live_buffer_for_editor(&canonical_str, Some(&peer.editor_id))
+            {
+                eprintln!(
+                    "[agent-doc] warning: failed to reap dead-editor live-buffer sidecar for {}: {err}",
+                    peer.editor_id
+                );
+            }
+            false
+        })
         .collect();
+    if reaped_dead_peers > 0 {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "realtime_broadcast_dead_peers_reaped file={} count={} reason=dead_editor_pid",
+                file.display(),
+                reaped_dead_peers
+            ),
+        );
+    }
     let targets = compute_broadcast_plan(&disk, originator_editor_id, originator_content, &peers)?;
     let doc_hash = crate::snapshot::doc_hash(&canonical)?;
     let mut deliveries = Vec::new();
@@ -880,5 +962,75 @@ mod tests {
         let body = payload["patches"][0]["content"].as_str().unwrap();
         assert!(body.contains("origin edit"));
         assert!(body.contains("peer edit"));
+    }
+
+    #[test]
+    fn editor_id_is_live_filters_dead_jetbrains_pids_only() {
+        let me = std::process::id();
+        assert!(editor_id_is_live(&format!("jetbrains-{me}-abc-uuid")), "own live pid");
+        // A pid near the max is overwhelmingly likely dead (kill(pid,0) → ESRCH).
+        assert!(!editor_id_is_live("jetbrains-2147483646-dead-uuid"), "dead high pid");
+        assert!(editor_id_is_live("vscode-123"), "non-jetbrains treated live");
+        assert!(editor_id_is_live("editor-A"), "no embedded pid treated live");
+        assert!(editor_id_is_live("jetbrains-notapid-uuid"), "malformed pid treated live");
+        assert_eq!(jetbrains_editor_id_pid("jetbrains-4242-uuid"), Some(4242));
+        assert_eq!(jetbrains_editor_id_pid("vscode-1"), None);
+        assert_eq!(jetbrains_editor_id_pid("jetbrains--uuid"), None);
+    }
+
+    #[test]
+    fn broadcast_editor_change_skips_dead_origin() {
+        let disk = concat!(
+            "# Doc\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "base\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let origin = disk.replace("base\n", "base\norigin edit\n");
+        let peer = disk.replace("base\n", "base\npeer edit\n");
+        let (_dir, file, canonical) = temp_doc(disk);
+        std::fs::create_dir_all(file.parent().unwrap().join(".agent-doc/patches")).unwrap();
+        // A live peer exists, but the originator's IntelliJ pid is dead.
+        crate::debounce::record_live_buffer_digest_content_for_editor(&canonical, &peer, Some("editor-B"))
+            .unwrap();
+        let deliveries =
+            broadcast_editor_change(&file, "jetbrains-2147483646-dead", &origin).unwrap();
+        assert!(deliveries.is_empty(), "a dead originator must not broadcast");
+    }
+
+    #[test]
+    fn broadcast_editor_change_drops_and_reaps_dead_peer() {
+        let disk = concat!(
+            "# Doc\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "base\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let origin = disk.replace("base\n", "base\norigin edit\n");
+        let dead_peer_buf = disk.replace("base\n", "base\ndead stale\n");
+        let (_dir, file, canonical) = temp_doc(disk);
+        std::fs::create_dir_all(file.parent().unwrap().join(".agent-doc/patches")).unwrap();
+        let dead_id = "jetbrains-2147483646-deadpeer";
+        crate::debounce::record_live_buffer_digest_content_for_editor(
+            &canonical,
+            &dead_peer_buf,
+            Some(dead_id),
+        )
+        .unwrap();
+        assert!(
+            crate::debounce::live_buffer_snapshots(&canonical)
+                .iter()
+                .any(|s| s.editor_id.as_deref() == Some(dead_id)),
+            "dead peer sidecar present before broadcast"
+        );
+
+        let deliveries = broadcast_editor_change(&file, "editor-A", &origin).unwrap();
+        assert!(deliveries.is_empty(), "no delivery to a dead peer");
+        assert!(
+            !crate::debounce::live_buffer_snapshots(&canonical)
+                .iter()
+                .any(|s| s.editor_id.as_deref() == Some(dead_id)),
+            "dead peer orphan sidecar must be reaped"
+        );
     }
 }

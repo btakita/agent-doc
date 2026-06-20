@@ -88,7 +88,23 @@ Implemented the zone-map segment-statistics substrate (plan Phases 1/2/4). **Com
 **Discovery → Phase 3 deferred (operator-gated).** While wiring Phase 3 I found the lexical `Sift` search builds its **own `TokenIndex`** (a JSON token cache) and never reads `index.db` — token-level pruning already exists there. So the zone-map's real consumers are the **index.db-backed** path/kind/scope queries (`explain`/`graph`/evidence), not the lexical corpus. I updated the plan with a revised Phase 3 (wire `files_possibly_containing_kind` + a future `files_in_path_scope` into those consumers, with a per-consumer pruned==unpruned regression) and queued it as an `[operator-verify]` backlog item so go-mode defers it — it's a behavior-changing cutover.
 
 **Held for your word:** `git push` of both repos, and the Phase 3 cutover. Say "push" and/or "do phase 3" when ready.
-<!-- agent:boundary:44a1fc2b -->
+
+### Re: do #b56m (Phase 3 zonemap cutover) — opus-4-8
+
+I attempted Phase 3 and audited every `index.db`-backed consumer. **Finding: there is no current consumer where the zonemap prune yields a win, so wiring it now would be speculative indirection.** I did not wire anything.
+
+Why no beneficiary today:
+- **Symbol queries** (`symbol_search`, `symbol_info`, `symbols_for_file`, `all_symbols`) hit the `symbols` table through SQL indexes (`idx_symbols_name`/`idx_symbols_file`) with bounded `WHERE` + `LIMIT` — they never iterate files and read contents, so a file-skip prune has nothing to accelerate.
+- The only **scan-heavy path** — lexical `Sift` content search — runs on its own `TokenIndex` and already prunes via `files_matching_any` (token-level). It never touches `index.db` and carries no symbol-kind data.
+- `explain`/`graph`/evidence follow `call_edges` (graph traversal, not file scans); `impact.rs` path-scoping is already bounded at the scoped-DB level.
+
+So the substrate (`file_zonemap` + `files_possibly_containing_kind`) is sound and tested but **currently inert**. The real next step is a direction decision, not a wiring — pick one and I'll do it:
+1. **Make lexical `Sift` search `index.db`-aware** so the zonemap prunes the *content* scan (mtime/path/kind). Biggest win, but a genuine `Sift` architecture change.
+2. **Add a new `--kind`-filtered symbol/search command** that consumes `files_possibly_containing_kind` — a small new feature that creates the consumer.
+3. **Leave the substrate inert** as a tested foundation until a consumer naturally appears.
+
+`#b56m` is gated pending your pick (1/2/3); finding recorded in the plan (superproject `HEAD`). Nothing pushed.
+<!-- agent:boundary:79bb523a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -103,12 +119,12 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#b56m] [operator-verify] Phase 3 (operator-gated cutover) of tasks/software/plan-tsift-zonemap-segment-stats.md: wire files_possibly_containing_kind (+ a future files_in_path_scope helper) into the index.db-backed path/kind/scope consumers, with a per-consumer pruned==unpruned regression. Behavior-changing — needs operator greenlight. Substrate phases 1/2/4 already landed (tsift f2bbcc7, push held).
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#b56m] [operator-verify] Phase 3 zonemap cutover BLOCKED on direction (see tasks/software/plan-tsift-zonemap-segment-stats.md): audit found NO current index.db consumer benefits — symbol queries are SQL-indexed (no file-scan to prune), lexical scan uses a separate TokenIndex, graph/explain follow call_edges. Pick a direction: (1) make Sift search index.db-aware for content-scan pruning [biggest, architectural]; (2) add a --kind-filtered command consuming files_possibly_containing_kind [new feature]; or (3) leave the substrate inert as a tested foundation.
 - [/] [#1yks] [operator] Finish tsift v0.1.72 publish: (1) bootstrap crates.io Trusted Publishing for the two NEW crates tsift-local-model + tsift-kg (browser/passkey 2FA — the prior 23 crates are configured, these two are not and a brand-new crate's first OIDC publish needs its config to exist; if crates.io rejects pre-config for a nonexistent name, do one manual 'cargo publish -p <crate>' to create it); (2) push the v0.1.72 tag (git tag v0.1.72 08d0f65 && git push origin v0.1.72) to trigger Release CI. Without step 1 the crates.io job fails again on the two new crates.
 <!-- /agent:review -->
 

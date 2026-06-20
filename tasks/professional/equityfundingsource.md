@@ -33,13 +33,11 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-201534.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-201534.md`*
 
 Compacted content:
-> **Queue prompt:**
->
-> **Queue prompt:**
->
+- Archived 12 response topic(s): Lender Bros 60% committed vs group 100% allocated; deploy #admin-deal-alloc-edit; "Committed amount and sold rate by this lender" showing with no committed amount; 9 more
+- Prior summary/context: prior compacted content: Archived 4 response topic(s): Message a lender individually; deploy; Is lender2@ blocking group selection; 1 more
 
 ### Re: what is "Funding Commitments" vs group confirmed % vs selection — opus-4-8
 
@@ -57,9 +55,7 @@ Selecting a lender/group (`selected_at`, via `PUT …/select`) is the **admin's 
 So the lifecycle is: **interest/proposal** (soft) → **group % split** (intent) → **admin selects funder** (decision, blends rate, TMO) → **lender funds** (`funds` pending = real commitment) → **wire confirmed** (`active` = funded). "100% of the loan will be funded" on selection is the *expectation*; it's realized only once funding commitments covering the loan are submitted and their wires confirmed.
 
 One gap worth flagging (ties to your earlier question): selection sends the lender **no email/notification**, so today nothing automatically tells a selected lender to go submit their funding commitment — that's a manual nudge. Let me know if you want a notification on select.
-❯ - Archived 12 response topic(s): Lender Bros 60% committed vs group 100% allocated; deploy #admin-deal-alloc-edit; "Committed amount and sold rate by this lender" showing with no committed amount; 9 more
-❯ - Prior summary/context: prior compacted content: Archived 4 response topic(s): Message a lender individually; deploy; Is lender2@ blocking gr...
-<!-- agent:boundary:ba185606 -->
+<!-- agent:boundary:7616ec10 -->
 <!-- /agent:exchange -->
 ###
 <!--

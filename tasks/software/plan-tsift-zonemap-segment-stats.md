@@ -7,10 +7,18 @@
 ### Discovery (2026-06-20): the lexical search path does not read `index.db`
 While wiring Phase 3 I found the lexical `Sift` search (`packages/tsift-search/src/sift.rs`, `search()`) builds/loads its **own `TokenIndex`** (a JSON token cache) and prunes via `files_matching_any(query_tokens)` — it never consults `index.db`'s `file_state`/`symbols`. So the original Phase 3 premise ("consult the index zonemap in `sift.rs`") is wrong: token-level pruning already exists there, and the zonemap's natural consumers are the **`index.db`-backed** commands (symbol/kind/scope/path queries, `explain`, `graph`, evidence), not the lexical corpus. The shipped read API `files_possibly_containing_kind` is the first sound consumer for that path. Revised Phase 3 below.
 
-### Revised Phase 3 — wire sound pruning into index.db-backed consumers
-- Identify the index.db-backed commands that iterate files/symbols with a kind or path predicate, and route them through `files_possibly_containing_kind` / a new `files_in_path_scope` zonemap helper.
-- Keep the soundness invariant (pruned ⊇ true matches); add a per-consumer regression that the pruned result equals the unpruned result on a fixture.
-- This is the operator-gated cutover; the substrate + read API it depends on are already landed and tested.
+### Phase 3 investigation (2026-06-20): no current consumer benefits
+Audited every index.db-backed consumer for a kind/path file-scan the zonemap could prune. **None qualify today:**
+- `symbol_search`, `symbol_info`, `symbols_for_file`, `all_symbols` query the `symbols` table directly through SQL indexes (`idx_symbols_name`/`idx_symbols_file`) with bounded `WHERE` + `LIMIT` — they never iterate files and read contents, so a file-skip prune has nothing to accelerate.
+- The only scan-heavy path, lexical `Sift` content search, runs on its own `TokenIndex` and already prunes via `files_matching_any` (token-level); it doesn't touch `index.db` and carries no symbol-kind data.
+- `explain`/`graph`/evidence follow `call_edges` (graph traversal, not file scans); `impact.rs` path-scoping is already bounded at the scoped-DB level.
+
+So the substrate (`file_zonemap` + `files_possibly_containing_kind`) is sound and tested but **currently inert — it has no beneficiary**. The next step is a direction decision, not a wiring:
+1. **Make the lexical `Sift` search `index.db`-aware** so the zonemap can prune the *content* scan (mtime/path/kind). Biggest win, but a real `Sift` architecture change.
+2. **Add a new `--kind`-filtered symbol/search command** that consumes `files_possibly_containing_kind` — a new feature that creates the consumer.
+3. **Leave the substrate inert** as a tested foundation until a consumer naturally appears.
+
+Soundness invariant for whichever path is chosen: pruned ⊇ true matches; add a per-consumer `pruned == unpruned` regression on a fixture.
 
 ## Why it fits tsift (grounded in current schema)
 

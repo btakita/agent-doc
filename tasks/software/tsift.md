@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -75,13 +75,33 @@ You chose **Advance Phase 3b now**, so I implemented and pushed it (the umbrella
 - Release built + `cargo install`ed (local `tsift` refreshed). CI run `27864747385` was **in_progress** at closeout — closing from local evidence per the in-progress-CI rule.
 
 **NEXT = Phase 4 cutover** (operator-scheduled, multi-session): flip the default to the FTS path, add a `files_in_path_scope` zone-map prune for path-filtered queries, retire the JSON `TokenIndex`; then Phase 5 ship (SPEC/VERSIONS). Say **"do #015t"** / **"do phase 4"** to continue.
-<!-- agent:boundary:495c20bf -->
+
+### Re: do #015t phase 4 — FTS5 cutover shipped — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#015t] phase 4
+
+
+You edited the queue head to `do [#015t] phase 4`, so I did the **Phase 4 cutover** (tsift `333a73c`, superproject pointer `f44e1ade9`).
+
+**FTS5 `index.db` BM25 is now the DEFAULT lexical search path.** `tsift search --strategy lexical` (and the auto-resolved lexical default for multi-token queries) returns `strategy: "fts"`. The JSON `TokenIndex` is demoted to a fallback.
+
+**How it stays sound** (the key design points):
+- `run_sift_search` uses FTS only when `<root>/.tsift/index.db` exists **AND is fresh** (`index_db_is_fresh_for_fts`). The normal flow's `precheck` + autoindex guarantees that in the common case.
+- **Freshness gate, not just existence** — a missing/corrupt index.db (empty placeholder) or a **stale** one (concurrent writer → autoindex degraded to read-only) falls back to the live `TokenIndex`. This caught a real regression in `make check`: degraded read-only search must serve **live** results, which the stale FTS index couldn't. The fallback fixes it.
+- Ranking shifts substring-position → **BM25 by design**; the Phase 3 gate proved candidate coverage (FTS ⊇ TokenIndex), so no hit is silently dropped — only the order changes.
+- Escape hatch: `TSIFT_FTS_SEARCH=0` (`0/false/no/off`) forces the legacy path during the transition.
+
+**Verification:** `make check` green (exit 0); new + updated tests (default-fts / no-index fallback / falsy-escape-hatch parser, plus three integration tests updated for the cutover); SPEC (`specs/architecture.md`) + VERSIONS (BREAKING CHANGE) updated; release built + `cargo install`ed; **live-verified** — default `--strategy lexical` → `strategy: fts`, `TSIFT_FTS_SEARCH=0` → `strategy: lexical`.
+
+**NEXT = Phase 4b cleanup** (agent-doable): retire the `TokenIndex` build/cache + `token-index.json` once the no-index path auto-indexes, add a `files_in_path_scope` path-prune, and thread the precheck freshness into `run_sift_search` to drop the redundant inspect walk. Then Phase 5 is the operator-gated crates.io release. Say **"do #015t"** / **"do phase 4b"** to continue.
+<!-- agent:boundary:7ff87b79 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: do [#015t] phase 4
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -90,7 +110,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 + 3a + 3b DONE + pushed (tsift f69f6a6): flag-gated index.db FTS5 search path wired into run_sift_search / __search-worker behind TSIFT_FTS_SEARCH (default off); sift::fts_search builds a SearchResponse with BM25 file ordering + lexical score_file line/snippet from the inline FTS body; IndexDb::content_fts_search_with_body. make check green, live-verified (--strategy lexical flips lexical->fts). NEXT = Phase 4 cutover: flip the default to FTS, add a files_in_path_scope path-prune, retire the JSON TokenIndex; then Phase 5 ship (SPEC/VERSIONS). Multi-session, operator-scheduled — say "do #015t" / "do phase 4".
+- [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 + 3a + 3b + Phase 4 CUTOVER DONE + pushed (tsift 333a73c). FTS5 index.db BM25 is now the DEFAULT lexical path (run_sift_search -> sift::fts_search when root index.db exists AND is fresh); TokenIndex demoted to fallback (no-index / un-indexed / direct caller), escape hatch TSIFT_FTS_SEARCH=0. Freshness gate keeps a stale/corrupt index from serving stale results. SPEC + VERSIONS (BREAKING) updated. make check green, live-verified (default->fts, =0->lexical). NEXT = Phase 4b cleanup (agent-doable): retire TokenIndex build/cache + token-index.json once the no-index path auto-indexes; add files_in_path_scope path-prune; thread precheck freshness to drop the redundant inspect walk. Then Phase 5 operator-gated crates.io release. Say "do #015t" / "do phase 4b".
 <!-- /agent:backlog -->
 
 ## Review

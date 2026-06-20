@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -38,7 +38,7 @@ completed
 Compacted content:
 - Archived 4 response topic(s): Message a lender individually; deploy; Is lender2@ blocking group selection; 1 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:3a1a73f9 -->
+<!-- agent:boundary:2061e991 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,12 +51,15 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated. First, we should drop the requ
+- :pushpin: The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.
+- The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.
+- do [#nthc]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#nthc] [recommended] Deploy #admin-deal-alloc-edit (admin per-deal allocation editor) to the EFS worker, then operator live-verify on deal d6b78994: open the Lender Bros group Edit overlay, bump lender2 from 0%, confirm the split saves and the "60% confirmed (partial)" badge reconciles. Shipped+pushed 2026-06-20 (EFS 8889a4c); deploy deferred (preset was spec-test-commit-push, no deploy).
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [/] [#67v2-aa-local] [recommended] Admin pipeline auto-advance local half (advances #67v2-auto-advance): define stage-requirement checks from the TMO-aligned Kanban and enqueue audited status updates to tmo_cache_outbox; replay stays gated on #dzmm. Depends on the #67v2 Kanban stages being built first.

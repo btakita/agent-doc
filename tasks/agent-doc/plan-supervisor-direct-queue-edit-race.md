@@ -35,21 +35,33 @@ concurrent queue writers plus a stale editor buffer:
 Each phase needs `make check`; phases touching the supervisor/editor need
 `make tmux-ci` across two live panes. Do **not** land from a degraded drain.
 
-- **Phase 1 — single live plugin owner per doc (#8bfz, foundational).** Plugin
-  acquires a short-TTL per-document owner lease (lock file under `.agent-doc/` or via
-  the sessions registry); non-owner live instances defer patch application +
-  `saveDocument`. Binary lease primitive + `PatchWatcher` gate. Removes re-flush
-  source (1). Already tracked as `#8bfz`; this plan absorbs it as Phase 1.
+- **Phase 1 — single live plugin owner per doc (#8bfz, foundational). ✅ SHIPPED**
+  (commit `237f5fb2`). Plugin acquires a short-TTL per-document owner lease
+  (`plugin_owner.rs` → `.agent-doc/plugin-owner/<hash>.json`, 30s TTL); non-owner
+  live instances defer patch application + `saveDocument` (`PatchWatcher.ownsDocument()`
+  gate, release on dispose). Binary lease primitive + FFI
+  (`agent_doc_plugin_owner_try_acquire`/`_release`) + 5 unit tests. Removes
+  re-flush source (1).
 
-- **Phase 2 — queue-edit lease respected by all writers.** Direct queue-edit
-  commands (`prune-noise`, `consume`) acquire the existing drain-claim lease (or a
-  new sibling `queue-edit` lease) for the edit's duration. The supervisor
-  idle-queue-watch already defers to drain-claim (#kp5z/#qflood); extend that defer
-  to **preflight queue maintenance** (`#mirrorall` mirror, backlog→queue sync,
-  `#7r2s` pin, live-buffer converge) so an out-of-band queue edit is atomic w.r.t.
-  the supervisor + preflight. Removes source (3) and the preflight half of (2).
+- **Phase 2 — queue-edit lease respected by all writers. ✅ SHIPPED** (commit
+  `d9a0ae58`). Direct queue-edit commands (`prune-noise`, `consume`) hold a new
+  sibling `queue_edit_owner` lease (`.agent-doc/queue-edit-owner/<hash>.json`, ~15s
+  TTL, RAII `QueueEditGuard`) for the edit's duration. Both other concurrent
+  writers now defer while a different live process holds a fresh lease:
+  **preflight queue maintenance** (`run_queue_maintenance` early-returns without
+  mutating — covers `#mirrorall` mirror, backlog→queue sync, `#7r2s` pin, dedup)
+  and the **supervisor idle-queue-watch** (skips the dispatch tick). Removes source
+  (3) and the preflight half of (2). 5 lease unit tests + maintenance defer
+  integration test; full suite (4796) + clippy green. Install/recycle deferred to
+  Phase 4.
 
-- **Phase 3 — idempotent malformed-entry normalization.** Make the queue
+- **Phase 3 — idempotent malformed-entry normalization. ~ MOSTLY LANDED**
+  (incremental: `#qdup-bare-id` collapses duplicate bare `[#id]` mirror heads,
+  `#qnoise-multiline-strike` excises fenced/multiline pasted-evidence heads,
+  `#pushpinaccum` idempotent operator pin). Remaining: a property/SimWorld
+  `render(parse(x))` fixed-point test over an already-malformed queue (double-pins
+  + stray `~~~done`/`---` runs together) to prove convergence, not amplification.
+  Make the queue
   parse/render path collapse double-pins, strip stray `~~~done` / consecutive `---`
   separator runs, and de-duplicate identical adjacent heads **idempotently**, routed
   through the converge path (never a bare disk write under a live listener). A

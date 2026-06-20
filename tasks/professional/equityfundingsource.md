@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,257 +33,33 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-165718.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-201534.md`*
 
 Compacted content:
-- Archived 4 response topic(s): Message a lender individually; deploy; Is lender2@ blocking group selection; 1 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Lender Bros 60% committed vs group 100% allocated — opus-4-8
-
 > **Queue prompt:**
 >
-❯ > The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.
-
-
 > **Queue prompt:**
 >
-> :pushpin: The admin at https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests Lender Bros ![img_33.png](img_33.png) as 60% committed, but the Lender Groups has the group 100% allocated.
 
+### Re: what is "Funding Commitments" vs group confirmed % vs selection — opus-4-8
 
-The screenshot (`img_33.png`) confirms the two numbers measure different things, so they aren't actually in conflict:
+There are **three distinct layers** here, and the deal moves through them in order. Worth separating because they're easy to conflate:
 
-- **Group → deal allocation**: the *Lender Bros* group is allocated **100%** of deal `d6b78994` (it takes the whole loan).
-- **Member → group confirmation**: within the group, `investor@` (CONTROLS) is at **60%** and `lender2@` at **0%** → the badge reads **"60% confirmed (partial)"**. The split (`lending_group_deal_split_set_`) imposes no 100%-sum rule, so partial is legal — there was no "requirement" actually blocking anything.
+**1. What the "Funding Commitments" tab (`deal_tab=funds`) is.**
+It's the `funds` table for this deal — *actual committed capital*, not intent. Each row is one investor's **`amount_funded`** (real dollars) with an `account_number`, a `position_type` (`whole_note` if they fund the full loan, else `fractional_interest`), a **status** (`pending` → `active`), and a TMO funding record id. `pending` = the lender submitted a funding commitment but the wire isn't confirmed; an admin flips it to `active`/accepted via **"Confirm Wire Funds Received."** So this tab is the money-on-the-table ledger + wire lifecycle.
 
-You chose **fix the admin display** + *let the admin edit the allocations via an overlay dialog*, so I built exactly that:
+**2. How it differs from the lender group's "confirmed %".**
+The group confirmed % (the Lender Bros "60% confirmed (partial)") is **intent/planning** — `lending_group_deal_split`, how a group's *members* divide the group's share among themselves, as a percentage. Partial is legal (no 100%-sum rule). A Funding Commitment is **binding dollars** with a funding status and TMO record. In short: **group % = who-takes-what-share intent; Funding Commitment = actual committed capital + wire status.** A member can be 60%-confirmed in the group split yet have *no* fund row yet, and vice-versa.
 
-- **Backend** — `POST /api/admin/lending-groups/:id/deals/:dealId/allocations` (`require_admin_`, reuses the already-tested `lending_group_deal_split_set_`; partial splits allowed).
-- **Admin UI** — an **Edit** action on each group header in the deal panel opens `AdminDealAllocationEditorModal` (built on the shared `PortalModal`): a per-member % editor that surfaces the running confirmed total and only blocks Save when it exceeds 100% — it does **not** force-rebalance to 100% like the default member-stakes editor.
-- **Tests** — data-layer read→edit→save round-trip (the exact 60%→reconcile case) + route/overlay wiring assertions. Full suite **976 pass / 0 fail**; browser + worker bundles build clean.
-- **Spec** — documented as `#admin-deal-alloc-edit` in `prds/lending-groups-plan.md`.
+**3. Is the lender committed once the admin selects them? — No.**
+Selecting a lender/group (`selected_at`, via `PUT …/select`) is the **admin's choice of funder**: it sets `selected_at`, recomputes the blended sold rate, and pushes a TMO writeback — but it creates **no `funds` row**. The binding commitment happens only when the **lender themselves submits funding** (account number + amount) → a `funds` row at `status='pending'`, and that amount **must match their selected proposal amount** (the code enforces it). It's not final even then — it's `pending` until an admin **confirms the wire received** → `active`.
 
-Committed + pushed to EFS `origin/main` (`8889a4c`). Per the `#spec-test-commit-push` preset I did **not** deploy — filed a `[recommended]` backlog item to deploy to the worker and live-verify the overlay on deal `d6b78994` when you're ready.
+So the lifecycle is: **interest/proposal** (soft) → **group % split** (intent) → **admin selects funder** (decision, blends rate, TMO) → **lender funds** (`funds` pending = real commitment) → **wire confirmed** (`active` = funded). "100% of the loan will be funded" on selection is the *expectation*; it's realized only once funding commitments covering the loan are submitted and their wires confirmed.
 
-### Re: deploy #admin-deal-alloc-edit — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-> **Queue prompt:**
->
-> do [#nthc]
-
-
-Deployed the `#admin-deal-alloc-edit` admin per-deal allocation editor (EFS `8889a4c`, already pushed) to the production worker.
-
-- **Build + upload** — worker bundle built clean; uploaded `index.browser-FYEISPPM.js` (1 new asset, 43 unchanged). Total 1116 KiB / 256 KiB gzip, 17 ms startup.
-- **Live** — https://equityfundingsource.brian-takita.workers.dev, **Version ID `17b06176-fc91-44b6-b35d-1cd61beed01b`**. All bindings (D1, R2 ×3, Durable Objects, scheduled `0 * * * *` tmo-sync) intact.
-
-The agent-doable half of `#nthc` is now complete (deploy). **Remaining is operator live-verify only** (can't be agent-done): open the Lender Bros group **Edit** overlay on deal `d6b78994`, bump `lender2` from 0%, confirm the split saves and the "60% confirmed (partial)" badge reconciles. Gated `#nthc` as `[operator-verify]`.
-
-(Left the unrelated `AGENTS.md` tsift code-nav version bump uncommitted — not part of this deploy.)
-
-### Re: "Committed amount and sold rate by this lender" showing with no committed amount — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests, "Committed amount and sold rate by this lender" is present but when I did not commit to any amount with the lender account. Why is this section showing up?
-
-
-That section is gated on a **submitted proposal**, not on a committed *amount* — and a proposal is stamped the moment the lender submits **any one** of amount, sold rate, or points. So that lender account submitted a proposal carrying a **sold rate and/or points** (possibly with a blank amount), which is enough to surface the block.
-
-**Render condition** (`lib/ui--browser--efs/portal/admin/deal_detail.tsx:730-745`): `interest_has_proposal_(interest) = Boolean(interest.proposal_submitted_at)`. Truthy → renders "Committed amount and sold rate by this lender"; falsy → "No committed amount or sold rate submitted by this lender yet."
-
-**What stamps `proposal_submitted_at`** — single write path (`app/equityfundingsource/lib/investor/shared.ts:504-522`):
-
-```
-if (proposal_amount != null || proposal_interest_rate != null || proposal_points != null) {
-  UPDATE investor_deal_interests SET proposal_submitted_at = now ...
-}
-```
-
-- A committed **amount** is NOT required — a sold rate alone (or points alone) trips it.
-- Merely clicking "Interested" (all three null) does **not** stamp it → no section.
-- No admin path writes `proposal_submitted_at` (admin only reads it), so it came from the lender's own deal-submit flow.
-
-**So:** "I did not commit to any amount" can be literally true (`proposal_amount` is null) while the section still shows because a **sold rate or points** was submitted — the committed-amount pill in that block would then read "-".
-
-Note this is the lender's soft **proposal**, distinct from the **group allocation/confirmation** (the earlier Lender Bros 60%-confirmed / lender2 0% — that's `lending_group_deal_split`, not `proposal_*`). A lender can have a proposal here without a confirmed group allocation, and vice versa.
-
-I couldn't confirm the exact D1 row (which of amount/rate/points is populated for deal `d6b78994`) — D1 read is still gated on **#cftk** (no D1-scoped token). Once it lands I can show the row.
-
-**Recommendation (filed `[recommended]` #cmtsec):** if this block should only appear for an actual committed amount, gate `interest_has_proposal_` on `proposal_amount != null`, or relabel it "Proposed terms" so showing a rate/points doesn't imply a committed amount.
-
-### Re: would `passage btak/equityfundingsource/cloudflare_api_token` work? — opus-4-8
-
-**Yes — it works.** I tested it (token never printed): `token verify` = **active**, and it has **D1 access** — both a D1 database list and a `SELECT` query succeeded against account `1e7e194ff8da4ad9e40ce041aea84f76` / DB `280e1539` (the `equityfundingsource` DB). The D1 `/query` API requires *Account D1 Edit*, so write scope is confirmed too.
-
-And your **`.env` line 7 already references this exact path** (`CLOUDFLARE_API_TOKEN=[REDACTED] So **`#cftk` is resolved** with no change needed — the token at that passage entry must have been re-scoped with D1 since the last test (which had failed on 10000/wrong-acct). The cf-wrangler / `cf:d1:query:remote` tooling and the D1-gated investigations (`#dealtab500`, `#cmtsec`) are unblocked.
-
-**Bonus — I queried the `d6b78994` row, which corrects my earlier answer:** the "Committed amount and sold rate by this lender" section is showing a **real submitted proposal**, not a null-amount artifact:
-
-| field | value |
-|---|---|
-| lender | `btak.dev+investor@gmail.com` (investor@, the group controller) |
-| proposal_amount | **$100,000** |
-| proposal_interest_rate | **6.5%** |
-| proposal_points | null |
-| proposal_submitted_at | 2026-06-19 6:26pm EDT |
-| selected_at | null (not yet blended into the deal) |
-
-So my prior `#cmtsec` "blank committed amount" hypothesis was **wrong for this deal** — there genuinely is a $100k @ 6.5% proposal recorded under the **investor@** account (the same account at 60% group-confirmed). If you didn't intend to commit $100k, that's stale/test data on the investor@ interest row — clearing that proposal removes the section. (`#cmtsec` updated with this; the latent UI behavior — showing on a rate/points-only proposal — still stands for *other* rows.)
-
-**On the dropped prompt** — you're right, my last turn lost it. The `no_changes:false → diff:null → no_changes:true` was the preflight queue-convergence wiping your uncommitted live-buffer line during the concurrent supervisor recycle. That's silent user-data loss; I filed it per `#agent-doc-bug` as **`#qprtloss`** in `agent-doc-bugs2.md` with a plan (`tasks/agent-doc/plan-prompt-loss-queue-convergence.md`) — distinct from the `#6b5h` finalize-wedge, and **not** implemented per the preset. Apologies for the round-trip.
-
-### Re: was a record created with default rate/duration? — opus-4-8
-
-> **Queue prompt:**
->
-> do [#proprate]
-
-
-> **Queue prompt:**
->
-> :pushpin: The amount was committed. But the other terms are not yet finalized...such as the interest rate and frequency. Was a record created with the interest rate and duration using default values? It should not have.
-
-
-**Rate: yes — a default got persisted. Duration: no — nothing was stored.** (Queried the live row + schema.)
-
-**The interest record has only 4 proposal columns** — `proposal_amount`, `proposal_interest_rate`, `proposal_points`, `proposal_submitted_at`. There is **no term/frequency/duration column** on `investor_deal_interests` at all.
-
-**Rate (6.5%) — defaulted, you're right.** The lender form pre-fills the rate input from the **deal's displayed rate** when no proposal exists yet (`investor/deal_detail.tsx:362`):
-
-```js
-const [proposal_rate] = useState(
-  deal.proposal_interest_rate == null
-    ? deal.monthly_interest.replace(/[^0-9.]/g,'')  // ← deal default (= 6.5)
-    : String(deal.proposal_interest_rate))
-```
-
-The submit (`:425-435`) then sends `proposal_interest_rate: rate` whenever an amount is present. So committing the $100k and hitting Send **without overriding the pre-filled rate persisted 6.5% as if it were finalized.** Confirmed it's a default: the deal's own `sold_rate` and `preferred_sold_rate` are both **null**, so 6.5 came from the `monthly_interest` display pre-fill. Worse, validation at `:421` *requires* a finite rate — so today there's **no way to commit an amount with the rate left "not finalized"**; it always submits the default.
-
-**Duration — not stored at all.** The submit body never sends a term, and there's no column to hold one. The form's `preferred_term` (defaulting to the deal's 12 months) is used only for client-side validation + the payment preview, then discarded. So **no defaulted duration record was created** — the admin "Amortized over" / "Frequency" pills read non-existent fields and render "-".
-
-**So the rate is the real issue.** Filed as **`#proprate`**: stop pre-filling the rate with the deal default, allow `proposal_interest_rate = null` ("amount committed, rate TBD"), and relax the `:421` validation + admin display to match.
-
-Want me to **null `proposal_interest_rate` on the `d6b78994` row** (live D1 write) so it reflects "amount committed, rate not finalized"? I'll only do that on your go.
-
-### Re: [#proprate] do cleanup — opus-4-8
-
-Done — nulled the defaulted rate on the live `d6b78994` row (D1 `changes=1`):
-
-| field | before | after |
-|---|---|---|
-| proposal_amount | $100,000 | **$100,000** (kept) |
-| proposal_interest_rate | 6.5 | **null** |
-| proposal_points | null | null |
-| proposal_submitted_at | 2026-06-19 | unchanged (kept) |
-
-So the investor@ interest now reads **"amount committed ($100k), rate not finalized"** — the admin "Sold rate" pill will show "-". Safe to do: the deal isn't selected (`selected_at` null), so no blended-rate recompute was triggered.
-
-The **code fix** half of `#proprate` (stop pre-filling the rate default, allow `proposal_interest_rate = null`, relax the `:421` validation + admin display) is still **gated pending your go** — without it, the next proposal submit would re-default the rate. Say the word and I'll implement + test it.
-
-### Re: is Monthly the CRE default? + which frequency-fix approach — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Frequency is autopopulated with Monthly, but the lender did not select Monthly. It was the default. Please make the Frequency nullable in the db and UI. Backport the existing available deal.
-
-
-**Yes — monthly is the standard default payment frequency for commercial real estate**, by a wide margin. Private/hard-money/bridge lending (which EFS is — sold rate, brokers, TMO/The Mortgage Office) is nearly always **monthly**, often interest-only monthly. Permanent/CMBS/agency CRE is monthly amortizing. Quarterly/semi-annual is niche; weekly/bi-weekly (which your enum offers) is essentially unheard of in CRE.
-
-So `monthly` as the **stored default** is domain-correct — the real defect is the UI presenting it as if the **lender finalized** that choice (same shape as the 6.5% rate). That changes the cost/benefit and gives us two paths:
-
-**① Derived-null (recommended)** — keep `monthly` as the DB default (correct CRE convention), but stop **treating/displaying** it as a selected value until the lender actually submits terms (`preferred_terms_submitted_at IS NULL` ⇒ show "-" / return null). Kills the false "Monthly selected" everywhere, **zero table rebuilds**, fully reversible, ~code-only.
-
-**② True nullable (literal ask)** — a migration rebuilding **both** `loans` and `investment_deals` to drop `NOT NULL DEFAULT 'monthly'`, + the ~11 code/UI/test changes, + backport nulls. Bigger and riskier — `loans` is a central table — even with no deploy this cycle.
-
-I held off implementing only because these diverge a lot and it's a production schema/behavior change. **Which do you want — ① (my recommendation) or ②?** Say the word and I'll implement it this cycle (spec + tests + commit + push, no deploy, per the preset).
-
-### Re: make Frequency nullable in db + UI / backport — opus-4-8
-
-> **Queue prompt:**
->
-> Frequency is autopopulated with Monthly, but the lender did not select Monthly. It was the default. Please make the Frequency nullable in the db and UI. Backport the existing available deal.
-
-
-Done (deal side) — implemented + committed + pushed, **no deploy** per your params. EFS `4df5488`, superproject pointer `3f895b27d`.
-
-- **Migration `0094`** rebuilds `investment_deals` to drop `NOT NULL DEFAULT 'monthly'` → `preferred_payment_frequency` is now **nullable**. Embedded backport nulls it on every deal whose preferred terms were never submitted (`preferred_terms_submitted_at IS NULL`) — covers both `d6b78994` + `7a0c1463` (your "all never-submitted" choice).
-- **Publish path** (`admin/repo.ts`) no longer copies a loan's defaulted `'monthly'` onto a deal unless the loan's terms were actually submitted.
-- **Deal API + investor/admin UI** now surface null as **"-"** instead of "Monthly" (coercion returns null, `?? 'monthly'` fallbacks removed, payment preview returns null without a frequency).
-- **Tests**: new `tests/deal-frequency-nullable.test.ts` (applies 0094 → asserts nullable + backport CASE + label "-"). Full suite **981 pass / 0 fail**; worker build clean. Spec: `#freqnull`.
-
-**No prod apply** — the migration + backport land when you next deploy + `cf:d1:migrate:remote`. Nothing was written to live D1 this cycle.
-
-**Scope note:** I made the **deal** column nullable (the "available deal" you named) and gated the loan→deal copy, but left the central **`loans`** table physically unchanged — rebuilding it is disproportionate risk and the deal is the displayed surface. The borrower's preferred-terms form still pre-selects Monthly at the loan level. If you also want that form truly blank-until-chosen (a `loans`-table rebuild), say so — filed `#freqnull-borrower` `[recommended]`.
-
-### Re: revert this turn — keep Monthly default — opus-4-8
-
-Reverted. The frequency-nullable change is fully undone and Monthly-default behavior is restored.
-
-- **EFS** — `git revert` of `4df5488` → **`c9cf538`**, pushed to `origin/main`. Migration `0094` deleted, `repo.ts` publish path back to `loan.preferred_payment_frequency ?? 'monthly'`, the deal API / UI `?? 'monthly'` fallbacks and label coercions restored, the new test removed. Suite back to **976 pass / 0 fail**, worker build clean (bundle back to `FYEISPPM`).
-- **Superproject** — pointer bumped to the reverted EFS HEAD (`cfe1ff6b6`).
-- **Nothing hit live D1** — the migration was never applied remotely, so there's nothing to undo there; production was always on the Monthly default.
-- **Backlog** — cancelled `#freqnull-borrower` (the borrower-side follow-up to the reverted work).
-
-Untouched (different turns, not part of this revert): the `#proprate` rate finding and the earlier one-off null of the `d6b78994` proposal_interest_rate. Tell me if you want those reverted too.
-
-### Re: move Select/Mark-package buttons above Workflow + deploy — opus-4-8
-
-> **Queue prompt:**
->
-❯ > :pushpin: Add an "Unselect Lender" button with a confirmation dialog in case a lender was mistakenly selected. Does "Select Lender" send an email to the lender(s)?
-
-
-❯ > **Queue prompt:**
-❯ >
-> :pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests, Move "Select Lender" and "Mark Package Sent" buttons above the Show/Hide Workflow button.
-
-
-Done + deployed. EFS `57f5c0f`, superproject pointer `414d223d7`, worker **Version ID `15aeefc9-975f-4fc8-ad49-fcb85c4221cc`** (live at https://equityfundingsource.brian-takita.workers.dev).
-
-In the admin deal interests row (`admin/deal_detail.tsx`), the two lender-action buttons now sit in the **row header, stacked above the "Workflow" toggle** — so you no longer have to expand the workflow section to use them:
-
-- **Select proposal** (the "Select Lender" action — toggles to **Deselect proposal** once selected)
-- **Mark package sent** (→ "Package sent" once done)
-- **Workflow** (Show/Hide) toggle underneath
-
-They were moved out of the collapsible *Deal Interest Workflow* section (no longer duplicated there). Suite **976 pass / 0 fail**, worker build clean.
-
-Two small notes: I kept the existing button labels ("Select proposal" / "Mark package sent") rather than renaming to "Select Lender" — say so if you'd prefer the rename. And I ordered them Select-then-Mark above the toggle per your listing; easy to flip to package-first if you'd rather follow the workflow sequence.
-
-### Re: Unselect Lender button + confirmation + does Select email the lender? — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-
-**Does "Select Lender" email the lender? — No.** Selecting a proposal (`PUT /api/admin/deal-interests/:id/select`) validates accreditation / TMO loan number / lender account / amount limits, sets `selected_at`, recomputes + stores the **blended sold rate**, runs a TMO writeback + `tmo_cache_outbox` sync enqueue, and may advance the loan status — but it sends **no email** to the lender. (The `lender_email` in that handler is only metadata in the TMO outbox payload.)
-
-**Unselect — the button already existed**, just hidden: the "Select proposal" button **toggles to "Deselect proposal"** once a lender is selected (`select_interest_` flips on `!selected_at`). With this turn's earlier change it's now in the row header (above the Workflow toggle), so it's visible without expanding.
-
-**What I added: the confirmation dialog.** Deselecting now pops a danger confirm ("Unselect {lender} for this deal? This clears the selection and updates the blended rate and TMO sync.") via the shared `use_confirm_dialog_` hook, so a selected lender can't be unselected by a misclick. Shipped + deployed.
-
-EFS `266de43`, superproject `78a518a2d`, worker **Version ID `dbf4590d-20d1-4730-9617-2d0ef349ea69`**. Suite 976 pass / 0 fail.
-
-(Heads-up: I'd briefly mis-struck this queued item before answering it — it's fully addressed now.)
-
-### Re: "Workflow" → "Show workflow" toggle label + deploy — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests, "Workflow" button should be "Show Workflow"...keep "Hide Workflow"
-
-
-Done + deployed. The collapsed toggle now reads **"Show workflow"** (was "Workflow"); the expanded state keeps **"Hide workflow"** unchanged, as you asked. I matched the existing lowercase-w style so the pair reads "Show workflow" / "Hide workflow" — say the word if you'd rather capitalize both ("Show Workflow" / "Hide Workflow").
-
-EFS `d5803a8`, superproject `421619ff9`, worker **Version ID `9f7151ba-bcda-407a-b284-7797ca004bb9`**. Suite 976 pass / 0 fail.
-<!-- agent:boundary:a3dba752 -->
+One gap worth flagging (ties to your earlier question): selection sends the lender **no email/notification**, so today nothing automatically tells a selected lender to go submit their funding commitment — that's a manual nudge. Let me know if you want a notification on select.
+❯ - Archived 12 response topic(s): Lender Bros 60% committed vs group 100% allocated; deploy #admin-deal-alloc-edit; "Committed amount and sold rate by this lender" showing with no committed amount; 9 more
+❯ - Prior summary/context: prior compacted content: Archived 4 response topic(s): Message a lender individually; deploy; Is lender2@ blocking gr...
+<!-- agent:boundary:ba185606 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -295,6 +71,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: What is the "Funding Commitments" tab in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=funds. How does "Funding Commitments" differ from the confirmed % in the lender group? When an admin selects a lender or lender group, 100% of the loan will be funded. Is the lender then committed once the admin selects a lender?
 <!-- /agent:queue -->
 
 ## Backlog

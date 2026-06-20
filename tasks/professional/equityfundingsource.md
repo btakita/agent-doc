@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -108,7 +108,7 @@ Implemented the associate-only fix (the safe default for the open design questio
 **Tests**: added source-assertion coverage for both halves and updated three pre-existing assertions that now matched the earlier associate-only occurrences. Full suite green — **909 pass / 0 fail** — plus `bun run build` + `bun run build:worker`.
 
 **Shipped**: committed + pushed EFS `d8c17b4`, superproject pointer `58a2c5fea`. **Deploy not run** — the directive carried no `#commit-push-deploy` preset and there is no CI auto-deploy. Trigger `#commit-push-deploy` (or `bun run deploy:worker`) when ready.
-<!-- agent:boundary:98f44d14 -->
+<!-- agent:boundary:28c53e2d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -121,6 +121,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#5q7z-ship]
 <!-- /agent:queue -->
 
 ## Backlog

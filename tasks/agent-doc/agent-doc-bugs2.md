@@ -39,7 +39,7 @@ completed
 Compacted content:
 - Archived 5 response topic(s): do #jbtsiftnosub; JB Run Agent Doc on monsterrodholders.md duplicates + no submit; do #avgwire; 2 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:eea2a368 -->
+<!-- agent:boundary:50e07e8c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -74,7 +74,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#vgat] #jbdupnosub #agent-doc-bug [operator-verify] JB Run Agent Doc on src/boost-client/tasks/monsterrodholders.md types the agent-doc <FILE> trigger MULTIPLE times (5-6 duplicate lines; screenshots img_50.png + img_51.png) into the input and never submits. STILL reproducing 2026-06-20 on the OLD pre-0.34.20 supervisor binary. Two layers: (1) cold-start typing into a not-yet-ready pane = the #jbtsiftnosub gate shipped in 0.34.20 (installed + recycled 2026-06-20); (2) repeated dispatch into a running-but-not-submit-ready pane, each re-typing the trigger with no submit proof = the broader #jbrundispatch/#1vhn accepted_only-no-submit family, plus a missing clear-before-retype so duplicates accumulate. If it persists AFTER the 0.34.20 recycle, capture .agent-doc/logs/supervisor-stderr.log + pane scrollback + pane state (cold-start vs busy) at send time. Likely the same no-submit-proof retry loop as the #qflood idle-watch re-dispatch.
 <!-- /agent:backlog -->
 
 ## Review

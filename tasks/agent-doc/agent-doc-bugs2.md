@@ -34,36 +34,47 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260620-051118.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260620-062516.md`*
 
 Compacted content:
-- Archived 5 response topic(s): do #jbtsiftnosub; JB Run Agent Doc on monsterrodholders.md duplicates + no submit; do #avgwire; 2 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-
-### Re: still not submitting after restart (img_52) + the cascade causes — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: [#vgat]: JB `Run Agent Doc` on monsterrodholders.md did not reproduce the issue. Is this done?
-
-
-You're right it wasn't fixed — it's a *different* code path than the one I fixed before, with the same underlying weakness. Both are now fixed and deployed (**0.34.22 installed**).
-
-**The restart duplicate-no-submit (img_52) — root-caused + fixed (0.34.22, `1e73e7cb`).** The earlier fix gated the *route* dispatch path (cold auto-start). Your screenshot is the **supervisor idle-watch drain loop** — a different path that checked pane readiness with a *weak* predicate (`matches_prompt`: "is there a prompt glyph?") instead of the *strong* one every gated path uses (`is_dispatch_ready_prompt_line`: "is the composer actually submit-ready?"). After a restart the pane shows a glyph while the composer is still coming up, so the drain loop re-injected the trigger **every tick** into a not-ready composer — Enter never submitted and copies stacked (your ~7 lines). Now it gates on the strong predicate and fails closed. This was the **shared root** of the duplicate-no-submit family; the prior fix only covered one of the two paths.
-
-**The cascade causes — all three fixed (0.34.21, `d48b30ea`):** (1) compaction saved the overlay-CRDT with pre-compaction content → now compacted text is authoritative; (2) `reset --from-current` didn't clear the crash-durability **queue journal** → now it does (why stale heads resurfaced); (3) `#editorbufwin` queue-consume now *reconciles* a live-buffer head divergence instead of hard-bailing, without breaking the safety invariant. All with regression tests; suite green (4822), pushed.
-
-**One operator step for a clean slate: restart this session + reload `agent-doc-bugs2.md` in JB.** 0.34.22 is installed; the restart puts the supervisor on it and the reload clears the divergent editor buffer that drove the drift this whole session (the one bug a binary fix can't clear for an already-open buffer).
-<!-- agent:boundary:b6e9e86b -->
+- Archived 1 response topic(s): still not submitting after restart (img_52) + the cascade causes
+- Prior summary/context: prior compacted content: Archived 5 response topic(s): do #jbtsiftnosub; JB Run Agent Doc on monsterrodholders.md dup...
+<!-- agent:boundary:7d21f255 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: [#vgat]: JB `Run Agent Doc` on monsterrodholders.md did not reproduce the issue. Is this done?~~
 - JB `Run Agent Doc` on equityfundingsource.md did not submit.
 - After restarting an agent-doc session, then JB `Run Agent Doc` on equityfundingsource.md, the duplicate prompts with no submit occurred ![img_52.png](img_52.png). I thought this issue was fixed but it's not fixed.
 - What are #next-steps to fix agent-doc bugs?
+---
+JB `Run Agent Doc` after a restart on monsterrodholders.md. I tried again and it worked. The restart state should not lag.
+```
+[route] target tmux session: 0
+[route] Still waiting for claude (1s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+[route] Still waiting for claude (3s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+[route] Still waiting for claude (4s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+[route] Still waiting for claude (6s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+[route] Still waiting for claude (8s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+[route] Still waiting for claude (9s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+[route] Still waiting for claude (11s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+[route] Still waiting for claude (12s)... last line:   search prompts: monst  ⏵⏵ bypass permissions on · 1 shell
+[route] Still waiting for claude (14s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+[route] Still waiting for claude (15s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+[route] Still waiting for claude (17s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+[route] Still waiting for claude (18s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+[route] Still waiting for claude (20s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+[route] Still waiting for claude (21s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+[route] Still waiting for claude (23s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+[route] Still waiting for claude (24s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+[route] Still waiting for claude (26s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+[route] Still waiting for claude (27s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+[route] Still waiting for claude (29s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+[route] claude blocked after 29.1s in pane %176: active claude turn
+Error: dispatch-only claude reopen refused to inject into pane %176 for tasks/monsterrodholders.md because the latest run is still booting and never reached a dispatch-ready prompt (active claude turn); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
+```
+---
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

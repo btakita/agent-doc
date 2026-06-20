@@ -271,53 +271,20 @@ Implemented and pushed (agent-doc `7b18567d`, **0.34.35**). But first an honest 
 **To clear THIS doc's churn now:** with 0.34.35 installed, `agent-doc queue prune-noise tasks/agent-doc/agent-doc-bugs2.md` will strike the orphan `[#kcb5]`, which unblocks `queue consume` to strike the two answered Qs — count drops to 0 and the loop settles. I'm doing the install + `lib-install` + `admin recycle` right after this commit (deferred until after closeout so the finalize client stays matched with the running supervisor — installing mid-finalize is what drifted this session).
 
 Remaining churn root that's *not* this fix: `#qheadstrike` (answered free-text heads not auto-struck through recovery paths) is still its own tracked item — `#orphanqhead` removes the head that *blocks* striking them, but the auto-strike-on-recovery gap is separate.
-<!-- agent:boundary:d7b0e483 -->
+<!-- agent:boundary:afc6f6dd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: [#kcb5]
+- ~~:pushpin: [#kcb5]~~
 - :pushpin: do [#6b5h]
-- #hap7
+- ~~#hap7~~
 - complete [#j9ja]
 - :pushpin: [#1jec]
 - :pushpin: Why is there so much drift? Can we tighten the window that causes drift by using evented and reactive techniques? Does the JB + VSCode environments support events whenever a document changes? Can we have a low-latency multi-channel streaming IPC mechanism from the plugin to the CPC? Or would it be better to one stream per document going to the CPC with a thread updating the document model? Can we isolate parts of the document so to reduce conflict? For example, I was typing into this queue item so it should not have any effect on the running job and it should not stall the queue since this is not the current item being run.
 - :pushpin: Why does monsterrodholders.md keep on reporting a stale 0.1.0 supervisor if we are using a recent version? `(Housekeeping: recycled a stale 0.1.0 supervisor that was producing the IPC-drift dialogs, and reconciled the agent-loop→boost-client parent pointer.)`
 ---
-JB `Run Agent Doc` on monsterrodholders.md sent duplicate prompts and did not submit.
-```
-claude exited cleanly.
-Press Enter to restart, or 'q' to exit.
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] supervisor auto-install: rebuilding + installing agent-doc from /home/brian/work/btakita/agent-loop/src/agent-doc so the next queue item runs on the freshly-committed source
-   Compiling agent-doc v0.34.26 (/home/brian/work/btakita/agent-loop/src/agent-doc)
-    Finished `release` profile [optimized] target(s) in 1m 44s
-[lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.26.so (symlink: libagent_doc.so)
-[lib-install] auto-recycle: 2 controller(s) marked to recycle at next idle boundary, 3 skipped (set AGENT_DOC_RECYCLE_ON_INSTALL=0 to disable)
-[agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle_queue_watch: clear cooldown active for tasks/agent-doc/agent-doc-bugs2.md, skipping passive queue dispatch
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-```
 - :pushpin: do [#qprtloss]
 - do [#6b5h]
 <!-- /agent:queue -->

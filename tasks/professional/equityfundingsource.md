@@ -121,7 +121,24 @@ Implemented the associate-only fix (the safe default for the open design questio
 When `admin_deal_publish_` runs it sets `investment_deals.status='published'`, which makes the loan an **"Available Deal"** in the **authenticated lender/investor portal** at `/lenders/available-deals` (`INVESTOR = '/lenders'`). That route is gated by `require_auth_(c, 'investor')` and sits behind the accredited-investor confirmation — so only a logged-in (accredited) lender account ever sees it. There is no public deal listing (nothing under `lib/.../public/` renders published deals), so a published loan does **not** appear on the public marketing site.
 
 So "a loan is publishable only [when accepted]" (#214f) is about whether an accepted loan is allowed into that **authenticated investor marketplace** — it never controls public-website visibility. Publishing exposes a deal to your logged-in lenders, not to the open web.
-<!-- agent:boundary:74687a53 -->
+
+### Re: funded vs. available — why is a funded loan still "publishable"? — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Why would a loan be publishable as available to be funded when it is funded? If it's funded, it's not available by definition.
+
+
+A funded deal is **not** offered as available-to-fund. The system separates **visible** from **available**:
+
+- **"Available Deals" = published only.** The available-deals nav count is `admin_deals_R_(db, 'published')` — funded deals are excluded from the available list.
+- **A funded deal stays *visible* in the marketplace** (`deal_viewable_` allows `published` **and** `funded`), so a lender can still see it — but each lender's badge is computed from *their own* position (`deal_user_status_`): `available` only when they hold no fund, else `funding_pending` / `funded`. A funded deal renders as **Funded**, never Available.
+- **The funding action is hard-capped by remaining capacity.** A commit is rejected when `amount_funded > available_amount`, where `available_amount = loan_amount − reserved`. A fully-funded deal has zero remaining capacity, so it can't be funded again (and the lender must be EFS-selected first). So "available by definition" holds at the action level — you cannot fund a funded deal.
+
+The `funded → published` mapping you likely saw (in the loan-status sync) is **not** "funded becomes available" — it's the *un-funding reset*: it only fires when TMO reports the loan is **no longer** `Funded` while the deal still says funded (a funding reversal), re-opening it as published. The forward path is `published → funded → closed`.
+
+So there's no contradiction: funded ≠ available; only *visibility* is shared, and capacity + selection guards prevent re-funding. If the product intent is that funded deals should disappear from the lender marketplace entirely (not just show a Funded badge), that's a one-line filter to gate `deal_viewable_`/the listing to `published` only — say the word and I'll do it.
+<!-- agent:boundary:cb8a6989 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,6 +152,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: "a loan is publishable only": Does publishable mean on the public webite?~~
+- ~~:pushpin: Why would a loan be publishable as available to be funded when it is funded? If it's funded, it's not available by definition.~~
 - do [#5q7z-ship]
 <!-- /agent:queue -->
 

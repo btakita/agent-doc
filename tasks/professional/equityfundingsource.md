@@ -59,7 +59,18 @@ You chose **fix the admin display** + *let the admin edit the allocations via an
 - **Spec** — documented as `#admin-deal-alloc-edit` in `prds/lending-groups-plan.md`.
 
 Committed + pushed to EFS `origin/main` (`8889a4c`). Per the `#spec-test-commit-push` preset I did **not** deploy — filed a `[recommended]` backlog item to deploy to the worker and live-verify the overlay on deal `d6b78994` when you're ready.
-<!-- agent:boundary:0d0817a2 -->
+
+### Re: deploy #admin-deal-alloc-edit — opus-4-8
+
+Deployed the `#admin-deal-alloc-edit` admin per-deal allocation editor (EFS `8889a4c`, already pushed) to the production worker.
+
+- **Build + upload** — worker bundle built clean; uploaded `index.browser-FYEISPPM.js` (1 new asset, 43 unchanged). Total 1116 KiB / 256 KiB gzip, 17 ms startup.
+- **Live** — https://equityfundingsource.brian-takita.workers.dev, **Version ID `17b06176-fc91-44b6-b35d-1cd61beed01b`**. All bindings (D1, R2 ×3, Durable Objects, scheduled `0 * * * *` tmo-sync) intact.
+
+The agent-doable half of `#nthc` is now complete (deploy). **Remaining is operator live-verify only** (can't be agent-done): open the Lender Bros group **Edit** overlay on deal `d6b78994`, bump `lender2` from 0%, confirm the split saves and the "60% confirmed (partial)" badge reconciles. Gated `#nthc` as `[operator-verify]`.
+
+(Left the unrelated `AGENTS.md` tsift code-nav version bump uncommitted — not part of this deploy.)
+<!-- agent:boundary:ba0ed56d -->
 <!-- /agent:exchange -->
 ###
 <!--

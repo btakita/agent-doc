@@ -75,13 +75,13 @@ You chose **Advance Phase 3b now**, so I implemented and pushed it (the umbrella
 - Release built + `cargo install`ed (local `tsift` refreshed). CI run `27864747385` was **in_progress** at closeout — closing from local evidence per the in-progress-CI rule.
 
 **NEXT = Phase 4 cutover** (operator-scheduled, multi-session): flip the default to the FTS path, add a `files_in_path_scope` zone-map prune for path-filtered queries, retire the JSON `TokenIndex`; then Phase 5 ship (SPEC/VERSIONS). Say **"do #015t"** / **"do phase 4"** to continue.
-<!-- agent:boundary:efcda17f -->
+<!-- agent:boundary:495c20bf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: do [#015t]
+- :pushpin: do [#015t] phase 4
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -69,6 +69,11 @@ Committed + pushed to EFS `origin/main` (`8889a4c`). Per the `#spec-test-commit-
 
 > **Queue prompt:**
 >
+> deploy
+
+
+> **Queue prompt:**
+>
 > do [#nthc]
 
 
@@ -80,7 +85,7 @@ Deployed the `#admin-deal-alloc-edit` admin per-deal allocation editor (EFS `888
 The agent-doable half of `#nthc` is now complete (deploy). **Remaining is operator live-verify only** (can't be agent-done): open the Lender Bros group **Edit** overlay on deal `d6b78994`, bump `lender2` from 0%, confirm the split saves and the "60% confirmed (partial)" badge reconciles. Gated `#nthc` as `[operator-verify]`.
 
 (Left the unrelated `AGENTS.md` tsift code-nav version bump uncommitted — not part of this deploy.)
-<!-- agent:boundary:9e818965 -->
+<!-- agent:boundary:0e8d3943 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,8 +98,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#nthc]~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

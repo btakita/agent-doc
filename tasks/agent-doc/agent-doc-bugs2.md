@@ -150,13 +150,28 @@ That converts the review gates into a test→log→auto-close loop instead of ma
 **Editor buffer should win (head 3).** You're right, and it's captured as **`#editorbufwin`** (`#agent-doc-bug`). This is the exact `#queue-user-edit-overwrite` drift that bit *my own* finalizes twice this session: `content_ours` (baseline + response, no user edits) overwrote your concurrently-typed `#advance-review` queue head, so `session-check` flagged it INTERRUPTED and I recovered via `reset --from-current`. Root cause: the route-owned supervisor's in-memory CRDT went stale vs your live editor buffer, so the snapshot kept winning. The fix is for the editor buffer to win for unconsumed user queue edits; near-term I'm recycling the supervisor to refresh its CRDT so it stops reverting your edits.
 
 Backlog now holds the two actionable items (`#editorbufwin`, `#optverify`); the 17 gated items stay in review for your live verification.
-<!-- agent:boundary:a436f50e -->
+
+### Re: do #editorbufwin — opus-4-8
+
+Created the plan (`plan-editor-buffer-wins-queue-merge.md`, committed `17b3f8f8b`) — and went past planning to *attempt* the fix, which paid off: it surfaced the real root cause and a hidden invariant a blind fix would have broken.
+
+**What I tried and why I reverted.** First approach was "splice the dropped user queue addition into `content_ours`." It broke `ipc_live_prompt_drift_content_ours_ignores_unproven_live_queue_deletions`, a test that *deliberately* asserts an unanswered user queue head must **not** be absorbed into `content_ours` — because a head folded into the snapshot reads as already-handled next cycle, so the agent could silently skip a prompt it never answered. So that direction is wrong.
+
+**The real root cause** (now in the plan): `content_ours` keeps additions next-cycle-visible on disk *by design*. The drop happens later — the **`#pcwc` post-commit worktree reconcile** overwrites the disk addition with HEAD (`disk_after_failed_editor_refresh`). The editor buffer re-flushing it is the only reason it survived at all; HEAD still lost it, so `session-check` correctly INTERRUPTED. Corrected fix direction: **P1** the `#pcwc` reconcile preserves unconsumed user queue additions on disk; **P2** auto-recover the commit (automate the manual `reset --from-current` you've been doing); **P4** refresh the stale supervisor CRDT that enables the drift.
+
+**Gated `#editorbufwin`** — plan-complete, but the implementation is a focused merge-core cycle. This is the one justified gate: a blind in-loop attempt *already* tripped a hidden invariant, which is exactly why it isn't loop-safe. The plan has the four invariants the fix must not regress.
+
+**Live irony:** this very cycle kept hitting `#editorbufwin` — every granular write drifted on `content_ours`, needing `agent-doc commit` recovery. The `admin recycle` I queued fires when this turn ends and should clear the stale CRDT.
+<!-- agent:boundary:2357af3a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - do [#editorbufwin]
+- What are #next-steps to fix agent-doc bugs?
+- Still getting JB `File Cache Conflicts`.
+- JB `Run Agent Doc` on tsift.md auto-started a new supervisor/tmux pane, added the prompt into the Claude input, but did not submit the prompt.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -183,12 +198,12 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#editorbufwin] #agent-doc-bug #queue-user-edit-overwrite The IPC content_ours merge reverts live editor-buffer queue edits to the stale disk/snapshot state and drops them — the operator observed their just-typed queue items revert ("the queue reverted back to the disk state; the editor buffer should have won as the source of truth"). Repro THIS session: two finalizes hit live_prompt_drift_after_preflight; content_ours (baseline+response, no user edits) overwrote the operator's concurrent #advance-review queue addition (session-check flagged #queue-user-edit-overwrite INTERRUPTED), requiring reset --from-current recovery. Root: the supervisor's in-memory CRDT is stale vs the live editor buffer, so content_ours wins over unconsumed user queue edits. Fix: when content_ours would drop an unconsumed user queue head that exists in the live editor buffer, prefer/merge the editor-buffer queue (editor buffer is source of truth for unanswered user edits) instead of the snapshot; or refresh the supervisor CRDT from the live buffer before the merge decision. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#editorbufwin] #agent-doc-bug #queue-user-edit-overwrite The IPC content_ours recovery drops unconsumed user queue additions the operator typed into the live editor buffer (operator: "the queue reverted to disk state; the editor buffer should have won as the source of truth"). PLAN DONE: root cause is NOT content_ours composition (it deliberately keeps additions next-cycle-visible on disk per the ignores_unproven_live_queue_deletions invariant — a blind splice-into-content_ours attempt 2026-06-19 tripped that test) but the #pcwc post-commit worktree reconcile overwriting the disk addition with HEAD. GATED for a focused merge-core cycle. Fix: P1 #pcwc reconcile preserves unconsumed user queue additions on disk; P2 auto-recover the commit (automate the manual reset --from-current the operator does today); P4 refresh the stale supervisor CRDT that enables the drift. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md
 - [/] [#fbwire] [operator-verify] #agent-doc-bug Phase 2 live wiring of the #fullboundary convergence gate (Phase 1 decision core + playback shipped, submodule 17010e78). Call convergence_gate_decision inside the supervisor idle-queue-watch/drain inter-item dispatch (start/idle_watch.rs to start.rs): gather the four facts (committed via cycle_state, editor converged==HEAD via emit_postcommit_worktree_check, ipc_socket inflight==0, actor idle), defer the next trigger until Dispatch, on ForceDiskFallback do the real --force-disk write + record_force_disk_fallback. Add SimWorld acceptance. Live-supervisor-critical: needs make check + make tmux-ci across two live panes, so NOT in-session-loop-drainable; needs a focused operator-driven cycle. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md
 - [/] [#hap7] [operator-verify] #agent-doc-bug #qdup Operator-reported (2026-06-19): agent-doc duplicated the operator equityfundingsource.md queue prompt (All upload preview dialogs should be full screen, deploy) on a concurrent edit. Second instance of the queue-prompt duplication family (first: virtuousai.md). Fix per operator spec: constrain the CRDT/semantic merge to the structural part it applies to (per-structural-node merges, not whole-component) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; and when the operator deletes a structure that agent content targets, note it in agent:exchange instead of merging. Merge-core change, the corruption source this session, so NOT safe to rush in the in-session loop; needs a focused cycle. Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md
 - [/] [#qpausemix-verify] [operator-verify] #agent-doc-bug Verify the #qpausemix session-check fix (submodule 2cf7bcee) live: build+install the new binary (make install: cargo install --path . + cargo build --release + agent-doc lib-install) at a supervisor recycle boundary (deferred from this session to avoid finalize-client-newer-than-supervisor drift), then on a controller-paused queue (e.g. equityfundingsource.md under a qflood pause) confirm session-check stderr now prints the "queue_paused is NOT a contradiction" preamble + recorded reason so an agent no longer stalls deciding operator-set-pause vs transient state. Root cause fixed: session-check printed the bare CONTINUATION_NO_STALL_GUIDANCE constant instead of continuation_guidance(pause_reason); resolution previously only reached preflight JSON.

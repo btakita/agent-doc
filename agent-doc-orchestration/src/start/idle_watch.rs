@@ -328,6 +328,16 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut reexec_failed = false;
             let mut reexec_escalation_attempts: u32 = 0;
             let mut reexec_escalation_exhausted_logged = false;
+            // `#wd40` / `#staleloop-recycle-restart`: one-shot log latch for the
+            // stale-binary recycle-yield request. A continuously self-draining
+            // `/loop` holds the harness `turn_active` back-to-back so this
+            // supervisor never reaches its own recycle boundary; when it is stale
+            // AND that loop owns the drain we write a short-TTL recycle-yield
+            // request that the in-session loop reads at its next inter-item
+            // boundary and yields, letting the `execve` recycle fire on its own.
+            // The request file is refreshed every tick while the condition holds;
+            // the log line fires once so the watch loop stays quiet.
+            let mut recycle_yield_requested_logged = false;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
@@ -1025,6 +1035,95 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     write_wedged,
                     reexec_failed,
                 );
+                // `#wd40` / `#staleloop-recycle-restart`: automate the manual
+                // `make install` + `admin recycle` + end-turn the operator had to
+                // run to force a stale supervisor onto a fresh binary during a
+                // continuously self-draining session. The recycle above only fires
+                // at a `turn_boundary` (`prompt_visible && !turn_active`), but a
+                // self-driving `/loop` holds a fresh drain-owner lease AND keeps
+                // the harness `turn_active` back-to-back, so the boundary is never
+                // reached. When this supervisor is stale, a loop owns the drain,
+                // and a recycle WOULD fire at a boundary, write a short-TTL
+                // recycle-yield request: the in-session loop reads it at its next
+                // inter-item boundary (via `queue_continuation::detect` /
+                // `session-check` / preflight), yields one boundary instead of
+                // re-triggering, and the resulting idle turn lets the `execve`
+                // recycle fire on its own. After the recycle the fresh supervisor
+                // (no longer stale) clears the request and the drain resumes.
+                {
+                    let drain_owner_active = crate::drain_owner::fresh_drain_owner_lease(
+                        &file,
+                        current_epoch_secs(),
+                    )
+                    .is_some();
+                    // Would a real recycle (or the Phase-3 escalation) fire if the
+                    // boundary were reachable? A bare `Detect` (auto-recycle opted
+                    // out, no admin/wedge) does NOT hot-reload, so yielding the loop
+                    // for it would only stall the drain.
+                    let would_recycle_at_boundary = !matches!(
+                        supervisor_recycle_action(
+                            supervisor_stale,
+                            recycle_auto_enabled,
+                            true,
+                            head_pending,
+                            explicit_admin_recycle,
+                            write_wedged,
+                            reexec_failed,
+                        ),
+                        SupervisorRecycleAction::None | SupervisorRecycleAction::Detect
+                    );
+                    // Never yield-loop a supervisor that can no longer converge: once
+                    // the bounded kill+relaunch escalation is exhausted the recycle
+                    // will never fire, so asking the loop to keep yielding would stall
+                    // the drain forever. Fall through to the one-time operator-restart
+                    // hint instead (`#supselfheal` Phase 3 exhaustion).
+                    if !reexec_escalation_exhausted_logged
+                        && stale_drain_recycle_yield_requested(
+                            would_recycle_at_boundary,
+                            drain_owner_active,
+                            turn_boundary,
+                        )
+                    {
+                        // Refresh the request every tick so it stays live until the
+                        // loop yields; log once.
+                        if let Err(err) = crate::recycle_yield::request_recycle_yield(
+                            &file,
+                            crate::recycle_yield::RECYCLE_YIELD_STALE_BINARY,
+                        ) {
+                            eprintln!(
+                                "[agent-doc] idle-queue watch: failed to write recycle-yield request for {}: {err:#}",
+                                path.display()
+                            );
+                        } else if !recycle_yield_requested_logged {
+                            recycle_yield_requested_logged = true;
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "supervisor_recycle_yield_requested pane={} reason=stale_binary_drain turn_active={} drain_owner=loop note=loop_yields_to_let_execve_recycle_fire",
+                                    shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                    turn_active,
+                                ),
+                            );
+                            crate::ops_log::log_op(
+                                &path,
+                                &format!(
+                                    "supervisor_recycle_yield_requested file={} pane={} reason=stale_binary_drain action=signal_loop_yield",
+                                    path.display(),
+                                    shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                ),
+                            );
+                            eprintln!(
+                                "[agent-doc] supervisor binary is stale while a self-draining loop owns the drain; requesting the in-session loop to yield one boundary so the recycle can hot-reload onto the fresh binary"
+                            );
+                        }
+                    } else if !supervisor_stale {
+                        // Post-recycle (or no longer stale): drop any leftover
+                        // request so the loop resumes draining on the fresh binary.
+                        // Reset the log latch so a later staleness can re-request.
+                        crate::recycle_yield::clear_recycle_yield(&file);
+                        recycle_yield_requested_logged = false;
+                    }
+                }
                 // `#supselfheal` Phase 3 (`#supselfheal-reexecescalate`): a stale
                 // supervisor whose in-place `execve` already failed cannot converge by
                 // re-execing again. Escalate to a bounded kill+relaunch of the harness

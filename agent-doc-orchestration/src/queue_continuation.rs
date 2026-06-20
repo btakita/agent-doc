@@ -56,6 +56,20 @@ pub struct QueueContinuation {
 /// `[clean-session]` head wanting "fresh context" are NOT stop reasons.
 pub const CONTINUATION_NO_STALL_GUIDANCE: &str = "queue continuation required — keep draining after a proven closeout. A closeout that reached committed + session-check ok is successful even via a proven file-IPC editor fallback (socket degraded / stale supervisor): the in-session loop does not depend on the socket itself. IPC timeout, missing response proof, recovery=retry_without_disk_write, or recovery=direct_write_fallback are not successful closeouts for an active editor buffer; retry the editor/CRDT path instead of using a direct session-document disk write. Only a failed closeout, unproven IPC/delivery retry condition, session-check interruption, or lint-gate block stops the loop. Degraded IPC after proof, a stale/wedged supervisor, high session-accretion, and semantic_completion_match warnings are NOT stop reasons.";
 
+/// `#wd40` / `#staleloop-recycle-restart` — guidance surfaced when the route-owned
+/// supervisor is running a stale binary and has asked the in-session loop to YIELD
+/// one inter-item boundary so the supervisor can `execve`-hot-reload onto the
+/// freshly-installed binary.
+///
+/// This is a *temporary, intentional* drop of `queue_continuation_required`, NOT a
+/// drained queue or a stop reason: end the current turn cleanly (do not re-trigger
+/// `agent-doc <FILE>`); the resulting idle boundary lets the stale supervisor
+/// recycle, and the drain resumes automatically on the fresh binary. Releasing the
+/// drain-owner lease (`agent-doc drain-claim <FILE> --release`) hands the drain
+/// back to the freshly-recycled supervisor immediately instead of waiting for the
+/// lease TTL.
+pub const RECYCLE_YIELD_GUIDANCE: &str = "supervisor recycle pending — the route-owned supervisor is running a STALE agent-doc binary and has asked this loop to YIELD one boundary so it can hot-reload onto the freshly-installed binary. This is intentional and temporary, NOT a drained queue or a stop reason. End this turn cleanly (do NOT re-trigger agent-doc <FILE>); the idle boundary lets the stale supervisor execve-recycle and the drain resumes automatically on the fresh binary. Optionally run `agent-doc drain-claim <FILE> --release` to hand the drain back to the recycled supervisor immediately rather than waiting for the lease TTL. Do not run `make install` / `admin recycle` by hand — the supervisor now automates the recycle once you yield.";
+
 /// Detect whether `file` currently requires queue continuation.
 ///
 /// True only when: frontmatter `queue_active: true`,
@@ -79,6 +93,18 @@ pub fn detect(file: &Path) -> Result<Option<QueueContinuation>> {
     // pause stalling the in-session loop strands genuine drainable backlog (the
     // operator-rejected over-reach); `queue: stop` / `--- stop` is the in-session
     // stop control.
+    // `#wd40` / `#staleloop-recycle-restart`: when the route-owned supervisor is
+    // stale and has asked the in-session loop to yield one boundary so it can
+    // hot-reload onto a freshly-installed binary, report no continuation so the
+    // loop ends its turn. The idle boundary lets the `execve` recycle fire; the
+    // fresh supervisor clears the request and the drain resumes. This is a
+    // *temporary* yield (the request is short-TTL and cleared post-recycle), not a
+    // drained queue — surfaces are expected to print [`RECYCLE_YIELD_GUIDANCE`].
+    // The supervisor's OWN idle-watch drain uses `live_drainable_continuation_head`
+    // (not this), so it is unaffected and resumes the drain after recycling.
+    if crate::recycle_yield::recycle_yield_pending(file) {
+        return Ok(None);
+    }
     let content = match std::fs::read_to_string(file) {
         Ok(content) => content,
         Err(_) => return Ok(None),
@@ -1812,6 +1838,40 @@ mod tests {
         let continuation = detect(&doc).unwrap().expect("ready auto-queue head");
         assert_eq!(continuation.head_prompt, "do [#seopdp] next");
         assert_eq!(continuation.head_id.as_deref(), Some("seopdp"));
+    }
+
+    #[test]
+    fn detect_yields_when_supervisor_requests_recycle_yield() {
+        // `#wd40` / `#staleloop-recycle-restart`: a stale supervisor that can never
+        // reach its own recycle boundary during a continuously self-draining session
+        // writes a recycle-yield request; while it is live the in-session loop must
+        // see NO continuation (so it ends its turn and the execve recycle fires),
+        // even though the active queue still has drainable heads. Clearing the
+        // request restores normal continuation so the drain resumes post-recycle.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#seopdp] next", "do [#third]"], true, true);
+        let doc_str = doc.to_string_lossy().to_string();
+
+        // Baseline: continuation is owed.
+        assert!(detect(&doc).unwrap().is_some());
+
+        // A live recycle-yield request suppresses continuation entirely.
+        crate::recycle_yield::request_recycle_yield(
+            &doc_str,
+            crate::recycle_yield::RECYCLE_YIELD_STALE_BINARY,
+        )
+        .unwrap();
+        assert!(
+            detect(&doc).unwrap().is_none(),
+            "a pending recycle-yield must make the in-session loop yield"
+        );
+
+        // Clearing the request hands the drain back so the loop resumes.
+        crate::recycle_yield::clear_recycle_yield(&doc_str);
+        assert!(
+            detect(&doc).unwrap().is_some(),
+            "clearing the recycle-yield must restore normal continuation"
+        );
     }
 
     #[test]

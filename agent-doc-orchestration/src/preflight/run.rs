@@ -1212,9 +1212,24 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         });
     }
 
-    let queue_continuation_guidance = queue_state.queue_continuation_required.then(|| {
-        crate::queue_continuation::continuation_guidance(queue_state.queue_pause_reason.as_deref())
-    });
+    // `#wd40` / `#staleloop-recycle-restart`: a stale route-owned supervisor that
+    // can never reach its own recycle boundary during a continuously self-draining
+    // session asks the in-session loop to yield. While that request is live, drop
+    // `queue_continuation_required` so the loop ends its turn (the idle boundary
+    // lets the `execve` recycle fire), and surface the recycle-yield guidance so
+    // the agent understands the yield is intentional and resumes after recycle.
+    let recycle_yield_pending = crate::recycle_yield::recycle_yield_pending(file);
+    let queue_continuation_required =
+        queue_state.queue_continuation_required && !recycle_yield_pending;
+    let queue_continuation_guidance = if recycle_yield_pending {
+        Some(crate::queue_continuation::RECYCLE_YIELD_GUIDANCE.to_string())
+    } else {
+        queue_continuation_required.then(|| {
+            crate::queue_continuation::continuation_guidance(
+                queue_state.queue_pause_reason.as_deref(),
+            )
+        })
+    };
 
     let output = PreflightOutput {
         warnings,
@@ -1263,7 +1278,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         queue_paused: queue_state.queue_paused,
         queue_pause_reason: queue_state.queue_pause_reason,
         queue_drainable_head_count: queue_state.queue_drainable_head_count,
-        queue_continuation_required: queue_state.queue_continuation_required,
+        queue_continuation_required,
         queue_continuation_guidance,
         session_accretion,
         pipeline,

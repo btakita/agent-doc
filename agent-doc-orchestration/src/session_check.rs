@@ -148,6 +148,28 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
     match report.status {
         SessionCheckStatus::Ok(message) => {
             println!("{}", message);
+            // `#wd40` / `#staleloop-recycle-restart`: a stale route-owned supervisor
+            // that can never reach its own recycle boundary during a continuously
+            // self-draining session asks the in-session loop to yield one boundary.
+            // Surface that as a distinct, intentional yield (NOT a drained queue or
+            // a stall) so the loop ends its turn cleanly; the idle boundary lets the
+            // `execve` recycle fire and the drain resumes on the fresh binary. Never
+            // force the Codex final-gate here — yielding is the desired outcome.
+            if crate::recycle_yield::recycle_yield_pending(file) {
+                let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
+                    crate::flow::outcome::UserFacingOutcomeKind::NoDrainableWork,
+                )
+                .expect("static no-drainable-work outcome is valid")
+                .log_fields();
+                println!(
+                    "queue_continuation_required=false queue_recycle_yield=true {outcome_fields}"
+                );
+                eprintln!(
+                    "[session-check] {}",
+                    crate::queue_continuation::RECYCLE_YIELD_GUIDANCE
+                );
+                return Ok(());
+            }
             if let Some(continuation) = crate::queue_continuation::detect(file)? {
                 // #prompt-preempts-auto-queue: a live unresolved exchange prompt
                 // must run before queue continuation, even when it was already

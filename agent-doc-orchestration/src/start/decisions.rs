@@ -478,6 +478,41 @@ pub fn supervisor_recycle_action(
     }
 }
 
+/// `#wd40` / `#staleloop-recycle-restart` — whether the idle-watch should ask a
+/// self-driving in-session `/loop` to yield one inter-item boundary so a stale
+/// supervisor can reach its recycle boundary and `execve`-hot-reload onto the
+/// freshly-installed binary.
+///
+/// The gap this closes: [`supervisor_recycle_action`] only fires at a
+/// `turn_boundary` (`prompt_visible && !turn_active`). A continuously
+/// self-draining Claude Code `/loop` holds a fresh drain-owner lease AND keeps
+/// the harness `turn_active` back-to-back, so the supervisor never reaches that
+/// boundary and a freshly-installed binary never hot-reloads — the root of this
+/// session's `content_ours` finalize drift + `#rt83` phantom-pin flood. The
+/// operator had to manually `make install` + `admin recycle` + end-turn to force
+/// the boundary; this automates it.
+///
+/// Request a yield only when all of:
+/// - `would_recycle_at_boundary`: a recycle (or the Phase-3 kill+relaunch
+///   escalation) WOULD fire if the boundary were reached — i.e.
+///   [`supervisor_recycle_action`] with `turn_boundary = true` is not `None` /
+///   `Detect`. A bare `Detect` (auto-recycle opted out, no admin/wedge) does not
+///   hot-reload, so yielding the loop for it would only stall the drain.
+/// - `drain_owner_active`: a self-driving loop currently owns the drain (a fresh
+///   drain-owner lease). Without an attended loop to yield there is nothing to
+///   signal — a non-`/loop` harness reaches the boundary on its own.
+/// - `!turn_boundary`: the boundary is NOT already reachable. When it is, the
+///   recycle fires directly and no yield is needed.
+///
+/// Pure so the policy is unit-testable without the live supervisor / loop.
+pub fn stale_drain_recycle_yield_requested(
+    would_recycle_at_boundary: bool,
+    drain_owner_active: bool,
+    turn_boundary: bool,
+) -> bool {
+    would_recycle_at_boundary && drain_owner_active && !turn_boundary
+}
+
 /// `#agentreloadrestart` — what the idle/turn-boundary supervisor watch should do
 /// about a detected harness change: the harness resolved from current frontmatter
 /// (`agent:`) differs from the one the running supervisor launched with. Gated
@@ -1036,6 +1071,22 @@ mod tests {
             MAX_REEXEC_ESCALATIONS + 1,
             MAX_REEXEC_ESCALATIONS
         ));
+    }
+
+    #[test]
+    fn stale_drain_recycle_yield_policy() {
+        // `#wd40` truth table. (would_recycle_at_boundary, drain_owner_active, turn_boundary)
+        // Not stale / no recycle would fire → never request a yield (nothing to
+        // gain; would only stall the drain).
+        assert!(!stale_drain_recycle_yield_requested(false, true, false));
+        // No self-driving loop owns the drain → the supervisor reaches the boundary
+        // on its own; nothing to signal.
+        assert!(!stale_drain_recycle_yield_requested(true, false, false));
+        // The boundary is already reachable → the recycle fires directly, no yield.
+        assert!(!stale_drain_recycle_yield_requested(true, true, true));
+        // Stale + a loop owns the drain + boundary unreachable (turn_active) → this
+        // is the exact wedge `#wd40` fixes: request the yield.
+        assert!(stale_drain_recycle_yield_requested(true, true, false));
     }
 
     #[test]

@@ -61,7 +61,20 @@ Done and deployed. If a co-lender marks an available deal as interesting **on be
 **Scope notes:** "interest on behalf of a group" means an `investor_deal_interests` row carrying that `lending_group_id` (created when a member expresses interest *as* the group). A purely personal interest by another member does **not** leak to the group. Membership is read via `lending_groups_for_user_R_` (groups you created + active/invited membership).
 
 Verified: new real-D1 unit test (`investor_deal_interest_group_by_deal_R_`) + marketplace wiring asserts; full suite **936 pass / 0 fail**, worker rebuilt. Committed (`f329e86`) + pushed, **deployed to production** (version `36d6b774`).
-<!-- agent:boundary:d56d793e -->
+
+### Re: "Share %" → "Default Share %" with tooltip — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In the admin and lender portal Lender Group table, "Share %" should be "Default Share %" with a tooltip that explains that this is the default share percentage for a deal.
+
+
+Done and deployed. In the lender-group share editor, the column header now reads **"Default Share % ⓘ"** with a help-cursor tooltip: *"Default Share % — the preset percentage of a deal each lender takes when this group joins a deal. It is the default split and stays customizable per deal."*
+
+Because admin and lender portals render the **same** shared `MemberAllocations` component, this updates both at once. I widened that column to `max-content` so the longer label sits on one line without disturbing the aligned columns (verified with a render — Default Share % stays right-aligned over the inputs, everything else still lines up).
+
+Tests **57/57** in the touched suites (full suite already green this session), worker rebuilt. Committed (`a32949c`) + pushed, **deployed to production** (version `14ec4fc7`; bundle `index.browser-AB7OWMDM.js`). Hard-refresh to see the new header + tooltip.
+<!-- agent:boundary:9c673072 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,6 +87,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: In the admin and lender portal Lender Group table, "Share %" should be "Default Share %" with a tooltip that explains that this is the default share percentage for a deal.~~
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

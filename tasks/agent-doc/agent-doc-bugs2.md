@@ -95,19 +95,19 @@ JetBrains ids carry the owning pid; non-JetBrains ids (no embedded pid) are cons
 Your principle — *the live editor buffer is the source of truth* — is preserved: the fix removes only **dead** editors from the picture; a single **live** editor's buffer still wins. (The remaining residual this session is a separate, pre-existing class — a *live* IntelliJ, pid 3873180, holding a stale buffer for this doc; each finalize detects that drift and commits the correct `content_ours` to HEAD, so the response is never lost, just noisier. Tracked under the `#cyh0`/`#fccaudit` stale-live-editor family, distinct from the storm.)
 
 Net: the degraded session's root cause (broadcast storming dead editors → regenerated patch files + stale-buffer drift on every finalize) is fixed in code and the live storm is stopped (0 broadcasts since cleanup). Remaining queue heads are all `[operator-verify]`.
-<!-- agent:boundary:dc921bea -->
+<!-- agent:boundary:589efd78 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#tsiftmdcrash]
+- :pushpin: For all `[operator-verify]` issues, look in the logs for verification.
+- :pushpin: do [#tsiftmdcrash]: Look in the logs for the crash.
 - :pushpin: [#sqedit-race]
 - :pushpin: [#qheadstrike]
 - :pushpin: do [#hap7]
 - :pushpin: do [#fbwire]
 - :pushpin: [#qpausemix-verify]
-- ~~do [#lbreap]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

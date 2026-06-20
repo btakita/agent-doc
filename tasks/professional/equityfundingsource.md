@@ -108,7 +108,20 @@ Implemented the associate-only fix (the safe default for the open design questio
 **Tests**: added source-assertion coverage for both halves and updated three pre-existing assertions that now matched the earlier associate-only occurrences. Full suite green — **909 pass / 0 fail** — plus `bun run build` + `bun run build:worker`.
 
 **Shipped**: committed + pushed EFS `d8c17b4`, superproject pointer `58a2c5fea`. **Deploy not run** — the directive carried no `#commit-push-deploy` preset and there is no CI auto-deploy. Trigger `#commit-push-deploy` (or `bun run deploy:worker`) when ready.
-<!-- agent:boundary:28c53e2d -->
+
+### Re: "publishable" — does it mean the public website? — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: "a loan is publishable only": Does publishable mean on the public webite?
+
+
+**No.** "Published" is an internal marketplace state, not public-web visibility.
+
+When `admin_deal_publish_` runs it sets `investment_deals.status='published'`, which makes the loan an **"Available Deal"** in the **authenticated lender/investor portal** at `/lenders/available-deals` (`INVESTOR = '/lenders'`). That route is gated by `require_auth_(c, 'investor')` and sits behind the accredited-investor confirmation — so only a logged-in (accredited) lender account ever sees it. There is no public deal listing (nothing under `lib/.../public/` renders published deals), so a published loan does **not** appear on the public marketing site.
+
+So "a loan is publishable only [when accepted]" (#214f) is about whether an accepted loan is allowed into that **authenticated investor marketplace** — it never controls public-website visibility. Publishing exposes a deal to your logged-in lenders, not to the open web.
+<!-- agent:boundary:74687a53 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -121,6 +134,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: "a loan is publishable only": Does publishable mean on the public webite?~~
 - do [#5q7z-ship]
 <!-- /agent:queue -->
 

@@ -99,13 +99,59 @@ You deleted the two already-struck `do [#rdypoll]` heads; the queue converged th
 **Why I am not running the `make install` / `admin recycle` deploy sub-step this cycle:** the agent-doc submodule has **uncommitted WIP** sitting on top of `138dc658` — a new `recycle_yield.rs` plus edits to `idle_watch.rs`, `queue_continuation.rs`, `session_check.rs`, `start.rs`, `start/decisions.rs`, and `preflight/run.rs`. A `cargo build --release` / `cargo install` now would bake that half-finished work into the live binary and supervisor, which is exactly the finalize-client-newer-than-supervisor drift `#rdypoll-deploy` was written to avoid. The deploy must wait until that WIP is either committed (its own cycle) or stashed.
 
 Queue is paused (`#rt83/#qflood` pause reason, now well past the 0.34.20 it referenced) with **0 drainable heads** — not looping. Next concrete step is operator-side: finish/commit the submodule WIP, then run the `#rdypoll-deploy` deploy + live restart proof at a supervisor-recycle boundary.
-<!-- agent:boundary:4300623a -->
+
+### Re: finish + commit the submodule WIP (#wd40 recycle-yield) — opus-4-8
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` after a restart on monsterrodholders.md. I tried again and it worked. The restart state should not lag.
+> ```
+> [route] target tmux session: 0
+> [route] Still waiting for claude (1s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+> [route] Still waiting for claude (3s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+> [route] Still waiting for claude (4s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+> [route] Still waiting for claude (6s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+> [route] Still waiting for claude (8s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+> [route] Still waiting for claude (9s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+> [route] Still waiting for claude (11s)... last line:   ⏵⏵ bypass permissions on · 1 shell · ← for agents
+> [route] Still waiting for claude (12s)... last line:   search prompts: monst  ⏵⏵ bypass permissions on · 1 shell
+> [route] Still waiting for claude (14s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+> [route] Still waiting for claude (15s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+> [route] Still waiting for claude (17s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+> [route] Still waiting for claude (18s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+> [route] Still waiting for claude (20s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+> [route] Still waiting for claude (21s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+> [route] Still waiting for claude (23s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+> [route] Still waiting for claude (24s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+> [route] Still waiting for claude (26s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+> [route] Still waiting for claude (27s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+> [route] Still waiting for claude (29s)... last line:   ⏵⏵ bypass permissions on · 1 shell
+> [route] claude blocked after 29.1s in pane %176: active claude turn
+> Error: dispatch-only claude reopen refused to inject into pane %176 for tasks/monsterrodholders.md because the latest run is still booting and never reached a dispatch-ready prompt (active claude turn); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
+> ```
+
+
+Reviewed the WIP: it's a complete, coherent feature — `#wd40` / `#staleloop-recycle-restart`, the stale-binary **recycle-yield** mechanism. Root cause it closes: a continuously self-draining `/loop` holds a fresh drain-owner lease and keeps the harness `turn_active` back-to-back, so the route-owned supervisor never reaches its turn-boundary recycle and a freshly-installed binary never hot-reloads (the source of this session's `content_ours` finalize drift + `#rt83` phantom-pin flood). It automates the manual `make install` + `admin recycle` + end-turn dance.
+
+All layers were already wired and tested — nothing was half-done:
+- **`recycle_yield.rs`** (new): short-TTL per-document request sidecar (producer/reader/clear + freshness predicate), mirroring `drain_owner`.
+- **`decisions::stale_drain_recycle_yield_requested`**: pure policy (stale + loop owns drain + boundary unreachable) with truth-table test.
+- **`idle_watch`**: once-latched write/refresh while the policy holds; clears + resets the latch when no longer stale; skips when the Phase-3 kill+relaunch escalation is exhausted so it never yield-stalls a non-converging supervisor.
+- **`queue_continuation::detect` + `preflight` + `session_check`**: while a request is live, drop `queue_continuation_required` and surface `RECYCLE_YIELD_GUIDANCE` (intentional yield, not a drained queue/stop); the execve recycle fires on its own and the drain resumes on the fresh binary.
+
+`make check` green (clippy `-D warnings` + full suite; the new module has zero warnings). Committed:
+- agent-doc submodule → **`abd1fc55`** `feat(#wd40): stale-binary recycle-yield request`
+- superproject gitlink → **`5e05ad4b9`**
+
+The commit also swept in the leftover working-tree `SKILL.md`/`AGENTS.md` version-pointer bumps (you said commit the WIP).
+
+**Not done (not requested):** no version bump, no push, no `make install` / `lib-install`. This feature isn't live in the running supervisor until it's released + installed — which is exactly the operator-gated deploy boundary (same gate as `#rdypoll-deploy`). Say the word to release + deploy at a recycle boundary.
+<!-- agent:boundary:2d69aa75 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~What are #next-steps to fix agent-doc bugs?~~
 ---
 JB `Run Agent Doc` after a restart on monsterrodholders.md. I tried again and it worked. The restart state should not lag.
 ```
@@ -146,9 +192,7 @@ Press Enter to restart, or 'q' to exit.
 [agent-doc] auto-trigger: timed out waiting for claude prompt
 ```
 ---
-- ~~:pushpin: do [#rdypoll]: It worked after a restart.~~
-- ~~do [#rdypoll]: It worked after a restart.~~
-- do [#rdypoll-deploy]
+- ~~do [#rdypoll-deploy]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

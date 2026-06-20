@@ -50,13 +50,9 @@ Compacted content:
 > claude exited cleanly.
 > Press Enter to restart, or 'q' to exit.
 > [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-> [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-> [start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
 > [start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
 > [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-> [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
 > [start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-> [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
 > [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
 > ```
 
@@ -82,7 +78,18 @@ Why it declined every time: `semantic_merge` reconstructs a non-`exchange` compo
 **Verification.** Two new regression tests — `freetext_fenced_queue_head_survives_per_node_merge` (markdown-ast unit) and `smconv_preserves_freetext_fenced_queue_head_on_drift` (IPC convergence: the guard now *adopts* the merge, head preserved verbatim, instead of blocking). Full suite **4807 passed** + clippy green. FlowCore budget updated for the new test's guard call.
 
 **Live status.** Binary installed (`0.34.19`), cdylib hot-reloaded via `lib-install`, and this doc's supervisor is marked to recycle onto the new binary at the next idle boundary. Once it recycles, this session's free-text-head merges converge and the queue churn stops. This is the merge-core fix `#hap7`/`#qdup` called for (plan: `plan-scoped-crdt-merge-no-structural-duplication.md`).
-<!-- agent:boundary:afec8f6f -->
+
+### Re: do #qheadstrike / #sqedit-race — opus-4-8
+
+Cleared the two struck heads you removed (`~~[#sqedit-race]~~`, `~~[#qheadstrike]~~`) — that was consumed-item cleanup, not a fresh directive. The unstruck `do [#qheadstrike]` / `do [#sqedit-race]` lines are the binary's `#mirrorall` mirror of the operator-verify backlog heads, not new work. Preflight confirms: `queue_drainable_head_count: 0`, `queue_continuation_required: false` — every remaining head is `[operator-verify]`. **Not looping.**
+
+Both items' *remaining* work is explicitly focused-clean-cycle-only per their own plans, and this churn-heavy live-supervisor drain is the exact hazard `#sqedit-race` warns against — so I'm not landing merge/queue-core edits from here:
+
+- **#sqedit-race** — Phases 1 (`237f5fb2`) + 2 (`d9a0ae58`) shipped; Phase 3 normalization mostly landed (`#qdup-bare-id` / `#qnoise-multiline-strike` / `#pushpinaccum`). Remaining Phase 3 = a `render(parse(x))` fixed-point SimWorld/property test; Phase 4 = operator-gated `make install → admin recycle → prune-noise`. Plan: *"SAFETY-CRITICAL supervisor/commit-path; focused clean cycle only... Do not land from a degraded drain."*
+- **#qheadstrike** — strike-all-answered-free-text-heads + move the strike onto the `committed` seam + normalize head matching. Plan: *"merge/commit/queue-core behavior — not safe to rush inside an in-session loop; needs a focused operator-driven cycle."* The related merge-core fix `#qdup-freetext` (0.34.19, `023be469`) already shipped + installed + lib-installed.
+
+Net: no agent-drainable rung here — the release sub-steps for the shipped fixes are already done, and what's left is focused-cycle code + your live verify. Pick one of these for a dedicated `/clear`ed cycle when you want it driven.
+<!-- agent:boundary:51a48bf7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -105,8 +112,6 @@ Press Enter to restart, or 'q' to exit.
 [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
 ```
 ---
-- ~~:pushpin: [#sqedit-race]~~
-- ~~:pushpin: [#qheadstrike]~~
 - :pushpin: do [#hap7]
 - :pushpin: do [#fbwire]
 - :pushpin: [#qpausemix-verify]

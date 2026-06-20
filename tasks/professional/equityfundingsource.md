@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -60,7 +60,7 @@ Investigated against prod — **not a state bug; it's the `#credentials-first` f
 > :pushpin: deploy
 
 Nothing to deploy this cycle — the set-password behavior is **working as intended** (you chose to keep `#credentials-first`), so there was no code change. The production worker (`d98be19b`) is unchanged and current.
-<!-- agent:boundary:ea327cb3 -->
+<!-- agent:boundary:e6caa250 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,8 +73,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: When I clicked on the passwordless link for btak.dev+lender2@gmail.com, I was presented with a set password dialog. I believe this account does not have a password. I think this is a bug.~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

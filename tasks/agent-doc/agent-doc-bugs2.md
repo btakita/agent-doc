@@ -139,7 +139,19 @@ Done (agent-doc submodule `57fc75ed`). Each log entry already had a prefix, but 
 **Why this needed care (not just a format swap):** the epoch was being **read back** as a `u64` in several staleness-critical places — `session_accretion` (recent-cycle / recent-restart windows), `startup_miss` windows, and the `gate_verify` ops.log scanner (including the `s760_clear_decision_clear_true` verifier, which compares marker times to a gate's `set_at`). A naive switch to ISO would have silently broken all of those (every timestamp parse → `None` → mis-windowed staleness / un-provable gates). So `parse_log_timestamp` is **backward-compatible**: it accepts *either* a bare epoch (old log lines + old cycles.jsonl) *or* ISO, and I routed every reader through it. The helper lives in `agent-doc-core` so the core `gate_verify` scanner and the orchestration writers share one implementation.
 
 **Verification:** `log_time` tests cover known vectors, an epoch↔ISO round-trip (incl. a leap day), and garbage-rejection (fails closed to `None`, never `0`); the `ops.log` integration test now asserts an ISO bracket that round-trips; the existing `gate_verify` epoch test still passes (proving backward-compat). **`make check` green (4805)**, release rebuilt. SPEC updated (`supervisor.md`, `07-core-commands.md`, `07-closeout-commands.md`). Goes live at the same deferred install boundary as `#tsiftmdcrash`.
-<!-- agent:boundary:1d587b91 -->
+
+### Re: JB `Run Agent Doc` on equityfundingsource.md did not submit — opus-4-8
+
+Log check (honoring "for operator-verify issues, look in the logs"):
+
+1. **Most likely `#qpauseux` (paused queue), not a new dispatch bug.** The EFS session log and `ops.log` show a continuous flood of `idle_queue_watch_drain_skipped reason=queue_control_paused` / `queue_dispatch_skipped reason=queue_control_paused` for `equityfundingsource.md` — its queue is **controller-paused**. With the queue paused, a `Run Agent Doc` dispatch is intentionally blocked and surfaces as "nothing submitted" — that is exactly `#qpauseux` variant 3 ("Run Agent Doc is not submitting / no visible submission result"). If that pause is stale/unintended, `agent-doc admin queue resume tasks/professional/equityfundingsource.md` clears it.
+
+2. **The pasted console is a concurrent supervisor recycle, not the cause.** "claude exited cleanly / Press Enter to restart" + "hot-reloading onto freshly-installed binary (execve)" are the EFS supervisor recycling onto the just-installed binary. *If* a dispatch landed on that restart prompt, that is the separate `#jbrundispatch` (directive 1) / `#1routedeadshell` "dispatch into a non-ready harness" class. Distinguishing paused-queue vs restart-prompt needs a live repro at the failing moment, per those review items — `route.rs` is invariant-heavy and not safe to blind-fix.
+
+3. **Bonus — `#opslogts` is already live-confirmed.** That same recycle picked up the new binary: the EFS session log timestamps flip from epoch `[1781917…]` to ISO `[2026-06-20T01:05:26Z]` right at the recycle, so the readable-timestamp change is working in a live supervisor.
+
+No drainable queue work remains (`queue_continuation_required=false`); the remaining heads are all operator-verify (`#sqedit-race`, `#qheadstrike`, `#hap7`, `#fbwire`, `#qpausemix-verify`, `#tsiftmdcrash-verify`) and need a live editor/pane or the deferred install. Not looping.
+<!-- agent:boundary:3fec595e -->
 <!-- /agent:exchange -->
 
 ## Queue

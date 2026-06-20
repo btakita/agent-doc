@@ -174,14 +174,37 @@ That ties `#cyh0` (FCC, "unidentified trigger") to `#editorbufwin` (the content_
 Near-term: the `admin recycle` I queued fires when this turn ends and refreshes the stale supervisor CRDT — that stops the `content_ours` drift, which stops the `disk_after_failed_editor_refresh` writes, which stops these FCCs. If they persist after the recycle on a clean (non-drifting) cycle, that's a genuinely separate trigger and I'll need the exact `ops.log` line at the dialog moment (`write_authority action=... transport=disk`) to find it.
 
 I'm stopping the drain here rather than piling more writes onto a drifting supervisor — the recycle needs this turn to end so it can clear the stale CRDT.
-<!-- agent:boundary:1af334b1 -->
+
+### Re: What are #next-steps to fix agent-doc bugs? — opus-4-8
+
+The backlog was empty (everything's gated in review); I've placed the actionable follow-ups. **Top of backlog: `#jbtsiftnosub`.**
+
+Priority to actually *fix* the bugs (not just track them):
+
+1. **`#editorbufwin`** (review, gated, **plan ready**) — the highest-impact fix. It's the root of the instability you keep hitting this whole session: `content_ours` drops your live queue edits → drift → the `disk_after_failed_editor_refresh` writes → the File Cache Conflicts. The plan (`plan-editor-buffer-wins-queue-merge.md`) has the corrected direction (P1: the `#pcwc` post-commit reconcile preserves additions via editor IPC instead of overwriting disk). **Next action: a focused clean cycle to implement P1** — a blind in-loop attempt already tripped a hidden invariant, so it shouldn't be rushed in a drifting session, but it's the #1 fix.
+2. **`#jbtsiftnosub`** (backlog top) — the dispatch-no-submit you just hit on tsift.md. Operator-blocking; same family as `#jbrundispatch`/`#1vhn`/`#runexitrestart`.
+3. **`#avgwire`** (backlog) — apply the *already-shipped* `#optverify` ops.log auto-verify mechanism (2026-06-10) to the 18 review gates so your live tests auto-close them. This is what makes "no more gates after this round" actually happen: you test, the log marker fires, the gate resolves itself.
+
+So the single most useful next move is a focused `/agent-doc` cycle on **`#editorbufwin`** — fixing it removes the drift, the churn, and the FCC trigger in one shot. (Note: `#optverify` the *id* is the shipped 2026-06-10 feature; my new item last cycle collided with it and got reaped as an already-done mirror — re-filed as `#avgwire`.)
+
+### Re: JB Run Agent Doc on tsift.md typed but didn't submit — opus-4-8
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix agent-doc bugs?
+
+
+Captured as **`#jbtsiftnosub`**. The new wrinkle vs the existing dispatch-no-submit items is the **cold-start race**: Run Agent Doc auto-started a fresh supervisor/pane, then typed into it before the harness was dispatch-ready, so the submit never landed. The fix direction: the route must positively re-verify a harness dispatch-ready prompt *after* the auto-start pane comes up and immediately *before* send (wait+retry or fail closed), not type into a still-starting pane. If it recurs, grab `.agent-doc/logs/supervisor-stderr.log` + the pane scrollback at send time so the cold-start window is in the trace.
+
+(The "Still getting File Cache Conflicts" head was answered last cycle — it's the `#editorbufwin`/`#pcwc` disk-reconcile trigger; striking it now.)
+<!-- agent:boundary:237273cd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#editorbufwin]~~
-- What are #next-steps to fix agent-doc bugs?
+- ~~What are #next-steps to fix agent-doc bugs?~~
 - Still getting JB `File Cache Conflicts`.
 - JB `Run Agent Doc` on tsift.md auto-started a new supervisor/tmux pane, added the prompt into the Claude input, but did  not submit the prompt.
 - do [#jbtsiftnosub]

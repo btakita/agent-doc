@@ -74,7 +74,7 @@ Done and deployed. In the lender-group share editor, the column header now reads
 Because admin and lender portals render the **same** shared `MemberAllocations` component, this updates both at once. I widened that column to `max-content` so the longer label sits on one line without disturbing the aligned columns (verified with a render — Default Share % stays right-aligned over the inputs, everything else still lines up).
 
 Tests **57/57** in the touched suites (full suite already green this session), worker rebuilt. Committed (`a32949c`) + pushed, **deployed to production** (version `14ec4fc7`; bundle `index.browser-AB7OWMDM.js`). Hard-refresh to see the new header + tooltip.
-<!-- agent:boundary:9c673072 -->
+<!-- agent:boundary:d4957d44 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,8 +87,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: In the admin and lender portal Lender Group table, "Share %" should be "Default Share %" with a tooltip that explains that this is the default share percentage for a deal.~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

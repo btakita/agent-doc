@@ -60,8 +60,21 @@ pub fn run(file: &Path, from_current: bool, preserve_session: bool) -> Result<()
     let (mut fm, body) = frontmatter::parse(&content)?;
     fm.resume = None;
     let updated = frontmatter::write(&fm, body)?;
-    std::fs::write(file, updated)?;
-    let updated_content = std::fs::read_to_string(file)?;
+    // `#evmh`: route the resume-clear write through the listener-guarded
+    // converge seam so a live JB editor buffer stays in sync with the change
+    // instead of diverging from a bare disk write and raising a File Cache
+    // Conflict. When no editor listener is attached this falls back to the same
+    // unguarded CLI disk write as before, so headless `reset` is unchanged.
+    agent_doc_orchestration::write::converge_or_disk_write(
+        file,
+        &content,
+        &updated,
+        "reset_resume_clear",
+    )?;
+    // Use the intended content directly: an editor convergence may apply
+    // asynchronously, so re-reading disk could race the buffer. `updated` is the
+    // authoritative post-reset document either way.
+    let updated_content = updated;
 
     if from_current {
         rebuild_sidecars_from_current(file, &updated_content, false)?;
@@ -138,6 +151,45 @@ mod tests {
             .to_text();
         assert_eq!(crdt_text, updated);
         assert!(snapshot::load_overlay_crdt(&doc).unwrap().is_some());
+    }
+
+    #[test]
+    fn from_current_routes_resume_clear_through_converge_seam() {
+        // `#evmh`: the default `reset --from-current` (resume-clear) write must
+        // route through the listener-guarded converge seam so a live JB editor
+        // buffer stays in sync instead of diverging from a bare disk write and
+        // raising a File Cache Conflict. With no listener attached it falls back
+        // to the CLI disk write and records the `reset_resume_clear` source-
+        // labelled disk fallback in ops.log — proving it went through the seam
+        // rather than a bare `std::fs::write`.
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/crdt")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("session.md");
+        let current = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: old\n---\n\nBody\n";
+        std::fs::write(&doc, current).unwrap();
+
+        run(&doc, true, false).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("resume: old"),
+            "resume must be cleared on disk after reset"
+        );
+        assert_eq!(
+            snapshot::load(&doc).unwrap().unwrap(),
+            updated,
+            "snapshot must match the resume-cleared document"
+        );
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("reset_resume_clear_writeback")
+                && ops_log.contains("transport=disk_fallback"),
+            "reset must route the resume-clear write through the converge seam \
+             (source-labelled disk fallback), got:\n{ops_log}"
+        );
     }
 
     #[test]

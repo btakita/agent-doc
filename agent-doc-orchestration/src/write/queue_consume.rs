@@ -921,6 +921,58 @@ fn noise_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
     Ok(keys)
 }
 
+/// Node keys of every live (non-struck) **orphan id-backed** queue head: an
+/// id-backed directive (`do [#id]` / `[#id]` / `#id`) whose id names NO open
+/// `agent:backlog` item (#orphanqhead bulk prune / #qchurn). Such a head has no
+/// drain path — `queue consume` rejects id-backed heads ("reap via --done") and
+/// `--done <id>` is a no-op — yet it is excluded from `drainable_head_count` and,
+/// when it sits at the queue head, BLOCKS the leading-run `queue consume` from
+/// reaching answered free-text heads behind it, so the go-mode loop churns. Bulk
+/// pruning it (alongside noise) clears that wedge without the operator naming each
+/// id via the targeted `queue consume --id <id>` escape hatch.
+///
+/// Gated on an `agent:backlog` component being PRESENT: a free-form id-head queue
+/// (no backlog) treats the id-heads AS the work, so membership is not required and
+/// nothing is pruned — mirroring `head_is_drainable`'s `open_backlog_ids` gate so
+/// the prune set and the drainable set agree on what an "orphan" is.
+fn orphan_id_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
+    let has_backlog = component::parse(content)
+        .map(|comps| {
+            comps
+                .iter()
+                .any(|c| component::is_backlog_component(&c.name))
+        })
+        .unwrap_or(false);
+    if !has_backlog {
+        return Ok(Vec::new());
+    }
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
+        anyhow::anyhow!("orphan prune: failed to derive queue node keys: {err}")
+    })?;
+    let mut keys = Vec::new();
+    for node in nodes {
+        if node.item.struck {
+            continue;
+        }
+        let text = node.item.text.trim();
+        // Only id-backed heads are candidates; a free-text report that merely
+        // contains a stray `#token` must never be force-struck here.
+        if text.is_empty() || queue_prompt_text_is_free_text(content, text) {
+            continue;
+        }
+        let Some(id) = queue_prompt_done_id(text) else {
+            continue;
+        };
+        // An id naming OPEN backlog work (including a deferred `[operator-verify]` /
+        // `[focused-cycle]` item, which is still an open `[ ]`/`[/]` entry) has a
+        // real drain path — preserve it. Only a truly absent id is an orphan.
+        if !head_id_names_open_backlog_item(content, &id) {
+            keys.push(node.node_key);
+        }
+    }
+    Ok(keys)
+}
+
 /// Strike every active queue head that is non-drainable **noise**, at ANY position
 /// (`#goqstall2`). Unlike `queue consume` — which strikes only a contiguous LEADING
 /// free-text run and stops at the first id-backed head — this clears noise
@@ -974,7 +1026,9 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
         snapshot::save(file, &snap)?;
     }
 
-    eprintln!("[queue] pruned {struck} non-drainable noise head(s) (#goqstall2)");
+    eprintln!(
+        "[queue] pruned {struck} non-drainable head(s): noise + orphan id-backed (#goqstall2/#orphanqhead)"
+    );
     crate::ops_log::log_op(
         file,
         &format!("queue_noise_prune file={} struck={}", file.display(), struck),
@@ -982,9 +1036,12 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
     Ok(struck)
 }
 
-/// Clear every non-drainable **noise** queue head from `content`, returning the
-/// rewritten document and the number struck. Multiline fenced noise blocks are
-/// excised by byte range (`queue::parse_spans`); bulleted single-line noise is
+/// Clear every non-drainable queue head from `content`, returning the rewritten
+/// document and the number struck. Two non-drainable classes are cleared: **noise**
+/// (pasted console output / agent fragments / bare observations) and **orphan
+/// id-backed heads** (`#orphanqhead`: a `do [#id]` / `[#id]` head whose id names no
+/// open `agent:backlog` item). Multiline fenced noise blocks are excised by byte
+/// range (`queue::parse_spans`); bulleted single-line noise AND orphan id heads are
 /// struck by durable node key (`item_nodes`). Multiline removal runs first so the
 /// node-key pass sees stable post-excision offsets. (#qnoise-multiline-strike)
 fn strike_all_noise_queue_heads(content: &str) -> Result<(String, usize)> {
@@ -1031,8 +1088,17 @@ fn strike_all_noise_queue_heads(content: &str) -> Result<(String, usize)> {
         working.replace_range(range, "");
     }
 
-    // 2. Bulleted single-line noise heads, struck via durable node keys.
-    let keys = noise_queue_head_node_keys(&working)?;
+    // 2. Bulleted single-line noise heads AND orphan id-backed heads (#orphanqhead),
+    //    struck via durable node keys. Orphan id-heads are non-drainable like noise
+    //    but `is_noise_queue_head` keeps them (they carry an `#id`), so they are
+    //    collected separately and merged into one strike set. Dedup so a head that
+    //    somehow matches both passes is not double-counted.
+    let mut keys = noise_queue_head_node_keys(&working)?;
+    for key in orphan_id_queue_head_node_keys(&working)? {
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
     let bulleted_struck = keys.len();
     if !keys.is_empty() {
         working = consume_queue_nodes_by_key(&working, &keys)?;
@@ -3340,6 +3406,80 @@ Old.
             prune_noise_queue_heads(&doc).unwrap(),
             0,
             "second prune must be a no-op"
+        );
+    }
+
+    #[test]
+    fn prune_noise_strikes_orphan_id_heads_preserves_open_and_deferred_backlog_ids() {
+        // #orphanqhead / #qchurn: `queue prune-noise` strikes an orphan id-backed
+        // head (id absent from the open backlog) — which `queue consume` rejects and
+        // `--done` cannot reap — so it stops blocking the leading-run consume and
+        // stops churning the go-mode loop. Open backlog ids, including deferred
+        // `[operator-verify]` / `[focused-cycle]` items, are preserved.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- :pushpin: [#kcb5]\n",        // ORPHAN (no backlog item) → struck
+            "- :pushpin: do [#6b5h]\n",     // deferred [focused-cycle] but OPEN → preserved
+            "- do [#keepme]\n",             // open backlog → preserved
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keepme] real open work\n",
+            "- [ ] [#6b5h] [focused-cycle] dedicated cycle work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let struck = prune_noise_queue_heads(&doc).unwrap();
+        assert_eq!(struck, 1, "only the orphan #kcb5 head must be struck");
+        let result = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(
+            result.contains("~~:pushpin: [#kcb5]~~") || result.contains("~~[#kcb5]~~"),
+            "orphan id head must be struck:\n{result}"
+        );
+        assert!(
+            result.contains("- :pushpin: do [#6b5h]\n"),
+            "deferred-but-open backlog id head must be preserved:\n{result}"
+        );
+        assert!(
+            result.contains("- do [#keepme]\n"),
+            "open backlog id head must be preserved:\n{result}"
+        );
+
+        // Idempotent: a second prune is a no-op.
+        assert_eq!(
+            prune_noise_queue_heads(&doc).unwrap(),
+            0,
+            "second prune must be a no-op"
+        );
+    }
+
+    #[test]
+    fn prune_noise_preserves_id_heads_when_no_backlog_component() {
+        // A free-form id-head queue (no `agent:backlog`) treats id-heads AS the work:
+        // the orphan prune must NOT fire, so nothing is struck (#orphanqhead gate).
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#a]\n",
+            "- do [#b]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        assert_eq!(
+            prune_noise_queue_heads(&doc).unwrap(),
+            0,
+            "no backlog component → id-heads are the work → nothing pruned"
         );
     }
 

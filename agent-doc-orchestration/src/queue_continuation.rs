@@ -956,7 +956,7 @@ pub fn queue_stale_noise_lines(file: &Path) -> usize {
 }
 
 /// Extract the backlog `#id` from a queue prompt like `do [#id] ...` or `#id ...`.
-fn extract_head_id(prompt: &str) -> Option<String> {
+pub(crate) fn extract_head_id(prompt: &str) -> Option<String> {
     if let Some(start) = prompt.find("[#")
         && let Some(end) = prompt[start + 2..].find(']')
     {

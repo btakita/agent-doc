@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -178,12 +178,13 @@ Wrote [`runbooks/crates-io-trusted-publishing.md`](../../runbooks/crates-io-trus
 This drains the queue head. #ph7n was the last drainable item — the queue is now empty.
 
 **Session health note (operator action needed, out of scope here):** preflight flags `stale_install` — the installed `~/.cargo/bin/agent-doc` (0.34.20) **predates agent-doc source commit `d48b30ea`**, and `src/agent-doc` has uncommitted dev changes. So this session's route-owned supervisor (pane %184) runs older agent-doc code, which is what's been dropping granular backlog writes all session (both responses still committed correctly at HEAD via `content_ours` recovery, and the queue heads consumed cleanly). I scheduled an `admin recycle` but it hasn't landed — the durable fix is **`make install` in `src/agent-doc`** (after you review/commit the WIP there) + a supervisor restart. I'm deliberately **not** running that from this tsift session: it would build uncommitted, out-of-scope agent-doc code, and mid-session agent-doc installs are themselves a known drift source.
-<!-- agent:boundary:f067c57a -->
+<!-- agent:boundary:138ce5ca -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- do [#015t]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

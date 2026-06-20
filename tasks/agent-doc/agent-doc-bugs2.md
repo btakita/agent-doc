@@ -95,19 +95,65 @@ JetBrains ids carry the owning pid; non-JetBrains ids (no embedded pid) are cons
 Your principle — *the live editor buffer is the source of truth* — is preserved: the fix removes only **dead** editors from the picture; a single **live** editor's buffer still wins. (The remaining residual this session is a separate, pre-existing class — a *live* IntelliJ, pid 3873180, holding a stale buffer for this doc; each finalize detects that drift and commits the correct `content_ours` to HEAD, so the response is never lost, just noisier. Tracked under the `#cyh0`/`#fccaudit` stale-live-editor family, distinct from the storm.)
 
 Net: the degraded session's root cause (broadcast storming dead editors → regenerated patch files + stale-buffer drift on every finalize) is fixed in code and the live storm is stopped (0 broadcasts since cleanup). Remaining queue heads are all `[operator-verify]`.
-<!-- agent:boundary:0d17acbb -->
+
+### Re: do [#tsiftmdcrash] — found the crash in the logs + fixed it — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: For all `[operator-verify]` issues, look in the logs for verification.
+
+
+You asked me to look in the logs for the crash. **Found it** — and it was a real agent-doc bug, not the execve-recycle window I guessed at last time (the log was 994KB then; it's 1.5MB now and the smoking gun is in it).
+
+**The crash signature:** the managed OpenCode session on pane `%78` (the tsift.md TUI) was killed **twice** with `opencode_exit code=143` — and 143 = 128 + 15 = **SIGTERM**. Both kills land at the *exact same timestamp* as the line right above them:
+
+```
+[1781771180] opencode_capability_proof status=failed attempts=3 error="opencode child network probe timed out after 45s; stderr="
+[1781771180] supervisor_host_inprocess_exit pane=%78 harness=opencode exit_code=143 heartbeat=3531
+[1781771180] opencode_exit code=143 ... action=restart_after
+```
+
+(Identical pair again at `1781775311`.)
+
+**Root cause:** the managed capability-proof thread, after its network probe failed 3× (45s timeout each), called `shared.kill_child()` (`start.rs:1844`) — SIGTERM-ing the **live, healthy OpenCode session you were actively using**. The probe is a *separate background* `opencode run` child; it timed out (a false negative — your real TUI was "Thinking normally"), and that false negative killed your live turn. Because the *supervisor* owns the kill, the supervisor stayed alive and pane `%78` stayed active, then auto-restarted the child 2s later — which is precisely your report: *a turn crashed and killed the session process while the tmux pane stayed active.*
+
+**Why the kill was wrong (and safe to remove):** the `Failed` proof gate **already** blocks every prompt dispatch (`capability_dispatch_blocker`). So the SIGTERM bought zero extra safety — no unsafe work can be auto-dispatched whether the child lives or dies — it only destroyed a session you were using.
+
+**Fix (shipped — agent-doc submodule `a281ae3e`):** the give-up branch no longer kills the child. It keeps the gate `Failed` (dispatch disabled), marks the actor `Blocked`, surfaces the diagnostic, and logs a new line you can grep to prove the fix: `<harness>_capability_proof_live_child_preserved reason=dispatch_gated_not_killed`. Your live session survives a flaky probe; you fix the environment / stop / restart to re-prove. Test `failed_capability_proof_gate_blocks_dispatch_so_live_child_need_not_be_killed` locks in that the gate alone is the complete dispatch block. **`make check` green (4803 tests + clippy)**; release built; SPEC + README + VERSIONS updated.
+
+**Deliberately deferred the install:** this session's supervisor runs `~/.cargo/bin/agent-doc`, so a mid-turn `cargo install` would make my finalize client newer than the running supervisor → `live_prompt_drift`. The fix ships at your next `make install` + recycle boundary. I queued `#tsiftmdcrash-verify` with the exact log line to confirm once it's live.
+<!-- agent:boundary:4deb4eda -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: For all `[operator-verify]` issues, look in the logs for verification.
+- ~~:pushpin: For all `[operator-verify]` issues, look in the logs for verification.~~
+- :pushpin: ops.logs should have each entry contain a timestamp.
+---
+:pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.
+
+```
+claude exited cleanly.
+Press Enter to restart, or 'q' to exit.
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+```
+---
 - ~~:pushpin: do [#tsiftmdcrash]: Look in the logs for the crash.~~
 - :pushpin: [#sqedit-race]
 - :pushpin: [#qheadstrike]
 - :pushpin: do [#hap7]
 - :pushpin: do [#fbwire]
 - :pushpin: [#qpausemix-verify]
+- do [#tsiftmdcrash-verify]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

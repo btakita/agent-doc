@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -114,7 +114,24 @@ What shipped:
 - Rebalance math is a pure, unit-tested module (`lending_groups_alloc.ts`).
 
 Verification: full suite **931 pass / 0 fail**, `bun run build` + `build:worker` clean. Committed (`79daf10`) + pushed, and **deployed to production** (version `366a229c`) — the new endpoints return 401 (auth-gated) live on the origin, matching the existing routes.
-<!-- agent:boundary:7abff952 -->
+
+### Re: Lender Group member columns still not aligned — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: The lender group member columns are not aligned ![img_31.png](img_31.png) on https://equityfundingsource.brian-takita.workers.dev/lenders/groups.
+
+
+Fixed and deployed. Thanks for the screenshot — it pinpointed the bug.
+
+**Root cause:** I had put the grid template on *each member row separately*, so every row was its own independent grid. The Status column was `max-content`, so the Invited row (with the wider "Invited" pill + "Resend Invite" button) sized that column wider than the Joined row — and because the Lender column was `1fr`, that width difference rippled back and shifted the Share %, Lock, and Status columns to different x-positions per row. Independent grids can't align to each other.
+
+**Fix:** the header and *all* member rows now live in **one** grid. Each row is a `display:contents` wrapper, so its four cells become items of that single grid and resolve against the same shared column tracks — every Share % input, lock, and status now lines up vertically regardless of row content.
+
+I verified the layout with a standalone render of the exact grid (one Joined row + one Invited/Resend row): both share inputs sit at the same x, locks align, and the Status column shares one right edge.
+
+Shipped: full suite **931 pass / 0 fail**, worker rebuilt. Committed (`79680d4`) + pushed, **deployed to production** (version `3272ab26`). Hard-refresh `/lenders/groups` (the JS bundle hash changed to `index.browser-MRVULXJE.js`) and the columns should line up.
+<!-- agent:boundary:b7ae0220 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -127,9 +144,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: The Lender Group members should be in a display: table or display: flex, where the columns line up. Add an input to change the percentages. The percentages should add up to 100%. Use best UI practices for the input logic. Should we have a lock icon to lock or unlock other lender % to rebalance changes to another lender %? deploy~~
-- ~~The Lender Group members should be in a display: table or display: flex, where the columns line up. Add an input to change the percentages. The percentages should add up to 100%. Use best UI practices for the input logic. Should we have a lock icon to lock or unlock other lender % to rebalance changes to another lender %? deploy~~
-- do [#pmhf]
 <!-- /agent:queue -->
 
 ## Backlog

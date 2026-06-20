@@ -151,7 +151,21 @@ Found and fixed the primary root cause — agent-doc `0.34.30`, submodule `4c7a5
 **Why this turn still drifted.** The running supervisor is `0.34.28` — the fix isn't live yet, so this very finalize recovered through the old path again. Installing `0.34.30` + recycling makes it live; after that, editing the doc mid-turn should stop forcing the recovery path (only a real edit to the in-flight response/prompt will defer).
 
 **Scope note.** This is the *biggest* single cause (it fired unconditionally whenever a queue was active). The remaining edit-race facets are narrower and already tracked: `#hap7` (scoped CRDT merge so a concurrent edit to one queue item can't duplicate adjacent structure), `#editorbufwin` (editor-wins for unconsumed user queue additions), `#docdriftgrace` (silent auto-rebase of unrelated drift). If you still see races after `0.34.30` is live, they'll be one of those — tell me which symptom and I'll take the next one.
-<!-- agent:boundary:7a90d029 -->
+
+### Re: Why does monsterrodholders.md keep reporting a stale 0.1.0 supervisor if we're on a recent version? — opus-4-8
+
+Two separate things were tangled together. Fixed the misleading half (`#orchver`, agent-doc `0.34.31`, submodule `4cdb421e`).
+
+**The "0.1.0" was a lie — it never reflected the real running version.** The stale-supervisor warning (and the `content_ours_adoption_refused_stale_supervisor` lines flooding `boost-client/.agent-doc/logs/ops.log`) builds its version string from `ControllerBinaryIdentity.version`, which was recorded with `env!("CARGO_PKG_VERSION")` **inside the `agent-doc-orchestration` crate**. That internal workspace crate is pinned at `0.1.0` and is never bumped in lockstep with the top-level `agent-doc` binary (now `0.34.x`) — `agent-doc-core` and `agent-doc-sqlite` are `0.1.0` too. So **every** controller and supervisor stamped itself "launched as 0.1.0" regardless of which build it actually ran. It was a cosmetic reporting bug, not evidence of an ancient binary. **Fix:** `main()` now injects the real top-level `CARGO_PKG_VERSION` at startup via `project_controller::set_binary_version`, and `current_binary_identity()` stamps that (falling back to the crate version only for library-only callers / tests). Next time the warning fires it will name the true version (e.g. `0.34.31`).
+
+**The staleness itself was real, but transient.** The *detection* never used that version field — it compares the recorded binary's length + mtime + path against the freshly-installed binary (`process_binary_is_stale`). The monsterrodholders host (`agent-doc start --route-owned tasks/monsterrodholders.md`, started ~04:29) was genuinely running an older on-disk inode after a later `cargo install` bumped the cargo bin (mtime 13:30). That's a true "already-running supervisor uses the OLD binary until restarted" condition — exactly what your housekeeping recycle cleared. The reason it *kept* recurring is that each finalize cycle spawns a fresh per-cycle controller that re-reads the same stale recorded identity, and the warning re-fired with the bogus `0.1.0` label every time, making one transient staleness look like a permanent ancient-binary problem. With the label fixed and the supervisor recycled onto `0.34.31`, the warning goes quiet unless a genuinely older binary is hosting.
+
+So: recycling was the right operational fix for the real staleness; `#orchver` fixes the part that made it *look* like a `0.1.0` binary and kept alarming you about it.
+
+`make check` green (4839 + 2 new `identity_version_*` unit tests), committed + pushed; installing `0.34.31` + `lib-install` + recycling the monsterrodholders and this session's supervisors onto the new binary as the post-closeout deploy step.
+
+**On `do [#6b5h]`:** the semantic-match hint that `#6b5h` is resolved by the already-shipped `#yzer` is a false positive — they're different bugs. `#yzer` is the JB-plugin reconnect re-read (stale editor buffer vs HEAD); `#6b5h` is the *pure-CLI, no-editor* case where an IPC listener is registered but no live editor is behind it, so every finalize wedges on `no_ack`. `#6b5h` is supervisor-core and needs an editor-less live repro + SimWorld coverage — it's also in the IPC-wedge family destabilizing this very session, so it's not safe to rush inside the drain loop. Left it queued for a focused cycle rather than fold a risky merge-core change into a release.
+<!-- agent:boundary:151eb2af -->
 <!-- /agent:exchange -->
 
 ## Queue

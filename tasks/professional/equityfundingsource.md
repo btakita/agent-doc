@@ -63,7 +63,24 @@ Deployed the EFS worker to production. **Version `0dd3c983-40a9-48d2-8f2b-e3a627
 `#5q7z-ship`: the **deploy sub-step is done**. The only thing left is the operator live-verify — open the admin approve flow on an already-in-TMO loan (deal `7a0c1463` / loan `45ddae53` GQI751) and confirm it no longer 400s and the button reads "Already in TMO". Left it as `[operator-verify]`.
 
 Note: this is the `workers.dev` deployment (the live app). The `equityfundingsource.com` custom-domain + SSO cutover is separate and still gated on `#cftk`/`#efs-cutover-sso-plan`.
-<!-- agent:boundary:083ec89c -->
+
+### Re: /lenders/groups — per-member rows + Resend Invite — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In /lenders/groups, have a row for each member of the group. If a member is invited but has not yet signed in, have a "Resend Invite" button to that lender.
+
+
+Done. In `/lenders/groups` each group now renders **one row per current member** (active or still-invited) instead of compact chips, and an invited-but-not-signed-in member gets an inline **"Resend Invite"** button.
+
+**UI** (`lib/ui--browser--efs/portal/shared/lending_groups.tsx`):
+- `GroupRow` lists `active`/`invited` members one per row — email (+ `(lead)` / stake), a status badge (**Joined** green / **Invited** amber), and for `status === 'invited'` (i.e. `joined_at` null — never signed in) a **Resend Invite** button.
+- `resend_invite_` now takes an optional `group_id`, so it resends inline from a group row (not just from inside the Invite dialog). It reuses the existing `…/invites` endpoint (which re-sends rather than erroring on an existing member) and surfaces the result as a toast.
+
+**Tests:** added source-assertion coverage in `investor-portal-e2e.test.ts` (member-row filter, group-id resend signature, inline `on_resend` wiring, the button, toast). Full suite green — **909 pass / 0 fail** — plus `bun run build` + `bun run build:worker`.
+
+**Shipped:** committed + pushed EFS `fce9b05`, superproject pointer `ab79a0d52`. The `deploy` queued behind this will push it live.
+<!-- agent:boundary:8f17623b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,7 +93,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: In /lenders/groups, have a row for each member of the group. If a member is invited but has not yet signed in, have a "Resend Invite" button to that lender.
+- ~~:pushpin: In /lenders/groups, have a row for each member of the group. If a member is invited but has not yet signed in, have a "Resend Invite" button to that lender.~~
 - :pushpin: deploy
 - do [#5q7z-ship]
 <!-- /agent:queue -->

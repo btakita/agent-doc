@@ -153,6 +153,14 @@ pub struct SemanticMerge {
     pub merged_doc: String,
     pub outcomes: Vec<NodeOutcome>,
     pub requires_ack: Vec<AckRequest>,
+    /// `#hap7` / `#qdup` deleted-structure rule: human-readable notes for nodes the
+    /// operator deleted this cycle that the agent's content had targeted (edited).
+    /// The deletion stands — the in-editor document is the source of truth and the
+    /// agent change is NOT merged back — but the fact is surfaced in `agent:exchange`
+    /// (and recorded here) so the operator sees the dropped agent edit this cycle,
+    /// independent of the next-cycle ack carry-forward. Each note is also injected
+    /// into the `exchange` component of [`Self::merged_doc`].
+    pub exchange_notes: Vec<String>,
 }
 
 /// Sentinel component name used for frontmatter scalar key-nodes in outcomes/acks.
@@ -194,6 +202,21 @@ pub fn semantic_merge(base: &str, ours_agent: &str, theirs_operator: &str) -> Se
         &mut requires_ack,
     );
 
+    // `#hap7` / `#qdup` deleted-structure rule: when the operator deleted a node
+    // the agent's content this cycle targeted (an `OperatorDeletedAgentEditedNode`
+    // ack), the deletion stands (already reflected in `merged_body` — the node is
+    // omitted, never resurrected) but we surface the fact as a note in
+    // `agent:exchange` so the operator sees the dropped agent edit this cycle. This
+    // is deliberately derived from the unscoped acks: it is NOT same-node ack
+    // noise to be scoped away, it represents real agent work the operator dropped.
+    let exchange_notes: Vec<String> = requires_ack
+        .iter()
+        .filter(|ack| ack.reason == AckReason::OperatorDeletedAgentEditedNode)
+        .map(|ack| deletion_note(&ack.component, &ack.id))
+        .collect();
+
+    let merged_body = inject_exchange_notes(merged_body, &exchange_notes);
+
     let merged_doc = match merged_fm {
         Some(fm) => format!("{fm}{merged_body}"),
         None => merged_body,
@@ -203,7 +226,105 @@ pub fn semantic_merge(base: &str, ours_agent: &str, theirs_operator: &str) -> Se
         merged_doc,
         outcomes,
         requires_ack,
+        exchange_notes,
     }
+}
+
+/// `#hap7` / `#qdup`: the canonical one-line note recorded when the operator
+/// deleted a structural node the agent's content targeted. A blockquote line
+/// (never a `### ` heading or `❯` prompt) so it cannot be misclassified as a
+/// response turn or a user prompt by the convergence / drift gates.
+fn deletion_note(component: &str, id: &str) -> String {
+    format!(
+        "> ⚠️ agent-doc: operator deleted `{component}` node `#{id}` that this turn targeted — deletion stands (the editor is the source of truth); the agent's change was not merged back."
+    )
+}
+
+/// Inject `#hap7` deletion notes into the `exchange` component of a merged body.
+///
+/// Notes are appended to the exchange inner, before a trailing
+/// `<!-- agent:boundary:… -->` marker if one is present (same convention as
+/// appended response turns), else just before the close marker. A note already
+/// present in the exchange inner is not re-added (idempotent across repeated
+/// convergence attempts in a cycle and across cycles where `base` already carries
+/// it). If there is no `exchange` component the notes cannot be surfaced here and
+/// the body is returned unchanged (the next-cycle ack carry-forward still fires).
+fn inject_exchange_notes(body: String, notes: &[String]) -> String {
+    if notes.is_empty() {
+        return body;
+    }
+    // Only inject notes not already present anywhere in the body (dedup guard).
+    let fresh: Vec<&String> = notes.iter().filter(|n| !body.contains(n.as_str())).collect();
+    if fresh.is_empty() {
+        return body;
+    }
+
+    let mut out = String::new();
+    let mut inside_exchange = false;
+    let mut inner: Vec<String> = Vec::new();
+    let mut injected = false;
+    for line in body.split_inclusive('\n') {
+        let trimmed = line.trim_end_matches(['\n', '\r']).trim();
+        if !inside_exchange {
+            if open_marker_name(trimmed).as_deref() == Some(EXCHANGE_COMPONENT) {
+                inside_exchange = true;
+            }
+            out.push_str(line);
+            continue;
+        }
+        if close_marker_name(trimmed).as_deref() == Some(EXCHANGE_COMPONENT) {
+            // Emit the buffered inner with the notes inserted before any trailing
+            // boundary marker, then the close marker.
+            let boundary_idx = inner.iter().rposition(|l| {
+                is_boundary_marker(l.trim_end_matches(['\n', '\r']).trim())
+            });
+            let mut note_block = String::new();
+            // Separate the notes from preceding content with a blank line when the
+            // preceding inner content does not already end with one.
+            let preceding_nonblank = match boundary_idx {
+                Some(idx) => inner[..idx]
+                    .iter()
+                    .rev()
+                    .find(|l| !l.trim().is_empty())
+                    .is_some(),
+                None => inner.iter().rev().find(|l| !l.trim().is_empty()).is_some(),
+            };
+            if preceding_nonblank {
+                note_block.push('\n');
+            }
+            for n in &fresh {
+                note_block.push_str(n);
+                note_block.push('\n');
+            }
+            match boundary_idx {
+                Some(idx) => {
+                    for l in &inner[..idx] {
+                        out.push_str(l);
+                    }
+                    out.push_str(&note_block);
+                    for l in &inner[idx..] {
+                        out.push_str(l);
+                    }
+                }
+                None => {
+                    for l in &inner {
+                        out.push_str(l);
+                    }
+                    out.push_str(&note_block);
+                }
+            }
+            out.push_str(line);
+            inside_exchange = false;
+            injected = true;
+            continue;
+        }
+        inner.push(line.to_string());
+    }
+    if !injected {
+        // No exchange close marker found (no exchange component) — return unchanged.
+        return body;
+    }
+    out
 }
 
 /// The set of structural nodes considered "active" in the current agent turn —
@@ -1931,6 +2052,212 @@ New turn B.
         assert!(
             b_idx < boundary_idx,
             "new turn must precede the boundary marker: {}",
+            m.merged_doc
+        );
+    }
+
+    // ----- #hap7 / #qdup: scoped-merge no-structural-duplication -------------
+
+    #[test]
+    fn qdup_operator_queue_add_during_exchange_turn_no_duplication() {
+        // #hap7 / #qdup test 1 (the operator-reported corruption shape): the agent
+        // writes a NEW exchange `### Re:` turn while the operator concurrently
+        // inserts a queue item. The per-node merge must land both change-sets with
+        // the operator's queue item appearing EXACTLY ONCE and no adjacent queue
+        // node duplicated/reversed.
+        let base = "\
+<!-- agent:queue -->
+- do [#a] first
+- do [#b] second
+<!-- /agent:queue -->
+<!-- agent:exchange -->
+### Re: prior — opus-4-8
+
+Prior answer.
+<!-- /agent:exchange -->
+";
+        // Agent (ours): appends a new exchange turn, queue untouched.
+        let ours = "\
+<!-- agent:queue -->
+- do [#a] first
+- do [#b] second
+<!-- /agent:queue -->
+<!-- agent:exchange -->
+### Re: prior — opus-4-8
+
+Prior answer.
+
+### Re: new turn — opus-4-8
+
+Fresh response.
+<!-- /agent:exchange -->
+";
+        // Operator (theirs): inserts a new queue item #c, exchange untouched.
+        let theirs = "\
+<!-- agent:queue -->
+- do [#a] first
+- do [#c] operator full screen dialogs deploy
+- do [#b] second
+<!-- /agent:queue -->
+<!-- agent:exchange -->
+### Re: prior — opus-4-8
+
+Prior answer.
+<!-- /agent:exchange -->
+";
+        let m = semantic_merge(base, ours, theirs);
+
+        // The operator's concurrent queue add appears EXACTLY ONCE.
+        assert_eq!(
+            m.merged_doc
+                .matches("do [#c] operator full screen dialogs deploy")
+                .count(),
+            1,
+            "operator queue add must appear exactly once (no duplication):\n{}",
+            m.merged_doc
+        );
+        // No adjacent queue node duplicated or dropped — order preserved.
+        assert_eq!(
+            reparses_to_ids(&m.merged_doc, "queue"),
+            vec!["a", "c", "b"],
+            "queue order preserved, no adjacent duplication:\n{}",
+            m.merged_doc
+        );
+        // Agent's new exchange turn survives, exactly once.
+        assert_eq!(
+            m.merged_doc.matches("### Re: new turn — opus-4-8").count(),
+            1,
+            "agent's new turn present exactly once:\n{}",
+            m.merged_doc
+        );
+        // Node-disjoint change-sets: no ack noise.
+        assert!(
+            m.requires_ack.is_empty(),
+            "node-disjoint queue-add + exchange-turn need no ack: {:?}",
+            m.requires_ack
+        );
+    }
+
+    #[test]
+    fn qdup_one_changed_node_leaves_siblings_byte_identical() {
+        // #hap7 / #qdup test 3 (per-node isolation): an agent edit to ONE queue
+        // node must leave every sibling node's serialized line byte-identical — a
+        // concurrent change to one structural part cannot reflow adjacent parts.
+        let base = q("- do [#a] first\n- do [#b] second\n- do [#c] third\n");
+        let ours = q("- do [#a] first\n- do [#b] SECOND EDITED\n- do [#c] third\n");
+        let theirs = base.clone();
+        let m = semantic_merge(&base, &ours, &theirs);
+
+        assert!(
+            m.merged_doc.contains("- do [#a] first\n"),
+            "sibling #a byte-identical:\n{}",
+            m.merged_doc
+        );
+        assert!(
+            m.merged_doc.contains("- do [#c] third\n"),
+            "sibling #c byte-identical:\n{}",
+            m.merged_doc
+        );
+        assert!(
+            m.merged_doc.contains("- do [#b] SECOND EDITED\n"),
+            "changed node #b applied:\n{}",
+            m.merged_doc
+        );
+        assert_eq!(
+            reparses_to_ids(&m.merged_doc, "queue"),
+            vec!["a", "b", "c"],
+            "order + cardinality unchanged:\n{}",
+            m.merged_doc
+        );
+    }
+
+    #[test]
+    fn qdup_operator_deleted_agent_targeted_node_noted_in_exchange_not_resurrected() {
+        // #hap7 / #qdup test 2 (deleted-structure rule): the operator deletes a
+        // queue node that the agent's content this cycle targeted (edited). The
+        // deletion must STAND (node not resurrected) and the fact must be surfaced
+        // in `agent:exchange` so the operator sees the agent's dropped edit — the
+        // in-editor document is the source of truth and we never merge it back.
+        let base = "\
+<!-- agent:queue -->
+- do [#a] first
+- do [#x] target node
+<!-- /agent:queue -->
+<!-- agent:exchange -->
+### Re: prior — opus-4-8
+
+Prior answer.
+<!-- /agent:exchange -->
+";
+        // Agent (ours): edited #x (its targeted node).
+        let ours = "\
+<!-- agent:queue -->
+- do [#a] first
+- do [#x] target node AGENT EDITED
+<!-- /agent:queue -->
+<!-- agent:exchange -->
+### Re: prior — opus-4-8
+
+Prior answer.
+<!-- /agent:exchange -->
+";
+        // Operator (theirs): deleted #x entirely.
+        let theirs = "\
+<!-- agent:queue -->
+- do [#a] first
+<!-- /agent:queue -->
+<!-- agent:exchange -->
+### Re: prior — opus-4-8
+
+Prior answer.
+<!-- /agent:exchange -->
+";
+        let m = semantic_merge(base, ours, theirs);
+
+        // Deletion stands — #x is NOT resurrected.
+        assert_eq!(
+            reparses_to_ids(&m.merged_doc, "queue"),
+            vec!["a"],
+            "operator deletion of #x must stand (not resurrected):\n{}",
+            m.merged_doc
+        );
+        assert!(
+            !m.merged_doc.contains("target node AGENT EDITED"),
+            "agent's edit to the deleted node must NOT be merged back:\n{}",
+            m.merged_doc
+        );
+        // The outcome is recorded as a kept deletion.
+        assert_eq!(
+            outcome_for(&m, "x").unwrap().kind,
+            OutcomeKind::DeletionKept
+        );
+        // The fact is surfaced as an exchange note (so the operator sees it this
+        // cycle, independent of the next-cycle ack carry-forward).
+        assert!(
+            !m.exchange_notes.is_empty(),
+            "a deletion-of-agent-targeted-node fact must be surfaced as an exchange note"
+        );
+        assert!(
+            m.exchange_notes.iter().any(|n| n.contains("#x")),
+            "the exchange note must name the deleted node #x: {:?}",
+            m.exchange_notes
+        );
+        // The note must actually appear inside the merged exchange component.
+        let exchange_inner = component_inner_lines("exchange", &m.merged_doc).join("");
+        assert!(
+            exchange_inner.contains("#x"),
+            "the deletion note must land inside agent:exchange:\n{}",
+            m.merged_doc
+        );
+        // And the merged doc must remain structurally clean (no duplicate
+        // components, no corruption) — re-parses to exactly one exchange component.
+        assert_eq!(
+            components(&m.merged_doc)
+                .iter()
+                .filter(|c| c.name == "exchange")
+                .count(),
+            1,
+            "exactly one exchange component after noting:\n{}",
             m.merged_doc
         );
     }

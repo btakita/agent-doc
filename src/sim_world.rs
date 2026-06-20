@@ -3695,6 +3695,101 @@ fn semmerge_sim_operator_deleted_agent_edited_node_keeps_deletion_and_acks() {
     );
 }
 
+#[test]
+fn hap7_sim_operator_queue_add_during_exchange_turn_no_duplication() {
+    // #hap7 / #qdup (the operator-reported corruption shape): the agent writes a
+    // new exchange `### Re:` turn while the operator concurrently inserts a queue
+    // item. The scoped converge must land both with the operator's queue item
+    // present EXACTLY ONCE and no adjacent queue node duplicated/reversed.
+    let mut world = SimWorld::new(7_001);
+    let base = concat!(
+        "<!-- agent:queue -->\n",
+        "- do [#a] first\n",
+        "- do [#b] second\n",
+        "<!-- /agent:queue -->\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — opus-4-8\n",
+        "\n",
+        "Prior answer.\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    // Agent (ours): appends a new exchange turn, queue untouched.
+    let agent_ours = base.replace(
+        "Prior answer.\n",
+        "Prior answer.\n\n### Re: new turn — opus-4-8\n\nFresh response.\n",
+    );
+    // Operator (theirs): inserts a new queue item #c between #a and #b.
+    let operator_theirs = base.replace(
+        "- do [#a] first\n",
+        "- do [#a] first\n- do [#c] full screen dialogs deploy\n",
+    );
+
+    let sm = world.converge_semantic_merge(base, &agent_ours, &operator_theirs, Some("exchange"));
+
+    assert_eq!(
+        world.snapshot.matches("do [#c] full screen dialogs deploy").count(),
+        1,
+        "operator queue add must appear exactly once (no #qdup duplication):\n{}",
+        world.snapshot
+    );
+    assert_eq!(
+        world.snapshot.matches("### Re: new turn — opus-4-8").count(),
+        1,
+        "agent's new exchange turn present exactly once:\n{}",
+        world.snapshot
+    );
+    assert!(
+        sm.requires_ack.is_empty(),
+        "node-disjoint queue-add + exchange-turn need no ack: {:?}",
+        sm.requires_ack
+    );
+}
+
+#[test]
+fn hap7_sim_operator_deleted_agent_targeted_node_noted_in_exchange() {
+    // #hap7 / #qdup deleted-structure rule (end-to-end through the scoped converge):
+    // the operator deletes a queue node the agent targeted this cycle. The deletion
+    // stands (not resurrected) AND the fact is surfaced as a note inside
+    // `agent:exchange` so the operator sees the dropped agent edit this cycle.
+    let mut world = SimWorld::new(7_002);
+    let base = concat!(
+        "<!-- agent:queue -->\n",
+        "- do [#a] first\n",
+        "- do [#x] target node\n",
+        "<!-- /agent:queue -->\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — opus-4-8\n",
+        "\n",
+        "Prior answer.\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    // Agent (ours): edited its targeted node #x.
+    let agent_ours = base.replace("- do [#x] target node\n", "- do [#x] target node AGENT EDITED\n");
+    // Operator (theirs): deleted #x entirely.
+    let operator_theirs = base.replace("- do [#x] target node\n", "");
+
+    let sm = world.converge_semantic_merge(base, &agent_ours, &operator_theirs, Some("exchange"));
+
+    // Deletion stands — #x not resurrected, agent's edit not merged back.
+    assert!(
+        !world.snapshot.contains("target node AGENT EDITED"),
+        "agent's edit to the deleted node must NOT be merged back:\n{}",
+        world.snapshot
+    );
+    // The fact is surfaced both as a structured note and inside agent:exchange.
+    assert!(
+        sm.exchange_notes.iter().any(|n| n.contains("#x")),
+        "a deletion note naming #x must be surfaced: {:?}",
+        sm.exchange_notes
+    );
+    assert!(
+        world.snapshot.contains("operator deleted")
+            && world.snapshot.contains("#x"),
+        "the deletion note must land in the converged document:\n{}",
+        world.snapshot
+    );
+}
+
 // #mrhpcdrift2: the recurring `ipc_socket_already_applied_live_buffer_diverged`
 // drift must always be RECOVERED, never silently lost. When the socket reports
 // `already_applied` but the live buffer diverged with the assistant response

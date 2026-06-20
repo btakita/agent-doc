@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,151 +33,26 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-055827.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-071324.md`*
 
 Compacted content:
-❯ - Archived 2 response topic(s): Email sign-in link; deploy
+❯ - Archived 11 response topic(s): Admin sees no log-out message on passwordless link; deploy; Still no notification; 8 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: Admin sees no log-out message on passwordless link — toast + persistent banner — opus-4-8
+### Re: Set-password dialog on a passwordless link for lender2 — working as intended (your call) — opus-4-8
 
 > **Queue prompt:**
 >
-> :pushpin: When I click the passwordless list while logged in as an admin, I don't see a message to log out. There should be a toast message and a message that remains after the toast disappears.
+> :pushpin: When I clicked on the passwordless link for btak.dev+lender2@gmail.com, I was presented with a set password dialog. I believe this account does not have a password. I think this is a bug.
 
+Investigated against prod — **not a state bug; it's the `#credentials-first` flow you asked for earlier**, and you've now chosen to keep it.
 
-> **Queue prompt:**
->
-> :pushpin: When I click the passwordless link while logged in as an admin, I don't see a message to log out. There should be a toast message and a message that remains after the toast disappears.
+**What actually happened:** I queried prod D1 for `btak.dev+lender2@gmail.com`. At the moment you clicked, the account had **no** password, so both the sign-in handler (`first_time = !password_hash && !access_identity_sub` → `/account/complete`) and the `require_auth_` gate (`#credentials-first`, "no local password AND no SSO ⇒ set credentials first") correctly routed you to the set-password screen. The row now shows `has_password = 1` with `last_login_at` ~4 min before this report — i.e. **you set the password via that very dialog**, which is why the account has one now. So it wasn't shown in error, and it won't re-prompt for this account.
 
-Fixed and deployed. **Root cause of "no message":** my prior fix only handled the *used/expired* token branch. As an admin you almost certainly had a **valid** token, which fell through to `login_and_redirect_` and **silently switched your session** to the link's account — so the log-out notice never fired at all.
+**Design call:** this collided with the "a passwordless link shouldn't require a password" intuition, so I asked how you wanted credential-less accounts to behave. You chose **"Keep requiring a password"** — keep `#credentials-first` as-is so no account stays password-less. **No code change** this cycle; the behavior is intended.
 
-**What changed** (`lib/auth/routes.ts`): the already-signed-in guard now runs **before** any token validation/consumption in `/login/email/verify`. When you're signed in it:
-- **never switches accounts** — a passwordless link can't take over an existing session;
-- **does not consume the token**, so a still-valid link works the moment you log out and click it again;
-- shows the notice **two ways**, exactly as requested — a transient **toast** (the `efs_flash` cookie the logout flow already uses) **and** a **persistent banner** that stays on the page after the toast fades (`/?notice=…` → new `home_notice_()` on the home page).
-
-Message: **"You're already signed in. Please log out, then open your email sign-in link again."**
-
-Verified: updated `tests/email-login.test.ts` asserts the guard runs before token consumption + both delivery paths; fixed two brittle source-string tests in `public-content.test.ts` that pinned the old `home__doc_html_` call. Full `bun run check` (test + build + build:worker) **947 pass / 0 fail**. Committed (`b1424ba`) + pushed. Live worker checks: `GET /?notice=…` renders the persistent banner; home with no notice has none; signed-out verify still `303`s to `/login/email`. (Test on the worker host — `www.equityfundingsource.com` is still the legacy Apache origin, as noted last cycle.)
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-Already deployed this cycle — the admin log-out-notice fix (`b1424ba`) went out as worker **version `6c634c0d`** via `make deploy` (no D1 migration; none needed). Live smoke checks confirmed the new behavior is serving: `GET /?notice=…` renders the persistent banner and the signed-out verify path still `303`s. Nothing changed since, so this is the live production worker.
-
-### Re: Still no notification — it was the INVITE flow; verified live with chromium-bridge — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: I still don't see any notification. Use chromium-bridge on https://equityfundingsource.brian-takita.workers.dev/login/invite?token=iI2YN6l4MHgYHx-HJpLgIDtxY86htclRIdDb2pI-5g4
-
-
-> **Queue prompt:**
->
-> :pushpin: I still don't see any notification. Use chromium-bridge on https://equityfundingsource.brian-takita.workers.dev/login/invite?token=… to verify.
-
-You were right — and the link you gave is the key. That's the **invite** flow (`/login/invite`), a *different* handler than the email-login link I'd been fixing. The invitation email you've been testing (the lender2 "Lender Bros" invite) uses `/login/invite`, so my earlier email-login fix never touched the flow you were actually clicking.
-
-**Verified the bug live with chromium-bridge** (signed in as admin): navigating that invite link redirected to `/` with **no toast and no banner** (`flashJson: null`, `notice: null`) — exactly "I still don't see any notification." Root cause: the invite handler silently switched accounts on a valid token (`#invite-switch-account`) or silent-redirected to home on a used one — neither path showed a message.
-
-**Fix:** both link flows now share one `signed_in_link_notice_()` helper. When you're already signed in, `/login/invite` **and** `/login/email/verify` show the log-out notice as **both** a toast (the `efs_flash` cookie) **and** a persistent home-page banner, run the guard **before** consuming the token (a still-valid link works after you log out), and **no longer switch accounts silently** (drops the old `#invite-switch-account` takeover).
-
-**Re-verified live with chromium-bridge** after deploy: the same invite link now lands on `/?notice=…`, renders the persistent banner *"You're already signed in. Please log out, then open your invitation link again."* (screenshot confirmed), and embeds the toast flash payload — and your admin session stays intact (no silent switch). Full `bun run check` **949 pass / 0 fail** (added invite + shared-helper wiring tests, updated the old `#invite-switch-account` assertion). Committed (`bfc6b9b`) + pushed, **deployed** (worker version `47ef12f6`).
-
-Note: this means an invite link can no longer be used to *switch into* another account while signed in — you log out first. If you actually relied on the old auto-switch (e.g. to jump into a lender's view as admin), say so and I'll add it back as an explicit confirm step instead.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-Already deployed this cycle — the invite-flow notice fix (`bfc6b9b`) went out as worker **version `47ef12f6`** (no D1 migration). Confirmed live with chromium-bridge: the invite link now shows the persistent log-out banner + toast flash payload. This is the live production worker.
-
-### Re: Link "log out" in the notice to actually log out — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: In "You’re already signed in. Please log out, then open your invitation link again.", link "log out" to log out.
-
-
-> **Queue prompt:**
->
-> :pushpin: In "You're already signed in. Please log out, then open your invitation link again.", link "log out" to log out.
-
-Done and deployed. In the persistent home-page banner, the phrase **"log out"** is now a clickable control instead of plain text. `home_notice_()` replaces the literal phrase with an inline `<form method="post" action="/logout">` submit button styled as an underlined link — POST, because `/logout` is a POST endpoint (CSRF-safe and tokenless, exactly like the header account-menu logout). One click signs you out (and lands you back on home, signed out), after which your invitation link works.
-
-Verified live with chromium-bridge on the worker after deploy: the banner now contains `form[action="/logout"][method="post"]` with button text "log out" (screenshot confirmed the underlined link). I did **not** submit it — that would have logged out your live admin session across all tabs. Full `bun run check` **949 pass / 0 fail** (home-notice test now asserts the logout control). Committed (`5af28e0`) + pushed, **deployed** (worker version `1487617b`).
-
-Scope note: I linked it in the **persistent banner** (the lasting element). The transient toast still shows the same text but isn't clickable — the toast auto-dismisses, so a click target belongs on the banner that stays. Say the word if you also want the toast itself clickable.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-Already deployed this cycle — the clickable-"log out" banner change (`5af28e0`) went out as worker **version `1487617b`** (no D1 migration). Confirmed live with chromium-bridge: the banner renders `form[action="/logout"]` with the "log out" link. Live production worker.
-
-### Re: A signed-in click must not consume / expire the link — already enforced, now proven — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: If the link is clicked while another user is logged in, that should not count as a usage and should not expire the link.
-
-Good news — this is **already the deployed behavior**, and I've now proven it. The fix that unified the sign-in/invite flows (worker `47ef12f6`) runs the already-signed-in guard **before** any token lookup or `*_token_use_()` call, so a click while another user is logged in returns the log-out notice and **never touches the token** — `used_at` stays NULL and `expires_at` is untouched.
-
-**Why your link looked "used up":** I queried prod D1 for your test token directly. Its `used_at` is `2026-06-20 03:09:57 UTC` — **~203 minutes BEFORE** the invite fix deployed (06:33 UTC). So it was burned by a **pre-fix** click (back when a valid invite click while signed in consumed the token + switched accounts), *not* by the current code. That token is permanently spent; you'll need a fresh invite to test the full happy path — but new signed-in clicks won't burn it.
-
-**Locked it in with a real behavioral test** (`tests/auth.test.ts`): I extended the fake D1 to back `invite_login_tokens` and assert, through the actual worker handler, that a `/login/invite` request carrying an admin session cookie → `303 /?notice=…` with the token's `used_at` **still NULL**, while a signed-out click still consumes it + signs the invitee in. Full `bun run check` **951 pass / 0 fail**. Committed (`6415751`) + pushed.
-
-No new deploy needed — the enforcing code already shipped in `47ef12f6`/`1487617b`; this cycle only added the regression test.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-No redeploy needed this cycle — it was **test-only** (added the regression test in `tests/auth.test.ts`; the worker bundle is unchanged). The enforcing code (guard-before-consume, so a signed-in click never consumes/expires the token) already shipped in worker **`47ef12f6`** and is current as of **`1487617b`**. The live worker already has the behavior you asked for.
-
-### Re: deploy (duplicate) — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-Duplicate of the prior `deploy` item (stale-supervisor queue churn re-injected it). Same answer: no redeploy needed — the live worker (`1487617b`) already carries the guard-before-consume behavior; this cycle was test-only. I've marked the stale supervisor to recycle at its next idle boundary to stop the duplication.
-
-### Re: Expired-invite notice — add "contact Equity Funding Source" mailto link — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: In addition to contacting the lender who sent the invite, add " or contact Equity Funding Source" with a link to email EFS to send another invite.
-
-Done and deployed. The expired/used-invite notice (shown on the login page to a signed-out visitor) now reads: *"This invitation link has expired or already been used. Please contact the lender who sent your invite and ask them to resend it, or **contact Equity Funding Source** to send another invite"* — where **contact Equity Funding Source** is a `mailto:info@equityfundingsource.com?subject=Request a new invitation` link.
-
-**Why it's wired this way:** the flash banner HTML-escapes its message, and `?info=` is user-controllable (an XSS vector), so I couldn't just put a link in the query text. Instead the invalid-invite redirect now passes a **notice code** — `/login/invite` → `/login?notice=invite_expired` — and the login page renders the full notice as server-built trusted HTML via a new `flash_info_html_()` variant (the mailto address comes from `ctx.site.email`). No user input is ever rendered as HTML.
-
-Verified live on the worker after deploy: a signed-out invalid invite link `303`s to `/login?notice=invite_expired`, and that page renders the notice with `mailto:info@equityfundingsource.com?subject=Request%20a%20new%20invitation`. (Verified via curl since the notice is server-rendered and only shows for signed-out visitors — `/login` bounces your signed-in admin session to home.) Full `bun run check` **951 pass / 0 fail** (updated the invite wiring test). Committed (`9533a99`) + pushed, **deployed** (worker version `d98be19b`).
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-Already deployed this cycle — the expired-invite "contact Equity Funding Source" mailto link (`9533a99`) went out as worker **version `d98be19b`** (no D1 migration). Confirmed live: `/login?notice=invite_expired` renders the EFS mailto link. Live production worker.
-<!-- agent:boundary:c06d1635 -->
+(If a passwordless lender ever needs to get in without setting a password, that'd be the "make password optional / fully passwordless" direction we discussed — say the word and I'll build it. For now it stays as-is.)
+<!-- agent:boundary:75a5eb3b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -190,6 +65,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: When I clicked on the passwordless link for btak.dev+lender2@gmail.com, I was presented with a set password dialog. I believe this account does not have a password. I think this is a bug.
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -185,7 +185,7 @@ Done — nulled the defaulted rate on the live `d6b78994` row (D1 `changes=1`):
 So the investor@ interest now reads **"amount committed ($100k), rate not finalized"** — the admin "Sold rate" pill will show "-". Safe to do: the deal isn't selected (`selected_at` null), so no blended-rate recompute was triggered.
 
 The **code fix** half of `#proprate` (stop pre-filling the rate default, allow `proposal_interest_rate = null`, relax the `:421` validation + admin display) is still **gated pending your go** — without it, the next proposal submit would re-default the rate. Say the word and I'll implement + test it.
-<!-- agent:boundary:5b95fe5d -->
+<!-- agent:boundary:5c853f8b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -198,6 +198,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: Frequency is autopopulated with Monthly, but the lender did not select Monthly. It was the default. Please make the Frequency nullable in the db and UI. Backport the existing available deal.
 <!-- /agent:queue -->
 
 ## Backlog

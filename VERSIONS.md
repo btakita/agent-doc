@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.33
+
+- **`#qstallguard` Layer B/C interaction fix — the supervisor failsafe drain no longer false-fires the stall guard.** Layer B (`drain_stall`) drops a continuation-pending marker at a clean in-session closeout; Layer C lets the supervisor idle-watch perform a single-owner failsafe drain of a paused queue. Without coordination, when the supervisor drained (paused-failsafe OR normal go-mode), the next drained agent's preflight would see the marker with no in-session drain-owner lease and emit a spurious `queue_stall_detected` — even though the supervisor *was* actively continuing the drain (not a stall). Fix: the idle-watch clears the continuation-pending marker at its drain-`Dispatch` decision, so a supervisor-progressed drain is correctly not classified as an in-session stall. Full suite + clippy + `make tmux-ci` green.
+
 ## 0.34.32
 
 - **`#qstallguard` — make non-stalling of a drainable queue a code-enforced invariant, not advisory prose.** A live dogfooding stall (the binary reported `queue_continuation_required=true` / `queue_drainable_head_count=1` and the agent stopped anyway) exposed that the extensive "do not stall" guidance in `SKILL.md` is advisory — an LLM can always synthesize a plausible stop reason from item prose. Three defense-in-depth layers, each pure-function unit-tested (the regression-proofing that survives refactors):

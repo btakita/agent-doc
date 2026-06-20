@@ -1788,6 +1788,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     last_dispatched.as_deref(),
                 ) {
                     IdleQueueDrainDecision::Dispatch => {
+                        // `#qstallguard` Layer B/C interaction: the supervisor idle-watch
+                        // is itself continuing the drain (whether the queue is paused —
+                        // the Layer C single-owner failsafe — or normal go-mode). That is
+                        // NOT an in-session stall, so clear any continuation-pending marker
+                        // the prior in-session closeout dropped. Otherwise the next drained
+                        // agent's preflight would see the marker with no in-session drain
+                        // lease and false-fire `queue_stall_detected` for a drain the
+                        // supervisor is actively progressing.
+                        crate::drain_stall::clear_continuation_pending(&file);
                         // `#qflood2`: hold the trigger until a just-sent `/clear`
                         // has settled, so it is never injected into the in-flight
                         // clear (the concatenated `/clear /agent-doc <FILE>`).

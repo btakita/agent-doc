@@ -89,14 +89,70 @@ The **one genuine unguarded gap was `reset --from-current`** (default, without `
 Shipped: agent-doc submodule `9b13d529` (0.34.27), pushed to origin/main. New regression test `from_current_routes_resume_clear_through_converge_seam` (asserts the `ops.log` source-labelled seam routing); `make check` (clippy + full suite) green. `#evmh` done.
 
 **Remaining (filed as `#evmhplugin`):** the plugin-side reconnect re-read (when the editor buffer is stale vs HEAD on reconnect, re-read disk instead of pushing the stale buffer — the `#postcommit-ipc-worktree-corruption` direction). That's separate Kotlin/FFI work. I'll `cargo install` 0.34.27 + recycle the supervisor *after* this finalize commits, to avoid the mid-session client-newer-than-supervisor drift.
-<!-- agent:boundary:c5d8b4f2 -->
+
+### Re: #next-steps to fix agent-doc bugs — opus-4-8
+
+> **Queue prompt:**
+>
+> :round_pushpin: What are #next-steps to fix agent-doc bugs?
+
+
+
+**Backlog priority order + top id.** The backlog holds one item, so it is already in order. No new follow-up items are needed — every actionable next step is already captured as a review item below; duplicating them into backlog would just create id-collision churn. **Top of backlog: `#yzer`** (the `#evmhplugin` plugin-side reconnect re-read; the binary half already shipped in 0.34.27 / `9b13d529`).
+
+The real next steps split into two tracks.
+
+**Track A — agent-actionable now (focused code cycles, nothing blocks *starting* them):**
+1. **`#j9ja` (avmark) — do this first; highest leverage.** Add a distinctive SUCCESS ops.log marker at every gated review proof site. This is what makes your "I test / file bugs, you check logs" loop work for *every* live gate via `#optverify` auto-verify. Today most proof sites only log the fail-closed refusal path, so a *passing* operator test leaves no marker — the gate can't be closed from logs. Wiring these markers converts most of Track B from "needs a live eyeball" to "auto-closes from ops.log."
+2. **`#editorbufwin` — merge-core cycle.** The `#pcwc` post-commit worktree reconcile overwrites unconsumed user queue additions with HEAD ("the queue reverted to disk; the editor buffer should have won"). Root corruption source; plan exists.
+3. **`#wd40` — supervisor stale-binary auto-recycle.** A long in-session `/loop` drain keeps the harness `turn_active` back-to-back, so the supervisor never reaches its recycle boundary → the stale binary persists → this session's `content_ours` drift + `#rt83` flood. Automate the yield-at-inter-item-boundary recycle.
+4. **`#agentreloadrestart` (Phase 1) + `#restartagentmenu` (Phase 2)** — restart-agent: re-resolve the harness from frontmatter on restart, plus a Restart Agent menu command.
+
+**Track B — operator-gated (blocked until you install 0.34.27 at a recycle boundary, then live-test):** the dozen `[operator-verify]` items — `#rdypoll-deploy`, `#qpausemix-verify`, `#sqedit-race` Phase 4, `#qheadstrike`, `#tsiftmdcrash-verify`, `#runexitrestart`, `#jbrundispatch`, `#qpauseux`, `#docdriftgrace`, `#cyh0`, `#8bfz`, `#1vhn`, `#fbwire`, `#hap7` (and `#gf5n`, which resolves when `#hap7` lands). None can advance without a live editor/pane — and Track A item #1 (`#j9ja`) is exactly what lets you close them from logs instead.
+
+**Recommended sequence:** `#j9ja` → `#editorbufwin` → `#wd40` → restart-agent (`#agentreloadrestart` / `#restartagentmenu`) → `#yzer`. Each is a focused cycle needing `make check` + `make tmux-ci`, so none is safe to rush inside this active drain loop — they want their own clean sessions.
+<!-- agent:boundary:a4b310d3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~:round_pushpin: What are #next-steps to fix agent-doc bugs?~~
 - do [#yzer]
-- What are #next-steps to fix agent-doc bugs?
+---
+JB `Run Agent Doc` on monsterrodholders.md sent duplicate prompts and did not submit.
+```
+claude exited cleanly.
+Press Enter to restart, or 'q' to exit.
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] supervisor auto-install: rebuilding + installing agent-doc from /home/brian/work/btakita/agent-loop/src/agent-doc so the next queue item runs on the freshly-committed source
+   Compiling agent-doc v0.34.26 (/home/brian/work/btakita/agent-loop/src/agent-doc)
+    Finished `release` profile [optimized] target(s) in 1m 44s
+[lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.26.so (symlink: libagent_doc.so)
+[lib-install] auto-recycle: 2 controller(s) marked to recycle at next idle boundary, 3 skipped (set AGENT_DOC_RECYCLE_ON_INSTALL=0 to disable)
+[agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle_queue_watch: clear cooldown active for tasks/agent-doc/agent-doc-bugs2.md, skipping passive queue dispatch
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+```
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

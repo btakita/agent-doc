@@ -20,6 +20,35 @@ pub(crate) struct DirectPaneAcceptance {
 
 const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR: Duration = Duration::from_millis(900);
 
+/// `#rdypoll` (§D / img_52): process-global count of REAL trigger injections into
+/// a harness composer for this `agent-doc route` invocation. A single dispatch
+/// should inject the `agent-doc <FILE>` trigger exactly once; a multi-inject
+/// regression (the ~7 stacked un-submitted copies the operator saw after a
+/// restart) shows up as `attempt=2`, `attempt=3`, … in ops.log. The route process
+/// is short-lived (one logical dispatch per invocation), so a monotonic counter
+/// makes "did this dispatch type the trigger more than once?" provable from logs.
+static DISPATCH_INJECT_ATTEMPTS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Record one real trigger injection and emit the `dispatch_inject attempt=N`
+/// marker. `transport` distinguishes the direct-pane text+Enter send from the
+/// supervisor-IPC inject so a regression can be attributed to the right path.
+fn log_dispatch_inject(file: &Path, pane: &str, harness: &HarnessConfig, transport: &str) {
+    let attempt =
+        DISPATCH_INJECT_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "dispatch_inject file={} pane={} harness={} transport={} attempt={}",
+            file.display(),
+            pane,
+            harness.binary,
+            transport,
+            attempt
+        ),
+    );
+}
+
 /// Default bare-Enter resubmit cap when the routed trigger stays drafted in the
 /// composer (not yet submitted).
 const DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT: usize = 6;
@@ -856,6 +885,7 @@ pub(crate) fn send_command_once_unchecked(
         transform,
         submit_key,
     );
+    log_dispatch_inject(Path::new(file_path), pane, harness, "direct_pane");
     crate::sessions::send_submitted_text_for_harness(tmux, pane, &payload, &harness.binary)?;
     if let Err(e) = tmux.select_pane(pane) {
         eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
@@ -912,6 +942,7 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
         "supervisor_ipc_inject",
         "Inject",
     );
+    log_dispatch_inject(file, pane, harness, "supervisor_ipc");
     let submit_start = Instant::now();
     let response = crate::supervisor::ipc::send_command(&sock, &method).with_context(|| {
         format!(

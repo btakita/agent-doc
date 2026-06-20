@@ -621,6 +621,12 @@ struct Coverage {
     route_dispatch_acceptances: usize,
     route_dispatch_proofs: usize,
     route_dispatch_coalesced: usize,
+    /// `#rdypoll` (§D / img_52): count of REAL trigger injections into the harness
+    /// composer. Mirrors the production `dispatch_inject attempt=N` ops.log marker
+    /// so a multi-inject regression (the ~7 stacked un-submitted triggers after a
+    /// restart) is provable from logs: a correct dispatch injects exactly once
+    /// (`attempt=1`), never `attempt=2+`.
+    dispatch_injects: usize,
     session_clears: usize,
     session_restart_busy_refusals: usize,
     session_restart_force_used: usize,
@@ -838,6 +844,7 @@ impl Coverage {
         self.route_dispatch_acceptances += other.route_dispatch_acceptances;
         self.route_dispatch_proofs += other.route_dispatch_proofs;
         self.route_dispatch_coalesced += other.route_dispatch_coalesced;
+        self.dispatch_injects += other.dispatch_injects;
         self.session_clears += other.session_clears;
         self.session_restart_busy_refusals += other.session_restart_busy_refusals;
         self.session_restart_force_used += other.session_restart_force_used;
@@ -1877,6 +1884,16 @@ fn route_sim_restart_drain_waits_for_dispatch_ready_prompt_before_send() {
             && ops_log.contains("reason=harness_not_dispatch_ready_before_restart_drain_send"),
         "ops log must record dispatch_into_restarting_pane for the restart race:\n{ops_log}"
     );
+    // `#rdypoll` (§D / img_52): NOTHING was injected while the pane stayed
+    // not-ready, so no `dispatch_inject` marker may have been emitted yet.
+    assert_eq!(
+        world.coverage.dispatch_injects, 0,
+        "no trigger may be injected while the restarted pane is not yet dispatch-ready"
+    );
+    assert!(
+        !ops_log.contains("dispatch_inject"),
+        "no dispatch_inject marker may be logged while the pane is not-ready:\n{ops_log}"
+    );
 
     // Once the restarted harness reaches a dispatch-ready prompt the same drain
     // sends and is proven submitted, exactly once.
@@ -1895,6 +1912,21 @@ fn route_sim_restart_drain_waits_for_dispatch_ready_prompt_before_send() {
     assert_eq!(
         world.coverage.drain_into_restarting_pane_blocks, 7,
         "the ready restart drain must not re-trip the restarting-pane block"
+    );
+    // `#rdypoll` (§D / img_52): exactly ONE real injection after ready — ops.log
+    // shows a single `dispatch_inject attempt=1`, never N stacked injections.
+    assert_eq!(
+        world.coverage.dispatch_injects, 1,
+        "the ready restart drain must inject the trigger exactly once (no ~7 stacked copies)"
+    );
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("dispatch_inject pane=") && ops_log.contains("attempt=1"),
+        "ops log must record the single dispatch_inject attempt=1 marker:\n{ops_log}"
+    );
+    assert!(
+        !ops_log.contains("attempt=2"),
+        "a correct restart drain must never log a second dispatch_inject attempt:\n{ops_log}"
     );
 }
 

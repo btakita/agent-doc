@@ -1507,10 +1507,21 @@ impl SimWorld {
         self.route.pending_dispatch = Some(DispatchReceipt {
             generation: self.route.durable.generation,
             session_id: self.route.durable.session_id.clone(),
-            pane_id,
+            pane_id: pane_id.clone(),
             proved: false,
         });
         self.coverage.route_dispatch_acceptances += 1;
+        // `#rdypoll` (§D / img_52): a real trigger injection happened — emit the
+        // same `dispatch_inject attempt=N` marker the production route logs so a
+        // multi-inject regression (N stacked un-submitted triggers after a restart)
+        // is provable from ops.log. A correct dispatch only reaches here once it is
+        // past the not-ready/Starting gate, so a healthy scenario logs `attempt=1`
+        // exactly once and never `attempt=2+`.
+        self.coverage.dispatch_injects += 1;
+        self.record_ops_proof(format!(
+            "dispatch_inject pane={} generation={} attempt={}",
+            pane_id, self.route.durable.generation, self.coverage.dispatch_injects
+        ));
         Ok(())
     }
 

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -69,12 +69,13 @@ You chose **plan only, no push** for the two recommendations that auto-drained i
 **No tsift code written, nothing pushed.** Only the session doc + plan file are committed to `agent-loop`. Phase 5 (build + spec + tests + commit + push to the tsift repo) waits for your explicit go — say "implement the zonemap plan" when you want it built.
 
 Both queue heads drained; the queue is now empty.
-<!-- agent:boundary:1b812242 -->
+<!-- agent:boundary:d16bd617 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: implement tasks/software/plan-tsift-zonemap-segment-stats.md
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

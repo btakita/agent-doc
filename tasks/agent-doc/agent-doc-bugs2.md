@@ -39,13 +39,38 @@ completed
 Compacted content:
 - Archived 7 response topic(s): Fix the root cause of already-done / noise heads flooding the queue; agent-doc duplicating queue items; JB `Run Agent Doc` route stalls (pane-kill+restart / "doesn't submit"); 4 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): Fix equityfundingsource.md "Mixed signals"; Clean up the noise...
-<!-- agent:boundary:fd60fed3 -->
+
+### Re: #sqedit-race (queue-edit race) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#sqedit-race]
+
+
+You pinned `#sqedit-race` to the top of a freshly-cleared session — the focused clean cycle this safety-critical commit-path item asks for. I scoped it against the actual code first, and the headline is that it was further along than the plan/backlog showed:
+
+**Phase 1 (#8bfz — single live plugin owner per doc) was already SHIPPED** (commit `237f5fb2`): `plugin_owner.rs` lease (`.agent-doc/plugin-owner/<hash>.json`, 30s TTL) + FFI (`agent_doc_plugin_owner_try_acquire`/`_release`) + `PatchWatcher.ownsDocument()` gate + release-on-dispose + 5 unit tests. Non-owner IntelliJ instances already defer patch application + saveDocument, so the multi-consumer re-flush source is closed. The plan now records this.
+
+**Phase 2 (queue-edit lease) — implemented + committed this cycle** (`d9a0ae58`, superproject `9ec17cc81`):
+- New `queue_edit_owner` module — a per-document `.agent-doc/queue-edit-owner/<hash>.json` lease (~15s self-healing TTL, mirrors the `drain-owner` lease) held for the whole `queue prune-noise` / `queue consume` read-modify-write via an RAII `QueueEditGuard` (released on drop, including early return / error).
+- The two *other* concurrent queue writers now defer while a **different, live** process holds a fresh lease: `run_queue_maintenance` returns early without mutating (logs `queue_maintenance_deferred reason=queue_edit_lease`), and the supervisor idle-queue-watch skips the dispatch tick (logs `idle_queue_watch_drain_skipped reason=queue_edit_in_flight`). The short TTL makes this a brief yield, not a stall.
+- This closes the preflight half of source (2) and source (3) from the plan: preflight maintenance / idle-watch can no longer round-trip a torn intermediate queue mid-edit.
+- 5 lease unit tests + `run_queue_maintenance_defers_while_foreign_queue_edit_lease_held` (proves zero mutation under a foreign lease, then resumes once cleared). FlowCore budget bumped (`maintenance.rs` `reason=` 3→4). **Full suite 4796 passed + clippy clean.**
+
+**Remaining:**
+- **Phase 3** (idempotent normalization) is *mostly landed* already — `#qdup-bare-id`, `#qnoise-multiline-strike`, `#pushpinaccum`. What's left is a `render(parse(x))` fixed-point property/SimWorld test over an already-malformed queue (double-pins + stray `~~~done`/`---` runs together) to prove convergence vs amplification.
+- **Phase 4** is the operator-gated finish and the only live-verify step: `make install` → `agent-doc admin recycle` → `queue prune-noise` on this doc, confirming `queue_stale_noise_lines` → 0 and the prune sticks across a later preflight.
+
+**Install deliberately deferred:** this session + the running supervisor (pid 3024307) both use `~/.cargo/bin/agent-doc`, so a mid-session `cargo install` would make the finalize client newer than the supervisor → `live_prompt_drift`. The new binary ships at the Phase 4 `make install` + recycle boundary. CI for `d9a0ae58` is in progress; local evidence is green.
+
+No agent-drainable queue heads remain (all `[operator-verify]`), so I'm not auto-looping.
+<!-- agent:boundary:3940f299 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: [#sqedit-race]
+- ~~:pushpin: [#sqedit-race]~~
 ---
 :pushpin: do [#tsiftmdcrash]
 ---
@@ -78,7 +103,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#sqedit-race] [operator-verify] #agent-doc-bug Fix the live-IPC-supervisor race on direct queue edits (the "noise heads never auto-deleted - the live IPC supervisor races on direct queue edits" hazard). NOT a single converge-path bug (try_editor_converge is already fail-closed on ack_mismatch); it is the compounding of: (1) multiple live JB plugin consumers re-flushing stale buffers (#8bfz), (2) preflight queue maintenance (#mirrorall mirror + backlog->queue sync + #7r2s pin + live-buffer converge) round-tripping already-malformed entries (double-pins, stray ~~~done / --- runs) and re-mangling them, (3) supervisor idle-watch reading a torn queue. SAFETY-CRITICAL supervisor/commit-path - focused clean cycle with make check + make tmux-ci, NOT a degraded-session drain (same class as the deferred #aqhr/#smconv). Phases: 1 single live plugin owner per doc (absorbs #8bfz), 2 queue-edit lease respected by supervisor idle-watch AND preflight maintenance, 3 idempotent malformed-entry normalization (render/parse fixed point), 4 restart + queue prune-noise cleanup (folds in #prunenoise-live + #qpausemix-verify). Plan: tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md
+- [ ] [#sqedit-race] [operator-verify] #agent-doc-bug Live-IPC-supervisor race on direct queue edits. Phase 1 (#8bfz single live plugin owner per doc) SHIPPED 237f5fb2. Phase 2 (queue-edit lease: prune-noise/consume hold a queue_edit_owner lease that preflight queue maintenance + supervisor idle-watch defer to while a different live process holds it) SHIPPED d9a0ae58 — full suite 4796 + clippy green. REMAINING: Phase 3 add a render(parse(x)) fixed-point property/SimWorld test over an already-malformed queue (normalization itself mostly landed via #qdup-bare-id / #qnoise-multiline-strike / #pushpinaccum); Phase 4 [operator-gated] make install -> agent-doc admin recycle -> queue prune-noise this doc, confirm queue_stale_noise_lines drops to 0 and the prune sticks across a later preflight (no re-injection). Plan: tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md
 - [ ] [#qpausemix-verify] [operator-verify] #agent-doc-bug Verify the #qpausemix session-check fix (submodule 2cf7bcee) live: build+install the new binary (make install: cargo install --path . + cargo build --release + agent-doc lib-install) at a supervisor recycle boundary (deferred from this session to avoid finalize-client-newer-than-supervisor drift), then on a controller-paused queue (e.g. equityfundingsource.md under a qflood pause) confirm session-check stderr now prints the "queue_paused is NOT a contradiction" preamble + recorded reason so an agent no longer stalls deciding operator-set-pause vs transient state. Root cause fixed: session-check printed the bare CONTINUATION_NO_STALL_GUIDANCE constant instead of continuation_guidance(pause_reason); resolution previously only reached preflight JSON.
 - [ ] [#hap7] [operator-verify] #agent-doc-bug #qdup Operator-reported (2026-06-19): agent-doc duplicated the operator equityfundingsource.md queue prompt (All upload preview dialogs should be full screen, deploy) on a concurrent edit. Second instance of the queue-prompt duplication family (first: virtuousai.md). Fix per operator spec: constrain the CRDT/semantic merge to the structural part it applies to (per-structural-node merges, not whole-component) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; and when the operator deletes a structure that agent content targets, note it in agent:exchange instead of merging. Merge-core change, the corruption source this session, so NOT safe to rush in the in-session loop; needs a focused cycle. Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md
 - [ ] [#fbwire] [operator-verify] #agent-doc-bug Phase 2 live wiring of the #fullboundary convergence gate (Phase 1 decision core + playback shipped, submodule 17010e78). Call convergence_gate_decision inside the supervisor idle-queue-watch/drain inter-item dispatch (start/idle_watch.rs to start.rs): gather the four facts (committed via cycle_state, editor converged==HEAD via emit_postcommit_worktree_check, ipc_socket inflight==0, actor idle), defer the next trigger until Dispatch, on ForceDiskFallback do the real --force-disk write + record_force_disk_fallback. Add SimWorld acceptance. Live-supervisor-critical: needs make check + make tmux-ci across two live panes, so NOT in-session-loop-drainable; needs a focused operator-driven cycle. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md

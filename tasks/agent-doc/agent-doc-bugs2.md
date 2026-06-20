@@ -39,7 +39,36 @@ completed
 Compacted content:
 ❯ - Archived 7 response topic(s): #sqedit-race (queue-edit race); Fix the root cause of the degraded session; #lbreap done + "deleted queue items came back after a File Cache Conflict"; 4 more
 ❯ - Prior summary/context: prior compacted content: Archived 7 response topic(s): Fix the root cause of already-done / noise heads flooding the ...
-<!-- agent:boundary:a6f91e8f -->
+
+### Re: Session compacted — standing state — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` on equityfundingsource.md did not submit.
+>
+> ```
+> claude exited cleanly.
+> Press Enter to restart, or 'q' to exit.
+> [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+> [agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+> [start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+> [start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+> [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+> [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+> [start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+> [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+> [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+> ```
+
+
+Session exchange was compacted (7 response topics archived to `.agent-doc/archives/...-20260620-020748.md`). Closing the post-compaction tail; nothing new to execute.
+
+Standing state (all prior, already committed):
+- **JB `Run Agent Doc` on equityfundingsource.md** — answered: the live cause is EFS's queue being controller-paused (`queue_control_paused` still flooding); the pasted recycle log is concurrent noise. Residual enhancement captured as `#runexitrestart` (deferred).
+- **Queue churn** — the answered free-text JB head keeps re-surfacing via `#qheadstrike` (free-text heads don't auto-strike) plus a live JB editor buffer diverging from HEAD (`ack_mismatch` blocks `queue consume`). Needs the stale editor instance reloaded; not agent-fixable from the binary.
+
+Note: this compaction's `### Session Summary` lines were emitted with spurious `❯` prompt-prefix glyphs, which made `session-check` read the summary as an unanswered prompt-only tail — captured below as `#compactprefix`.
+<!-- agent:boundary:f41f1938 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -62,7 +91,7 @@ Press Enter to restart, or 'q' to exit.
 [agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
 ```
 ---
-- :pushpin: [#sqedit-race]
+- ~~:pushpin: [#sqedit-race]~~
 - :pushpin: [#qheadstrike]
 - :pushpin: do [#hap7]
 - :pushpin: do [#fbwire]

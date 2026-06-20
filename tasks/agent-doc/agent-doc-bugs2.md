@@ -184,7 +184,19 @@ You're right — I stalled. The binary said `queue_continuation_required=true` w
 A removes my ability to misclassify; B catches it loudly if I stall anyway; C makes a stall recoverable instead of terminal. I want to confirm scope before building, because Layer A (new tag taxonomy) and Layer C (pause semantics) change product behavior in ways that are genuinely your call — see the question I'm posing alongside this.
 
 And to be unambiguous about the live queue: it has drainable heads right now (`#kcb5` plus the items you just re-stacked). I was wrong to defer them.
-<!-- agent:boundary:7e9496d7 -->
+
+### Re: Behavior-architecture fix for the stall — shipped all three layers (#qstallguard) — opus-4-8
+
+Implemented + shipped agent-doc `0.34.32` (submodule `fb75e58e`, superproject `3491a1fdd`, pushed). The principle: move the no-stall invariant out of advisory `SKILL.md` prose (which I rationalized past) and into code + tests, so it survives refactors.
+
+- **Layer A — drainability is a typed attribute, never inferred.** New `[focused-cycle]` execution-context tag. `ExecutionContext::loop_undrainable()` is now the single authority for "the loop must not auto-drain this head" = `[operator-verify]` (needs a human) ∪ `[focused-cycle]` (operator-declared dedicated cycle); `[clean-session]` is excluded (drains in place). Both the continuation calc (`deferred_backlog_ids`) and the backlog→queue sync (`partition_drainable_backlog_ids`) key off it. I can no longer reclassify a drainable head as undrainable by reading its prose — absent a tag, it drains. If you want an item kept out of the loop (merge-core work needing two-pane `make tmux-ci`), tag it `[focused-cycle]`; that's the binary-read knob.
+- **Layer B — binary-detected stall guard** (`drain_stall.rs`). A clean closeout that still requires continuation drops a one-shot marker; the next preflight emits a hard `queue_stall_detected` warning + `ops.log` line when drainable work remained, the loop didn't continue (no fresh drain lease), and no valid stop reason applied (a real user prompt / `queue: stop` / drained queue — a degraded/stale supervisor, high accretion, and `semantic_completion_match` are explicitly NOT valid). A red diagnostic is much harder to rationalize past than prose.
+- **Layer C — pause throttles, it doesn't disable the failsafe** (`idle_watch.rs`). The thing that made my stall *terminal*: an accepted `queue pause` had made the in-session loop the ONLY drainer, so stalling stranded the queue. Now the supervisor skips a paused queue only when an in-session loop owns the drain or nothing is drainable; otherwise it does a single-owner failsafe drain through the normal `turn_active`/route-in-flight/cooldown-guarded path (one dispatch per turn, never the 2/sec flood the pause guards against).
+
+All three pure decision functions are unit-tested (the part that "remains after changes"); full suite + clippy + `make tmux-ci` green. Two pieces are appropriately operator-gated and tracked as a `[focused-cycle]` follow-up (dogfooding the new tag): the end-to-end SimWorld scenario for the Layer C pause-failsafe (the SimWorld engine doesn't model the pause gate yet) and the live two-pane verification — both are supervisor-core and need live tmux, exactly the category `[focused-cycle]` exists for.
+
+Your queue (`#kcb5`, `do [#6b5h]`, `#hap7`, `complete [#j9ja]`) is intact and drainable. With Layer C now live, after the supervisor recycles onto 0.34.32 the failsafe will keep it draining even under the pause — and if I ever stall it again, Layer B will say so out loud.
+<!-- agent:boundary:f304d9ee -->
 <!-- /agent:exchange -->
 
 ## Queue

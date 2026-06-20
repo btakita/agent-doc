@@ -231,7 +231,26 @@ Reverted. The frequency-nullable change is fully undone and Monthly-default beha
 - **Backlog** — cancelled `#freqnull-borrower` (the borrower-side follow-up to the reverted work).
 
 Untouched (different turns, not part of this revert): the `#proprate` rate finding and the earlier one-off null of the `d6b78994` proposal_interest_rate. Tell me if you want those reverted too.
-<!-- agent:boundary:6fd2db07 -->
+
+### Re: move Select/Mark-package buttons above Workflow + deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests, Move "Select Lender" and "Mark Package Sent" buttons above the Show/Hide Workflow button.
+
+
+Done + deployed. EFS `57f5c0f`, superproject pointer `414d223d7`, worker **Version ID `15aeefc9-975f-4fc8-ad49-fcb85c4221cc`** (live at https://equityfundingsource.brian-takita.workers.dev).
+
+In the admin deal interests row (`admin/deal_detail.tsx`), the two lender-action buttons now sit in the **row header, stacked above the "Workflow" toggle** — so you no longer have to expand the workflow section to use them:
+
+- **Select proposal** (the "Select Lender" action — toggles to **Deselect proposal** once selected)
+- **Mark package sent** (→ "Package sent" once done)
+- **Workflow** (Show/Hide) toggle underneath
+
+They were moved out of the collapsible *Deal Interest Workflow* section (no longer duplicated there). Suite **976 pass / 0 fail**, worker build clean.
+
+Two small notes: I kept the existing button labels ("Select proposal" / "Mark package sent") rather than renaming to "Select Lender" — say so if you'd prefer the rename. And I ordered them Select-then-Mark above the toggle per your listing; easy to flip to package-first if you'd rather follow the workflow sequence.
+<!-- agent:boundary:96ec1310 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -244,7 +263,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#freqnull-borrower]~~
+- ~~:pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests, Move "Select Lender" and "Mark Package Sent" buttons above the Show/Hide Workflow button.~~
+- :pushpin: Add an "Unselect Lender" button with a confirmation dialog in case a lender was mistakenly selected. Does "Select Lender" send an email to the lender(s)?
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -127,7 +127,23 @@ All three queue items shipped and deployed. The root cause of "no email sent to 
 **lender2 / "Lender Bros":** btak.dev+lender2 is already an `invited` member with an account. Open the group's **Invite Co-Lenders** dialog and click **Resend invite** next to btak.dev+lender2 — it now re-sends the email (on by default) instead of erroring. (I couldn't trigger the send myself: the worker invite route needs an investor/admin session, and the EFS deploy token returns 401 on the Cloudflare Email Sending API — it lacks `email:send` scope.)
 
 Confidence: high — code + deploy binding-verified, regression covered by tests. Escalation: none.
-<!-- agent:boundary:e5174a28 -->
+
+### Re: Free-text queue heads should have auto-struck (#agent-doc-bug) — opus-4-8
+
+Agreed — they should have. Two parts: I cleaned up this session now, and filed the product fix per `#agent-doc-bug` (plan only, not implemented).
+
+**Immediate cleanup (this session):** struck the 4 stranded heads with `agent-doc queue consume --count 4` — queue is now drained and `queue_active` cleared (`queue_drainable_head_count: 0`). They matched cleanly now that the post-recovery snapshot equals the document.
+
+**Why they weren't struck automatically — 3 compounding causes:**
+1. The finalize strike heuristic **only consumes one free-text head per cycle** (`main.rs` `queue consume` doc), so a cycle answering 4 heads leaves 3 stragglers.
+2. My closeout went through the **recovery path** (wedged IPC → `reset --from-current` → `commit`), which **bypasses the strike entirely** — it's coupled to the happy-path finalize, not to "the cycle reached `committed`." So zero heads struck.
+3. `queue consume` earlier **exact-matched and rejected** ("snapshot head prompts do not match document head prompts") because the live buffer had mutated the heads (added a 📌 prefix, split one prompt into several).
+
+**Fix filed (NOT implemented):** `tasks/agent-doc/plan-freetext-queue-head-autostrike.md` — strike *all* answered free-text heads, move the strike onto the `committed` seam so recovery paths (`--force-disk`, `reset→commit`) converge, and normalize head matching (pushpin/emoji/whitespace/split). Scoped to free-text heads; id-backed heads still reaped via `--done`.
+
+**Backlog:** I couldn't add it to `agent-doc-bugs2.md` — that doc is owned by a live session (pane %125) and the binary blocked the cross-pane write (correctly; I didn't `claim` it to avoid disrupting that session). Add this line to its backlog from that session:
+`- [ ] [#qheadstrike] [operator-verify] #agent-doc-bug Completed free-text queue heads not struck after a proven closeout (one-head-per-finalize + recovery-path bypass + exact head-match rejects on live-buffer drift). Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md`
+<!-- agent:boundary:d171290e -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -253,7 +253,25 @@ So the evented path is available in both. The win: feed those deltas straight in
 (1) and (2) are the cheap wins that remove most of what this session hit; (3) is the real isolation guarantee.
 
 I've kept this to analysis — I did **not** add backlog items or touch the queue, because you're actively curating it and concurrent backlog edits are exactly what's been corrupting convergence this session. Say the word and I'll file a plan (`plan-document-isolation-evented-ipc.md`) decomposed into those three rungs and queue them as proper phase IDs.
-<!-- agent:boundary:712f94c0 -->
+
+### Re: Path 2 — shipped `#orphanqhead`, plus a diagnosis correction — opus-4-8
+
+Implemented and pushed (agent-doc `7b18567d`, **0.34.35**). But first an honest correction, because verifying against the live code changed the picture:
+
+**The orphan-id *non-drainable* half of Path 2 was already shipped.** `head_is_drainable` (in `queue_continuation.rs`) already excludes an id-backed head whose id is absent from the open `agent:backlog` from `queue_drainable_head_count` (tested at `drainable_head_count_excludes_orphan_id_head_when_backlog_present`). So `:pushpin: [#kcb5]` is **not** counted as drainable — my earlier line-218 claim that it was is stale. The actual count=2 was the two **answered free-text questions** (the drift Q + the monsterrodholders Q) that `#qheadstrike` never struck.
+
+**But the orphan still caused the churn — by a second mechanism I'd missed.** `queue consume` strikes only a *contiguous leading run* of free-text heads and **errors** on the first id-backed head. Since the orphan `[#kcb5]` sits at the head, it *blocks* `queue consume` from ever reaching the answered free-text Qs behind it. And the genuinely-missing half of Path 2 — *bulk* pruning — wasn't there: `queue consume --id <id>` could strike one named orphan, but `prune-noise` skipped anything carrying an `#id`. So the orphan had no position-independent removal path and wedged the whole drain.
+
+**What I shipped (`#orphanqhead`):** `queue prune-noise` now also strikes orphan id-backed heads — a new `orphan_id_queue_head_node_keys` pass collects any non-struck id-backed head whose id names no open backlog item, and strikes it alongside noise through the same editor-IPC-converged write path. Safeguards:
+- **Gated on a backlog component being present** — a free-form id-head queue (no `agent:backlog`) treats id-heads AS the work, so nothing is pruned (mirrors `head_is_drainable`'s gate). New test `prune_noise_preserves_id_heads_when_no_backlog_component`.
+- **Preserves open backlog ids**, including deferred `[operator-verify]` / `[focused-cycle]` items (they're still open `[ ]`/`[/]` entries, so `head_id_names_open_backlog_item` keeps them). New test `prune_noise_strikes_orphan_id_heads_preserves_open_and_deferred_backlog_ids`.
+
+`make check` green (full suite + clippy). CI run just kicked off on the push; I'll trust local evidence per the closeout rule and not block on it.
+
+**To clear THIS doc's churn now:** with 0.34.35 installed, `agent-doc queue prune-noise tasks/agent-doc/agent-doc-bugs2.md` will strike the orphan `[#kcb5]`, which unblocks `queue consume` to strike the two answered Qs — count drops to 0 and the loop settles. I'm doing the install + `lib-install` + `admin recycle` right after this commit (deferred until after closeout so the finalize client stays matched with the running supervisor — installing mid-finalize is what drifted this session).
+
+Remaining churn root that's *not* this fix: `#qheadstrike` (answered free-text heads not auto-struck through recovery paths) is still its own tracked item — `#orphanqhead` removes the head that *blocks* striking them, but the auto-strike-on-recovery gap is separate.
+<!-- agent:boundary:d7b0e483 -->
 <!-- /agent:exchange -->
 
 ## Queue

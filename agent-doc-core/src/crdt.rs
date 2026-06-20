@@ -324,6 +324,196 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
     Ok(dedup_adjacent_blocks(&merged))
 }
 
+/// One cell of the per-component document segmentation (`#qcellmerge1`).
+///
+/// A document is decomposed into an alternating sequence of interstitial text
+/// (preamble, gaps between components, trailing residue) and `<!-- agent:* -->`
+/// component regions. Each cell merges against its own base independently so
+/// unrelated cells (e.g. `exchange` vs `queue`) never contend and content can
+/// never splice across components.
+#[derive(Debug, Clone)]
+enum Cell {
+    /// Free text outside any component marker (always present between/around
+    /// components, possibly empty, to keep ours/theirs cell sequences aligned).
+    Interstitial(String),
+    /// A full `<!-- agent:name -->...<!-- /agent:name -->` region, markers included.
+    Component { name: String, text: String },
+}
+
+impl Cell {
+    fn component_name(&self) -> Option<&str> {
+        match self {
+            Cell::Component { name, .. } => Some(name.as_str()),
+            Cell::Interstitial(_) => None,
+        }
+    }
+
+    fn text(&self) -> &str {
+        match self {
+            Cell::Interstitial(t) => t,
+            Cell::Component { text, .. } => text,
+        }
+    }
+}
+
+/// Segment `text` into top-level cells: `I0 C0 I1 C1 … C(n-1) In`.
+///
+/// Interstitial slots are always emitted (even when empty) so two documents
+/// with the same component-name sequence produce structurally-aligned cell
+/// vectors that can be paired by index.
+fn segment_into_cells(text: &str) -> Result<Vec<Cell>> {
+    let comps = crate::component::parse(text)?;
+    // Top-level components only: a component is top-level if it is not nested
+    // inside any other component's span.
+    let mut top: Vec<&crate::component::Component> = comps
+        .iter()
+        .filter(|c| {
+            !comps.iter().any(|o| {
+                !std::ptr::eq(o, *c) && o.open_start <= c.open_start && c.close_end <= o.close_end
+            })
+        })
+        .collect();
+    top.sort_by_key(|c| c.open_start);
+
+    let mut cells = Vec::with_capacity(top.len() * 2 + 1);
+    let mut cursor = 0usize;
+    for c in top {
+        // Interstitial slot before this component (possibly empty).
+        cells.push(Cell::Interstitial(text[cursor..c.open_start].to_string()));
+        cells.push(Cell::Component {
+            name: c.name.clone(),
+            text: text[c.open_start..c.close_end].to_string(),
+        });
+        cursor = c.close_end;
+    }
+    // Trailing interstitial slot (possibly empty).
+    cells.push(Cell::Interstitial(text[cursor..].to_string()));
+    Ok(cells)
+}
+
+/// Component-scoped three-way CRDT merge (`#qcellmerge1`) — the anti-corruption rung.
+///
+/// Instead of reconciling the whole document as one text blob (which lets
+/// unrelated edits contend and content splice across components — e.g. agent
+/// console output merged INTO `agent:queue`), this splits ours/theirs/base into
+/// per-component cells and runs [`merge`] on each cell against its own base.
+///
+/// - Cells are paired by their component-name sequence. Component base text is
+///   resolved by name (components are unique per document in practice), so the
+///   `exchange` committed-response guard inside [`merge`] still sees its real base.
+/// - **Structural divergence** — when ours and theirs disagree on which
+///   components exist (a component added/removed on one side) — falls back to the
+///   whole-document [`merge`] for the entire document, logged, never silently.
+/// - A document with no `agent:*` components (inline mode) delegates directly to
+///   [`merge`] with the original base state, preserving legacy behavior exactly.
+pub fn merge_by_component(
+    base_state: Option<&[u8]>,
+    ours_text: &str,
+    theirs_text: &str,
+) -> Result<String> {
+    if ours_text == theirs_text {
+        return Ok(ours_text.to_string());
+    }
+
+    let ours_cells = match segment_into_cells(ours_text) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!(
+                "[crdt] merge_by_component: failed to segment ours ({e}); falling back to whole-doc merge"
+            );
+            return merge(base_state, ours_text, theirs_text);
+        }
+    };
+    let theirs_cells = match segment_into_cells(theirs_text) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!(
+                "[crdt] merge_by_component: failed to segment theirs ({e}); falling back to whole-doc merge"
+            );
+            return merge(base_state, ours_text, theirs_text);
+        }
+    };
+
+    let ours_names: Vec<&str> = ours_cells.iter().filter_map(Cell::component_name).collect();
+    let theirs_names: Vec<&str> = theirs_cells
+        .iter()
+        .filter_map(Cell::component_name)
+        .collect();
+
+    // No components on either side (inline-mode doc): preserve exact legacy
+    // behavior by delegating to the whole-doc merge with the original state.
+    if ours_names.is_empty() && theirs_names.is_empty() {
+        return merge(base_state, ours_text, theirs_text);
+    }
+
+    // Structural divergence: the set/order of components differs. A per-cell
+    // pairing is unsound, so fall back to the whole-doc merge (logged).
+    if ours_names != theirs_names {
+        eprintln!(
+            "[crdt] merge_by_component: structural divergence (ours components {ours_names:?} != theirs {theirs_names:?}); falling back to whole-doc merge"
+        );
+        return merge(base_state, ours_text, theirs_text);
+    }
+
+    // Resolve base text and a name→content map for per-cell base alignment.
+    let base_text = match base_state {
+        Some(bytes) => match CrdtDoc::decode_state(bytes) {
+            Ok(doc) => doc.to_text(),
+            Err(e) => {
+                eprintln!(
+                    "[crdt] merge_by_component: failed to decode base state ({e}); merging cells without a base"
+                );
+                String::new()
+            }
+        },
+        None => String::new(),
+    };
+    let base_cells = segment_into_cells(&base_text).unwrap_or_default();
+    let mut base_by_name: std::collections::HashMap<&str, &str> =
+        std::collections::HashMap::new();
+    for cell in &base_cells {
+        if let Cell::Component { name, text } = cell {
+            base_by_name.entry(name.as_str()).or_insert(text.as_str());
+        }
+    }
+    // Interstitial base slots, paired positionally with ours/theirs interstitials.
+    let base_interstitials: Vec<&str> = base_cells
+        .iter()
+        .filter_map(|c| match c {
+            Cell::Interstitial(t) => Some(t.as_str()),
+            Cell::Component { .. } => None,
+        })
+        .collect();
+
+    let mut merged = String::with_capacity(ours_text.len().max(theirs_text.len()));
+    let mut interstitial_idx = 0usize;
+    for (ours_cell, theirs_cell) in ours_cells.iter().zip(theirs_cells.iter()) {
+        // Resolve this cell's base text.
+        let cell_base: Option<&str> = match ours_cell {
+            Cell::Component { name, .. } => base_by_name.get(name.as_str()).copied(),
+            Cell::Interstitial(_) => {
+                let b = base_interstitials.get(interstitial_idx).copied();
+                interstitial_idx += 1;
+                b
+            }
+        };
+
+        let ours_slice = ours_cell.text();
+        let theirs_slice = theirs_cell.text();
+
+        let merged_cell = if ours_slice == theirs_slice {
+            ours_slice.to_string()
+        } else {
+            let cell_base_state =
+                cell_base.map(|t| CrdtDoc::from_text(t).encode_state());
+            merge(cell_base_state.as_deref(), ours_slice, theirs_slice)?
+        };
+        merged.push_str(&merged_cell);
+    }
+
+    Ok(merged)
+}
+
 /// True for transient/structural lines that must not count as "new content"
 /// introduced by `theirs` (boundary markers carry per-cycle ids and `(HEAD)`
 /// annotations are working-tree-only artifacts).
@@ -1512,5 +1702,127 @@ Second answer line three.
             merged.contains("### Re: second question"),
             "new response lost:\n{merged}"
         );
+    }
+
+    // ---- #qcellmerge1: component-scoped merge -----------------------------
+
+    /// Build a template doc with an `exchange` and a `queue` component.
+    fn doc_with_exchange_queue(exchange: &str, queue: &str) -> String {
+        format!(
+            "---\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange -->\n{exchange}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue}\n<!-- /agent:queue -->\n"
+        )
+    }
+
+    #[test]
+    fn merge_by_component_isolates_concurrent_cross_component_edits() {
+        // Side A (agent) appends to `exchange`; side B (operator) appends a
+        // `queue` item. They must BOTH survive with ZERO cross-component splice.
+        let base = doc_with_exchange_queue("Existing prompt.", "- do [#a1]");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+
+        let ours = doc_with_exchange_queue(
+            "Existing prompt.\n\n### Re: existing — opus\n\nAgent response body.",
+            "- do [#a1]",
+        );
+        let theirs = doc_with_exchange_queue("Existing prompt.", "- do [#a1]\n- do [#b2]");
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+
+        // Both edits present.
+        assert!(
+            merged.contains("### Re: existing"),
+            "agent exchange edit lost:\n{merged}"
+        );
+        assert!(merged.contains("[#b2]"), "operator queue edit lost:\n{merged}");
+
+        // ZERO cross-component splice: the agent response body must not appear
+        // inside the queue component, and the queue item must not appear inside
+        // exchange.
+        let queue_body = merged
+            .split("<!-- agent:queue -->")
+            .nth(1)
+            .and_then(|s| s.split("<!-- /agent:queue -->").next())
+            .unwrap_or("");
+        let exchange_body = merged
+            .split("<!-- agent:exchange -->")
+            .nth(1)
+            .and_then(|s| s.split("<!-- /agent:exchange -->").next())
+            .unwrap_or("");
+        assert!(
+            !queue_body.contains("Agent response body"),
+            "exchange content spliced into queue:\n{queue_body}"
+        );
+        assert!(
+            !exchange_body.contains("[#b2]"),
+            "queue content spliced into exchange:\n{exchange_body}"
+        );
+    }
+
+    #[test]
+    fn merge_by_component_blocks_console_output_in_queue_corruption() {
+        // The live 2026-06-20 corruption: agent console output ("Supervisor is
+        // now fresh…") merged INTO agent:queue as a fenced block while the
+        // operator typed a queue prompt. Model it as: ours = agent wrote console
+        // text into `exchange`, theirs = operator typed a queue prompt. The
+        // console text must never land in the queue cell.
+        let console = "```\n● Supervisor is now fresh (recycled to 0.34.35).\n```";
+        let base = doc_with_exchange_queue("Q.", "- :pushpin: typing here");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+
+        let ours = doc_with_exchange_queue(&format!("Q.\n\n### Re: q\n\n{console}"), "- :pushpin: typing here");
+        let theirs = doc_with_exchange_queue("Q.", "- :pushpin: typing here now extended");
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+
+        let queue_body = merged
+            .split("<!-- agent:queue -->")
+            .nth(1)
+            .and_then(|s| s.split("<!-- /agent:queue -->").next())
+            .unwrap_or("");
+        assert!(
+            !queue_body.contains("Supervisor is now fresh"),
+            "console output corrupted the queue cell:\n{queue_body}"
+        );
+        assert!(
+            queue_body.contains("extended"),
+            "operator queue edit lost:\n{queue_body}"
+        );
+        assert!(
+            merged.contains("Supervisor is now fresh"),
+            "console output must remain in its own (exchange) cell:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn merge_by_component_degenerates_to_whole_doc_without_components() {
+        // Inline-mode docs (no agent:* components) must behave exactly like the
+        // legacy whole-doc merge.
+        let base = "# Document\n\nBase content.\n";
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let ours = format!("{base}## Agent\n\nAgent response.\n");
+        let theirs = format!("{base}## User\n\nUser addition.\n");
+
+        let by_component = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        let whole_doc = merge(Some(&base_state), &ours, &theirs).unwrap();
+        assert_eq!(
+            by_component, whole_doc,
+            "component merge must equal whole-doc merge for a component-less doc"
+        );
+    }
+
+    #[test]
+    fn merge_by_component_falls_back_on_structural_divergence() {
+        // theirs removes the queue component entirely → structural divergence →
+        // whole-doc fallback (no panic, content preserved deterministically).
+        let base = doc_with_exchange_queue("Q.", "- do [#a1]");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let ours = doc_with_exchange_queue("Q.\n\n### Re: q\n\nResponse.", "- do [#a1]");
+        // theirs: no queue component at all.
+        let theirs = "---\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange -->\nQ.\n<!-- /agent:exchange -->\n".to_string();
+
+        // Must not panic and must equal the whole-doc merge fallback.
+        let by_component = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        let whole_doc = merge(Some(&base_state), &ours, &theirs).unwrap();
+        assert_eq!(by_component, whole_doc, "structural divergence must use whole-doc fallback");
     }
 }

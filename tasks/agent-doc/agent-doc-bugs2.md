@@ -123,20 +123,15 @@ Done. All 7 backlog items were `[operator-verify]`, so the backlog is now empty 
 `agent:review` is now 17 items (was 10) — above the usual <10 target, but that's the explicit consolidation you asked for: every operator-gated item now lives in one place and the backlog holds only agent-actionable work (currently none). This also stops the `#mirrorall` churn that kept re-mirroring those operator-verify backlog heads into the active queue each preflight.
 
 Nothing agent-drainable remains — the review items each need your live editor/pane verification.
-<!-- agent:boundary:a9c5dc35 -->
+<!-- agent:boundary:d0b77cd8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - :pushpin: Move the remaining [operator-verify] tasks in the backlog into review.
-- :pushpin: do [#runexitrestart]
-- :pushpin: do [#tsiftmdcrash-verify]
-- :pushpin: do [#qheadstrike]
-- :pushpin: do [#sqedit-race]
-- do [#qpausemix-verify]
-- do [#hap7]
-- do [#fbwire]
+- #advance-review. Any operator-verify should have logging so automate verification.
+- As I was typing in the previous queue item, the queue reverted back to the disk state. The editor buffer should have won as the editor buffer is the source of truth.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

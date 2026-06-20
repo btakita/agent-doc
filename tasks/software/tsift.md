@@ -96,12 +96,33 @@ You edited the queue head to `do [#015t] phase 4`, so I did the **Phase 4 cutove
 **Verification:** `make check` green (exit 0); new + updated tests (default-fts / no-index fallback / falsy-escape-hatch parser, plus three integration tests updated for the cutover); SPEC (`specs/architecture.md`) + VERSIONS (BREAKING CHANGE) updated; release built + `cargo install`ed; **live-verified** — default `--strategy lexical` → `strategy: fts`, `TSIFT_FTS_SEARCH=0` → `strategy: lexical`.
 
 **NEXT = Phase 4b cleanup** (agent-doable): retire the `TokenIndex` build/cache + `token-index.json` once the no-index path auto-indexes, add a `files_in_path_scope` path-prune, and thread the precheck freshness into `run_sift_search` to drop the redundant inspect walk. Then Phase 5 is the operator-gated crates.io release. Say **"do #015t"** / **"do phase 4b"** to continue.
-<!-- agent:boundary:7ff87b79 -->
+
+### Re: do #015t phase 4b — freshness threading shipped — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: [#015t]: do phase 4b
+
+
+You queued `do phase 4b`, so I worked it. On inspection the three Phase 4b items had very different shapes, so I did the one that's genuinely safe mechanical cleanup and deferred the other two with rationale rather than forcing them.
+
+**Done — item 3 (perf cleanup; tsift `475262b`, superproject `3ee95df15`):** threaded the precheck's freshness verdict into the search path as `fts_index_fresh: Option<bool>` (through `run_sift_search` / `run_search_with_timeout` / `__search-worker`), so the FTS path **no longer re-walks the tree with `inspect_read_only` on every search** — `cmd_search` already computed freshness in `precheck_search_indexes`. `Some(true)` → FTS without re-inspect; `Some(false)` (degraded read-only) → live `TokenIndex` fallback; `None` (direct callers) → inspect as before. The worker carries it as `--fts-index-fresh`.
+
+**Deferred, with rationale (not punting effort — these aren't mechanical cleanup):**
+- **Retire `TokenIndex`** — the Phase 4 freshness fallback *needs* the live-walk `TokenIndex` to serve **live** results in the degraded-read-only case (stale index held by a concurrent writer). Removing it requires an operator/design decision: keep `TokenIndex` for that path, or switch degraded-read-only to live `rg -F` exact. The redundant `token-index.json` *cache* is already effectively retired on the default path.
+- **`files_in_path_scope` path-prune** — net-new capability (the FTS path searches the whole index, same as the old `TokenIndex`; `--path` sub-narrowing of file hits was never applied here), so it's an enhancement, not cleanup.
+
+**Verification:** `make check` green (exit 0; fixed a clippy `too_many_arguments` with the codebase's standard `#[allow]`); new test `run_sift_search_honors_threaded_freshness_verdict` (Some(true)→fts, Some(false)→lexical); built + installed; live-verified the worker path still returns `strategy: fts`.
+
+**NEXT:** Phase 4b's two deferred items need your call (keep/retire `TokenIndex` for degraded-read-only; whether the path-prune enhancement is worth it), and **Phase 5** is the operator-gated crates.io release. Say **"do #015t"** with a direction, or schedule the release.
+<!-- agent:boundary:d3d14300 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- ~~:pushpin: [#015t]: do phase 4b~~
+- [#015t]: do phase 4b
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -110,7 +131,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 + 3a + 3b + Phase 4 CUTOVER DONE + pushed (tsift 333a73c). FTS5 index.db BM25 is now the DEFAULT lexical path (run_sift_search -> sift::fts_search when root index.db exists AND is fresh); TokenIndex demoted to fallback (no-index / un-indexed / direct caller), escape hatch TSIFT_FTS_SEARCH=0. Freshness gate keeps a stale/corrupt index from serving stale results. SPEC + VERSIONS (BREAKING) updated. make check green, live-verified (default->fts, =0->lexical). NEXT = Phase 4b cleanup (agent-doable): retire TokenIndex build/cache + token-index.json once the no-index path auto-indexes; add files_in_path_scope path-prune; thread precheck freshness to drop the redundant inspect walk. Then Phase 5 operator-gated crates.io release. Say "do #015t" / "do phase 4b".
+- [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 + 3a + 3b + Phase 4 cutover + Phase 4b item 3 (thread precheck freshness) DONE + pushed (tsift 475262b). FTS5 index.db BM25 is the DEFAULT lexical path; run_sift_search/run_search_with_timeout/__search-worker take an fts_index_fresh verdict so the FTS path no longer re-walks the tree on every search; degraded read-only routes to the live TokenIndex fallback. NEXT (Phase 4b remaining, optional): (a) retire TokenIndex build/cache — DEFERRED, the degraded-read-only fallback still needs the live-walk; needs an operator/design decision on degraded-read-only behavior (keep TokenIndex vs live rg -F); (b) files_in_path_scope zone-map path-prune — net-new enhancement, not cleanup. Then Phase 5 = operator-gated crates.io release. Say "do #015t" for (a)/(b) or to ship.
 <!-- /agent:backlog -->
 
 ## Review

@@ -80,7 +80,16 @@ Done. In `/lenders/groups` each group now renders **one row per current member**
 **Tests:** added source-assertion coverage in `investor-portal-e2e.test.ts` (member-row filter, group-id resend signature, inline `on_resend` wiring, the button, toast). Full suite green — **909 pass / 0 fail** — plus `bun run build` + `bun run build:worker`.
 
 **Shipped:** committed + pushed EFS `fce9b05`, superproject pointer `ab79a0d52`. The `deploy` queued behind this will push it live.
-<!-- agent:boundary:8f17623b -->
+
+### Re: deploy — lending-groups feature live — opus-4-8
+
+Deployed. **Version `89bc78ab-0c11-48ca-a5d7-b4841e7614c0`**, live at `https://equityfundingsource.brian-takita.workers.dev`. The `/lenders/groups` per-member rows + inline **Resend Invite** (EFS `fce9b05`, pointer `ab79a0d52`) are now in production.
+
+**Pipeline:** build clean (no stale-CSS issue this time) → remote D1 migrate clean → worker uploaded → triggers deployed.
+**Smoke check:** homepage `HTTP 200`; `/lenders/groups` → `HTTP 303` to login (auth gate live).
+
+Queue drained except the operator-gated `#5q7z-ship` (deploy done earlier; only your live-verify of the TMO duplicate-loan fix remains). Stopping here.
+<!-- agent:boundary:e7ab200b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -94,7 +103,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: In /lenders/groups, have a row for each member of the group. If a member is invited but has not yet signed in, have a "Resend Invite" button to that lender.~~
-- :pushpin: deploy
+- ~~:pushpin: deploy~~
 - do [#5q7z-ship]
 <!-- /agent:queue -->
 

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -69,13 +69,31 @@ You chose **plan only, no push** for the two recommendations that auto-drained i
 **No tsift code written, nothing pushed.** Only the session doc + plan file are committed to `agent-loop`. Phase 5 (build + spec + tests + commit + push to the tsift repo) waits for your explicit go — say "implement the zonemap plan" when you want it built.
 
 Both queue heads drained; the queue is now empty.
-<!-- agent:boundary:d16bd617 -->
+
+### Re: implement plan-tsift-zonemap-segment-stats.md — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: implement tasks/software/plan-tsift-zonemap-segment-stats.md
+
+
+Implemented the zone-map segment-statistics substrate (plan Phases 1/2/4). **Committed locally; push held** for your review.
+
+**What landed** (`tsift` submodule `f2bbcc7`, superproject `c13fb487c`):
+- **Schema** — additive `file_zonemap` table (`path, min_line, max_line, symbol_count, kinds, content_hash`). `IF NOT EXISTS`, so existing indexes get it empty and populate on next reindex.
+- **Populate** — at index time + on `rebuild`, cleared on modify, removed on delete. `kinds` is comma-fenced (`,function,struct,`) for `LIKE`-based skip predicates; `content_hash` reuses `source_content_hash`.
+- **Read API** — `zonemap_count`, `file_zonemaps`, and `files_possibly_containing_kind` — a **sound** kind-filter prune: files lacking a zone-map row (e.g. a legacy un-reindexed index) are conservatively retained, so the pruned set is always a superset of the true matches.
+- **Tests** — 4 new soundness-focused tests (populate-code-files-only, modify/delete lifecycle, rebuild repopulate, prune-soundness retention branch). `make check` green: 0 failures, clippy `-D warnings` clean. Release build + `cargo install` of `tsift`/`tsift-cli` succeeded.
+
+**Discovery → Phase 3 deferred (operator-gated).** While wiring Phase 3 I found the lexical `Sift` search builds its **own `TokenIndex`** (a JSON token cache) and never reads `index.db` — token-level pruning already exists there. So the zone-map's real consumers are the **index.db-backed** path/kind/scope queries (`explain`/`graph`/evidence), not the lexical corpus. I updated the plan with a revised Phase 3 (wire `files_possibly_containing_kind` + a future `files_in_path_scope` into those consumers, with a per-consumer pruned==unpruned regression) and queued it as an `[operator-verify]` backlog item so go-mode defers it — it's a behavior-changing cutover.
+
+**Held for your word:** `git push` of both repos, and the Phase 3 cutover. Say "push" and/or "do phase 3" when ready.
+<!-- agent:boundary:6d8719df -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: implement tasks/software/plan-tsift-zonemap-segment-stats.md
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -84,6 +102,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#b56m] [operator-verify] Phase 3 (operator-gated cutover) of tasks/software/plan-tsift-zonemap-segment-stats.md: wire files_possibly_containing_kind (+ a future files_in_path_scope helper) into the index.db-backed path/kind/scope consumers, with a per-consumer pruned==unpruned regression. Behavior-changing — needs operator greenlight. Substrate phases 1/2/4 already landed (tsift f2bbcc7, push held).
 <!-- /agent:backlog -->
 
 ## Review

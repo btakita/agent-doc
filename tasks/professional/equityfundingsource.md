@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -90,7 +90,7 @@ Personal (non-group) interests are unaffected.
 > :pushpin: deploy
 
 Deployed. Committed `baac434` and pushed to `origin/main` (equityfundingsource-dev), then `make deploy` pushed the worker live — **version `bcf747a4-eb03-4fdb-9633-21a6e2e23c4d`** at `https://equityfundingsource.brian-takita.workers.dev` (startup 19 ms, bindings unchanged). The accreditation gate is now live in production.
-<!-- agent:boundary:abdb2bc9 -->
+<!-- agent:boundary:cedc701d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,9 +103,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Ensure that all lenders in a group are accredited before the EFS admin can select the lender group for an available deal.~~
-- :pushpin: deploy
-- ~~Ensure that all lenders in a group are accredited before the EFS admin can select the lender group for an available deal.~~
+- :pushpin: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests shows 60% funded by the Lender Bros group. The 60% seems to come from the controlling lender btak.dev+investor@gmail.com. btak.dev+lender2@gmail.com does not show up anywhere...neither does btak.dev+lender2@gmail.com 40% position in the loan.
 - deploy
 <!-- /agent:queue -->
 

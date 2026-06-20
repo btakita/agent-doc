@@ -90,7 +90,34 @@ Personal (non-group) interests are unaffected.
 > :pushpin: deploy
 
 Deployed. Committed `baac434` and pushed to `origin/main` (equityfundingsource-dev), then `make deploy` pushed the worker live — **version `bcf747a4-eb03-4fdb-9633-21a6e2e23c4d`** at `https://equityfundingsource.brian-takita.workers.dev` (startup 19 ms, bindings unchanged). The accreditation gate is now live in production.
-<!-- agent:boundary:cedc701d -->
+
+### Re: Lender Bros group shows only 60% — lender2 and their 40% are missing — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests shows 60% funded by the Lender Bros group. The 60% seems to come from the controlling lender btak.dev+investor@gmail.com. btak.dev+lender2@gmail.com does not show up anywhere...neither does btak.dev+lender2@gmail.com 40% position in the loan.
+
+
+> **Queue prompt:**
+>
+> :pushpin: …/admin/pipeline?…deal_tab=interests shows 60% funded by the Lender Bros group. The 60% seems to come from the controlling lender btak.dev+investor@gmail.com. btak.dev+lender2@gmail.com does not show up anywhere…neither does btak.dev+lender2@gmail.com 40% position in the loan.
+
+Diagnosed against prod, then fixed. **It wasn't a math bug — `lender2@` hasn't accepted the group invite yet.**
+
+**Root cause (prod D1):** `investor@` created the "Lender Bros" group and invited `lender2@`. `investor@` is an **active** member (60% stake); `lender2@` is still **`status='invited'`** — they never accepted, so they're not an active member and have no per-deal allocation row (only `investor@`'s 60% allocation exists). The admin deal panel filtered to **active members only**, so `lender2@` and their intended 40% were hidden entirely, and the deal showed only the confirmed 60%.
+
+**Fix (you chose display-only):** `lending_group_deal_participation_R_` now also returns invited members as `participation.pending_members`, each carrying its **intended** position (the member's default group stake). The admin "Multi-Lender Groups" panel renders them with an **"INVITED — PENDING"** badge and shows the header as **`60% confirmed · 100% intended`** when invitations are outstanding. So you'll now see:
+
+> **Lender Bros** — 60% confirmed · 100% intended
+> • investor@   60%   CONTROLS
+> • lender2@   40%   INVITED — PENDING
+
+This is **display-only** by design: `members` / `total_bps` / `control`, the funding split, and the accreditation gate I shipped earlier all stay **active-only** — a pending invite reserves a share but doesn't fund the deal until `lender2@` accepts. If you instead want a way to activate/confirm a pending member from the admin (writing their real 40% allocation), say the word and I'll add that.
+
+**Tests + spec:** added pending-member cases to `deal_participation.test.ts` (mirroring the live 60/40 Lender Bros shape) and a `#group-pending-visibility` section to `prds/lending-groups-plan.md`. Full suite **958 pass / 0 fail**, app + worker builds clean.
+
+**Shipped:** committed `b22613c`, pushed to `origin/main`, deployed worker **`9d6c1733`** — live now. Reload the deal's Interested-Lenders tab and `lender2@`'s pending 40% will show.
+<!-- agent:boundary:3f5d7fa2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,8 +130,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests shows 60% funded by the Lender Bros group. The 60% seems to come from the controlling lender btak.dev+investor@gmail.com. btak.dev+lender2@gmail.com does not show up anywhere...neither does btak.dev+lender2@gmail.com 40% position in the loan.
+- ~~:pushpin: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests shows 60% funded by the Lender Bros group. The 60% seems to come from the controlling lender btak.dev+investor@gmail.com. btak.dev+lender2@gmail.com does not show up anywhere...neither does btak.dev+lender2@gmail.com 40% position in the loan.~~
 - deploy
+- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=interests shows 60% funded by the Lender Bros group. The 60% seems to come from the controlling lender btak.dev+investor@gmail.com. btak.dev+lender2@gmail.com does not show up anywhere...neither does btak.dev+lender2@gmail.com 40% position in the loan.
 <!-- /agent:queue -->
 
 ## Backlog

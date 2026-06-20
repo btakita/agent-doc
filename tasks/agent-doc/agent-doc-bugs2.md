@@ -174,16 +174,18 @@ That ties `#cyh0` (FCC, "unidentified trigger") to `#editorbufwin` (the content_
 Near-term: the `admin recycle` I queued fires when this turn ends and refreshes the stale supervisor CRDT — that stops the `content_ours` drift, which stops the `disk_after_failed_editor_refresh` writes, which stops these FCCs. If they persist after the recycle on a clean (non-drifting) cycle, that's a genuinely separate trigger and I'll need the exact `ops.log` line at the dialog moment (`write_authority action=... transport=disk`) to find it.
 
 I'm stopping the drain here rather than piling more writes onto a drifting supervisor — the recycle needs this turn to end so it can clear the stale CRDT.
-<!-- agent:boundary:c952cdda -->
+<!-- agent:boundary:1af334b1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#editorbufwin]
+- ~~do [#editorbufwin]~~
 - What are #next-steps to fix agent-doc bugs?
 - Still getting JB `File Cache Conflicts`.
-- JB `Run Agent Doc` on tsift.md auto-started a new supervisor/tmux pane, added the prompt into the Claude input, but did not submit the prompt.
+- JB `Run Agent Doc` on tsift.md auto-started a new supervisor/tmux pane, added the prompt into the Claude input, but did  not submit the prompt.
+- do [#jbtsiftnosub]
+- do [#avgwire]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -210,6 +212,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#jbtsiftnosub] #agent-doc-bug Operator-reported (2026-06-19): JB Run Agent Doc on tsift.md auto-started a new supervisor/tmux pane, typed the prompt into the Claude input, but did NOT submit it. Dispatch-no-submit on a COLD START — the route typed into a pane that was not yet dispatch-ready (harness still starting), so the submit never landed. Same family as #jbrundispatch (accepted_only dispatch with no submit), #1vhn (typed into a not-ready pane), #runexitrestart (fail-closed instead of restart-then-submit), but the new wrinkle is the cold-start race: route must positively re-verify a harness dispatch-ready prompt AFTER the auto-start pane comes up and immediately BEFORE send, and fail closed (or wait+retry) instead of typing into a starting pane. Capture at repro: .agent-doc/logs/supervisor-stderr.log + route trace + pane state at send time. Overlaps the route/startup invariants in route.rs; needs a live two-pane repro. Plan candidate: extend tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md (starting-pane variant).
+- [ ] [#avgwire] [recommended] Apply the already-shipped #optverify auto-verify mechanism (set --pending-set-verify id=verify=ops_log:<marker>;disproof=ops_log:<text>, shipped 2026-06-10) to the 18 gated review items so the operator's live test auto-resolves each gate from ops.log — the operator's "logging so automate verification" ask. Start with the gates that ALREADY emit a distinctive marker (just set the predicate): #fbwire (record_force_disk_fallback), #tsiftmdcrash-verify (capability_proof_live_child_preserved), #agentreloadrestart (harness_change_detected/agent_restart_performed), #restartagentmenu, #qpausemix-verify (session-check queue_paused preamble), #runexitrestart. Then add a distinctive marker first for: #qpauseux, #jbrundispatch, #1vhn, #cyh0, #8bfz, #qheadstrike, #hap7/#gf5n/#rt83/#docdriftgrace. NOTE: id #optverify itself is taken by the shipped 2026-06-10 done item; this is the application/wiring task, not the mechanism.
 <!-- /agent:backlog -->
 
 ## Review

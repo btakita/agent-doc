@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -60,7 +60,15 @@ Fixed and deployed. **Root cause of "no message":** my prior fix only handled th
 Message: **"You're already signed in. Please log out, then open your email sign-in link again."**
 
 Verified: updated `tests/email-login.test.ts` asserts the guard runs before token consumption + both delivery paths; fixed two brittle source-string tests in `public-content.test.ts` that pinned the old `home__doc_html_` call. Full `bun run check` (test + build + build:worker) **947 pass / 0 fail**. Committed (`b1424ba`) + pushed. Live worker checks: `GET /?notice=…` renders the persistent banner; home with no notice has none; signed-out verify still `303`s to `/login/email`. (Test on the worker host — `www.equityfundingsource.com` is still the legacy Apache origin, as noted last cycle.)
-<!-- agent:boundary:3216bc02 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Already deployed this cycle — the admin log-out-notice fix (`b1424ba`) went out as worker **version `6c634c0d`** via `make deploy` (no D1 migration; none needed). Live smoke checks confirmed the new behavior is serving: `GET /?notice=…` renders the persistent banner and the signed-out verify path still `303`s. Nothing changed since, so this is the live production worker.
+<!-- agent:boundary:e557211a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,8 +81,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: When I click the passwordless list while logged in as an admin, I don't see a message to log out. There should be a toast message and a message that remains after the toast disappears.~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

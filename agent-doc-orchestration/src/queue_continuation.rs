@@ -322,19 +322,21 @@ pub(crate) fn deferred_backlog_ids(content: &str) -> std::collections::HashSet<S
     // the in-session `/loop` drains `[clean-session]` heads IN PLACE instead of
     // deferring to the supervisor. Deferring stranded the queue whenever the
     // supervisor idle-watch was itself stalled (the live failure this fixes), so
-    // `queue_continuation_required` must stay true while any non-`[operator-verify]`
-    // head remains. Both the in-loop and supervisor drain paths defer ONLY
-    // `[operator-verify]` (which genuinely needs a human); `[clean-session]` is
-    // always drainable.
+    // `queue_continuation_required` must stay true while any loop-drainable head
+    // remains. The in-loop and supervisor drain paths defer the SAME typed set
+    // (`#qstallguard` Layer A): `[operator-verify]` (needs a human) and
+    // `[focused-cycle]` (operator-declared dedicated cycle). `[clean-session]` is
+    // always drainable (drains in place). Drainability is owned ENTIRELY by these
+    // tags — the agent must never re-derive non-drainability from item prose.
     for comp in &components {
         if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
         for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
-            if ctx.operator_verify_required {
-                // `[operator-verify]` genuinely needs a human — never drainable by
-                // any agent scope.
+            if ctx.loop_undrainable() {
+                // `[operator-verify]` needs a human; `[focused-cycle]` needs a
+                // dedicated operator-initiated cycle. Neither is loop-drainable.
                 deferred.insert(id.to_ascii_lowercase());
             }
         }

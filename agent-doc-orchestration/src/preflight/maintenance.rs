@@ -1100,13 +1100,18 @@ pub(crate) fn partition_drainable_backlog_ids(
     for id in backlog_ids {
         let key = id.trim().to_ascii_lowercase();
         let ctx = ctxs.get(&key).copied().unwrap_or_default();
-        // `#qcontdrain`: only `[operator-verify]` is undrainable now. `[clean-session]`
-        // items are added to the go-mode queue and drained in-loop (matching the
-        // continuation signal), so live editor-IPC state no longer skips them.
-        if ctx.operator_verify_required {
+        // `#qcontdrain` + `#qstallguard` Layer A: the undrainable set is exactly the
+        // typed tags `[operator-verify]` (needs a human) and `[focused-cycle]`
+        // (operator-declared dedicated cycle). `[clean-session]` drains in-loop.
+        // Drainability is tag-owned — never inferred from item prose.
+        if ctx.loop_undrainable() {
             skipped.push(UndrainableSkip {
                 id: key,
-                reason: "operator_verify",
+                reason: if ctx.operator_verify_required {
+                    "operator_verify"
+                } else {
+                    "focused_cycle"
+                },
             });
         } else {
             drainable.push(id.clone());
@@ -5198,6 +5203,7 @@ mod tests {
             crate::pending::ExecutionContext {
                 clean_session_required: true,
                 operator_verify_required: false,
+                focused_cycle_required: false,
             },
         );
         ctxs.insert(
@@ -5205,6 +5211,7 @@ mod tests {
             crate::pending::ExecutionContext {
                 clean_session_required: false,
                 operator_verify_required: true,
+                focused_cycle_required: false,
             },
         );
         let ids = vec![

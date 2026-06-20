@@ -1750,26 +1750,49 @@ pub fn active_item_after_deps(body: &str) -> Vec<(String, Vec<String>)> {
 /// may auto-drain the item in the current session type.
 pub const CLEAN_SESSION_TAG: &str = "[clean-session]";
 pub const OPERATOR_VERIFY_TAG: &str = "[operator-verify]";
+pub const FOCUSED_CYCLE_TAG: &str = "[focused-cycle]";
 
 /// Machine-readable execution-context attributes parsed from a backlog item's
 /// text (`#goqueuestall`).
 ///
 /// - `clean_session_required` — `[clean-session]`: the item must run from a
 ///   session WITHOUT a live editor-IPC listener; running it under a live IPC
-///   listener risks closeout corruption, so go-mode skips it while live.
+///   listener risks closeout corruption, so go-mode skips it while live. NOTE
+///   (`#qcontdrain`): `[clean-session]` items now DRAIN IN PLACE in the
+///   in-session loop, so this flag no longer defers the continuation decision.
 /// - `operator_verify_required` — `[operator-verify]`: completion needs
 ///   operator-driven live verification the agent cannot perform, so go-mode
 ///   never auto-drains it.
+/// - `focused_cycle_required` — `[focused-cycle]` (`#qstallguard` Layer A): the
+///   OPERATOR has declared that this item needs its own dedicated, operator-
+///   initiated cycle (e.g. merge-core / supervisor-core work that needs
+///   `make tmux-ci` across live panes), so it must NOT be auto-drained inside
+///   the queue loop even though the agent could perform the work. This is the
+///   ONLY sanctioned way to mark an agent-doable item non-loop-drainable: it
+///   moves the "this needs a focused cycle" judgment OUT of the agent's prose
+///   reading (where it became a stall excuse) and INTO a binary-read tag. The
+///   agent must never re-derive non-drainability from an item's description —
+///   absent this tag, a drainable head is drained.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ExecutionContext {
     pub clean_session_required: bool,
     pub operator_verify_required: bool,
+    pub focused_cycle_required: bool,
 }
 
 impl ExecutionContext {
     /// True when at least one deferral tag is present.
     pub fn is_deferred(&self) -> bool {
-        self.clean_session_required || self.operator_verify_required
+        self.clean_session_required || self.operator_verify_required || self.focused_cycle_required
+    }
+
+    /// True when the item is undrainable by the queue loop — it needs a human
+    /// (`[operator-verify]`) or a dedicated operator-initiated cycle
+    /// (`[focused-cycle]`). `[clean-session]` is intentionally EXCLUDED: it
+    /// drains in place (`#qcontdrain`). This is the single authority for
+    /// "the loop must not auto-drain this head" (`#qstallguard` Layer A).
+    pub fn loop_undrainable(&self) -> bool {
+        self.operator_verify_required || self.focused_cycle_required
     }
 }
 
@@ -1786,11 +1809,19 @@ pub fn item_operator_verify_required(text: &str) -> bool {
     text_has_bracket_tag(text, "operator-verify")
 }
 
-/// Parse both execution-context tags from an item's text (`#goqueuestall`).
+/// True when the item text carries a `[focused-cycle]` tag token
+/// (`#qstallguard` Layer A).
+pub fn item_focused_cycle_required(text: &str) -> bool {
+    text_has_bracket_tag(text, "focused-cycle")
+}
+
+/// Parse all execution-context tags from an item's text (`#goqueuestall` /
+/// `#qstallguard`).
 pub fn item_execution_context(text: &str) -> ExecutionContext {
     ExecutionContext {
         clean_session_required: item_clean_session_required(text),
         operator_verify_required: item_operator_verify_required(text),
+        focused_cycle_required: item_focused_cycle_required(text),
     }
 }
 
@@ -1814,7 +1845,8 @@ pub fn strip_execution_context_tags(text: &str) -> String {
             let trimmed =
                 token.trim_matches(|c: char| matches!(c, '(' | ')' | ',' | '.' | ';' | ':'));
             !(trimmed.eq_ignore_ascii_case(CLEAN_SESSION_TAG)
-                || trimmed.eq_ignore_ascii_case(OPERATOR_VERIFY_TAG))
+                || trimmed.eq_ignore_ascii_case(OPERATOR_VERIFY_TAG)
+                || trimmed.eq_ignore_ascii_case(FOCUSED_CYCLE_TAG))
         })
         .collect();
     kept.join(" ")
@@ -2873,6 +2905,44 @@ mod tests {
         // Prose mention of the word (not a bracketed token) does not trip it.
         let prose = item_execution_context("run from a clean session please");
         assert!(!prose.clean_session_required);
+    }
+
+    #[test]
+    fn focused_cycle_tag_is_loop_undrainable_but_clean_session_is_not() {
+        // `#qstallguard` Layer A: `[focused-cycle]` is the operator's binary-read
+        // knob for "agent-doable but needs its own dedicated cycle, do not
+        // auto-drain in the loop."
+        let focused = item_execution_context("[focused-cycle] supervisor-core merge change");
+        assert!(focused.focused_cycle_required);
+        assert!(focused.is_deferred());
+        assert!(
+            focused.loop_undrainable(),
+            "[focused-cycle] must be undrainable by the queue loop"
+        );
+
+        // `[clean-session]` is deferred-flavored but DRAINS IN PLACE — it must NOT
+        // be loop_undrainable (`#qcontdrain`).
+        let clean = item_execution_context("[clean-session] needs a quiet session");
+        assert!(clean.is_deferred());
+        assert!(
+            !clean.loop_undrainable(),
+            "[clean-session] drains in place — never loop_undrainable"
+        );
+
+        // `[operator-verify]` needs a human and is loop_undrainable.
+        let oper = item_execution_context("[operator-verify] live drive");
+        assert!(oper.loop_undrainable());
+
+        // Plain items are fully drainable: the agent may NOT invent a stall.
+        let plain = item_execution_context("just implement #6b5h");
+        assert!(!plain.loop_undrainable());
+        assert!(!plain.is_deferred());
+
+        // The tag strips out of display text and coexists with other markers.
+        assert_eq!(
+            strip_execution_context_tags("[recommended] [focused-cycle] rework the merge seam"),
+            "[recommended] rework the merge seam"
+        );
     }
 
     #[test]

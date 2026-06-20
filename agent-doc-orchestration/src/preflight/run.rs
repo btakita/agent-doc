@@ -1256,6 +1256,45 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         })
     };
 
+    // `#qstallguard` Layer B: reconcile the continuation-pending marker dropped by
+    // the prior clean closeout (session-check). If drainable work remained, the
+    // loop did not continue (no fresh drain-owner lease), and no valid stop reason
+    // applies, the previous turn STALLED the queue — emit a hard diagnostic instead
+    // of letting the silent stall pass. The marker is one-shot: every branch clears
+    // it so the diagnostic fires once per stall, not every preflight.
+    {
+        let file_str = file.to_string_lossy().to_string();
+        if crate::drain_stall::read_continuation_pending(&file_str).is_some() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let facts = crate::drain_stall::StallFacts {
+                continuation_pending_marker: true,
+                continuation_required_now: queue_continuation_required,
+                drainable_head_count: queue_state.queue_drainable_head_count,
+                user_prompt_preempts: !user_intent_prompt_changes.is_empty(),
+                queue_stopped: queue_state.queue_active != Some(true)
+                    || queue_state.queue_halted.is_some(),
+                loop_is_continuing: crate::drain_owner::fresh_drain_owner_lease(&file_str, now)
+                    .is_some(),
+            };
+            if let crate::drain_stall::StallVerdict::Stalled(message) =
+                crate::drain_stall::classify_stall(&facts)
+            {
+                crate::ops_log::log_op(file, &message);
+                warnings.push(PreflightWarning {
+                    code: "queue_stall_detected".to_string(),
+                    message,
+                    document_agent: None,
+                    active_harness: None,
+                });
+            }
+            // One-shot: clear the marker on every reconciliation outcome.
+            crate::drain_stall::clear_continuation_pending(&file_str);
+        }
+    }
+
     let output = PreflightOutput {
         warnings,
         layout_issues,

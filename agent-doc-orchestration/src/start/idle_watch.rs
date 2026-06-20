@@ -50,6 +50,34 @@ fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
     crate::queue_continuation::live_drainable_continuation_head(file, &content)
 }
 
+/// `#qstallguard` Layer C: should the supervisor idle-watch SKIP dispatch on a
+/// queue under an accepted `admin queue pause`?
+///
+/// An accepted pause is the `#rt83`/`#qflood` flood guard — it suppresses the
+/// *unattended re-injection flood*, NOT all draining (the sanctioned way to stop
+/// the loop entirely is `queue: stop` / a `--- stop` fence, never pause). Before
+/// this guard, pause unconditionally skipped, so a paused queue's ONLY drainer was
+/// the attended in-session `/loop`; when that loop stalled/abandoned the drain,
+/// the queue was stranded with no failsafe.
+///
+/// New rule: on a paused queue, skip ONLY when an in-session `/loop` owns the drain
+/// (a fresh drain-owner lease — defer to it) or there is no drainable head. With no
+/// loop owner AND a drainable head, the supervisor performs a SINGLE-OWNER failsafe
+/// drain (the caller falls through to the normal, fully-guarded
+/// [`idle_queue_drain_decision`], whose `turn_active` / route-in-flight / cooldown
+/// guards bound it to one dispatch per turn — never the 2/sec flood the pause
+/// guards against). Pure so it is unit-testable. `paused == false` is never a skip.
+pub fn paused_idle_watch_should_skip(
+    paused: bool,
+    has_drainable_head: bool,
+    loop_owner_lease_fresh: bool,
+) -> bool {
+    if !paused {
+        return false;
+    }
+    loop_owner_lease_fresh || !has_drainable_head
+}
+
 fn idle_queue_context_reset_ops_log_message(
     file: &Path,
     harness: &crate::harness::HarnessConfig,
@@ -1679,10 +1707,40 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 if active_head.is_some()
                     && crate::queue_continuation::document_queue_controller_paused(&path)
                 {
+                    // `#qstallguard` Layer C: pause throttles to single-owner; it does
+                    // not disable the failsafe. Skip ONLY when an in-session `/loop`
+                    // owns the drain (defer to it). With no loop owner and a drainable
+                    // head, fall through to the normal guarded drain so the queue is
+                    // not stranded when the loop abandons it.
+                    let loop_owner_fresh = crate::drain_owner::fresh_drain_owner_lease(
+                        &file,
+                        current_epoch_secs(),
+                    )
+                    .is_some();
+                    if paused_idle_watch_should_skip(true, active_head.is_some(), loop_owner_fresh) {
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "idle_queue_watch_drain_skipped harness={} reason=queue_control_paused file={}",
+                                harness.binary,
+                                path.display()
+                            ),
+                        );
+                        crate::ops_log::log_op(
+                            &path,
+                            &format!(
+                                "queue_dispatch_skipped file={} harness={} reason=queue_control_paused",
+                                path.display(),
+                                harness.binary
+                            ),
+                        );
+                        continue;
+                    }
+                    // No in-session loop owner + drainable head: single-owner failsafe.
                     log_event(
                         &mut session_log,
                         &format!(
-                            "idle_queue_watch_drain_skipped harness={} reason=queue_control_paused file={}",
+                            "idle_queue_watch_paused_failsafe_drain harness={} reason=queue_paused_no_loop_owner file={}",
                             harness.binary,
                             path.display()
                         ),
@@ -1690,12 +1748,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     crate::ops_log::log_op(
                         &path,
                         &format!(
-                            "queue_dispatch_skipped file={} harness={} reason=queue_control_paused",
+                            "queue_paused_failsafe_single_owner_drain file={} harness={} reason=no_in_session_loop_owner (#qstallguard Layer C)",
                             path.display(),
                             harness.binary
                         ),
                     );
-                    continue;
+                    // fall through to the guarded drain decision below.
                 }
 
                 // #sqedit-race Phase 2: a direct `queue prune-noise` / `queue
@@ -1962,6 +2020,29 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paused_failsafe_drains_only_when_no_loop_owner_holds_a_drainable_head() {
+        // `#qstallguard` Layer C: pause defers to an in-session loop owner...
+        assert!(
+            paused_idle_watch_should_skip(true, true, true),
+            "loop owner present → defer (skip)"
+        );
+        // ...skips when there is nothing drainable...
+        assert!(
+            paused_idle_watch_should_skip(true, false, false),
+            "no drainable head → skip"
+        );
+        // ...but performs a single-owner failsafe drain when the loop abandoned the
+        // drain and a drainable head remains (this is the strand the pause caused).
+        assert!(
+            !paused_idle_watch_should_skip(true, true, false),
+            "paused + drainable + no loop owner → drain (do NOT skip)"
+        );
+        // An unpaused queue is never gated by this rule.
+        assert!(!paused_idle_watch_should_skip(false, true, false));
+        assert!(!paused_idle_watch_should_skip(false, false, true));
+    }
 
     #[test]
     fn pending_payload_enter_resubmit_is_scoped_and_one_shot() {

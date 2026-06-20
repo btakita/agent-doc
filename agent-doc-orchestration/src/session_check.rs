@@ -218,6 +218,24 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // `queue_continuation_required: true`) prints the "queue_paused is
                 // NOT a contradiction" preamble + recorded pause reason here too.
                 eprintln!("[session-check] {}", continuation_guidance_for(file));
+                // #qstallguard Layer B: this is a clean closeout that STILL requires
+                // continuation. Drop a one-shot continuation-pending marker so the
+                // next preflight can emit `queue_stall_detected` if the loop neither
+                // continued nor recorded a valid stop reason (the prose no-stall
+                // guidance is advisory; this makes the violation a hard signal).
+                let stall_cycle_id = crate::cycle_state::load(file)
+                    .ok()
+                    .flatten()
+                    .map(|s| s.cycle_id)
+                    .unwrap_or_default();
+                if let Err(err) = crate::drain_stall::mark_continuation_pending(
+                    &file.to_string_lossy(),
+                    &stall_cycle_id,
+                ) {
+                    eprintln!(
+                        "[session-check] warning: failed to record continuation marker: {err}"
+                    );
+                }
                 if codex_final_gate {
                     if let Some(command) =
                         crate::queue_command::slash_command_text(&continuation.head_prompt)

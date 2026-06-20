@@ -82,6 +82,7 @@ pub mod diff_io;
 pub mod doctor;
 pub mod document_watcher;
 pub mod drain_owner;
+pub mod drain_stall;
 pub mod editor_route_errors;
 pub mod plugin_owner;
 pub mod flow;

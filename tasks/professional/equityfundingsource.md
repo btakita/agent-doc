@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,32 @@ completed
 Compacted content:
 ❯ - Archived 4 response topic(s): /lenders/available-deals should have a "Deals of Interest"; No invite email sent for the Lender Bros group; Lending-group email on by default + friendlier duplicate-invite handling + resend button; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:fcd1200a -->
+
+### Re: Go through the review items — triaged into backlog + queue — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Go through the review items. Add actionable items into the backlog and queue.
+
+
+Went through all 18 gated review items and split them by whether an agent session can actually move them now — no external credential, operator decision, or unbuilt dependency in the way.
+
+**Queued for the go-loop (added to backlog + queue):**
+- **#5q7z-fix** — TMO "Accept and send to TMO" duplicate-loan bug. Clear local fix: (1) approve/writeback detects an existing TMO association (`tmo_loan_rec_id` / `writeback_status=sent`) and associates+marks accepted locally instead of calling `NewLoan` (kills the TMO 400 "Duplicate loan number"); (2) hide/disable the button in `full_applications.tsx` when the loan is already in TMO. Safe default for the embedded design Q: associate-only, no TMO call. Also unblocks the #dealtab500 investigation.
+- **#214f-gate** — publish-on-acceptance gate. `admin_deal_publish_` + `POST /api/admin/loans/:id/deal` currently publish with no acceptance check. Add the gate + surface ineligibility; default rule "accepted-before-available" (operator can revise). Complements the already-shipped #accept-autopublish.
+
+**Added to backlog, gated (actionable but need a precondition/decision first, so not auto-drained):**
+- **#cutover-checklist** — write (not execute) the workers.dev→custom-domain + Google Workspace SSO cutover checklist; execution gated on #m6ch creds.
+- **#67v2-aa-local** — admin pipeline auto-advance local half; depends on the #67v2 Kanban stages being built first.
+
+**Likely already shipped — recommend closing the review item, didn't re-queue:**
+- **#zwws-vestings-local** — its scope (capture/display vestings + special instructions, EFS-local half, TMO push gated) matches the completed **#zwws-local-first** (done.md, 2026-06-05). Verify in the investor UI and strike the review item if confirmed.
+
+**Left in review — externally gated, not agent-actionable now:**
+- #dealtab500 (live repro / #cftk token), #cftk (operator mints the Cloudflare D1 token), #5eq8 (closing-docs redesign, design-blocked), #efs-cutover-sso-plan (parent; writeable half is #cutover-checklist), #xcvg / #xcvg-prod-email (Resend domain #f4rq + SMTP #m6ch/#p40t), #dzmm / #dzmm-writeback-replay (TMO write field-map #7a4d + support #k2xg), #jnzs / #jnzs-approval-followup (await Judith/EFS reviewer), #67v2 (Kanban; partly TMO-gated), #zwws (remaining phases externally gated), #next-steps (custom-domain cutover deferred), #dropbox-sync-adapter (needs Dropbox access).
+
+No code changed this cycle — this was a triage pass. #5q7z-fix and #214f-gate are queued for the go-loop.
+<!-- agent:boundary:fc97f2bc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,12 +76,15 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Go through the review items. Add actionable items into the backlog and queue.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
+- [/] [#67v2-aa-local] [recommended] Admin pipeline auto-advance local half (advances #67v2-auto-advance): define stage-requirement checks from the TMO-aligned Kanban and enqueue audited status updates to tmo_cache_outbox; replay stays gated on #dzmm. Depends on the #67v2 Kanban stages being built first.
+- [ ] [#214f-gate] Gate investor deal publish on acceptance (advances #214f): add an acceptance check before status='published' in admin_deal_publish_ (lib/admin/repo.ts) + POST /api/admin/loans/:id/deal, blocking publish of a non-accepted loan and surfacing why it is ineligible. Default business rule: accepted-before-available (operator may revise). Complements the shipped #accept-autopublish auto-publish-on-accept flow.
+- [ ] [#5q7z-fix] TMO duplicate-loan fix (advances #5q7z, relates #dealtab500/#214f): (1) approve/writeback path (admin/applications/index.ts -> tmo_writeback.ts NewLoan) must detect an existing TMO association (tmo_loan_rec_id present / writeback_status=sent) and associate+mark accepted locally instead of calling NewLoan, avoiding the TMO 400 'Duplicate loan number'; (2) hide/disable 'Accept and send to TMO' in lib/ui--browser--efs/portal/admin/full_applications.tsx when the loan is already in TMO. Safe default for the design Q: associate-only, no TMO call.
 <!-- /agent:backlog -->
 
 ## Review

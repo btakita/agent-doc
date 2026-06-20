@@ -136,7 +136,15 @@ Good news — this is **already the deployed behavior**, and I've now proven it.
 **Locked it in with a real behavioral test** (`tests/auth.test.ts`): I extended the fake D1 to back `invite_login_tokens` and assert, through the actual worker handler, that a `/login/invite` request carrying an admin session cookie → `303 /?notice=…` with the token's `used_at` **still NULL**, while a signed-out click still consumes it + signs the invitee in. Full `bun run check` **951 pass / 0 fail**. Committed (`6415751`) + pushed.
 
 No new deploy needed — the enforcing code already shipped in `47ef12f6`/`1487617b`; this cycle only added the regression test.
-<!-- agent:boundary:3e4a785b -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+No redeploy needed this cycle — it was **test-only** (added the regression test in `tests/auth.test.ts`; the worker bundle is unchanged). The enforcing code (guard-before-consume, so a signed-in click never consumes/expires the token) already shipped in worker **`47ef12f6`** and is current as of **`1487617b`**. The live worker already has the behavior you asked for.
+<!-- agent:boundary:a85cd4dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -150,7 +158,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: If the link is clicked while another user is logged in, that should not count as a usage and should not expire the link.~~
-- :pushpin: deploy
+- ~~:pushpin: deploy~~
 - ~~If the link is clicked while another user is logged in, that should not count as a usage and should not expire the link.~~
 - deploy
 <!-- /agent:queue -->

@@ -85,11 +85,43 @@ A) vs normal dispatch. SimWorld coverage for the starting-pane
 pane's scrollback at send time, so the cold-start window (pane created → harness
 prompt ready) is in the trace.
 
+### D — Retry loop re-injects the trigger on every readiness poll (`img_52`)
+
+Operator-reported (2026-06-20, `tasks/professional/equityfundingsource.md`,
+screenshot `tasks/agent-doc/img_52.png`): after **restarting** an agent-doc
+session, JB `Run Agent Doc` produced **~7 stacked copies** of
+`agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+typed into the pane, **none submitted**.
+
+This is the same root as A/C (dispatch into a not-yet-ready / post-restart pane)
+but exposes a distinct, agent-actionable bug in the *retry shape*: the
+readiness poll/retry loop **re-types the trigger text on each attempt** instead
+of typing at most once. So a slow post-restart boot (the 29s "Still waiting for
+claude … active claude turn" window from the monsterrodholders report) turns
+into N accumulated, unsubmitted copies in the composer — the visible
+"duplicate prompts with no submit." Even once the harness becomes ready, the
+composer now holds N concatenated triggers, so a submit (if it ever fires) is
+corrupt.
+
+**Fix direction:** the route must separate *readiness polling* from *injection*.
+Poll for the harness dispatch-ready prompt **without** typing; inject the
+trigger exactly once, only after a dispatch-ready prompt is positively
+identified, and re-verify immediately before the single send. On a retry after a
+failed/aborted send, **clear the composer first** (or never re-type) so retries
+cannot accumulate. A not-ready/booting/shell pane must fail closed (or wait
+silently) **without** injecting any text. ops.log: record each injection with an
+attempt counter (`dispatch_inject attempt=N`) so a multi-inject regression is
+provable from logs; assert at most one injection per dispatch.
+
 ## Acceptance
 
 - SimWorld: a route to a pane showing a bare shell prompt (no live harness) fails
   closed / triggers restart instead of sending the trigger; ops.log records the
   dead-harness diagnostic.
+- SimWorld (`img_52`): a post-restart dispatch whose pane stays not-ready across
+  several readiness polls injects the trigger **zero** times while not-ready and
+  **exactly once** after the dispatch-ready prompt appears; ops.log shows a
+  single `dispatch_inject attempt=1`, never N stacked injections.
 - SimWorld (`#jbtsiftnosub`): an auto-start dispatch to a freshly-created pane that
   is still starting (input accepted, not yet submit-ready) waits for the harness
   dispatch-ready prompt before sending, then submits; ops.log records

@@ -144,7 +144,20 @@ No new deploy needed — the enforcing code already shipped in `47ef12f6`/`14876
 > :pushpin: deploy
 
 No redeploy needed this cycle — it was **test-only** (added the regression test in `tests/auth.test.ts`; the worker bundle is unchanged). The enforcing code (guard-before-consume, so a signed-in click never consumes/expires the token) already shipped in worker **`47ef12f6`** and is current as of **`1487617b`**. The live worker already has the behavior you asked for.
-<!-- agent:boundary:a85cd4dd -->
+
+### Re: deploy (duplicate) — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Duplicate of the prior `deploy` item (stale-supervisor queue churn re-injected it). Same answer: no redeploy needed — the live worker (`1487617b`) already carries the guard-before-consume behavior; this cycle was test-only. I've marked the stale supervisor to recycle at its next idle boundary to stop the duplication.
+<!-- agent:boundary:d0f3e9b3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -157,10 +170,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: If the link is clicked while another user is logged in, that should not count as a usage and should not expire the link.~~
-- ~~:pushpin: deploy~~
-- ~~If the link is clicked while another user is logged in, that should not count as a usage and should not expire the link.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

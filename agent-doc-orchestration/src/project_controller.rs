@@ -38,7 +38,7 @@ use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, OnceLock,
     atomic::{AtomicBool, Ordering},
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -144,6 +144,40 @@ pub struct ControllerBinaryIdentity {
     pub len: u64,
     pub modified_secs: u64,
     pub modified_nanos: u32,
+}
+
+/// `#orchver` — the orchestration crate's own `CARGO_PKG_VERSION` is `0.1.0`: it is an
+/// internal workspace crate that is never version-bumped in lockstep with the top-level
+/// `agent-doc` binary (currently `0.34.x`). Recording `env!("CARGO_PKG_VERSION")` directly
+/// in [`ControllerBinaryIdentity`] therefore stamped EVERY controller/supervisor as
+/// "launched as 0.1.0" in the stale-binary warning (`supervisor_stale_warning_message`),
+/// which misled the operator into thinking an ancient build was running when only the
+/// len/mtime comparison actually drives staleness. The binary crate injects its real
+/// `CARGO_PKG_VERSION` here once at startup; library-only callers / tests fall back to the
+/// orchestration crate version.
+static BINARY_VERSION: OnceLock<String> = OnceLock::new();
+
+/// Record the real top-level `agent-doc` binary version for identity reporting. Called once
+/// from `main()`; the first writer wins and any later call is intentionally a no-op.
+pub fn set_binary_version(version: &str) {
+    if BINARY_VERSION.set(version.to_string()).is_err() {
+        // Already initialized (e.g. a second call in tests) — keep the first version.
+    }
+}
+
+/// Resolve the version stamped into [`ControllerBinaryIdentity`]. Prefers the binary-injected
+/// value; falls back to the orchestration crate version only when unset.
+fn identity_version() -> String {
+    resolve_identity_version(BINARY_VERSION.get().map(String::as_str))
+}
+
+/// Pure resolution split out from [`identity_version`] so it is unit-testable without the
+/// process-global `OnceLock`. `injected` is the binary-provided version (`None` when the
+/// binary never called [`set_binary_version`], e.g. library-only callers / tests).
+fn resolve_identity_version(injected: Option<&str>) -> String {
+    injected
+        .map(str::to_string)
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1174,7 +1208,7 @@ pub(crate) fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
         .with_context(|| format!("modified time before unix epoch for {}", path.display()))?;
     Ok(ControllerBinaryIdentity {
         path,
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: identity_version(),
         len: metadata.len(),
         modified_secs: modified.as_secs(),
         modified_nanos: modified.subsec_nanos(),
@@ -2593,6 +2627,22 @@ mod tests {
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
     use rusqlite::params;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn identity_version_prefers_injected_binary_version() {
+        // `#orchver` — when the binary injects its real version, the identity stamps it.
+        assert_eq!(resolve_identity_version(Some("0.34.30")), "0.34.30");
+    }
+
+    #[test]
+    fn identity_version_falls_back_to_crate_version() {
+        // Library-only callers (no `set_binary_version`) fall back to the orchestration
+        // crate version. This is the path that historically produced "0.1.0".
+        assert_eq!(
+            resolve_identity_version(None),
+            env!("CARGO_PKG_VERSION").to_string()
+        );
+    }
 
     #[test]
     fn controller_paths_are_project_local() {

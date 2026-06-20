@@ -2093,6 +2093,11 @@ fn main() -> anyhow::Result<()> {
     // When unset, no file logging (zero overhead).
     init_tracing();
 
+    // `#orchver` — stamp the real top-level binary version into controller/supervisor
+    // identities so the stale-binary warning reports the true version instead of the
+    // orchestration crate's perennial `0.1.0`.
+    agent_doc_orchestration::project_controller::set_binary_version(env!("CARGO_PKG_VERSION"));
+
     let raw_args: Vec<OsString> = std::env::args_os().collect();
     let pending_alias_used = deprecated_pending_alias_used(&raw_args);
     let done_flag_alias_used = deprecated_done_flag_used(&raw_args);

@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -89,13 +89,14 @@ The **one genuine unguarded gap was `reset --from-current`** (default, without `
 Shipped: agent-doc submodule `9b13d529` (0.34.27), pushed to origin/main. New regression test `from_current_routes_resume_clear_through_converge_seam` (asserts the `ops.log` source-labelled seam routing); `make check` (clippy + full suite) green. `#evmh` done.
 
 **Remaining (filed as `#evmhplugin`):** the plugin-side reconnect re-read (when the editor buffer is stale vs HEAD on reconnect, re-read disk instead of pushing the stale buffer — the `#postcommit-ipc-worktree-corruption` direction). That's separate Kotlin/FFI work. I'll `cargo install` 0.34.27 + recycle the supervisor *after* this finalize commits, to avoid the mid-session client-newer-than-supervisor drift.
-<!-- agent:boundary:5e49e3cb -->
+<!-- agent:boundary:c5d8b4f2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - do [#yzer]
+- What are #next-steps to fix agent-doc bugs?
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

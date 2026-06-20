@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -57,7 +57,15 @@ Fixed and deployed. When a passwordless `/login/email/verify` link was clicked w
 Verified: new wiring test in `tests/email-login.test.ts` asserts the log-out notice + `#email-login-signed-in-notice` tag; full `bun run check` (test + build + build:worker) **946 pass / 0 fail**. Committed (`227a9a2`) + pushed, **deployed** (worker version `ba75ee98`). Live smoke check on the worker: `GET /login/email/verify` with no token → `303` → `/login/email?info=…` (the new signed-in flash branch sits on that same path).
 
 **Verify it here:** test on the worker host (`…brian-takita.workers.dev`) or whichever host your sign-in emails link to — *not* `www.equityfundingsource.com`. That `www` domain is still fronted by the legacy **Apache** origin for nested routes (`/login/invite`, `/admin/login`, `/login/email/verify` all 404 there — pre-existing, unrelated to this change); the Cloudflare worker is the new platform and serves the fix. The emailed link uses the request origin (`SITE_URL`), so real users clicking a link reach the worker.
-<!-- agent:boundary:c17733c9 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Already deployed in this same cycle — the email sign-in-link fix (`227a9a2`) went out as worker **version `ba75ee98`** via `make deploy` (build:worker + remote D1 migrate, a no-op here since there's no schema change + cf-deploy). No code has changed since, so this is the live production worker; redeploying would produce an identical bundle. Live smoke check confirmed the new behavior is serving (`GET /login/email/verify` → `303`).
+<!-- agent:boundary:d04afe43 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,8 +78,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: If I'm logged into another account, the email link goes to the home page with no message. Add something like "Please log out of your current account and try again."~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

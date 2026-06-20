@@ -157,7 +157,19 @@ No redeploy needed this cycle — it was **test-only** (added the regression tes
 > :pushpin: deploy
 
 Duplicate of the prior `deploy` item (stale-supervisor queue churn re-injected it). Same answer: no redeploy needed — the live worker (`1487617b`) already carries the guard-before-consume behavior; this cycle was test-only. I've marked the stale supervisor to recycle at its next idle boundary to stop the duplication.
-<!-- agent:boundary:bd802457 -->
+
+### Re: Expired-invite notice — add "contact Equity Funding Source" mailto link — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In addition to contacting the lender who sent the invite, add " or contact Equity Funding Source" with a link to email EFS to send another invite.
+
+Done and deployed. The expired/used-invite notice (shown on the login page to a signed-out visitor) now reads: *"This invitation link has expired or already been used. Please contact the lender who sent your invite and ask them to resend it, or **contact Equity Funding Source** to send another invite"* — where **contact Equity Funding Source** is a `mailto:info@equityfundingsource.com?subject=Request a new invitation` link.
+
+**Why it's wired this way:** the flash banner HTML-escapes its message, and `?info=` is user-controllable (an XSS vector), so I couldn't just put a link in the query text. Instead the invalid-invite redirect now passes a **notice code** — `/login/invite` → `/login?notice=invite_expired` — and the login page renders the full notice as server-built trusted HTML via a new `flash_info_html_()` variant (the mailto address comes from `ctx.site.email`). No user input is ever rendered as HTML.
+
+Verified live on the worker after deploy: a signed-out invalid invite link `303`s to `/login?notice=invite_expired`, and that page renders the notice with `mailto:info@equityfundingsource.com?subject=Request%20a%20new%20invitation`. (Verified via curl since the notice is server-rendered and only shows for signed-out visitors — `/login` bounces your signed-in admin session to home.) Full `bun run check` **951 pass / 0 fail** (updated the invite wiring test). Committed (`9533a99`) + pushed, **deployed** (worker version `d98be19b`).
+<!-- agent:boundary:68f7da76 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -170,7 +182,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: In addition to contacting the lender who sent the invite, add " or contact Equity Funding Source" with a link to email EFS to send another invite.
+- ~~:pushpin: In addition to contacting the lender who sent the invite, add " or contact Equity Funding Source" with a link to email EFS to send another invite.~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

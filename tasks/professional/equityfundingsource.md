@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -85,7 +85,29 @@ Fixed, tested, committed, pushed, and deployed. Two root causes:
 **Verify + deploy:** `make check` green — **899 pass, 0 fail** (4 new), typecheck clean. `make deploy` succeeded; the live worker now shows `LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED ("true")` bound. Superproject pointer bumped to `5b3d72b` (`d447381db`, pushed).
 
 Please re-run the invite (btak.dev+investor → btak.dev+lender2 into "Lender Bros") and confirm lender2 receives the email. One caveat to verify live: delivery depends on the `CLOUDFLARE_EMAIL_API_TOKEN` secret being present in prod (it is for the working message/contact emails, which share the exact same gate + token). Confidence: high — same delivery path as the already-working email flows. Escalation: none. (Note: committed via `--force-disk` — the route-owned supervisor's IPC listener is still wedged on the stale binary; `admin recycle` remains queued for the next idle boundary.)
-<!-- agent:boundary:9d2e99d2 -->
+
+### Re: Lending-group email on by default + friendlier duplicate-invite handling + resend button — opus-4-8
+
+All three queue items shipped and deployed. The root cause of "no email sent to lender2" turned out to be the duplicate-invite bug you flagged mid-cycle — re-inviting an already-seated member threw `D1_ERROR: UNIQUE constraint failed` *before* the email ever fired. Both that and the email gate are now fixed.
+
+**1. Email gate removed → on by default (`cd2d227`)**
+- `lib/lending_groups/notify.ts` — `lending_group_email_enabled_` no longer requires `LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED`. Email is **on by default**; the flag is now an explicit opt-out only (`false`/`0`/`no`/`off`). Delivery still needs configured Cloudflare Email or local capture; in-app notifications are unaffected.
+- `wrangler.toml` — dropped the now-redundant `= "true"` line (kept `LENDING_GROUP_NOTIFICATION_FROM`). Prod bindings confirm the flag is gone.
+
+**2. Friendlier duplicate-invite + resend button (`86aa7aa`)**
+- `lib/lending_groups/service.ts` — `lending_group_invite_member_` is now idempotent: an existing membership is re-used instead of INSERTing a duplicate (which hit the `(group_id, invited_email)`/`(group_id, user_id)` UNIQUE index). Re-inviting a pending member re-sends the invite; a declined/removed invite is re-activated; an already-active member returns a friendly "already a member" result. New `already_member`/`resent` flags drive the route.
+- `lib/lending_groups/routes.ts` — lender + admin invite routes email on a fresh invite or a resend (never re-email an active member), return a friendly `message`, and map any residual UNIQUE-race error to "already in this group" instead of a raw D1 blob.
+- `lib/ui--browser--efs/portal/shared/lending_groups.tsx` — the Invite Co-Lenders dialog now lists pending invitations with a **"Resend invite"** button each, and shows a green confirmation ("Invitation re-sent to …").
+
+**Verification**
+- `bun test`: **902 pass / 0 fail** (added 3 resend/idempotency tests).
+- `bun run build` + `build:worker`: clean.
+- `deploy:worker`: deployed (gate removal `752f1def`, resend feature `b1bdea0f`).
+
+**lender2 / "Lender Bros":** btak.dev+lender2 is already an `invited` member with an account. Open the group's **Invite Co-Lenders** dialog and click **Resend invite** next to btak.dev+lender2 — it now re-sends the email (on by default) instead of erroring. (I couldn't trigger the send myself: the worker invite route needs an investor/admin session, and the EFS deploy token returns 401 on the Cloudflare Email Sending API — it lacks `email:send` scope.)
+
+Confidence: high — code + deploy binding-verified, regression covered by tests. Escalation: none.
+<!-- agent:boundary:62b2fe20 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,6 +120,10 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: Remove LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED gate. It should be on by default.
+- Adding btak.dev+lender2@gmail.com had an error "D1_ERROR: UNIQUE constraint failed: lending_group_members.group_id, lending_group_members.user_id: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)". Make the error friendlier. Add resend invite button.
+- deploy
+- Remove LENDING_GROUP_EMAIL_NOTIFICATIONS_ENABLED gate. It should be on by default. Send email to btak.dev+lender2@gmail.com. deploy 
 <!-- /agent:queue -->
 
 ## Backlog

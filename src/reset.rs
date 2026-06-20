@@ -88,6 +88,14 @@ fn rebuild_sidecars_from_current(file: &Path, content: &str, save_baseline: bool
     if save_baseline {
         save_baseline_from_current(file, content)?;
     }
+    // Clear the crash-durability queue journal (mirrors the commit-time clear in
+    // `git::commit`). The rebuilt snapshot/baseline IS the new durable queue
+    // baseline for the current file, so any pre-reset journal window (queue heads
+    // recorded while older prompts were live) is superseded. Without this, a
+    // compaction or reset that removed answered/compacted heads would leave those
+    // heads in the journal, and the next `start` would call
+    // `queue_journal::replay_missing` and resurrect them over the current queue.
+    agent_doc_orchestration::queue_journal::clear(file);
     Ok(())
 }
 
@@ -175,6 +183,79 @@ mod tests {
             .to_text();
         assert_eq!(crdt_text, current);
         assert!(snapshot::load_overlay_crdt(&doc).unwrap().is_some());
+        assert_eq!(std::fs::read_to_string(&cycle_path).unwrap(), cycle_state);
+        assert_eq!(
+            std::fs::read_to_string(&capture_path).unwrap(),
+            capture_state
+        );
+    }
+
+    #[test]
+    fn preserve_session_clears_stale_queue_journal_so_compacted_heads_do_not_resurface() {
+        // The crash-durability queue journal records live heads while they are
+        // pending. A compaction/answer removes heads B,C from the queue, then
+        // `reset --from-current --preserve-session` rebuilds the sidecars. Without
+        // clearing the journal, the next `start` would call
+        // `queue_journal::replay_missing` and resurrect B,C over the current file.
+        use agent_doc_orchestration::queue_journal;
+
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/crdt")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/baselines")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/state/cycles")).unwrap();
+        let doc = dir.path().join("session.md");
+
+        // Earlier state: queue had heads A, B, C live — recorded in the journal.
+        let earlier = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: keep-me\n---\n\n## Queue\n\n<!-- agent:queue auto -->\n- do [#a]\n- do [#b]\n- do [#c]\n<!-- /agent:queue -->\n";
+        std::fs::write(&doc, earlier).unwrap();
+        queue_journal::record(&doc, earlier).unwrap();
+        // Sanity: B,C are journaled and would replay if absent.
+        let only_a = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: keep-me\n---\n\n## Queue\n\n<!-- agent:queue auto -->\n- do [#a]\n<!-- /agent:queue -->\n";
+        let pre_fix_missing = queue_journal::replay_missing(&doc, only_a);
+        assert_eq!(
+            pre_fix_missing.len(),
+            2,
+            "before the reset, B,C are journaled and would resurface: {pre_fix_missing:?}"
+        );
+
+        // Current file (post-answer/compaction): queue has ONLY head A.
+        std::fs::write(&doc, only_a).unwrap();
+        snapshot::save(&doc, "stale snapshot").unwrap();
+        snapshot::save_crdt(&doc, b"stale crdt").unwrap();
+        std::fs::write(snapshot::baseline_path_for(&doc).unwrap(), "stale baseline").unwrap();
+
+        // Preserved continuity: cycle state + capture.
+        let hash = snapshot::doc_hash(&doc).unwrap();
+        let cycle_path = dir
+            .path()
+            .join(".agent-doc/state/cycles")
+            .join(format!("{hash}.json"));
+        let cycle_state = r#"{"cycle_id":"cycle-keep","phase":"preflight_started"}"#;
+        std::fs::write(&cycle_path, cycle_state).unwrap();
+        let capture_dir = dir.path().join(".agent-doc/captures").join(&hash);
+        std::fs::create_dir_all(&capture_dir).unwrap();
+        let capture_path = capture_dir.join("capture-keep.json");
+        let capture_state = r#"{"capture_id":"capture-keep","state":"committed"}"#;
+        std::fs::write(&capture_path, capture_state).unwrap();
+
+        run(&doc, true, true).unwrap();
+
+        // The journal is cleared: B,C no longer replay over the current file.
+        let missing = queue_journal::replay_missing(&doc, only_a);
+        assert!(
+            missing.is_empty(),
+            "reset --from-current must clear the journal so compacted heads do not resurface: {missing:?}"
+        );
+
+        // Preserved continuity is unchanged.
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), only_a);
+        assert!(std::fs::read_to_string(&doc).unwrap().contains("resume: keep-me"));
+        assert_eq!(snapshot::load(&doc).unwrap().unwrap(), only_a);
+        assert_eq!(
+            std::fs::read_to_string(snapshot::baseline_path_for(&doc).unwrap()).unwrap(),
+            only_a
+        );
         assert_eq!(std::fs::read_to_string(&cycle_path).unwrap(), cycle_state);
         assert_eq!(
             std::fs::read_to_string(&capture_path).unwrap(),

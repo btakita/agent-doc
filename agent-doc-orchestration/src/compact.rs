@@ -139,19 +139,19 @@ pub fn run(
 
     let resolved = fm.resolve_mode();
     if resolved.is_template() {
-        // Compact CRDT state if CRDT write mode
-        if resolved.is_crdt()
-            && let Ok(Some(crdt_state)) = snapshot::load_crdt(file)
-        {
-            let compacted_crdt = crate::crdt::compact(&crdt_state)?;
-            snapshot::save_document_crdt(file, &compacted_crdt, &content)?;
-            eprintln!(
-                "[compact] CRDT state compacted: {} → {} bytes",
-                crdt_state.len(),
-                compacted_crdt.len()
-            );
-        }
-
+        // NOTE (#compact-overlay-crdt-staleness): the legacy CRDT/overlay refresh
+        // is deferred to `apply_compacted_document(..., refresh_crdt=true)`, which
+        // is the single authoritative CRDT writer. An earlier
+        // `save_document_crdt(file, &compact(&crdt_state), &content)` here was a
+        // defect: it saved the overlay CRDT with the PRE-compaction (large)
+        // `&content` markdown. Later cycles re-projected that overlay
+        // (`load_overlay_crdt`→`to_markdown`) and reproduced snapshot(large) >
+        // visible(small), tripping `guard_no_stale_snapshot_reset_drift`'s
+        // "looks like a manual cleanup" refusal. Because
+        // `apply_compacted_document` rebuilds the CRDT from the COMPACTED text
+        // (`CrdtDoc::from_text` / `OverlayCrdtDoc::from_markdown`, fresh docs with
+        // no carried tombstones), that rebuild both refreshes the overlay with the
+        // correct compacted markdown and supersedes the old tombstone-GC step.
         let target = component_name.unwrap_or("exchange");
         let is_crdt = resolved.is_crdt();
         match keep {
@@ -2147,6 +2147,95 @@ mod tests {
             !snapshot_after.contains("stale topic"),
             "snapshot merge base must not retain stale pre-clear exchange content:\n{snapshot_after}"
         );
+    }
+
+    #[test]
+    fn compact_advances_snapshot_and_crdt_so_next_preflight_does_not_refuse() {
+        // #compact-overlay-crdt-staleness: a CRDT-mode full compact must leave the
+        // overlay CRDT projecting the COMPACTED (small) document, not the
+        // pre-compaction (large) one. The earlier defect saved the overlay with
+        // the large `&content`, so later cycles re-projected snapshot(large) >
+        // visible(small) and `guard_no_stale_snapshot_reset_drift` refused the
+        // commit as a "manual cleanup".
+        let mut exchange = String::new();
+        for i in 0..40 {
+            exchange.push_str(&format!(
+                "### Re: topic {i}\n\nThis is a fairly long archived response body number {i} that should be removed by compaction and must not survive in the overlay CRDT projection after the compact completes.\n\n"
+            ));
+        }
+        let doc = format!(
+            "---\nagent_doc_session: test-crdt-compact\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange}<!-- /agent:exchange -->\n"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, &doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        snapshot::save(&file, &doc).unwrap();
+        // Seed both the legacy and overlay CRDT sidecars from the large document,
+        // mirroring a live CRDT session before compaction.
+        let legacy = crate::crdt::CrdtDoc::from_text(&doc).encode_state();
+        snapshot::save_document_crdt(&file, &legacy, &doc).unwrap();
+
+        // Full compact (keep=None) in CRDT mode.
+        run_component_compact(&file, &doc, "exchange", Some("Session compacted."), true).unwrap();
+
+        let visible = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            visible.len() < doc.len(),
+            "compact must shrink the visible document: {} >= {}",
+            visible.len(),
+            doc.len()
+        );
+        assert!(
+            !visible.contains("topic 0"),
+            "compacted visible file must not retain archived topics:\n{visible}"
+        );
+
+        // The snapshot must advance to the compacted document (no archived topics
+        // and small relative to the original).
+        let snap = snapshot::load(&file).unwrap().unwrap();
+        assert!(
+            !snap.contains("topic 0"),
+            "snapshot merge base must not retain archived topics:\n{snap}"
+        );
+        assert!(
+            snap.len() < doc.len(),
+            "snapshot must shrink to the compacted document: {} >= {}",
+            snap.len(),
+            doc.len()
+        );
+
+        // The overlay CRDT projection must equal the COMPACTED text, not the
+        // original large document.
+        let overlay_bytes = snapshot::load_overlay_crdt(&file).unwrap().unwrap();
+        let projected =
+            agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&overlay_bytes)
+                .unwrap()
+                .to_markdown()
+                .unwrap();
+        assert!(
+            !projected.contains("topic 0"),
+            "overlay CRDT must project the compacted document, not the pre-compaction one:\n{projected}"
+        );
+        assert_eq!(
+            projected, visible,
+            "overlay CRDT projection must equal the compacted visible document"
+        );
+
+        // With the overlay advanced, the stale-snapshot drift guard must NOT bail.
+        // (Before the fix, the overlay carried the large doc and a re-projected
+        // snapshot would trip the "manual cleanup" refusal.)
+        crate::write::guard_no_stale_snapshot_reset_drift(
+            &file,
+            Some(projected.as_str()),
+            &visible,
+            "commit",
+        )
+        .expect("compacted overlay/snapshot must not trip the stale-snapshot reset-drift guard");
     }
 
     #[test]

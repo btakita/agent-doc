@@ -1040,7 +1040,14 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `guard_`/`reason=` tokens are tracked against the new submodules,
         // not added anew.
         ("agent-doc-orchestration/src/write/queue_consume.rs", "guard_") => 1,
-        ("agent-doc-orchestration/src/write/queue_consume.rs", "reason=") => 1,
+        // 1 -> 4 (#editorbufwin Fix A): the queue-consume head-equality check now
+        // reconciles a benign live-buffer head divergence instead of hard-bailing,
+        // mirroring the existing remaining-queue `reason=crdt_merge_authoritative`
+        // reconcile. The new `reason=live_buffer_addition_authoritative` token
+        // appears in the production ops_log line, its explanatory comment, and the
+        // regression test assertion — gated on recorded dropped-queue evidence
+        // (no evidence still bails, preserving the corruption guard).
+        ("agent-doc-orchestration/src/write/queue_consume.rs", "reason=") => 4,
         // +4 `guard_` (#dupcontent: two `guard_adopts/refuses_*` adoption tests
         // + two `guard_ipc_snapshot_adoption_against_live_prompt_drift` calls in
         // those tests) and +2 `reason=` (the two `content_ours_adoption_refused_structural`

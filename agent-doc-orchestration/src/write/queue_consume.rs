@@ -1950,11 +1950,53 @@ pub(crate) fn plan_queue_prompt_consumption(
             .collect::<Vec<_>>()
     };
     if norm(&snapshot_consumed_texts) != norm(&consumed_texts) {
-        anyhow::bail!(
-            "queue consume: snapshot head prompts {:?} do not match document head prompts {:?}",
-            snapshot_consumed_texts,
-            consumed_texts
-        );
+        // `#editorbufwin` (Fix A): the document head (read fresh from disk) is the
+        // user's live editor-buffer queue addition; the snapshot/content_ours head
+        // is the OLD head because the live user queue addition is deliberately NOT
+        // absorbed into content_ours (the unproven-live-queue invariant). So a
+        // benign live editor buffer makes these heads disagree and would hard-bail
+        // EVERY cycle. The remaining-queue check below already tolerates exactly
+        // this kind of divergence (`queue_consume_divergence_reconciled
+        // reason=crdt_merge_authoritative`); the head check lacked a matching path.
+        //
+        // Reconcile — but ONLY when the divergence is explained by recorded
+        // live-buffer drift: the document head must be a user ADDITION that the
+        // ipc write path recorded as a dropped queue prompt
+        // (`cycle_state::record_dropped_queue_prompts`, written at write/ipc.rs).
+        // In that case the editor buffer is the source of truth: log and PROCEED
+        // using the DOCUMENT head as authoritative. With NO dropped-queue evidence
+        // the divergence is unexplained (genuine corruption) and we keep the
+        // hard-bail.
+        let dropped_evidence = crate::cycle_state::load(file)
+            .ok()
+            .flatten()
+            .map(|s| s.dropped_queue_prompts)
+            .unwrap_or_default();
+        let doc_head_is_recorded_addition = !dropped_evidence.is_empty()
+            && consumed_texts.iter().all(|doc_head| {
+                let doc_norm = crate::queue::strip_priority_markers(doc_head);
+                dropped_evidence
+                    .iter()
+                    .any(|d| crate::queue::strip_priority_markers(d) == doc_norm)
+            });
+        if doc_head_is_recorded_addition {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "queue_consume_head_divergence_reconciled file={} reason=live_buffer_addition_authoritative consumed={} snap_head={:?} doc_head={:?}",
+                    file.display(),
+                    consume_count,
+                    snapshot_consumed_texts,
+                    consumed_texts
+                ),
+            );
+        } else {
+            anyhow::bail!(
+                "queue consume: snapshot head prompts {:?} do not match document head prompts {:?}",
+                snapshot_consumed_texts,
+                consumed_texts
+            );
+        }
     }
     let snap_completed_entries =
         crate::queue::mark_first_n_prompts_completed(&snap_entries, consume_count);
@@ -2578,6 +2620,111 @@ mod core_tests {
             "snapshot must adopt the reconciled document queue:\n{snap_result}"
         );
     }
+    #[test]
+    fn queue_consume_head_divergence_reconciles_with_dropped_queue_evidence() {
+        // #editorbufwin (Fix A): the snapshot head is the OLD head; the document
+        // head is the user's live editor-buffer addition (deliberately NOT
+        // absorbed into content_ours). When the ipc write path recorded that
+        // addition as a dropped queue prompt (`record_dropped_queue_prompts`),
+        // consume must RECONCILE using the document head as authoritative instead
+        // of hard-bailing every cycle on a benign live-buffer divergence.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: handle the new live-buffer request\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- handle the new live-buffer request\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        // Snapshot carries the OLD head (the live user addition was not absorbed).
+        let snap = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: handle the old request\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- handle the old request\n",
+            "<!-- /agent:queue -->\n",
+        );
+        snapshot::save(&doc, snap).unwrap();
+
+        // Record the live-buffer drift evidence for the document head.
+        crate::cycle_state::start_preflight(&doc, Some(snap), Some(content)).unwrap();
+        crate::cycle_state::record_dropped_queue_prompts(
+            &doc,
+            &["handle the new live-buffer request".to_string()],
+        )
+        .unwrap();
+
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .expect("consume must reconcile a head divergence backed by dropped-queue evidence");
+        let outcome = outcome.expect("the document head should be consumed");
+        assert_eq!(outcome.consumed_count, 1, "exactly the document head consumes");
+        // The document head (live-buffer addition) is authoritative — its single
+        // queue item drains, and the snapshot adopts the reconciled (drained)
+        // document queue rather than retaining the OLD snapshot head.
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !result.contains("- handle the new live-buffer request"),
+            "the document head must no longer be a live queue item after consume:\n{result}"
+        );
+        let snap_result = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !snap_result.contains("- handle the old request"),
+            "the snapshot must not retain the stale OLD head after reconcile:\n{snap_result}"
+        );
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("queue_consume_head_divergence_reconciled")
+                && ops_log.contains("reason=live_buffer_addition_authoritative"),
+            "the reconcile must be logged for forensics:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn queue_consume_head_divergence_without_evidence_still_bails() {
+        // #editorbufwin (Fix A) corruption guard: a head divergence with NO
+        // recorded dropped-queue evidence is unexplained (genuine corruption) and
+        // must keep the hard-bail.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: handle the new live-buffer request\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- handle the new live-buffer request\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let snap = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: handle the old request\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- handle the old request\n",
+            "<!-- /agent:queue -->\n",
+        );
+        snapshot::save(&doc, snap).unwrap();
+        // No cycle_state dropped-queue evidence recorded.
+
+        let err = consume_queue_prompt_force_disk(&doc)
+            .expect_err("an unexplained head divergence must still hard-bail");
+        assert!(
+            err.to_string().contains("do not match document head prompts"),
+            "the corruption guard must keep the original bail: {err}"
+        );
+    }
+
     #[test]
     fn strike_orphan_id_backed_queue_head_strikes_absent_backing_item() {
         // #orphanqhead: an id-backed head whose backing backlog item was reaped

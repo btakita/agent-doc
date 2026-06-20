@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -157,7 +157,7 @@ No redeploy needed this cycle — it was **test-only** (added the regression tes
 > :pushpin: deploy
 
 Duplicate of the prior `deploy` item (stale-supervisor queue churn re-injected it). Same answer: no redeploy needed — the live worker (`1487617b`) already carries the guard-before-consume behavior; this cycle was test-only. I've marked the stale supervisor to recycle at its next idle boundary to stop the duplication.
-<!-- agent:boundary:d0f3e9b3 -->
+<!-- agent:boundary:bd802457 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -170,6 +170,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: In addition to contacting the lender who sent the invite, add " or contact Equity Funding Source" with a link to email EFS to send another invite.
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

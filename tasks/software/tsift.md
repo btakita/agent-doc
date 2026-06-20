@@ -126,15 +126,14 @@ It's a real multi-phase project, so per my offer I wrote the **plan** rather tha
 **On your #1yks refinement** ("automate crates.io trusted publishing + add a runbook"): captured as a backlog item. Note the honest constraint — per-crate trusted-publishing config is a crates.io **web-UI + browser/passkey 2FA** step that can't be fully API-automated; the runbook will script the repeatable parts and document the 2FA step as yours. I'll write it in a focused cycle (it's separate from the tsift code work). #1yks itself stays gated on that 2FA bootstrap for the two new crates.
 
 Session note: this doc is drift-heavy from a stale route-owned supervisor (pane %184) — responses are landing at HEAD via recovery, but if you see churn that's the cause, not the content.
-<!-- agent:boundary:adcd78ba -->
+<!-- agent:boundary:4b7e1016 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#b56m]: What is the most effective? Sift search index.db-aware?~~
-- [#b56m]: do the "Best" option
-- [#1yks]: Automate setting up crates.io trusted publishing using the procedure on crates.io. Add a dedicated runbook to agent-loop for adding trusted publishing to crates.io.
+- :pushpin: [#015t]: verified
+- :pushpin: [#ph7n]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

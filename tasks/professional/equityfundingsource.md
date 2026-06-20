@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -137,7 +137,30 @@ And your **`.env` line 7 already references this exact path** (`CLOUDFLARE_API_T
 So my prior `#cmtsec` "blank committed amount" hypothesis was **wrong for this deal** — there genuinely is a $100k @ 6.5% proposal recorded under the **investor@** account (the same account at 60% group-confirmed). If you didn't intend to commit $100k, that's stale/test data on the investor@ interest row — clearing that proposal removes the section. (`#cmtsec` updated with this; the latent UI behavior — showing on a rate/points-only proposal — still stands for *other* rows.)
 
 **On the dropped prompt** — you're right, my last turn lost it. The `no_changes:false → diff:null → no_changes:true` was the preflight queue-convergence wiping your uncommitted live-buffer line during the concurrent supervisor recycle. That's silent user-data loss; I filed it per `#agent-doc-bug` as **`#qprtloss`** in `agent-doc-bugs2.md` with a plan (`tasks/agent-doc/plan-prompt-loss-queue-convergence.md`) — distinct from the `#6b5h` finalize-wedge, and **not** implemented per the preset. Apologies for the round-trip.
-<!-- agent:boundary:5a730319 -->
+
+### Re: was a record created with default rate/duration? — opus-4-8
+
+**Rate: yes — a default got persisted. Duration: no — nothing was stored.** (Queried the live row + schema.)
+
+**The interest record has only 4 proposal columns** — `proposal_amount`, `proposal_interest_rate`, `proposal_points`, `proposal_submitted_at`. There is **no term/frequency/duration column** on `investor_deal_interests` at all.
+
+**Rate (6.5%) — defaulted, you're right.** The lender form pre-fills the rate input from the **deal's displayed rate** when no proposal exists yet (`investor/deal_detail.tsx:362`):
+
+```js
+const [proposal_rate] = useState(
+  deal.proposal_interest_rate == null
+    ? deal.monthly_interest.replace(/[^0-9.]/g,'')  // ← deal default (= 6.5)
+    : String(deal.proposal_interest_rate))
+```
+
+The submit (`:425-435`) then sends `proposal_interest_rate: rate` whenever an amount is present. So committing the $100k and hitting Send **without overriding the pre-filled rate persisted 6.5% as if it were finalized.** Confirmed it's a default: the deal's own `sold_rate` and `preferred_sold_rate` are both **null**, so 6.5 came from the `monthly_interest` display pre-fill. Worse, validation at `:421` *requires* a finite rate — so today there's **no way to commit an amount with the rate left "not finalized"**; it always submits the default.
+
+**Duration — not stored at all.** The submit body never sends a term, and there's no column to hold one. The form's `preferred_term` (defaulting to the deal's 12 months) is used only for client-side validation + the payment preview, then discarded. So **no defaulted duration record was created** — the admin "Amortized over" / "Frequency" pills read non-existent fields and render "-".
+
+**So the rate is the real issue.** Filed as **`#proprate`**: stop pre-filling the rate with the deal default, allow `proposal_interest_rate = null` ("amount committed, rate TBD"), and relax the `:421` validation + admin display to match.
+
+Want me to **null `proposal_interest_rate` on the `d6b78994` row** (live D1 write) so it reflects "amount committed, rate not finalized"? I'll only do that on your go.
+<!-- agent:boundary:df353629 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -151,7 +174,6 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - :pushpin: The amount was committed. But the other terms are not yet finalized...such as the interest rate and frequency. Was a record created with the interest rate and duration using default values? It should not have.
-- do [#proprate]
 <!-- /agent:queue -->
 
 ## Backlog

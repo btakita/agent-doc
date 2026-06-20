@@ -152,6 +152,12 @@ fn reap_stale_jetbrains_consumers_closeout(file: &Path) {
     if reaped > 0 {
         eprintln!("[hooks] reaped {reaped} stale jetbrains consumer patch file(s)");
     }
+    // `#lbreap`: also reap dead-PID live-buffer sidecars so closed-IntelliJ
+    // orphans never accumulate into a realtime-broadcast storm (`#sqdrift`).
+    let reaped_buffers = reap_stale_jetbrains_live_buffers(&project_root);
+    if reaped_buffers > 0 {
+        eprintln!("[hooks] reaped {reaped_buffers} stale jetbrains live-buffer sidecar(s)");
+    }
 }
 
 /// Fire a claim hook event.
@@ -480,6 +486,96 @@ fn reap_stale_jetbrains_consumers_with(
     reaped
 }
 
+/// `#lbreap`: parse the owning pid from a live-buffer sidecar filename that
+/// embeds a `jetbrains-<pid>-<uuid>` editor id (`<stem>.jetbrains-<pid>-<uuid>`).
+/// Returns `None` for the legacy no-editor-id sidecar (`<stem>`) and any
+/// non-JetBrains editor id (no parseable pid), which are never reaped.
+fn jetbrains_live_buffer_pid(filename: &str) -> Option<u32> {
+    let idx = filename.find("jetbrains-")?;
+    let rest = &filename[idx + "jetbrains-".len()..];
+    let pid_str = rest.split('-').next()?;
+    if pid_str.is_empty() || !pid_str.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    pid_str.parse::<u32>().ok()
+}
+
+/// `#lbreap`: best-effort reap of stale dead-PID IntelliJ live-buffer sidecars
+/// from `<project_root>/.agent-doc/live-buffer/`.
+///
+/// Mirrors [`reap_stale_jetbrains_consumers`] for patch files. A closed IntelliJ
+/// leaves its per-editor `<stem>.jetbrains-<pid>-<uuid>` live-buffer sidecar
+/// behind, and these accumulate (one per past window) until they swamp the
+/// realtime broadcast peer set — the `#sqdrift` degraded-session driver, where a
+/// single live editor's change fanned out to ~187 dead-editor orphans. `#sqdrift`
+/// reaps a dead peer only when a broadcast happens to touch it; this closeout
+/// pass reaps them proactively so they never accumulate. Removes only sidecars
+/// whose embedded pid is provably dead.
+///
+/// Best-effort: directory/read/remove errors degrade to a logged stderr warning;
+/// closeout must never fail because a reap could not run. On non-Unix this is a
+/// no-op (returns 0). Returns the number of files reaped.
+pub fn reap_stale_jetbrains_live_buffers(project_root: &Path) -> usize {
+    let dir = project_root.join(".agent-doc").join("live-buffer");
+    reap_stale_jetbrains_live_buffers_with(&dir, pid_is_live)
+}
+
+/// `#lbreap`: testable core of [`reap_stale_jetbrains_live_buffers`] with an
+/// injectable liveness predicate. Only sidecars whose embedded
+/// `jetbrains-<pid>` is NOT live (and not this process's own pid) are removed;
+/// legacy no-editor-id sidecars and non-JetBrains ids are always skipped.
+fn reap_stale_jetbrains_live_buffers_with(
+    dir: &Path,
+    is_pid_live: impl Fn(u32) -> bool,
+) -> usize {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return 0,
+        Err(err) => {
+            eprintln!(
+                "[hooks] live-buffer reap: cannot read {}: {err}",
+                dir.display()
+            );
+            return 0;
+        }
+    };
+    let self_pid = std::process::id();
+    let mut reaped = 0usize;
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                eprintln!("[hooks] live-buffer reap: dir entry error: {err}");
+                continue;
+            }
+        };
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        let Some(pid) = jetbrains_live_buffer_pid(name) else {
+            continue;
+        };
+        if pid == self_pid || is_pid_live(pid) {
+            continue;
+        }
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => reaped += 1,
+            Err(err) => {
+                eprintln!(
+                    "[hooks] live-buffer reap: failed to remove {}: {err}",
+                    path.display()
+                );
+            }
+        }
+    }
+    reaped
+}
+
 /// `#fccreap`: real liveness check used by [`reap_stale_jetbrains_consumers`].
 ///
 /// On Unix, `kill(pid, 0)` returning 0 (process exists) or erroring with `EPERM`
@@ -729,6 +825,54 @@ mod tests {
         assert!(alive.exists(), "alive-pid file should survive");
         assert!(base.exists(), "base patch file should survive");
         assert!(unrelated.exists(), "unrelated file should survive");
+    }
+
+    #[test]
+    fn jetbrains_live_buffer_pid_parses_pid_from_sidecar_name() {
+        // Per-editor sidecar `<stem>.jetbrains-<pid>-<uuid>`.
+        assert_eq!(
+            jetbrains_live_buffer_pid("130a18479c134e03.jetbrains-3873180-bf4c9d87-uuid"),
+            Some(3873180)
+        );
+        // Legacy no-editor-id sidecar (bare stem) → None (never reaped).
+        assert_eq!(jetbrains_live_buffer_pid("130a18479c134e03"), None);
+        // VS Code / non-jetbrains → None.
+        assert_eq!(jetbrains_live_buffer_pid("stem.vscode-99-uuid"), None);
+        // Malformed: no digits after the marker.
+        assert_eq!(jetbrains_live_buffer_pid("stem.jetbrains--uuid"), None);
+    }
+
+    #[test]
+    fn reap_removes_only_dead_pid_live_buffer_sidecars() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("live-buffer");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let dead_a = dir.join("s1.jetbrains-111-aaaa");
+        let dead_b = dir.join("s2.jetbrains-222-bbbb");
+        let alive = dir.join("s3.jetbrains-333-cccc");
+        let legacy = dir.join("s4"); // bare-stem legacy sidecar, no editor id
+        let vscode = dir.join("s5.vscode-9-dddd");
+        for p in [&dead_a, &dead_b, &alive, &legacy, &vscode] {
+            std::fs::write(p, "{}").unwrap();
+        }
+
+        // Only pid 333 is "alive".
+        let reaped = reap_stale_jetbrains_live_buffers_with(&dir, |pid| pid == 333);
+
+        assert_eq!(reaped, 2);
+        assert!(!dead_a.exists(), "dead-pid sidecar A should be reaped");
+        assert!(!dead_b.exists(), "dead-pid sidecar B should be reaped");
+        assert!(alive.exists(), "alive-pid sidecar should survive");
+        assert!(legacy.exists(), "legacy no-id sidecar must never be reaped");
+        assert!(vscode.exists(), "non-jetbrains sidecar must never be reaped");
+    }
+
+    #[test]
+    fn reap_live_buffers_is_noop_on_missing_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let missing = tmp.path().join("live-buffer");
+        assert_eq!(reap_stale_jetbrains_live_buffers_with(&missing, |_| false), 0);
     }
 
     #[test]

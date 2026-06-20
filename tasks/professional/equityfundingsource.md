@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,139 +33,25 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-032127.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-045343.md`*
 
 Compacted content:
-❯ - Archived 3 response topic(s): invite link should switch accounts; invite token should have expiration; deploy
+❯ - Archived 7 response topic(s): member rows should fill full width, no email truncation; member table should have a default deal-share %; deploy; 4 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: member rows should fill full width, no email truncation — opus-4-8
+### Re: Group-interest deals surface as Deals of Interest — opus-4-8
 
-> **Queue prompt:**
->
-> :pushpin: Lender group member rows should fill the entire width of the parent ![img_30.png](img_30.png). The email should not be truncated.
+Done and deployed. If a co-lender marks an available deal as interesting **on behalf of a lender group**, that deal now shows up as a **Deal of Interest** for every member of that group — on both `/lenders/available-deals` and `/lenders/dashboard` — even if the member never personally clicked "interested."
 
+**How it works:**
+- New `investor_deal_interest_group_by_deal_R_(group_ids, deal_ids)` returns, for the lender's groups, which deals any group is interested in (earliest interest wins for the group attribution).
+- `investor_deals_GET_` (the list endpoint that powers *both* pages) now loads the lender's groups, ORs group-interest into the `interested` flag, keeps those deals visible, and reports the interested group id. Both pages already bucket by `deal.interested`, so the deal moves into the "Deals of Interest" section automatically.
+- `investor_deals_by_id_GET_` (single deal) does the same, so opening the deal stays consistent and the commit flow can preselect the group.
 
-Fixed. The member rows were crammed into the narrow "Group" column, so emails ellipsis-truncated (`btak.dev+lend…` in your screenshot). They now render in a **full-width sub-row** spanning all columns.
+**Scope notes:** "interest on behalf of a group" means an `investor_deal_interests` row carrying that `lending_group_id` (created when a member expresses interest *as* the group). A purely personal interest by another member does **not** leak to the group. Membership is read via `lending_groups_for_user_R_` (groups you created + active/invited membership).
 
-**What changed** (`lib/ui--browser--efs/portal/shared/lending_groups.tsx`, `GroupRow`): the per-member list moved out of the Group cell into a `<tr><td colspan={5}>` beneath each group's summary row. Each member's email cell is `flex:1 1 auto; min-width:0; word-break:break-all` — it fills the available width and wraps if ever needed, instead of truncating. The "Joined/Invited" badge + "Resend Invite" button stay right-aligned.
-
-**Tests:** e2e source-assertions updated (full-width colspan + non-truncating email cell). Full suite **920 pass / 0 fail**, builds clean.
-
-**Shipped:** committed + pushed EFS `1a522af`, pointer `1c97edbee`. (No `deploy` is queued — queue one, or I'll fold it into the next deploy.)
-
-### Re: member table should have a default deal-share % — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: The lender group member table should have a default % of shares in deals. The deal % can be customized, but the default is the preset % values.
-
-
-Done — and the functional half already existed; the gap was making it **visible** in the member table.
-
-**Already in place (backend):** when a lender group joins a deal, `lending_group_interest_allocations_sync_` sets the per-deal split to each member's **`default_stake_bps`** (the preset %), falling back to an even split if none are set. That split is **customizable per deal** via `lending_group_deal_split_set_`. So "default = preset %, customizable per deal" was already the behavior.
-
-**Added this cycle (UI):** the member table now **surfaces each member's default deal share** — a labelled `X% default` badge per member (or "No default %" when unset), with a caption: *"Default deal share — the preset % each lender takes when this group joins a deal (customizable per deal)."* This pairs with the full-width member rows so the preset is clearly visible.
-
-**Tests:** e2e source-assertions for the default-share badge/caption + the backend default-allocation. Full suite **920 pass / 0 fail**, builds clean.
-
-**Shipped:** committed + pushed EFS `cbe850e`, pointer `816af47a0`.
-
-Note: the default % is currently **set at group creation / invite** (and used as the deal default). If you also want to **edit each member's default % inline in this table**, that's a small follow-up — say the word.
-
-### Re: deploy — lender-group table changes live — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-
-Deployed. **Version `afcf3ebd-c8b3-4ec8-afff-3f35f37b7f75`**, live at `https://equityfundingsource.brian-takita.workers.dev`. Both pending lender-group UI changes are now in production:
-
-- **Full-width member rows** — no more email truncation (the colspan sub-row).
-- **Default deal-share %** surfaced per member (the `X% default` badge + caption).
-
-**Smoke check:** homepage `200`; `/lenders/groups` → `303` to login (auth gate live). The member-table changes render in the authenticated lender portal — sign in to `/lenders/groups` to eyeball the full-width rows + default-share badges.
-
-Queue drained — only the operator-gated `#5q7z-ship` live-verify remains. Stopping.
-
-### Re: Lender Group members table + editable, rebalancing share % (lock pins) — opus-4-8
-
-> **Queue prompt:**
->
-> The Lender Group members should be in a display: table or display: flex, where the columns line up. Add an input to change the percentages. The percentages should add up to 100%. Use best UI practices for the input logic. Should we have a lock icon to lock or unlock other lender % to rebalance changes to another lender %? deploy
-
-
-> **Queue prompt:**
->
-> :pushpin: The Lender Group members should be in a display: table or display: flex, where the columns line up. Add an input to change the percentages. The percentages should add up to 100%. Use best UI practices for the input logic. Should we have a lock icon to lock or unlock other lender % to rebalance changes to another lender %? deploy
-
-
-Done and deployed. The Lender Group member rows are now an aligned editor instead of right-floated chips, and each member's default deal-share % is editable inline.
-
-**On the lock-icon question — yes, I built it.** A lock is the right call for a "must total 100%" set: without it, editing one lender silently shoves *every* other lender's % around, including ones the user already deliberately set. With per-row 🔒/🔓, you pin the rows you're happy with and only the unlocked rows absorb the rebalance.
-
-What shipped:
-- **Aligned table** — one CSS-grid template (`Lender | Share % | Lock | Status`) shared by the header and every row, so columns line up regardless of email length (long emails wrap, never truncate).
-- **Editable % inputs** — number inputs commit on blur (no fighting decimals while typing). Editing one share rebalances the remainder across the other *unlocked* members so the total always converges to **100%**; rounding uses largest-remainder so the integer bps sum exactly.
-- **Lock pins** — a locked row keeps its %, is excluded from auto-rebalance, and its input disables (unlock to edit). An edited share can't exceed the headroom locked rows leave.
-- **"Distribute evenly"** + **Reset**, and a live **Total: NN% ✓** indicator (amber until balanced). **Save shares** is gated on a balanced *and* dirty split.
-- **Persistence** — new `POST /api/lender/groups/:id/member-stakes` and `POST /api/admin/lending-groups/:id/member-stakes`, backed by `lending_group_member_stakes_set_`, which re-enforces the 100% split server-side.
-- Rebalance math is a pure, unit-tested module (`lending_groups_alloc.ts`).
-
-Verification: full suite **931 pass / 0 fail**, `bun run build` + `build:worker` clean. Committed (`79daf10`) + pushed, and **deployed to production** (version `366a229c`) — the new endpoints return 401 (auth-gated) live on the origin, matching the existing routes.
-
-### Re: Lender Group member columns still not aligned — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: The lender group member columns are not aligned ![img_31.png](img_31.png) on https://equityfundingsource.brian-takita.workers.dev/lenders/groups.
-
-
-Fixed and deployed. Thanks for the screenshot — it pinpointed the bug.
-
-**Root cause:** I had put the grid template on *each member row separately*, so every row was its own independent grid. The Status column was `max-content`, so the Invited row (with the wider "Invited" pill + "Resend Invite" button) sized that column wider than the Joined row — and because the Lender column was `1fr`, that width difference rippled back and shifted the Share %, Lock, and Status columns to different x-positions per row. Independent grids can't align to each other.
-
-**Fix:** the header and *all* member rows now live in **one** grid. Each row is a `display:contents` wrapper, so its four cells become items of that single grid and resolve against the same shared column tracks — every Share % input, lock, and status now lines up vertically regardless of row content.
-
-I verified the layout with a standalone render of the exact grid (one Joined row + one Invited/Resend row): both share inputs sit at the same x, locks align, and the Status column shares one right edge.
-
-Shipped: full suite **931 pass / 0 fail**, worker rebuilt. Committed (`79680d4`) + pushed, **deployed to production** (version `3272ab26`). Hard-refresh `/lenders/groups` (the JS bundle hash changed to `index.browser-MRVULXJE.js`) and the columns should line up.
-
-### Re: Move the Status column after the Lender column — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: In /lenders/groups, move the status column after the lender column.
-
-
-Done and deployed. The share editor now reads **Lender | Status | Share % | Lock** — Status moved into column 2, right after the lender, with its pill/Resend-Invite content left-aligned so it sits flush against the lender column.
-
-The columns still line up across rows (same single-grid + `display:contents` approach), which I re-verified with a standalone render: both status pills left-align at the same x, share inputs align, and locks align.
-
-Committed (`6c35e31`) + pushed, **deployed to production** (version `c57823b8`; bundle `index.browser-3X5JG7OP.js`). Hard-refresh `/lenders/groups` to see the reordered columns. Tests 931 pass / 0 fail.
-
-### Re: Still not lining up — format to highest standard — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Still not lining up well ![img_32.png](img_32.png). Please loop until you can format this to the highest standard.
-
-
-Now I see it. The columns *were* internally aligned, but the editor was stretched across the entire full-width group row: the `1fr` Lender column ate all the slack and flung Status / Share % / Lock to the far right with a big empty gap, so it read as sprawling and disconnected rather than a tidy table.
-
-**What I changed:**
-- **Capped the panel to a compact 760px** and left-grouped it, so the columns sit tightly under the lender instead of spanning the whole row.
-- **Hairline header underline** (Lender · Status · Share % · Lock) and a **divider above the footer** for a clean, real-table read.
-- Action buttons (**Distribute evenly / Save shares**) now align to the table's right edge; **Total** anchors the left.
-- Single-grid + `display:contents` still guarantees every Status pill, Share % input, and Lock lines up across rows.
-
-I rendered the exact markup before shipping (Joined row + Invited/Resend row at a wide viewport) to confirm it's tidy and aligned — screenshot verified.
-
-Shipped: tests **931 pass / 0 fail**, committed (`5338231`) + pushed, **deployed to production** (version `496add51`; bundle `index.browser-J2JASOC6.js`). Hard-refresh `/lenders/groups` to see it.
-
-If any specific element still reads off to you, point at it (or drop another screenshot) and I'll tighten it further — a subjective "highest standard" is easiest to converge with your eye on the live page.
-<!-- agent:boundary:979232c0 -->
+Verified: new real-D1 unit test (`investor_deal_interest_group_by_deal_R_`) + marketplace wiring asserts; full suite **936 pass / 0 fail**, worker rebuilt. Committed (`f329e86`) + pushed, **deployed to production** (version `36d6b774`).
+<!-- agent:boundary:c6ea452e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -178,6 +64,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: On /lenders/available-deals & /lenders/dashboard, if a lender is part of a lender group that is already interested in an available deal, that deal should show up as as a Deal of Interest.
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

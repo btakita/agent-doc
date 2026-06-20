@@ -1841,7 +1841,25 @@ fn spawn_managed_capability_proof_thread(
                                         harness_binary
                                     ),
                                 );
-                                shared.kill_child();
+                                // `#tsiftmdcrash` — do NOT kill the live hosted child on
+                                // capability-proof give-up. The `Failed` gate already blocks
+                                // all prompt dispatch (`capability_dispatch_blocker`), so a
+                                // SIGTERM here only destroys a healthy interactive harness the
+                                // operator is actively using — a false-positive background
+                                // network probe (e.g. a flaky `opencode run` proof child that
+                                // timed out at 45s) would yank the live session out from under
+                                // the operator and read as a "crash that killed the session
+                                // while the tmux pane stayed alive". Leave the child running:
+                                // dispatch stays gated + the actor is Blocked, so no unsafe
+                                // work is auto-dispatched, and the operator can fix the
+                                // environment / stop / restart to re-prove.
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "{}_capability_proof_live_child_preserved reason=dispatch_gated_not_killed",
+                                        harness_binary
+                                    ),
+                                );
                                 return;
                             }
                         }
@@ -3768,6 +3786,39 @@ Done.
         assert_eq!(
             auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
             AutoTriggerOutcome::SendFailed
+        );
+    }
+    #[test]
+    fn failed_capability_proof_gate_blocks_dispatch_so_live_child_need_not_be_killed() {
+        // `#tsiftmdcrash` regression guard: the capability-proof give-up path no
+        // longer SIGTERMs the live hosted child. That is only safe because the
+        // `Failed` gate is itself a complete dispatch block — no prompt can reach
+        // the agent while proof failed, so a healthy interactive harness the
+        // operator is using can stay alive without auto-dispatching unsafe work.
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        assert!(
+            shared.capability_dispatch_blocker().is_none(),
+            "NotRequired gate must not block dispatch"
+        );
+        shared.set_capability_proof_gate(CapabilityProofGate::Proven, None);
+        assert!(
+            shared.capability_dispatch_blocker().is_none(),
+            "Proven gate must not block dispatch"
+        );
+        shared.set_capability_proof_gate(
+            CapabilityProofGate::Failed,
+            Some("opencode child network probe timed out after 45s".to_string()),
+        );
+        let blocker = shared
+            .capability_dispatch_blocker()
+            .expect("Failed gate must block dispatch");
+        assert!(
+            blocker.contains("prompt dispatch is disabled"),
+            "blocker must state dispatch is disabled: {blocker}"
+        );
+        assert!(
+            blocker.contains("opencode child network probe timed out after 45s"),
+            "blocker must carry the proof-failure detail: {blocker}"
         );
     }
     #[test]

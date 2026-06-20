@@ -111,7 +111,23 @@ The real next steps split into two tracks.
 **Track B — operator-gated (blocked until you install 0.34.27 at a recycle boundary, then live-test):** the dozen `[operator-verify]` items — `#rdypoll-deploy`, `#qpausemix-verify`, `#sqedit-race` Phase 4, `#qheadstrike`, `#tsiftmdcrash-verify`, `#runexitrestart`, `#jbrundispatch`, `#qpauseux`, `#docdriftgrace`, `#cyh0`, `#8bfz`, `#1vhn`, `#fbwire`, `#hap7` (and `#gf5n`, which resolves when `#hap7` lands). None can advance without a live editor/pane — and Track A item #1 (`#j9ja`) is exactly what lets you close them from logs instead.
 
 **Recommended sequence:** `#j9ja` → `#editorbufwin` → `#wd40` → restart-agent (`#agentreloadrestart` / `#restartagentmenu`) → `#yzer`. Each is a focused cycle needing `make check` + `make tmux-ci`, so none is safe to rush inside this active drain loop — they want their own clean sessions.
-<!-- agent:boundary:a4b310d3 -->
+
+### Re: do [#yzer] — implemented #evmhplugin (plugin reconnect re-read) — opus-4-8
+
+Shipped the plugin half of `#evmh` (the `#yzer`/`#evmhplugin` item) — agent-doc `0.34.28`, submodule `f6b8ae17`, plugin `0.2.172`, pushed to origin/main.
+
+**The bug.** While the JB plugin is disconnected from IPC (supervisor down, plugin/cdylib reload), the binary can commit control-plane content to disk/HEAD. The open editor buffer is then stale, and the next `save_document` pushes that stale buffer back over HEAD — the `#postcommit-ipc-worktree-corruption` revert direction.
+
+**The fix (FFI-first).** The staleness *decision* lives in the binary, the plugin only applies it:
+
+- **`decide_reconnect_buffer`** (pure, in `agent-doc-orchestration::flow::document_mutation`): `in_sync` / `reread_disk` / `keep_buffer`. It re-reads disk **only** when the buffer is *provably* stale — it equals a recent prior commit of the file **and** disk equals clean `HEAD`. Any unprovable divergence ⇒ `keep_buffer`, so genuine unsynced user edits are never clobbered (editor wins, per `#editorbufwin`).
+- **FFI `agent_doc_reconnect_buffer_decision`** computes those two facts via `ffi_show_head` (disk == HEAD) and a new `ffi_show_prior_blobs` (buffer == any of the last 10 commits' blobs), returns the disk content to apply on `reread_disk`, and logs `reconnect_buffer_decision decision=… #yzer` to `ops.log`.
+- **Plugin**: `PatchWatcher.registerRoot` now reconciles on (re)connect — after the socket listener starts it walks every open `.md` session doc under that root, calls the FFI, and on `reread_disk` runs `applyReconnectReread` (re-checks the live editor generation, then `setText` + `saveDocument` to clear the dirty flag).
+
+**Verified.** `decide_reconnect_buffer` unit tests (all three branches) + a `reconnect_buffer_sim_rereads_stale_then_keeps_user_edits` SimWorld scenario (re-reads a prior-commit buffer, keeps an offline-edited buffer). `make check` green — 4832 tests, clippy clean. Plugin Kotlin compiles; both 0.2.172 zips built.
+
+**Closeout.** `#yzer` done (code complete + shipped). The `cargo install`/`lib-install` + **live reconnect** proof is genuinely operator-gated — a mid-session install would make the finalize client newer than the running supervisor and drift this very closeout — so I filed `#yzerverify` `[operator-verify]` with the exact repro and the `ops.log` marker to check. The `reconnect_buffer_decision` marker means you can prove/disprove it from the logs (the `#j9ja` avmark pattern).
+<!-- agent:boundary:bc829501 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -179,7 +195,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#yzer] #evmhplugin #agent-doc-bug Plugin-side half of #evmh: on JB plugin IPC reconnect, when the editor buffer is stale vs HEAD (committed content the binary wrote while the plugin was disconnected), re-read disk/HEAD into the buffer instead of pushing the stale buffer via save_document (the #postcommit-ipc-worktree-corruption revert direction that overwrote binary disk writes this session). Binary/HEAD wins for unsynced control-plane edits; editor wins only for genuine user edits (per #editorbufwin P1). Kotlin PatchWatcher/reconnect path + FFI staleness check + SimWorld/multi-window reconnect coverage. operator-verify (needs a live reconnect test). Also live-verify the shipped binary half (0.34.27, commit 9b13d529) at the next install/recycle boundary: a default reset --from-current on a doc open in a live JB editor must NOT raise a File Cache Conflict and ops.log should show reset_resume_clear_writeback transport=editor_ipc.
+- [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
 <!-- /agent:backlog -->
 
 ## Review

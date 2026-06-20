@@ -50,6 +50,11 @@ Queue corrected: the 3 answered free-text operator heads ("Why is the 0.1.0 supe
 
 > **Queue prompt:**
 >
+> :pushpin: Please diagnose JB file cache conflict dialogs.
+
+
+> **Queue prompt:**
+>
 > What are #next-steps to fix agent-doc bugs?
 
 
@@ -69,14 +74,14 @@ Queue corrected: the 3 answered free-text operator heads ("Why is the 0.1.0 supe
 - **Operator/agent guidance:** never `git checkout` / `Edit` / `sed` a session doc that has a live editor open — only `reset --from-current` + `commit` (listener-guarded). My use of `git checkout HEAD` and `Edit` during recovery *was itself* an FCC trigger this session.
 
 This **confirms `#cyh0`'s hypothesis**: the live trigger is the recovery/manual disk-write paths, not the guarded hot path. The stale "What are #next-steps" head (already answered + archived in the compaction) is cleared alongside this.
-<!-- agent:boundary:1119ccf6 -->
+<!-- agent:boundary:ddd32f5f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~What are #next-steps to fix agent-doc bugs?~~
-- :pushpin: Please diagnose JB file cache conflict dialogs.
+- ~~:pushpin: Please diagnose JB file cache conflict dialogs.~~
 - do [#evmh]
 <!-- /agent:queue -->
 <!--

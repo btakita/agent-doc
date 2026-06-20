@@ -63,7 +63,7 @@ Went through all 18 gated review items and split them by whether an agent sessio
 - #dealtab500 (live repro / #cftk token), #cftk (operator mints the Cloudflare D1 token), #5eq8 (closing-docs redesign, design-blocked), #efs-cutover-sso-plan (parent; writeable half is #cutover-checklist), #xcvg / #xcvg-prod-email (Resend domain #f4rq + SMTP #m6ch/#p40t), #dzmm / #dzmm-writeback-replay (TMO write field-map #7a4d + support #k2xg), #jnzs / #jnzs-approval-followup (await Judith/EFS reviewer), #67v2 (Kanban; partly TMO-gated), #zwws (remaining phases externally gated), #next-steps (custom-domain cutover deferred), #dropbox-sync-adapter (needs Dropbox access).
 
 No code changed this cycle — this was a triage pass. #5q7z-fix and #214f-gate are queued for the go-loop.
-<!-- agent:boundary:fc97f2bc -->
+<!-- agent:boundary:b059db09 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,6 +76,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#214f-gate]
+- do [#5q7z-fix]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,114 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-022443.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260620-030900.md`*
 
 Compacted content:
-❯ - Archived 5 response topic(s): Go through the review items; do #214f-gate; #5q7z TMO duplicate-loan fix; 2 more
+❯ - Archived 7 response topic(s): session compacted; deploy; /lenders/groups; 4 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: session compacted — opus-4-8
-
-Context compacted — 5 prior response topics archived to `.agent-doc/archives/…-20260620-022443.md` (the `#214f-gate` publish-on-acceptance gate, the `#5q7z` TMO duplicate-loan fix, and the *publishable*/*funded-vs-available* clarifications). All of that work is committed + pushed; nothing is pending.
-
-The only open queue head is the operator-gated **`#5q7z-ship`** deploy (deferred — needs `#commit-push-deploy` / `bun run deploy:worker` + live-verify). Ready for your next prompt.
-
-### Re: deploy — production worker deployed — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-
-Deployed the EFS worker to production. **Version `0dd3c983-40a9-48d2-8f2b-e3a6272ecf6c`**, live at `https://equityfundingsource.brian-takita.workers.dev`. The `#5q7z` TMO duplicate-loan fix and the `#214f-gate` publish-on-acceptance gate (both already committed + pushed) are now live.
-
-**Build fix en route:** the first `deploy:worker` aborted in `pack:worker` on a stale **0-byte** CSS artifact (`index.server-ZFSW4ULG_N63YTD5X.css` — the complete Tailwind+component bundle had been truncated). Removed the stale CSS files and rebuilt clean; the regenerated bundle passed and deployed.
-
-**Deploy steps:** remote D1 migrate ran clean → worker uploaded (1 new asset, 43 cached) → triggers deployed.
-
-**Smoke check:** homepage `HTTP 200` (72 KB, CSS bundle intact); `/lenders/available-deals` → `HTTP 303` redirect to login (the `require_auth_('investor')` gate is live).
-
-`#5q7z-ship`: the **deploy sub-step is done**. The only thing left is the operator live-verify — open the admin approve flow on an already-in-TMO loan (deal `7a0c1463` / loan `45ddae53` GQI751) and confirm it no longer 400s and the button reads "Already in TMO". Left it as `[operator-verify]`.
-
-Note: this is the `workers.dev` deployment (the live app). The `equityfundingsource.com` custom-domain + SSO cutover is separate and still gated on `#cftk`/`#efs-cutover-sso-plan`.
-
-### Re: /lenders/groups — per-member rows + Resend Invite — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: In /lenders/groups, have a row for each member of the group. If a member is invited but has not yet signed in, have a "Resend Invite" button to that lender.
-
-
-Done. In `/lenders/groups` each group now renders **one row per current member** (active or still-invited) instead of compact chips, and an invited-but-not-signed-in member gets an inline **"Resend Invite"** button.
-
-**UI** (`lib/ui--browser--efs/portal/shared/lending_groups.tsx`):
-- `GroupRow` lists `active`/`invited` members one per row — email (+ `(lead)` / stake), a status badge (**Joined** green / **Invited** amber), and for `status === 'invited'` (i.e. `joined_at` null — never signed in) a **Resend Invite** button.
-- `resend_invite_` now takes an optional `group_id`, so it resends inline from a group row (not just from inside the Invite dialog). It reuses the existing `…/invites` endpoint (which re-sends rather than erroring on an existing member) and surfaces the result as a toast.
-
-**Tests:** added source-assertion coverage in `investor-portal-e2e.test.ts` (member-row filter, group-id resend signature, inline `on_resend` wiring, the button, toast). Full suite green — **909 pass / 0 fail** — plus `bun run build` + `bun run build:worker`.
-
-**Shipped:** committed + pushed EFS `fce9b05`, superproject pointer `ab79a0d52`. The `deploy` queued behind this will push it live.
-
-### Re: deploy — lending-groups feature live — opus-4-8
-
-Deployed. **Version `89bc78ab-0c11-48ca-a5d7-b4841e7614c0`**, live at `https://equityfundingsource.brian-takita.workers.dev`. The `/lenders/groups` per-member rows + inline **Resend Invite** (EFS `fce9b05`, pointer `ab79a0d52`) are now in production.
-
-**Pipeline:** build clean (no stale-CSS issue this time) → remote D1 migrate clean → worker uploaded → triggers deployed.
-**Smoke check:** homepage `HTTP 200`; `/lenders/groups` → `HTTP 303` to login (auth gate live).
-
-Queue drained except the operator-gated `#5q7z-ship` (deploy done earlier; only your live-verify of the TMO duplicate-loan fix remains). Stopping here.
-
-### Re: remove "Continue with Google" on login — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: Remove "Continue with Google" button on the login page.
-
-
-Done. Removed the **Continue with Google** button from the login page (`lib/ui--server--efs/auth/login.ts`), along with its now-orphaned **"Or"** divider and the unused `google_url`. Email/password login is unchanged.
-
-Scope note: I left the matching Google button on the **signup** page (`signup.ts:92`) in place — the directive named the login page specifically. Say the word if you want it gone from signup too.
-
-**Tests:** added `tests/auth-login-ui.test.ts` (regression guard: no "Continue with Google" / `/login/google` / `google_url`; core login affordances intact). Full suite green — **910 pass / 0 fail** — build clean.
-
-**Shipped:** committed + pushed EFS `54a7eb8`, superproject pointer `e2547395a`. The `deploy` queued behind these will push it live.
-
-### Re: invite email auto-login + first-time account completion — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: An invite email should have a code to automatically log the user in. If it's the first time, the user should be presented with a form to complete their account.
-
-
-Done. Invitation emails now carry a **single-use auto-login link**; clicking it signs the lender in. First-timers are routed to a new **account-completion** page; returning lenders go straight to their portal.
-
-**Token model** (`lib/auth/invite_login.ts` + migration `0092_invite_login_tokens`): mirrors the password-reset pattern — a 32-byte random token, **SHA-256-hashed at rest** (raw token never stored), **single-use** (consumed on first click), **14-day TTL**, and minting a new invite supersedes the prior unused one.
-
-**Flow** (`lib/auth/routes.ts`):
-- `GET /login/invite?token=…` — validates + consumes the token, mints the session, then branches: empty `password_hash` (first-time) → `/account/complete`; otherwise → the lender's portal. Invalid/expired → login page with a friendly notice.
-- `GET`/`POST /account/complete` — session-gated. The first-timer confirms name + sets a password (≥8, confirmed); `user__complete_account_` writes name + first password in one update, and the session is re-minted with the completed profile. An already-complete account is bounced to its portal.
-
-**Invite email** (`lending_groups/notify.ts`): now embeds `/login/invite?token=…` instead of "set your password from the sign-in page."
-
-**Why empty-password = first-time:** invited accounts are created with `password_hash: ''` (existing behavior). A non-empty hash now means "fully set up", so the gate is unambiguous — and password login already rejects empty-hash accounts, so the token is the only way in until completion.
-
-**Tests:** `invite-login-token.test.ts` (real in-memory SQLite — single-use, expiry, supersede, unknown-token) + `invite-autologin-wiring.test.ts` (routes/notify/page/migration/export). Full suite **917 pass / 0 fail**, builds clean.
-
-**Scope:** wired into the **lending-group invite** (the invite path that auto-creates accounts). Borrower invites already have their own `/apply/finish` token flow, and admin-provisioning emails are separate — say the word if you want the auto-login link extended to those too.
-
-**Shipped:** committed + pushed EFS `475b90e`, superproject pointer `edbaf5b42`. Migration `0092` applies on the next deploy. The `deploy` queued behind this will push it live.
-
-### Re: deploy — login + invite auto-login live — opus-4-8
-
-Deployed. **Version `37955c6b-dad8-4fb0-a1ff-7971d00a4d5e`**, live at `https://equityfundingsource.brian-takita.workers.dev`. Both queued changes shipped: the **Continue-with-Google removal** and the **invite email auto-login + account completion** (migration `0092` applied to remote D1).
-
-**Smoke check (live):**
-- `/login` → `200`, **"Continue with Google" absent** (grep count 0).
-- `/login/invite` (no token) → `303` → login with "invitation link is invalid or has expired" notice.
-- `/account/complete` (no session) → `303` → `login?next=/account/complete` (session-gated, as designed).
-
-Queue drained — the only remaining head is the operator-gated `#5q7z-ship` (TMO duplicate-loan fix deployed earlier; just your live-verify left). Stopping.
-<!-- agent:boundary:605bec56 -->
+<!-- agent:boundary:e9585bac -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -153,6 +51,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: When I'm logged in as btak.dev+investor@gmail.com and I click on the btak.dev+lender@gmail.com invite link, btak.dev+investor@gmail.com should be logged out and btak.dev+lender@gmail.com should be logged in.
+- :pushpin: The invite token should have 1 week expiration. If the user attempts to use the link after the expriration
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

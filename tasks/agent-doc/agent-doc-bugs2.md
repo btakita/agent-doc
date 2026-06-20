@@ -86,7 +86,7 @@ Did the agent-actionable part of §D and shipped it (agent-doc submodule `138dc6
 **On "the restart state should not lag":** the ~29s "Still waiting for claude … active claude turn" window is the route *correctly* polling for the harness dispatch-ready prompt without typing (the §D fix — poll silently, inject once). It's a slow harness boot, not the route lagging; the fail-closed-then-retry is the safe shape that prevents the stacking. Reducing the boot wait itself is a separate tuning knob, not part of §D.
 
 **Operator-gated remainder** (filed as `#rdypoll-deploy`): the live two-pane restart verify + the `cargo install` / `agent-doc lib-install` / `admin recycle` deploy are deferred from this in-session run to avoid a finalize-client-newer-than-supervisor drift mid-session. After you deploy, restart a session and JB `Run Agent Doc`: `ops.log` should show a single `dispatch_inject … attempt=1` and zero `attempt=2`.
-<!-- agent:boundary:44b342a6 -->
+<!-- agent:boundary:137e3448 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -163,6 +163,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rdypoll-deploy] [operator-verify] #agent-doc-bug Deploy + live-verify the #rdypoll §D dispatch_inject marker (agent-doc submodule 138dc658, 0.34.23). Agent-actionable code shipped+pushed (dispatch_inject attempt=N marker at both injection funnels + SimWorld assertion). REMAINING (operator-gated, deferred from session to avoid finalize-client-newer-than-supervisor drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then the two-pane restart repro: restart a session, JB Run Agent Doc, confirm ops.log shows a single dispatch_inject ... attempt=1 and ZERO attempt=2 (proves no post-restart re-type stacking). Plan: tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md (§D)
 <!-- /agent:backlog -->
 
 ## Review

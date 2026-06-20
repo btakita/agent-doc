@@ -386,6 +386,68 @@ pub fn full_content_visible_replacement_event(
     ))
 }
 
+/// Decision for reconciling a JetBrains editor buffer against disk when the
+/// plugin (re)connects its IPC listener (`#yzer` / `#evmhplugin`, the plugin
+/// half of `#evmh`).
+///
+/// While the plugin is disconnected (supervisor down, plugin/cdylib reload), the
+/// binary may commit control-plane content to disk/HEAD. On reconnect the editor
+/// buffer is then stale vs HEAD. If the plugin later pushes that stale buffer
+/// back via `save_document`, it reverts the binary's committed writes — the
+/// `#postcommit-ipc-worktree-corruption` direction. The fix: on reconnect,
+/// re-read disk/HEAD into the buffer when (and only when) we can PROVE the buffer
+/// is stale committed content. The editor wins only for genuine user edits
+/// (per `#editorbufwin` P1), so an unprovable divergence keeps the buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconnectBufferDecision {
+    /// Buffer already matches disk — nothing to do.
+    InSync,
+    /// Buffer equals a prior commit of the file and disk is clean HEAD — the
+    /// binary advanced disk while the plugin was disconnected. HEAD wins:
+    /// re-read disk into the buffer.
+    RereadDisk,
+    /// Buffer diverges from disk but is not a known prior commit — treat as
+    /// genuine local user edits. Editor wins: keep the buffer.
+    KeepBuffer,
+}
+
+impl ReconnectBufferDecision {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InSync => "in_sync",
+            Self::RereadDisk => "reread_disk",
+            Self::KeepBuffer => "keep_buffer",
+        }
+    }
+}
+
+/// Decide how to reconcile an editor buffer with disk on plugin IPC reconnect.
+///
+/// - `buffer_matches_disk`: editor buffer content == on-disk content.
+/// - `disk_is_committed_head`: on-disk content == the file's blob at `HEAD`
+///   (the working tree is clean for this file — disk is authoritative committed
+///   content the binary wrote, not a half-applied write).
+/// - `buffer_matches_prior_commit`: editor buffer content == the file's blob at
+///   some recent prior commit (definitive proof the buffer is stale committed
+///   content, not unsynced user edits).
+///
+/// Re-read disk only when the buffer is PROVABLY stale (equals a prior commit)
+/// and disk is clean HEAD; otherwise keep the buffer so genuine user edits are
+/// never clobbered.
+pub fn decide_reconnect_buffer(
+    buffer_matches_disk: bool,
+    disk_is_committed_head: bool,
+    buffer_matches_prior_commit: bool,
+) -> ReconnectBufferDecision {
+    if buffer_matches_disk {
+        return ReconnectBufferDecision::InSync;
+    }
+    if disk_is_committed_head && buffer_matches_prior_commit {
+        return ReconnectBufferDecision::RereadDisk;
+    }
+    ReconnectBufferDecision::KeepBuffer
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrchestratePatchbackRejectReason {
     MissingExchangePatch,
@@ -533,6 +595,45 @@ pub fn enforce_orchestrate_patchback_contract(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reconnect_buffer_in_sync_when_buffer_matches_disk() {
+        // Even if the proof inputs look stale, an in-sync buffer is a no-op.
+        assert_eq!(
+            decide_reconnect_buffer(true, true, true),
+            ReconnectBufferDecision::InSync
+        );
+        assert_eq!(
+            decide_reconnect_buffer(true, false, false),
+            ReconnectBufferDecision::InSync
+        );
+    }
+
+    #[test]
+    fn reconnect_buffer_rereads_provably_stale_committed_buffer() {
+        // buffer != disk, disk is clean HEAD, buffer equals a prior commit
+        // → the binary advanced disk while disconnected; HEAD wins.
+        assert_eq!(
+            decide_reconnect_buffer(false, true, true),
+            ReconnectBufferDecision::RereadDisk
+        );
+    }
+
+    #[test]
+    fn reconnect_buffer_keeps_unproven_divergent_buffer() {
+        // buffer diverges but is NOT a known prior commit → genuine user edits;
+        // editor wins, never clobber.
+        assert_eq!(
+            decide_reconnect_buffer(false, true, false),
+            ReconnectBufferDecision::KeepBuffer
+        );
+        // disk is not clean HEAD (uncommitted working-tree change) → don't reread
+        // even if the buffer happens to match a prior commit.
+        assert_eq!(
+            decide_reconnect_buffer(false, false, true),
+            ReconnectBufferDecision::KeepBuffer
+        );
+    }
 
     #[test]
     fn patch_markers_without_closed_blocks_are_malformed() {

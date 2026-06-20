@@ -1242,6 +1242,146 @@ fn ffi_show_head(file: &std::path::Path) -> Option<String> {
         .and_then(|output| String::from_utf8(output.stdout).ok())
 }
 
+/// Recent prior-commit blob contents of `file` (newest first, up to `limit`
+/// commits that touched the file). Used by the reconnect staleness check
+/// (`#yzer`) to prove an editor buffer is stale committed content rather than
+/// unsynced user edits. Best-effort: returns an empty vec on any git failure.
+fn ffi_show_prior_blobs(file: &std::path::Path, limit: usize) -> Vec<String> {
+    let Some(parent) = file.parent() else {
+        return Vec::new();
+    };
+    let Some(root) = std::process::Command::new("git")
+        .current_dir(parent)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|stdout| std::path::PathBuf::from(stdout.trim()))
+    else {
+        return Vec::new();
+    };
+    let Ok(relative) = file.strip_prefix(&root) else {
+        return Vec::new();
+    };
+    let rel = relative.to_string_lossy().to_string();
+    let commits = std::process::Command::new("git")
+        .current_dir(&root)
+        .args([
+            "log",
+            &format!("-n{limit}"),
+            "--format=%H",
+            "--",
+            rel.as_str(),
+        ])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .unwrap_or_default();
+    commits
+        .lines()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .filter_map(|commit| {
+            let spec = format!("{commit}:{rel}");
+            std::process::Command::new("git")
+                .current_dir(&root)
+                .args(["show", &spec])
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .and_then(|output| String::from_utf8(output.stdout).ok())
+        })
+        .collect()
+}
+
+/// Decide how an editor plugin should reconcile its buffer with disk when it
+/// (re)connects its IPC listener, and return the disk content to apply when a
+/// re-read is warranted (`#yzer` / `#evmhplugin`).
+///
+/// Returns a JSON object (free with [`agent_doc_free_string`]):
+/// ```json
+/// {"decision": "reread_disk" | "keep_buffer" | "in_sync", "content": "<disk>"}
+/// ```
+/// `content` is present only for `reread_disk`. On any error the result is
+/// `{"decision":"keep_buffer"}` (fail safe — never clobber the buffer on
+/// uncertainty). Emits a `reconnect_buffer_decision` marker to the document's
+/// `ops.log` so the path is verifiable from the logs.
+///
+/// # Safety
+///
+/// `project_root`, `file_path`, and `buffer_content` must be valid,
+/// NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_reconnect_buffer_decision(
+    project_root: *const c_char,
+    file_path: *const c_char,
+    buffer_content: *const c_char,
+) -> *mut c_char {
+    use agent_doc_orchestration::flow::document_mutation::{
+        decide_reconnect_buffer, ReconnectBufferDecision,
+    };
+    let keep = || {
+        CString::new(r#"{"decision":"keep_buffer"}"#)
+            .unwrap()
+            .into_raw()
+    };
+    let (Ok(file), Ok(buffer)) = (
+        unsafe { CStr::from_ptr(file_path) }.to_str(),
+        unsafe { CStr::from_ptr(buffer_content) }.to_str(),
+    ) else {
+        return keep();
+    };
+    let _ = project_root; // root is derived from the file's git toplevel
+    let file_path_buf = std::path::PathBuf::from(file);
+    let Ok(disk) = std::fs::read_to_string(&file_path_buf) else {
+        return keep();
+    };
+
+    // Trailing-whitespace tolerant comparison: editor buffers routinely differ
+    // from git blobs only by a trailing newline.
+    let norm = |s: &str| s.trim_end().to_string();
+    let buffer_n = norm(buffer);
+    let disk_n = norm(&disk);
+
+    let buffer_matches_disk = buffer_n == disk_n;
+    let head = ffi_show_head(&file_path_buf);
+    let disk_is_committed_head = head.as_deref().map(norm) == Some(disk_n.clone());
+    let buffer_matches_prior_commit = ffi_show_prior_blobs(&file_path_buf, 10)
+        .iter()
+        .any(|blob| norm(blob) == buffer_n);
+
+    let decision = decide_reconnect_buffer(
+        buffer_matches_disk,
+        disk_is_committed_head,
+        buffer_matches_prior_commit,
+    );
+
+    agent_doc_orchestration::ops_log::log_op(
+        &file_path_buf,
+        &format!(
+            "reconnect_buffer_decision decision={} buffer_matches_disk={} disk_is_head={} buffer_is_prior_commit={} #yzer",
+            decision.as_str(),
+            buffer_matches_disk,
+            disk_is_committed_head,
+            buffer_matches_prior_commit,
+        ),
+    );
+
+    let json = match decision {
+        ReconnectBufferDecision::RereadDisk => serde_json::json!({
+            "decision": decision.as_str(),
+            "content": disk,
+        }),
+        _ => serde_json::json!({ "decision": decision.as_str() }),
+    };
+    match CString::new(json.to_string()) {
+        Ok(c) => c.into_raw(),
+        Err(_) => keep(),
+    }
+}
+
 fn ffi_normalize_transient_agent_doc_markers(content: &str) -> String {
     content
         .lines()

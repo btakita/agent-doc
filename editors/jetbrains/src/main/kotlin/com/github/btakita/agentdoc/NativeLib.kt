@@ -412,6 +412,20 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_commit(filePath: String): Boolean
 
+    /**
+     * Decide how to reconcile an editor buffer with disk on plugin IPC reconnect
+     * (#yzer / #evmhplugin). Returns a JSON pointer:
+     * `{"decision":"reread_disk"|"keep_buffer"|"in_sync","content":"<disk>"}`
+     * (`content` present only for `reread_disk`). Fail-safe `keep_buffer` on any
+     * error so a buffer with genuine user edits is never clobbered.
+     * Caller must free the result with [agent_doc_free_string].
+     */
+    fun agent_doc_reconnect_buffer_decision(
+        projectRoot: String,
+        filePath: String,
+        bufferContent: String,
+    ): Pointer?
+
     /** Free a string returned by any agent_doc_* function. */
     fun agent_doc_free_string(ptr: Pointer?)
 

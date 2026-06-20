@@ -168,7 +168,106 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         startSocketListenerViaFfi(state)
         processPendingPatches(patchesDir)
+        // #yzer / #evmhplugin: a (re)connect is the moment to reconcile any
+        // editor buffer the binary advanced past while this plugin was
+        // disconnected (committed content the buffer never saw). Re-read disk
+        // into provably-stale buffers so a later save_document cannot revert the
+        // binary's committed writes. Runs off-EDT (it blocks on idle + git).
+        Thread({
+            try {
+                reconcileStaleBuffersOnReconnect(state)
+            } catch (e: Exception) {
+                LOG.warn("[reconnect] reconcile failed for $root: ${e.message}")
+            }
+        }, "agent-doc-reconnect-reconcile-${File(root).name}").apply {
+            isDaemon = true
+            start()
+        }
         LOG.info("[patch-watcher] registered root: $root")
+    }
+
+    /**
+     * #yzer / #evmhplugin: on IPC (re)connect, reconcile every open session
+     * document under [state].root whose editor buffer is PROVABLY stale committed
+     * content (the binary advanced disk/HEAD while the plugin was disconnected).
+     * The binary FFI owns the staleness decision; the plugin only applies a
+     * re-read when told to, so genuine unsynced user edits are never clobbered
+     * (editor wins, per #editorbufwin).
+     */
+    private fun reconcileStaleBuffersOnReconnect(state: RootState) {
+        val lib = AgentDocLib.get() ?: return
+        val app = ApplicationManager.getApplication()
+        // Snapshot the open .md buffers that belong to this exact root.
+        val candidates = mutableListOf<Pair<String, String>>()
+        app.invokeAndWait {
+            val fem = FileEditorManager.getInstance(project)
+            for (vf in fem.openFiles) {
+                val path = vf.path
+                if (!path.endsWith(".md")) continue
+                if (resolveRootFor(path) != state.root) continue
+                val document = FileDocumentManager.getInstance().getDocument(vf) ?: continue
+                candidates.add(path to document.text)
+            }
+        }
+        for ((path, buffer) in candidates) {
+            val ptr = try {
+                lib.agent_doc_reconnect_buffer_decision(state.root, path, buffer)
+            } catch (e: Throwable) {
+                LOG.warn("[reconnect] decision FFI failed for $path: ${e.message}")
+                null
+            } ?: continue
+            val json = try {
+                ptr.getString(0)
+            } finally {
+                lib.agent_doc_free_string(ptr)
+            }
+            val decision = extractStringField(json, "decision")
+            if (decision != "reread_disk") {
+                if (decision != null && decision != "in_sync") {
+                    LOG.info("[reconnect] $path decision=$decision (buffer kept) #yzer")
+                }
+                continue
+            }
+            val content = extractStringField(json, "content") ?: continue
+            applyReconnectReread(path, content)
+        }
+    }
+
+    /**
+     * Re-read committed disk/HEAD content into a stale editor buffer on reconnect
+     * (#yzer). Mirrors [refreshContentViaDocument] but the staleness proof was
+     * already established by the binary FFI, so this only re-checks the live
+     * editor generation before setText to avoid racing a concurrent edit.
+     */
+    private fun applyReconnectReread(filePath: String, content: String) {
+        if (!awaitIdleBeforeDocumentMutation(filePath, "reconnect stale-buffer reread")) {
+            return
+        }
+        ApplicationManager.getApplication().invokeAndWait {
+            val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
+            targetFile.refresh(false, false)
+            val fdm = FileDocumentManager.getInstance()
+            val document = fdm.getDocument(targetFile) ?: return@invokeAndWait
+            if (document.text == content) {
+                return@invokeAndWait
+            }
+            val proof = EditorApplyProof(document.text, document.modificationStamp)
+            var applied = false
+            WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reconnect Reread", null, {
+                if (!editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
+                    LOG.warn("[reconnect] stale editor generation during reread for $filePath; rejecting")
+                    return@runWriteCommandAction
+                }
+                document.setText(content)
+                applied = true
+                LOG.info(
+                    "[reconnect] re-read disk/HEAD into stale buffer for $filePath (${content.length} chars) #yzer",
+                )
+            })
+            if (applied) {
+                fdm.saveDocument(document)
+            }
+        }
     }
 
     /**

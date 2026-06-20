@@ -640,6 +640,7 @@ struct Coverage {
     normalization_repair_patches: usize,
     sidecar_normalization_divergences: usize,
     stale_source_buffer_skips: usize,
+    reconnect_reread_decisions: usize,
     ipc_snapshot_live_prompt_blocks: usize,
     live_prompt_forward_merges: usize,
     already_applied_response_recoveries: usize,
@@ -859,6 +860,7 @@ impl Coverage {
         self.normalization_repair_patches += other.normalization_repair_patches;
         self.sidecar_normalization_divergences += other.sidecar_normalization_divergences;
         self.stale_source_buffer_skips += other.stale_source_buffer_skips;
+        self.reconnect_reread_decisions += other.reconnect_reread_decisions;
         self.already_applied_response_recoveries += other.already_applied_response_recoveries;
         self.ack_sidecar_only_repairs += other.ack_sidecar_only_repairs;
         self.visible_duplicate_repairs += other.visible_duplicate_repairs;
@@ -3421,6 +3423,63 @@ fn full_content_source_proof_sim_rejects_stale_editor_buffers() {
             "{source:?} must not apply stale compact/repair/timeout replacement content"
         );
     }
+}
+
+#[test]
+fn reconnect_buffer_sim_rereads_stale_then_keeps_user_edits() {
+    use agent_doc_orchestration::flow::document_mutation::{
+        decide_reconnect_buffer, ReconnectBufferDecision,
+    };
+    let mut world = SimWorld::new(2_044);
+
+    // The content the editor buffer last saw before the plugin disconnected.
+    let prior_committed = world.doc.clone();
+
+    // While disconnected, the binary committed a control-plane edit (queue/status
+    // bookkeeping). Disk == HEAD now holds that newer content.
+    world.append_to_exchange("<!-- agent:boundary:reconnect -->\n").unwrap();
+    let disk_head = world.doc.clone();
+    assert_ne!(prior_committed, disk_head);
+
+    // Case 1: the buffer is exactly the prior committed version (stale, unedited).
+    // disk is clean HEAD, buffer matches a prior commit → re-read disk.
+    let buffer_stale = prior_committed.clone();
+    let decision = decide_reconnect_buffer(
+        buffer_stale == disk_head,
+        true, // disk == HEAD
+        buffer_stale == prior_committed,
+    );
+    assert_eq!(
+        decision,
+        ReconnectBufferDecision::RereadDisk,
+        "a buffer equal to a prior commit while disk is clean HEAD must re-read disk"
+    );
+    if decision == ReconnectBufferDecision::RereadDisk {
+        world.coverage.reconnect_reread_decisions += 1;
+    }
+
+    // Case 2: the buffer has genuine unsynced user edits (matches neither disk
+    // nor any prior commit) → editor wins, never clobber.
+    let buffer_user_edit = format!("{prior_committed}\n❯ user typed offline\n");
+    let decision = decide_reconnect_buffer(
+        buffer_user_edit == disk_head,
+        true,
+        buffer_user_edit == prior_committed,
+    );
+    assert_eq!(
+        decision,
+        ReconnectBufferDecision::KeepBuffer,
+        "a buffer with genuine user edits must be kept (editor wins per #editorbufwin)"
+    );
+
+    // Case 3: buffer already matches disk → no-op.
+    let decision = decide_reconnect_buffer(true, true, true);
+    assert_eq!(decision, ReconnectBufferDecision::InSync);
+
+    assert_eq!(
+        world.coverage.reconnect_reread_decisions, 1,
+        "exactly one stale buffer should be re-read in this scenario"
+    );
 }
 
 #[test]

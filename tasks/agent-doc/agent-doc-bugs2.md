@@ -197,7 +197,22 @@ Fixed the destructive half of your report ("I'm typing in a queue item and agent
 **Recovery note:** the queue component had been corrupted by a stale-supervisor CRDT replay (a monsterrodholders deploy log + a prior response + console output spliced into `agent:queue` — the console-output-in-queue class). HEAD was clean, so I restored from HEAD, `reset --from-current --preserve-session`, and marked the supervisor to `admin recycle` at its idle boundary to clear the stale in-memory CRDT.
 
 **Remaining → `#qstrikenote`** (filed to backlog): Phase 1 explicit deterministic "auto-struck" note (the blockquote-quote already puts the head in the response, but an explicit label is clearer) + a SimWorld integration case. No release/install (STOP-cutting-releases); source committed + pushed.
-<!-- agent:boundary:6fafec5c -->
+
+### Re: route/dispatch/stall reports — already fixed in code; were stale-binary symptoms — opus-4-8
+
+Recovery is complete and the session is healthy again: `make install` + `cargo build --release` brought every binary/cdylib current (the `stale_install` warning is gone), `admin recycle` landed, and this cycle's writes committed cleanly with **zero corruption** — confirming the stale supervisor that was splicing console output into `agent:queue` and driving `live_prompt_drift` is gone.
+
+**Key finding on the route/dispatch/stall reports.** I traced them in the binary, and the behaviors you reported are **already implemented in shipped code** — they were almost certainly symptoms of the **stale pre-06933b72 supervisor binary** I just replaced, not unfixed bugs:
+
+- *"agent-doc was typed into the input but not submitted"* → `route/dispatch.rs` already detects `not_dispatched` (composer stayed empty + pane idle) and **re-sends the full trigger (text+Enter)** in a loop (`while acceptance.not_dispatched`, ~L856) — exactly your "loop to check the input and submit it if not submitted." `#jbrundispatch` directive 2.
+- *"JB Run Agent Doc stalled / re-typed N times un-submitted"* → `send_direct_pane_enter_resubmit_until_stable` (~L779/895) loops Enter until the trigger submits, and the `dispatch_inject attempt=N` ops.log marker (`#rdypoll`) makes any multi-injection regression provable from logs.
+
+So I did **not** re-implement working code. Instead I filed **`#routeretest` `[operator-verify]`**: now that the fresh binary is installed + recycled, drive one JB/Codex Run-Agent-Doc dispatch and confirm `ops.log` shows a single `dispatch_inject attempt=1` + a submitted trigger (no stacked copies, no stray `/clear`). If any symptom *persists on the fresh binary*, that's a genuine residual gap and I'll dig in.
+
+**Stopping the loop here.** The remaining drainable heads are not cleanly agent-codeable right now: the route/dispatch/stall family is code-complete pending your live re-test (`#routeretest`/`#rdypoll`), `#s81q` (Stop/Restart menus) is release-gated plugin work needing scope confirmation, and `#qstrikenote` is the Phase-1 explanation-note follow-up I just filed (binary, `[recommended]`). I'm not striking your reports — they stay queued until you confirm them resolved on the fresh binary. Tell me to take `#qstrikenote`, or re-prioritize, whenever you're ready.
+
+**This session shipped:** `#qnodemerge4wire` (op-capture FFI supply side) + `#qstrikeexplain` (free-text strike defers in-flight edits), both pushed, `make check` green at 4937 tests; root-caused + fixed the stale-binary corruption.
+<!-- agent:boundary:bca992a4 -->
 <!-- /agent:exchange -->
 
 ## Queue

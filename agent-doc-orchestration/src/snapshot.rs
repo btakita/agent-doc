@@ -13,6 +13,8 @@
 //!   `<project_root>/.agent-doc/crdt/<hash>.yrs`.
 //! - `overlay_crdt_path_for(doc)`: compute structured markdown-overlay CRDT
 //!   state path `<project_root>/.agent-doc/crdt/<hash>.overlay.yrs`.
+//! - `multinode_crdt_path_for(doc)`: compute per-node CRDT state path
+//!   `<project_root>/.agent-doc/crdt/<hash>.nodes.yrs` (`#qnodemerge2`).
 //! - `pre_response_path_for(doc)`: compute pre-response snapshot path
 //!   `<project_root>/.agent-doc/pre-response/<hash>.md`.
 //! - `SnapshotLock::acquire(doc)`: acquire an exclusive advisory flock on the snapshot lock
@@ -661,6 +663,7 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
         ("pending", "md"),
         ("crdt", "yrs"),
         ("crdt", "overlay.yrs"),
+        ("crdt", "nodes.yrs"), // #qnodemerge2 per-node state sidecar
         ("pre-response", "md"),
     ];
 
@@ -960,6 +963,18 @@ pub fn overlay_crdt_path_for(doc: &Path) -> Result<PathBuf> {
     crdt_path_for_filename(doc, filename)
 }
 
+/// Compute the per-node CRDT state file path for a document (`#qnodemerge2`).
+/// Returns `<project_root>/.agent-doc/crdt/<hash>.nodes.yrs`.
+///
+/// This is the per-component successor to the whole-doc `<hash>.yrs` blob: it
+/// persists one independent Yrs state per top-level node so each node's base
+/// advances independently across cycles.
+pub fn multinode_crdt_path_for(doc: &Path) -> Result<PathBuf> {
+    let hash = doc_hash(doc)?;
+    let filename = format!("{}.nodes.yrs", hash);
+    crdt_path_for_filename(doc, filename)
+}
+
 fn crdt_path_for_filename(doc: &Path, filename: String) -> Result<PathBuf> {
     let canonical = doc.canonicalize()?;
     let project_root = find_project_root(&canonical)
@@ -995,6 +1010,55 @@ pub fn save_overlay_crdt(doc: &Path, state: &[u8]) -> Result<()> {
     let path = overlay_crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
     write_crdt_state(&path, state)
+}
+
+/// Load raw per-node CRDT container bytes for a document (`#qnodemerge2`), if any.
+pub fn load_multinode_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
+    let path = multinode_crdt_path_for(doc)?;
+    let _lock = acquire_crdt_lock(doc)?;
+    crate::fs_util::read_optional_bytes(&path)
+        .with_context(|| format!("failed to read per-node CRDT state {}", path.display()))
+}
+
+/// Save per-node CRDT container bytes for a document (`#qnodemerge2`).
+pub fn save_multinode_crdt(doc: &Path, state: &[u8]) -> Result<()> {
+    let path = multinode_crdt_path_for(doc)?;
+    let _lock = acquire_crdt_lock(doc)?;
+    write_crdt_state(&path, state)
+}
+
+/// Load the durable per-node merge state for a document (`#qnodemerge2`).
+///
+/// Resolution order, never panics:
+/// 1. The `<hash>.nodes.yrs` per-node container, when present.
+/// 2. Otherwise lazily migrate the legacy whole-doc `<hash>.yrs` blob by
+///    splitting it into per-node states.
+/// 3. Otherwise rebuild fresh per-node states from `fallback_markdown`.
+pub fn multinode_crdt_state(
+    doc: &Path,
+    fallback_markdown: &str,
+) -> Result<crate::crdt::MultiNodeState> {
+    let _lock = acquire_crdt_lock(doc)?;
+    let nodes_path = multinode_crdt_path_for(doc)?;
+    if let Some(bytes) = crate::fs_util::read_optional_bytes(&nodes_path)
+        .with_context(|| format!("failed to read per-node CRDT state {}", nodes_path.display()))?
+    {
+        return Ok(crate::crdt::MultiNodeState::decode_or_migrate(
+            &bytes,
+            fallback_markdown,
+        ));
+    }
+    // No per-node sidecar yet — migrate the legacy whole-doc blob if present.
+    let legacy_path = crdt_path_for(doc)?;
+    if let Some(bytes) = crate::fs_util::read_optional_bytes(&legacy_path)
+        .with_context(|| format!("failed to read CRDT state {}", legacy_path.display()))?
+    {
+        return Ok(crate::crdt::MultiNodeState::decode_or_migrate(
+            &bytes,
+            fallback_markdown,
+        ));
+    }
+    crate::crdt::MultiNodeState::from_text(fallback_markdown)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1108,6 +1172,17 @@ pub fn save_document_crdt(doc: &Path, legacy_state: &[u8], markdown: &str) -> Re
     let overlay_state =
         agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(markdown).encode_state();
     save_overlay_crdt(doc, &overlay_state)?;
+    // Per-node successor to the whole-doc `<hash>.yrs` blob (`#qnodemerge2`).
+    // Rebuilding from the snapshot markdown each cycle also GCs per node
+    // (compaction routes through here, so post-compact content yields fresh
+    // per-node states). A parse failure must not fail the load-bearing save —
+    // log and skip the per-node sidecar.
+    match crate::crdt::MultiNodeState::from_text(markdown) {
+        Ok(multinode) => save_multinode_crdt(doc, &multinode.encode())?,
+        Err(e) => eprintln!(
+            "[crdt] save_document_crdt: failed to build per-node state ({e}); skipping nodes sidecar"
+        ),
+    }
     Ok(())
 }
 
@@ -1129,13 +1204,17 @@ fn write_crdt_state(path: &Path, state: &[u8]) -> Result<()> {
 pub fn delete_crdt(doc: &Path) -> Result<()> {
     let path = crdt_path_for(doc)?;
     let overlay_path = overlay_crdt_path_for(doc)?;
-    if path.exists() || overlay_path.exists() {
+    let nodes_path = multinode_crdt_path_for(doc)?;
+    if path.exists() || overlay_path.exists() || nodes_path.exists() {
         let _lock = acquire_crdt_lock(doc)?;
         if path.exists() {
             std::fs::remove_file(&path)?;
         }
         if overlay_path.exists() {
             std::fs::remove_file(&overlay_path)?;
+        }
+        if nodes_path.exists() {
+            std::fs::remove_file(&nodes_path)?;
         }
     }
     Ok(())
@@ -1630,6 +1709,107 @@ Second answer line three.
     fn crdt_delete_no_error_when_missing() {
         let (_dir, doc) = setup();
         delete_crdt(&doc).unwrap();
+    }
+
+    // ---- #qnodemerge2: per-node CRDT state persistence -------------------
+
+    fn template_doc(exchange: &str, queue: &str) -> String {
+        format!(
+            "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n{exchange}\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{queue}\n<!-- /agent:queue -->\n"
+        )
+    }
+
+    #[test]
+    fn save_document_crdt_writes_per_node_sidecar() {
+        let (_dir, doc) = setup();
+        let markdown = template_doc("Prompt.\n\n### Re: q\n\nBody.", "- do [#a1]");
+        let legacy = crate::crdt::CrdtDoc::from_text(&markdown).encode_state();
+        save_document_crdt(&doc, &legacy, &markdown).unwrap();
+
+        // The per-node sidecar exists and round-trips through decode → text.
+        assert!(multinode_crdt_path_for(&doc).unwrap().exists());
+        let bytes = load_multinode_crdt(&doc).unwrap().expect("nodes sidecar present");
+        let state = crate::crdt::MultiNodeState::decode(&bytes).unwrap();
+        assert_eq!(state.to_text().unwrap(), markdown);
+    }
+
+    #[test]
+    fn multinode_crdt_state_migrates_legacy_when_no_sidecar() {
+        let (_dir, doc) = setup();
+        let markdown = template_doc("Q.", "- do [#a1]");
+        // Only the legacy whole-doc blob exists (older binary).
+        let legacy = crate::crdt::CrdtDoc::from_text(&markdown).encode_state();
+        save_crdt(&doc, &legacy).unwrap();
+        assert!(!multinode_crdt_path_for(&doc).unwrap().exists());
+
+        let state = multinode_crdt_state(&doc, "fallback").unwrap();
+        assert_eq!(
+            state.to_text().unwrap(),
+            markdown,
+            "must migrate the legacy whole-doc blob, not use the fallback"
+        );
+    }
+
+    #[test]
+    fn multinode_crdt_state_prefers_sidecar_over_legacy() {
+        let (_dir, doc) = setup();
+        let markdown = template_doc("Q.", "- do [#a1]\n- do [#b2]");
+        let legacy = crate::crdt::CrdtDoc::from_text(&markdown).encode_state();
+        save_document_crdt(&doc, &legacy, &markdown).unwrap();
+        // Round-trips from the per-node sidecar.
+        let state = multinode_crdt_state(&doc, "fallback").unwrap();
+        assert_eq!(state.to_text().unwrap(), markdown);
+    }
+
+    #[test]
+    fn multinode_crdt_state_fallback_when_nothing_persisted() {
+        let (_dir, doc) = setup();
+        let fallback = template_doc("Q.", "- do [#a1]");
+        let state = multinode_crdt_state(&doc, &fallback).unwrap();
+        assert_eq!(state.to_text().unwrap(), fallback);
+    }
+
+    #[test]
+    fn save_document_crdt_rebuilds_per_node_state_on_compaction() {
+        // Compaction routes through save_document_crdt with post-compact markdown,
+        // so each save rebuilds fresh per-node states (GC per node) rather than
+        // accreting tombstones — the sidecar reflects only the compacted content.
+        let (_dir, doc) = setup();
+        let before = template_doc("Q.\n\n### Re: q\n\nA long answer body to be compacted away.", "- do [#a1]");
+        let before_legacy = crate::crdt::CrdtDoc::from_text(&before).encode_state();
+        save_document_crdt(&doc, &before_legacy, &before).unwrap();
+        let before_len = load_multinode_crdt(&doc).unwrap().unwrap().len();
+
+        let after = template_doc("Q.\n\n_[compacted]_", "- do [#a1]");
+        let after_legacy = crate::crdt::CrdtDoc::from_text(&after).encode_state();
+        save_document_crdt(&doc, &after_legacy, &after).unwrap();
+
+        let state = multinode_crdt_state(&doc, "").unwrap();
+        assert_eq!(
+            state.to_text().unwrap(),
+            after,
+            "per-node sidecar must reflect post-compact content"
+        );
+        let after_bytes = load_multinode_crdt(&doc).unwrap().unwrap();
+        assert!(
+            after_bytes.len() < before_len,
+            "compacted per-node state should be smaller (before={before_len}, after={})",
+            after_bytes.len()
+        );
+    }
+
+    #[test]
+    fn delete_crdt_removes_per_node_sidecar() {
+        let (_dir, doc) = setup();
+        let markdown = template_doc("Q.", "- do [#a1]");
+        let legacy = crate::crdt::CrdtDoc::from_text(&markdown).encode_state();
+        save_document_crdt(&doc, &legacy, &markdown).unwrap();
+        assert!(load_multinode_crdt(&doc).unwrap().is_some());
+        delete_crdt(&doc).unwrap();
+        assert!(
+            load_multinode_crdt(&doc).unwrap().is_none(),
+            "delete_crdt must GC the per-node sidecar"
+        );
     }
 
     #[test]

@@ -83,6 +83,33 @@ matter for correctness:
   (`<!-- agent:boundary:… -->`) and working-tree-only ` (HEAD)` annotations are treated as
   transient and never count as new content.
 
+## Durable per-node base — `MultiNodeState` (`#qnodemerge2`)
+
+`merge_by_component` derives each node's base by decoding *one* whole-doc state and slicing it
+by name — so the persisted base (`<hash>.yrs`) is still a single blob whose Yrs clock is shared
+across every node. `MultiNodeState` makes the base durable *per node*:
+
+- **One Yrs state per node, one file.** `MultiNodeState::from_text` segments the document into
+  top-level nodes (components + interstitials) and encodes each node's text as its own Yrs
+  state. `encode`/`decode` round-trip the whole set into a single self-describing container
+  (`MAGIC | version | count | [name, state]…`) persisted at `.agent-doc/crdt/<hash>.nodes.yrs`.
+- **Deterministic encoding.** Node states use a fixed Yrs client id (`encode_text_deterministic`)
+  so identical text always re-encodes to byte-identical bytes — an untouched node's base is
+  provably unchanged across a cycle, and there are no spurious sidecar rewrites. The base client
+  id is irrelevant to the leaf `merge` (which reads only the base text), so this is safe.
+- **Independent advance.** `MultiNodeState::merge(base, ours, theirs)` runs the same per-node
+  reconciliation as `merge_by_component` (shared `merge_aligned_nodes`), but resolves each node's
+  base from *its own* persisted state and returns a fresh `MultiNodeState` where only changed
+  nodes advanced. Structural divergence / component-less docs fall back to the whole-doc `merge`,
+  same safety net as the component rung.
+- **Migration & GC.** `snapshot::multinode_crdt_state` reads the `.nodes.yrs` sidecar, lazily
+  migrating a legacy whole-doc `<hash>.yrs` (decode → split) when the sidecar is absent.
+  `save_document_crdt` rebuilds and rewrites the sidecar every cycle (so compaction, which routes
+  through it, GCs per node), `delete_crdt` removes it, and the rename migration carries it with
+  the document. The legacy `<hash>.yrs` and `<hash>.overlay.yrs` are still written for
+  back-compat; the live orchestration merge base is unchanged pending the recursive `#qnodemerge3`
+  rung.
+
 ## Roadmap — recursive AST-node merge
 
 `merge_by_component` is the component-level (coarsest) rung. The full model applies node
@@ -92,7 +119,7 @@ Virtual DOM keys its children.
 | Phase | What it adds |
 | --- | --- |
 | `#qnodemerge1` ✅ shipped | Component-scoped merge (`merge_by_component`) — the anti-corruption rung above. |
-| `#qnodemerge2` | Per-node CRDT **state persistence** (`<hash>.<component>.yrs`) so each node carries its own stable base across cycles instead of one whole-doc `<hash>.yrs`. A node needs its own base before bases can advance independently. |
+| `#qnodemerge2` ✅ shipped | Per-node CRDT **state persistence** — `MultiNodeState` (`crdt.rs`) persists one independent Yrs state per top-level node into a single structured container (`<hash>.nodes.yrs`), the per-component successor to the whole-doc `<hash>.yrs`. Each node carries its own stable base across cycles (an untouched node re-encodes byte-identically; a changed node's base advances on its own). Migrates a legacy whole-doc `<hash>.yrs` lazily, rebuilds (GCs) per node every save/compaction, and follows the document across renames. See *Durable per-node base* below. |
 | `#qnodemerge3` | **Recursive AST-node reconciliation** — one `reconcile(base, ours, theirs)` matching children by durable key and recursing on matched pairs. Queue/backlog items *and* `### Re:` blocks (with interleaved prompts) become nodes; the whole-doc text merge becomes the leaf. |
 | `#qnodemerge4` | **Op-capture / evented reflection** (highest-leverage accuracy lever) — feed real editor operations (`DocumentListener.documentChanged` / `onDidChangeTextDocument`) into the per-node model instead of reconstructing edits from a text diff, removing the diff-guess entirely. |
 | `#qnodemerge5` | **Surface true conflicts, never fabricate** — for a genuine concurrent edit to the *same* leaf node (information-theoretically underdetermined), present both versions for operator resolution instead of silently auto-merging text neither side wrote. |

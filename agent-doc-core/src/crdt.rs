@@ -485,33 +485,336 @@ pub fn merge_by_component(
         })
         .collect();
 
-    let mut merged = String::with_capacity(ours_text.len().max(theirs_text.len()));
+    let merged_nodes = merge_aligned_nodes(&ours_nodes, &theirs_nodes, |name, idx| match name {
+        Some(n) => base_by_name.get(n).map(|s| s.to_string()),
+        None => base_interstitials.get(idx).map(|s| s.to_string()),
+    })?;
+    Ok(merged_nodes.into_iter().map(|(_, text)| text).collect())
+}
+
+/// Merge aligned `ours`/`theirs` node vectors (same component-name sequence),
+/// resolving each node's base text via `resolve_base`. `resolve_base` is called
+/// with `(component_name, interstitial_index)` — `name` is `Some` for a
+/// component node (and `interstitial_index` is meaningless), `None` for an
+/// interstitial node (paired positionally by `interstitial_index`). Returns the
+/// merged `(component_name, text)` per node in document order.
+///
+/// This is the shared per-node reconciliation loop behind both
+/// [`merge_by_component`] (base resolved from a decoded whole-doc state) and
+/// [`MultiNodeState::merge`] (base resolved from per-node persisted states).
+fn merge_aligned_nodes<F>(
+    ours_nodes: &[Node],
+    theirs_nodes: &[Node],
+    mut resolve_base: F,
+) -> Result<Vec<(Option<String>, String)>>
+where
+    F: FnMut(Option<&str>, usize) -> Option<String>,
+{
+    let mut merged = Vec::with_capacity(ours_nodes.len());
     let mut interstitial_idx = 0usize;
     for (ours_node, theirs_node) in ours_nodes.iter().zip(theirs_nodes.iter()) {
-        // Resolve this node's base text.
-        let node_base: Option<&str> = match ours_node {
-            Node::Component { name, .. } => base_by_name.get(name.as_str()).copied(),
-            Node::Interstitial(_) => {
-                let b = base_interstitials.get(interstitial_idx).copied();
-                interstitial_idx += 1;
-                b
-            }
-        };
+        let name = ours_node.component_name();
+        let node_base = resolve_base(name, interstitial_idx);
+        if name.is_none() {
+            interstitial_idx += 1;
+        }
 
         let ours_slice = ours_node.text();
         let theirs_slice = theirs_node.text();
 
-        let merged_node = if ours_slice == theirs_slice {
+        let merged_text = if ours_slice == theirs_slice {
             ours_slice.to_string()
         } else {
-            let node_base_state =
-                node_base.map(|t| CrdtDoc::from_text(t).encode_state());
+            let node_base_state = node_base
+                .as_deref()
+                .map(|t| CrdtDoc::from_text(t).encode_state());
             merge(node_base_state.as_deref(), ours_slice, theirs_slice)?
         };
-        merged.push_str(&merged_node);
+        merged.push((name.map(str::to_string), merged_text));
+    }
+    Ok(merged)
+}
+
+/// Encode `text` as a Yrs state with a **fixed** client id, so identical text
+/// always produces byte-identical state. [`CrdtDoc::from_text`] uses
+/// `Doc::new()`, which assigns a random client id, making every re-encode of the
+/// same text differ — unsuitable for stable per-node persistence and no-change
+/// detection. The base client id is irrelevant to [`merge`] (which reads only the
+/// base text), so a fixed id is safe here.
+fn encode_text_deterministic(text: &str) -> Vec<u8> {
+    let doc = Doc::with_client_id(0);
+    let yrs_text = doc.get_or_insert_text(TEXT_KEY);
+    {
+        let mut txn = doc.transact_mut();
+        yrs_text.insert(&mut txn, 0, text);
+    }
+    let txn = doc.transact();
+    txn.encode_state_as_update_v1(&yrs::StateVector::default())
+}
+
+/// Magic prefix identifying a [`MultiNodeState`] container on disk, so a per-node
+/// state file (`<hash>.nodes.yrs`) is unambiguously distinguishable from a legacy
+/// whole-doc Yrs update blob (`<hash>.yrs`), whose first bytes are a Yrs v1
+/// update header rather than this ASCII tag.
+const MULTINODE_MAGIC: &[u8; 4] = b"ADN1";
+
+/// A document's CRDT merge state split into one independent Yrs state per
+/// top-level node — the durable per-node base of `#qnodemerge2`.
+///
+/// The legacy whole-doc `<hash>.yrs` blob reconciles every node against one
+/// shared base, so a node's base can never advance independently and unrelated
+/// edits share a single Yrs clock. `MultiNodeState` instead persists one Yrs
+/// state per node (each `agent:*` component plus the interstitial text around
+/// them) in document order, serialized into a single structured container file
+/// (`<hash>.nodes.yrs`). Each node therefore carries its own stable base across
+/// cycles: a node untouched this cycle re-encodes to byte-identical state while a
+/// changed node's state advances on its own, with no cross-node contention.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MultiNodeState {
+    nodes: Vec<PersistedNode>,
+}
+
+/// One persisted node within a [`MultiNodeState`], in document order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PersistedNode {
+    /// `Some(name)` for an `agent:*` component node; `None` for interstitial text.
+    name: Option<String>,
+    /// This node's own independent Yrs state (a [`CrdtDoc`] encoded state).
+    state: Vec<u8>,
+}
+
+impl MultiNodeState {
+    /// Build a per-node state by segmenting `text` into top-level nodes and
+    /// encoding each node's text as its own independent Yrs state.
+    pub fn from_text(text: &str) -> Result<Self> {
+        let nodes = segment_into_nodes(text)?
+            .iter()
+            .map(|node| PersistedNode {
+                name: node.component_name().map(str::to_string),
+                state: encode_text_deterministic(node.text()),
+            })
+            .collect();
+        Ok(MultiNodeState { nodes })
     }
 
-    Ok(merged)
+    /// Build a per-node state directly from already-merged `(name, text)` nodes.
+    fn from_merged_nodes(merged: &[(Option<String>, String)]) -> Self {
+        MultiNodeState {
+            nodes: merged
+                .iter()
+                .map(|(name, text)| PersistedNode {
+                    name: name.clone(),
+                    state: encode_text_deterministic(text),
+                })
+                .collect(),
+        }
+    }
+
+    /// Decode a single node's persisted Yrs state back to its text.
+    fn node_text(node: &PersistedNode) -> Result<String> {
+        Ok(CrdtDoc::decode_state(&node.state)?.to_text())
+    }
+
+    /// Reconstruct the full document text by concatenating node texts in order.
+    pub fn to_text(&self) -> Result<String> {
+        let mut text = String::new();
+        for node in &self.nodes {
+            text.push_str(&Self::node_text(node)?);
+        }
+        Ok(text)
+    }
+
+    /// Resolve this state's per-node base into a `name → text` map (components)
+    /// and an ordered list of interstitial texts, mirroring the alignment
+    /// [`merge_aligned_nodes`] expects.
+    fn base_lookup(
+        &self,
+    ) -> Result<(std::collections::HashMap<String, String>, Vec<String>)> {
+        let mut by_name = std::collections::HashMap::new();
+        let mut interstitials = Vec::new();
+        for node in &self.nodes {
+            let text = Self::node_text(node)?;
+            match &node.name {
+                Some(name) => {
+                    by_name.entry(name.clone()).or_insert(text);
+                }
+                None => interstitials.push(text),
+            }
+        }
+        Ok((by_name, interstitials))
+    }
+
+    /// Serialize into the `<hash>.nodes.yrs` container format:
+    /// `MAGIC(4) | version(1) | node_count(u32 LE)` then per node
+    /// `name_len(u32 LE) | name bytes | state_len(u32 LE) | state bytes`,
+    /// where `name_len == u32::MAX` marks an interstitial node (no name).
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(MULTINODE_MAGIC);
+        out.push(1u8); // container version
+        out.extend_from_slice(&(self.nodes.len() as u32).to_le_bytes());
+        for node in &self.nodes {
+            match &node.name {
+                Some(name) => {
+                    let bytes = name.as_bytes();
+                    out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+                    out.extend_from_slice(bytes);
+                }
+                None => out.extend_from_slice(&u32::MAX.to_le_bytes()),
+            }
+            out.extend_from_slice(&(node.state.len() as u32).to_le_bytes());
+            out.extend_from_slice(&node.state);
+        }
+        out
+    }
+
+    /// Decode a `<hash>.nodes.yrs` container. Returns an error (never a panic) on
+    /// a missing magic tag or any truncation, so callers can fall back to
+    /// migration via [`MultiNodeState::decode_or_migrate`].
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        let mut cursor = 0usize;
+        let take = |cursor: &mut usize, n: usize| -> Result<&[u8]> {
+            let end = cursor
+                .checked_add(n)
+                .filter(|end| *end <= bytes.len())
+                .ok_or_else(|| anyhow::anyhow!("multinode state truncated"))?;
+            let slice = &bytes[*cursor..end];
+            *cursor = end;
+            Ok(slice)
+        };
+        let read_u32 = |cursor: &mut usize| -> Result<u32> {
+            let b = take(cursor, 4)?;
+            Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        };
+
+        if take(&mut cursor, 4)? != MULTINODE_MAGIC {
+            anyhow::bail!("not a multinode state container (magic mismatch)");
+        }
+        let version = take(&mut cursor, 1)?[0];
+        if version != 1 {
+            anyhow::bail!("unsupported multinode state version {version}");
+        }
+        let count = read_u32(&mut cursor)? as usize;
+        let mut nodes = Vec::with_capacity(count);
+        for _ in 0..count {
+            let name_len = read_u32(&mut cursor)?;
+            let name = if name_len == u32::MAX {
+                None
+            } else {
+                let bytes = take(&mut cursor, name_len as usize)?;
+                Some(
+                    std::str::from_utf8(bytes)
+                        .map_err(|e| anyhow::anyhow!("invalid node name UTF-8: {e}"))?
+                        .to_string(),
+                )
+            };
+            let state_len = read_u32(&mut cursor)? as usize;
+            let state = take(&mut cursor, state_len)?.to_vec();
+            nodes.push(PersistedNode { name, state });
+        }
+        Ok(MultiNodeState { nodes })
+    }
+
+    /// Decode `bytes` as a per-node container, migrating older formats:
+    /// 1. A `<hash>.nodes.yrs` container decodes directly.
+    /// 2. Otherwise treat `bytes` as a legacy whole-doc `<hash>.yrs` Yrs state,
+    ///    decode it to text, and split into per-node states.
+    /// 3. If neither works, fall back to `fallback_text`.
+    ///
+    /// Never panics; logs the migration path it took.
+    pub fn decode_or_migrate(bytes: &[u8], fallback_text: &str) -> Self {
+        match Self::decode(bytes) {
+            Ok(state) => return state,
+            Err(_) => {
+                // Not a per-node container — try the legacy whole-doc blob.
+                if let Ok(doc) = CrdtDoc::decode_state(bytes)
+                    && let Ok(state) = Self::from_text(&doc.to_text())
+                {
+                    eprintln!(
+                        "[crdt] MultiNodeState: migrated legacy whole-doc state into per-node state"
+                    );
+                    return state;
+                }
+            }
+        }
+        eprintln!(
+            "[crdt] MultiNodeState: state unreadable; rebuilding per-node state from fallback text"
+        );
+        Self::from_text(fallback_text).unwrap_or_default()
+    }
+
+    /// Per-node component-scoped three-way merge (`#qnodemerge2`).
+    ///
+    /// Like [`merge_by_component`] but each node reconciles against **its own
+    /// persisted base** (carried in `base`) rather than a slice of one decoded
+    /// whole-doc base, and the merged result is returned as a fresh
+    /// `MultiNodeState` where each node's base has advanced independently. An
+    /// unchanged node re-encodes to byte-identical state.
+    ///
+    /// Falls back to the whole-document [`merge`] (against `base`'s projected
+    /// text) on structural divergence or a component-less document, preserving
+    /// the same safety net as [`merge_by_component`].
+    pub fn merge(
+        base: Option<&MultiNodeState>,
+        ours_text: &str,
+        theirs_text: &str,
+    ) -> Result<(String, MultiNodeState)> {
+        let whole_doc_fallback = |reason: &str| -> Result<(String, MultiNodeState)> {
+            let base_text = match base {
+                Some(b) => b.to_text().unwrap_or_default(),
+                None => String::new(),
+            };
+            let base_state = base.map(|_| CrdtDoc::from_text(&base_text).encode_state());
+            if !reason.is_empty() {
+                eprintln!("[crdt] MultiNodeState::merge: {reason}; falling back to whole-doc merge");
+            }
+            let merged = merge(base_state.as_deref(), ours_text, theirs_text)?;
+            let state = MultiNodeState::from_text(&merged)?;
+            Ok((merged, state))
+        };
+
+        if ours_text == theirs_text {
+            return Ok((ours_text.to_string(), MultiNodeState::from_text(ours_text)?));
+        }
+
+        let ours_nodes = match segment_into_nodes(ours_text) {
+            Ok(c) => c,
+            Err(e) => return whole_doc_fallback(&format!("failed to segment ours ({e})")),
+        };
+        let theirs_nodes = match segment_into_nodes(theirs_text) {
+            Ok(c) => c,
+            Err(e) => return whole_doc_fallback(&format!("failed to segment theirs ({e})")),
+        };
+
+        let ours_names: Vec<&str> = ours_nodes.iter().filter_map(Node::component_name).collect();
+        let theirs_names: Vec<&str> = theirs_nodes
+            .iter()
+            .filter_map(Node::component_name)
+            .collect();
+
+        if ours_names.is_empty() && theirs_names.is_empty() {
+            return whole_doc_fallback("");
+        }
+        if ours_names != theirs_names {
+            return whole_doc_fallback(&format!(
+                "structural divergence (ours {ours_names:?} != theirs {theirs_names:?})"
+            ));
+        }
+
+        let (base_by_name, base_interstitials) = match base {
+            Some(b) => b.base_lookup()?,
+            None => (std::collections::HashMap::new(), Vec::new()),
+        };
+
+        let merged_nodes = merge_aligned_nodes(&ours_nodes, &theirs_nodes, |name, idx| match name {
+            Some(n) => base_by_name.get(n).cloned(),
+            None => base_interstitials.get(idx).cloned(),
+        })?;
+
+        let merged_text: String = merged_nodes.iter().map(|(_, text)| text.as_str()).collect();
+        let new_state = MultiNodeState::from_merged_nodes(&merged_nodes);
+        Ok((merged_text, new_state))
+    }
 }
 
 /// True for transient/structural lines that must not count as "new content"
@@ -1824,5 +2127,162 @@ Second answer line three.
         let by_component = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
         let whole_doc = merge(Some(&base_state), &ours, &theirs).unwrap();
         assert_eq!(by_component, whole_doc, "structural divergence must use whole-doc fallback");
+    }
+
+    // ---- #qnodemerge2: per-node CRDT state persistence --------------------
+
+    #[test]
+    fn multinode_state_roundtrip_encode_decode() {
+        // Per-component encode/decode round-trips through the container format and
+        // reconstructs the exact document text.
+        let doc = doc_with_exchange_queue("Prompt.\n\n### Re: q\n\nBody.", "- do [#a1]\n- do [#b2]");
+        let state = MultiNodeState::from_text(&doc).unwrap();
+        let encoded = state.encode();
+        let decoded = MultiNodeState::decode(&encoded).unwrap();
+        assert_eq!(decoded, state, "decode must reproduce the encoded per-node state");
+        assert_eq!(
+            decoded.to_text().unwrap(),
+            doc,
+            "per-node state must reconstruct the original document text"
+        );
+        // The container is self-describing — one node per interstitial+component.
+        assert!(decoded.nodes.len() >= 4, "expected ≥4 nodes, got {}", decoded.nodes.len());
+        assert!(decoded.nodes.iter().any(|n| n.name.as_deref() == Some("exchange")));
+        assert!(decoded.nodes.iter().any(|n| n.name.as_deref() == Some("queue")));
+    }
+
+    #[test]
+    fn multinode_state_decode_rejects_non_container() {
+        // A legacy whole-doc Yrs blob is not a per-node container — decode must
+        // error (not panic) so the caller can migrate it.
+        let legacy = CrdtDoc::from_text("# Doc\n\nlegacy whole-doc state\n").encode_state();
+        assert!(
+            MultiNodeState::decode(&legacy).is_err(),
+            "legacy whole-doc state must not decode as a per-node container"
+        );
+    }
+
+    #[test]
+    fn multinode_state_migrates_legacy_whole_doc() {
+        // decode_or_migrate must split a legacy whole-doc state into per-node states.
+        let doc = doc_with_exchange_queue("Q.", "- do [#a1]");
+        let legacy = CrdtDoc::from_text(&doc).encode_state();
+        let migrated = MultiNodeState::decode_or_migrate(&legacy, "");
+        assert_eq!(
+            migrated.to_text().unwrap(),
+            doc,
+            "legacy migration must preserve the full document text"
+        );
+        assert!(
+            migrated.nodes.iter().any(|n| n.name.as_deref() == Some("queue")),
+            "legacy migration must recover component nodes"
+        );
+    }
+
+    #[test]
+    fn multinode_merge_advances_node_base_independently() {
+        // The core #qnodemerge2 property: when only the `exchange` node changes,
+        // the `queue` node's persisted base is byte-identical across the cycle,
+        // while the `exchange` node's base advances.
+        let base_doc = doc_with_exchange_queue("Q.", "- do [#a1]");
+        let base = MultiNodeState::from_text(&base_doc).unwrap();
+
+        // Agent appends to exchange; operator leaves queue untouched.
+        let ours = doc_with_exchange_queue("Q.\n\n### Re: q\n\nAgent body.", "- do [#a1]");
+        let theirs = base_doc.clone();
+
+        let (merged, advanced) = MultiNodeState::merge(Some(&base), &ours, &theirs).unwrap();
+        assert!(merged.contains("Agent body."), "exchange edit lost:\n{merged}");
+
+        let queue_before = base
+            .nodes
+            .iter()
+            .find(|n| n.name.as_deref() == Some("queue"))
+            .map(|n| &n.state);
+        let queue_after = advanced
+            .nodes
+            .iter()
+            .find(|n| n.name.as_deref() == Some("queue"))
+            .map(|n| &n.state);
+        assert_eq!(
+            queue_before, queue_after,
+            "untouched queue node base must be byte-identical across the cycle"
+        );
+
+        let exchange_before = base
+            .nodes
+            .iter()
+            .find(|n| n.name.as_deref() == Some("exchange"))
+            .map(|n| &n.state);
+        let exchange_after = advanced
+            .nodes
+            .iter()
+            .find(|n| n.name.as_deref() == Some("exchange"))
+            .map(|n| &n.state);
+        assert_ne!(
+            exchange_before, exchange_after,
+            "changed exchange node base must advance"
+        );
+    }
+
+    #[test]
+    fn multinode_merge_isolates_concurrent_cross_component_edits() {
+        // Parallel to merge_by_component: concurrent exchange + queue edits both
+        // survive with zero cross-component splice, via per-node bases.
+        let base_doc = doc_with_exchange_queue("Existing prompt.", "- do [#a1]");
+        let base = MultiNodeState::from_text(&base_doc).unwrap();
+
+        let ours = doc_with_exchange_queue(
+            "Existing prompt.\n\n### Re: existing — opus\n\nAgent response body.",
+            "- do [#a1]",
+        );
+        let theirs = doc_with_exchange_queue("Existing prompt.", "- do [#a1]\n- do [#b2]");
+
+        let (merged, _advanced) = MultiNodeState::merge(Some(&base), &ours, &theirs).unwrap();
+        assert!(merged.contains("### Re: existing"), "exchange edit lost:\n{merged}");
+        assert!(merged.contains("[#b2]"), "queue edit lost:\n{merged}");
+
+        let queue_body = merged
+            .split("<!-- agent:queue -->")
+            .nth(1)
+            .and_then(|s| s.split("<!-- /agent:queue -->").next())
+            .unwrap_or("");
+        assert!(
+            !queue_body.contains("Agent response body"),
+            "exchange content spliced into queue:\n{queue_body}"
+        );
+    }
+
+    #[test]
+    fn multinode_merge_falls_back_on_structural_divergence() {
+        // theirs drops the queue component → whole-doc fallback, still producing a
+        // valid per-node state that round-trips the merged text.
+        let base_doc = doc_with_exchange_queue("Q.", "- do [#a1]");
+        let base = MultiNodeState::from_text(&base_doc).unwrap();
+        let ours = doc_with_exchange_queue("Q.\n\n### Re: q\n\nResponse.", "- do [#a1]");
+        let theirs = "---\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange -->\nQ.\n<!-- /agent:exchange -->\n".to_string();
+
+        let (merged, advanced) = MultiNodeState::merge(Some(&base), &ours, &theirs).unwrap();
+        let whole_doc = {
+            let base_state = CrdtDoc::from_text(&base_doc).encode_state();
+            merge(Some(&base_state), &ours, &theirs).unwrap()
+        };
+        assert_eq!(merged, whole_doc, "structural divergence must use whole-doc fallback");
+        assert_eq!(
+            advanced.to_text().unwrap(),
+            merged,
+            "fallback must still yield a per-node state round-tripping the merged text"
+        );
+    }
+
+    #[test]
+    fn multinode_merge_bootstraps_without_base() {
+        // No prior per-node state (first cycle) still merges and yields state.
+        let ours = doc_with_exchange_queue("Q.\n\n### Re: q\n\nBody.", "- do [#a1]");
+        let theirs = doc_with_exchange_queue("Q.", "- do [#a1]\n- do [#b2]");
+        let (merged, state) = MultiNodeState::merge(None, &ours, &theirs).unwrap();
+        assert!(merged.contains("Body."));
+        assert!(merged.contains("[#b2]"));
+        assert_eq!(state.to_text().unwrap(), merged);
     }
 }

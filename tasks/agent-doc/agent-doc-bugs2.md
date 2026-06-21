@@ -64,7 +64,7 @@ The remaining ~10 markers are genuinely blocked: #agentreloadrestart / #restarta
 **No install / no JB plugin reinstall.** Per STOP-cutting-releases I did **not** bump/install/recycle — the two markers go live when you `make install` at a supervisor-recycle boundary, same as the other [operator-verify] items. No `.kt` changed, so no JB plugin reinstall is needed. To live-test once installed: drive the JB Run Agent Doc cold-start path and confirm ops.log shows `auto_start_dispatch_ready_confirmed`; and on a paused queue confirm `queue_paused_continuation_guidance_emitted`.
 
 **Review not emptied this cycle** (your "keep review items until logging lands" choice). #t3mn (#jbclrdispdup) stays — it needs a live-pane repro to fix.
-<!-- agent:boundary:5c4d0f43 -->
+<!-- agent:boundary:f8854737 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -82,6 +82,7 @@ The remaining ~10 markers are genuinely blocked: #agentreloadrestart / #restarta
 - :pushpin: do [#qnodemerge5]
 - ~~Please document the document node merge architecture. Link from the readme. Ensure the document remains up to date if any changes are made.~~
 - ~~:pushpin: JB `Clear Session Context` then JB `Run Agent Doc` still sends duplicate prompts and no submit.~~
+- do [#t3mn]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

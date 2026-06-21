@@ -61,7 +61,34 @@ The reworded step text also drops the confusing `(Lender Requests page)` parenth
 **Verification.** New `tests/advance-lender-dialog.test.ts` (7 tests) covers the action-marker logic and the dialog wiring; full suite **1024 pass / 0 fail**, `bun run check` (test + build + worker build) green. EFS has no GitHub Actions CI, so local verification is the gate.
 
 **Not deployed.** This is committed + pushed but not yet deployed to the worker — say the word (or `deploy`) and I'll push it live. Tracked as a recommended follow-up.
-<!-- agent:boundary:f48b1252 -->
+
+### Re: Master state-machine living document — opus-4-8
+
+> **Queue prompt:**
+>
+> Create a master state machine diagram for all flows...public site application + application request from borrower portal + application request from broker portal + deal pipeline + lender pipeline + broker pipeline. Make this master state machine diagram a living document that is updated as we iterate on the workflows.
+
+
+> **Queue prompt:** Create a master state machine diagram for all flows...public site application + application request from borrower portal + application request from broker portal + deal pipeline + lender pipeline + broker pipeline. Make this master state machine diagram a living document that is updated as we iterate on the workflows.
+
+Shipped **`docs/master-state-machine.md`** (EFS `f50a422`, pushed) — one living overview that maps every EFS state machine as Mermaid diagrams, grounded in the actual status-model code.
+
+**What's in it:**
+- **Master overview** flowchart showing how the flows connect: three intake paths → loan created + auto-published → Deal Pipeline, funded by lenders vetted in the Lender Pipeline, with the Broker Pipeline joining on approval.
+- **§1 Public site application** (`application_leads`): `new → contacted → converted | archived`, plus the staff-notification / borrower-invite side tracks.
+- **§2 Borrower portal application** (`full_applications`): `draft → submitted → in_review → accepted | declined`, with the submit (e-sign) and approve (completeness) gates and the TMO writeback hand-off that creates the loan.
+- **§3 Broker portal application** (`full_applications`, `variant=business_purpose`): same machine, broker-owned origination.
+- **§4 Deal Pipeline** (`tmo_loan_status` steps + `investment_deals.status`): Application Received → … → Funded, with the marketplace offering states; links the deeper `deal-pipeline-flow.md`.
+- **§5 Lender Pipeline** (`investor_pipeline_status_`): `signed_up → requirements_review → requirements_current → lender_ready` (+ renewal/expiry), plus the accreditation, `lender_requests`, and per-deal interest sub-machines.
+- **§6 Broker Pipeline** (`broker_deals`): `submitted → in_review → docs_needed → approved → funded | declined`, broker-vs-admin transition authority, and the commission sub-machine.
+- A **status-model index table** naming the source-of-truth file for every status field, so the diagrams stay verifiable.
+
+**Living-document contract:** a header instructs updating the relevant diagram + re-checking code anchors in the same change a workflow changes; deeper sibling docs are linked rather than duplicated. Each flow was mapped from code (status enums, derivation functions, migrations) via parallel exploration, with file anchors throughout.
+
+**Verification:** docs-only change; full suite re-run **1024 pass / 0 fail**. Committed + pushed (submodule `f50a422`, superproject pointer bumped). Mermaid diagrams use standard `flowchart` / `stateDiagram-v2` / `sequenceDiagram`-compatible syntax (no mermaid CLI in-repo to render-check, but ordering/labels follow valid syntax).
+
+Next queue head is `do [#dmz8]` (deploy the advance-lender dialog) — outward-facing, operator-gated.
+<!-- agent:boundary:a2f570f2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,7 +100,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Create a master state machine diagram for all flows...public site application + application request from borrower portal + application request from broker portal + deal pipeline + lender pipeline + broker pipeline. Make this master state machine diagram a living document that is updated as we iterate on the workflows.
+- ~~Create a master state machine diagram for all flows...public site application + application request from borrower portal + application request from broker portal + deal pipeline + lender pipeline + broker pipeline. Make this master state machine diagram a living document that is updated as we iterate on the workflows.~~
 - do [#dmz8]
 <!-- /agent:queue -->
 

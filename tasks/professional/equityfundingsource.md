@@ -33,96 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260621-152709.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260621-160306.md`*
 
 Compacted content:
-❯ - Archived 12 response topic(s): what is "Funding Commitments" vs group confirmed % vs selection; lender-portal group allocation dialog + deploy; why lender2 shows the "Stalled 26 days … candidate for outreach" tag; 9 more
-❯ - Prior summary/context: prior compacted content: Archived 12 response topic(s): Lender Bros 60% committed vs group 100% allocated; deploy #ad...
-
-### Re: Unified inbox shipped + deployed (#msg-unify2) — opus-4-8
-
-Phase 2 done and **live** (the doc compacted out-of-band mid-cycle; recovered the session and recording this on the compacted doc). Worker version `933a581c-2d9a-40d1-854a-317192df93df`; EFS `fbabaa9`; migration `0096` applied to prod D1.
-
-**What you can see now:** Admin → **Messages → "All Messages"** tab → enter a user ID → their **entire conversation history across every channel** (borrower chat + lender-deal + lender-account) in one chronological thread, each message badged with party + scope and a **topic filter**. Read-only adapter over the live tables — no data moved.
-
-- `lib/messages_unified.ts` — pure adapters + chronological merge + a defensive per-source orchestrator.
-- `GET /api/admin/unified-messages/:id` (+ `?topic=` filter). Smoke: home `200`, route `401` (auth-guarded, live). **1008 tests pass / 0 fail**.
-
-**Where the unification stands:** the operator-facing payoff is live — the **model** (#msg-unify1) + the **unified per-person inbox with topic filtering** (#msg-unify2). Remaining phases are internal/additive:
-
-- **#msg-unify3 / #msg-unify4 — data cutover.** Move *live* borrower/lender rows onto `messages` (dual-write → backfill → dual-read → drop legacy). A live-prod-data migration, so each should be its own deliberate cycle — and it changes nothing you *see* (the inbox already shows everything); it's just collapsing four tables into one.
-- **#msg-unify5 — broker two-way thread** (a new visible feature; brokers get one-way notifications only today).
-
-**Your call:** proceed with **#msg-unify3 borrower cutover** (carefully, dual-write first), do the **#msg-unify5 broker thread** (new visible feature), or call the unification good here — the inbox + model are already live, so the cutover isn't urgent.
-
-### Re: deploy — already live; checkpoint on the remaining phases — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-Already deployed — nothing new to push. EFS `fbabaa9` == `origin/main` is the live worker (version `933a581c-2d9a-40d1-854a-317192df93df`); there's no uncommitted/unpushed code since last cycle's deploy. So #msg-unify1 (model) + #msg-unify2 (unified inbox) are both live and verified (home `200`).
-
-**Checkpoint — the operator-facing unification is done and live.** What remains splits cleanly by value vs risk:
-
-- **#msg-unify5 — broker two-way thread.** A genuinely **new, visible** feature: brokers get a real conversation (today they only get one-way notifications), surfaced in the broker portal + the unified inbox. Low risk (additive, like the lender thread I already shipped). **My recommendation for the next real work.**
-- **#msg-unify3 / #msg-unify4 — internal data cutover.** Move *live* borrower/lender rows onto `messages` (dual-write → backfill → drop legacy). **Zero visible change** — the unified inbox already shows everything — and it rewrites the *live* borrower-chat write path (Durable Object WebSocket), so it carries real regression risk for **no user-facing benefit right now**. I'd treat these as optional internal cleanup to schedule deliberately, not livestream-grind.
-
-**So:** want me to build **#msg-unify5 (broker thread)** next — the last visible win — and shelve the #msg-unify3/4 cutover as optional cleanup? Or push through the cutover anyway? Either way the queue still has both `deploy` heads (both no-ops now) and the three phase heads; tell me the priority and I'll drive it.
-
-### Re: Borrower cutover — safe step shipped (#msg-unify3) — opus-4-8
-
-Did the **safe, additive** half of the borrower cutover and gated the rest. EFS `411a4da`; **not deployed** (the `deploy` head is later in the queue). #msg-unify3 is gated awaiting prod soak.
-
-**Shipped:**
-- **Dual-write** — new borrower chat messages now mirror into the unified `messages` table via `borrower_chat_message_mirror_`, wired into **both** create paths (REST + the Durable Object realtime). It's `.catch()`-guarded, so a mirror failure can **never** break the live chat write — the existing borrower-chat suite still passes untouched (1010 tests / 0 fail).
-- **Backfill** — migration `0097` copies existing chat history into `messages` (rows prefixed `bk-borrower:` so they're identifiable and never collide with live ids). `chat_messages` is untouched.
-
-**Deliberately NOT done (gated):** the **dual-read switch** (inbox reads `messages` instead of the live adapter) and the **legacy-table drop**. Those need the dual-write to soak in prod first — flipping reads or dropping `chat_messages` before the mirror has proven itself on live traffic would be the reckless part. So `#msg-unify3` stays `[/]` until that soak; nothing user-visible changed (the inbox already shows everything via the adapter).
-
-**Remaining queue:** `#msg-unify4` (lender cutover — same dual-write+backfill pattern, also safe to ship), `#msg-unify5` (broker thread — new visible feature), then `deploy`. I'll keep draining; the dual-write goes live whenever the `deploy` head lands (backfill + dual-write deploy together, so no sync gap).
-
-### Re: Lender cutover — safe step shipped (#msg-unify4) — opus-4-8
-
-Same safe pattern as the borrower cutover, applied to both lender sources. EFS `b5a6a55`; not deployed (deploy head is next/last). #msg-unify4 gated awaiting soak.
-
-**Shipped:**
-- **Dual-write** — new lender messages mirror into `messages`: deal-interest threads (party=lender, scope=deal; party resolved from the interest's lender) and account threads (party=lender, scope=account). Both `.catch()`-guarded, so a mirror failure can never break live lender messaging. Existing lender-message suites pass untouched (1013 tests / 0 fail).
-- **Backfill** — migration `0098` copies existing rows from both lender tables into `messages` (prefixed `bk-lender-deal:` / `bk-lender-account:`).
-
-**Gated (needs soak):** the dual-read switch + dropping `deal_interest_lender_messages` / `lender_account_messages`.
-
-**Queue now:** `#msg-unify5` (broker two-way thread — the last *new visible* feature) then `deploy`. With both cutover dual-writes in place, the `deploy` will take all the mirrors + backfills (migrations `0097`+`0098`) live together — no sync gap. I'll keep draining; the stale supervisor recycles at its next idle boundary, which should clear the force-disk fallbacks.
-
-### Re: Broker thread shipped + everything deployed (#msg-unify5 + deploy) — opus-4-8
-
-Last feature done and the whole unification is **live**. Worker version `febaf532-931f-4555-b4ac-7fa0ca40c6c2`; EFS `b581736`.
-
-**#msg-unify5 — broker two-way thread (new visible feature):**
-- Brokers now have a real EFS conversation on the unified `messages` model (party=broker) — replacing the old one-way notifications. `GET`/`POST /api/broker/messages` (read + reply), a **"Messages from EFS"** card on the broker dashboard.
-- Admin side: `GET`/`POST /api/admin/brokers/:id/messages`, and the unified inbox now surfaces native broker messages alongside the legacy adapters (filtered to `party='broker'` so the borrower/lender dual-write mirrors aren't double-counted).
-- **1017 tests / 0 fail**; both bundles build clean.
-
-**Deploy (drained the `deploy` head):** migrations `0097` (borrower backfill) + `0098` (lender backfill) applied to prod D1; the borrower + lender **dual-writes are now live and soaking**. Verified: home `200`, `/api/broker/messages` `401` (auth-guarded), and `messages` is populated (15 borrower rows backfilled).
-
-**The message unification is complete and live:**
-- **#msg-unify1** model · **#msg-unify2** unified per-person inbox + topic filter · **#msg-unify5** broker two-way thread — all live.
-- **#msg-unify3 / #msg-unify4** cutover dual-writes + backfills — live and **soaking**; the only remaining work is the gated dual-read switch + legacy-table drop, which should wait until the dual-writes have proven themselves on live traffic. Nothing forces that step — the unified inbox already shows everything.
-
-Queue should be drained now. The session shipped, end-to-end: the advance-step dialog banner, admin↔lender messaging (both sides), the unified message model + inbox, the borrower/lender cutover dual-writes, and the broker two-way thread — all deployed to prod.
-
-### Re: deploy — already live (queue drained) — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: deploy
-
-Already deployed last cycle — nothing new to push. EFS `b581736` == `origin/main`, live as worker version `febaf532-931f-4555-b4ac-7fa0ca40c6c2` (home `200`), no uncommitted/unpushed code.
-
-That was the last queue head, so the queue is now **drained**. The full message unification — model, unified inbox, borrower + lender cutover dual-writes (soaking), and the broker two-way thread — is all live on prod. The only remaining work is the deliberately-gated dual-read switch + legacy-table drop (`#msg-unify3`/`#msg-unify4`), which should wait for the dual-writes to soak.
-
-Nothing left to drain. If you want the dual-read/drop cutover finished later, or anything else, just queue it.
-<!-- agent:boundary:dcba64b1 -->
+- Archived 6 response topic(s): Unified inbox shipped + deployed (#msg-unify2); deploy; Borrower cutover; 3 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+<!-- agent:boundary:f8d2a1d2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,9 +51,9 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#msg-unify2]~~
-- :pushpin: do [#msg-unify3]
-- :pushpin: do [#msg-unify4]
-- :pushpin: do [#msg-unify5]
+- ~~:pushpin: do [#msg-unify3]~~
+- ~~:pushpin: do [#msg-unify4]~~
+- ~~:pushpin: do [#msg-unify5]~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

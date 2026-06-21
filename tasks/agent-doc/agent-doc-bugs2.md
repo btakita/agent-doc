@@ -64,7 +64,7 @@ The remaining ~10 markers are genuinely blocked: #agentreloadrestart / #restarta
 **No install / no JB plugin reinstall.** Per STOP-cutting-releases I did **not** bump/install/recycle — the two markers go live when you `make install` at a supervisor-recycle boundary, same as the other [operator-verify] items. No `.kt` changed, so no JB plugin reinstall is needed. To live-test once installed: drive the JB Run Agent Doc cold-start path and confirm ops.log shows `auto_start_dispatch_ready_confirmed`; and on a paused queue confirm `queue_paused_continuation_guidance_emitted`.
 
 **Review not emptied this cycle** (your "keep review items until logging lands" choice). #t3mn (#jbclrdispdup) stays — it needs a live-pane repro to fix.
-<!-- agent:boundary:f8854737 -->
+<!-- agent:boundary:013eff05 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -82,7 +82,7 @@ The remaining ~10 markers are genuinely blocked: #agentreloadrestart / #restarta
 - :pushpin: do [#qnodemerge5]
 - ~~Please document the document node merge architecture. Link from the readme. Ensure the document remains up to date if any changes are made.~~
 - ~~:pushpin: JB `Clear Session Context` then JB `Run Agent Doc` still sends duplicate prompts and no submit.~~
-- do [#t3mn]
+- ~~do [#t3mn]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -109,7 +109,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#t3mn] #jbclrdispdup #agent-doc-bug JB "Clear Session Context" then JB "Run Agent Doc" still sends duplicate prompts and no submit (operator-reported 2026-06-20). Same dispatch-restack/no-submit class as #rdypoll / #rdypoll-deploy: Run Agent Doc re-types the agent-doc trigger N times into a not-ready/booting pane with no Enter, now reproduced specifically after the Clear Session Context (context-clear) action. Fix dir: dispatch must wait for a harness dispatch-ready prompt before typing and must submit exactly once; extend the dispatch_inject attempt=N marker + SimWorld assertion to the clear-then-run path. route.rs/start.rs. Needs live-pane repro to verify.
+- [ ] [#t3mn] [operator-verify] #jbclrdispdup #agent-doc-bug JB "Clear Session Context" then JB "Run Agent Doc" still sends duplicate prompts and no submit (operator-reported 2026-06-20). Same dispatch-restack/no-submit class as #rdypoll / #rdypoll-deploy: Run Agent Doc re-types the agent-doc trigger N times into a not-ready/booting pane with no Enter, now reproduced specifically after the Clear Session Context (context-clear) action. Fix dir: dispatch must wait for a harness dispatch-ready prompt before typing and must submit exactly once; extend the dispatch_inject attempt=N marker + SimWorld assertion to the clear-then-run path. route.rs/start.rs. Needs live-pane repro to verify.
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
 - [ ] [#qnodemerge2] [focused-cycle] #agent-doc-bug Per-component CRDT state persistence — persist .agent-doc/crdt/<hash>.<component>.yrs (or one multi-node state) so each node carries its own stable base across cycles instead of one whole-doc <hash>.yrs. Migration: decode existing whole-doc state and split, or rebuild per-component lazily. Acceptance: round-trip per-component encode/decode; a node base advances independently; compaction GCs per node. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 2). Builds on shipped #qnodemerge1. Operator chose to drive in a fresh clean session.
 - [ ] [#qnodemerge3] [focused-cycle] #agent-doc-bug Recursive AST-node nodes (keyed reconciliation, generalized) — drill the shipped Phase 1 keyed component reconciliation INSIDE each component so a node is any AST node, reconciled by durable node identity like React Virtual DOM. queue/backlog: each list item is a node; exchange: each Re: block is a node with interleaved prompts as their own nodes. Engine: one recursive reconcile(base,ours,theirs) matching children by key; whole-doc text merge stays the leaf. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 3). Sequenced after #qnodemerge2. Operator chose to drive in a fresh clean session.

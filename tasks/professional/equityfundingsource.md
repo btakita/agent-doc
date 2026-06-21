@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -55,7 +55,7 @@ Selecting a lender/group (`selected_at`, via `PUT …/select`) is the **admin's 
 So the lifecycle is: **interest/proposal** (soft) → **group % split** (intent) → **admin selects funder** (decision, blends rate, TMO) → **lender funds** (`funds` pending = real commitment) → **wire confirmed** (`active` = funded). "100% of the loan will be funded" on selection is the *expectation*; it's realized only once funding commitments covering the loan are submitted and their wires confirmed.
 
 One gap worth flagging (ties to your earlier question): selection sends the lender **no email/notification**, so today nothing automatically tells a selected lender to go submit their funding commitment — that's a manual nudge. Let me know if you want a notification on select.
-<!-- agent:boundary:39dd2243 -->
+<!-- agent:boundary:dc1a818e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,6 +67,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: In the lender portal, if a Lender Group is interested in the deal, there should be a dialog for the % allocation. Prepopulate the allocations with the Lender Group default allocations set in the Lender Group.
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

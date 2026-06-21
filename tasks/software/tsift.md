@@ -78,7 +78,7 @@ On crates.io, add a Trusted Publisher to **both** crate names `tsift-local-model
 **Fallback (Option B — if crates.io rejects pre-config for a nonexistent name):** create them with a personal token, in dependency order. `tsift-local-model` first (`cargo publish -p tsift-local-model`), but `tsift-kg` needs `tsift-core`/`tsift-sqlite`/`tsift-local-model` at `0.1.73` published first — so Option A is strongly preferred.
 
 **After you confirm bootstrap** (a quick `curl`/browser check that both crate names resolve / show a Trusted Publisher), tell me and I'll: re-run `make check`, `git tag v0.1.73 1caaa43`, `git push origin v0.1.73`, then watch the Release run. I'm **not** pushing the tag now — doing so before bootstrap would fail the crates.io job on the two new crates and cascade to `tsift-cli` (a red/partial release).
-<!-- agent:boundary:f244041e -->
+<!-- agent:boundary:11fe6954 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -100,7 +100,7 @@ https://github.com/chopratejas/headroom
 ## Review
 
 <!-- agent:review -->
-- [/] [#1yks] [operator] Finish tsift v0.1.72 publish: (1) bootstrap crates.io Trusted Publishing for the two NEW crates tsift-local-model + tsift-kg (browser/passkey 2FA — the prior 23 crates are configured, these two are not and a brand-new crate's first OIDC publish needs its config to exist; if crates.io rejects pre-config for a nonexistent name, do one manual 'cargo publish -p <crate>' to create it); (2) push the v0.1.72 tag (git tag v0.1.72 08d0f65 && git push origin v0.1.72) to trigger Release CI. Without step 1 the crates.io job fails again on the two new crates.
+- [/] [#1yks] [operator] Finish tsift v0.1.73 publish (corrected from v0.1.72): (1) bootstrap crates.io Trusted Publishing for the two NEW crates tsift-local-model + tsift-kg (both 404 on crates.io; PREFERRED = pre-config a Trusted Publisher for each crate NAME via crates.io UI so CI publishes the whole 0.1.73 set in dependency order — sidesteps that tsift-kg depends on tsift-core/tsift-sqlite/tsift-local-model 0.1.73 which are not yet on crates.io; FALLBACK = manual token publish in dep order, tsift-local-model first); (2) once both names resolve, agent pushes the tag: git tag v0.1.73 1caaa43 && git push origin v0.1.73 to trigger Release CI. Without step 1 the crates.io job fails on the two new crates and cascades to tsift-cli.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

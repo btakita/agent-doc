@@ -155,7 +155,22 @@ Migrated the admin lender-pipeline messaging to the unified component, with the 
 **Scoped honestly — I did NOT do all of #portalmsg2's wording in one shot.** It listed "card dialog AND deal-detail." I migrated the self-contained account-scoped lender thread; the per-deal-interest "Lender communication" thread (`DealInterestWorkflowList`, deal-interest-scoped) and the admin deal-detail borrower+lender threads are more entangled (they share borrower-message helpers and deal-interest state), so I split them into **`#portalmsg2-dealthreads`** rather than risk that refactor in the same cycle.
 
 **Queue:** you approved only #portalmsg2, so I'm **not** auto-draining the remaining `do [#portalmsg4]` (borrower DO/websocket — the riskiest) or `do [#portalmsg-shell-cleanup]`. Those stay queued for your call. Worth eyeballing the deployed admin lender-pipeline card (open a lender, scroll the dialog — the "Message lender" composer should stick to the bottom) before the next phase.
-<!-- agent:boundary:ec048c23 -->
+
+### Re: #portalmsg-shell-cleanup — delete orphaned component — opus-4-8
+
+Done (#portalmsg-shell-cleanup). EFS `500075e`, pushed. All 1061 tests pass; `build:worker` green. **No deploy** — the bundle hash is unchanged (`WGHFDSA7`, same as #portalmsg2), confirming the deletion is runtime-inert (nothing imported it).
+
+Deleted the now-orphaned `lib/ui--browser--efs/portal/investor/lender_account_messages.tsx` (the standalone lender-facing account-thread UI), fully superseded by the unified `PortalMessages` shell launcher (party=lender over `/api/investor/messages`). −187 lines.
+
+Coverage folded, not lost:
+- The lender reply round-trip test (`lender_account_message_create_` → `lender_account_messages_R_`, sender_role=lender, lender-scoped) and the investor-route registration test cover the **backend** — untouched, both still pass.
+- The shell test now asserts the unified component carries the `/api/investor/messages` endpoint.
+- Removed the deleted file from the avatar/shortcut surface lists (the shared `portal_messages.tsx` already covers both).
+
+The **backend** (`lender-account-messages.ts` repo, route handlers, `lender_account_messages_to_unified_` adapter) is deliberately untouched — that data layer still serves both the lender launcher and the admin thread.
+
+**Queue:** two phases remain, both for your call — `do [#portalmsg2-dealthreads]` (admin deal-interest + deal-detail threads, medium risk) and `do [#portalmsg4]` (borrower launcher over the live DO/websocket chat, highest risk). I'm not auto-draining either.
+<!-- agent:boundary:32d1618d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -180,7 +195,6 @@ After 20:30
 
 <!-- agent:backlog priority queue -->
 - [ ] [#portalmsg2-dealthreads] [recommended] Finish the admin inline cutover: migrate the per-deal-interest "Lender communication" thread (DealInterestWorkflowList in investor_pipeline.tsx, endpoint /api/admin/deal-interests/:id/lender-messages) and the admin deal-detail borrower+lender threads to <PortalMessages placement="inline">. More entangled than the account thread (deal-interest-scoped, shares borrower-message helpers), so split from #portalmsg2. Advances #portalmsg2.
-- [ ] [#portalmsg-shell-cleanup] [recommended] Delete the now-orphaned investor/lender_account_messages.tsx (lender-facing account thread, fully superseded by the shell PortalMessages launcher) and fold its #lender-card-msg-portal test coverage into the unified component tests. Deferred so the live shell launcher can be eyeballed first.
 - [ ] [#portalmsg4] [recommended] Borrower launcher: migrate borrower application-status messaging (sessions/loan-scoped + Durable Object websocket path) to <PortalMessages placement="launcher">; needs care around the live DO chat path. Advances #portalmsg4.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.

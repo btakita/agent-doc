@@ -235,7 +235,7 @@ I'm deliberately **not** striking it — it's your probe, and I'm preserving it.
 **On `do [#routeretest]`:** that's the `[operator-verify]` live re-test, and it's genuinely yours to drive — the route/dispatch code is already shipped (`not_dispatched` full-trigger re-send, `send_direct_pane_enter_resubmit_until_stable`, `dispatch_inject attempt=N`), so there's nothing for me to re-implement. Trigger a JB/Codex Run-Agent-Doc on the fresh binary and check `ops.log` for a single `dispatch_inject attempt=1` + a submitted trigger. If it stalls or stacks un-submitted copies, that's a real residual gap and I'll dig into the dispatch path.
 
 IPC note: if you restarted the IDE, this cycle should commit cleanly via the revived listener. If it still drifts, the work is safe in git regardless.
-<!-- agent:boundary:db7e0338 -->
+<!-- agent:boundary:65b9894e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -273,6 +273,8 @@ Press Enter to restart, or 'q' to exit.
 - do [#s81q]: Rename "Restart Supervisor" to "Recycle Supervisor". Add Restart command alongside "Recycle Supervisor"
 - ~~do [#qstrikeexplain]~~
 - do [#qstrikenote]
+- 🧪 test edit for [#qnodemerge4wire]
+- do [#routeretest]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

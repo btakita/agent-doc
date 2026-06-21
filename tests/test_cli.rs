@@ -3077,6 +3077,10 @@ fn test_codex_skill_install_writes_hook_artifacts() {
         config["mcp_servers"]["agent-doc"]["command"].as_str(),
         Some("agent-doc")
     );
+    assert_eq!(
+        config["mcp_servers"]["agent-doc"]["default_tools_approval_mode"].as_str(),
+        Some("approve")
+    );
     let mcp_args: Vec<&str> = config["mcp_servers"]["agent-doc"]["args"]
         .as_array()
         .unwrap()

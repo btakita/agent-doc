@@ -227,6 +227,7 @@ const CODEX_USER_PROMPT_COMMAND: &str = "agent-doc hook codex-user-prompt-submit
 const CODEX_STOP_COMMAND: &str = "agent-doc hook codex-stop";
 const CODEX_MCP_SERVER_NAME: &str = "agent-doc";
 const CODEX_MCP_COMMAND: &str = "agent-doc";
+const CODEX_MCP_APPROVAL_MODE: &str = "approve";
 
 fn config() -> SkillConfig {
     let env = detect_install_env();
@@ -968,6 +969,10 @@ fn merge_codex_config(path: &Path, project_root: &Path) -> Result<()> {
         toml::Value::String(CODEX_MCP_COMMAND.to_string()),
     );
     server.insert(
+        "default_tools_approval_mode".to_string(),
+        toml::Value::String(CODEX_MCP_APPROVAL_MODE.to_string()),
+    );
+    server.insert(
         "args".to_string(),
         toml::Value::Array(vec![
             toml::Value::String("mcp".to_string()),
@@ -1253,6 +1258,10 @@ mod tests {
     fn assert_codex_mcp_config(config: &toml::Value, root: &std::path::Path) {
         let server = &config["mcp_servers"][CODEX_MCP_SERVER_NAME];
         assert_eq!(server["command"].as_str(), Some(CODEX_MCP_COMMAND));
+        assert_eq!(
+            server["default_tools_approval_mode"].as_str(),
+            Some(CODEX_MCP_APPROVAL_MODE)
+        );
         let args: Vec<&str> = server["args"]
             .as_array()
             .unwrap()

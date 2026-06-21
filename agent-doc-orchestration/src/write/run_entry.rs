@@ -868,7 +868,14 @@ pub fn run_stream(
             // appends within the same region (lazily-rs.md corruption bug).
             let base_state = snapshot::crdt_merge_base_state(file, base)?.state;
             // Agent=client_id(2) gives native correct ordering — no skip_reorder needed.
-            match merge::merge_contents_crdt(Some(&base_state), &content_ours, content_current) {
+            // Prefer the editor's real captured ops over the diff-guess when aligned
+            // (#qnodemerge4wire); inert (byte-identical) until the editor reporters land.
+            match merge::merge_contents_crdt_with_ops(
+                file,
+                Some(&base_state),
+                &content_ours,
+                content_current,
+            ) {
                 Ok(merged) => merged,
                 Err(e) => {
                     eprintln!(
@@ -1442,9 +1449,13 @@ fn merge_recovery_content(
             ),
         );
         let base_state = snapshot::crdt_merge_base_state(file, base)?.state;
-        let (merged, _) =
-            merge::merge_contents_crdt(Some(&base_state), content_ours, content_current)
-                .with_context(|| format!("CRDT merge failed during {source}"))?;
+        let (merged, _) = merge::merge_contents_crdt_with_ops(
+            file,
+            Some(&base_state),
+            content_ours,
+            content_current,
+        )
+        .with_context(|| format!("CRDT merge failed during {source}"))?;
         Ok(merged)
     } else {
         merge::merge_contents(base, content_ours, content_current)

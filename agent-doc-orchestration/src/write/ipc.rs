@@ -367,7 +367,12 @@ pub(crate) fn content_ours_merged_with_disk_edits(
             crate::crdt::CrdtDoc::from_text(base).encode_state()
         }
     };
-    match merge::merge_contents_crdt(Some(&base_state), content_ours, &on_disk_content) {
+    match merge::merge_contents_crdt_with_ops(
+        file,
+        Some(&base_state),
+        content_ours,
+        &on_disk_content,
+    ) {
         Ok((merged, _)) => merged,
         Err(e) => {
             eprintln!(
@@ -645,7 +650,8 @@ fn try_semantic_merge_convergence(
     // exchange-area collision raises an AckRequest. The merged document is
     // identical to the unscoped merge (operator always wins), so this only
     // narrows ack noise, never content.
-    let active = agent_doc_markdown_ast::semantic_merge::ActiveNodes::new().active_component("exchange");
+    let active =
+        agent_doc_markdown_ast::semantic_merge::ActiveNodes::new().active_component("exchange");
     let sm = agent_doc_markdown_ast::semantic_merge::semantic_merge_scoped(
         base,
         candidate,

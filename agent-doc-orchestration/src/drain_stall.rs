@@ -35,7 +35,8 @@ use serde::{Deserialize, Serialize};
 const DRAIN_STALL_DIR: &str = ".agent-doc/drain-stall";
 
 /// The canonical `ops.log` / preflight-warning marker emitted on a detected stall.
-pub const QUEUE_STALL_DETECTED: &str = "queue_stall_detected reason=no_valid_stop_with_continuation_required";
+pub const QUEUE_STALL_DETECTED: &str =
+    "queue_stall_detected reason=no_valid_stop_with_continuation_required";
 
 /// Persisted continuation-pending marker body. Written at a clean closeout that
 /// required continuation; reconciled (and cleared) at the next preflight.
@@ -142,7 +143,9 @@ fn marker_path(file: &str) -> PathBuf {
                 .parent()
                 .unwrap_or(Path::new("."))
                 .to_path_buf();
-            return parent.join(DRAIN_STALL_DIR).join(format!("{hash:016x}.json"));
+            return parent
+                .join(DRAIN_STALL_DIR)
+                .join(format!("{hash:016x}.json"));
         }
     }
 }

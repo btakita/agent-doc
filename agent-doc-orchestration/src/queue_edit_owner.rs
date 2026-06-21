@@ -208,9 +208,18 @@ mod tests {
     #[test]
     fn freshness_predicate_uses_ttl_window() {
         let ttl = Duration::from_secs(15);
-        assert!(queue_edit_owner_lease_is_fresh(1_000, 1_000, ttl), "same instant");
-        assert!(queue_edit_owner_lease_is_fresh(1_000, 1_015, ttl), "at the ttl edge");
-        assert!(!queue_edit_owner_lease_is_fresh(1_000, 1_016, ttl), "past the ttl");
+        assert!(
+            queue_edit_owner_lease_is_fresh(1_000, 1_000, ttl),
+            "same instant"
+        );
+        assert!(
+            queue_edit_owner_lease_is_fresh(1_000, 1_015, ttl),
+            "at the ttl edge"
+        );
+        assert!(
+            !queue_edit_owner_lease_is_fresh(1_000, 1_016, ttl),
+            "past the ttl"
+        );
         // Clock skew (heartbeat in the future) saturates to fresh.
         assert!(queue_edit_owner_lease_is_fresh(2_000, 1_000, ttl));
     }

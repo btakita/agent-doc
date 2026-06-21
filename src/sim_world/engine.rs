@@ -861,7 +861,10 @@ impl SimWorld {
         // doomed execve again. The relaunch reclaims the wedged harness child (so the
         // previously-orphaned response can commit) and clears the editor-IPC wedge;
         // past the bound the watch continues on the current binary (operator restart).
-        if matches!(recycle_action, SupervisorRecycleAction::EscalateKillRelaunch) {
+        if matches!(
+            recycle_action,
+            SupervisorRecycleAction::EscalateKillRelaunch
+        ) {
             use agent_doc_orchestration::start::decisions::{
                 MAX_REEXEC_ESCALATIONS, reexec_escalation_within_bound,
             };
@@ -1306,7 +1309,7 @@ impl SimWorld {
         active_component: Option<&str>,
     ) -> agent_doc_markdown_ast::semantic_merge::SemanticMerge {
         use agent_doc_markdown_ast::semantic_merge::{
-            ActiveNodes, AckReason, OutcomeKind, semantic_merge_scoped,
+            AckReason, ActiveNodes, OutcomeKind, semantic_merge_scoped,
         };
         let active = match active_component {
             Some(name) => ActiveNodes::new().active_component(name),

@@ -84,7 +84,6 @@ pub mod document_watcher;
 pub mod drain_owner;
 pub mod drain_stall;
 pub mod editor_route_errors;
-pub mod plugin_owner;
 pub mod flow;
 pub mod focus;
 pub mod gc;
@@ -93,6 +92,7 @@ pub mod git_sibling;
 pub mod graph;
 pub mod harness;
 pub mod harness_prompt;
+pub mod plugin_owner;
 pub mod turn_status;
 // Relocated to `agent-doc-core` (#bz6s follow-up #adoc-pure-to-core — pure,
 // zero-dep). Re-exported so `crate::heuristics::*` call sites resolve unchanged.
@@ -155,6 +155,10 @@ pub mod write_queue;
 
 // Core-backed shim for the CRDT merge path (merge -> crdt).
 pub mod merge;
+
+// Supply side of op-capture / evented-reflection merge (#qnodemerge4wire):
+// per-document editor-op sidecar persistence consumed by merge::merge_contents_crdt_with_ops.
+pub mod op_capture;
 
 #[cfg(test)]
 mod test_support;

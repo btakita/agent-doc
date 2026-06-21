@@ -2784,7 +2784,10 @@ mod tests {
             !got.contains("fullboundary"),
             "a [#id] cited in prose must NOT be treated as a done item id: {got:?}"
         );
-        assert!(!got.contains("semmerge"), "trailing prose citation excluded: {got:?}");
+        assert!(
+            !got.contains("semmerge"),
+            "trailing prose citation excluded: {got:?}"
+        );
         // Contrast: the whole-text extractor DOES harvest the prose citations.
         assert!(extract_pending_ids_from_text(archive).contains("fullboundary"));
     }
@@ -2800,9 +2803,18 @@ mod tests {
         let got = extract_done_item_own_ids(body);
         assert!(got.contains("foo"));
         assert!(got.contains("gated"));
-        assert!(!got.contains("bar"), "same-line prose citation excluded: {got:?}");
-        assert!(!got.contains("baz"), "continuation-line citation excluded: {got:?}");
-        assert!(!got.contains("qux"), "non-list prose line excluded: {got:?}");
+        assert!(
+            !got.contains("bar"),
+            "same-line prose citation excluded: {got:?}"
+        );
+        assert!(
+            !got.contains("baz"),
+            "continuation-line citation excluded: {got:?}"
+        );
+        assert!(
+            !got.contains("qux"),
+            "non-list prose line excluded: {got:?}"
+        );
     }
 
     #[test]

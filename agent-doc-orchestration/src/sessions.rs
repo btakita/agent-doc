@@ -395,10 +395,7 @@ fn send_text_with_submit_key(
         .status()
         .context("failed to run tmux send-keys (text only, split path)")?;
     if !text_status.success() {
-        anyhow::bail!(
-            "tmux send-keys split text step failed for pane {}",
-            pane_id
-        );
+        anyhow::bail!("tmux send-keys split text step failed for pane {}", pane_id);
     }
     std::thread::sleep(std::time::Duration::from_millis(split_delay_ms));
     let enter_status = tmux

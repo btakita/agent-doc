@@ -306,9 +306,7 @@ pub(crate) fn current_generation_ready_prompt_proven(
 
 /// Pure check: does the actor's last transition already prove current-generation
 /// dispatch readiness without needing a fresh capture?
-fn transition_proves_current_generation_ready(
-    target: &AuthoritativeActorDispatchTarget,
-) -> bool {
+fn transition_proves_current_generation_ready(target: &AuthoritativeActorDispatchTarget) -> bool {
     target.record.last_transition.new_generation == target.record.generation
         && matches!(
             target.record.last_transition.reason.as_str(),

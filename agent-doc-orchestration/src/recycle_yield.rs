@@ -89,7 +89,9 @@ fn recycle_yield_path(file: &str) -> PathBuf {
     dir.pop();
     loop {
         if dir.join(".agent-doc").is_dir() {
-            return dir.join(RECYCLE_YIELD_DIR).join(format!("{hash:016x}.json"));
+            return dir
+                .join(RECYCLE_YIELD_DIR)
+                .join(format!("{hash:016x}.json"));
         }
         if !dir.pop() {
             let parent = PathBuf::from(file)

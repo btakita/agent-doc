@@ -967,12 +967,27 @@ mod tests {
     #[test]
     fn editor_id_is_live_filters_dead_jetbrains_pids_only() {
         let me = std::process::id();
-        assert!(editor_id_is_live(&format!("jetbrains-{me}-abc-uuid")), "own live pid");
+        assert!(
+            editor_id_is_live(&format!("jetbrains-{me}-abc-uuid")),
+            "own live pid"
+        );
         // A pid near the max is overwhelmingly likely dead (kill(pid,0) → ESRCH).
-        assert!(!editor_id_is_live("jetbrains-2147483646-dead-uuid"), "dead high pid");
-        assert!(editor_id_is_live("vscode-123"), "non-jetbrains treated live");
-        assert!(editor_id_is_live("editor-A"), "no embedded pid treated live");
-        assert!(editor_id_is_live("jetbrains-notapid-uuid"), "malformed pid treated live");
+        assert!(
+            !editor_id_is_live("jetbrains-2147483646-dead-uuid"),
+            "dead high pid"
+        );
+        assert!(
+            editor_id_is_live("vscode-123"),
+            "non-jetbrains treated live"
+        );
+        assert!(
+            editor_id_is_live("editor-A"),
+            "no embedded pid treated live"
+        );
+        assert!(
+            editor_id_is_live("jetbrains-notapid-uuid"),
+            "malformed pid treated live"
+        );
         assert_eq!(jetbrains_editor_id_pid("jetbrains-4242-uuid"), Some(4242));
         assert_eq!(jetbrains_editor_id_pid("vscode-1"), None);
         assert_eq!(jetbrains_editor_id_pid("jetbrains--uuid"), None);
@@ -991,11 +1006,18 @@ mod tests {
         let (_dir, file, canonical) = temp_doc(disk);
         std::fs::create_dir_all(file.parent().unwrap().join(".agent-doc/patches")).unwrap();
         // A live peer exists, but the originator's IntelliJ pid is dead.
-        crate::debounce::record_live_buffer_digest_content_for_editor(&canonical, &peer, Some("editor-B"))
-            .unwrap();
+        crate::debounce::record_live_buffer_digest_content_for_editor(
+            &canonical,
+            &peer,
+            Some("editor-B"),
+        )
+        .unwrap();
         let deliveries =
             broadcast_editor_change(&file, "jetbrains-2147483646-dead", &origin).unwrap();
-        assert!(deliveries.is_empty(), "a dead originator must not broadcast");
+        assert!(
+            deliveries.is_empty(),
+            "a dead originator must not broadcast"
+        );
     }
 
     #[test]

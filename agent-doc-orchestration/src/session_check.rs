@@ -290,11 +290,9 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // `detect` already returned None, so a `Some` supervisor head ⟺ a
                 // focused-cycle head — the queue is NOT operator-stalled; the agent
                 // yields and the supervisor force-`/clear`s + re-dispatches it.
-                let supervisor_head = std::fs::read_to_string(file)
-                    .ok()
-                    .and_then(|content| {
-                        crate::queue_continuation::live_drainable_continuation_head(file, &content)
-                    });
+                let supervisor_head = std::fs::read_to_string(file).ok().and_then(|content| {
+                    crate::queue_continuation::live_drainable_continuation_head(file, &content)
+                });
                 if supervisor_head.is_some() {
                     let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
                         crate::flow::outcome::UserFacingOutcomeKind::DeferredForSupervisorDrain,
@@ -7498,7 +7496,12 @@ Body\n\
         );
 
         // Controller-paused: the guidance must explain the mixed signal in-line.
-        set_document_queue_control(root, &doc, "paused", Some("qflood: idle-watch re-injecting"));
+        set_document_queue_control(
+            root,
+            &doc,
+            "paused",
+            Some("qflood: idle-watch re-injecting"),
+        );
         let paused = continuation_guidance_for(&doc);
         assert!(
             paused.contains("queue_paused is set but is NOT a contradiction"),

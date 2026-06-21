@@ -1631,7 +1631,7 @@ mod tests {
         fs::write(
             root.join(".codex/config.toml"),
             format!(
-                "[mcp_servers.agent-doc]\ncommand = \"agent-doc\"\nargs = [\"mcp\", \"serve\", \"--project-root\", \"{}\"]\n",
+                "[mcp_servers.agent-doc]\ncommand = \"agent-doc\"\ndefault_tools_approval_mode = \"approve\"\nargs = [\"mcp\", \"serve\", \"--project-root\", \"{}\"]\n",
                 root.display()
             ),
         )

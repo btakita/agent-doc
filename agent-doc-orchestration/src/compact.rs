@@ -2212,11 +2212,10 @@ mod tests {
         // The overlay CRDT projection must equal the COMPACTED text, not the
         // original large document.
         let overlay_bytes = snapshot::load_overlay_crdt(&file).unwrap().unwrap();
-        let projected =
-            agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&overlay_bytes)
-                .unwrap()
-                .to_markdown()
-                .unwrap();
+        let projected = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&overlay_bytes)
+            .unwrap()
+            .to_markdown()
+            .unwrap();
         assert!(
             !projected.contains("topic 0"),
             "overlay CRDT must project the compacted document, not the pre-compaction one:\n{projected}"

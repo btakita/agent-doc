@@ -181,9 +181,7 @@ impl ConvergencePlayback {
 /// Resolve the playback artifact path for a document + cycle without writing.
 /// `.agent-doc/playback/<doc-hash>/<cycle-id>.json`, mirroring the captures layout.
 pub fn playback_artifact_path(file: &Path, cycle_id: &str) -> Result<PathBuf> {
-    let canonical = file
-        .canonicalize()
-        .unwrap_or_else(|_| file.to_path_buf());
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let hash = crate::snapshot::doc_hash(&canonical)?;
     let project_root = crate::snapshot::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
@@ -280,7 +278,12 @@ mod tests {
             Some("base".into()),
             Some("head".into()),
         )
-        .with_candidate(Some(40_279), Some("cand".into()), Some(39_011), Some("ours".into()))
+        .with_candidate(
+            Some(40_279),
+            Some("cand".into()),
+            Some(39_011),
+            Some("ours".into()),
+        )
     }
 
     #[test]
@@ -295,7 +298,10 @@ mod tests {
         assert_eq!(back.attempts[1].ack, "send_failed");
         assert_eq!(back.attempts[1].inflight, 5);
         assert_eq!(back.candidate_len, Some(40_279));
-        assert!(back.state_transitions.contains(&"force_disk_fallback".to_string()));
+        assert!(
+            back.state_transitions
+                .contains(&"force_disk_fallback".to_string())
+        );
     }
 
     #[test]
@@ -312,10 +318,8 @@ mod tests {
 
     #[test]
     fn write_then_read_back_artifact_in_tempdir() {
-        let tmp = std::env::temp_dir().join(format!(
-            "agentdoc-playback-test-{}",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("agentdoc-playback-test-{}", std::process::id()));
         let agent_doc = tmp.join(".agent-doc");
         std::fs::create_dir_all(&agent_doc).unwrap();
         let doc = tmp.join("doc.md");

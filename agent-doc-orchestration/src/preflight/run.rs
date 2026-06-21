@@ -1804,8 +1804,8 @@ mod tests {
         let realigned = realign_baseline_to_converged_queue(pre, &converged)
             .expect("queue convergence delta must produce a re-aligned baseline");
         save_baseline_content(&doc, &realigned);
-        let baseline_after = std::fs::read_to_string(snapshot::baseline_path_for(&doc).unwrap())
-            .unwrap();
+        let baseline_after =
+            std::fs::read_to_string(snapshot::baseline_path_for(&doc).unwrap()).unwrap();
         assert!(
             baseline_after.contains("[#alpha]"),
             "re-aligned baseline must carry the converged queue shape"

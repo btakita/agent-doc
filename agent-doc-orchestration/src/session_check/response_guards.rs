@@ -99,7 +99,11 @@ pub(crate) fn queue_ids_including_struck(doc: &str) -> std::collections::HashSet
         let unstruck = no_bullet
             .strip_prefix("~~")
             .and_then(|s| s.strip_suffix("~~"))
-            .or_else(|| no_bullet.strip_prefix('~').and_then(|s| s.strip_suffix('~')))
+            .or_else(|| {
+                no_bullet
+                    .strip_prefix('~')
+                    .and_then(|s| s.strip_suffix('~'))
+            })
             .unwrap_or(no_bullet);
         for id in do_directive_target_ids_in_line(unstruck) {
             ids.insert(id);

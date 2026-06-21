@@ -1023,11 +1023,23 @@ mod core_tests {
         let threshold = IPC_DEWEDGE_TIMEOUT_THRESHOLD;
         // Active listener at/over threshold → wedged.
         assert!(write_wedged_from_ipc_failures(threshold, true, threshold));
-        assert!(write_wedged_from_ipc_failures(threshold + 1, true, threshold));
+        assert!(write_wedged_from_ipc_failures(
+            threshold + 1,
+            true,
+            threshold
+        ));
         // Active listener under threshold → not yet wedged (transient lull).
-        assert!(!write_wedged_from_ipc_failures(threshold - 1, true, threshold));
+        assert!(!write_wedged_from_ipc_failures(
+            threshold - 1,
+            true,
+            threshold
+        ));
         // No listener nominally active → never a wedge (disk fallback is safe).
-        assert!(!write_wedged_from_ipc_failures(threshold + 5, false, threshold));
+        assert!(!write_wedged_from_ipc_failures(
+            threshold + 5,
+            false,
+            threshold
+        ));
         assert!(!write_wedged_from_ipc_failures(0, true, threshold));
     }
 
@@ -1344,7 +1356,11 @@ mod core_tests {
         // disk write: the target lands on disk and a source-labelled disk fallback
         // is recorded. Cover each route source label so a future regression on any
         // one of them is caught.
-        for source_label in ["route_session_id", "route_dedup_scrub", "route_queue_activation"] {
+        for source_label in [
+            "route_session_id",
+            "route_dedup_scrub",
+            "route_queue_activation",
+        ] {
             let dir = TempDir::new().unwrap();
             let agent_doc_dir = dir.path().join(".agent-doc");
             fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();

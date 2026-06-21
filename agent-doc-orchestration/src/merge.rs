@@ -75,6 +75,83 @@ pub fn merge_contents_crdt(
     Ok((merged, state))
 }
 
+/// Op-capture–aware CRDT merge (`#qnodemerge4wire` part 3).
+///
+/// Same contract and return shape as [`merge_contents_crdt`], but for the
+/// `theirs` (editor) side it prefers the editor's *real* captured operations
+/// over a Myers diff-guess when they are available and provably aligned. This
+/// is the live wiring that makes the op-capture supply chain
+/// (`op_capture` sidecar ← editor reporters via FFI) actually change a merge.
+///
+/// Safety / no-regression invariant: the captured ops are used **only** when
+/// both gates pass —
+///   1. the sidecar's `base_hash` matches the resolved base text
+///      ([`op_capture::editor_ops_for_base`]), and
+///   2. replaying the ops onto that base reproduces `theirs` byte-for-byte
+///      ([`crate::crdt::merge_with_editor_ops`]'s acceptance gate).
+///      Otherwise the merge is byte-identical to [`merge_contents_crdt`]: with no
+///      sidecar (the production state until the editor reporters land), or with
+///      stale/misaligned ops, this delegates to the exact same `crdt::merge` path.
+///
+/// The sidecar is **consumed**: it is cleared after the merge regardless of
+/// whether the ops were used, so the next epoch starts clean and stale ops can
+/// never leak into a later, unrelated merge.
+pub fn merge_contents_crdt_with_ops(
+    doc: &std::path::Path,
+    base_state: Option<&[u8]>,
+    ours: &str,
+    theirs: &str,
+) -> Result<(String, Vec<u8>)> {
+    // Resolve the base text the ops must align to. `merge_with_editor_ops`
+    // resolves the same base internally; we mirror it here only to gate which
+    // ops (if any) to even offer.
+    let base_text = match base_state {
+        Some(bytes) => crate::crdt::CrdtDoc::decode_state(bytes)
+            .map(|d| d.to_text())
+            .unwrap_or_default(),
+        None => String::new(),
+    };
+
+    let editor_ops = match crate::op_capture::editor_ops_for_base(doc, &base_text) {
+        Ok(ops) => ops,
+        Err(e) => {
+            // A capture-load failure must never block a write — fall back to the
+            // diff-guess path, but log it (never swallow).
+            eprintln!(
+                "[op-capture] failed to load ops for {} ({e}); falling back to diff-guess",
+                doc.display()
+            );
+            None
+        }
+    };
+
+    let merged = match &editor_ops {
+        Some(ops) => {
+            eprintln!(
+                "[op-capture] offering {} captured editor op(s) to the merge for {} (#qnodemerge4wire)",
+                ops.len(),
+                doc.display()
+            );
+            crate::crdt::merge_with_editor_ops(base_state, ours, theirs, Some(ops))
+                .context("CRDT merge (with editor ops) failed")?
+        }
+        None => crate::crdt::merge(base_state, ours, theirs).context("CRDT merge failed")?,
+    };
+
+    // Consume the sidecar — the ops belonged to this base epoch (used or stale).
+    if let Err(e) = crate::op_capture::clear_op_capture(doc) {
+        eprintln!(
+            "[op-capture] failed to clear sidecar for {} after merge ({e})",
+            doc.display()
+        );
+    }
+
+    let crdt_doc = crate::crdt::CrdtDoc::from_text(&merged);
+    let state = crdt_doc.encode_state();
+    eprintln!("[write] CRDT merge successful — no conflicts possible.");
+    Ok((merged, state))
+}
+
 /// 3-way merge using `git merge-file --diff3`.
 ///
 /// Returns merged content. Append-only conflicts are auto-resolved by

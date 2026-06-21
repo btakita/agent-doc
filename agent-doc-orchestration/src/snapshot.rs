@@ -1040,9 +1040,12 @@ pub fn multinode_crdt_state(
 ) -> Result<crate::crdt::MultiNodeState> {
     let _lock = acquire_crdt_lock(doc)?;
     let nodes_path = multinode_crdt_path_for(doc)?;
-    if let Some(bytes) = crate::fs_util::read_optional_bytes(&nodes_path)
-        .with_context(|| format!("failed to read per-node CRDT state {}", nodes_path.display()))?
-    {
+    if let Some(bytes) = crate::fs_util::read_optional_bytes(&nodes_path).with_context(|| {
+        format!(
+            "failed to read per-node CRDT state {}",
+            nodes_path.display()
+        )
+    })? {
         return Ok(crate::crdt::MultiNodeState::decode_or_migrate(
             &bytes,
             fallback_markdown,
@@ -1728,7 +1731,9 @@ Second answer line three.
 
         // The per-node sidecar exists and round-trips through decode → text.
         assert!(multinode_crdt_path_for(&doc).unwrap().exists());
-        let bytes = load_multinode_crdt(&doc).unwrap().expect("nodes sidecar present");
+        let bytes = load_multinode_crdt(&doc)
+            .unwrap()
+            .expect("nodes sidecar present");
         let state = crate::crdt::MultiNodeState::decode(&bytes).unwrap();
         assert_eq!(state.to_text().unwrap(), markdown);
     }
@@ -1775,7 +1780,10 @@ Second answer line three.
         // so each save rebuilds fresh per-node states (GC per node) rather than
         // accreting tombstones — the sidecar reflects only the compacted content.
         let (_dir, doc) = setup();
-        let before = template_doc("Q.\n\n### Re: q\n\nA long answer body to be compacted away.", "- do [#a1]");
+        let before = template_doc(
+            "Q.\n\n### Re: q\n\nA long answer body to be compacted away.",
+            "- do [#a1]",
+        );
         let before_legacy = crate::crdt::CrdtDoc::from_text(&before).encode_state();
         save_document_crdt(&doc, &before_legacy, &before).unwrap();
         let before_len = load_multinode_crdt(&doc).unwrap().unwrap().len();

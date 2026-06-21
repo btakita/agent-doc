@@ -164,7 +164,10 @@ pub fn write_plugin_owner_lease_for_test(file: &str, pid: u32) {
     if let Some(parent) = path.parent()
         && let Err(e) = std::fs::create_dir_all(parent)
     {
-        panic!("test lease seed: failed to create {}: {e}", parent.display());
+        panic!(
+            "test lease seed: failed to create {}: {e}",
+            parent.display()
+        );
     }
     if let Err(e) = write_lease_at(
         &path,
@@ -371,9 +374,18 @@ mod tests {
     #[test]
     fn freshness_predicate_uses_ttl_window() {
         let ttl = Duration::from_secs(30);
-        assert!(plugin_owner_lease_is_fresh(1_000, 1_000, ttl), "same instant");
-        assert!(plugin_owner_lease_is_fresh(1_000, 1_030, ttl), "at the ttl edge");
-        assert!(!plugin_owner_lease_is_fresh(1_000, 1_031, ttl), "past the ttl");
+        assert!(
+            plugin_owner_lease_is_fresh(1_000, 1_000, ttl),
+            "same instant"
+        );
+        assert!(
+            plugin_owner_lease_is_fresh(1_000, 1_030, ttl),
+            "at the ttl edge"
+        );
+        assert!(
+            !plugin_owner_lease_is_fresh(1_000, 1_031, ttl),
+            "past the ttl"
+        );
         // Clock skew (heartbeat in the future) saturates to fresh.
         assert!(plugin_owner_lease_is_fresh(2_000, 1_000, ttl));
     }
@@ -388,11 +400,32 @@ mod tests {
         let alive = |_pid: u32| true;
 
         // First consumer acquires.
-        assert!(try_acquire_plugin_owner_at(&path, "jetbrains-1-aaa", 1, 1_000, ttl, alive));
+        assert!(try_acquire_plugin_owner_at(
+            &path,
+            "jetbrains-1-aaa",
+            1,
+            1_000,
+            ttl,
+            alive
+        ));
         // Second consumer defers while the owner stays fresh + live.
-        assert!(!try_acquire_plugin_owner_at(&path, "jetbrains-2-bbb", 2, 1_000, ttl, alive));
+        assert!(!try_acquire_plugin_owner_at(
+            &path,
+            "jetbrains-2-bbb",
+            2,
+            1_000,
+            ttl,
+            alive
+        ));
         // Owner re-acquires (refresh) and keeps ownership.
-        assert!(try_acquire_plugin_owner_at(&path, "jetbrains-1-aaa", 1, 1_010, ttl, alive));
+        assert!(try_acquire_plugin_owner_at(
+            &path,
+            "jetbrains-1-aaa",
+            1,
+            1_010,
+            ttl,
+            alive
+        ));
         let lease = read_lease_at(&path).unwrap();
         assert_eq!(lease.consumer_id, "jetbrains-1-aaa");
         assert_eq!(lease.heartbeat_secs, 1_010, "owner heartbeat refreshed");
@@ -407,11 +440,25 @@ mod tests {
         let ttl = Duration::from_secs(30);
 
         // Owner 1 claims while live.
-        assert!(try_acquire_plugin_owner_at(&path, "jetbrains-1-aaa", 1, 1_000, ttl, |_| true));
+        assert!(try_acquire_plugin_owner_at(
+            &path,
+            "jetbrains-1-aaa",
+            1,
+            1_000,
+            ttl,
+            |_| true
+        ));
         // Owner 1's pid is now dead; consumer 2 takes over even though the
         // heartbeat is still fresh.
         let only_2_live = |pid: u32| pid == 2;
-        assert!(try_acquire_plugin_owner_at(&path, "jetbrains-2-bbb", 2, 1_005, ttl, only_2_live));
+        assert!(try_acquire_plugin_owner_at(
+            &path,
+            "jetbrains-2-bbb",
+            2,
+            1_005,
+            ttl,
+            only_2_live
+        ));
         assert_eq!(read_lease_at(&path).unwrap().consumer_id, "jetbrains-2-bbb");
     }
 
@@ -424,10 +471,24 @@ mod tests {
         let ttl = Duration::from_secs(30);
         let alive = |_pid: u32| true;
 
-        assert!(try_acquire_plugin_owner_at(&path, "jetbrains-1-aaa", 1, 1_000, ttl, alive));
+        assert!(try_acquire_plugin_owner_at(
+            &path,
+            "jetbrains-1-aaa",
+            1,
+            1_000,
+            ttl,
+            alive
+        ));
         // Long past the TTL with no refresh: a different consumer takes over even
         // though pid 1 is still live (owner stopped watching the doc).
-        assert!(try_acquire_plugin_owner_at(&path, "jetbrains-2-bbb", 2, 9_000, ttl, alive));
+        assert!(try_acquire_plugin_owner_at(
+            &path,
+            "jetbrains-2-bbb",
+            2,
+            9_000,
+            ttl,
+            alive
+        ));
         assert_eq!(read_lease_at(&path).unwrap().consumer_id, "jetbrains-2-bbb");
     }
 
@@ -439,7 +500,10 @@ mod tests {
         assert!(try_acquire_plugin_owner(&file, "jetbrains-1-aaa", 1));
         // A non-owner release is a no-op.
         release_plugin_owner(&file, "jetbrains-2-bbb");
-        assert!(read_plugin_owner_lease(&file).is_some(), "non-owner must not release");
+        assert!(
+            read_plugin_owner_lease(&file).is_some(),
+            "non-owner must not release"
+        );
         // The owner releases successfully.
         release_plugin_owner(&file, "jetbrains-1-aaa");
         assert!(read_plugin_owner_lease(&file).is_none());
@@ -452,8 +516,16 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let file = doc_in(dir.path());
         // First live consumer wins via the public (real-clock) path.
-        assert!(try_acquire_plugin_owner(&file, "jetbrains-1-aaa", std::process::id()));
+        assert!(try_acquire_plugin_owner(
+            &file,
+            "jetbrains-1-aaa",
+            std::process::id()
+        ));
         // A second consumer whose pid is THIS live process defers.
-        assert!(!try_acquire_plugin_owner(&file, "jetbrains-2-bbb", std::process::id()));
+        assert!(!try_acquire_plugin_owner(
+            &file,
+            "jetbrains-2-bbb",
+            std::process::id()
+        ));
     }
 }

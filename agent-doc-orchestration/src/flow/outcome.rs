@@ -62,9 +62,9 @@ impl UserFacingOutcomeKind {
 
     pub const fn class(self) -> BinaryOutcomeClass {
         match self {
-            Self::QueuedBehindOwner
-            | Self::NoDrainableWork
-            | Self::DeferredForSupervisorDrain => BinaryOutcomeClass::Ok,
+            Self::QueuedBehindOwner | Self::NoDrainableWork | Self::DeferredForSupervisorDrain => {
+                BinaryOutcomeClass::Ok
+            }
             Self::RecoveredAndRetried => BinaryOutcomeClass::Recoverable,
             Self::DeferredForOperatorProof => BinaryOutcomeClass::Operator,
             Self::RealComponentConflict | Self::BlockedWithExactUnblocker => {

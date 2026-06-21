@@ -182,8 +182,7 @@ mod tests {
             updated,
             "snapshot must match the resume-cleared document"
         );
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("reset_resume_clear_writeback")
                 && ops_log.contains("transport=disk_fallback"),
@@ -302,7 +301,11 @@ mod tests {
 
         // Preserved continuity is unchanged.
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), only_a);
-        assert!(std::fs::read_to_string(&doc).unwrap().contains("resume: keep-me"));
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("resume: keep-me")
+        );
         assert_eq!(snapshot::load(&doc).unwrap().unwrap(), only_a);
         assert_eq!(
             std::fs::read_to_string(snapshot::baseline_path_for(&doc).unwrap()).unwrap(),

@@ -342,10 +342,7 @@ pub(crate) fn reap_local_model_leases(file: &Path) -> ReapOutcome {
     let Some(project_root) = crate::snapshot::find_project_root(&canonical) else {
         return ReapOutcome::SkippedNoProjectRoot;
     };
-    if !project_root
-        .join(DEFAULT_LEASE_REGISTRY_RELATIVE)
-        .exists()
-    {
+    if !project_root.join(DEFAULT_LEASE_REGISTRY_RELATIVE).exists() {
         return ReapOutcome::SkippedNoRegistry;
     }
     let args = reap_command_args(None, None);
@@ -353,10 +350,7 @@ pub(crate) fn reap_local_model_leases(file: &Path) -> ReapOutcome {
     cmd.args(&args).current_dir(&project_root).arg("--json");
     match cmd.output() {
         Ok(output) if output.status.success() => {
-            eprintln!(
-                "[hooks] tsift lease reap ok for {}",
-                file.display()
-            );
+            eprintln!("[hooks] tsift lease reap ok for {}", file.display());
             ReapOutcome::Reaped(String::from_utf8_lossy(&output.stdout).to_string())
         }
         Ok(output) => {
@@ -524,10 +518,7 @@ pub fn reap_stale_jetbrains_live_buffers(project_root: &Path) -> usize {
 /// injectable liveness predicate. Only sidecars whose embedded
 /// `jetbrains-<pid>` is NOT live (and not this process's own pid) are removed;
 /// legacy no-editor-id sidecars and non-JetBrains ids are always skipped.
-fn reap_stale_jetbrains_live_buffers_with(
-    dir: &Path,
-    is_pid_live: impl Fn(u32) -> bool,
-) -> usize {
+fn reap_stale_jetbrains_live_buffers_with(dir: &Path, is_pid_live: impl Fn(u32) -> bool) -> usize {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return 0,
@@ -772,10 +763,7 @@ mod tests {
         assert!(args.contains(&"--host".to_string()));
         assert!(args.contains(&"http://gpu-box:11434".to_string()));
         // Order: --unload-empty precedes the optional overrides.
-        let unload_idx = args
-            .iter()
-            .position(|a| a == "--unload-empty")
-            .unwrap();
+        let unload_idx = args.iter().position(|a| a == "--unload-empty").unwrap();
         let host_idx = args.iter().position(|a| a == "--host").unwrap();
         assert!(unload_idx < host_idx);
     }
@@ -795,7 +783,10 @@ mod tests {
         // Malformed: no digits after the marker.
         assert_eq!(jetbrains_consumer_pid("abc123.jetbrains--uuid.json"), None);
         // Not a json file.
-        assert_eq!(jetbrains_consumer_pid("abc123.jetbrains-12345-uuid.txt"), None);
+        assert_eq!(
+            jetbrains_consumer_pid("abc123.jetbrains-12345-uuid.txt"),
+            None
+        );
     }
 
     #[test]
@@ -865,14 +856,20 @@ mod tests {
         assert!(!dead_b.exists(), "dead-pid sidecar B should be reaped");
         assert!(alive.exists(), "alive-pid sidecar should survive");
         assert!(legacy.exists(), "legacy no-id sidecar must never be reaped");
-        assert!(vscode.exists(), "non-jetbrains sidecar must never be reaped");
+        assert!(
+            vscode.exists(),
+            "non-jetbrains sidecar must never be reaped"
+        );
     }
 
     #[test]
     fn reap_live_buffers_is_noop_on_missing_dir() {
         let tmp = tempfile::TempDir::new().unwrap();
         let missing = tmp.path().join("live-buffer");
-        assert_eq!(reap_stale_jetbrains_live_buffers_with(&missing, |_| false), 0);
+        assert_eq!(
+            reap_stale_jetbrains_live_buffers_with(&missing, |_| false),
+            0
+        );
     }
 
     #[test]
@@ -880,17 +877,11 @@ mod tests {
         // Missing dir.
         let tmp = tempfile::TempDir::new().unwrap();
         let missing = tmp.path().join("patches");
-        assert_eq!(
-            reap_stale_jetbrains_consumers_with(&missing, |_| false),
-            0
-        );
+        assert_eq!(reap_stale_jetbrains_consumers_with(&missing, |_| false), 0);
 
         // Empty dir.
         std::fs::create_dir_all(&missing).unwrap();
-        assert_eq!(
-            reap_stale_jetbrains_consumers_with(&missing, |_| false),
-            0
-        );
+        assert_eq!(reap_stale_jetbrains_consumers_with(&missing, |_| false), 0);
     }
 
     #[test]
@@ -902,7 +893,10 @@ mod tests {
         std::fs::write(&doc, "no frontmatter").unwrap();
         let outcome = reap_local_model_leases(&doc);
         assert!(
-            matches!(outcome, ReapOutcome::SkippedNoProjectRoot | ReapOutcome::SkippedNoRegistry),
+            matches!(
+                outcome,
+                ReapOutcome::SkippedNoProjectRoot | ReapOutcome::SkippedNoRegistry
+            ),
             "expected a skip outcome, got {outcome:?}"
         );
     }

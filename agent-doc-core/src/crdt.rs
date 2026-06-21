@@ -543,8 +543,7 @@ pub fn merge_by_component(
         None => String::new(),
     };
     let base_nodes = segment_into_nodes(&base_text).unwrap_or_default();
-    let mut base_by_name: std::collections::HashMap<&str, &str> =
-        std::collections::HashMap::new();
+    let mut base_by_name: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
     for node in &base_nodes {
         if let Node::Component { name, text } = node {
             base_by_name.entry(name.as_str()).or_insert(text.as_str());
@@ -599,8 +598,12 @@ where
         let merged_text = if ours_slice == theirs_slice {
             ours_slice.to_string()
         } else if let Some(component_name) = name
-            && let Some(merged) =
-                reconcile_component(component_name, node_base.as_deref(), ours_slice, theirs_slice)
+            && let Some(merged) = reconcile_component(
+                component_name,
+                node_base.as_deref(),
+                ours_slice,
+                theirs_slice,
+            )
         {
             // Phase 3 (#qnodemerge3): recursive keyed reconciliation drilled
             // *inside* the component, so two edits to different child nodes (queue
@@ -853,8 +856,10 @@ fn reconcile_component_body(
 
     let ours_map: std::collections::HashMap<&str, &KeyedChild> =
         ours_children.iter().map(|c| (c.key.as_str(), c)).collect();
-    let theirs_map: std::collections::HashMap<&str, &KeyedChild> =
-        theirs_children.iter().map(|c| (c.key.as_str(), c)).collect();
+    let theirs_map: std::collections::HashMap<&str, &KeyedChild> = theirs_children
+        .iter()
+        .map(|c| (c.key.as_str(), c))
+        .collect();
     let base_map: std::collections::HashMap<&str, &KeyedChild> =
         base_children.iter().map(|c| (c.key.as_str(), c)).collect();
 
@@ -1020,9 +1025,7 @@ impl MultiNodeState {
     /// Resolve this state's per-node base into a `name → text` map (components)
     /// and an ordered list of interstitial texts, mirroring the alignment
     /// [`merge_aligned_nodes`] expects.
-    fn base_lookup(
-        &self,
-    ) -> Result<(std::collections::HashMap<String, String>, Vec<String>)> {
+    fn base_lookup(&self) -> Result<(std::collections::HashMap<String, String>, Vec<String>)> {
         let mut by_name = std::collections::HashMap::new();
         let mut interstitials = Vec::new();
         for node in &self.nodes {
@@ -1159,7 +1162,9 @@ impl MultiNodeState {
             };
             let base_state = base.map(|_| CrdtDoc::from_text(&base_text).encode_state());
             if !reason.is_empty() {
-                eprintln!("[crdt] MultiNodeState::merge: {reason}; falling back to whole-doc merge");
+                eprintln!(
+                    "[crdt] MultiNodeState::merge: {reason}; falling back to whole-doc merge"
+                );
             }
             let merged = merge(base_state.as_deref(), ours_text, theirs_text)?;
             let state = MultiNodeState::from_text(&merged)?;
@@ -1199,10 +1204,11 @@ impl MultiNodeState {
             None => (std::collections::HashMap::new(), Vec::new()),
         };
 
-        let merged_nodes = merge_aligned_nodes(&ours_nodes, &theirs_nodes, |name, idx| match name {
-            Some(n) => base_by_name.get(n).cloned(),
-            None => base_interstitials.get(idx).cloned(),
-        })?;
+        let merged_nodes =
+            merge_aligned_nodes(&ours_nodes, &theirs_nodes, |name, idx| match name {
+                Some(n) => base_by_name.get(n).cloned(),
+                None => base_interstitials.get(idx).cloned(),
+            })?;
 
         let merged_text: String = merged_nodes.iter().map(|(_, text)| text.as_str()).collect();
         let new_state = MultiNodeState::from_merged_nodes(&merged_nodes);
@@ -1445,10 +1451,7 @@ pub fn replay_editor_ops(base: &str, ops: &[EditorOp]) -> Option<String> {
             }
             EditorOp::Delete { offset, len } => {
                 let end = offset.checked_add(*len)?;
-                if end > buf.len()
-                    || !buf.is_char_boundary(*offset)
-                    || !buf.is_char_boundary(end)
-                {
+                if end > buf.len() || !buf.is_char_boundary(*offset) || !buf.is_char_boundary(end) {
                     return None;
                 }
                 buf.replace_range(*offset..end, "");
@@ -1528,10 +1531,7 @@ mod tests {
         let base = "- do [#foo]\n";
         // user renamed #foo -> #foobar: delete "foo" then insert "foobar"
         let ops = vec![
-            EditorOp::Delete {
-                offset: 7,
-                len: 3,
-            },
+            EditorOp::Delete { offset: 7, len: 3 },
             EditorOp::Insert {
                 offset: 7,
                 text: "foobar".to_string(),
@@ -1569,10 +1569,7 @@ mod tests {
             text: "x".to_string(),
         }];
         assert_eq!(replay_editor_ops(base, &insert), None);
-        let delete = vec![EditorOp::Delete {
-            offset: 3,
-            len: 99,
-        }];
+        let delete = vec![EditorOp::Delete { offset: 3, len: 99 }];
         assert_eq!(replay_editor_ops(base, &delete), None);
     }
 
@@ -1594,10 +1591,7 @@ mod tests {
                 offset: 3,
                 text: "hi".to_string(),
             },
-            EditorOp::Delete {
-                offset: 0,
-                len: 2,
-            },
+            EditorOp::Delete { offset: 0, len: 2 },
         ];
         let json = serde_json::to_string(&ops).unwrap();
         let back: Vec<EditorOp> = serde_json::from_str(&json).unwrap();
@@ -1612,10 +1606,7 @@ mod tests {
         let ours = "<!-- agent:queue -->\n- do [#foo]\n<!-- /agent:queue -->\nAGENT RESPONSE\n";
         let theirs = "<!-- agent:queue -->\n- do [#foobar]\n<!-- /agent:queue -->\n";
         let ops = vec![
-            EditorOp::Delete {
-                offset: 28,
-                len: 3,
-            },
+            EditorOp::Delete { offset: 28, len: 3 },
             EditorOp::Insert {
                 offset: 28,
                 text: "foobar".to_string(),
@@ -1625,13 +1616,19 @@ mod tests {
         assert_eq!(replay_editor_ops(base, &ops).as_deref(), Some(theirs));
 
         let base_state = CrdtDoc::from_text(base).encode_state();
-        let merged =
-            merge_with_editor_ops(Some(&base_state), ours, theirs, Some(&ops)).unwrap();
+        let merged = merge_with_editor_ops(Some(&base_state), ours, theirs, Some(&ops)).unwrap();
         // Both edits present, renamed item, no duplication.
         assert!(merged.contains("- do [#foobar]"), "merged: {merged}");
         assert!(merged.contains("AGENT RESPONSE"), "merged: {merged}");
-        assert!(!merged.contains("- do [#foo]\n"), "stale item leaked: {merged}");
-        assert_eq!(merged.matches("do [#foobar]").count(), 1, "duplicated: {merged}");
+        assert!(
+            !merged.contains("- do [#foo]\n"),
+            "stale item leaked: {merged}"
+        );
+        assert_eq!(
+            merged.matches("do [#foobar]").count(),
+            1,
+            "duplicated: {merged}"
+        );
     }
 
     #[test]
@@ -2685,7 +2682,10 @@ Second answer line three.
             merged.contains("### Re: existing"),
             "agent exchange edit lost:\n{merged}"
         );
-        assert!(merged.contains("[#b2]"), "operator queue edit lost:\n{merged}");
+        assert!(
+            merged.contains("[#b2]"),
+            "operator queue edit lost:\n{merged}"
+        );
 
         // ZERO cross-component splice: the agent response body must not appear
         // inside the queue component, and the queue item must not appear inside
@@ -2721,7 +2721,10 @@ Second answer line three.
         let base = doc_with_exchange_queue("Q.", "- :pushpin: typing here");
         let base_state = CrdtDoc::from_text(&base).encode_state();
 
-        let ours = doc_with_exchange_queue(&format!("Q.\n\n### Re: q\n\n{console}"), "- :pushpin: typing here");
+        let ours = doc_with_exchange_queue(
+            &format!("Q.\n\n### Re: q\n\n{console}"),
+            "- :pushpin: typing here",
+        );
         let theirs = doc_with_exchange_queue("Q.", "- :pushpin: typing here now extended");
 
         let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
@@ -2775,7 +2778,10 @@ Second answer line three.
         // Must not panic and must equal the whole-doc merge fallback.
         let by_component = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
         let whole_doc = merge(Some(&base_state), &ours, &theirs).unwrap();
-        assert_eq!(by_component, whole_doc, "structural divergence must use whole-doc fallback");
+        assert_eq!(
+            by_component, whole_doc,
+            "structural divergence must use whole-doc fallback"
+        );
     }
 
     // ---- #qnodemerge2: per-node CRDT state persistence --------------------
@@ -2784,20 +2790,38 @@ Second answer line three.
     fn multinode_state_roundtrip_encode_decode() {
         // Per-component encode/decode round-trips through the container format and
         // reconstructs the exact document text.
-        let doc = doc_with_exchange_queue("Prompt.\n\n### Re: q\n\nBody.", "- do [#a1]\n- do [#b2]");
+        let doc =
+            doc_with_exchange_queue("Prompt.\n\n### Re: q\n\nBody.", "- do [#a1]\n- do [#b2]");
         let state = MultiNodeState::from_text(&doc).unwrap();
         let encoded = state.encode();
         let decoded = MultiNodeState::decode(&encoded).unwrap();
-        assert_eq!(decoded, state, "decode must reproduce the encoded per-node state");
+        assert_eq!(
+            decoded, state,
+            "decode must reproduce the encoded per-node state"
+        );
         assert_eq!(
             decoded.to_text().unwrap(),
             doc,
             "per-node state must reconstruct the original document text"
         );
         // The container is self-describing — one node per interstitial+component.
-        assert!(decoded.nodes.len() >= 4, "expected ≥4 nodes, got {}", decoded.nodes.len());
-        assert!(decoded.nodes.iter().any(|n| n.name.as_deref() == Some("exchange")));
-        assert!(decoded.nodes.iter().any(|n| n.name.as_deref() == Some("queue")));
+        assert!(
+            decoded.nodes.len() >= 4,
+            "expected ≥4 nodes, got {}",
+            decoded.nodes.len()
+        );
+        assert!(
+            decoded
+                .nodes
+                .iter()
+                .any(|n| n.name.as_deref() == Some("exchange"))
+        );
+        assert!(
+            decoded
+                .nodes
+                .iter()
+                .any(|n| n.name.as_deref() == Some("queue"))
+        );
     }
 
     #[test]
@@ -2823,7 +2847,10 @@ Second answer line three.
             "legacy migration must preserve the full document text"
         );
         assert!(
-            migrated.nodes.iter().any(|n| n.name.as_deref() == Some("queue")),
+            migrated
+                .nodes
+                .iter()
+                .any(|n| n.name.as_deref() == Some("queue")),
             "legacy migration must recover component nodes"
         );
     }
@@ -2841,7 +2868,10 @@ Second answer line three.
         let theirs = base_doc.clone();
 
         let (merged, advanced) = MultiNodeState::merge(Some(&base), &ours, &theirs).unwrap();
-        assert!(merged.contains("Agent body."), "exchange edit lost:\n{merged}");
+        assert!(
+            merged.contains("Agent body."),
+            "exchange edit lost:\n{merged}"
+        );
 
         let queue_before = base
             .nodes
@@ -2888,7 +2918,10 @@ Second answer line three.
         let theirs = doc_with_exchange_queue("Existing prompt.", "- do [#a1]\n- do [#b2]");
 
         let (merged, _advanced) = MultiNodeState::merge(Some(&base), &ours, &theirs).unwrap();
-        assert!(merged.contains("### Re: existing"), "exchange edit lost:\n{merged}");
+        assert!(
+            merged.contains("### Re: existing"),
+            "exchange edit lost:\n{merged}"
+        );
         assert!(merged.contains("[#b2]"), "queue edit lost:\n{merged}");
 
         let queue_body = merged
@@ -2916,7 +2949,10 @@ Second answer line three.
             let base_state = CrdtDoc::from_text(&base_doc).encode_state();
             merge(Some(&base_state), &ours, &theirs).unwrap()
         };
-        assert_eq!(merged, whole_doc, "structural divergence must use whole-doc fallback");
+        assert_eq!(
+            merged, whole_doc,
+            "structural divergence must use whole-doc fallback"
+        );
         assert_eq!(
             advanced.to_text().unwrap(),
             merged,
@@ -2956,7 +2992,10 @@ Second answer line three.
         );
 
         let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
-        assert!(merged.contains("### Re: q"), "exchange edit lost:\n{merged}");
+        assert!(
+            merged.contains("### Re: q"),
+            "exchange edit lost:\n{merged}"
+        );
         assert_eq!(
             merged.matches("do [#a1]").count(),
             1,
@@ -2992,7 +3031,10 @@ Second answer line three.
         let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
         assert!(merged.contains("### Re: first"), "block 1 lost:\n{merged}");
         assert!(merged.contains("### Re: second"), "block 2 lost:\n{merged}");
-        assert!(merged.contains("### Re: third"), "appended block 3 lost:\n{merged}");
+        assert!(
+            merged.contains("### Re: third"),
+            "appended block 3 lost:\n{merged}"
+        );
         assert!(
             merged.contains("a prompt typed between blocks"),
             "interleaved operator prompt lost:\n{merged}"
@@ -3071,7 +3113,10 @@ Second answer line three.
             merged.contains("### Re: second"),
             "stale side deleted a committed block:\n{merged}"
         );
-        assert!(merged.contains("[#new]"), "concurrent queue add lost:\n{merged}");
+        assert!(
+            merged.contains("[#new]"),
+            "concurrent queue add lost:\n{merged}"
+        );
     }
 
     #[test]
@@ -3120,7 +3165,13 @@ Second answer line three.
         let theirs = ["a", "x", "b", "c", "y"];
         assert_eq!(
             order_union(&ours, &theirs),
-            vec!["a".to_string(), "x".into(), "b".into(), "c".into(), "y".into()]
+            vec![
+                "a".to_string(),
+                "x".into(),
+                "b".into(),
+                "c".into(),
+                "y".into()
+            ]
         );
     }
 

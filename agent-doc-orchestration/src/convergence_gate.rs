@@ -195,7 +195,10 @@ mod tests {
         };
         match convergence_gate_decision(&facts) {
             ConvergenceGateDecision::ForceDiskFallback { unmet } => {
-                assert_eq!(unmet, vec![proof::EDITOR_CONVERGED, proof::INFLIGHT_DRAINED]);
+                assert_eq!(
+                    unmet,
+                    vec![proof::EDITOR_CONVERGED, proof::INFLIGHT_DRAINED]
+                );
             }
             other => panic!("expected ForceDiskFallback at timeout, got {other:?}"),
         }

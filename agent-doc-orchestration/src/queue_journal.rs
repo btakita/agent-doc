@@ -253,10 +253,12 @@ pub fn merge_missing_into_content(
         if present.contains(&entry.text) {
             continue;
         }
-        entries.push(crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-            text: entry.text.clone(),
-            multiline: entry.multiline,
-        }));
+        entries.push(crate::queue::QueueEntry::Prompt(
+            crate::queue::QueuePrompt {
+                text: entry.text.clone(),
+                multiline: entry.multiline,
+            },
+        ));
         added = true;
     }
     if !added {
@@ -335,7 +337,10 @@ mod tests {
             .unwrap()
             .expect("a lost add must produce merged content");
         assert!(merged.contains("- do [#beta]"), "merged:\n{merged}");
-        assert!(merged.contains("- do [#alpha]"), "must keep survivor:\n{merged}");
+        assert!(
+            merged.contains("- do [#alpha]"),
+            "must keep survivor:\n{merged}"
+        );
     }
 
     #[test]

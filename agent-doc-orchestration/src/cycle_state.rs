@@ -940,14 +940,16 @@ pub fn record_semantic_merge_acks(
                 && existing.id == ack.id
                 && existing.reason == reason
         }) {
-            state.pending_semantic_merge_acks.push(PendingSemanticMergeAck {
-                component: ack.component.clone(),
-                id: ack.id.clone(),
-                reason,
-                detail: ack.detail.clone(),
-                recorded_cycle_id: Some(cycle_id.clone()),
-                surfaced: false,
-            });
+            state
+                .pending_semantic_merge_acks
+                .push(PendingSemanticMergeAck {
+                    component: ack.component.clone(),
+                    id: ack.id.clone(),
+                    reason,
+                    detail: ack.detail.clone(),
+                    recorded_cycle_id: Some(cycle_id.clone()),
+                    surfaced: false,
+                });
             changed = true;
         }
     }
@@ -1346,7 +1348,10 @@ mod tests {
             recorded.recorded_cycle_id.as_deref(),
             Some(started.cycle_id.as_str())
         );
-        assert!(!recorded.surfaced, "freshly recorded ack is not yet surfaced");
+        assert!(
+            !recorded.surfaced,
+            "freshly recorded ack is not yet surfaced"
+        );
     }
 
     #[test]
@@ -1398,15 +1403,22 @@ mod tests {
 
         // Cycle 1 records ack A.
         start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        record_semantic_merge_acks(&doc, &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)])
-            .unwrap();
+        record_semantic_merge_acks(
+            &doc,
+            &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)],
+        )
+        .unwrap();
 
         // Cycle 2 surfaces A (carried) AND its own convergence records ack B.
         let cycle2 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         assert_eq!(cycle2.pending_semantic_merge_acks.len(), 1);
         record_semantic_merge_acks(
             &doc,
-            &[ack("exchange", "b", AckReason::OperatorRevivedAgentDeletedNode)],
+            &[ack(
+                "exchange",
+                "b",
+                AckReason::OperatorRevivedAgentDeletedNode,
+            )],
         )
         .unwrap();
 

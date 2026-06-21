@@ -889,7 +889,8 @@ pub unsafe extern "C" fn agent_doc_plugin_owner_try_acquire(
         Ok(s) => s,
         Err(_) => return 1,
     };
-    agent_doc_orchestration::plugin_owner::try_acquire_plugin_owner(path, consumer, pid as u32) as i32
+    agent_doc_orchestration::plugin_owner::try_acquire_plugin_owner(path, consumer, pid as u32)
+        as i32
 }
 
 /// `#8bfz` / `#fcconeowner`: release the plugin-owner lease for `file_path`, but
@@ -1320,7 +1321,7 @@ pub unsafe extern "C" fn agent_doc_reconnect_buffer_decision(
     buffer_content: *const c_char,
 ) -> *mut c_char {
     use agent_doc_orchestration::flow::document_mutation::{
-        decide_reconnect_buffer, ReconnectBufferDecision,
+        ReconnectBufferDecision, decide_reconnect_buffer,
     };
     let keep = || {
         CString::new(r#"{"decision":"keep_buffer"}"#)

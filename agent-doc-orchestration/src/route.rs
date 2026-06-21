@@ -1923,8 +1923,13 @@ pub fn run_with_tmux(
     frontmatter::require_agent_doc_document(&content, file)?;
     let (mut updated_content, session_id) = frontmatter::ensure_session_for_file(&content, file)?;
     if updated_content != content {
-        crate::write::converge_document_or_disk(file, &updated_content, &content, "route_session_id")
-            .with_context(|| format!("failed to write {}", file.display()))?;
+        crate::write::converge_document_or_disk(
+            file,
+            &updated_content,
+            &content,
+            "route_session_id",
+        )
+        .with_context(|| format!("failed to write {}", file.display()))?;
         eprintln!("[route] Generated session UUID: {}", session_id);
     }
     let snapshot_doc = crate::snapshot::load(file).ok().flatten();
@@ -2325,8 +2330,7 @@ fn route_closeout_user_outcome_fields(
     use crate::flow::closeout::CloseoutRecoveryDecision as Decision;
     use crate::flow::outcome::UserFacingOutcomeKind;
     if let Decision::Blocked { recommended, .. } = decision {
-        let command =
-            extract_recovery_command(recommended).unwrap_or_else(|| recommended.clone());
+        let command = extract_recovery_command(recommended).unwrap_or_else(|| recommended.clone());
         if let Ok(outcome) = crate::flow::outcome::UserFacingOutcome::with_unblocker(
             UserFacingOutcomeKind::BlockedWithExactUnblocker,
             "run_recovery_command",
@@ -2734,7 +2738,10 @@ fn route_queue_head_backed_by_committed_snapshot(file: &Path, head_text: &str) -
         Ok(components) => components,
         Err(_) => return true,
     };
-    let Some(queue_component) = components.iter().find(|component| component.name == "queue") else {
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
         return false;
     };
     let body = &snapshot[queue_component.open_end..queue_component.close_start];
@@ -2743,8 +2750,9 @@ fn route_queue_head_backed_by_committed_snapshot(file: &Path, head_text: &str) -
         Err(_) => return true,
     };
     entries.iter().any(|entry| match entry {
-        crate::queue::QueueEntry::Prompt(prompt)
-        | crate::queue::QueueEntry::Completed(prompt) => prompt.text == head_text,
+        crate::queue::QueueEntry::Prompt(prompt) | crate::queue::QueueEntry::Completed(prompt) => {
+            prompt.text == head_text
+        }
         _ => false,
     })
 }
@@ -2763,8 +2771,13 @@ fn activate_existing_route_queue_head(
     content = strip_queue_component_auto_attr(&content)?;
     let activated = content != original;
     if activated {
-        crate::write::converge_document_or_disk(file, &content, &original, "route_queue_activation")
-            .with_context(|| format!("failed to activate queue in {}", file.display()))?;
+        crate::write::converge_document_or_disk(
+            file,
+            &content,
+            &original,
+            "route_queue_activation",
+        )
+        .with_context(|| format!("failed to activate queue in {}", file.display()))?;
         crate::snapshot::save(file, &content).with_context(|| {
             format!(
                 "failed to sync snapshot after activating queue for {}",

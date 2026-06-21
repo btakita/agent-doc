@@ -578,10 +578,7 @@ where
                 let inflight = INFLIGHT_CONNECTION_HANDLERS
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
                     + 1;
-                crate::ops_log::log_op(
-                    &root_buf,
-                    &ipc_accept_thread_ops_marker(inflight),
-                );
+                crate::ops_log::log_op(&root_buf, &ipc_accept_thread_ops_marker(inflight));
                 std::thread::spawn(move || {
                     let _inflight_guard = InflightConnectionGuard;
                     let (reader_half, mut writer_half) = stream.split();
@@ -610,7 +607,9 @@ where
                                     // EARLY_ACK_ENABLED run had no grep-able proof the
                                     // `pending` ack actually went out before the blocking
                                     // apply. Emit a positive marker on the success path.
-                                    eprintln!("[ipc-socket] early-ack pending emitted before apply");
+                                    eprintln!(
+                                        "[ipc-socket] early-ack pending emitted before apply"
+                                    );
                                     // #x9ds: the stderr line above is invisible to the
                                     // ops.log gate-verify scan, and its hyphenated text does
                                     // not contain the `early_ack_pending` predicate token.

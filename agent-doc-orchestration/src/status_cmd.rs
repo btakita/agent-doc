@@ -156,8 +156,14 @@ mod tests {
         set(&doc, "new status").unwrap();
 
         let on_disk = std::fs::read_to_string(&doc).unwrap();
-        assert!(on_disk.contains("new status"), "status not written: {on_disk}");
-        assert!(!on_disk.contains("old status"), "old status not replaced: {on_disk}");
+        assert!(
+            on_disk.contains("new status"),
+            "status not written: {on_disk}"
+        );
+        assert!(
+            !on_disk.contains("old status"),
+            "old status not replaced: {on_disk}"
+        );
     }
 
     #[test]

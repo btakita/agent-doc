@@ -794,8 +794,9 @@ pub(crate) fn answered_free_text_head_node_keys(
     if response_body.trim().is_empty() {
         return Ok(Vec::new());
     }
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
-        .map_err(|err| anyhow::anyhow!("free-text strike: failed to derive queue node keys: {err}"))?;
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
+        anyhow::anyhow!("free-text strike: failed to derive queue node keys: {err}")
+    })?;
     let mut keys = Vec::new();
     for node in nodes {
         if node.item.struck {
@@ -861,8 +862,7 @@ pub fn strike_answered_free_text_queue_heads(
     };
 
     if skip_visible_guard {
-        atomic_write(file, &new_document)
-            .context("free-text strike: failed to write document")?;
+        atomic_write(file, &new_document).context("free-text strike: failed to write document")?;
     } else {
         converge_document_or_disk(file, &new_document, &content, "free_text_strike")
             .context("free-text strike: failed to write document")?;
@@ -946,9 +946,8 @@ fn orphan_id_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
     if !has_backlog {
         return Ok(Vec::new());
     }
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
-        anyhow::anyhow!("orphan prune: failed to derive queue node keys: {err}")
-    })?;
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("orphan prune: failed to derive queue node keys: {err}"))?;
     let mut keys = Vec::new();
     for node in nodes {
         if node.item.struck {
@@ -999,8 +998,7 @@ fn orphan_id_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
 ///      source of queue-head segmentation (`queue::parse_spans`).
 pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
     let _lock = acquire_doc_lock(file)?;
-    let content =
-        std::fs::read_to_string(file).context("noise prune: failed to read document")?;
+    let content = std::fs::read_to_string(file).context("noise prune: failed to read document")?;
     let (fm, _) = frontmatter::parse(&content)?;
     if fm.queue_active != Some(true) {
         return Ok(0);
@@ -1015,7 +1013,11 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
     let new_snapshot = match snapshot::load(file)? {
         Some(snap) => {
             let (new_snap, _) = strike_all_noise_queue_heads(&snap)?;
-            if new_snap == snap { None } else { Some(new_snap) }
+            if new_snap == snap {
+                None
+            } else {
+                Some(new_snap)
+            }
         }
         None => None,
     };
@@ -1031,7 +1033,11 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
     );
     crate::ops_log::log_op(
         file,
-        &format!("queue_noise_prune file={} struck={}", file.display(), struck),
+        &format!(
+            "queue_noise_prune file={} struck={}",
+            file.display(),
+            struck
+        ),
     );
     Ok(struck)
 }
@@ -1071,9 +1077,7 @@ fn strike_all_noise_queue_heads(content: &str) -> Result<(String, usize)> {
                         preset_supplies_directive,
                     )
             }
-            crate::queue::QueueEntry::Freeform(line) => {
-                crate::queue::is_noise_freeform_line(line)
-            }
+            crate::queue::QueueEntry::Freeform(line) => crate::queue::is_noise_freeform_line(line),
             _ => false,
         };
         if is_noise {
@@ -1189,9 +1193,8 @@ pub fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool>
 /// *contain* a `#token` — are excluded so the orphan escape hatch can never strike
 /// a free-text operator report by accident.
 fn id_backed_head_node_keys(content: &str, target_id: &str) -> Result<Vec<String>> {
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
-        anyhow::anyhow!("orphan strike: failed to derive queue node keys: {err}")
-    })?;
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("orphan strike: failed to derive queue node keys: {err}"))?;
     let mut keys = Vec::new();
     for node in nodes {
         if node.item.struck {
@@ -2756,7 +2759,10 @@ mod core_tests {
         let outcome = consume_queue_prompt_force_disk(&doc)
             .expect("consume must reconcile a head divergence backed by dropped-queue evidence");
         let outcome = outcome.expect("the document head should be consumed");
-        assert_eq!(outcome.consumed_count, 1, "exactly the document head consumes");
+        assert_eq!(
+            outcome.consumed_count, 1,
+            "exactly the document head consumes"
+        );
         // The document head (live-buffer addition) is authoritative — its single
         // queue item drains, and the snapshot adopts the reconciled (drained)
         // document queue rather than retaining the OLD snapshot head.
@@ -2812,7 +2818,8 @@ mod core_tests {
         let err = consume_queue_prompt_force_disk(&doc)
             .expect_err("an unexplained head divergence must still hard-bail");
         assert!(
-            err.to_string().contains("do not match document head prompts"),
+            err.to_string()
+                .contains("do not match document head prompts"),
             "the corruption guard must keep the original bail: {err}"
         );
     }
@@ -3067,8 +3074,12 @@ mod core_tests {
 
     #[test]
     fn queue_prompt_text_is_free_text_classification() {
-        let content = "---\nqueue_active: true\n---\n<!-- agent:queue -->\n- x\n<!-- /agent:queue -->\n";
-        assert!(!queue_prompt_text_is_free_text(content, "do [#fullboundary]"));
+        let content =
+            "---\nqueue_active: true\n---\n<!-- agent:queue -->\n- x\n<!-- /agent:queue -->\n";
+        assert!(!queue_prompt_text_is_free_text(
+            content,
+            "do [#fullboundary]"
+        ));
         assert!(!queue_prompt_text_is_free_text(content, "#orphanqhead"));
         assert!(queue_prompt_text_is_free_text(
             content,
@@ -3422,9 +3433,9 @@ Old.
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue go -->\n",
-            "- :pushpin: [#kcb5]\n",        // ORPHAN (no backlog item) → struck
-            "- :pushpin: do [#6b5h]\n",     // deferred [focused-cycle] but OPEN → preserved
-            "- do [#keepme]\n",             // open backlog → preserved
+            "- :pushpin: [#kcb5]\n",    // ORPHAN (no backlog item) → struck
+            "- :pushpin: do [#6b5h]\n", // deferred [focused-cycle] but OPEN → preserved
+            "- do [#keepme]\n",         // open backlog → preserved
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog -->\n",
             "- [ ] [#keepme] real open work\n",
@@ -3499,8 +3510,8 @@ Old.
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue preset=\"#spec-test-build-install-commit-push\" go -->\n",
-            "- [#sqedit-race]\n",  // id-backed → preserved
-            "- [#keepme]\n",       // id-backed → preserved
+            "- [#sqedit-race]\n", // id-backed → preserved
+            "- [#keepme]\n",      // id-backed → preserved
             // Shape 1: `---`-wrapped block whose text contains a nested ``` fence.
             "---\n",
             ":round_pushpin: Fix the root cause of the HEAD issue with already done items.\n",
@@ -3523,7 +3534,10 @@ Old.
         // 5 noise entries: the `---`-wrapped block (1) + the bare-```-fenced block's
         // 4 `Freeform` lines (`:pushpin:` head, ```, console line, ```).
         let struck = prune_noise_queue_heads(&doc).unwrap();
-        assert_eq!(struck, 5, "both pasted blocks (all their lines) must be excised");
+        assert_eq!(
+            struck, 5,
+            "both pasted blocks (all their lines) must be excised"
+        );
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(

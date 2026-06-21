@@ -34,8 +34,7 @@ static DISPATCH_INJECT_ATTEMPTS: std::sync::atomic::AtomicUsize =
 /// marker. `transport` distinguishes the direct-pane text+Enter send from the
 /// supervisor-IPC inject so a regression can be attributed to the right path.
 fn log_dispatch_inject(file: &Path, pane: &str, harness: &HarnessConfig, transport: &str) {
-    let attempt =
-        DISPATCH_INJECT_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let attempt = DISPATCH_INJECT_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     crate::ops_log::log_op(
         file,
         &format!(
@@ -158,9 +157,7 @@ pub(crate) fn poll_direct_pane_acceptance(
                     let not_dispatched = !poll_state.saw_trigger_visible
                         && last_capture
                             .as_ref()
-                            .map(|(_, _, _, content)| {
-                                pane_idle_dispatch_ready(content, harness)
-                            })
+                            .map(|(_, _, _, content)| pane_idle_dispatch_ready(content, harness))
                             .unwrap_or(false);
                     return DirectPaneAcceptance {
                         status: CommandDispatchStatus::Accepted,

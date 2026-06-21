@@ -98,7 +98,10 @@ mod tests {
         // Backward-compat: bare epoch (pre-#opslogts log lines) still parse.
         assert_eq!(parse_log_timestamp("1781771180"), Some(1_781_771_180));
         // ISO-8601 UTC parses back to the same epoch.
-        assert_eq!(parse_log_timestamp("2026-06-18T08:26:20Z"), Some(1_781_771_180));
+        assert_eq!(
+            parse_log_timestamp("2026-06-18T08:26:20Z"),
+            Some(1_781_771_180)
+        );
         // Round-trip across a range of epochs, including a leap day.
         for secs in [0_u64, 1, 1_709_164_800, 1_781_915_847, 4_102_444_800] {
             assert_eq!(

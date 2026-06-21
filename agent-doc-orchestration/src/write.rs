@@ -4500,7 +4500,10 @@ mod tests {
     fn count_code_fence_openings_handles_backtick_and_tilde() {
         assert_eq!(count_code_fence_openings("```\ncode\n```\n"), 2);
         assert_eq!(count_code_fence_openings("~~~\ncode\n~~~\n"), 2);
-        assert_eq!(count_code_fence_openings("  ```js\nconst x = 1;\n  ```\n"), 2);
+        assert_eq!(
+            count_code_fence_openings("  ```js\nconst x = 1;\n  ```\n"),
+            2
+        );
         assert_eq!(count_code_fence_openings("no fences here"), 0);
         assert_eq!(count_code_fence_openings("```python\nprint('hi')\n```"), 2);
         assert_eq!(

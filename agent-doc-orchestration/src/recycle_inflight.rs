@@ -238,8 +238,14 @@ mod tests {
     fn freshness_predicate_uses_ttl_window() {
         let ttl = Duration::from_secs(15);
         assert!(recycle_inflight_is_fresh(1_000, 1_000, ttl), "same instant");
-        assert!(recycle_inflight_is_fresh(1_000, 1_015, ttl), "at the ttl edge");
-        assert!(!recycle_inflight_is_fresh(1_000, 1_016, ttl), "past the ttl");
+        assert!(
+            recycle_inflight_is_fresh(1_000, 1_015, ttl),
+            "at the ttl edge"
+        );
+        assert!(
+            !recycle_inflight_is_fresh(1_000, 1_016, ttl),
+            "past the ttl"
+        );
         // Clock skew (marker in the future) saturates to fresh.
         assert!(recycle_inflight_is_fresh(2_000, 1_000, ttl));
     }
@@ -311,11 +317,8 @@ mod tests {
         mark_recycle_inflight(&file, RECYCLE_INFLIGHT_AUTO_INSTALL).unwrap();
         // A fresh marker stays pending; a sub-poll timeout must give up (false)
         // rather than block forever, so the caller can fail closed / retry.
-        let settled = wait_for_recycle_settle(
-            &file,
-            Duration::from_millis(0),
-            Duration::from_millis(1),
-        );
+        let settled =
+            wait_for_recycle_settle(&file, Duration::from_millis(0), Duration::from_millis(1));
         assert!(
             !settled,
             "an unsettling recycle must return false at the timeout, not hang"

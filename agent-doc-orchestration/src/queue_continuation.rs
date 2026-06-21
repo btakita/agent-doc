@@ -325,9 +325,7 @@ pub(crate) fn deferred_backlog_ids(content: &str) -> std::collections::HashSet<S
 /// instead of stranding idle. The supervisor head picker
 /// [`live_drainable_continuation_head`] uses this scope; the in-session loop and
 /// `session-check` guards use the narrower in-session scope.
-pub(crate) fn supervisor_deferred_backlog_ids(
-    content: &str,
-) -> std::collections::HashSet<String> {
+pub(crate) fn supervisor_deferred_backlog_ids(content: &str) -> std::collections::HashSet<String> {
     deferred_backlog_ids_scoped(content, DrainScope::Supervisor)
 }
 
@@ -1031,9 +1029,7 @@ pub fn queue_stale_noise_lines(file: &Path) -> usize {
             crate::queue::QueueEntry::Prompt(prompt) => {
                 !is_drainable_queue_head_with_context(&prompt.text, preset_supplies_directive)
             }
-            crate::queue::QueueEntry::Freeform(line) => {
-                crate::queue::is_noise_freeform_line(line)
-            }
+            crate::queue::QueueEntry::Freeform(line) => crate::queue::is_noise_freeform_line(line),
             _ => false,
         })
         .count()
@@ -2021,7 +2017,12 @@ mod tests {
         // even though the active queue still has drainable heads. Clearing the
         // request restores normal continuation so the drain resumes post-recycle.
         let dir = tempfile::tempdir().unwrap();
-        let doc = write_doc(dir.path(), &["do [#seopdp] next", "do [#third]"], true, true);
+        let doc = write_doc(
+            dir.path(),
+            &["do [#seopdp] next", "do [#third]"],
+            true,
+            true,
+        );
         let doc_str = doc.to_string_lossy().to_string();
 
         // Baseline: continuation is owed.

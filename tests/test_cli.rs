@@ -966,6 +966,14 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // occurrences were test-assertion literals, not production hot-path
         // guards; only production `guard_` tokens are budgeted here now.
         ("agent-doc-orchestration/src/session_check.rs", "guard_") => 65,
+        // +1 (#qpausemix-verify / #j9ja): when `queue_continuation_required` is
+        // emitted on a controller-paused queue, session-check now drops a
+        // distinctive `queue_paused_continuation_guidance_emitted pause_reason={..}`
+        // SUCCESS marker into ops.log so an operator live test of the pause-aware
+        // guidance is provable/disprovable from the log (auto-verify keys on
+        // `ops_log:queue_paused_continuation_guidance_emitted`). The recorded
+        // `pause_reason=` is the controller pause text, not a new flow boundary.
+        ("agent-doc-orchestration/src/session_check.rs", "reason=") => 1,
         ("agent-doc-orchestration/src/session_check/closeout_guards.rs", "guard_") => 4,
         // +3 (#mrhqueuepreserve): the audited
         // `queue_head_removal_guard_proof` diagnostic plus two regression test

@@ -1653,6 +1653,13 @@ impl SimWorld {
         }
         // Past the cold-start gate the auto-start send rejoins the normal route
         // dispatch path (the same readiness/coalesce/acceptance invariants apply).
+        // `#jbtsiftnosub` / `#j9ja`: record the SUCCESS counterpart of
+        // `dispatch_into_starting_pane` so a live operator test of the cleared
+        // re-verify gate is provable/disprovable from ops.log.
+        self.record_ops_proof(format!(
+            "auto_start_dispatch_ready_confirmed pane={} generation={} #jbtsiftnosub",
+            pane_id, self.route.durable.generation
+        ));
         self.dispatch_route_prompt_with(true)
     }
 

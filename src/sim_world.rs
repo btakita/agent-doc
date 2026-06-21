@@ -1840,6 +1840,13 @@ fn route_sim_auto_start_dispatch_waits_for_dispatch_ready_prompt_before_send() {
         world.coverage.auto_start_starting_pane_blocks, 1,
         "the ready auto-start dispatch must not re-trip the starting-pane block"
     );
+    // #jbtsiftnosub / #j9ja: the cleared re-verify gate must log the SUCCESS
+    // counterpart so an operator live test is provable from ops.log.
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("auto_start_dispatch_ready_confirmed"),
+        "ops log must record auto_start_dispatch_ready_confirmed once the dispatch-ready gate clears:\n{ops_log}"
+    );
 }
 
 #[test]

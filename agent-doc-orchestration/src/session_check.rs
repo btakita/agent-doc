@@ -218,6 +218,23 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // `queue_continuation_required: true`) prints the "queue_paused is
                 // NOT a contradiction" preamble + recorded pause reason here too.
                 eprintln!("[session-check] {}", continuation_guidance_for(file));
+                // #qpausemix-verify / #j9ja: the pause-aware guidance above only
+                // reaches session-check stderr. When the queue is controller-paused,
+                // also drop a distinctive SUCCESS marker into ops.log so a live
+                // operator test of the "queue_paused is NOT a contradiction" preamble
+                // is provable/disprovable from the log (auto-verify resolves the gate
+                // via `--pending-set-verify
+                // verify=ops_log:queue_paused_continuation_guidance_emitted`).
+                if let Some(reason) =
+                    crate::queue_continuation::document_queue_controller_pause_reason(file)
+                {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "queue_paused_continuation_guidance_emitted pause_reason={reason:?} #qpausemix-verify"
+                        ),
+                    );
+                }
                 // #qstallguard Layer B: this is a clean closeout that STILL requires
                 // continuation. Drop a one-shot continuation-pending marker so the
                 // next preflight can emit `queue_stall_detected` if the loop neither

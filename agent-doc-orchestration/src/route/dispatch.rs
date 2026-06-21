@@ -655,7 +655,26 @@ pub(crate) fn reverify_auto_start_dispatch_ready(
     let poll_interval = Duration::from_millis(150);
     let last_block = loop {
         match auto_start_dispatch_ready_block(tmux, pane, harness) {
-            None => return Ok(()),
+            None => {
+                // #jbtsiftnosub / #j9ja: SUCCESS marker. The pane reached a harness
+                // dispatch-ready prompt within the bound, so the auto-start send may
+                // proceed. The fail-closed arms below log `dispatch_into_starting_pane`
+                // / `dispatch_into_shell`; emit the positive counterpart so a live
+                // operator test of this gate is provable/disprovable from ops.log
+                // (auto-verify resolves the gate via `--pending-set-verify
+                // verify=ops_log:auto_start_dispatch_ready_confirmed`).
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "auto_start_dispatch_ready_confirmed file={} pane={} harness={} elapsed_secs={} #jbtsiftnosub",
+                        file.display(),
+                        pane,
+                        harness.binary,
+                        start.elapsed().as_secs()
+                    ),
+                );
+                return Ok(());
+            }
             Some(block) if start.elapsed() >= timeout => break block,
             Some(_) => {}
         }

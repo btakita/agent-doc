@@ -32,6 +32,10 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+- Phase 4 cutover shipped — FTS5 `index.db` BM25 is the **default** lexical search path; JSON `TokenIndex` demoted to a freshness-gated degraded-read-only fallback.
+- Phase 4b (b) path-prune (`#ve5f`) shipped; Phase 4b (a) decided + recorded (keep `TokenIndex::build` for degraded read-only).
+- All pushed to `origin/main`.
+- **Phase 5 — crates.io release.** Review item `#1yks` gates it: the two new crates `tsift-local-model` + `tsift-kg` need crates.io Trusted Publishing config before the `v*` tag, or the publish fails on them.
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260621-035054.md`*
@@ -39,7 +43,21 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 ❯ - Archived 9 response topic(s): session compaction; queue re-mirror; do #015t; 6 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54...
-<!-- agent:boundary:8f742482 -->
+
+### Re: session compaction — state recap — opus-4-8
+
+The exchange was compacted (9 response topics archived to `…-20260621-035054.md`) and the compacted document is now committed cleanly (the snapshot/CRDT drift from the compaction was reset from the current file first, so HEAD matches the visible doc). This response closes the prompt-only summary tail. No new work was requested.
+
+**`#015t` (FTS5 content index) state — Phases 0–4b COMPLETE:**
+- Phase 4 cutover shipped — FTS5 `index.db` BM25 is the **default** lexical search path; JSON `TokenIndex` demoted to a freshness-gated degraded-read-only fallback.
+- Phase 4b (b) path-prune (`#ve5f`) shipped; Phase 4b (a) decided + recorded (keep `TokenIndex::build` for degraded read-only).
+- All pushed to `origin/main`.
+
+**Only remaining item is operator-gated → `#015t` stays `[operator-verify]`:**
+- **Phase 5 — crates.io release.** Review item `#1yks` gates it: the two new crates `tsift-local-model` + `tsift-kg` need crates.io Trusted Publishing config before the `v*` tag, or the publish fails on them.
+
+The queued `[#015t]` is the go-mode mirror of the operator-verify umbrella (`queue_drainable_head_count: 0`, `queue_continuation_required: false`) — not a fresh directive, so I'm not looping. Say **"release"** (after `#1yks` is configured) to ship Phase 5.
+<!-- agent:boundary:ef6c5dc7 -->
 <!-- /agent:exchange -->
 
 ## Queue

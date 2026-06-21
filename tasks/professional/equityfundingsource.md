@@ -228,7 +228,7 @@ So end-to-end now: an admin opens a lender card → "Message lender" → the len
 Remaining: **`#lender-card-msg-email`** (email-to-lender notification) is **gated into review** — it's blocked on the verified EFS Resend sending domain (`#f4rq`), same gate as the existing deal-thread email. Nothing else to do there until the domain lands.
 
 **Not deployed** (preset is commit+push; new table `0095` + these routes apply on deploy). Reply **`deploy`** to push the whole set live (Part 1 banner + admin messaging + this lender portal half).
-<!-- agent:boundary:993db93c -->
+<!-- agent:boundary:79cb6c3c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -240,11 +240,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: On dialogs, there should be a message that indicates what needs to be done to advance the card to the next step. So in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > btak.dev+lender2@gmail.com should have a message that hoists the requirement "No accreditation submission yet — the lender must submit their questionnaire before it can be decided."...assuming that is what is needed. We should also have an embedded messaging component with the lender to help the lender provide the documents.~~
-- ~~On dialogs, there should be a message that indicates what needs to be done to advance the card to the next step. So in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > btak.dev+lender2@gmail.com should have a message that hoists the requirement "No accreditation submission yet — the lender must submit their questionnaire before it can be decided."...assuming that is what is needed. We should also have an embedded messaging component with the lender to help the lender provide the documents.~~
-- do [#lender-card-msg]
-- do [#lender-card-msg-portal]
-- do [#lender-card-msg-email]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -170,7 +170,28 @@ Coverage folded, not lost:
 The **backend** (`lender-account-messages.ts` repo, route handlers, `lender_account_messages_to_unified_` adapter) is deliberately untouched — that data layer still serves both the lender launcher and the admin thread.
 
 **Queue:** two phases remain, both for your call — `do [#portalmsg2-dealthreads]` (admin deal-interest + deal-detail threads, medium risk) and `do [#portalmsg4]` (borrower launcher over the live DO/websocket chat, highest risk). I'm not auto-draining either.
-<!-- agent:boundary:32d1618d -->
+
+### Re: Stop — leave remaining phases as backlog — opus-4-8
+
+Stopping here per your call. The unified messaging feature's high-value, low-risk work is **complete and live**; the two remaining phases stay as backlog.
+
+**Shipped + deployed this session:**
+- PRD `prds/portal-messages-component.md`
+- `#portalmsg1/3` — `<PortalMessages>` component (launcher + inline placements) + self-service launchers
+- `#portalmsg-shell` — launcher hoisted to the lender/broker portal shells (always-visible on every page)
+- `#portalmsg2` — admin lender-pipeline account thread → unified inline (sticky compose)
+- `#portalmsg-shell-cleanup` — deleted the orphaned standalone component
+
+Latest worker version `101ce2fd` (cleanup was runtime-inert, no redeploy). 1061 tests green.
+
+**Left as backlog (not started), both larger refactors than the shipped phases:**
+- `#portalmsg2-dealthreads` — the deal-interest "Lender communication" + admin deal-detail threads are **controlled** components (render from pre-loaded `interest.lender_messages`/`borrower_messages` with optimistic send handlers), so this needs `PortalMessages` extended to a controlled mode (messages + onSend props) before migrating. Not a quick swap.
+- `#portalmsg4` — borrower launcher over the live Durable Object websocket realtime chat path; highest regression risk.
+
+Both remain queued as `do [#id]` mirrors of their backlog items. The in-session queue is paused (qflood guard) and I'm not auto-draining; if `/agent-doc` keeps re-firing on these deferred heads, set `queue: stop` in the frontmatter (or remove the two `do [#...]` lines) to silence it — preflight re-forces `queue: start` while drainable heads exist.
+
+Net for the session: one unified, always-visible messaging component replacing four bespoke thread UIs across the self-service portals and the admin lender card, all behind tests and deployed.
+<!-- agent:boundary:91c1279a -->
 <!-- /agent:exchange -->
 ###
 <!--

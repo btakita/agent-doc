@@ -243,13 +243,37 @@ IPC note: if you restarted the IDE, this cycle should commit cleanly via the rev
 One note on your `🧪` test line: preflight this cycle **did** strike `🧪 test edit for [#qnodemerge4wire]`, but with `source=review_gated` — i.e. it was resolved because it *cites the gated id `#qnodemerge4wire`*, which is correct resolution (the id is done/in-review), **not** the false-strike bug `#qstrikeexplain` fixes. That bug is specifically about striking a brand-new *free-text* head you're still typing; this line was struck for a legitimately different reason (its cited work is resolved).
 
 Continuing now that the transport is healthy. Next agent-doable binary head is `#qstrikenote` (the Phase-1 explicit-strike-note follow-up). I'll pick it up on the next cycle.
-<!-- agent:boundary:fa16cfde -->
+
+### Re: fix the plugin drift issue — root-caused + fixed (#qpcwcmerge) — opus-4-8
+
+> **Queue prompt:**
+>
+> Fix the plugin drift issue.
+
+
+> **Queue prompt:** Fix the plugin drift issue.
+
+Done, shipped to the agent-doc submodule (`1eefd8e1`). Root cause traced, fixed, and your three follow-up directives folded in.
+
+**Root cause.** When `finalize` hit `live_prompt_drift`, the editor-convergence recovery (`try_editor_converge_live_prompt_drift`) sent the response to the editor, and the editor's CRDT correctly produced the right merged buffer — **its live queue + same-cycle auto-strikes + the response**. But the acceptance check required a **whole-document** match against `content_ours` (which carries only the *baseline* queue), so it rejected the editor's correct buffer as `ack_mismatch` and fell back to the lossy `content_ours` disk write — dropping the editor's queue and diverging HEAD from the editor every cycle (the `#pcwc` post-commit drift you kept seeing).
+
+**Fix (`#qpcwcmerge`).** The recovery now accepts the editor buffer when **every divergence from `content_ours` lives strictly inside a component other than the agent's response component (`exchange`)**; the response, the non-component regions, and the component structure must all match. Committing the editor buffer makes HEAD == editor → no drift (editor-wins, `#queue-user-edit-overwrite`).
+
+**Your three directives, incorporated:**
+1. **AST / arbitrary + plugin components** — the discriminator (`blank_components_except`) keys off `component::parse` with **no hardcoded allowlist**, so a plugin-defined component reconciles identically to the built-in queue. Test covers an `agent:pluginpanel` component.
+2. **Binary uses the generalized names** — verified: `live_prompt_drift_convergence_patches` was already AST-generic (iterates all components by name), and the new helper is too. No allowlist anywhere in the recovery path.
+3. **VS Code matches JB** — added the `#yzer` reconnect-reread to the VS Code plugin (`reconnectBufferDecision` FFI binding + `PatchWatcher.reconcileStaleBuffersOnReconnect` on activation), a thin caller of the **binary-owned** `agent_doc_reconnect_buffer_decision` decision — exactly mirroring the JB plugin. Both editors now share that FFI.
+
+**Verification:** `make check` green (**4944 tests**, +7 for `#qpcwcmerge` incl. plugin-component + structural-add fail-closed); VS Code `tsc` clean + native tests 11/11 (+5 `parseReconnectDecision`); SPEC aligned.
+
+**To go live:** I'll `make install` + `admin recycle` now (local rebuild, no release) so the running supervisor picks up the fix at its idle boundary. You'll see it directly: subsequent finalizes should commit cleanly with `editor_convergence_succeeded ... resolution=editor_wins_outside_response` in `ops.log` and **no** post-commit worktree drift.
+<!-- agent:boundary:8b5d34a0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
-- Fix the plugin drift issue.
+- ~~Fix the plugin drift issue.~~
 ---
 :round_pushpin: JB `Run Agent Doc` stalled without feedback
 ```
@@ -278,7 +302,7 @@ Press Enter to restart, or 'q' to exit.
 - do [#qcm1verify]
 - do [#s81q]: Rename "Restart Supervisor" to "Recycle Supervisor". Add Restart command alongside "Recycle Supervisor"
 - do [#qstrikenote]
-- 🧪 test edit for [#qnodemerge4wire]
+- ~~🧪 test edit for [#qnodemerge4wire]~~
 - do [#routeretest]
 - [#pendaddorder]
 - JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.

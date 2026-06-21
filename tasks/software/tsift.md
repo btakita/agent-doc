@@ -116,7 +116,22 @@ You chose **"I publish all 25 now"**, so I did the full manual `0.1.73` publish 
 **`#015t` is now complete** — Phases 0–4b shipped earlier, Phase 5 (this release) is published + tagged. Reaped.
 
 **One optional, non-blocking follow-up for you (future releases only):** add a Trusted Publisher to `tsift-local-model` and `tsift-kg` on crates.io (*Settings → Trusted Publishing* → GitHub `btakita/tsift`, workflow `release.yml`) so the **next** `v*` tag publishes them via CI/OIDC instead of a token. It's tracked in `#1yks`; the release itself no longer depends on it.
-<!-- agent:boundary:8048a7d5 -->
+
+### Re: Can we complete #1yks now? — yes, done — opus-4-8
+
+> **Queue prompt:**
+>
+> Can we complete #1yks now?
+
+Yes — completed it just now. Both new crates now exist on crates.io (after the v0.1.73 publish), so I registered their Trusted Publishers via the same chromium-bridge path that configured the other 23 (your browser is logged in as `btakita`):
+
+- **`tsift-local-model`** → Trusted Publisher `btakita/tsift @ release.yml` (config id 10989)
+- **`tsift-kg`** → Trusted Publisher `btakita/tsift @ release.yml` (config id 10990)
+
+Verified both via `GET /api/v1/trusted_publishing/github_configs` — each returns `btakita/tsift@release.yml`. No token, no environment, matching the existing 23.
+
+**Net effect:** all 25 tsift crates are now OIDC trusted-publishing configured. The next `v*` tag publishes the entire workspace via CI with no manual token step — the token bootstrap was a one-time thing for the two brand-new crate names. `#1yks` is resolved.
+<!-- agent:boundary:d15a1444 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -135,7 +150,6 @@ https://github.com/chopratejas/headroom
 ## Review
 
 <!-- agent:review -->
-- [/] [#1yks] [operator] [OPTIONAL, non-blocking] tsift v0.1.73 is fully PUBLISHED (all 25 crates on crates.io, tag v0.1.73 pushed, Release CI run 27907620025). The two new crates tsift-local-model + tsift-kg were bootstrapped via manual token publish (crates.io has no pre-config for nonexistent crates). Remaining optional work for FUTURE releases only: add a Trusted Publisher to tsift-local-model and tsift-kg on crates.io (Settings -> Trusted Publishing -> GitHub btakita/tsift, workflow release.yml) so the next v* tag publishes them via CI/OIDC instead of a token.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

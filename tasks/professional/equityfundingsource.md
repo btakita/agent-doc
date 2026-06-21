@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,165 +33,52 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260621-160306.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260621-174256.md`*
 
 Compacted content:
-- Archived 6 response topic(s): Unified inbox shipped + deployed (#msg-unify2); deploy; Borrower cutover; 3 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-❯ In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, btak.dev+lender2@gmail.com
-❯ has a notification that is unclear on what it means and what to do next. What is the "Lender requests page"? Please add a link that opens a dialog to support the admin in advancing the lender. Since the lender has not uploaded docs, the admin dialog could be a the missing documents + messaging to the lender to remind the lender and/or support the lender in uploading the corrects docs.
-```
-Compliance hold before funding — to clear it:
-AdminComplete the pending lender request (Lender Requests page) to assign the TMO lender account.
-```
+❯ - Archived 7 response topic(s): "Lender Requests page" notification + advance-lender dialog; Master state-machine living document; Deployed #dmz8; 4 more
+❯ - Prior summary/context: prior compacted content: Archived 6 response topic(s): Unified inbox shipped + deployed (#msg-unify2); deploy; Borrow...
 
-### Re: "Lender Requests page" notification + advance-lender dialog — opus-4-8
-
-**What the notification means.** That lender (`btak.dev+lender2@gmail.com`) is on a *compliance hold before funding* because no **TMO lender account** is linked yet. The "Lender Requests page" it points at is simply the **Lenders** tab on this same Lender Pipeline (`/admin/lender-pipeline?tab=lenders`) — it lists every lender request and is where you type in the TMO account number that clears the hold. The wording was unhelpful because it referenced a page by a name that doesn't appear in the nav and gave you no way to act from the notification.
-
-**What I shipped (`#advance-lender`, EFS `4f564be`, pushed).** The lender-account compliance-hold step in the card dialog is now an actionable **"Advance lender →"** button. It opens a focused support dialog that:
-
-- **Explains the hold** — what a TMO lender account is and what completing the request does, in plain language, plus a clear note that "Lender Requests page" = the **Lenders** tab.
-- **Deep-links to the Lender Requests page** — an "Open Lender Requests page →" button that jumps to the Lenders tab with the pending request auto-opened (`?tab=lenders&attention=pending-lender-requests`), so you land directly on the account-assignment control.
-- **Messages the lender** — reuses the existing onboarding message composer (`LenderAccountMessages`) so you can remind/support the lender right there when docs are missing or wrong.
-- **Shows the lender's documents** — embeds `AdminLenderDocuments` so you can see what's uploaded and what's still missing before assigning the account.
-
-The reworded step text also drops the confusing `(Lender Requests page)` parenthetical and spells out *why* the account isn't linked yet (request pending vs. no request).
-
-**Verification.** New `tests/advance-lender-dialog.test.ts` (7 tests) covers the action-marker logic and the dialog wiring; full suite **1024 pass / 0 fail**, `bun run check` (test + build + worker build) green. EFS has no GitHub Actions CI, so local verification is the gate.
-
-**Not deployed.** This is committed + pushed but not yet deployed to the worker — say the word (or `deploy`) and I'll push it live. Tracked as a recommended follow-up.
-
-### Re: Master state-machine living document — opus-4-8
+### Re: Advance Lender account-message email + deploy — gpt-5
 
 > **Queue prompt:**
 >
-> do [#dmz8]
+> https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message submission did not send an email to the lender.
 
 
-> **Queue prompt:**
->
-> Create a master state machine diagram for all flows...public site application + application request from borrower portal + application request from broker portal + deal pipeline + lender pipeline + broker pipeline. Make this master state machine diagram a living document that is updated as we iterate on the workflows.
-
-
-> **Queue prompt:** Create a master state machine diagram for all flows...public site application + application request from borrower portal + application request from broker portal + deal pipeline + lender pipeline + broker pipeline. Make this master state machine diagram a living document that is updated as we iterate on the workflows.
-
-Shipped **`docs/master-state-machine.md`** (EFS `f50a422`, pushed) — one living overview that maps every EFS state machine as Mermaid diagrams, grounded in the actual status-model code.
-
-**What's in it:**
-- **Master overview** flowchart showing how the flows connect: three intake paths → loan created + auto-published → Deal Pipeline, funded by lenders vetted in the Lender Pipeline, with the Broker Pipeline joining on approval.
-- **§1 Public site application** (`application_leads`): `new → contacted → converted | archived`, plus the staff-notification / borrower-invite side tracks.
-- **§2 Borrower portal application** (`full_applications`): `draft → submitted → in_review → accepted | declined`, with the submit (e-sign) and approve (completeness) gates and the TMO writeback hand-off that creates the loan.
-- **§3 Broker portal application** (`full_applications`, `variant=business_purpose`): same machine, broker-owned origination.
-- **§4 Deal Pipeline** (`tmo_loan_status` steps + `investment_deals.status`): Application Received → … → Funded, with the marketplace offering states; links the deeper `deal-pipeline-flow.md`.
-- **§5 Lender Pipeline** (`investor_pipeline_status_`): `signed_up → requirements_review → requirements_current → lender_ready` (+ renewal/expiry), plus the accreditation, `lender_requests`, and per-deal interest sub-machines.
-- **§6 Broker Pipeline** (`broker_deals`): `submitted → in_review → docs_needed → approved → funded | declined`, broker-vs-admin transition authority, and the commission sub-machine.
-- A **status-model index table** naming the source-of-truth file for every status field, so the diagrams stay verifiable.
-
-**Living-document contract:** a header instructs updating the relevant diagram + re-checking code anchors in the same change a workflow changes; deeper sibling docs are linked rather than duplicated. Each flow was mapped from code (status enums, derivation functions, migrations) via parallel exploration, with file anchors throughout.
-
-**Verification:** docs-only change; full suite re-run **1024 pass / 0 fail**. Committed + pushed (submodule `f50a422`, superproject pointer bumped). Mermaid diagrams use standard `flowchart` / `stateDiagram-v2` / `sequenceDiagram`-compatible syntax (no mermaid CLI in-repo to render-check, but ordering/labels follow valid syntax).
-
-Next queue head is `do [#dmz8]` (deploy the advance-lender dialog) — outward-facing, operator-gated.
-
-### Re: Deployed #dmz8 — advance-lender dialog live — opus-4-8
-
-Per your confirmation, deployed the advance-lender dialog (`#advance-lender`, EFS `f50a422`) to the **production EFS worker**.
-
-- **`bun run deploy:worker`** — built the worker, applied remote D1 migrations (none new this change), uploaded the new frontend bundle (`index.browser-EEXL5SQB.js`).
-- **Live at** `https://equityfundingsource.brian-takita.workers.dev`
-- **Version ID** `e77a5d20-d0ba-481d-9e74-fdaa96160a81`
-
-The "Advance lender →" button on the lender-pipeline compliance-hold step and its support dialog (explainer + Lender Requests deep-link + messaging + documents) are now live. `#dmz8` / `#advance-lender-deploy` marked **done**.
-
-Queue is fully drained — no remaining drainable heads (only the gated `#5eq8`, design-blocked, remains).
-
-### Re: Advance Lender required-documents checklist + deploy — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-> **Queue prompt:**
->
-> In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender, show which documents are required. Show individual upload field for multiple documents of each type for each document. Also show which documents were uploaded.
-
-
-> **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender, show which documents are required. Show individual upload field for multiple documents of each type for each document. Also show which documents were uploaded.
+> **Queue prompt:** https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message submission did not send an email to the lender.
 
 > **Queue prompt:** deploy
 
-Shipped + deployed (`#advance-lender-docs`, EFS `c8f9cb5`).
+Shipped, pushed, and deployed the Advance Lender account-message email fix.
 
-**The Advance Lender dialog's document section is now a required-documents checklist** instead of a flat list:
-- **Which documents are required** — an explicit, editable model (`LENDER_DOCUMENT_REQUIREMENTS`): **accreditation, tax, and proof-of-funds (statement) are Required**; legal and due-diligence are Optional. Each row shows a Required/Optional badge.
-- **Individual upload field per document type, multiple files each** — every document type has its own drop-zone + Upload control scoped to that category, accepting multiple files at once (each posted individually to the existing endpoint).
-- **Which documents were uploaded** — each type shows an Uploaded·N / Missing status and lists the documents already provided (view / archive in place), with a **"N of M required provided"** readiness summary at the top.
+What changed:
+- `admin_lenders_by_id_messages_POST_` now loads the lender email/name and sends `notify_lender_account_message_` after the admin creates a pre-deal lender account message.
+- Added a dedicated lender-account lifecycle email template with subject `Message from Equity Funding Source about your lender account`, reply-to from the admin, and CTA to `/lenders/dashboard`.
+- Extended `tests/lender-account-messages.test.ts` so the admin message route, lifecycle sender, template, and dashboard URL stay wired.
 
-No schema change — it's backed by the existing `/api/admin/investor-documents` endpoints; the lender-pipeline **Documents** tab keeps the full list view. The required set lives in one constant (`lender_documents.tsx`) so you can re-tune which types are required.
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/investor_management/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/lifecycle.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/templates/lifecycle.ts`
+- `src/equityfundingsource-dev/tests/lender-account-messages.test.ts`
 
-**Verification:** new `tests/advance-lender-documents.test.ts` (7 tests: requirements model + checklist wiring); full suite **1031 pass / 0 fail**, `bun run check` (test + build + worker build) green.
+Commits:
+- EFS `bde4d58` pushed to `origin/main`.
+- Superproject pointer `f75e121c4` committed locally.
 
-**Deployed** (per the `deploy` queue item) to the production EFS worker: `bun run deploy:worker` → live at `https://equityfundingsource.brian-takita.workers.dev`, **Version ID `57e592b8-a297-41b6-9d16-9a9cffefcab5`**. Submodule pointer bumped.
+Verification:
+- `bun test tests/lender-account-messages.test.ts` — 9 pass / 0 fail.
+- `make check` — 1050 pass / 0 fail, browser build green, worker build green.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy — no migrations to apply.
+- `make deploy` — deployed production worker version `7e3353ac-b1e8-4e05-a7d1-8c444313f757` at `https://equityfundingsource.brian-takita.workers.dev`.
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` — 200.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists for this repo, so local verification is the gate.
 
-### Re: Message UX — Ctrl/Cmd+Enter, avatars, local date+time stamps + deploy — opus-4-8
+Confidence: high. The reported path now uses the same lifecycle-email delivery pattern as deal lender messages, but with account-specific copy and the lender dashboard target.
 
-> **Queue prompt:**
->
-> do [#mcme]
-
-
-> **Queue prompt:**
->
-> Ctrl+Enter (Windows + Linux) or Cmd+Enter (OSX) in any message textarea should submit the message.
-
-
-> **Queue prompt:** Ctrl+Enter (Windows + Linux) or Cmd+Enter (OSX) in any message textarea should submit the message.
-
-> **Queue prompt:** All messages should have human-readable date + time stamp in local time.
-
-> **Queue prompt:** deploy
-
-> **Queue prompt:** do [#mcme]
-
-Shipped + deployed across all message threads (EFS `6bba0f1` + `17c174b`).
-
-**Ctrl/Cmd+Enter submit (every message textarea):** there's a shared `message_send_shortcut_match_` helper; 3 composers already used it. Added it to the **2 that didn't** — broker and lender-account — so Ctrl+Enter (Win/Linux) / ⌘+Enter (macOS) now submits in *every* message box, each with a send hint.
-
-**Every message has a human-readable local date + time stamp:** all six threads render via `toLocale*String` (the viewer's local timezone). The four non-chat threads (broker, lender-account, lender deal, unified inbox) now include the **year**; the admin + borrower chat per-message stamps now show the **full date alongside the time** (they previously showed time-only, with the date as a day-separator) — so each message is self-contained.
-
-**Plus avatars (from your earlier answer):** every message now shows a sender **avatar** — a shared `MessageAvatar` initials badge (EFS brand badge for EFS, deterministic-color initials for parties) — next to the name + timestamp, across all six surfaces.
-
-**`do [#mcme]` — read-status — stays DEFERRED.** `#mcme` is the read-receipts item I filed; you gated it on "only if we can detect email reads," and EFS currently can't: it sends via Cloudflare Email (no open tracking). Doing it properly is a ~3–5 day greenfield subsystem (switch message email to Resend with open-tracking, a signed `email.opened` webhook, an `email_events` table, and message↔email linking). I left it as a `[recommended]` backlog item with the full plan rather than auto-building a multi-day subsystem. Say the word if you want that built.
-
-**Verification:** new `tests/message-avatar-shortcut.test.ts` (16 tests); full suite **1047 pass / 0 fail**, `bun run check` green. **Deployed** → live at `https://equityfundingsource.brian-takita.workers.dev`, **Version ID `6119ba13-9dcc-49ec-8d37-d6ba2a1e86aa`**.
-
-### Re: Ctrl/Cmd+Enter submit across all textareas + deploy — opus-4-8
-
-> **Queue prompt:**
->
-> Ctrl+Enter does not submit the message on https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender. Survey all textareas in the app and add ctrl+enter/cmd+enter keybinding.
-
-
-> **Queue prompt:** Ctrl+Enter does not submit the message on `/admin/lender-pipeline` > Advance Lender. Survey all textareas in the app and add ctrl+enter/cmd+enter keybinding.
-> **Queue prompt:** deploy
-
-**Root cause.** The `message_send_shortcut_match_` helper (Ctrl+Enter on Win/Linux, ⌘+Enter on macOS; `shared/ui.tsx`) was already wired into the deal-detail, borrower, broker, admin-chat, and lender-account message boxes — but **not** into `admin/investor_pipeline.tsx`, which is the Advance Lender / lender-pipeline surface. Its three `msg-input` send boxes had no `onKeyDown`, so Enter just inserted a newline and the only way to send was the button.
-
-**Survey + fixes.**
-- `admin/investor_pipeline.tsx` — imported `message_send_shortcut_match_` and wired all three send boxes: deal-interest **lender** message (`send_lender_message_`), deal-interest **borrower** message (`send_borrower_message_`), and the **Advance Lender support dialog** lender message (`send_`). This fixes the reported bug.
-- `lib/ui--server--efs/apply/index.ts` — the public **/apply** prequalification form had no shortcut (the **/contact** form already did). Added the same contact-form-style `Ctrl/Cmd+Enter → form.requestSubmit()` script + a platform-aware `Ctrl+Enter / ⌘+Enter to submit` hint.
-- Confirmed every remaining `msg-input` message-send textarea (borrower/admin/broker/investor deal-detail + lender-account) is already wired. The remaining `fi`-class textareas (settings, blog/public-content editors, wire instructions, denial reason, vesting/workflow notes) are multi-field form/content editors with no single "send" action and auto-save or a separate Save button — out of the message-submit scope, left as-is.
-
-**Verification.** Extended `tests/msg-send-shortcut.test.ts` with source-level guards for the investor_pipeline boxes (≥3 wired) and the apply form. Full suite **1049 pass / 0 fail**, `bun run check` green (typecheck + browser/worker build). Committed (`59aea65`, submodule pointer `7498d9f4a`), pushed, and **deployed** → live at `https://equityfundingsource.brian-takita.workers.dev`, **Version ID `36501217-0f88-4290-88a8-01361b7d6dc7`**.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:** deploy
-
-Already deployed this cycle alongside the Ctrl/Cmd+Enter fix — no code changed since, so this drains as already-satisfied. Live worker is **Version ID `36501217-0f88-4290-88a8-01361b7d6dc7`** at `https://equityfundingsource.brian-takita.workers.dev` (build/typecheck green, 1049 tests pass).
-<!-- agent:boundary:3aa35e9c -->
+Escalation: none.
+<!-- agent:boundary:bbb7b7b8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -203,6 +90,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message submission did not send an email to the lender.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

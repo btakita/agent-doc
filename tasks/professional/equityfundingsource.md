@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -191,7 +191,7 @@ Latest worker version `101ce2fd` (cleanup was runtime-inert, no redeploy). 1061 
 Both remain queued as `do [#id]` mirrors of their backlog items. The in-session queue is paused (qflood guard) and I'm not auto-draining; if `/agent-doc` keeps re-firing on these deferred heads, set `queue: stop` in the frontmatter (or remove the two `do [#...]` lines) to silence it — preflight re-forces `queue: start` while drainable heads exist.
 
 Net for the session: one unified, always-visible messaging component replacing four bespoke thread UIs across the self-service portals and the admin lender card, all behind tests and deployed.
-<!-- agent:boundary:91c1279a -->
+<!-- agent:boundary:e1056d00 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -203,13 +203,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Implement src/equityfundingsource-dev/prds/portal-messages-component.md. Make sure the prop component is always visible in the respective UI context. My always visible, make sure the user can click on the messaging no matter where the user scrolls on a dialog, page, or other component that has the messaging prop/context.~~
-- ~~deploy~~
-- ~~do [#portalmsg-shell]~~
-- do [#portalmsg2]
-- do [#portalmsg4]
-- do [#portalmsg-shell-cleanup]
-- do [#portalmsg2-dealthreads]
+- The message user's email reply-to should go back to the app email (the sender). A CF worker should process the reply, write the message into the database, and send an email to the admin. The admin should be able to reply to the app email, which writes the message into the database, and sends an email to the user. And so on. All emails 
+- :pushpin: do [#portalmsg4]
+- :pushpin: do [#portalmsg2-dealthreads]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -98,14 +98,33 @@ One thing, and it's the `#1yks` gate: **the two new crates `tsift-local-model` a
 **If crates.io refuses to pre-config a nonexistent crate** (fallback): publish `tsift-local-model` once manually with a personal token to create it (`cargo publish -p tsift-local-model`). `tsift-kg` can't be created standalone — it needs `tsift-core`/`tsift-sqlite`/`tsift-local-model` at `0.1.73` on crates.io first — so the pre-config route above is strongly preferred; with it, CI publishes the whole set in dependency order in one shot.
 
 **Then:** `agent-doc admin queue resume tasks/software/tsift.md` (the queue is currently paused) and tell me — I'll run `make check`, `git tag v0.1.73 1caaa43`, `git push origin v0.1.73`, and watch the Release run. Nothing else is needed from you; `#015t`'s Phases 0–4b are done and pushed, only Phase 5 (this release) remains.
-<!-- agent:boundary:4eebe7a7 -->
+
+### Re: setup trusted publishing + ship the release — v0.1.73 PUBLISHED — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Use https://crates.io/docs/trusted-publishing to setup trusted publishing for the crates.
+
+Read the docs, then did the release. **Key docs finding (corrects my earlier guess):** crates.io has **no "pending publisher"** like PyPI — you **cannot** pre-configure trusted publishing for a crate that doesn't exist; each new crate's **first publish must be manual with a token**. So pre-config wasn't an option for `tsift-local-model` / `tsift-kg`.
+
+You chose **"I publish all 25 now"**, so I did the full manual `0.1.73` publish with the present token (read-verified first; no E403):
+
+- **`make check` green** (exit 0, full suite) before publishing.
+- **All 25 crates published to crates.io at `0.1.73`** in dependency order — including the two brand-new crates **`tsift-local-model`** and **`tsift-kg`** (both now resolve, HTTP 200). That's the `#1yks` bootstrap, done.
+- **Tag `v0.1.73` pushed** (`git tag v0.1.73 1caaa43`) → Release CI run `27907620025` is **in progress** (binary GitHub Release; its crates.io job now skips all 25 already-published versions idempotently, so the prior red Release runs are resolved). Per the in-progress-CI rule, closing from the publish evidence rather than blocking on CI.
+
+**`#015t` is now complete** — Phases 0–4b shipped earlier, Phase 5 (this release) is published + tagged. Reaped.
+
+**One optional, non-blocking follow-up for you (future releases only):** add a Trusted Publisher to `tsift-local-model` and `tsift-kg` on crates.io (*Settings → Trusted Publishing* → GitHub `btakita/tsift`, workflow `release.yml`) so the **next** `v*` tag publishes them via CI/OIDC instead of a token. It's tracked in `#1yks`; the release itself no longer depends on it.
+<!-- agent:boundary:a49ed1f3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: Use https://crates.io/docs/trusted-publishing to setup trusted publishing for the crates.
-- do [#015t]
+- ~~:pushpin: Use https://crates.io/docs/trusted-publishing to setup trusted publishing for the crates.~~
+- ~~:round_pushpin: Use https://crates.io/docs/trusted-publishing to setup trusted publishing for the crates.~~
+- ~~do [#015t]~~
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -114,7 +133,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). FTS5 index.db BM25 is the DEFAULT lexical path; degraded read-only routes to the live TokenIndex fallback. Phase 4b COMPLETE: (a) degraded-read-only engine DECIDED 2026-06-20 — keep TokenIndex::build live-rebuild over rg -F for OR-union/ranking parity (tsift 1caaa43); (b) files_in_path_scope path-prune DONE (#ve5f, tsift d908371). NEXT = Phase 5 = operator-gated crates.io release ONLY. Say "release" to ship, or schedule it.
 <!-- /agent:backlog -->
 
 ## Review

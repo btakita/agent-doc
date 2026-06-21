@@ -116,7 +116,7 @@ You chose **"I publish all 25 now"**, so I did the full manual `0.1.73` publish 
 **`#015t` is now complete** — Phases 0–4b shipped earlier, Phase 5 (this release) is published + tagged. Reaped.
 
 **One optional, non-blocking follow-up for you (future releases only):** add a Trusted Publisher to `tsift-local-model` and `tsift-kg` on crates.io (*Settings → Trusted Publishing* → GitHub `btakita/tsift`, workflow `release.yml`) so the **next** `v*` tag publishes them via CI/OIDC instead of a token. It's tracked in `#1yks`; the release itself no longer depends on it.
-<!-- agent:boundary:a49ed1f3 -->
+<!-- agent:boundary:af7523f7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -138,7 +138,7 @@ https://github.com/chopratejas/headroom
 ## Review
 
 <!-- agent:review -->
-- [/] [#1yks] [operator] Finish tsift v0.1.73 publish (corrected from v0.1.72): (1) bootstrap crates.io Trusted Publishing for the two NEW crates tsift-local-model + tsift-kg (both 404 on crates.io; PREFERRED = pre-config a Trusted Publisher for each crate NAME via crates.io UI so CI publishes the whole 0.1.73 set in dependency order — sidesteps that tsift-kg depends on tsift-core/tsift-sqlite/tsift-local-model 0.1.73 which are not yet on crates.io; FALLBACK = manual token publish in dep order, tsift-local-model first); (2) once both names resolve, agent pushes the tag: git tag v0.1.73 1caaa43 && git push origin v0.1.73 to trigger Release CI. Without step 1 the crates.io job fails on the two new crates and cascades to tsift-cli.
+- [/] [#1yks] [operator] [OPTIONAL, non-blocking] tsift v0.1.73 is fully PUBLISHED (all 25 crates on crates.io, tag v0.1.73 pushed, Release CI run 27907620025). The two new crates tsift-local-model + tsift-kg were bootstrapped via manual token publish (crates.io has no pre-config for nonexistent crates). Remaining optional work for FUTURE releases only: add a Trusted Publisher to tsift-local-model and tsift-kg on crates.io (Settings -> Trusted Publishing -> GitHub btakita/tsift, workflow release.yml) so the next v* tag publishes them via CI/OIDC instead of a token.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

@@ -123,6 +123,51 @@ fn pid_is_live(pid: u32) -> bool {
     crate::hooks::pid_is_live(pid)
 }
 
+/// `#6b5h`: true when a **live** editor plugin process owns this document — i.e.
+/// there is a real editor buffer that the "editor IPC listener active → refuse
+/// direct disk write" guard is actually protecting.
+///
+/// The disk-write guard exists to stop the binary from raw-writing the session
+/// document behind a live editor buffer (the `File Cache Conflict` /
+/// cross-buffer-drift family). But a pure-CLI session (no JetBrains/VS Code
+/// plugin attached) can still observe a *connectable* IPC socket — the project
+/// controller hosts a listener that returns error acks with nothing behind it —
+/// so [`crate::ipc_socket::is_listener_active`] reports `true` while there is no
+/// editor buffer to protect. Every `finalize` then wedges on `no_ack` forever
+/// (`#6b5h`) and only `--force-disk` succeeds, because the guard cannot tell a
+/// transiently-wedged real editor apart from a CLI-only dead-end listener.
+///
+/// This is the positive "a real editor is attached" signal that distinguishes
+/// the two cases: every shipped plugin maintains a per-document owner lease
+/// (`#8bfz`) recording its IDE process pid; a CLI-only session never wrote one.
+///
+/// Keys off **pid liveness**, not heartbeat freshness: the plugin refreshes the
+/// lease heartbeat only on patch events, so an idle editor with the document
+/// open keeps a live pid but a stale heartbeat. Gating on freshness would
+/// misclassify an idle real editor as CLI-only and route a disk write straight
+/// into its live buffer — the exact File Cache Conflict the guard prevents.
+///
+/// Fail-safe bias: returns `true` (treat as editor-attached → keep the guard)
+/// whenever a lease with a live pid exists. Only an absent lease, or a lease
+/// whose owner pid is provably dead, reads as "no live editor endpoint".
+pub fn live_editor_endpoint_attached(file: &str) -> bool {
+    editor_endpoint_attached_for_lease(read_plugin_owner_lease(file), pid_is_live)
+}
+
+/// Testable core of [`live_editor_endpoint_attached`]: a live editor is attached
+/// iff an owner lease exists and its owner pid is still live. Pure given the
+/// injected liveness predicate so the decision is unit-testable without spawning
+/// a real IDE process.
+pub fn editor_endpoint_attached_for_lease(
+    lease: Option<PluginOwnerLease>,
+    is_pid_live: impl Fn(u32) -> bool,
+) -> bool {
+    match lease {
+        Some(lease) => is_pid_live(lease.pid),
+        None => false,
+    }
+}
+
 /// Testable election core. Returns `true` if `consumer_id` (running as `pid`)
 /// holds or acquires ownership of the document at `path`, `false` if it should
 /// defer to a live owner. Side effects (lease read/write/remove) are real but
@@ -257,6 +302,46 @@ mod tests {
         let file = dir.join("plan.md");
         std::fs::write(&file, "body").unwrap();
         file.to_string_lossy().to_string()
+    }
+
+    fn lease_with_pid(pid: u32) -> PluginOwnerLease {
+        PluginOwnerLease {
+            consumer_id: format!("jetbrains-{pid}-uuid"),
+            pid,
+            heartbeat_secs: 0,
+        }
+    }
+
+    #[test]
+    fn editor_endpoint_attached_requires_lease_with_live_pid() {
+        // #6b5h: no lease at all → CLI-only session, no editor buffer to protect.
+        assert!(!editor_endpoint_attached_for_lease(None, |_| true));
+        // Lease present + owner pid live → a real editor is attached.
+        assert!(editor_endpoint_attached_for_lease(
+            Some(lease_with_pid(4242)),
+            |pid| pid == 4242
+        ));
+        // Lease present but owner pid dead (closed editor) → no live editor.
+        assert!(!editor_endpoint_attached_for_lease(
+            Some(lease_with_pid(4242)),
+            |_| false
+        ));
+    }
+
+    #[test]
+    fn editor_endpoint_attached_ignores_heartbeat_staleness() {
+        // #6b5h regression guard: an idle real editor refreshes the lease only on
+        // patch events, so a stale heartbeat with a live pid must still read as
+        // editor-attached (never route a disk write into a live idle buffer).
+        let stale_but_live = PluginOwnerLease {
+            consumer_id: "jetbrains-7-uuid".to_string(),
+            pid: 7,
+            heartbeat_secs: 0, // far in the past relative to any real `now`
+        };
+        assert!(editor_endpoint_attached_for_lease(
+            Some(stale_but_live),
+            |pid| pid == 7
+        ));
     }
 
     #[test]

@@ -243,13 +243,13 @@ IPC note: if you restarted the IDE, this cycle should commit cleanly via the rev
 One note on your `🧪` test line: preflight this cycle **did** strike `🧪 test edit for [#qnodemerge4wire]`, but with `source=review_gated` — i.e. it was resolved because it *cites the gated id `#qnodemerge4wire`*, which is correct resolution (the id is done/in-review), **not** the false-strike bug `#qstrikeexplain` fixes. That bug is specifically about striking a brand-new *free-text* head you're still typing; this line was struck for a legitimately different reason (its cited work is resolved).
 
 Continuing now that the transport is healthy. Next agent-doable binary head is `#qstrikenote` (the Phase-1 explicit-strike-note follow-up). I'll pick it up on the next cycle.
-<!-- agent:boundary:7ae91ab8 -->
+<!-- agent:boundary:fa16cfde -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
-- ~~:pushpin: do [#qnodemerge4wire]~~
+- Fix the plugin drift issue.
 ---
 :round_pushpin: JB `Run Agent Doc` stalled without feedback
 ```
@@ -271,18 +271,18 @@ Press Enter to restart, or 'q' to exit.
 - [#1jec]
 - :pushpin: do [#tb4q]
 - :pushpin: do [#k7mf]
-- ~~I'm typing in a queue item and agent-doc automatically strikes it. This should not happen without a response written into the document explaining why it was auto-struck.~~
-- ~~complete [#wd40]. Reduce the wait to restart. An immediate restart would be ideal...if we can quickly flush whatever state needs to be cleared.~~
 - Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
 - JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
 - `agent-doc tasks/monsterrodholders.md` was added to the codex input but not submitted. Whatever wrote the prompt should also loop to check the input and submit it if not submitted.
 - As I was writing queue items during a turn, an extra `/clear\n/agent-doc tasks/agent-doc/agent-doc-bugs2.md\n/clear` was written into the input and submitted.
 - do [#qcm1verify]
 - do [#s81q]: Rename "Restart Supervisor" to "Recycle Supervisor". Add Restart command alongside "Recycle Supervisor"
-- ~~do [#qstrikeexplain]~~
 - do [#qstrikenote]
 - 🧪 test edit for [#qnodemerge4wire]
 - do [#routeretest]
+- [#pendaddorder]
+- JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.
+- JS `Clear Session Context` then JB `Run Agent Doc` sometimes has the dispatch storm (multiple duplicate prompts) and no submit.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

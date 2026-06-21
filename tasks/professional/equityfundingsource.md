@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -126,7 +126,12 @@ Done and deployed. Replaced every hard-delete path in the admin user / Lender Pr
 **Verification:** suite **980 pass / 0 fail** (added a regression test asserting no DELETE/Delete-button/DeleteUserModal remains, the `/status` deactivate+reactivate wiring, the confirmation dialog, and the role-aware labels; updated the stale `#b0wq` assertion). `bun run build` + `bun run build:worker` clean.
 
 **Deploy:** `equityfundingsource` worker deployed → version `970b2557-44ad-4b84-bc87-3c577e7c7664` at https://equityfundingsource.brian-takita.workers.dev. Code committed `974de08` in the EFS submodule.
-<!-- agent:boundary:18a4540c -->
+> **Queue prompt:** deploy
+
+### Re: deploy — already shipped this turn — opus-4-8
+
+The deactivate-only change was already deployed in the previous cycle this turn — no rebuild/redeploy needed. Worker `equityfundingsource` is live at version **`970b2557-44ad-4b84-bc87-3c577e7c7664`** (https://equityfundingsource.brian-takita.workers.dev), code `974de08`. Draining the duplicate `deploy` queue head.
+<!-- agent:boundary:0de546b5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,8 +143,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: Admin "Lender Profile" dialogs should have "Deactivate Lender" instead of "Delete User". "Deactivate Lender" should have a confirmation dialog. Records must not be deleted from the ui...only deactivated.~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

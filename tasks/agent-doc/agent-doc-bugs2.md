@@ -80,12 +80,12 @@ Verification:
 - `make tmux-ci` — passed locally, 7 ignored tmux/integration tests.
 - `gh run watch 27914059454 --exit-status` in `src/agent-doc` — passed on GitHub Actions CI in 5m14s.
 - `make install` installed `agent-doc 0.34.35`; `agent-doc admin recycle` marked the controller to recycle at the next idle boundary.
-<!-- agent:boundary:e858bc68 -->
+<!-- agent:boundary:9f7d60a4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
 - [#1jec]
 - do [#qcm1verify]
 - :pushpin: do [#tb4q]

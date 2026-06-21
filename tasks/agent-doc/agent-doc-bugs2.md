@@ -370,7 +370,15 @@ Why it persists rather than auto-correcting:
 The fix is the **active** recovery, which your housekeeping already did: `agent-doc admin recycle <FILE>` (or a Restart Supervisor) forces the swap at the next boundary. That's exactly what cleared the `stale_install` mismatch on *this* doc earlier in the session.
 
 So `0.1.0` was a genuinely ancient supervisor process for that doc that never reached a recycle boundary — not a version-detection bug. The durable product fix is `#wd40` (auto-recycle a stale-binary supervisor *during* a continuously-active drain by yielding at the next inter-item boundary), so the operator doesn't have to run `admin recycle` by hand. The parenthetical confirms it's already recycled + the agent-loop→boost-client parent pointer reconciled, so nothing is outstanding on monsterrodholders here — this was a "why did it happen" question, and `#wd40` is the open item that prevents the recurrence.
-<!-- agent:boundary:5a53cf1b -->
+
+### Re: Striking the monsterrodholders head (root cause found) — opus-4-8
+
+> **Queue prompt:**
+>
+> Why does monsterrodholders.md keep on reporting a stale 0.1.0 supervisor if we are using a recent version?
+
+Quoting it as a blockquote so the position-independent strike (`#ftstrike` / `strike_answered_free_text_queue_heads`, wired into finalize at `write.rs:2139`) can match and strike it — it already strikes free-text heads at any position, *behind* deferred id-heads included. My earlier answer (the "stale 0.1.0 supervisor" `### Re:` block above) used only a heading with no `>` blockquote, so `free_text_head_answered_by_response` had nothing to match — that, not a missing binary capability, is why the head stuck and `drainable` stayed pinned at 3. The substantive answer stands above (stale-binary supervisor doesn't self-heal; `admin recycle` is the fix; `#wd40` is the durable item). The durable fix for the *strike* gap is skill-side — quote the free-text prompt when draining it — which I'm shipping next.
+<!-- agent:boundary:850b0f14 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -383,6 +391,7 @@ So `0.1.0` was a genuinely ancient supervisor process for that doc that never re
 - :pushpin: do [#qcellmerge2]
 - :pushpin: do [#qcellmerge3]
 - :pushpin: do [#qcm1verify]
+- do [#qdeferstrike]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

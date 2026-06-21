@@ -106,7 +106,51 @@ Verification: deployment and smoke proof above; no additional code changed in th
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:5c9a4acb -->
+
+### Re: Message sender timestamps + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message Lender messages do not have the human-readable timestamp of the message. Please ensure all instances of message components across the codebase have the name of the sender and the human-readable timestamp.
+
+> **Queue prompt:** deploy
+
+Shipped, pushed, and deployed the message metadata fix.
+
+What changed:
+- Admin embedded lender-account messages in the Lender Pipeline / Advance Lender flow now render a sender avatar, sender label, and human-readable timestamp.
+- Admin deal-interest lender and borrower message rows in both Lender Pipeline and Deal Detail now render the same sender + timestamp header.
+- Borrower Available Deal Conversation rows now include the shared sender avatar alongside the existing sender name and timestamp.
+- `prds/lender-card-messaging.md` now records the UI invariant, and the static message guard covers the previously missed admin workflow surfaces.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/borrower/application_status.tsx`
+- `src/equityfundingsource-dev/prds/lender-card-messaging.md`
+- `src/equityfundingsource-dev/tests/message-avatar-shortcut.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+
+Commits:
+- EFS `d3dd8b9` pushed to `origin/main`.
+- Superproject pointer `cfeae7a68` pushed to `origin/main`.
+
+Verification:
+- `bun test tests/message-avatar-shortcut.test.ts` — 21 pass / 0 fail.
+- `bun test tests/admin-investor-pipeline.test.ts -t "lender card and modal render package"` — pass.
+- `bun test tests/investor-portal-e2e.test.ts -t "admin investor deal tables expose interest counts"` — pass.
+- `make check` — 1055 pass / 0 fail, browser build green, worker build green. The log includes the existing non-fatal `d1 down` message from a passing outbox-failure test.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists for this repo, so local verification is the gate.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy — no migrations to apply.
+- `make deploy` — deployed production Worker version `1346f79d-87b7-41b1-a52e-6c2afe7cd9f0` at `https://equityfundingsource.brian-takita.workers.dev`.
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` — 200.
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline` — 303, the expected protected-route redirect without an authenticated browser session.
+
+Confidence: high. The reported Advance Lender message rows and the sibling admin message rows now use human-readable timestamps and explicit sender identity, with regression tests covering the omitted surfaces.
+
+Escalation: none.
+<!-- agent:boundary:c39dd65e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,6 +162,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message Lender messages do not have the human-readable timestamp of the message. Please ensure all instances of message components across the codebase have the name of the sender and the human-readable timestamp.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

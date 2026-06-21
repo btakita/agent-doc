@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -78,7 +78,35 @@ Verification:
 Confidence: high. The reported path now uses the same lifecycle-email delivery pattern as deal lender messages, but with account-specific copy and the lender dashboard target.
 
 Escalation: none.
-<!-- agent:boundary:bbb7b7b8 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+> **Queue prompt:** deploy
+
+Already completed by the preceding Advance Lender email fix cycle.
+
+Deployment proof:
+- `make deploy` completed successfully.
+- Production worker version: `7e3353ac-b1e8-4e05-a7d1-8c444313f757`.
+- Live URL: `https://equityfundingsource.brian-takita.workers.dev`.
+- Post-deploy D1 migration check: no migrations to apply.
+- Public smoke test returned HTTP 200.
+
+Changed paths: none in this drain beyond the already-recorded EFS commit `bde4d58` and superproject pointer commit `f75e121c4`.
+
+Commands: reused the already-run deploy and verification commands from the prior response.
+
+Verification: deployment and smoke proof above; no additional code changed in this drain.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:5c9a4acb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,8 +118,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message submission did not send an email to the lender.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

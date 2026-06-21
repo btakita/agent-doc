@@ -1383,6 +1383,110 @@ pub unsafe extern "C" fn agent_doc_reconnect_buffer_decision(
     }
 }
 
+/// Record one real editor operation for op-capture (`#qnodemerge4wire` part 2).
+///
+/// The FFI-first ingestion point the thin editor reporters (JetBrains
+/// `DocumentListener.documentChanged`, VS Code `onDidChangeTextDocument`) call to
+/// feed the editor's *real* operations to the merge instead of a Myers
+/// diff-guess. A replacement is reported as a `delete` followed by an `insert`.
+///
+/// `op_kind` is `"insert"` or `"delete"`. For `"insert"`, `insert_text` is the
+/// inserted text and `delete_len` is ignored. For `"delete"`, `delete_len` is the
+/// number of bytes removed at `offset` and `insert_text` may be null. `offset`
+/// and `delete_len` are byte offsets/lengths into the buffer the op was captured
+/// against, whose text hashes to `base_hash` (see
+/// [`agent_doc_orchestration::op_capture::content_hash`]). A later merge trusts
+/// the op only when its resolved base hashes to the same value; otherwise the op
+/// is silently disqualified and the merge falls back to the diff-guess (never
+/// worse than today).
+///
+/// Returns `1` when the op was durably recorded, `0` on any error (bad UTF-8,
+/// unknown kind, negative offset/len, or I/O failure) so the reporter can fall
+/// back to the diff-guess path.
+///
+/// # Safety
+///
+/// `file_path`, `base_hash`, and `op_kind` must be valid, NUL-terminated UTF-8
+/// strings. `insert_text` may be null (for deletes) or a valid NUL-terminated
+/// UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_record_editor_op(
+    file_path: *const c_char,
+    base_hash: *const c_char,
+    op_kind: *const c_char,
+    offset: i64,
+    insert_text: *const c_char,
+    delete_len: i64,
+) -> i32 {
+    let (Ok(file), Ok(base), Ok(kind)) = (
+        unsafe { CStr::from_ptr(file_path) }.to_str(),
+        unsafe { CStr::from_ptr(base_hash) }.to_str(),
+        unsafe { CStr::from_ptr(op_kind) }.to_str(),
+    ) else {
+        eprintln!("[op-capture] agent_doc_record_editor_op: non-UTF-8 argument; ignoring op");
+        return 0;
+    };
+    let Ok(offset) = usize::try_from(offset) else {
+        eprintln!("[op-capture] agent_doc_record_editor_op: negative offset {offset}; ignoring op");
+        return 0;
+    };
+    let file_path_buf = std::path::PathBuf::from(file);
+
+    let op = match kind {
+        "insert" => {
+            if insert_text.is_null() {
+                eprintln!(
+                    "[op-capture] agent_doc_record_editor_op: insert with null text; ignoring op"
+                );
+                return 0;
+            }
+            let Ok(text) = unsafe { CStr::from_ptr(insert_text) }.to_str() else {
+                eprintln!(
+                    "[op-capture] agent_doc_record_editor_op: non-UTF-8 insert text; ignoring op"
+                );
+                return 0;
+            };
+            agent_doc_orchestration::crdt::EditorOp::Insert {
+                offset,
+                text: text.to_string(),
+            }
+        }
+        "delete" => {
+            let Ok(len) = usize::try_from(delete_len) else {
+                eprintln!(
+                    "[op-capture] agent_doc_record_editor_op: negative delete_len {delete_len}; ignoring op"
+                );
+                return 0;
+            };
+            agent_doc_orchestration::crdt::EditorOp::Delete { offset, len }
+        }
+        other => {
+            eprintln!("[op-capture] agent_doc_record_editor_op: unknown op_kind {other:?}; ignoring");
+            return 0;
+        }
+    };
+
+    match agent_doc_orchestration::op_capture::record_editor_op(&file_path_buf, base, op) {
+        Ok(()) => {
+            agent_doc_orchestration::ops_log::log_op(
+                &file_path_buf,
+                &format!(
+                    "editor_op_recorded kind={kind} offset={offset} base={} #qnodemerge4wire",
+                    base.get(..12).unwrap_or(base),
+                ),
+            );
+            1
+        }
+        Err(e) => {
+            agent_doc_orchestration::ops_log::log_op(
+                &file_path_buf,
+                &format!("editor_op_record_failed kind={kind} error={e} #qnodemerge4wire"),
+            );
+            0
+        }
+    }
+}
+
 fn ffi_normalize_transient_agent_doc_markers(content: &str) -> String {
     content
         .lines()
@@ -1952,6 +2056,97 @@ fn force_link_core_ffi_symbols() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn record_editor_op_ffi_writes_base_keyed_sidecar() {
+        use agent_doc_orchestration::op_capture;
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        let base_text = "hello world\n";
+        let base_hash = op_capture::content_hash(base_text);
+
+        let file_c = CString::new(doc.to_str().unwrap()).unwrap();
+        let base_c = CString::new(base_hash.as_str()).unwrap();
+        let insert_kind = CString::new("insert").unwrap();
+        let delete_kind = CString::new("delete").unwrap();
+        let text_c = CString::new("!").unwrap();
+
+        // Insert op records (returns 1).
+        let rc = unsafe {
+            agent_doc_record_editor_op(
+                file_c.as_ptr(),
+                base_c.as_ptr(),
+                insert_kind.as_ptr(),
+                5,
+                text_c.as_ptr(),
+                0,
+            )
+        };
+        assert_eq!(rc, 1, "valid insert op must record");
+
+        // Delete op appends within the same epoch (null insert_text is allowed).
+        let rc = unsafe {
+            agent_doc_record_editor_op(
+                file_c.as_ptr(),
+                base_c.as_ptr(),
+                delete_kind.as_ptr(),
+                0,
+                std::ptr::null(),
+                3,
+            )
+        };
+        assert_eq!(rc, 1, "valid delete op must record");
+
+        // The consumer trusts the sidecar only against the matching base, and the
+        // ops round-trip in editor order.
+        let ops = op_capture::editor_ops_for_base(&doc, base_text)
+            .unwrap()
+            .expect("ops captured against the base must be trusted");
+        assert_eq!(ops.len(), 2);
+        assert_eq!(
+            ops[0],
+            agent_doc_orchestration::crdt::EditorOp::Insert {
+                offset: 5,
+                text: "!".into()
+            }
+        );
+        assert_eq!(
+            ops[1],
+            agent_doc_orchestration::crdt::EditorOp::Delete { offset: 0, len: 3 }
+        );
+
+        // Unknown kind and negative offset fail closed (return 0, record nothing).
+        let bad_kind = CString::new("replace").unwrap();
+        let rc = unsafe {
+            agent_doc_record_editor_op(
+                file_c.as_ptr(),
+                base_c.as_ptr(),
+                bad_kind.as_ptr(),
+                0,
+                text_c.as_ptr(),
+                0,
+            )
+        };
+        assert_eq!(rc, 0, "unknown op_kind must fail closed");
+        let rc = unsafe {
+            agent_doc_record_editor_op(
+                file_c.as_ptr(),
+                base_c.as_ptr(),
+                insert_kind.as_ptr(),
+                -1,
+                text_c.as_ptr(),
+                0,
+            )
+        };
+        assert_eq!(rc, 0, "negative offset must fail closed");
+        let ops = op_capture::editor_ops_for_base(&doc, base_text)
+            .unwrap()
+            .unwrap();
+        assert_eq!(ops.len(), 2, "failed ops must not be recorded");
+    }
 
     #[test]
     fn sync_lock_acquire_decision_self_heals_wedged_holder() {

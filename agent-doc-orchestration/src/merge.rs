@@ -516,6 +516,90 @@ User line 2.
     }
 
     #[test]
+    fn merge_with_ops_consumes_and_clears_base_keyed_sidecar() {
+        // End-to-end #qnodemerge4wire wiring (part 3): a recorded editor op for
+        // the merge base is offered to the merge, then the sidecar is cleared so a
+        // later, unrelated merge can never replay stale ops.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        let base = "# Doc\n\nBase line.\n";
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+
+        // The editor appended "User edit.\n" — captured against the merge base.
+        let base_hash = crate::op_capture::content_hash(base);
+        crate::op_capture::record_editor_op(
+            &doc,
+            &base_hash,
+            crate::crdt::EditorOp::Insert {
+                offset: base.len(),
+                text: "User edit.\n".to_string(),
+            },
+        )
+        .unwrap();
+        assert!(
+            crate::op_capture::load_op_capture(&doc).unwrap().is_some(),
+            "precondition: sidecar recorded"
+        );
+
+        let ours = "# Doc\n\nBase line.\n\nAgent response.\n"; // agent side
+        let theirs = "# Doc\n\nBase line.\nUser edit.\n"; // disk side (editor's real op)
+
+        let (merged, state) =
+            merge_contents_crdt_with_ops(&doc, Some(&base_state), ours, theirs).unwrap();
+        assert!(merged.contains("Agent response."), "agent side preserved:\n{merged}");
+        assert!(merged.contains("User edit."), "editor op preserved:\n{merged}");
+        assert!(!merged.contains("<<<<<<<"));
+        assert!(!state.is_empty());
+
+        // The sidecar is consumed exactly once — a later merge starts clean.
+        assert!(
+            crate::op_capture::load_op_capture(&doc).unwrap().is_none(),
+            "sidecar must be cleared after the merge consumes its epoch"
+        );
+    }
+
+    #[test]
+    fn merge_with_ops_falls_back_to_diff_guess_on_base_mismatch() {
+        // When the captured ops were recorded against a DIFFERENT base than the
+        // merge resolves, they are disqualified — the merge degrades to the plain
+        // CRDT path and is byte-identical to merge_contents_crdt.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        let base = "# Doc\n\nBase line.\n";
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+
+        // Op recorded against a stale base that no longer matches the merge base.
+        crate::op_capture::record_editor_op(
+            &doc,
+            &crate::op_capture::content_hash("a totally different base\n"),
+            crate::crdt::EditorOp::Insert {
+                offset: 0,
+                text: "x".to_string(),
+            },
+        )
+        .unwrap();
+
+        let ours = "# Doc\n\nBase line.\n\nAgent response.\n";
+        let theirs = "# Doc\n\nBase line.\n\nUser addition.\n";
+
+        let (with_ops, _) =
+            merge_contents_crdt_with_ops(&doc, Some(&base_state), ours, theirs).unwrap();
+        let (plain, _) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        assert_eq!(
+            with_ops, plain,
+            "stale-base ops must not change the merge result"
+        );
+        // The stale sidecar is still cleared (its epoch is over).
+        assert!(crate::op_capture::load_op_capture(&doc).unwrap().is_none());
+    }
+
+    #[test]
     fn crdt_merge_one_side_unchanged() {
         let base = "Original.\n";
         let base_doc = crate::crdt::CrdtDoc::from_text(base);

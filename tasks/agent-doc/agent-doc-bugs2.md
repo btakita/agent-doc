@@ -39,6 +39,14 @@ completed
 Compacted content:
 - Archived 26 response topic(s): Session compacted + queue corrected; Diagnose JB File Cache Conflict dialogs; Implemented #evmh (binary half); 23 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
+### Re: Documented the node-merge architecture + captured the JB dispatch bug — opus-4-8
+
+Done (recorded post-compaction via Edit + `agent-doc commit` — the live editor IPC is dead this session, so `finalize` could not write).
+
+**Architecture doc** — new `src/agent-doc/docs/reference/node-merge-architecture.md`: whole-document blob-merge problem → per-node merge model → shipped `merge_by_component` (`#qnodemerge1`) → leaf `merge` safeguards (stale-base detection + committed-`### Re:` preservation) → `#qnodemerge2–5` roadmap. Linked from the README Architecture section and `docs/SUMMARY.md`, with a maintenance note binding it to `crdt.rs`. Commits: submodule `e89d5ee8`, superproject pointer `805abd86c` (not pushed — STOP-cutting-releases / confirm-before-push).
+
+**JB queue head** is a bug report, not a request to run the action — I did not trigger the clear+rerun. Captured as `#jbclrdispdup` (`#t3mn`), same dispatch-restack/no-submit class as `#rdypoll` / `#rdypoll-deploy`. Also filed `#nodesymrename` [recommended] — code symbol is still `Cell`/`segment_into_cells` while the docs now say "node".
+
 <!-- agent:boundary:7f51774f -->
 <!-- /agent:exchange -->
 
@@ -55,8 +63,8 @@ Compacted content:
 - :pushpin: do [#qprtloss]
 - :pushpin: do [#qcm1verify]
 - :pushpin: do [#qnodemerge5]
-- Please document the document node merge architecture. Link from the readme. Ensure the document remains up to date if any changes are made.
-- :pushpin: JB `Clear Session Context` then JB `Run Agent Doc` still sends duplicate prompts and no submit. 
+- ~~Please document the document node merge architecture. Link from the readme. Ensure the document remains up to date if any changes are made.~~
+- ~~:pushpin: JB `Clear Session Context` then JB `Run Agent Doc` still sends duplicate prompts and no submit.~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

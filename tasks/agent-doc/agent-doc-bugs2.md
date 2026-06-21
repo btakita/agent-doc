@@ -164,7 +164,26 @@ Proof:
 - Commands: `agent-doc preflight`, `agent-doc write --pending-add`, `agent-doc finalize --force-disk`.
 - Verification: none (no code changed — plan/backlog capture only).
 - Escalation: confirm scope before I implement `#qstrikeexplain` (it touches the strike heuristic).
-<!-- agent:boundary:0603559c -->
+
+### Re: do #qnodemerge4wire — op-capture supply side (FFI + tests) — opus-4-8
+
+Drained the queue head. Implemented the genuine remaining agent-doable gap and shipped it to the agent-doc submodule (`b149532e`); `make check` green (**4934 tests**, 239 skipped; clippy + sim-medium + version-sync all pass).
+
+**What was already done (no rework):**
+- **Part 1** — per-document base-keyed op-capture sidecar (record/load/clear/GC) in `op_capture.rs`.
+- **Part 3** — `merge_contents_crdt_with_ops` (`merge.rs:99`) loads ops via `editor_ops_for_base`, offers them to `merge_with_editor_ops`, and clears the sidecar after; already wired into `run_entry.rs:873`.
+
+**Shipped this cycle:**
+- **Part 2 — `agent_doc_record_editor_op` FFI entry** (`src/ffi.rs`). The FFI-first ingestion point the thin editor reporters call: `insert`/`delete` kinds, base-hash-keyed (an op is trusted by a later merge only when that merge's resolved base hashes to the same value), and it **fails closed** (returns `0`, never panics) on non-UTF-8 args, unknown kind, negative offset, or null insert text — so a reporter falls back to the diff-guess path. Logs `editor_op_recorded …` to `ops.log`.
+- **Part 5 — end-to-end tests.** FFI roundtrip (insert+delete append within an epoch, fail-closed branches), plus merge-level tests that the recorded sidecar is **consumed-and-cleared** by the wired merge, and that a base-mismatch sidecar disqualifies the ops (result byte-identical to `merge_contents_crdt`).
+
+**Gated remainder (`#qnodemerge4wire` moved to review):**
+- **Part 4** — thin JB `DocumentListener.documentChanged` + VS Code `onDidChangeTextDocument` reporters that split replacements into delete+insert and call the new FFI entry. Blocked by **STOP-cutting-releases** (needs a `pluginVersion` bump + build/install to take effect), so I did **not** write untested, un-shippable plugin code this cycle.
+- **`[operator-verify]` live eyeball** — a concurrent live edit + agent write converging with zero diff-derived duplication, `ops.log` showing `editor_op_recorded`.
+- Note carried: byte-offset vs Yrs unicode-offset semantics still need verification on non-ASCII edits.
+
+No version bump / install / publish (STOP-cutting-releases). Source committed locally for preservation; submodule-pointer bump follows.
+<!-- agent:boundary:f8b408e9 -->
 <!-- /agent:exchange -->
 
 ## Queue

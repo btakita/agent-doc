@@ -186,7 +186,34 @@ Two asks. **Part 1 (the advance-to-next-step message) is shipped + pushed.** **P
 2. **Generalize the borrower chat** (`chat_sessions`) to accept a `lender` participant role. More reuse, but widens a borrower-specific schema.
 
 Plan written to `src/equityfundingsource-dev/prds/lender-card-messaging.md`; queued as **`#lender-card-msg`**. The in-app thread isn't email-gated, but outbound email-to-lender parity rides the same Resend-domain gate as `#f4rq`/`#xcvg`. **Tell me "option 1" (or 2) and I'll build it** — I didn't want to lay down a new D1 table on a guess.
-<!-- agent:boundary:406fd251 -->
+
+### Re: Embedded lender messaging shipped (option 1) — opus-4-8
+
+> **Queue prompt:**
+>
+> On dialogs, there should be a message that indicates what needs to be done to advance the card to the next step. So in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > btak.dev+lender2@gmail.com should have a message that hoists the requirement "No accreditation submission yet — the lender must submit their questionnaire before it can be decided."...assuming that is what is needed. We should also have an embedded messaging component with the lender to help the lender provide the documents.
+
+
+> **Queue prompt:**
+>
+> :pushpin: On dialogs, there should be a message that indicates what needs to be done to advance the card to the next step. So in .../admin/lender-pipeline > btak.dev+lender2@gmail.com should have a message ... We should also have an embedded messaging component with the lender to help the lender provide the documents.
+
+(That prompt is the already-answered Part 1 from the prior cycle, re-queued as a CRDT duplicate during a degraded-IPC recovery — Part 1 shipped in `4780bf4`. Striking the duplicate; this cycle delivers Part 2.)
+
+**Part 2 — embedded pre-deal lender messaging: shipped + pushed (`#spec-test-commit-push`).** You chose **option 1 (new `lender_account_messages` table)**. EFS `bb31fe7` (+ plan doc `e2bcfc3`), superproject pointer `f6d927911`. `#lender-card-msg` is done; two follow-ups filed.
+
+What shipped:
+- **Migration `0095`** — `lender_account_messages` + `lender_account_message_attachments`, keyed on the lender's `user_id` (so it works with no deal interest). `sender_role` is `lender`|`efs`, so the schema already supports lender replies.
+- **Repo** `lib/lender-account-messages.ts` — create/read, R2 attachment storage, and an auth-checked attachment download (admin, or the lender themselves).
+- **Routes** — `GET`/`POST /api/admin/lenders/:id/messages` and `GET /api/lender-account-message-attachments/:id/download`.
+- **UI** — a new **"Message lender"** thread + compose box (text + up to 5 attachments) embedded in the lender-pipeline **card dialog**, right under the accreditation control. Reuses the existing attachment renderer.
+- **Tests** — repo create/read round-trip (incl. attachment + lender-scoping) and route/UI wiring. Full suite **993 pass / 0 fail**; both bundles build clean.
+
+Scope notes (so this isn't oversold):
+- This is the **admin-side** half. The lender can't yet view/reply **in-app** — that's the lender-portal component, filed as **`#lender-card-msg-portal`** (the data model already supports it).
+- **Email-to-lender** notification (so they know to act) is filed as **`#lender-card-msg-email`**; it rides the verified Resend domain gate (`#f4rq`), same as the deal-interest thread.
+- The new table needs migration `0095` applied, which happens on **deploy**. Until then the panel shows a graceful "couldn't load" message rather than erroring the dialog. The preset was commit+push, so I held the deploy — reply `deploy` to push it live (Part 1's banner + this).
+<!-- agent:boundary:8c925010 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -199,14 +226,17 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: On dialogs, there should be a message that indicates what needs to be done to advance the card to the next step. So in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > btak.dev+lender2@gmail.com should have a message that hoists the requirement "No accreditation submission yet — the lender must submit their questionnaire before it can be decided."...assuming that is what is needed. We should also have an embedded messaging component with the lender to help the lender provide the documents.~~
-- On dialogs, there should be a message that indicates what needs to be done to advance the card to the next step. So in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > btak.dev+lender2@gmail.com should have a message that hoists the requirement "No accreditation submission yet — the lender must submit their questionnaire before it can be decided."...assuming that is what is needed. We should also have an embedded messaging component with the lender to help the lender provide the documents.
+- ~~On dialogs, there should be a message that indicates what needs to be done to advance the card to the next step. So in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > btak.dev+lender2@gmail.com should have a message that hoists the requirement "No accreditation submission yet — the lender must submit their questionnaire before it can be decided."...assuming that is what is needed. We should also have an embedded messaging component with the lender to help the lender provide the documents.~~
 - do [#lender-card-msg]
+- do [#lender-card-msg-portal]
+- do [#lender-card-msg-email]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lender-card-msg] [recommended] Embedded pre-deal lender messaging in the admin lender-pipeline card dialog so an admin can message a lender about onboarding/accreditation documents BEFORE any deal interest exists. Deal-interest-scoped lender messaging already ships in the dialog (deal_interest_lender_messages / migration 0082); the gap is a user-scoped thread. Plan + data-model fork (recommend new lender_account_messages table vs generalizing borrower chat_sessions): src/equityfundingsource-dev/prds/lender-card-messaging.md. Confirm the data-model choice before building; in-app first, email notify gated on #f4rq/#xcvg.
+- [ ] [#lender-card-msg-portal] [recommended] Lender-portal half of #lender-card-msg: surface the lender_account_messages thread in the lender/investor portal so a lender can view EFS messages and REPLY (sender_role='lender') with document attachments. Data model + admin side already shipped (EFS bb31fe7); needs a lender-portal inbox/thread component + a lender POST route. Plan: src/equityfundingsource-dev/prds/lender-card-messaging.md.
+- [ ] [#lender-card-msg-email] [recommended] Email-to-lender parity for #lender-card-msg account messages (mirror notify_lender_deal_message_): notify the lender by email when an admin posts an account message, like the deal-interest thread does. Rides the verified EFS Resend sending domain gate (#f4rq). Plan: src/equityfundingsource-dev/prds/lender-card-messaging.md.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.

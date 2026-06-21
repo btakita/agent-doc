@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -131,7 +131,30 @@ Done and deployed. Replaced every hard-delete path in the admin user / Lender Pr
 ### Re: deploy — already shipped this turn — opus-4-8
 
 The deactivate-only change was already deployed in the previous cycle this turn — no rebuild/redeploy needed. Worker `equityfundingsource` is live at version **`970b2557-44ad-4b84-bc87-3c577e7c7664`** (https://equityfundingsource.brian-takita.workers.dev), code `974de08`. Draining the duplicate `deploy` queue head.
-<!-- agent:boundary:15d2820b -->
+> **Queue prompt:** The reason why btak.dev+lender2@gmail.com is in "Compliance hold before funding" in .../admin/lender-pipeline is not obvious when opening the dialog. Please explain the actionable step needed, either by the admin or the lender, in the dialog.
+
+### Re: Make the compliance-hold reason actionable in the lender card dialog — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: The reason why btak.dev+lender2@gmail.com is in "Compliance hold before funding" in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline is not obvious when opening the dialog. Please explain the actionable step needed, either by the admin or the lender, in the dialog.
+
+
+Done (committed; not yet deployed). The card dialog now spells out **why** the lender is on hold and **who clears it**.
+
+**Change** (`lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`):
+
+- Added a pure `compliance_hold_steps_(card)` helper that derives the active blocker(s) directly from the same inputs that set `compliance_hold` (`investor_requirements_blocks_funding_(requirements_status) || !lender_account_ready`), tagging each with the actor who resolves it:
+  - **Accreditation** (`requirements_status`): `not_started` → **Lender** submits evidence; `under_review` → **Admin** Accredits/Rejects (below in the same dialog); `expired` → **Lender** renews; `rejected` → **Lender** resubmits. (`current`/`renewal_due` never block.)
+  - **Lender account** (`!lender_account_ready`): request pending → **Admin** completes it on the Lender Requests page to assign the TMO lender account; none pending → lender requests one, then Admin assigns it.
+- A red banner now renders in the card dialog whenever `compliance_hold` is set, listing each step with an **ADMIN**/**LENDER** label.
+
+**For lender2 specifically:** they self-attested accreditation (requirements **Current**), but **no lender account is linked** — so the single actionable step is the **Admin** one: *"Link a lender account: have the lender request one, then complete it on the Lender Requests page to assign the TMO lender account."* Once linked → Lender Ready, hold clears.
+
+**Verification:** suite **981 pass / 0 fail** (added a test asserting the lender2 card state — `compliance_hold=true`, `requirements_status=current`, `lender_account_ready=false` — plus the banner/step wiring; a fully-linked accredited lender has no hold). `bun run build` + `bun run build:worker` clean. Committed `4dc5647` in the EFS submodule.
+
+**Deploy:** not deployed this cycle (last cycle's `deploy` was a separate explicit step). Reply `deploy` (or queue it) to push it live so you can see the banner in the dialog.
+<!-- agent:boundary:f8cde3a3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -143,7 +166,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: The reason why btak.dev+lender2@gmail.com is in "Compliance hold before funding" in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline is not obvious when opening the dialog. Please explain the actionable step needed, either by the admin or the lender, in the dialog.
 <!-- /agent:queue -->
 
 ## Backlog

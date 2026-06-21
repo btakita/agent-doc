@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -98,12 +98,14 @@ One thing, and it's the `#1yks` gate: **the two new crates `tsift-local-model` a
 **If crates.io refuses to pre-config a nonexistent crate** (fallback): publish `tsift-local-model` once manually with a personal token to create it (`cargo publish -p tsift-local-model`). `tsift-kg` can't be created standalone — it needs `tsift-core`/`tsift-sqlite`/`tsift-local-model` at `0.1.73` on crates.io first — so the pre-config route above is strongly preferred; with it, CI publishes the whole set in dependency order in one shot.
 
 **Then:** `agent-doc admin queue resume tasks/software/tsift.md` (the queue is currently paused) and tell me — I'll run `make check`, `git tag v0.1.73 1caaa43`, `git push origin v0.1.73`, and watch the Release run. Nothing else is needed from you; `#015t`'s Phases 0–4b are done and pushed, only Phase 5 (this release) remains.
-<!-- agent:boundary:fdd283d6 -->
+<!-- agent:boundary:4eebe7a7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: Use https://crates.io/docs/trusted-publishing to setup trusted publishing for the crates.
+- do [#015t]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

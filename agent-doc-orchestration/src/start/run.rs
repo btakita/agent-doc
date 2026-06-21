@@ -372,16 +372,78 @@ pub fn run_with_reap_policy(
         &project_root,
         crate::project_controller::LaunchMode::Lazy,
     )?;
-    let actor_record = crate::project_controller::start_session(
-        &project_root,
-        crate::project_controller::StartSessionRequest {
+    // `#jbdisprecycle` R2: a `start_session` that races a supervisor `execve`
+    // hot-reload (lib-install auto-recycle / operator restart) fails because the
+    // project controller is mid-teardown (the live repro's terminal
+    // `start_session failed for tasks/software/tsift.md`). That is a transient
+    // race, not a terminal error — wait for the recycle to settle and retry,
+    // instead of surfacing a terminal failure that strands the dispatch.
+    let actor_record = {
+        const MAX_START_SESSION_RECYCLE_RETRIES: usize = 2;
+        let start_request = crate::project_controller::StartSessionRequest {
             file: canonical.clone(),
             session_id: session_id.clone(),
             pane_id: pane_id.clone(),
             window_id: pane_window.clone(),
             generation: start_generation,
-        },
-    )?;
+        };
+        let file_path_str = file.to_string_lossy().to_string();
+        let mut attempts_used = 0usize;
+        loop {
+            match crate::project_controller::start_session(&project_root, start_request.clone()) {
+                Ok(record) => break record,
+                Err(err) => {
+                    let recycle_pending =
+                        crate::recycle_inflight::recycle_inflight_pending(&file_path_str);
+                    if !crate::recycle_inflight::start_session_retryable_during_recycle(
+                        recycle_pending,
+                        attempts_used,
+                        MAX_START_SESSION_RECYCLE_RETRIES,
+                    ) {
+                        return Err(err);
+                    }
+                    attempts_used += 1;
+                    let reason = crate::recycle_inflight::read_recycle_inflight(&file_path_str)
+                        .map(|m| m.reason)
+                        .unwrap_or_else(|| "unknown".to_string());
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "start_session_recycle_retry file={} pane={} attempt={} reason={} err={}",
+                            file.display(),
+                            pane_id,
+                            attempts_used,
+                            reason,
+                            err
+                        ),
+                    );
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "start_session_recycle_retry attempt={attempts_used} reason={reason}"
+                        ),
+                    );
+                    // Bounded wait for the fresh supervisor to settle onto the new
+                    // binary (clears the recycle-inflight marker on watch-loop
+                    // start; TTL is the backstop). If it never settles, surface the
+                    // original error so the caller retries the whole dispatch rather
+                    // than spinning here.
+                    if !crate::recycle_inflight::wait_for_recycle_settle(
+                        &file_path_str,
+                        crate::recycle_inflight::RECYCLE_SETTLE_WAIT,
+                        crate::recycle_inflight::RECYCLE_SETTLE_POLL,
+                    ) {
+                        return Err(err);
+                    }
+                    // Re-ensure the freshly-recycled controller is reachable before retry.
+                    crate::project_controller::ensure_controller_running(
+                        &project_root,
+                        crate::project_controller::LaunchMode::Lazy,
+                    )?;
+                }
+            }
+        }
+    };
     log_event(
         &mut session_log,
         &format!(

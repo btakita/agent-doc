@@ -160,6 +160,62 @@ pub fn recycle_inflight_pending(file: &str) -> bool {
     fresh_recycle_inflight(file, now_secs()).is_some()
 }
 
+/// R2/R3 (`#jbdisprecycle`): bound on how long a caller waits for an in-flight
+/// supervisor recycle to settle before giving up. Slightly under the marker TTL
+/// so a genuinely-stuck recycle surfaces as retryable rather than hanging the
+/// caller indefinitely.
+pub const RECYCLE_SETTLE_WAIT: Duration = Duration::from_secs(10);
+/// Poll cadence while waiting for a recycle to settle.
+pub const RECYCLE_SETTLE_POLL: Duration = Duration::from_millis(250);
+
+/// Block up to `timeout` (polling every `poll`) for the project's supervisor
+/// recycle to settle — the in-flight marker clearing (fresh supervisor watch
+/// loop start) or expiring (TTL backstop). Returns `true` if the recycle settled
+/// within the window (including the no-recycle-in-flight fast path), `false` if
+/// it never settled. Shared by R2 (`start_session` retry) and R3 (submit-once
+/// resubmit) so both wait the same bounded window before acting.
+pub fn wait_for_recycle_settle(file: &str, timeout: Duration, poll: Duration) -> bool {
+    if !recycle_inflight_pending(file) {
+        return true;
+    }
+    let started = std::time::Instant::now();
+    while recycle_inflight_pending(file) {
+        if started.elapsed() >= timeout {
+            return false;
+        }
+        std::thread::sleep(poll);
+    }
+    true
+}
+
+/// R2 (`#jbdisprecycle`): a `start_session` that fails *while the project
+/// supervisor is mid-`execve` recycle* raced the hot-reload (the controller is
+/// tearing down / restarting its session actors) — it is a transient race, not a
+/// terminal error. Retry (after the recycle settles) while attempts remain and
+/// the supervisor was actually recycling; otherwise surface the error as before.
+/// Pure so the retry policy is unit-testable without a live controller.
+pub fn start_session_retryable_during_recycle(
+    recycle_pending: bool,
+    attempts_used: usize,
+    max_attempts: usize,
+) -> bool {
+    recycle_pending && attempts_used < max_attempts
+}
+
+/// R3 (`#jbdisprecycle`): once the routed trigger has already been typed into the
+/// composer (`dispatch_inject attempt>=1`) but the submit has not been accepted,
+/// a recycle in flight means the submit keystroke was dropped across the
+/// `execve` boundary. The recovery is to wait for the recycle to settle and then
+/// land the submit exactly ONCE — never another full trigger re-type, which would
+/// log `dispatch_inject attempt=2` (the `#rdypoll` restack symptom). Returns true
+/// when the caller must wait-for-settle before its single resubmit.
+pub fn recycle_interrupted_resubmit_should_wait(
+    trigger_already_injected: bool,
+    recycle_pending: bool,
+) -> bool {
+    trigger_already_injected && recycle_pending
+}
+
 /// Best-effort clear of the recycle-in-flight marker. The fresh post-recycle
 /// supervisor drops it when its watch loop initializes; the TTL is the backstop.
 pub fn clear_recycle_inflight(file: &str) {
@@ -228,6 +284,63 @@ mod tests {
             recycle_inflight_pending(&doc_b),
             "a recycle marked via doc A must be visible to a dispatch for sibling doc B"
         );
+    }
+
+    #[test]
+    fn wait_for_settle_returns_immediately_when_no_recycle_pending() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file = file.to_string_lossy().to_string();
+        // No marker written → fast-path true, no sleeping.
+        assert!(wait_for_recycle_settle(
+            &file,
+            Duration::from_secs(10),
+            Duration::from_millis(250)
+        ));
+    }
+
+    #[test]
+    fn wait_for_settle_gives_up_when_recycle_never_clears() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file = file.to_string_lossy().to_string();
+        mark_recycle_inflight(&file, RECYCLE_INFLIGHT_AUTO_INSTALL).unwrap();
+        // A fresh marker stays pending; a sub-poll timeout must give up (false)
+        // rather than block forever, so the caller can fail closed / retry.
+        let settled = wait_for_recycle_settle(
+            &file,
+            Duration::from_millis(0),
+            Duration::from_millis(1),
+        );
+        assert!(
+            !settled,
+            "an unsettling recycle must return false at the timeout, not hang"
+        );
+    }
+
+    #[test]
+    fn start_session_retry_only_while_recycling_and_budget_remains() {
+        // Retry only when the supervisor is actually recycling AND attempts remain.
+        assert!(start_session_retryable_during_recycle(true, 0, 2));
+        assert!(start_session_retryable_during_recycle(true, 1, 2));
+        // Budget exhausted → surface the error (terminal).
+        assert!(!start_session_retryable_during_recycle(true, 2, 2));
+        // Not recycling → a real start_session failure is terminal, never retried.
+        assert!(!start_session_retryable_during_recycle(false, 0, 2));
+    }
+
+    #[test]
+    fn recycle_interrupted_resubmit_waits_only_when_injected_and_recycling() {
+        // Trigger typed + recycle in flight → wait for settle, then submit once.
+        assert!(recycle_interrupted_resubmit_should_wait(true, true));
+        // Recycle in flight but nothing injected yet → R1 pre-inject gate owns it.
+        assert!(!recycle_interrupted_resubmit_should_wait(false, true));
+        // Injected but no recycle → normal budgeted resubmit, no extra wait.
+        assert!(!recycle_interrupted_resubmit_should_wait(true, false));
     }
 
     #[test]

@@ -167,6 +167,21 @@ enum SimCommand {
     /// by targeted tests, not the random generator, so seed corpus traces are
     /// unchanged.
     DispatchIdleQueueDrainAfterRestart,
+    /// `#jbdisprecycle`: mark the project supervisor mid-`execve` recycle (the
+    /// lib-install auto-recycle / operator-restart hot-reload window). Models the
+    /// project-scoped `recycle_inflight` marker `idle_watch.rs` writes before each
+    /// reexec; while set, a `route` dispatch must defer (NOT type) so a trigger is
+    /// never injected across the boundary where the submit Enter is dropped.
+    MarkSupervisorRecycleInflight,
+    /// `#jbdisprecycle`: the fresh post-recycle supervisor settled onto the new
+    /// binary and cleared the recycle-inflight marker (or the TTL expired).
+    SettleSupervisorRecycle,
+    /// `#jbdisprecycle` R4: a JB `Run Agent Doc` dispatch that lands during the
+    /// recycle window. While `recycle_inflight` is set it must fail closed and
+    /// record `dispatch_into_recycling_pane` (no inject, no re-type); once the
+    /// recycle settles (`SettleSupervisorRecycle`) the same dispatch injects the
+    /// trigger exactly once. Proves R1+R3's defer-until-settle + submit-once.
+    DispatchDuringSupervisorRecycle,
     BusyInterruptRecoveryReady,
     RepairBusyProjectionWithReadyPrompt,
     AdminPauseQueue,
@@ -511,6 +526,10 @@ struct RouteModel {
     starting_timeout: Option<(u64, String)>,
     queue_control: QueueControlState,
     supervisor_lease_generation: Option<u64>,
+    /// `#jbdisprecycle`: the project supervisor is mid-`execve` recycle right now
+    /// (lib-install auto-recycle / operator restart). Models the project-scoped
+    /// `recycle_inflight` marker the live `route` dispatch reads before typing.
+    recycle_inflight: bool,
 }
 
 impl RouteModel {
@@ -523,6 +542,7 @@ impl RouteModel {
             starting_timeout: None,
             queue_control: QueueControlState::Resumed,
             supervisor_lease_generation: Some(1),
+            recycle_inflight: false,
         }
     }
 }
@@ -659,6 +679,11 @@ struct Coverage {
     /// recording `dispatch_into_restarting_pane` instead of typing — so a not-ready
     /// restarted composer never accumulates duplicate un-submitted triggers.
     drain_into_restarting_pane_blocks: usize,
+    /// `#jbdisprecycle` R4: a `route` dispatch refused to inject the trigger while
+    /// the project supervisor was mid-`execve` recycle, recording
+    /// `dispatch_into_recycling_pane` instead of typing across the hot-reload
+    /// boundary (where the submit Enter is dropped).
+    dispatch_into_recycling_pane_blocks: usize,
     busy_dispatch_blocks: usize,
     closed_dispatch_blocks: usize,
     busy_interrupt_recoveries: usize,
@@ -870,6 +895,7 @@ impl Coverage {
         self.starting_prompt_promotions += other.starting_prompt_promotions;
         self.auto_start_starting_pane_blocks += other.auto_start_starting_pane_blocks;
         self.drain_into_restarting_pane_blocks += other.drain_into_restarting_pane_blocks;
+        self.dispatch_into_recycling_pane_blocks += other.dispatch_into_recycling_pane_blocks;
         self.busy_dispatch_blocks += other.busy_dispatch_blocks;
         self.closed_dispatch_blocks += other.closed_dispatch_blocks;
         self.busy_interrupt_recoveries += other.busy_interrupt_recoveries;
@@ -1938,6 +1964,86 @@ fn route_sim_restart_drain_waits_for_dispatch_ready_prompt_before_send() {
     assert!(
         !ops_log.contains("attempt=2"),
         "a correct restart drain must never log a second dispatch_inject attempt:\n{ops_log}"
+    );
+}
+
+#[test]
+fn route_sim_dispatch_defers_during_recycle_then_injects_once_after_settle() {
+    // `#jbdisprecycle` R4: a JB `Run Agent Doc` dispatch that lands while the
+    // project supervisor is mid-`execve` recycle (lib-install auto-recycle /
+    // operator restart) must fail closed and inject NOTHING — a trigger typed
+    // across the hot-reload boundary has its submit Enter dropped (the live
+    // typed-without-submit no-submit repro). Repeated dispatches during the
+    // recycle window must NOT stack duplicate un-submitted triggers. Once the
+    // fresh supervisor settles and clears the recycle marker, the same dispatch
+    // injects the trigger exactly once (R1 defer-until-settle + R3 submit-once).
+    let mut world = SimWorld::new(2_007);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    // The supervisor enters its lib-install auto-recycle hot-reload window.
+    world.apply(SimCommand::MarkSupervisorRecycleInflight).unwrap();
+    assert!(world.route.recycle_inflight);
+
+    // Every dispatch that lands mid-recycle fails closed — no inject, no re-type.
+    for _ in 0..7 {
+        world
+            .apply(SimCommand::DispatchDuringSupervisorRecycle)
+            .unwrap();
+    }
+    assert_eq!(
+        world.coverage.dispatch_into_recycling_pane_blocks, 7,
+        "every dispatch during the recycle window must fail closed (no trigger typed across the execve boundary)"
+    );
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 0,
+        "no trigger may be injected while the supervisor is mid-recycle"
+    );
+    assert_eq!(
+        world.coverage.dispatch_injects, 0,
+        "no dispatch_inject marker while mid-recycle (no ~7 stacked un-submitted triggers)"
+    );
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("dispatch_into_recycling_pane")
+            && ops_log.contains("reason=supervisor_mid_recycle_before_dispatch_send"),
+        "ops log must record dispatch_into_recycling_pane for the recycle race:\n{ops_log}"
+    );
+    assert!(
+        !ops_log.contains("dispatch_inject"),
+        "no dispatch_inject marker may be logged while the supervisor is mid-recycle:\n{ops_log}"
+    );
+
+    // The fresh post-recycle supervisor settles and clears the marker; the same
+    // dispatch now injects the trigger exactly once and is proven submitted.
+    world.apply(SimCommand::SettleSupervisorRecycle).unwrap();
+    assert!(!world.route.recycle_inflight);
+    world
+        .apply(SimCommand::DispatchDuringSupervisorRecycle)
+        .unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 1,
+        "after the recycle settles the dispatch must submit exactly once"
+    );
+    assert_eq!(world.coverage.route_dispatch_proofs, 1);
+    assert_eq!(
+        world.coverage.dispatch_into_recycling_pane_blocks, 7,
+        "the settled dispatch must not re-trip the recycle block"
+    );
+    assert_eq!(
+        world.coverage.dispatch_injects, 1,
+        "the settled dispatch must inject the trigger exactly once (no stacked copies)"
+    );
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("dispatch_inject pane=") && ops_log.contains("attempt=1"),
+        "ops log must record the single dispatch_inject attempt=1 after settle:\n{ops_log}"
+    );
+    assert!(
+        !ops_log.contains("attempt=2"),
+        "a correct recycle-settle dispatch must never log a second dispatch_inject attempt:\n{ops_log}"
     );
 }
 

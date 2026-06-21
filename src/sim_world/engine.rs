@@ -327,6 +327,17 @@ impl SimWorld {
                     self.coverage.record_block(&err.to_string());
                 }
             }
+            SimCommand::MarkSupervisorRecycleInflight => {
+                self.route.recycle_inflight = true;
+            }
+            SimCommand::SettleSupervisorRecycle => {
+                self.route.recycle_inflight = false;
+            }
+            SimCommand::DispatchDuringSupervisorRecycle => {
+                if let Err(err) = self.dispatch_during_supervisor_recycle() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
             SimCommand::BusyInterruptRecoveryReady => {
                 if let Err(err) = self.recover_busy_interrupt_to_ready() {
                     self.coverage.record_block(&err.to_string());
@@ -1693,6 +1704,35 @@ impl SimWorld {
         // Past the restart-dispatch gate the drain rejoins the normal route
         // dispatch path (the same readiness/coalesce/acceptance invariants apply),
         // so a proven-ready restarted pane drains exactly once.
+        self.dispatch_route_prompt_with(true)
+    }
+
+    /// `#jbdisprecycle` R4: model the `route` dispatch's recycle-inflight gate.
+    /// While the project supervisor is mid-`execve` recycle the live dispatch
+    /// (`route/dispatch_only.rs` R1, `route/dispatch.rs` R3) must NOT type the
+    /// trigger — a keystroke typed across the hot-reload boundary has its submit
+    /// Enter dropped, leaving the operator-observed typed-without-submit trigger.
+    /// So the gate fails closed, records `dispatch_into_recycling_pane`, and
+    /// injects NOTHING (repeated dispatches while recycling cannot stack
+    /// duplicates). Once the recycle settles (`SettleSupervisorRecycle`) the same
+    /// dispatch rejoins the normal route path and injects exactly once.
+    pub(crate) fn dispatch_during_supervisor_recycle(&mut self) -> Result<()> {
+        let pane_id = self.current_dispatch_pane()?;
+        if self.route.recycle_inflight {
+            self.coverage.dispatch_into_recycling_pane_blocks += 1;
+            self.record_ops_proof(format!(
+                "dispatch_into_recycling_pane pane={} generation={} reason=supervisor_mid_recycle_before_dispatch_send",
+                pane_id, self.route.durable.generation
+            ));
+            bail!(
+                "route dispatch refused: project supervisor mid-recycle (trigger typed across the execve boundary would be dropped before submit) for pane {}; seed={} trace={:?}",
+                pane_id,
+                self.seed,
+                self.trace
+            );
+        }
+        // Recycle settled — rejoin the normal route dispatch path (same
+        // readiness/coalesce/acceptance invariants), so the dispatch injects once.
         self.dispatch_route_prompt_with(true)
     }
 

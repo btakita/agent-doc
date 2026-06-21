@@ -809,6 +809,45 @@ pub(crate) fn send_command_unchecked(
         "direct_pane_acceptance",
     );
 
+    // `#jbdisprecycle` R3: the trigger was just injected (dispatch_inject
+    // attempt=1) but the submit has not been accepted. If the project supervisor
+    // is mid-`execve` recycle (lib-install auto-recycle / operator restart), the
+    // submit keystroke was dropped across the hot-reload boundary. Wait for the
+    // recycle to settle and re-poll ONCE, so the budgeted resubmit/re-type loops
+    // below run against the settled supervisor and land the submit exactly once —
+    // never burning the budget on input the recycle silently drops (which would
+    // re-type the trigger N times: the #rdypoll restack symptom).
+    if acceptance.status != CommandDispatchStatus::Accepted
+        && crate::recycle_inflight::recycle_interrupted_resubmit_should_wait(
+            true,
+            crate::recycle_inflight::recycle_inflight_pending(file_path),
+        )
+    {
+        let settled = crate::recycle_inflight::wait_for_recycle_settle(
+            file_path,
+            crate::recycle_inflight::RECYCLE_SETTLE_WAIT,
+            crate::recycle_inflight::RECYCLE_SETTLE_POLL,
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_submit_recycle_settle file={} pane={} harness={} settled={} action=submit_once_after_settle",
+                file.display(),
+                pane,
+                harness.binary,
+                settled
+            ),
+        );
+        acceptance = poll_direct_pane_acceptance(
+            tmux,
+            pane,
+            file,
+            harness,
+            &trigger,
+            "direct_pane_post_recycle_acceptance",
+        );
+    }
+
     // #jbrundispatch directive 2: "detect if the prompt was not dispatched into the
     // session, and send the prompt and submit the prompt." When the trigger never
     // landed in the composer (`not_dispatched`) — the classic pane-kill+restart

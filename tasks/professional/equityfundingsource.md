@@ -140,7 +140,22 @@ Tests re-pointed from the dashboards to the shells; the requirements-page test n
 **One bit of debt I deliberately deferred, not hid:** `investor/lender_account_messages.tsx` is now orphaned (the shell launcher fully supersedes it), but deleting it cascades into the `#lender-card-msg-portal` test block. I left the file in place and filed `#portalmsg-shell-cleanup` to delete it + fold its coverage into the unified component tests — deferred so you can eyeball the live shell launcher first.
 
 **Queue note:** you chose only #portalmsg-shell, so I'm **not** auto-draining the remaining `do [#portalmsg2]` (admin inline) and `do [#portalmsg4]` (borrower DO/websocket) heads — those stay queued for your call. Worth eyeballing the deployed lender + broker portals (the FAB should now follow you across every page) before I take the next phase.
-<!-- agent:boundary:ebbf2b38 -->
+
+### Re: #portalmsg2 — admin lender thread → unified inline component — opus-4-8
+
+Done + deployed (#portalmsg2). EFS `0a49dfa`, worker version `101ce2fd`, live. All 1063 tests pass; `build:worker` green.
+
+Migrated the admin lender-pipeline messaging to the unified component, with the sticky compose you wanted:
+- Extended `PortalMessages` with an explicit **admin / EFS-as-sender** config path (`endpoint` + `self_role`/`self_label` + `other_role`/`other_label` overrides) and an `admin_lender_messages_context_(user_id)` helper. Self-service rendering is unchanged (defaults resolve to the old behavior).
+- Replaced the bespoke ~110-line admin `LenderAccountMessages` component (2 mount sites: lender-pipeline card + advance-lender dialog) with `<PortalMessages placement="inline" ...>` over the **same** user-scoped admin endpoint (`/api/admin/lenders/:user_id/messages`). Now uses the `position:sticky` `.pm-inline-compose`, so an admin's composer stays reachable while the card dialog scrolls.
+- EFS rows render as "self", lender rows as the counterparty — the avatar/name/timestamp row invariant is preserved.
+
+**No admin-table regression:** the change is confined to the card-dialog thread component; the pipeline board/table and the shared deal-interest thread helpers are untouched. Net −130/+87 lines (deleted the duplicated component).
+
+**Scoped honestly — I did NOT do all of #portalmsg2's wording in one shot.** It listed "card dialog AND deal-detail." I migrated the self-contained account-scoped lender thread; the per-deal-interest "Lender communication" thread (`DealInterestWorkflowList`, deal-interest-scoped) and the admin deal-detail borrower+lender threads are more entangled (they share borrower-message helpers and deal-interest state), so I split them into **`#portalmsg2-dealthreads`** rather than risk that refactor in the same cycle.
+
+**Queue:** you approved only #portalmsg2, so I'm **not** auto-draining the remaining `do [#portalmsg4]` (borrower DO/websocket — the riskiest) or `do [#portalmsg-shell-cleanup]`. Those stay queued for your call. Worth eyeballing the deployed admin lender-pipeline card (open a lender, scroll the dialog — the "Message lender" composer should stick to the bottom) before the next phase.
+<!-- agent:boundary:ec048c23 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -154,16 +169,18 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Implement src/equityfundingsource-dev/prds/portal-messages-component.md. Make sure the prop component is always visible in the respective UI context. My always visible, make sure the user can click on the messaging no matter where the user scrolls on a dialog, page, or other component that has the messaging prop/context.~~
 - ~~deploy~~
-- do [#portalmsg-shell]
+- ~~do [#portalmsg-shell]~~
 - do [#portalmsg2]
 - do [#portalmsg4]
+- do [#portalmsg-shell-cleanup]
+- do [#portalmsg2-dealthreads]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#portalmsg2-dealthreads] [recommended] Finish the admin inline cutover: migrate the per-deal-interest "Lender communication" thread (DealInterestWorkflowList in investor_pipeline.tsx, endpoint /api/admin/deal-interests/:id/lender-messages) and the admin deal-detail borrower+lender threads to <PortalMessages placement="inline">. More entangled than the account thread (deal-interest-scoped, shares borrower-message helpers), so split from #portalmsg2. Advances #portalmsg2.
 - [ ] [#portalmsg-shell-cleanup] [recommended] Delete the now-orphaned investor/lender_account_messages.tsx (lender-facing account thread, fully superseded by the shell PortalMessages launcher) and fold its #lender-card-msg-portal test coverage into the unified component tests. Deferred so the live shell launcher can be eyeballed first.
-- [ ] [#portalmsg2] [recommended] Admin inline cutover: replace the embedded threads on the admin lender-pipeline card dialog (investor_pipeline.tsx) and deal-detail with <PortalMessages placement="inline">, using the sticky .pm-inline-compose so the composer stays reachable while the dialog scrolls. Verify no admin-table coverage regression. Advances #portalmsg2.
 - [ ] [#portalmsg4] [recommended] Borrower launcher: migrate borrower application-status messaging (sessions/loan-scoped + Durable Object websocket path) to <PortalMessages placement="launcher">; needs care around the live DO chat path. Advances #portalmsg4.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.

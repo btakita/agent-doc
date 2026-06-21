@@ -34,62 +34,19 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260621-174407.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260621-182945.md`*
 
 Compacted content:
-- Archived 8 response topic(s): fix #rt83 churn + commit agent-doc files + queue dedup; queue dedup; process the next queue head in order; 5 more
-- Prior summary/context: prior compacted content: Archived 11 response topic(s): Documented the node-merge architecture + captured the JB disp...
-
-### Re: queue cleanup + next-step direction — opus-4-8
-
-Removed the two struck heads `#6b5h` and `#6b5hwire` you cleared — confirmed both are archived in `agent-doc-bugs2.done.md` (the `#6b5h` primary chokepoint shipped as `#g9d7`/`#6b5hprimary`), so that was completed-item cleanup, not lost work. No new prompt rode in with the edit.
-
-**Why I'm not auto-draining the new head.** The queue head is now `[#1jec]`, which is `[operator-verify]` — it needs a `make install` at a supervisor-recycle boundary plus a live JB session, so the in-session loop can't complete it. Walking the rest of the queue, every realistically-reachable item is gated on something the loop must not decide for you:
-
-- **Operator-verify (need install at recycle boundary + live editor):** `#1jec` (yzer/evmh plugin reconnect re-read), `#qcm1verify` (qnodemerge1 component merge), `#tb4q` (qfocsup supervisor clear-and-continue), `#k7mf` (g9d7 editor-less disk fallback).
-- **Explicit hold:** `#qprtloss` is tagged **DO NOT IMPLEMENT yet** in its backlog text — I will not start it even though the binary's coarse drainability filter treats `[focused-cycle]` as drainable.
-- **Merge-core, dedicated-session work:** `#qnodemerge5` (surface true conflicts, "operator-driven fresh clean session") and `#qnodemerge4wire` (op-capture supply side — 5 sub-parts: sidecar persistence, FFI ingestion, live merge wiring, thin JB/VSCode reporters, SimWorld). These are the per-cell CRDT merge fix you want progressed, but they're the corruption-source surface and you've asked to land them in a focused cycle, not the go-loop.
-- **Confirm-before-implement:** `#qauthorderpin` (riskier do-vs-do sort change) and `#s81q` (Stop/Restart agent menus in JB+VSCode — overlaps the free-text head, "confirm scope").
-
-So this is a "no in-session-loop-drainable head" state in practice (the head is operator-verify; the next reachable item is explicitly held). I'm stopping the loop rather than churning a no-op cycle on `#qprtloss`.
-
-**Recommended next move** — pick one and I'll run it as its own focused cycle:
-1. **`#qnodemerge4wire`** — highest-leverage code progress on the per-cell merge fix; agent-doable parts (1)–(5) land + commit + push, no release ceremony (respects the STOP-cutting-releases gate), live eyeball left to you.
-2. **Operator-verify batch** — you `make install` at a recycle boundary, then drive the live repros for `#1jec`/`#qcm1verify`/`#tb4q`/`#k7mf` and I check the ops.log markers.
-3. **`#s81q`** — confirm scope (alongside-vs-replace Restart Supervisor Process; JB + VSCode both) and I implement the Stop/Restart menus.
-
-### Re: #qprtloss and #qnodemerge5 - gpt-5
-
-Implemented both fixes.
-
-- #qprtloss: `run_queue_maintenance` now records the queue journal immediately after parsing the live queue, before convergence or normalization can return early and drop an uncommitted operator prompt. The regression test verifies a mid-edit `#newhead` prompt is recoverable through `queue_journal::replay_missing`.
-- #qnodemerge5: semantic merge now keeps the operator text for true same-node conflicts and emits an exchange conflict note with both the kept operator version and rejected agent version. The SimWorld assertion now checks that the merged node stays operator-owned while the rejected agent side remains visible in the note.
-- I also fixed a pre-existing Clippy doc-list indentation issue in the dirty `merge.rs` worktree so `make check` could complete; I did not include that unrelated op-capture file in the feature commit.
-
-Proof:
-
-- `cargo test -p agent-doc-markdown-ast`
-- `cargo test -p agent-doc-orchestration queue_journal -- --nocapture`
-- `cargo test -p agent-doc semmerge_sim_same_node_conflict_operator_wins_with_ack_in_active_area -- --nocapture`
-- `make check` passed: Clippy, 4928 nextest tests, doctests, and the medium sim check.
-- `gh run list --workflow CI --limit 1`: latest CI on `main` was successful (`27911942955`, 2026-06-21T17:25:06Z).
-
-Commits:
-
-- `cf65f876 agent-doc: journal queues and surface conflicts` in `src/agent-doc`, pushed to `btakita/agent-doc main`.
-- `ec4865da5 agent-doc: update agent-doc submodule` in the superproject.
-<!-- agent:boundary:181b6fdd -->
+- Archived 2 response topic(s): queue cleanup + next-step direction; #qprtloss and #qnodemerge5 - gpt-5
+- Prior summary/context: prior compacted content: Archived 8 response topic(s): fix #rt83 churn + commit agent-doc files + queue dedup; queue ...
+<!-- agent:boundary:f4b68194 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#6b5h]~~
-- ~~:round_pushpin: do [#6b5hwire]~~
 - [#1jec]
-- ~~do [#qprtloss]~~
 - do [#qcm1verify]
-- ~~do [#qnodemerge5]~~
 - :pushpin: do [#tb4q]
 - :pushpin: do [#k7mf]
 - :pushpin: do [#qauthorderpin]

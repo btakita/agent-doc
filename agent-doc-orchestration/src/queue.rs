@@ -260,7 +260,10 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
         if let Some(rest) = trimmed.strip_prefix("preset ") {
             let preset = rest.trim();
             if !preset.is_empty() {
-                entries.push((QueueEntry::Preset(preset.to_string()), span(start_i, start_i + 1)));
+                entries.push((
+                    QueueEntry::Preset(preset.to_string()),
+                    span(start_i, start_i + 1),
+                ));
                 i += 1;
                 continue;
             }
@@ -316,7 +319,10 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 i = close_idx + 1;
                 continue;
             }
-            entries.push((QueueEntry::Freeform(line.to_string()), span(start_i, start_i + 1)));
+            entries.push((
+                QueueEntry::Freeform(line.to_string()),
+                span(start_i, start_i + 1),
+            ));
             i += 1;
             continue;
         }
@@ -339,7 +345,10 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 i = close_idx + 1;
                 continue;
             }
-            entries.push((QueueEntry::Freeform(line.to_string()), span(start_i, start_i + 1)));
+            entries.push((
+                QueueEntry::Freeform(line.to_string()),
+                span(start_i, start_i + 1),
+            ));
             i += 1;
             continue;
         }
@@ -348,7 +357,10 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
         // queue consume/resume/dispatch guards stay resilient to a polluted
         // queue body (#jb-run-agent-doc-response-queue-contamination). The line
         // is preserved as-is and never treated as an actionable item.
-        entries.push((QueueEntry::Freeform(line.to_string()), span(start_i, start_i + 1)));
+        entries.push((
+            QueueEntry::Freeform(line.to_string()),
+            span(start_i, start_i + 1),
+        ));
         i += 1;
     }
 
@@ -809,24 +821,20 @@ pub fn annotate_operator_priority_reorders(
     changed.then_some(out)
 }
 
-/// Auto-pin freshly operator-added queue prompts with the operator priority
-/// marker (`#7r2s`).
+/// Stable prompt identities for freshly operator-added queue prompts (`#7r2s`).
 ///
-/// `annotate_operator_priority_reorders` only pins an *existing* prompt that
-/// moved earlier; a brand-new line the operator just typed into the queue is
-/// ignored, so the subsequent backlog-priority recompute can sort it below
-/// `queue`-attr backlog items and silently deprioritize the line the operator
-/// just placed. Treat a prompt present in `current` but absent from `snapshot`
-/// (by pin-independent identity) whose `do [#id]` id is NOT one the binary just
-/// appended from the backlog this cycle (`synced_ids`) as an operator-authored
-/// addition, and prefix it with `:pushpin:` so it is position-locked at its
-/// authored slot. Binary-synced backlog entries and already-pinned prompts are
-/// left untouched.
-pub fn annotate_manual_queue_additions(
+/// `annotate_operator_priority_reorders` only handles an *existing* prompt that
+/// moved earlier. A brand-new line the operator just typed into the queue is
+/// absent from `snapshot`; when it is also not one the binary just appended from
+/// the backlog this cycle (`synced_ids`), treat its pin-independent text as an
+/// operator-authored identity. Priority/DAG sorting can then position-lock that
+/// identity at its authored slot without mutating visible prompt text with a
+/// synthetic `:pushpin:`.
+pub fn operator_authored_prompt_identities(
     snapshot: &[QueueEntry],
     current: &[QueueEntry],
     synced_ids: &std::collections::HashSet<String>,
-) -> Option<Vec<QueueEntry>> {
+) -> std::collections::HashSet<String> {
     let snapshot_identities: std::collections::HashSet<String> = snapshot
         .iter()
         .filter_map(|entry| match entry {
@@ -838,14 +846,16 @@ pub fn annotate_manual_queue_additions(
         .iter()
         .map(|id| id.to_ascii_lowercase())
         .collect();
-    let mut changed = false;
-    let mut out = current.to_vec();
-    for entry in &mut out {
+    let mut identities = std::collections::HashSet::new();
+    for entry in current {
         let do_id = entry_do_id(entry);
         let QueueEntry::Prompt(prompt) = entry else {
             continue;
         };
         let identity = strip_priority_markers(&prompt.text);
+        if identity.trim().is_empty() {
+            continue;
+        }
         if snapshot_identities.contains(&identity) {
             continue; // not new this cycle
         }
@@ -856,24 +866,26 @@ pub fn annotate_manual_queue_additions(
             continue; // binary appended it from the backlog, not an operator add
         }
         if is_prioritized(&prompt.text) || is_agent_prioritized(&prompt.text) {
-            continue; // operator/agent already pinned it
+            continue; // already carries an explicit priority marker
         }
-        if !prompt.multiline
-            && dedup_key_for_prompt(prompt).is_none()
-            && bare_id_reference_key(prompt).is_none()
-        {
-            // #qauthorder: a brand-new operator FREE-TEXT line is position-locked
-            // at its authored slot by the priority/DAG sort (anchored like an
-            // operator pin via `is_free_text_prompt`) — do NOT inject a
-            // `:pushpin:` the operator never typed. Only id-backed `do [#id]`
-            // operator lines still get the #7r2s auto-pin: they need it to hold
-            // their slot against backlog-rank append-stability.
-            continue;
-        }
-        prompt.text = apply_operator_pin(&prompt.text);
-        changed = true;
+        identities.insert(identity);
     }
-    changed.then_some(out)
+    identities
+}
+
+/// Auto-pin freshly operator-added queue prompts with the operator priority
+/// marker (`#7r2s`).
+///
+/// Kept as a compatibility shim for older call sites/tests. New operator-added
+/// prompts are now position-locked by passing [`operator_authored_prompt_identities`]
+/// to the priority/DAG sort, which avoids injecting a visible `:pushpin:`.
+pub fn annotate_manual_queue_additions(
+    snapshot: &[QueueEntry],
+    current: &[QueueEntry],
+    synced_ids: &std::collections::HashSet<String>,
+) -> Option<Vec<QueueEntry>> {
+    let _ = operator_authored_prompt_identities(snapshot, current, synced_ids);
+    None
 }
 
 /// Pin tier of a prompt's text: `0` = operator pin, `1` = agent pin, `2` =
@@ -923,10 +935,39 @@ fn entry_is_backlog_sourced(
     entry_do_id(entry).is_some_and(|id| backlog_sourced.contains(&id))
 }
 
+fn entry_identity(entry: &QueueEntry) -> Option<String> {
+    match entry {
+        QueueEntry::Prompt(p) | QueueEntry::Completed(p) => Some(strip_priority_markers(&p.text)),
+        _ => None,
+    }
+}
+
+fn entry_is_operator_authored(
+    entry: &QueueEntry,
+    operator_authored: &std::collections::HashSet<String>,
+) -> bool {
+    !operator_authored.is_empty()
+        && entry_identity(entry).is_some_and(|identity| operator_authored.contains(&identity))
+}
+
 pub fn sort_prompts_by_priority(
     entries: &[QueueEntry],
     rank: &std::collections::HashMap<String, u8>,
     backlog_sourced: &std::collections::HashSet<String>,
+) -> Option<Vec<QueueEntry>> {
+    sort_prompts_by_priority_with_operator_authored(
+        entries,
+        rank,
+        backlog_sourced,
+        &std::collections::HashSet::new(),
+    )
+}
+
+pub fn sort_prompts_by_priority_with_operator_authored(
+    entries: &[QueueEntry],
+    rank: &std::collections::HashMap<String, u8>,
+    backlog_sourced: &std::collections::HashSet<String>,
+    operator_authored: &std::collections::HashSet<String>,
 ) -> Option<Vec<QueueEntry>> {
     let positions: Vec<usize> = entries
         .iter()
@@ -966,13 +1007,15 @@ pub fn sort_prompts_by_priority(
             (2, group, r)
         }
     };
-    // Anchored slots are position-locked: operator pins (tier 0,
-    // `#queue-operator-pin-position-lock`) AND free-text operator lines
-    // (`#qauthorder` — anchored without a visible pin via `is_free_text_prompt`).
-    // Only the remaining movable prompts reorder, filling the slots not held by
-    // an anchor.
-    let is_anchored =
-        |idx: usize| entry_priority_tier(&prompts[idx]) == 0 || is_free_text_prompt(&prompts[idx]);
+    // Anchored slots are position-locked: operator pins (tier 0),
+    // operator-authored identities (`#qauthorderpin`), and free-text operator
+    // lines (`#qauthorder`). Only the remaining movable prompts reorder, filling
+    // the slots not held by an anchor.
+    let is_anchored = |idx: usize| {
+        entry_priority_tier(&prompts[idx]) == 0
+            || entry_is_operator_authored(&prompts[idx], operator_authored)
+            || is_free_text_prompt(&prompts[idx])
+    };
     let mut movable: Vec<usize> = (0..n).filter(|&i| !is_anchored(i)).collect();
     movable.sort_by_key(|&i| key(i));
     // Reassemble: walk the prompt slots in document order. An anchored slot keeps
@@ -1020,6 +1063,22 @@ pub fn sort_prompts_by_dag(
     rank: &std::collections::HashMap<String, u8>,
     deps: &std::collections::HashMap<String, Vec<String>>,
     backlog_sourced: &std::collections::HashSet<String>,
+) -> Option<Vec<QueueEntry>> {
+    sort_prompts_by_dag_with_operator_authored(
+        entries,
+        rank,
+        deps,
+        backlog_sourced,
+        &std::collections::HashSet::new(),
+    )
+}
+
+pub fn sort_prompts_by_dag_with_operator_authored(
+    entries: &[QueueEntry],
+    rank: &std::collections::HashMap<String, u8>,
+    deps: &std::collections::HashMap<String, Vec<String>>,
+    backlog_sourced: &std::collections::HashSet<String>,
+    operator_authored: &std::collections::HashSet<String>,
 ) -> Option<Vec<QueueEntry>> {
     let positions: Vec<usize> = entries
         .iter()
@@ -1087,12 +1146,15 @@ pub fn sort_prompts_by_dag(
             (tier, group, r, idx)
         }
     };
-    // Anchored slots are position-locked in the DAG order: operator pins (tier 0,
-    // `#queue-operator-pin-position-lock-dag`) AND free-text operator lines
-    // (`#qauthorder`). Only the movable (agent-pin/unpinned `do [#id]`) prompts
-    // reorder around them, in dependency-respecting priority order.
-    let is_anchored =
-        |idx: usize| entry_priority_tier(&prompts[idx]) == 0 || is_free_text_prompt(&prompts[idx]);
+    // Anchored slots are position-locked in the DAG order: operator pins (tier 0),
+    // operator-authored identities (`#qauthorderpin`), and free-text operator
+    // lines (`#qauthorder`). Only movable prompts reorder around them, in
+    // dependency-respecting priority order.
+    let is_anchored = |idx: usize| {
+        entry_priority_tier(&prompts[idx]) == 0
+            || entry_is_operator_authored(&prompts[idx], operator_authored)
+            || is_free_text_prompt(&prompts[idx])
+    };
 
     // Plain priority-weighted topological order over ALL prompts (Kahn). Used for
     // the no-operator-pin path and as the blocker-outranks-pin fallback. A
@@ -1469,7 +1531,9 @@ fn bare_id_reference_key(prompt: &QueuePrompt) -> Option<String> {
     if prompt.multiline {
         return None;
     }
-    let trimmed = strip_priority_markers(&prompt.text).trim().to_ascii_lowercase();
+    let trimmed = strip_priority_markers(&prompt.text)
+        .trim()
+        .to_ascii_lowercase();
     // ONLY a pure `[#id]` / `#id` head — nothing trailing. `do [#id]` is excluded
     // (it starts with `do`, so neither prefix matches) and a free-text directive
     // citing an id has trailing text that fails the `id == token` whole-match check.
@@ -1587,10 +1651,12 @@ pub fn dedup_pin_variant_do_heads(entries: &[QueueEntry]) -> Option<Vec<QueueEnt
         .enumerate()
         .filter(|(i, _)| !drop.contains(i))
         .map(|(i, entry)| match keep_text.get(&i) {
-            Some(text) if matches!(entry, QueueEntry::Prompt(_)) => QueueEntry::Prompt(QueuePrompt {
-                text: text.clone(),
-                multiline: false,
-            }),
+            Some(text) if matches!(entry, QueueEntry::Prompt(_)) => {
+                QueueEntry::Prompt(QueuePrompt {
+                    text: text.clone(),
+                    multiline: false,
+                })
+            }
             _ => entry.clone(),
         })
         .collect();
@@ -1946,17 +2012,23 @@ mod tests {
     }
 
     #[test]
-    fn annotate_manual_queue_additions_pins_operator_added_unpinned_line() {
-        // #7r2s: the operator typed a brand-new `do [#manual]` line with no pin.
-        // It is absent from the snapshot and was NOT appended by the backlog sync,
-        // so it is auto-pinned with operator priority and stays at its slot.
+    fn operator_authored_prompt_identities_detects_operator_added_unpinned_line() {
+        // #7r2s/#qauthorderpin: the operator typed a brand-new `do [#manual]`
+        // line with no pin. It is absent from the snapshot and was NOT appended
+        // by backlog sync, so the priority sort should receive a stable identity
+        // instead of mutating the visible text with `:pushpin:`.
         let snapshot = parse("- do [#a]\n").unwrap();
         let current = parse("- do [#manual]\n- do [#a]\n").unwrap();
         let synced: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        let marked = annotate_manual_queue_additions(&snapshot, &current, &synced)
-            .expect("a new operator-added line must be auto-pinned");
-        assert_eq!(render(&marked), "- :pushpin: do [#manual]\n- do [#a]\n");
+        let identities = operator_authored_prompt_identities(&snapshot, &current, &synced);
+        let expected: std::collections::HashSet<String> =
+            ["do [#manual]".to_string()].into_iter().collect();
+        assert_eq!(identities, expected);
+        assert!(
+            annotate_manual_queue_additions(&snapshot, &current, &synced).is_none(),
+            "manual additions are now anchored by identity, not visible pins"
+        );
     }
 
     #[test]
@@ -1970,8 +2042,8 @@ mod tests {
             ["synced".to_string()].into_iter().collect();
 
         assert!(
-            annotate_manual_queue_additions(&snapshot, &current, &synced).is_none(),
-            "binary-synced and already-pinned new lines must not be auto-pinned"
+            operator_authored_prompt_identities(&snapshot, &current, &synced).is_empty(),
+            "binary-synced and already-pinned new lines are not authored anchors"
         );
     }
 
@@ -2580,12 +2652,12 @@ mod tests {
         let entries = parse(concat!(
             "- [#sqedit-race]\n",
             "- [#qpausemix-verify]\n",
-            "- [#sqedit-race]\n",                    // bare duplicate → collapse
-            "- :pushpin: [#qpausemix-verify]\n",     // pinned bare dup → collapse
-            "- #sqedit-race\n",                      // unbracketed bare dup → collapse
-            "- do [#sqedit-race]\n",                 // `do` directive → PRESERVED
-            "- do [#sqedit-race]\n",                 // intentional `do` duplicate → PRESERVED
-            "- #sqedit-race continue the drain\n",   // free-text citing an id → PRESERVED
+            "- [#sqedit-race]\n",                  // bare duplicate → collapse
+            "- :pushpin: [#qpausemix-verify]\n",   // pinned bare dup → collapse
+            "- #sqedit-race\n",                    // unbracketed bare dup → collapse
+            "- do [#sqedit-race]\n",               // `do` directive → PRESERVED
+            "- do [#sqedit-race]\n",               // intentional `do` duplicate → PRESERVED
+            "- #sqedit-race continue the drain\n", // free-text citing an id → PRESERVED
         ))
         .unwrap();
         let deduped = dedup_bare_id_reference_heads(&entries)
@@ -2632,8 +2704,7 @@ mod tests {
     fn dedup_free_text_heads_collapses_pin_variant_and_struck_duplicates() {
         // A re-emit that only differs by an injected `:pushpin:` still collapses
         // (the snapshot committed one struck copy; convergence doubled it).
-        let snapshot =
-            parse("- ~~items added by operator stay in document order~~\n").unwrap();
+        let snapshot = parse("- ~~items added by operator stay in document order~~\n").unwrap();
         let entries = parse(concat!(
             "- ~~:pushpin: items added by operator stay in document order~~\n",
             "- ~~items added by operator stay in document order~~\n",
@@ -2683,19 +2754,81 @@ mod tests {
     }
 
     #[test]
-    fn annotate_manual_queue_additions_does_not_pin_free_text() {
-        // #qauthorder: a brand-new operator free-text line is NOT auto-pinned (it
-        // is position-locked by the sort instead); a new id-backed `do [#id]`
-        // operator line still gets the #7r2s operator pin.
+    fn operator_authored_identity_set_does_not_pin_new_prompt_text() {
+        // #qauthorder/#qauthorderpin: brand-new operator free-text and id-backed
+        // lines are NOT auto-pinned; they are position-locked by stable identity
+        // in the sort instead.
         let snapshot = parse("- do [#a]\n").unwrap();
         let current = parse("- do [#a]\n- hold this slot, do not bubble\n- do [#b]\n").unwrap();
         let synced: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let pinned = annotate_manual_queue_additions(&snapshot, &current, &synced)
-            .expect("the new id-backed line should still be pinned");
+        let identities = operator_authored_prompt_identities(&snapshot, &current, &synced);
+        let expected: std::collections::HashSet<String> = [
+            "hold this slot, do not bubble".to_string(),
+            "do [#b]".to_string(),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(identities, expected);
         assert_eq!(
-            render(&pinned),
-            "- do [#a]\n- hold this slot, do not bubble\n- :pushpin: do [#b]\n",
-            "free-text stays unpinned; the new do-line is operator-pinned"
+            render(&current),
+            "- do [#a]\n- hold this slot, do not bubble\n- do [#b]\n",
+            "operator-authored text stays marker-free"
+        );
+    }
+
+    #[test]
+    fn operator_authored_id_backed_line_is_position_locked_in_priority_sort() {
+        // #qauthorderpin: the operator manually inserted an id-backed queue head
+        // in the middle. Even if its backlog rank would make it bubble to the
+        // front, the identity-aware priority sort holds that authored slot and
+        // reorders only the other prompts around it.
+        let entries = parse("- do [#a]\n- do [#manual]\n- do [#b]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("manual".to_string(), 1u8);
+        rank.insert("b".to_string(), 2u8);
+        rank.insert("a".to_string(), 9u8);
+        let backlog: std::collections::HashSet<String> =
+            ["manual".to_string(), "a".to_string(), "b".to_string()]
+                .into_iter()
+                .collect();
+        let authored: std::collections::HashSet<String> =
+            ["do [#manual]".to_string()].into_iter().collect();
+        let sorted =
+            sort_prompts_by_priority_with_operator_authored(&entries, &rank, &backlog, &authored)
+                .expect("non-authored prompts reorder around the manual slot");
+        assert_eq!(
+            render(&sorted),
+            "- do [#b]\n- do [#manual]\n- do [#a]\n",
+            "manual id-backed prompt keeps slot 1 without a visible pin"
+        );
+    }
+
+    #[test]
+    fn operator_authored_id_backed_line_is_position_locked_in_dag_path() {
+        // Same anchoring on the auto-DAG path: dependency edges can reorder the
+        // movable prompts around the operator-authored id line without injecting
+        // `:pushpin:`.
+        let entries = parse("- do [#a]\n- do [#manual]\n- do [#b]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 1u8);
+        rank.insert("manual".to_string(), 2u8);
+        rank.insert("b".to_string(), 3u8);
+        let mut deps: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        deps.insert("a".to_string(), vec!["b".to_string()]); // #a after #b
+        let backlog: std::collections::HashSet<String> =
+            ["manual".to_string(), "a".to_string(), "b".to_string()]
+                .into_iter()
+                .collect();
+        let authored: std::collections::HashSet<String> =
+            ["do [#manual]".to_string()].into_iter().collect();
+        let sorted =
+            sort_prompts_by_dag_with_operator_authored(&entries, &rank, &deps, &backlog, &authored)
+                .expect("dependency edge reorders movable prompts around the manual slot");
+        assert_eq!(
+            render(&sorted),
+            "- do [#b]\n- do [#manual]\n- do [#a]\n",
+            "manual id-backed prompt keeps slot 1 in DAG ordering"
         );
     }
 
@@ -2728,9 +2861,8 @@ mod tests {
         let mut deps: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
         deps.insert("a".to_string(), vec!["b".to_string()]); // #a after #b
-        let sorted =
-            sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
-                .expect("dep edge reorders the do-prompts around the anchor");
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
+            .expect("dep edge reorders the do-prompts around the anchor");
         assert_eq!(
             render(&sorted),
             "- do [#b]\n- operator note\n- do [#a]\n",
@@ -2774,7 +2906,7 @@ mod tests {
         // the earliest position, carrying the strongest (operator) pin.
         let entries = parse(concat!(
             "- do [#6b5h]\n",
-            "- do [#6b5hwire]\n",          // bare twin, earliest for this id
+            "- do [#6b5hwire]\n",           // bare twin, earliest for this id
             "- :pushpin: do [#6b5hwire]\n", // pinned twin → collapse, strongest pin wins
             "- do [#tb4q]\n",
         ))
@@ -3760,7 +3892,8 @@ mod tests {
     /// re-injected a stray separator) it would feed the qchurn loop forever.
     #[test]
     fn render_parse_is_fixed_point_on_malformed_queue() {
-        let normalize = |s: &str| render(&parse(s).expect("parse must never fail on a polluted queue"));
+        let normalize =
+            |s: &str| render(&parse(s).expect("parse must never fail on a polluted queue"));
         let pin_count = |s: &str| s.matches(":pushpin:").count();
 
         // The compounded malformed shape: empty `---` separator runs top and
@@ -3800,7 +3933,11 @@ mod tests {
         );
         assert!(texts.iter().any(|t| t.contains("do [#dup]")));
         assert!(texts.iter().any(|t| t.contains("do [#real]")));
-        assert!(texts.iter().any(|t| t.contains("a genuine free-text question?")));
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("a genuine free-text question?"))
+        );
 
         // (3) Pins converge, never amplify: the double pin is preserved verbatim
         //     (canonical-collapse to a single pin is `apply_operator_pin`'s job

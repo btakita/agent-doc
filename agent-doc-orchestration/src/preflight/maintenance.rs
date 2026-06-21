@@ -1455,6 +1455,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // when no backlog item carries a `priority` attribute.
     if comp.attrs.contains_key("priority") || source_queue_priority {
         let rank = collect_backlog_priority_ranks(&components, &content);
+        let mut operator_authored_identities: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         if let Ok(Some(snap_content)) = snapshot::load(file)
             && let Ok(snap_components) = crate::component::parse(&snap_content)
             && let Some(snap_queue) = snap_components.iter().find(|c| c.name == "queue")
@@ -1476,29 +1478,23 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     entries = pinned;
                     mutated = true;
                 }
-                // #7r2s: a brand-new queue line the operator just typed (absent from
-                // the snapshot, not one the binary appended from the backlog this
-                // cycle) carries no pin, so the priority sort below would sink it
-                // under `queue`-attr backlog items. Auto-pin it with operator
-                // priority so it stays at its authored slot.
+                // #7r2s/#qauthorderpin: a brand-new queue line the operator just
+                // typed (absent from the snapshot, not one the binary appended
+                // from the backlog this cycle) carries no visible pin. Thread its
+                // stable identity into the priority/DAG sort below so the authored
+                // slot is held without injecting a `:pushpin:`.
                 let synced_set: std::collections::HashSet<String> =
                     synced_queue_ids.iter().cloned().collect();
-                if let Some(pinned_new) = crate::queue::annotate_manual_queue_additions(
+                operator_authored_identities = crate::queue::operator_authored_prompt_identities(
                     &snap_entries,
                     &entries,
                     &synced_set,
-                ) {
-                    let new_body = crate::queue::render(&pinned_new);
-                    current_content = {
-                        let comps = crate::component::parse(&current_content)?;
-                        let q = comps.iter().find(|c| c.name == "queue").unwrap();
-                        q.replace_content(&current_content, &new_body)
-                    };
+                );
+                if !operator_authored_identities.is_empty() {
                     eprintln!(
-                        "[preflight] queue: auto-pinned manually-added prompt(s) with operator priority (#7r2s)"
+                        "[preflight] queue: preserving {} manually-added prompt slot(s) by stable identity (#qauthorderpin)",
+                        operator_authored_identities.len()
                     );
-                    entries = pinned_new;
-                    mutated = true;
                 }
             }
         }
@@ -1522,12 +1518,23 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // graph first (a blocker outranks a pin); fall back to the plain
         // pin+priority sort when there are no dependency edges.
         let deps = collect_after_deps(&components, &content);
-        let sorted = crate::queue::sort_prompts_by_dag(&entries, &rank, &deps, &backlog_sourced)
-            .map(|s| ("auto-dag dependency order (blockers + pins)", s))
-            .or_else(|| {
-                crate::queue::sort_prompts_by_priority(&entries, &rank, &backlog_sourced)
-                    .map(|s| ("backlog priority (operator pins position-locked)", s))
-            });
+        let sorted = crate::queue::sort_prompts_by_dag_with_operator_authored(
+            &entries,
+            &rank,
+            &deps,
+            &backlog_sourced,
+            &operator_authored_identities,
+        )
+        .map(|s| ("auto-dag dependency order (blockers + pins)", s))
+        .or_else(|| {
+            crate::queue::sort_prompts_by_priority_with_operator_authored(
+                &entries,
+                &rank,
+                &backlog_sourced,
+                &operator_authored_identities,
+            )
+            .map(|s| ("backlog priority (operator pins position-locked)", s))
+        });
         if let Some((how, sorted)) = sorted {
             let sorted = crate::queue::annotate_agent_priority_promotions(&entries, &sorted)
                 .unwrap_or(sorted);

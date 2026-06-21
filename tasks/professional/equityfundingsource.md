@@ -81,7 +81,19 @@ Did the **safe, additive** half of the borrower cutover and gated the rest. EFS 
 **Deliberately NOT done (gated):** the **dual-read switch** (inbox reads `messages` instead of the live adapter) and the **legacy-table drop**. Those need the dual-write to soak in prod first — flipping reads or dropping `chat_messages` before the mirror has proven itself on live traffic would be the reckless part. So `#msg-unify3` stays `[/]` until that soak; nothing user-visible changed (the inbox already shows everything via the adapter).
 
 **Remaining queue:** `#msg-unify4` (lender cutover — same dual-write+backfill pattern, also safe to ship), `#msg-unify5` (broker thread — new visible feature), then `deploy`. I'll keep draining; the dual-write goes live whenever the `deploy` head lands (backfill + dual-write deploy together, so no sync gap).
-<!-- agent:boundary:13cc1cb8 -->
+
+### Re: Lender cutover — safe step shipped (#msg-unify4) — opus-4-8
+
+Same safe pattern as the borrower cutover, applied to both lender sources. EFS `b5a6a55`; not deployed (deploy head is next/last). #msg-unify4 gated awaiting soak.
+
+**Shipped:**
+- **Dual-write** — new lender messages mirror into `messages`: deal-interest threads (party=lender, scope=deal; party resolved from the interest's lender) and account threads (party=lender, scope=account). Both `.catch()`-guarded, so a mirror failure can never break live lender messaging. Existing lender-message suites pass untouched (1013 tests / 0 fail).
+- **Backfill** — migration `0098` copies existing rows from both lender tables into `messages` (prefixed `bk-lender-deal:` / `bk-lender-account:`).
+
+**Gated (needs soak):** the dual-read switch + dropping `deal_interest_lender_messages` / `lender_account_messages`.
+
+**Queue now:** `#msg-unify5` (broker two-way thread — the last *new visible* feature) then `deploy`. With both cutover dual-writes in place, the `deploy` will take all the mirrors + backfills (migrations `0097`+`0098`) live together — no sync gap. I'll keep draining; the stale supervisor recycles at its next idle boundary, which should clear the force-disk fallbacks.
+<!-- agent:boundary:0ad982bf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,7 +115,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#msg-unify4] [recommended] Lender cutover — migrate deal_interest_lender_messages + lender_account_messages onto the unified messages table, backfill, dual-read then drop. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [ ] [#msg-unify5] [recommended] Broker two-way thread — give brokers a real messages thread (party=broker) in the broker portal + unified admin inbox (today brokers get one-way notifications only). Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
@@ -114,6 +125,7 @@ After 20:30
 ## Review
 
 <!-- agent:review -->
+- [/] [#msg-unify4] [gated: awaiting dual-write prod soak] Lender cutover — dual-write (best-effort mirror into messages, both lender sources) + backfill (migration 0098) SHIPPED (EFS b5a6a55). Remaining: after soak, switch the inbox to read lender data from messages (dual-read), then drop deal_interest_lender_messages + lender_account_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [/] [#msg-unify3] [gated: awaiting dual-write prod soak] Borrower cutover — dual-write (best-effort mirror into messages) + backfill (migration 0097) SHIPPED (EFS 411a4da). Remaining: after the dual-write soaks live, switch the unified inbox to read borrower data from messages (dual-read), then drop chat_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [/] [#lender-card-msg-email] [recommended] Email-to-lender parity for #lender-card-msg account messages (mirror notify_lender_deal_message_): notify the lender by email when an admin posts an account message, like the deal-interest thread does. Rides the verified EFS Resend sending domain gate (#f4rq). Plan: src/equityfundingsource-dev/prds/lender-card-messaging.md.
 - [/] [#proprate] Lender proposal persists a DEFAULT interest rate never finalized. investor/deal_detail.tsx:362 pre-fills proposal_rate from deal.monthly_interest when deal.proposal_interest_rate==null; submit (:425-435) sends it whenever an amount is present; :421 requires a finite rate, so a lender cannot commit an amount with rate TBD — the pre-filled default (6.5% on d6b78994) persists as if finalized. Duration NOT affected (no proposal_term_months column). DATA CLEANUP DONE 2026-06-20: nulled proposal_interest_rate on the d6b78994/b8ccaa76 row (kept proposal_amount=100000 + proposal_submitted_at; D1 changes=1). CODE FIX still pending operator go: do NOT pre-fill the rate with the deal default; allow proposal_interest_rate=null ("amount committed, rate TBD"); relax :421 validation + admin LoanTermProposalSummary display.

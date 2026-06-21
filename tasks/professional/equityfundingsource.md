@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -105,7 +105,7 @@ Per your confirmation, deployed the advance-lender dialog (`#advance-lender`, EF
 The "Advance lender →" button on the lender-pipeline compliance-hold step and its support dialog (explainer + Lender Requests deep-link + messaging + documents) are now live. `#dmz8` / `#advance-lender-deploy` marked **done**.
 
 Queue is fully drained — no remaining drainable heads (only the gated `#5eq8`, design-blocked, remains).
-<!-- agent:boundary:26a6a832 -->
+<!-- agent:boundary:9421af15 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,6 +117,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender, show which documents are required. Show individual upload field for multiple documents of each type for each document. Also show which documents were uploaded.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -89,7 +89,38 @@ Wrote the PRD for the unified frontend message component: `src/equityfundingsour
 **Phasing** (one backlog id per phase, each migrated surface verified before the next, legacy thread removed only after its replacement passes tests): #portalmsg1 component foundation (both render modes, shared thread/compose/attachment/unread internals, avatar/name/timestamp row invariant) → #portalmsg2 admin inline cutover → #portalmsg3 self-service launcher (lender/investor) → #portalmsg4 borrower launcher → #portalmsg5 broker (after `#msg-unify5`).
 
 No code/test surface this cycle since it's a planning doc; the `#spec-test-commit-push` preset's deliverable here is the spec, committed + pushed.
-<!-- agent:boundary:38d0df75 -->
+
+### Re: Implement the unified component + always-visible + deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> Implement src/equityfundingsource-dev/prds/portal-messages-component.md. Make sure the prop component is always visible in the respective UI context. My always visible, make sure the user can click on the messaging no matter where the user scrolls on a dialog, page, or other component that has the messaging prop/context.
+
+
+> **Queue prompt:** Implement src/equityfundingsource-dev/prds/portal-messages-component.md. Make sure the prop component is always visible in the respective UI context... make sure the user can click on the messaging no matter where the user scrolls on a dialog, page, or other component that has the messaging prop/context.
+>
+> **Queue prompt:** deploy
+
+Built and shipped the unified `<PortalMessages>` component (#portalmsg1/3). Committed + pushed (EFS `5cc49ab`) and **deployed** (worker version `7926c38a`, live at equityfundingsource.brian-takita.workers.dev). All 1061 tests pass; `build` + `build:worker` green.
+
+**The component** (`lib/ui--browser--efs/portal/shared/portal_messages.tsx`): one component over the per-party message endpoints, with **placement as a prop** — exactly the always-visible behavior you asked for:
+- `placement="launcher"` → a `position:fixed` bottom-right FAB **plus a `position:fixed` panel**. The launcher and its open panel are pinned to the viewport, so messaging is reachable and clickable **no matter where the user scrolls** the page. Unread badge on the FAB.
+- `placement="inline"` → a card whose composer sits in a `position:sticky` bar (`.pm-inline-compose`), so within a scrolling dialog/page the compose stays reachable (this is the mode for the admin operational pages, queued as #portalmsg2).
+- `context = { party, scope_type, scope_id }` resolves endpoint + self-role + copy via the pure, unit-tested `portal_messages_config_`.
+
+**Wired now (self-service launchers):** broker dashboard and investor/lender dashboard now mount `<PortalMessages placement="launcher" ...>`. Deleted the now-orphaned `BrokerMessages` component (fully subsumed). The `LenderAccountMessages` thread stays — it still backs the accreditation/requirements page and the admin pipeline card.
+
+**CSS:** added `.pm-launcher` / `.pm-fab` / `.pm-panel` / `.pm-badge` / `.pm-inline-compose` to `portal.ts`.
+
+**Tests:** new `tests/portal-messages-component.test.ts` (config resolution, the launcher-fixed / inline-sticky always-visible invariant, dashboard wiring); updated the 3 existing tests that asserted the old broker/lender dashboard wiring.
+
+**Scoping note — this is phase 1 + the self-service half of phase 3.** I deliberately did NOT migrate everything in one deploy. Queued the rest as backlog so each live-surface migration is verified on its own:
+- `#portalmsg-shell` — mount the launcher at the portal SHELL (not just the dashboard view) so it's always-visible across *every* self-service page, and drop the now-duplicate inline thread on the accreditation page.
+- `#portalmsg2` — admin inline cutover (lender-pipeline dialog + deal-detail) using the sticky inline mode.
+- `#portalmsg4` — borrower launcher (has Durable Object websocket complexity, needs care).
+
+One honest caveat for live verification: the launcher currently mounts on the dashboard *view*. It's always-visible while you scroll the dashboard; making it persist across all sub-pages of a portal is `#portalmsg-shell`. Worth an eyeball on the deployed lender/broker dashboards to confirm the FAB + panel feel right before I push the shell-level mount.
+<!-- agent:boundary:45084e6c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,11 +132,19 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~Implement src/equityfundingsource-dev/prds/portal-messages-component.md. Make sure the prop component is always visible in the respective UI context. My always visible, make sure the user can click on the messaging no matter where the user scrolls on a dialog, page, or other component that has the messaging prop/context.~~
+- deploy
+- do [#portalmsg-shell]
+- do [#portalmsg2]
+- do [#portalmsg4]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#portalmsg-shell] [recommended] Mount the PortalMessages launcher at the lender/broker portal SHELL (not just the dashboard view) so it is truly always-visible across every self-service page, and retire the duplicate inline <LenderAccountMessages /> on the investor accreditation/requirements page (now redundant with the dashboard launcher). Advances #portalmsg3. Plan: src/equityfundingsource-dev/prds/portal-messages-component.md
+- [ ] [#portalmsg2] [recommended] Admin inline cutover: replace the embedded threads on the admin lender-pipeline card dialog (investor_pipeline.tsx) and deal-detail with <PortalMessages placement="inline">, using the sticky .pm-inline-compose so the composer stays reachable while the dialog scrolls. Verify no admin-table coverage regression. Advances #portalmsg2.
+- [ ] [#portalmsg4] [recommended] Borrower launcher: migrate borrower application-status messaging (sessions/loan-scoped + Durable Object websocket path) to <PortalMessages placement="launcher">; needs care around the live DO chat path. Advances #portalmsg4.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.

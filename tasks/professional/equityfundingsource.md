@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,7 @@ completed
 Compacted content:
 - Archived 6 response topic(s): Unified inbox shipped + deployed (#msg-unify2); deploy; Borrower cutover; 3 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:f8d2a1d2 -->
+<!-- agent:boundary:3bd227df -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,11 +50,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#msg-unify2]~~
-- ~~:pushpin: do [#msg-unify3]~~
-- ~~:pushpin: do [#msg-unify4]~~
-- ~~:pushpin: do [#msg-unify5]~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

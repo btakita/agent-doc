@@ -645,8 +645,19 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // `auto` queue stalls after every item. A real user prompt typed mid-queue
     // keeps `diff_result` non-None here, so this flag stays false and the
     // prompt is surfaced normally.
+    // `#rt83`: only synthesize the queue head as a prompt diff when SOME drainer
+    // will actually act on it — the queue is not controller-paused AND the head is
+    // supervisor-scope drainable (`[operator-verify]`/noise heads excluded). An
+    // operator-verify-only or paused queue previously synthesized a phantom
+    // `+:pushpin: do [#id]` add every preflight, keeping `no_changes:false` and
+    // sustaining the qchurn flood even though no head was actionable. The supervisor
+    // idle-watch dispatches `[focused-cycle]`/`[clean-session]` heads via its own
+    // `live_drainable_continuation_head` check, so suppressing the synthetic diff for
+    // non-drainable heads does not strand legitimate supervisor-driven continuation.
     let mut diff_from_queue_head_only = false;
     if diff_result.is_none()
+        && !queue_state.queue_paused
+        && queue_state.queue_supervisor_drainable
         && let Some(head_prompt) = queue_state.queue_prompts.first()
     {
         let slash_command = crate::queue_command::slash_command_text(head_prompt);

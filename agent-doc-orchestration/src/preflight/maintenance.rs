@@ -932,6 +932,14 @@ pub(crate) struct QueueState {
     /// `#cleardrainsignal`: whether the queue has agent-drainable continuation work
     /// this session. False when inactive OR every remaining head is deferred/noise.
     pub(crate) queue_continuation_required: bool,
+    /// `#rt83`: whether the active queue head is drainable in the SUPERVISOR scope
+    /// (defers `[operator-verify]`/noise only; `[focused-cycle]`/`[clean-session]`
+    /// stay drainable because the supervisor force-`/clear`s + re-dispatches them).
+    /// Gates the preflight synthetic queue-head diff: a head that no drainer (neither
+    /// the in-session `/loop` nor the supervisor) will act on must NOT synthesize a
+    /// phantom `+:pushpin: do [#id]` prompt diff, which previously kept
+    /// `no_changes:false` every preflight and sustained the qchurn flood.
+    pub(crate) queue_supervisor_drainable: bool,
     pub(crate) synced_queue_ids: Vec<String>,
     pub(crate) warnings: Vec<PreflightWarning>,
 }
@@ -1784,6 +1792,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 queue_pause_reason: None,
                 queue_drainable_head_count: 0,
                 queue_continuation_required: false,
+                queue_supervisor_drainable: false,
                 synced_queue_ids,
                 warnings: Vec::new(),
             });
@@ -1803,6 +1812,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 queue_pause_reason: None,
                 queue_drainable_head_count: 0,
                 queue_continuation_required: false,
+                queue_supervisor_drainable: false,
                 synced_queue_ids,
                 warnings: Vec::new(),
             });
@@ -1928,6 +1938,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                         queue_pause_reason: None,
                         queue_drainable_head_count: 0,
                         queue_continuation_required: false,
+                        queue_supervisor_drainable: false,
                         synced_queue_ids,
                         warnings: Vec::new(),
                     });
@@ -2174,6 +2185,11 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         0
     };
     let queue_continuation_required = activation.active && queue_drainable_head_count > 0;
+    // `#rt83`: supervisor-scope drainability (defers `[operator-verify]`/noise only).
+    // Used to gate the preflight synthetic queue-head diff so an operator-verify-only
+    // (or otherwise non-actionable) head stops perpetually reporting `no_changes:false`.
+    let queue_supervisor_drainable = activation.active
+        && crate::queue_continuation::live_drainable_continuation_head(file, &content).is_some();
 
     Ok(QueueState {
         queue_prompts,
@@ -2194,6 +2210,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         queue_pause_reason,
         queue_drainable_head_count,
         queue_continuation_required,
+        queue_supervisor_drainable,
         synced_queue_ids,
         warnings: queue_warnings,
     })
@@ -2707,6 +2724,88 @@ mod tests {
             drainable, 1,
             "operator-verify head must be deferred from drainability (#mirrorall keeps the loop \
              safe); only #act should count:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_operator_verify_only_queue_is_not_supervisor_drainable() {
+        // `#rt83`: a queue whose only active heads are `[operator-verify]` has no
+        // drainer (neither the in-session `/loop` nor the supervisor) — so
+        // `queue_supervisor_drainable` must be false. The preflight synthetic
+        // queue-head diff gates on this flag, so an operator-verify-only head no
+        // longer synthesizes a phantom `+:pushpin: do [#id]` add every preflight
+        // (the qchurn flood that kept `no_changes:false` forever).
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#opv]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#opv] [operator-verify] needs a human, do not auto-drain\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert!(
+            !state.queue_supervisor_drainable,
+            "operator-verify-only queue must NOT be supervisor-drainable (#rt83): {state:?}"
+        );
+        assert_eq!(
+            state.queue_drainable_head_count, 0,
+            "operator-verify head is not in-session drainable either (#rt83): {state:?}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_focused_cycle_head_is_supervisor_drainable() {
+        // `#rt83`: a `[focused-cycle]` head stays supervisor-drainable (the
+        // supervisor force-`/clear`s + re-dispatches it), so the synthetic
+        // queue-head diff must still fire — suppressing it only for non-drainable
+        // heads must NOT strand legitimate supervisor-driven continuation.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#foc]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#foc] [focused-cycle] fix the merge core\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert!(
+            state.queue_supervisor_drainable,
+            "focused-cycle head must stay supervisor-drainable (#rt83): {state:?}"
+        );
+        assert_eq!(
+            state.queue_drainable_head_count, 0,
+            "focused-cycle head is deferred for the in-session loop (#qcontdrain): {state:?}"
         );
     }
     #[test]

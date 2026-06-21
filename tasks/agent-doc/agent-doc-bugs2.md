@@ -182,7 +182,28 @@ You're right — idling the queue was the bug, and I've fixed the binary so the 
 The handoff: the in-session agent ends its turn → the pane idles → the supervisor idle-watch force-`/clear`s and re-dispatches the focused-cycle head to a fresh session → repeat. New unit tests cover both scopes, the head-picker split, the force-clear set, and the outcome; `make check` green.
 
 **To activate live (operator-gated):** the running supervisor is on the old binary, so this takes effect only after `make install` + `agent-doc admin recycle`. That install is gated by STOP-cutting-releases (no install/release until the per-node merge corruption proves out) — say the word and I'll install + recycle, or hold. Filed `#qfocsupverify` [operator-verify] for the live proof (watch the supervisor clear + re-dispatch `#qnodemerge3` to a fresh session).
-<!-- agent:boundary:9fe1672a -->
+
+### Re: do [#qnodemerge3] — opus-4-8
+
+Done — recursive AST-node keyed reconciliation is implemented, tested, and committed (agent-doc submodule `c8fb1417`, local only; not installed/pushed per STOP-cutting-releases, since this *is* the per-cell CRDT merge work that gate is waiting on).
+
+**What landed (`agent-doc-core/src/crdt.rs`)**
+
+Phase 1/2 stopped at the top-level node and ran the leaf text `merge` on each *whole* component. Phase 3 drills the **same** keyed reconciliation one level deeper, inside any component whose body is a sequence of keyed children — wired through the shared `merge_aligned_nodes`, so **both** `merge_by_component` (whole-doc base) and `MultiNodeState::merge` (per-node base) get it for free.
+
+- **List components** (`queue`/`backlog`/`review`/`done`): each `- …` item is a child keyed by its durable `#id` (the identity the strike paths already use) or, for free-text, its normalized text (strike markers / pin glyphs / checkbox stripped — so a strike keys the *same* child and reconciles as an edit, not delete+insert).
+- **`exchange`**: each `### Re:` block is a child keyed by heading; an interleaved prompt attaches to the block it falls within.
+- **Engine** (`reconcile_component` → `reconcile_component_body`): match `ours`/`theirs`/`base` children by key (React-VDOM style). Matched-but-different → leaf `merge` against *that child's own* base. Key-on-one-side → pure **insert** (kept, so a concurrent user queue addition is never dropped — the `#queue-user-edit-overwrite` class) or **delete** (honored only on a clean delete-vs-unchanged; **never** for committed `exchange` blocks — the per-block `#ipc-crdt-response-drift` guard). Order via `order_union` (ours' order is the spine; theirs-only inserts woven in deterministically).
+
+**Fail-safe by construction.** Segmentation is lossless (`concat(children) == body`); an unsplittable component, malformed marker framing, ambiguous (duplicate) keys, or any leaf-merge error falls the component back to the flat whole-component `merge` (current behavior). Phase 3 strictly *narrows* contention without widening the corruption surface.
+
+**Acceptance — 11 new tests, `make check` green (4891 passed, 0 failed, clippy clean):**
+- (a) editing queue item B while item A is the running head leaves A byte-identical (no drift, no duplication) and carries B's edit;
+- (b) a user prompt inserted between two committed `### Re:` blocks while the agent appends a third converges with all three present and zero cross-block splice;
+- plus: concurrent user queue addition preserved, clean item deletion honored, committed exchange block never dropped on a stale side, duplicate-key fallback, lossless segmentation, `order_union` weave, id/strike-stable keying.
+
+**Deferred under STOP-cutting-releases:** the live install + `admin recycle` + edit-during-finalize eyeball (the same `[operator-verify]` remainder as `#qcm1verify`/`#qnodemerge2`). No new gate filed — the install ceremony is blocked globally by that directive, not per-item. Architecture doc (`docs/reference/node-merge-architecture.md`) updated to mark Phase 3 shipped with a *Recursive reconciliation* section. Remaining roadmap: `#qnodemerge4` (op-capture) and `#qnodemerge5` (surface true conflicts).
+<!-- agent:boundary:5a87edff -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,36 @@ completed
 Compacted content:
 ❯ - Archived 5 response topic(s): Advance Lender account-message email + deploy; deploy; Message sender timestamps + deploy; 2 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:7951c621 -->
+
+### Re: One floating context-sensitive message widget to unify portal messaging? — opus-4-8
+
+> **Queue prompt:**
+>
+> Should we just have a context-sensitive message component absolutely positioned in the bottom right corner to unify all messaging in the portal?
+
+
+> **Queue prompt:** Should we just have a context-sensitive message component absolutely positioned in the bottom right corner to unify all messaging in the portal?
+
+Short answer: **build one unified message component, yes — but make placement a prop, not a single global corner bubble.** The corner launcher is the right default for the self-service portals; the admin operational pages should keep an inline/docked rendering of the *same* component.
+
+**Why this is mostly already done at the layer that matters.** The data is already unified: `app/equityfundingsource/lib/messages_unified.ts` `merge_unified_messages_` folds the three sources — `borrower_messages_to_unified_`, `lender_deal_messages_to_unified_`, `lender_account_messages_to_unified_` — into one `message_T[]` stream (the `msg-unify` series). What's *not* unified is the frontend: there are still separate embedded threads on admin lender-pipeline, deal-detail, borrower application-status, and investor accreditation/requirements. So the real proposal is "collapse the N embedded thread UIs into one component," and the backend makes that cheap.
+
+**Recommendation — one component, two placements:**
+- Build a single `<PortalMessages context={...}>` over `merge_unified_messages_`. `context` carries the current scope (deal id / lender id / borrower / "account") so the thread auto-scopes to what the page is about — that's the "context-sensitive" win, independent of where it's drawn.
+- **Self-service portals (lender / borrower / investor):** render it as the persistent bottom-right floating launcher. One always-available entry point + a global unread badge is a clear UX upgrade over hunting for an inline thread per page. This is where your instinct is right.
+- **Admin operational pages (lender-pipeline, deal-detail):** keep it **inline/docked** next to the record. An admin advancing a lender or working a deal needs the conversation *beside* the row they're acting on; a corner bubble that floats over the table forces context-switching and covers content. Same component, `placement="inline"`.
+
+**Why not a single global corner widget everywhere:**
+- It detaches the conversation from the content it's about — on the Requirements page the thread sitting next to the requirements *is* the affordance.
+- It covers admin tables/CTAs and is worse on mobile.
+- Lower discoverability for first-time lenders mid-questionnaire than an inline "Questions? Message us" panel.
+
+**Net:** unify at the component + data layer (single source of truth, already half-built), and treat "floating corner" as the default *placement* for self-service, with inline docking retained for admin work surfaces. That gets you the unification and the context-sensitivity without regressing the admin operational flows.
+
+This is a sizable frontend surface change, so I'm leaving it as a recommendation rather than implementing it. If you want to proceed, say the word and I'll spec it (a `prds/` plan + one `<PortalMessages>` component with a `placement` prop, migrating the existing embedded threads one page at a time behind tests) and ship it. If you'd rather go all-in on a single global launcher everywhere (including admin), I can do that too — just flagging the admin-page tradeoff above.
+
+Confidence: high on the data-layer facts (verified in `messages_unified.ts`); the placement recommendation is a UX judgment call, hence surfacing the tradeoff rather than auto-deciding.
+<!-- agent:boundary:97be4bbb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +79,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Should we just have a context-sensitive message component absolutely positioned in the bottom right corner to unify all messaging in the portal?
 <!-- /agent:queue -->
 
 ## Backlog

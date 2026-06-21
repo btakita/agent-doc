@@ -318,6 +318,11 @@ This is the merge-layer rung underneath the whole `#editorbufwin`/`#hap7`/`#qdup
 
 > **Queue prompt:**
 >
+❯ > :pushpin: Why is there so much drift? Can we tighten the window that causes drift by using evented and reactive techniques? Does the JB + VSCode environments support events whenever a document changes? Can we have a low-latency multi-channel streaming IPC mechanism from the plugin to the CPC? Or would it be better to one stream per document going to the CPC with a thread updating the document model? Can we isolate parts of the document so to reduce conflict? For example, I was typing into this queue item so it should not have any effect on the running job and it should not stall the queue since this is not the current item being run.
+
+
+❯ > **Queue prompt:**
+❯ >
 > :pushpin: We should generalize cell merge. It should be applied to the entire structure of the document AST. So if someone writes a prompt interleaved with an exchange response, the cell is the particular exchange response. The key is isolation of merges. To avoid conflicts and drift. The React Virtual DOM may be a good example of what we are trying to do.435
 
 
@@ -353,15 +358,12 @@ The editor IPC reconnected: the answered drift-question head struck and the queu
 **Next queue head is `do [#6b5h]`** — the editor-IPC-listener-registered-but-no-live-editor wedge that churned this session (every finalize forced to `content_ours`/disk fallback). The fix is scopeable but supervisor-core: detect a registered editor-IPC listener with no live plugin behind it for a CLI-only actor and route finalize to the controller-host disk write instead of the `no_ack` wedge — or don't arm the editor-IPC disk-write guard when no plugin editor is attached. It's tagged `[focused-cycle]` because it needs an editor-less live repro plus SimWorld coverage, and it is **not** safe to land a write-path guard change while finalizing this doc *through* that same write path in an accreted live session. Recommend driving it in a fresh `/clear`ed session, alongside `#qcellmerge2/3`.
 
 I'm not auto-looping past this: the remaining drainable head (`#6b5h`) is focused-cycle write-path surgery that shouldn't run mid-finalize in this session, and the only other items are operator-gated (`#qcm1verify`, `#1jec`).
-<!-- agent:boundary:d3f8434f -->
+<!-- agent:boundary:6a03a49a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#qcellmerge1]~~
-- ~~:pushpin: We should generalize cell merge. It should be applied to the entire structure of the document AST. So if someone writes a prompt interleaved with an exchange response, the cell is the particular exchange response. The key is isolation of merges. To avoid conflicts and drift. The React Virtual DOM may be a good example of what we are trying to do.435~~
-- :pushpin: Why is there so much drift? Can we tighten the window that causes drift by using evented and reactive techniques? Does the JB + VSCode environments support events whenever a document changes? Can we have a low-latency multi-channel streaming IPC mechanism from the plugin to the CPC? Or would it be better to one stream per document going to the CPC with a thread updating the document model? Can we isolate parts of the document so to reduce conflict? For example, I was typing into this queue item so it should not have any effect on the running job and it should not stall the queue since this is not the current item being run.
 - :pushpin: do [#6b5h]
 - :pushpin: [#1jec]
 - :pushpin: do [#qprtloss]

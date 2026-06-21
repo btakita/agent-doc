@@ -425,7 +425,10 @@ pub fn reexec_escalation_within_bound(attempts: u32, max: u32) -> bool {
 /// supervisor recycles immediately at the next turn boundary even when
 /// `auto_recycle` is false, so `admin recycle` (the gentle fix the closeout path
 /// itself recommends) can actually clear a stale-binary supervisor wedge. It still
-/// respects `turn_boundary` (never drops a live turn) and is a no-op when not stale.
+/// respects `turn_boundary` (never drops a live turn). On a fresh binary it no
+/// longer no-ops: an explicit `admin recycle` recycles the *process* to flush stale
+/// in-memory supervisor state (a lagging CRDT projection driving `#rt83` phantom-pin
+/// churn even when the installed binary already matches — `#wd40`).
 ///
 /// `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): `write_wedged` is the typed
 /// fact derived in the write/converge closeout path from repeated
@@ -453,29 +456,45 @@ pub fn supervisor_recycle_action(
     write_wedged: bool,
     reexec_failed: bool,
 ) -> SupervisorRecycleAction {
-    if !stale || !turn_boundary {
+    // Never drop a live turn — every recycle arm below respects the boundary.
+    if !turn_boundary {
         return SupervisorRecycleAction::None;
     }
-    if reexec_failed {
-        // Phase 3: the in-place re-exec already failed; recycling onto it again is
-        // pointless. Escalate to a bounded kill+relaunch instead of looping
-        // `continue_current_binary`. This wins over every recycle arm below.
-        return SupervisorRecycleAction::EscalateKillRelaunch;
+    if stale {
+        if reexec_failed {
+            // Phase 3: the in-place re-exec already failed; recycling onto it again is
+            // pointless. Escalate to a bounded kill+relaunch instead of looping
+            // `continue_current_binary`. This wins over every recycle arm below.
+            return SupervisorRecycleAction::EscalateKillRelaunch;
+        }
+        if explicit_admin || write_wedged {
+            // Operator/agent explicit `admin recycle`, or a wedged editor-IPC write —
+            // recycle now, overriding the default-OFF opt-out. The next turn boundary
+            // is the deliberate restart point; a wedge must never stay `Detect`.
+            return SupervisorRecycleAction::RecycleImmediate;
+        }
+        if !auto_recycle {
+            return SupervisorRecycleAction::Detect;
+        }
+        return if head_pending {
+            SupervisorRecycleAction::RecycleImmediate
+        } else {
+            SupervisorRecycleAction::RecycleDebounced
+        };
     }
-    if explicit_admin || write_wedged {
-        // Operator/agent explicit `admin recycle`, or a wedged editor-IPC write —
-        // recycle now, overriding the default-OFF opt-out. The next turn boundary is
-        // the deliberate restart point; a wedge must never stay `Detect`.
+    // `#wd40` state-flush: the binary is current, so there is nothing to *swap*, but
+    // an explicit operator `admin recycle` is a deliberate request to restart the
+    // supervisor *process* to flush stale in-memory state — e.g. a lagging CRDT
+    // projection (`projection_lag`) that keeps re-pinning a queue head (`#rt83`
+    // phantom-pin churn) even though the installed binary matches. Honor it so
+    // `admin recycle` is never a silent no-op on a fresh binary (the prior behavior
+    // that left the operator unable to flush the lagging projection). A bare wedge on
+    // a fresh binary still stays a no-op — some other transient cause owns the
+    // converge retry — so only the operator's explicit intent forces a fresh flush.
+    if explicit_admin {
         return SupervisorRecycleAction::RecycleImmediate;
     }
-    if !auto_recycle {
-        return SupervisorRecycleAction::Detect;
-    }
-    if head_pending {
-        SupervisorRecycleAction::RecycleImmediate
-    } else {
-        SupervisorRecycleAction::RecycleDebounced
-    }
+    SupervisorRecycleAction::None
 }
 
 /// `#wd40` / `#staleloop-recycle-restart` — whether the idle-watch should ask a
@@ -977,9 +996,21 @@ mod tests {
             supervisor_recycle_action(true, false, false, false, true, false, false),
             None
         );
-        // Explicit admin on a FRESH binary → nothing to recycle.
+        // `#wd40` state-flush: explicit admin on a FRESH binary now recycles the
+        // process to flush stale in-memory state (e.g. a lagging CRDT projection),
+        // rather than no-opping and leaving the operator unable to clear it.
         assert_eq!(
             supervisor_recycle_action(false, false, true, false, true, false, false),
+            RecycleImmediate
+        );
+        // ...but still never mid-turn (no boundary) on a fresh binary either.
+        assert_eq!(
+            supervisor_recycle_action(false, false, false, false, true, false, false),
+            None
+        );
+        // A fresh binary WITHOUT explicit admin stays None (no spurious flush).
+        assert_eq!(
+            supervisor_recycle_action(false, true, true, true, false, false, false),
             None
         );
     }
@@ -1087,6 +1118,47 @@ mod tests {
         // Stale + a loop owns the drain + boundary unreachable (turn_active) → this
         // is the exact wedge `#wd40` fixes: request the yield.
         assert!(stale_drain_recycle_yield_requested(true, true, false));
+    }
+
+    #[test]
+    fn wd40_fresh_binary_explicit_admin_flush_yields_during_active_drain() {
+        // `#wd40` state-flush end-to-end: the installed binary already matches
+        // (`stale = false`, the live `supervisor:fresh` + `projection_lag=true`
+        // condition), an operator ran `admin recycle` to flush the lagging CRDT
+        // projection, and a self-driving loop holds the drain `turn_active`.
+        // 1) A recycle WOULD fire at a boundary now (explicit admin forces it even on
+        //    a fresh binary — no longer a silent no-op).
+        let would_recycle_at_boundary = !matches!(
+            supervisor_recycle_action(
+                /* stale */ false,
+                /* auto_recycle */ true,
+                /* turn_boundary */ true,
+                /* head_pending */ false,
+                /* explicit_admin */ true,
+                /* write_wedged */ false,
+                /* reexec_failed */ false,
+            ),
+            SupervisorRecycleAction::None | SupervisorRecycleAction::Detect
+        );
+        assert!(
+            would_recycle_at_boundary,
+            "explicit admin must force a recycle at the boundary even on a fresh binary"
+        );
+        // 2) So the idle-watch requests the loop yield one boundary, letting the
+        //    process restart fire and flush the stale projection.
+        assert!(stale_drain_recycle_yield_requested(
+            would_recycle_at_boundary,
+            /* drain_owner_active */ true,
+            /* turn_boundary */ false,
+        ));
+        // Without the explicit admin, a fresh binary mid-drain never yields (no
+        // spurious flush / churn).
+        let no_admin_recycle = !matches!(
+            supervisor_recycle_action(false, true, true, false, false, false, false),
+            SupervisorRecycleAction::None | SupervisorRecycleAction::Detect
+        );
+        assert!(!no_admin_recycle);
+        assert!(!stale_drain_recycle_yield_requested(no_admin_recycle, true, false));
     }
 
     #[test]

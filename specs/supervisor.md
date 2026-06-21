@@ -483,6 +483,19 @@ distinct from the one-shot restart auto-trigger:
   `idle_queue_drain_decision`) the live idle-queue watch uses rather than
   reimplementing the policy, so the recycle + clear pipeline is simulated offline
   across its interoperating systems.
+- `#wd40` state-flush: an explicit `admin recycle` recycles at the next turn
+  boundary even when the installed binary already matches the running supervisor
+  (`supervisor:fresh`). The recycle then restarts the supervisor *process*, which
+  rebuilds its in-memory state — flushing a lagging CRDT projection
+  (`projection_lag`) that can keep re-pinning a queue head (`#rt83` phantom-pin
+  churn) even though there is no stale binary to swap. `supervisor_recycle_action`
+  therefore returns `RecycleImmediate` for `explicit_admin` on a fresh binary
+  (previously a silent no-op that left the operator unable to clear the lagging
+  projection); a bare wedge on a fresh binary still stays a no-op. When a
+  self-driving `/loop` holds the drain `turn_active`, the idle-watch writes a
+  `state_flush_drain` recycle-yield request (mirroring the `stale_binary_drain`
+  path) so the loop yields one inter-item boundary and the process restart fires.
+  It still respects `turn_boundary` — a fresh-binary flush never drops a live turn.
 - On `Dispatch` it injects a harness-specific trigger through the same
   `auto_trigger_inject_command` path (capability-proof gated, actor marked
   `busy` before bytes). Claude/OpenCode receive the normal harness trigger

@@ -54,6 +54,12 @@ pub struct RecycleYieldRequest {
 /// Canonical reason for a stale-binary self-recycle yield.
 pub const RECYCLE_YIELD_STALE_BINARY: &str = "stale_binary_drain";
 
+/// Reason for a fresh-binary state-flush self-recycle yield (`#wd40`): the
+/// installed binary already matches, but an explicit `admin recycle` wants the
+/// supervisor process restarted to flush stale in-memory state (e.g. a lagging
+/// CRDT projection driving `#rt83` phantom-pin churn).
+pub const RECYCLE_YIELD_STATE_FLUSH: &str = "state_flush_drain";
+
 /// Resolve the request TTL, honoring the `AGENT_DOC_RECYCLE_YIELD_TTL_SECS`
 /// override.
 pub fn recycle_yield_ttl() -> Duration {

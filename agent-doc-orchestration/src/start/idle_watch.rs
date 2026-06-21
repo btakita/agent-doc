@@ -1143,10 +1143,18 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         )
                     {
                         // Refresh the request every tick so it stays live until the
-                        // loop yields; log once.
+                        // loop yields; log once. The reason distinguishes a stale-binary
+                        // swap from a fresh-binary state flush (`#wd40`: an explicit
+                        // `admin recycle` restarts the process to clear a lagging CRDT
+                        // projection even when the installed binary already matches).
+                        let yield_reason = if supervisor_stale {
+                            crate::recycle_yield::RECYCLE_YIELD_STALE_BINARY
+                        } else {
+                            crate::recycle_yield::RECYCLE_YIELD_STATE_FLUSH
+                        };
                         if let Err(err) = crate::recycle_yield::request_recycle_yield(
                             &file,
-                            crate::recycle_yield::RECYCLE_YIELD_STALE_BINARY,
+                            yield_reason,
                         ) {
                             eprintln!(
                                 "[agent-doc] idle-queue watch: failed to write recycle-yield request for {}: {err:#}",
@@ -1157,7 +1165,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             log_event(
                                 &mut session_log,
                                 &format!(
-                                    "supervisor_recycle_yield_requested pane={} reason=stale_binary_drain turn_active={} drain_owner=loop note=loop_yields_to_let_execve_recycle_fire",
+                                    "supervisor_recycle_yield_requested pane={} reason={yield_reason} turn_active={} drain_owner=loop note=loop_yields_to_let_execve_recycle_fire",
                                     shared.inject_pane.as_deref().unwrap_or("<pty>"),
                                     turn_active,
                                 ),
@@ -1165,13 +1173,18 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             crate::ops_log::log_op(
                                 &path,
                                 &format!(
-                                    "supervisor_recycle_yield_requested file={} pane={} reason=stale_binary_drain action=signal_loop_yield",
+                                    "supervisor_recycle_yield_requested file={} pane={} reason={yield_reason} action=signal_loop_yield",
                                     path.display(),
                                     shared.inject_pane.as_deref().unwrap_or("<pty>"),
                                 ),
                             );
+                            let cause = if supervisor_stale {
+                                "supervisor binary is stale"
+                            } else {
+                                "an explicit admin recycle wants stale in-memory state flushed"
+                            };
                             eprintln!(
-                                "[agent-doc] supervisor binary is stale while a self-draining loop owns the drain; requesting the in-session loop to yield one boundary so the recycle can hot-reload onto the fresh binary"
+                                "[agent-doc] {cause} while a self-draining loop owns the drain; requesting the in-session loop to yield one boundary so the recycle can hot-reload/restart at a clean boundary"
                             );
                         }
                     } else if !supervisor_stale {

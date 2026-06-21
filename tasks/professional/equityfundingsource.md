@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -134,7 +134,7 @@ No schema change — it's backed by the existing `/api/admin/investor-documents`
 **Verification:** new `tests/advance-lender-documents.test.ts` (7 tests: requirements model + checklist wiring); full suite **1031 pass / 0 fail**, `bun run check` (test + build + worker build) green.
 
 **Deployed** (per the `deploy` queue item) to the production EFS worker: `bun run deploy:worker` → live at `https://equityfundingsource.brian-takita.workers.dev`, **Version ID `57e592b8-a297-41b6-9d16-9a9cffefcab5`**. Submodule pointer bumped.
-<!-- agent:boundary:27ffdd93 -->
+<!-- agent:boundary:e42ec316 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -146,11 +146,16 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Ctrl+Enter (Windows + Linux) or Cmd+Enter (OSX) in any message textarea should submit the message.
+- All messages should have human-readable date + time stamp in local time.
+- deploy
+- do [#mcme]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#mcme] [recommended] #msg-read-status Email-open-based read receipts on messages — DEFERRED: gated by the operator on "only if we can detect email reads", which EFS cannot today (sends via Cloudflare Email, no open tracking). Needs a ~3-5 day greenfield subsystem: switch message notifications to Resend with open-tracking, add a signed Resend event webhook (email.opened), an email_events table, and message<->email linking, then surface email_opened_at in the message DTO/UI. In-app portal read cursors already exist for borrower chat (chat_sessions.*_last_read_at) but are not email reads.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.

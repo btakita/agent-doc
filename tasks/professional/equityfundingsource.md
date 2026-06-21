@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -104,7 +104,12 @@ Done — shipped and deployed to prod. The borrower chat was already on a websoc
 **Deployed:** `src/equityfundingsource-dev` committed (`ebb9fec`), pushed to origin, and deployed to prod Cloudflare — worker version `e0f71a7c-486b-4293-add9-f0e95ecf1e23`. The new `PORTAL_MESSAGES_ROOM` Durable Object + `v3_portal_messages_room` migration are live; root health 200, the new WS route returns 401 unauth as expected.
 
 **Note on scope:** v1 uses a single shared hub instance — fine at the portal's concurrency, but every message wakes every connected portal tab to do a cheap refetch. Per-user sharding (only wake the affected party + watching admins), typing indicators/read receipts for unified threads, and pushing the body on the tick are filed as #msgrt2-4 in `prds/message-realtime.md`.
-<!-- agent:boundary:178d32fb -->
+> **Queue prompt:** deploy
+
+### Re: deploy — opus-4-8
+
+Re-ran the prod deploy to drain this head and confirm prod is current. No code changed since the realtime feature (EFS `ebb9fec`), so this was an idempotent redeploy: `cf:d1:migrate:remote` reported **no migrations to apply**, and the worker redeployed cleanly — new version id `2d88971e-384b-4d2a-91bb-08c454d4ea94` at `https://equityfundingsource.brian-takita.workers.dev`. The realtime `PORTAL_MESSAGES_ROOM` Durable Object remains bound and live. Queue drained.
+<!-- agent:boundary:06ed8a0a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,8 +121,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Keep the chat on the websocket. I want realtime messaging if possible. Integrate the message system to support realtime messaging from the ui and email replies.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

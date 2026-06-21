@@ -69,7 +69,7 @@ Done — the review is empty and the plan no longer carries any gates. Committed
 **JB plugin updates you'll need to install** (for the items whose proof needs plugin code): `#qpauseux` (paused-queue notification render), `#8bfz` (single-owner lease), `#restartagentmenu` (Restart Agent menu), `#qnodemerge4wire` P4 (DocumentListener reporters). I'll flag the exact build when each lands; none are shipped yet.
 
 **Also this cycle:** noted your `#1jec` strike (resolved) and preserved the `:pushpin:` position-locks (`#qauthorder`). The answered JB-stall head (`#supinstallfeedback`, shipped `cf7347a9`) stays at the queue head only because last cycle's `content_ours` drift recovery reverted its strike — no re-work needed.
-<!-- agent:boundary:4bfc0bc8 -->
+<!-- agent:boundary:c5e043df -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -110,6 +110,24 @@ Press Enter to restart, or 'q' to exit.
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` sometimes has the dispatch storm (multiple duplicate prompts) and no submit.
 - :pushpin: do [#arsm]
+- do [#agentreloadrestart]
+- do [#restartagentmenu]
+- do [#j9ja]
+- do [#editorbufwin]
+- do [#hap7]
+- do [#fbwire]
+- do [#qheadstrike]
+- do [#qnodemerge4wire]
+- do [#jbdisprecycle]
+- do [#sqedit-race]
+- do [#qpauseux]
+- do [#8bfz]
+- do [#cyh0]
+- do [#1vhn]
+- do [#jbrundispatch]
+- do [#docdriftgrace]
+- do [#runexitrestart]
+- do [#gf5n]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

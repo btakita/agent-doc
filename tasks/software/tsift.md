@@ -78,14 +78,29 @@ On crates.io, add a Trusted Publisher to **both** crate names `tsift-local-model
 **Fallback (Option B — if crates.io rejects pre-config for a nonexistent name):** create them with a personal token, in dependency order. `tsift-local-model` first (`cargo publish -p tsift-local-model`), but `tsift-kg` needs `tsift-core`/`tsift-sqlite`/`tsift-local-model` at `0.1.73` published first — so Option A is strongly preferred.
 
 **After you confirm bootstrap** (a quick `curl`/browser check that both crate names resolve / show a Trusted Publisher), tell me and I'll: re-run `make check`, `git tag v0.1.73 1caaa43`, `git push origin v0.1.73`, then watch the Release run. I'm **not** pushing the tag now — doing so before bootstrap would fail the crates.io job on the two new crates and cascade to `tsift-cli` (a red/partial release).
-<!-- agent:boundary:11fe6954 -->
+### Re: #015t — what you need to verify to unblock the v0.1.73 release — opus-4-8
+
+One thing, and it's the `#1yks` gate: **the two new crates `tsift-local-model` and `tsift-kg` must exist on crates.io with a Trusted Publisher configured.** Right now both are **404** (never published); every other tsift crate is already set up. Until these two are bootstrapped, pushing the tag fails their publish job and cascades to `tsift-cli` (which depends on them).
+
+**Do this (crates.io, your browser/passkey 2FA — I can't do 2FA):**
+1. Sign in to crates.io.
+2. For **each** crate name — `tsift-local-model` and `tsift-kg` — add a **Trusted Publisher**: GitHub, repository `btakita/tsift`, workflow `release.yml`. Modern crates.io lets you configure trusted publishing for a crate name that doesn't exist yet; the first OIDC publish then creates it.
+
+**How to verify you're done** (either is sufficient):
+- Each crate's crates.io page shows a Trusted Publisher under *Settings → Trusted Publishing*, **or**
+- the crate name resolves once the first publish lands. If you only pre-config (don't publish yet), rely on the Trusted Publishing settings page as the proof.
+
+**If crates.io refuses to pre-config a nonexistent crate** (fallback): publish `tsift-local-model` once manually with a personal token to create it (`cargo publish -p tsift-local-model`). `tsift-kg` can't be created standalone — it needs `tsift-core`/`tsift-sqlite`/`tsift-local-model` at `0.1.73` on crates.io first — so the pre-config route above is strongly preferred; with it, CI publishes the whole set in dependency order in one shot.
+
+**Then:** `agent-doc admin queue resume tasks/software/tsift.md` (the queue is currently paused) and tell me — I'll run `make check`, `git tag v0.1.73 1caaa43`, `git push origin v0.1.73`, and watch the Release run. Nothing else is needed from you; `#015t`'s Phases 0–4b are done and pushed, only Phase 5 (this release) remains.
+<!-- agent:boundary:dd412993 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: release + publish~~
-- :pushpin: [#015t]
+- :pushpin: [#015t]: What do I need to verify?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

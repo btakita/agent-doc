@@ -142,6 +142,11 @@ Proof:
 
 ### Re: queue items auto-struck without explanation — opus-4-8
 
+> **Queue prompt:**
+>
+> :pushpin: do [#qnodemerge4wire]
+
+
 > **Queue prompt:** I'm typing in a queue item and agent-doc automatically strikes it. This should not happen without a response written into the document explaining why it was auto-struck.
 
 Filed as a bug with a plan — I did **not** rush a fix into the `#ftstrike` strike-heuristic family (it's delicate and interacts with `#qheadstrike` / `#queue-user-edit-overwrite`), so this is plan + backlog per the `#agent-doc-bug` workflow.
@@ -159,13 +164,13 @@ Proof:
 - Commands: `agent-doc preflight`, `agent-doc write --pending-add`, `agent-doc finalize --force-disk`.
 - Verification: none (no code changed — plan/backlog capture only).
 - Escalation: confirm scope before I implement `#qstrikeexplain` (it touches the strike heuristic).
-<!-- agent:boundary:2035466a -->
+<!-- agent:boundary:0603559c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
-- :pushpin: do [#qnodemerge4wire]
+- ~~:pushpin: do [#qnodemerge4wire]~~
 - [#1jec]
 - do [#qcm1verify]
 - :pushpin: do [#tb4q]
@@ -178,6 +183,24 @@ Proof:
 - As I was writing queue items during a turn, an extra `/clear\n/agent-doc tasks/agent-doc/agent-doc-bugs2.md\n/clear` was written into the input and submitted.
 - do [#s81q]: Rename "Restart Supervisor" to "Recycle Supervisor". Add Restart command alongside "Recycle Supervisor"
 - do [#qstrikeexplain]
+---
+JB `Run Agent Doc` stalled without feedback
+```
+claude exited cleanly.
+Press Enter to restart, or 'q' to exit.
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+
+claude exited cleanly.
+Press Enter to restart, or 'q' to exit.
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] supervisor auto-install: rebuilding + installing agent-doc from /home/brian/work/btakita/agent-loop/src/agent-doc so the next queue item runs on the freshly-committed source
+   Compiling agent-doc v0.34.35 (/home/brian/work/btakita/agent-loop/src/agent-doc)
+```
+---
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -207,7 +230,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qstrikeexplain] [recommended] #agent-doc-bug Free-text queue-head auto-strike (#ftstrike) must be explained + conservative (operator: "I'm typing in a queue item and agent-doc automatically strikes it. This should not happen without a response written into the document explaining why it was auto-struck."). Two modes: (1) silent strike — a struck free-text head leaves no exchange note, so a typed line just disappears; (2) striking a mid-typed line — the response-match heuristic can strike a head the operator is still authoring this turn. Fix: strike only a baseline-present head the committed response answered (defer brand-new live-buffer heads to the cycle that answers them, per #queue-user-edit-overwrite editor-wins), and deterministically record a one-line 'auto-struck queue head: …' note in the response. Plan: tasks/agent-doc/plan-queue-strike-explanation.md
 - [ ] [#s81q] [recommended] #agent-doc-bug #stopvscodemenu Extend #restartagentmenu (JB Restart Agent; plan tasks/agent-doc/plan-restart-agent.md) per operator request to also add a Stop Agent command and mirror BOTH Stop+Restart into the VSCode extension menus. Delta beyond #restartagentmenu: (1) StopAgentAction.kt + plugin.xml registration on the JB side; (2) VSCode command-palette + editor/title menu contributions for stop+restart wired to the same TerminalUtil/route paths. Decide alongside-vs-replace the existing Restart Supervisor Process action; do not remove without operator confirmation. Bump pluginVersion + build signed/unsigned zips (gated by STOP-cutting-releases). Confirm scope before implementing.
 - [ ] [#k7mf] [operator-verify] #g9d7verify #agent-doc-bug Live editor-less repro of #g9d7/#6b5hprimary (agent-doc submodule 260d61b3). Code shipped+pushed: the run_ipc no-delivery bail routes content_ours to the guarded controller-host disk write when there is no plugin-owner lease (live_editor_endpoint_attached=false), reusing decide_editorless_disk_fallback; a live editor still fails closed. After a make install, run agent-doc finalize in a Claude Code pane with NO JB IDE attached and confirm ops.log shows run_ipc_editorless_disk_fallback transport=disk_fallback editor_endpoint=absent plus a committed cycle, with no --force-disk and no recovery=retry_without_disk_write. Operator-gated: needs a real CLI pane.
-- [ ] [#qnodemerge4wire] [focused-cycle] #agent-doc-bug Supply side of #qnodemerge4 op-capture (consumer shipped: EditorOp + replay_editor_ops + merge_with_editor_ops behind the replay-exactness gate, agent-doc submodule ea84ebab). Remaining: (1) per-document op-capture sidecar persistence (record/load/clear/GC) keyed by the base it was captured against; (2) FFI ingestion entry point agent_doc_record_editor_op (FFI-first, plugins stay thin); (3) wire the live merge_contents_crdt path to load+pass theirs editor ops to merge_with_editor_ops and clear the sidecar after; (4) thin JB DocumentListener.documentChanged + VS Code onDidChangeTextDocument reporters that split replacements into delete+insert and report byte offsets; (5) SimWorld coverage. [operator-verify] live eyeball: a concurrent live edit + agent write converges with zero diff-derived duplication and ops replay == editor-observed state. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4). NOTE byte-offset/Yrs unicode-offset semantics (currently ASCII-gated in the consumer) need verification when wiring non-ASCII edits.
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
 - [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
@@ -216,6 +238,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#qnodemerge4wire] [focused-cycle] #agent-doc-bug Op-capture supply side of #qnodemerge4. SHIPPED this cycle (agent-doc submodule b149532e): part 2 FFI agent_doc_record_editor_op (FFI-first insert/delete ingestion, base-hash-keyed, fails closed to diff-guess on bad input) + part 5 end-to-end tests (FFI roundtrip + merge consume-and-clear + base-mismatch fallback). Parts 1 (sidecar persistence op_capture.rs) and 3 (merge_contents_crdt_with_ops wiring at merge.rs:99, wired run_entry.rs:873) were already shipped. make check green (4934 tests). REMAINING (gated): part 4 thin JB DocumentListener.documentChanged + VS Code onDidChangeTextDocument reporters that split replacements into delete+insert and call the new FFI entry — blocked by STOP-cutting-releases (needs plugin pluginVersion bump + build/install to take effect). Plus [operator-verify] live eyeball: a concurrent live edit + agent write converges with zero diff-derived duplication, ops.log shows editor_op_recorded. NOTE byte-offset/Yrs unicode-offset semantics need verification on non-ASCII edits. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4).
 - [/] [#jbdisprecycle] [operator-verify] #agent-doc-bug #jbclrdispdup JB Run Agent Doc no-submit during post-lib-install supervisor recycle. R1-R4 ALL SHIPPED+pushed (agent-doc submodule d21079b7, superproject 3c84f70a9; NOT installed/released per STOP-cutting-releases). R1 recycle_inflight marker + dispatch_only pre-inject settle gate. R2 start/run.rs recycle-aware start_session retry (wait_for_recycle_settle + re-ensure controller, <=2 retries) so a start_session racing the execve hot-reload is retried, not terminal. R3 route/dispatch.rs submit-once-after-settle gate (route_dispatch_submit_recycle_settle) so an injected-but-unsubmitted trigger re-submits exactly once after settle, never re-typed N times. R4 SimWorld route_sim_dispatch_defers_during_recycle_then_injects_once_after_settle + 4 recycle_inflight unit tests; make check green, clippy -D warnings clean. ONLY operator live-verify remains: at a recycle boundary run make install + agent-doc admin recycle, fire JB Run Agent Doc on a second doc during the hot-reload burst, confirm a single dispatch_start_proof WITH submit and no stranded start_session failed.
 - [/] [#rdypoll-deploy] [operator-verify] #agent-doc-bug Deploy + live-verify the #rdypoll §D dispatch_inject marker (agent-doc submodule 138dc658, 0.34.23). Agent-actionable code shipped+pushed (dispatch_inject attempt=N marker at both injection funnels + SimWorld assertion). REMAINING (operator-gated, deferred from session to avoid finalize-client-newer-than-supervisor drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then the two-pane restart repro: restart a session, JB Run Agent Doc, confirm ops.log shows a single dispatch_inject ... attempt=1 and ZERO attempt=2 (proves no post-restart re-type stacking). Plan: tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md (§D)
 - [/] [#wd40] [operator-verify] #agent-doc-bug Supervisor recycle now flushes stale in-memory state on a FRESH binary. SHIPPED+pushed (agent-doc submodule 6f1868ca, superproject 38a0e3f98; NOT installed per STOP-cutting-releases). Root cause: supervisor_recycle_action short-circuited to None when !stale, so admin recycle was a silent no-op on a current binary — the operator could not flush a lagging CRDT projection (projection_lag) re-pinning a queue head (#rt83 phantom-pin) even with no stale binary to swap. Fix: explicit_admin now recycles the supervisor process at the next turn boundary even on a fresh binary (RecycleImmediate, no debounce); idle-watch writes a state_flush_drain recycle-yield so a self-driving /loop yields one boundary to let the restart fire; still respects turn_boundary (never drops a live turn); bare wedge on fresh binary stays a no-op. decisions.rs + recycle_yield.rs + idle_watch.rs + specs/supervisor.md + truth-table/end-to-end tests; make check + make tmux-ci green. ONLY operator live-verify remains: at a recycle boundary run make install + agent-doc admin recycle on this fresh-binary/projection_lag session and confirm ops.log shows supervisor_recycle_yield_requested reason=state_flush_drain (if a loop owns the drain) then an execve recycle, projection_lag clears, and the phantom :pushpin: do [#qnodemerge4wire] stops reappearing.

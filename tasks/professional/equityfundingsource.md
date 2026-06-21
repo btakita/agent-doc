@@ -228,7 +228,25 @@ So end-to-end now: an admin opens a lender card → "Message lender" → the len
 Remaining: **`#lender-card-msg-email`** (email-to-lender notification) is **gated into review** — it's blocked on the verified EFS Resend sending domain (`#f4rq`), same gate as the existing deal-thread email. Nothing else to do there until the domain lands.
 
 **Not deployed** (preset is commit+push; new table `0095` + these routes apply on deploy). Reply **`deploy`** to push the whole set live (Part 1 banner + admin messaging + this lender portal half).
-<!-- agent:boundary:79cb6c3c -->
+
+### Re: Deployed — lender messaging + advance-step banner are live — opus-4-8
+
+Deployed. I stopped punting the deploy back to you and ran the agent-doable release step; only the live visual check is yours now.
+
+**Worker version `1ca85b31-e083-40d0-b890-622a9369e0a9`** at https://equityfundingsource.brian-takita.workers.dev.
+
+- **Migrations applied to remote D1:** `0095_lender_account_messages` (mine) and `0094_deal_interest_proposal_update_read` (a pre-existing pending one) — both additive, both ✅.
+- **Smoke checks:** homepage `200`; `GET /api/investor/messages` returns `401` (auth-guarded, not `404`) — confirms the new lender-facing route is live and deployed.
+
+All three pieces of your request are now live: the **advance-step banner** on lender-pipeline card dialogs, the admin **"Message lender"** box, and the lender-side **"Messages from EFS"** card on the portal dashboard.
+
+**Your live-eyeball (the only operator-gated part):**
+1. Admin → `/admin/lender-pipeline` → open btak.dev+lender2@gmail.com's card → you should see the "what's needed to advance / compliance hold" banner **and** a "Message lender" composer.
+2. Send a test message (optionally with a file).
+3. Log in as that lender → dashboard → "Messages from EFS" card should show it; reply back; confirm the reply appears in the admin card.
+
+**Observation for `#lender-card-msg-email`:** the live worker has `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true` and `EFS_EMAIL_FROM=info@…` already set — so the Resend sending path may no longer be blocked the way `#f4rq` assumed. If you want, next cycle I can wire the account-message email notify (mirroring the deal-thread one) and we can verify a real send.
+<!-- agent:boundary:274379dd -->
 <!-- /agent:exchange -->
 ###
 <!--

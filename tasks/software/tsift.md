@@ -57,7 +57,28 @@ The exchange was compacted (9 response topics archived to `…-20260621-035054.m
 - **Phase 5 — crates.io release.** Review item `#1yks` gates it: the two new crates `tsift-local-model` + `tsift-kg` need crates.io Trusted Publishing config before the `v*` tag, or the publish fails on them.
 
 The queued `[#015t]` is the go-mode mirror of the operator-verify umbrella (`queue_drainable_head_count: 0`, `queue_continuation_required: false`) — not a fresh directive, so I'm not looping. Say **"release"** (after `#1yks` is configured) to ship Phase 5.
-<!-- agent:boundary:ef6c5dc7 -->
+
+### Re: release + publish — blocked on operator crates.io bootstrap of 2 new crates — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: release + publish
+
+You chose **"you bootstrap, then I tag"**, so here's the exact handoff. I verified the full release state first — the `#1yks` gate is real and its stale `v0.1.72`/`08d0f65` reference is corrected below.
+
+**Verified state:**
+- tsift is at **`0.1.73`** (HEAD `1caaa43`, clean tree). Latest tag is only `v0.1.71` — so the next tag is **`v0.1.73` at `1caaa43`** (not `v0.1.72`).
+- Crates.io publishing is **enabled** (`TSIFT_ENABLE_CRATES_PUBLISH=true`) and uses **OIDC trusted publishing** — `release.yml` requires every crate to already exist on crates.io with a registered Trusted Publisher.
+- **`tsift-local-model` and `tsift-kg` are 404 on crates.io** (don't exist); both are deps of `tsift-cli`. The other tsift crates exist (e.g. `tsift-core 0.1.71`, `tsift-cli 0.1.69`).
+- **Dependency wrinkle:** `tsift-local-model` has no tsift-* deps (serde/ureq only) → can be created standalone. `tsift-kg` depends on `tsift-core 0.1.73` + `tsift-sqlite 0.1.73` + `tsift-local-model 0.1.73`, none of which are on crates.io yet → it **cannot** be token-published standalone before the rest of the 0.1.73 chain.
+
+**Recommended bootstrap (Option A — pre-config trusted publishing, no token, lets CI order everything):**
+On crates.io, add a Trusted Publisher to **both** crate names `tsift-local-model` and `tsift-kg` (GitHub repo `btakita/tsift`, workflow `release.yml`) — modern crates.io supports configuring trusted publishing for a not-yet-published crate name. Then I push `v0.1.73` and CI publishes the whole set in dependency order, creating the two new crates via OIDC. This sidesteps the `tsift-kg` dependency wrinkle entirely.
+
+**Fallback (Option B — if crates.io rejects pre-config for a nonexistent name):** create them with a personal token, in dependency order. `tsift-local-model` first (`cargo publish -p tsift-local-model`), but `tsift-kg` needs `tsift-core`/`tsift-sqlite`/`tsift-local-model` at `0.1.73` published first — so Option A is strongly preferred.
+
+**After you confirm bootstrap** (a quick `curl`/browser check that both crate names resolve / show a Trusted Publisher), tell me and I'll: re-run `make check`, `git tag v0.1.73 1caaa43`, `git push origin v0.1.73`, then watch the Release run. I'm **not** pushing the tag now — doing so before bootstrap would fail the crates.io job on the two new crates and cascade to `tsift-cli` (a red/partial release).
+<!-- agent:boundary:517f33ca -->
 <!-- /agent:exchange -->
 
 ## Queue

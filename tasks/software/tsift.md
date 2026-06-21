@@ -187,15 +187,14 @@ The `#ve5f` enhancement from last cycle — `--path` sub-narrowing of FTS/lexica
 2. **Phase 5 — the crates.io release** (operator-gated).
 
 The queue's `:pushpin: Implement your recommendations.` head is already answered (the token-index.json deletion cycle) — stale, no action. Tell me **(a) keep / rg -F**, or **"release"**, to move #015t forward.
-<!-- agent:boundary:dc75c801 -->
+<!-- agent:boundary:e7d9ed77 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#ve5f]
+- ~~do [#ve5f]~~
 - do [#015t]
-- :pushpin: Implement your recommendations.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

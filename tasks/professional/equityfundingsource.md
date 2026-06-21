@@ -120,7 +120,27 @@ Built and shipped the unified `<PortalMessages>` component (#portalmsg1/3). Comm
 - `#portalmsg4` — borrower launcher (has Durable Object websocket complexity, needs care).
 
 One honest caveat for live verification: the launcher currently mounts on the dashboard *view*. It's always-visible while you scroll the dashboard; making it persist across all sub-pages of a portal is `#portalmsg-shell`. Worth an eyeball on the deployed lender/broker dashboards to confirm the FAB + panel feel right before I push the shell-level mount.
-<!-- agent:boundary:45084e6c -->
+
+### Re: #portalmsg-shell — shell-level always-visible launcher — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Done + deployed (#portalmsg-shell). EFS `c3a78d6`, worker version `e11943ce`, live. All 1061 tests pass; `build:worker` green.
+
+You picked "Do #portalmsg-shell next" — so I moved the launcher from the per-view dashboards up to the portal **shells**:
+- `InvestorPortalApp` (lender) and `BrokerPortalApp` (broker) now mount `<PortalMessages placement="launcher" ...>` once, as a sibling of the layout. Because it's `position:fixed`, the FAB + panel now render on **every** section of those portals (dashboard, requirements, positions, deals, documents, ...), not just the dashboard — that's the "always-visible no matter where you scroll OR which page" win.
+- Removed the launcher from the two dashboards (it would otherwise double-mount).
+- **Dropped the now-duplicate inline thread on the accreditation/requirements page** — lender messaging there is covered by the shell launcher.
+
+Tests re-pointed from the dashboards to the shells; the requirements-page test now asserts the shell launcher provides the lender's messaging instead of a per-page thread.
+
+**One bit of debt I deliberately deferred, not hid:** `investor/lender_account_messages.tsx` is now orphaned (the shell launcher fully supersedes it), but deleting it cascades into the `#lender-card-msg-portal` test block. I left the file in place and filed `#portalmsg-shell-cleanup` to delete it + fold its coverage into the unified component tests — deferred so you can eyeball the live shell launcher first.
+
+**Queue note:** you chose only #portalmsg-shell, so I'm **not** auto-draining the remaining `do [#portalmsg2]` (admin inline) and `do [#portalmsg4]` (borrower DO/websocket) heads — those stay queued for your call. Worth eyeballing the deployed lender + broker portals (the FAB should now follow you across every page) before I take the next phase.
+<!-- agent:boundary:ebbf2b38 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,7 +153,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Implement src/equityfundingsource-dev/prds/portal-messages-component.md. Make sure the prop component is always visible in the respective UI context. My always visible, make sure the user can click on the messaging no matter where the user scrolls on a dialog, page, or other component that has the messaging prop/context.~~
-- deploy
+- ~~deploy~~
 - do [#portalmsg-shell]
 - do [#portalmsg2]
 - do [#portalmsg4]
@@ -142,7 +162,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#portalmsg-shell] [recommended] Mount the PortalMessages launcher at the lender/broker portal SHELL (not just the dashboard view) so it is truly always-visible across every self-service page, and retire the duplicate inline <LenderAccountMessages /> on the investor accreditation/requirements page (now redundant with the dashboard launcher). Advances #portalmsg3. Plan: src/equityfundingsource-dev/prds/portal-messages-component.md
+- [ ] [#portalmsg-shell-cleanup] [recommended] Delete the now-orphaned investor/lender_account_messages.tsx (lender-facing account thread, fully superseded by the shell PortalMessages launcher) and fold its #lender-card-msg-portal test coverage into the unified component tests. Deferred so the live shell launcher can be eyeballed first.
 - [ ] [#portalmsg2] [recommended] Admin inline cutover: replace the embedded threads on the admin lender-pipeline card dialog (investor_pipeline.tsx) and deal-detail with <PortalMessages placement="inline">, using the sticky .pm-inline-compose so the composer stays reachable while the dialog scrolls. Verify no admin-table coverage regression. Advances #portalmsg2.
 - [ ] [#portalmsg4] [recommended] Borrower launcher: migrate borrower application-status messaging (sessions/loan-scoped + Durable Object websocket path) to <PortalMessages placement="launcher">; needs care around the live DO chat path. Advances #portalmsg4.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.

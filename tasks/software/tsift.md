@@ -174,7 +174,7 @@ Implemented the high-value, low-risk half of my recommendation — **deleting th
 2. **`files_in_path_scope` path-prune:** captured as a `[recommended]` backlog item — a net-new *enhancement* (not cleanup); skip unless you want `--path` sub-narrowing of FTS hits.
 
 Then **Phase 5** is the operator-gated crates.io release. Say **"do #015t"** with a direction (or "release") to continue.
-<!-- agent:boundary:9e37e901 -->
+<!-- agent:boundary:9b500971 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -191,7 +191,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#ve5f] [recommended] #015t Phase 4b enhancement: add a files_in_path_scope path-prune so --path sub-narrows FTS hits (net-new capability, not cleanup; implement only if the operator wants --path sub-narrowing).
 - [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 + 3a + 3b + Phase 4 cutover + Phase 4b item 3 (thread precheck freshness) DONE + pushed (tsift 475262b). FTS5 index.db BM25 is the DEFAULT lexical path; run_sift_search/run_search_with_timeout/__search-worker take an fts_index_fresh verdict so the FTS path no longer re-walks the tree on every search; degraded read-only routes to the live TokenIndex fallback. NEXT (Phase 4b remaining, optional): (a) retire TokenIndex build/cache — DEFERRED, the degraded-read-only fallback still needs the live-walk; needs an operator/design decision on degraded-read-only behavior (keep TokenIndex vs live rg -F); (b) files_in_path_scope zone-map path-prune — net-new enhancement, not cleanup. Then Phase 5 = operator-gated crates.io release. Say "do #015t" for (a)/(b) or to ship.
 <!-- /agent:backlog -->
 

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -131,7 +131,7 @@ Done and deployed. Replaced every hard-delete path in the admin user / Lender Pr
 ### Re: deploy — already shipped this turn — opus-4-8
 
 The deactivate-only change was already deployed in the previous cycle this turn — no rebuild/redeploy needed. Worker `equityfundingsource` is live at version **`970b2557-44ad-4b84-bc87-3c577e7c7664`** (https://equityfundingsource.brian-takita.workers.dev), code `974de08`. Draining the duplicate `deploy` queue head.
-<!-- agent:boundary:0de546b5 -->
+<!-- agent:boundary:15d2820b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -143,6 +143,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: The reason why btak.dev+lender2@gmail.com is in "Compliance hold before funding" in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline is not obvious when opening the dialog. Please explain the actionable step needed, either by the admin or the lender, in the dialog.
 <!-- /agent:queue -->
 
 ## Backlog

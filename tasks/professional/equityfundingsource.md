@@ -93,7 +93,19 @@ Shipped **`docs/master-state-machine.md`** (EFS `f50a422`, pushed) — one livin
 **Verification:** docs-only change; full suite re-run **1024 pass / 0 fail**. Committed + pushed (submodule `f50a422`, superproject pointer bumped). Mermaid diagrams use standard `flowchart` / `stateDiagram-v2` / `sequenceDiagram`-compatible syntax (no mermaid CLI in-repo to render-check, but ordering/labels follow valid syntax).
 
 Next queue head is `do [#dmz8]` (deploy the advance-lender dialog) — outward-facing, operator-gated.
-<!-- agent:boundary:78e3e6ca -->
+
+### Re: Deployed #dmz8 — advance-lender dialog live — opus-4-8
+
+Per your confirmation, deployed the advance-lender dialog (`#advance-lender`, EFS `f50a422`) to the **production EFS worker**.
+
+- **`bun run deploy:worker`** — built the worker, applied remote D1 migrations (none new this change), uploaded the new frontend bundle (`index.browser-EEXL5SQB.js`).
+- **Live at** `https://equityfundingsource.brian-takita.workers.dev`
+- **Version ID** `e77a5d20-d0ba-481d-9e74-fdaa96160a81`
+
+The "Advance lender →" button on the lender-pipeline compliance-hold step and its support dialog (explainer + Lender Requests deep-link + messaging + documents) are now live. `#dmz8` / `#advance-lender-deploy` marked **done**.
+
+Queue is fully drained — no remaining drainable heads (only the gated `#5eq8`, design-blocked, remains).
+<!-- agent:boundary:26a6a832 -->
 <!-- /agent:exchange -->
 ###
 <!--

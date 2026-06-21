@@ -105,7 +105,31 @@ Per your confirmation, deployed the advance-lender dialog (`#advance-lender`, EF
 The "Advance lender →" button on the lender-pipeline compliance-hold step and its support dialog (explainer + Lender Requests deep-link + messaging + documents) are now live. `#dmz8` / `#advance-lender-deploy` marked **done**.
 
 Queue is fully drained — no remaining drainable heads (only the gated `#5eq8`, design-blocked, remains).
-<!-- agent:boundary:9421af15 -->
+
+### Re: Advance Lender required-documents checklist + deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender, show which documents are required. Show individual upload field for multiple documents of each type for each document. Also show which documents were uploaded.
+
+
+> **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender, show which documents are required. Show individual upload field for multiple documents of each type for each document. Also show which documents were uploaded.
+
+> **Queue prompt:** deploy
+
+Shipped + deployed (`#advance-lender-docs`, EFS `c8f9cb5`).
+
+**The Advance Lender dialog's document section is now a required-documents checklist** instead of a flat list:
+- **Which documents are required** — an explicit, editable model (`LENDER_DOCUMENT_REQUIREMENTS`): **accreditation, tax, and proof-of-funds (statement) are Required**; legal and due-diligence are Optional. Each row shows a Required/Optional badge.
+- **Individual upload field per document type, multiple files each** — every document type has its own drop-zone + Upload control scoped to that category, accepting multiple files at once (each posted individually to the existing endpoint).
+- **Which documents were uploaded** — each type shows an Uploaded·N / Missing status and lists the documents already provided (view / archive in place), with a **"N of M required provided"** readiness summary at the top.
+
+No schema change — it's backed by the existing `/api/admin/investor-documents` endpoints; the lender-pipeline **Documents** tab keeps the full list view. The required set lives in one constant (`lender_documents.tsx`) so you can re-tune which types are required.
+
+**Verification:** new `tests/advance-lender-documents.test.ts` (7 tests: requirements model + checklist wiring); full suite **1031 pass / 0 fail**, `bun run check` (test + build + worker build) green.
+
+**Deployed** (per the `deploy` queue item) to the production EFS worker: `bun run deploy:worker` → live at `https://equityfundingsource.brian-takita.workers.dev`, **Version ID `57e592b8-a297-41b6-9d16-9a9cffefcab5`**. Submodule pointer bumped.
+<!-- agent:boundary:8f931d38 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,7 +141,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender, show which documents are required. Show individual upload field for multiple documents of each type for each document. Also show which documents were uploaded.
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender, show which documents are required. Show individual upload field for multiple documents of each type for each document. Also show which documents were uploaded.~~
 - deploy
 <!-- /agent:queue -->
 

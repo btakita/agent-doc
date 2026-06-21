@@ -67,7 +67,29 @@ Short answer: **build one unified message component, yes — but make placement 
 This is a sizable frontend surface change, so I'm leaving it as a recommendation rather than implementing it. If you want to proceed, say the word and I'll spec it (a `prds/` plan + one `<PortalMessages>` component with a `placement` prop, migrating the existing embedded threads one page at a time behind tests) and ship it. If you'd rather go all-in on a single global launcher everywhere (including admin), I can do that too — just flagging the admin-page tradeoff above.
 
 Confidence: high on the data-layer facts (verified in `messages_unified.ts`); the placement recommendation is a UX judgment call, hence surfacing the tradeoff rather than auto-deciding.
-<!-- agent:boundary:97be4bbb -->
+
+### Re: PRD the unified component — opus-4-8
+
+> **Queue prompt:**
+>
+> Prd the unified component
+
+
+> **Queue prompt:** Prd the unified component
+
+Wrote the PRD for the unified frontend message component: `src/equityfundingsource-dev/prds/portal-messages-component.md` (EFS `47d0cb0`, committed + pushed). PRD only — not implemented.
+
+**What it specs (`#portalmsg`):** one `<PortalMessages context placement>` component over the already-unified `merge_unified_messages_` stream, collapsing the N embedded thread UIs (admin lender-pipeline card, deal-detail, borrower application-status, investor accreditation/requirements, broker) into one. Per the prior recommendation, **placement is a prop, not a single global corner bubble**:
+- `context` = `{ party, scope_type, scope_id, party_user_id }` → maps directly to the `message_T` filter the merge layer already produces (the context-sensitive win, independent of where it's drawn).
+- `placement="launcher"` = persistent bottom-right floating launcher + global unread badge → default for self-service portals (lender/borrower/investor).
+- `placement="inline"` = docked thread beside the record → default for admin operational pages, so an admin isn't fighting a corner bubble covering the table.
+
+**Scope boundary:** this is the *frontend* half. The *data* half (the `messages` table, adapters, admin inbox) stays in `message-unification.md` (`#msg-unify`). Write-path unification is explicitly out of scope — compose keeps POSTing to the existing per-party endpoints until the `#msg-unify3/4/5` cutovers move them onto `messages`.
+
+**Phasing** (one backlog id per phase, each migrated surface verified before the next, legacy thread removed only after its replacement passes tests): #portalmsg1 component foundation (both render modes, shared thread/compose/attachment/unread internals, avatar/name/timestamp row invariant) → #portalmsg2 admin inline cutover → #portalmsg3 self-service launcher (lender/investor) → #portalmsg4 borrower launcher → #portalmsg5 broker (after `#msg-unify5`).
+
+No code/test surface this cycle since it's a planning doc; the `#spec-test-commit-push` preset's deliverable here is the spec, committed + pushed.
+<!-- agent:boundary:38d0df75 -->
 <!-- /agent:exchange -->
 ###
 <!--

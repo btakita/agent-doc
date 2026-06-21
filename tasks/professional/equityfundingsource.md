@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -101,7 +101,7 @@ When a lender expresses interest in a deal **as a Lending Group**, a **% allocat
 So lender2 self-attested accreditation (requirements show "Current"), but has **never been linked to a TMO lender account**, leaving them parked in `requirements_current` for 26 days — past the 14-day window — which is exactly the "signed up, cleared requirements, but isn't actually investing yet" cohort the board is meant to surface for outreach.
 
 **To clear the tag:** link a lender account to the user (moves them to **Lender Ready**, which is outside `INVESTOR_PRE_READY_STATUSES`). The flag then drops regardless of age. Verifying accreditation alone won't clear it while `lender_account` stays null.
-<!-- agent:boundary:1d32ee92 -->
+<!-- agent:boundary:dfbe59b7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -113,6 +113,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: Admin "Lender Profile" dialogs should have "Deactivate Lender" instead of "Delete User". "Deactivate Lender" should have a confirmation dialog. Records must not be deleted from the ui...only deactivated.
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

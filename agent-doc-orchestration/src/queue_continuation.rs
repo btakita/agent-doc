@@ -314,29 +314,67 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
 /// `[clean-session]` head (`#cleandrainsup`, see [`head_requires_clean_session`]),
 /// but that decision is independent of the drainable set computed here.
 pub(crate) fn deferred_backlog_ids(content: &str) -> std::collections::HashSet<String> {
+    deferred_backlog_ids_scoped(content, DrainScope::InSessionLoop)
+}
+
+/// The set of active backlog ids (lowercase) that are NOT drainable by the
+/// SUPERVISOR clear-and-continue idle-watch drain (`#qfocsup`): `[operator-verify]`
+/// items only. Unlike the in-session [`deferred_backlog_ids`], a `[focused-cycle]`
+/// id is NOT in this set — the supervisor force-`/clear`s and re-dispatches it to a
+/// fresh context (see [`head_requires_context_reset`]), so the queue keeps draining
+/// instead of stranding idle. The supervisor head picker
+/// [`live_drainable_continuation_head`] uses this scope; the in-session loop and
+/// `session-check` guards use the narrower in-session scope.
+pub(crate) fn supervisor_deferred_backlog_ids(
+    content: &str,
+) -> std::collections::HashSet<String> {
+    deferred_backlog_ids_scoped(content, DrainScope::Supervisor)
+}
+
+/// Drain scope for computing the deferred (non-drainable) backlog id set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DrainScope {
+    /// In-session `/loop`: defers `[operator-verify]` AND `[focused-cycle]` — the
+    /// current accreted session cannot give a `[focused-cycle]` item the fresh
+    /// context it requires, so the loop yields it to the supervisor.
+    InSessionLoop,
+    /// Supervisor idle-watch clear-and-continue: defers `[operator-verify]` only.
+    /// `[focused-cycle]` is drained via a forced `/clear` + re-dispatch (`#qfocsup`).
+    Supervisor,
+}
+
+/// Shared core of the deferred-id computation, parameterized by drain scope.
+///
+/// `#qcontdrain` (operator override of `#goqueuestall`/`#cleandrainsup`/`#freshgrant`):
+/// the in-session `/loop` drains `[clean-session]` heads IN PLACE instead of
+/// deferring to the supervisor. `#qfocsup` (operator directive): a `[focused-cycle]`
+/// head is deferred by the in-session loop but DRAINED by the supervisor's
+/// clear-and-continue path, so it never strands the queue idle. Drainability is
+/// owned ENTIRELY by these tags — the agent must never re-derive non-drainability
+/// from item prose.
+fn deferred_backlog_ids_scoped(
+    content: &str,
+    scope: DrainScope,
+) -> std::collections::HashSet<String> {
     let mut deferred = std::collections::HashSet::new();
     let Ok(components) = crate::component::parse(content) else {
         return deferred;
     };
-    // `#qcontdrain` (operator override of `#goqueuestall`/`#cleandrainsup`/`#freshgrant`):
-    // the in-session `/loop` drains `[clean-session]` heads IN PLACE instead of
-    // deferring to the supervisor. Deferring stranded the queue whenever the
-    // supervisor idle-watch was itself stalled (the live failure this fixes), so
-    // `queue_continuation_required` must stay true while any loop-drainable head
-    // remains. The in-loop and supervisor drain paths defer the SAME typed set
-    // (`#qstallguard` Layer A): `[operator-verify]` (needs a human) and
-    // `[focused-cycle]` (operator-declared dedicated cycle). `[clean-session]` is
-    // always drainable (drains in place). Drainability is owned ENTIRELY by these
-    // tags — the agent must never re-derive non-drainability from item prose.
     for comp in &components {
         if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
         for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
-            if ctx.loop_undrainable() {
+            let undrainable = match scope {
                 // `[operator-verify]` needs a human; `[focused-cycle]` needs a
-                // dedicated operator-initiated cycle. Neither is loop-drainable.
+                // freshly-cleared cycle the in-session loop cannot provide.
+                DrainScope::InSessionLoop => ctx.loop_undrainable(),
+                // The supervisor can clear-and-continue, so only `[operator-verify]`
+                // is undrainable for it.
+                DrainScope::Supervisor => ctx.supervisor_undrainable(),
+            };
+            if undrainable {
                 deferred.insert(id.to_ascii_lowercase());
             }
         }
@@ -381,6 +419,52 @@ pub fn head_requires_clean_session(file: &Path, head: &str) -> bool {
 /// Pure core of [`head_requires_clean_session`] — testable without a file.
 pub fn head_requires_clean_session_in(content: &str, head: &str) -> bool {
     let ids = clean_session_backlog_ids(content);
+    if ids.is_empty() {
+        return false;
+    }
+    let id = extract_head_id(head)
+        .map(|i| i.to_ascii_lowercase())
+        .unwrap_or_else(|| head.trim().to_ascii_lowercase());
+    ids.contains(&id)
+}
+
+/// Active backlog ids (lowercase) for which the SUPERVISOR must force a context
+/// `/clear` before dispatching the head: `[clean-session]` OR `[focused-cycle]`
+/// (`#qfocsup`). A `[focused-cycle]` item needs a genuinely fresh context — that is
+/// precisely why it is not in-session-drainable — so the supervisor clears before
+/// re-dispatching it, exactly as it does for `[clean-session]`.
+pub fn context_reset_backlog_ids(content: &str) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    let Ok(components) = crate::component::parse(content) else {
+        return ids;
+    };
+    for comp in &components {
+        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
+            continue;
+        }
+        let body = &content[comp.open_end..comp.close_start];
+        for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
+            if ctx.clean_session_required || ctx.focused_cycle_required {
+                ids.insert(id.to_ascii_lowercase());
+            }
+        }
+    }
+    ids
+}
+
+/// Whether the active queue `head` maps to a backlog item that requires the
+/// supervisor to force a context `/clear` before dispatch — `[clean-session]` OR
+/// `[focused-cycle]` (`#qfocsup`). Superset of [`head_requires_clean_session`].
+pub fn head_requires_context_reset(file: &Path, head: &str) -> bool {
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return false;
+    };
+    head_requires_context_reset_in(&content, head)
+}
+
+/// Pure core of [`head_requires_context_reset`] — testable without a file.
+pub fn head_requires_context_reset_in(content: &str, head: &str) -> bool {
+    let ids = context_reset_backlog_ids(content);
     if ids.is_empty() {
         return false;
     }
@@ -632,11 +716,11 @@ pub fn live_drainable_continuation_head(file: &Path, content: &str) -> Option<St
         return None;
     }
     let open_backlog = open_backlog_ids_from_content(content);
-    // `#qcontdrain`/`#cleandrainsup`: only `[operator-verify]` is deferred. The
-    // supervisor force-`/clear`s before a `[clean-session]` head, but that decision
-    // is made separately (`head_requires_clean_session`) and does not change the
-    // drainable set.
-    let deferred_ids = deferred_backlog_ids(content);
+    // `#qfocsup`/`#cleandrainsup`: the SUPERVISOR defers only `[operator-verify]`.
+    // It force-`/clear`s before a `[clean-session]` OR `[focused-cycle]` head
+    // (decided separately via `head_requires_context_reset`), so `[focused-cycle]`
+    // stays in the drainable set here instead of stranding the queue idle.
+    let deferred_ids = supervisor_deferred_backlog_ids(content);
     let preset_supplies_directive = queue_component.attrs.contains_key("preset");
     let head = first_drainable_head(
         &activation.entries_after,
@@ -1619,6 +1703,92 @@ mod tests {
             deferred.contains("b"),
             "operator-verify is never drainable by any agent scope"
         );
+    }
+
+    #[test]
+    fn supervisor_drains_focused_cycle_but_loop_defers_it() {
+        // #qfocsup: a [focused-cycle] head is deferred by the in-session loop (it
+        // cannot give the fresh context the tag demands) but DRAINED by the
+        // supervisor (force-/clear + re-dispatch), so it never strands the queue
+        // idle. [operator-verify] stays deferred in BOTH scopes.
+        let content = doc_with_backlog(
+            &["do [#f]", "do [#o]"],
+            &[
+                "- [ ] [#f] [focused-cycle] merge-core work",
+                "- [ ] [#o] [operator-verify] live drive",
+            ],
+        );
+        let loop_deferred = deferred_backlog_ids(&content);
+        assert!(
+            loop_deferred.contains("f"),
+            "focused-cycle deferred by in-session loop"
+        );
+        assert!(
+            loop_deferred.contains("o"),
+            "operator-verify deferred by in-session loop"
+        );
+
+        let sup_deferred = supervisor_deferred_backlog_ids(&content);
+        assert!(
+            !sup_deferred.contains("f"),
+            "focused-cycle is supervisor-drainable (#qfocsup)"
+        );
+        assert!(
+            sup_deferred.contains("o"),
+            "operator-verify never drainable by any scope"
+        );
+    }
+
+    #[test]
+    fn focused_cycle_head_drains_for_supervisor_not_in_session_loop() {
+        // The queue is NOT idle when only a [focused-cycle] head remains: the
+        // supervisor picks it up (and force-/clears first), while the in-session
+        // loop yields it (drainable_head_count == 0).
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("d.md");
+        let content = doc_with_backlog(
+            &["do [#f]"],
+            &["- [ ] [#f] [focused-cycle] merge-core work"],
+        );
+        std::fs::write(&doc, &content).unwrap();
+
+        assert_eq!(
+            live_drainable_continuation_head(&doc, &content).as_deref(),
+            Some("f"),
+            "supervisor drains the focused-cycle head (clear-and-continue)"
+        );
+        assert_eq!(
+            drainable_head_count(&doc, &content),
+            0,
+            "in-session loop yields the focused-cycle head to the supervisor"
+        );
+        assert!(
+            head_requires_context_reset_in(&content, "do [#f]"),
+            "supervisor force-/clears before a focused-cycle head"
+        );
+    }
+
+    #[test]
+    fn head_requires_context_reset_covers_clean_session_and_focused_cycle() {
+        let content = doc_with_backlog(
+            &["do [#c]", "do [#f]", "do [#o]", "do [#p]"],
+            &[
+                "- [ ] [#c] [clean-session] quiet",
+                "- [ ] [#f] [focused-cycle] merge-core",
+                "- [ ] [#o] [operator-verify] live",
+                "- [ ] [#p] plain",
+            ],
+        );
+        assert!(head_requires_context_reset_in(&content, "c"));
+        assert!(head_requires_context_reset_in(&content, "f"));
+        assert!(
+            !head_requires_context_reset_in(&content, "o"),
+            "operator-verify is not a context-reset (it is never auto-dispatched)"
+        );
+        assert!(!head_requires_context_reset_in(&content, "p"));
+        // clean-session-only check stays narrow (focused-cycle excluded).
+        assert!(head_requires_clean_session_in(&content, "c"));
+        assert!(!head_requires_clean_session_in(&content, "f"));
     }
 
     #[test]

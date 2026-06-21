@@ -36,6 +36,12 @@ pub enum UserFacingOutcomeKind {
     QueuedBehindOwner,
     RecoveredAndRetried,
     DeferredForOperatorProof,
+    /// The in-session loop has no drainable head, but a `[focused-cycle]` head
+    /// remains that the SUPERVISOR clear-and-continue path will drain (force
+    /// `/clear` + re-dispatch to a fresh context). No operator action is required;
+    /// the in-session agent simply ends its turn so the supervisor takes over
+    /// (`#qfocsup`).
+    DeferredForSupervisorDrain,
     NoDrainableWork,
     RealComponentConflict,
     BlockedWithExactUnblocker,
@@ -47,6 +53,7 @@ impl UserFacingOutcomeKind {
             Self::QueuedBehindOwner => "queued_behind_owner",
             Self::RecoveredAndRetried => "recovered_and_retried",
             Self::DeferredForOperatorProof => "deferred_for_operator_proof",
+            Self::DeferredForSupervisorDrain => "deferred_for_supervisor_drain",
             Self::NoDrainableWork => "no_drainable_work",
             Self::RealComponentConflict => "real_component_conflict",
             Self::BlockedWithExactUnblocker => "blocked_with_exact_unblocker",
@@ -55,7 +62,9 @@ impl UserFacingOutcomeKind {
 
     pub const fn class(self) -> BinaryOutcomeClass {
         match self {
-            Self::QueuedBehindOwner | Self::NoDrainableWork => BinaryOutcomeClass::Ok,
+            Self::QueuedBehindOwner
+            | Self::NoDrainableWork
+            | Self::DeferredForSupervisorDrain => BinaryOutcomeClass::Ok,
             Self::RecoveredAndRetried => BinaryOutcomeClass::Recoverable,
             Self::DeferredForOperatorProof => BinaryOutcomeClass::Operator,
             Self::RealComponentConflict | Self::BlockedWithExactUnblocker => {
@@ -69,6 +78,7 @@ impl UserFacingOutcomeKind {
             Self::QueuedBehindOwner => "wait_for_owner_turn_to_drain",
             Self::RecoveredAndRetried => "continue_after_recovery_retry",
             Self::DeferredForOperatorProof => "operator_proof_required",
+            Self::DeferredForSupervisorDrain => "yield_to_supervisor_clear_and_continue",
             Self::NoDrainableWork => "no_agent_action",
             Self::RealComponentConflict => "resolve_component_conflict",
             Self::BlockedWithExactUnblocker => "follow_unblocker",
@@ -324,6 +334,12 @@ mod tests {
                 "deferred_for_operator_proof",
                 BinaryOutcomeClass::Operator,
                 "operator_proof_required",
+            ),
+            (
+                Kind::DeferredForSupervisorDrain,
+                "deferred_for_supervisor_drain",
+                BinaryOutcomeClass::Ok,
+                "yield_to_supervisor_clear_and_continue",
             ),
             (
                 Kind::NoDrainableWork,

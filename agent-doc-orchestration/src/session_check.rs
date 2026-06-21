@@ -284,7 +284,33 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // as "deferred + N stale lines to clear", not a silent stall. Never
                 // auto-deleted (the live IPC supervisor races on direct queue edits).
                 let noise = crate::queue_continuation::queue_stale_noise_lines(file);
-                if deferred > 0 || noise > 0 {
+                // #qfocsup: the in-session loop has no drainable head, but a
+                // `[focused-cycle]` head may still remain that the SUPERVISOR
+                // clear-and-continue path will drain. In this branch the in-session
+                // `detect` already returned None, so a `Some` supervisor head ⟺ a
+                // focused-cycle head — the queue is NOT operator-stalled; the agent
+                // yields and the supervisor force-`/clear`s + re-dispatches it.
+                let supervisor_head = std::fs::read_to_string(file)
+                    .ok()
+                    .and_then(|content| {
+                        crate::queue_continuation::live_drainable_continuation_head(file, &content)
+                    });
+                if supervisor_head.is_some() {
+                    let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
+                        crate::flow::outcome::UserFacingOutcomeKind::DeferredForSupervisorDrain,
+                    )
+                    .expect("static deferred supervisor-drain outcome is valid")
+                    .log_fields();
+                    println!(
+                        "queue_continuation_required=false queue_deferred_heads={} queue_stale_noise_lines={} {}",
+                        deferred, noise, outcome_fields
+                    );
+                    eprintln!(
+                        "[session-check] queue continues via supervisor: a [focused-cycle] head remains that the CPC/supervisor clear-and-continue path drains (force /clear + re-dispatch to a fresh session). End this turn so the supervisor takes over — NOT an operator stall ({}; #qfocsup). {}",
+                        file.display(),
+                        outcome_fields
+                    );
+                } else if deferred > 0 || noise > 0 {
                     let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
                         crate::flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
                     )
@@ -295,7 +321,7 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                         deferred, noise, outcome_fields
                     );
                     eprintln!(
-                        "[session-check] queue idle: {} head(s) deferred (clean-session/operator-verify), {} stale noise line(s) — drain deferred heads from a clean session and clear the noise lines ({}; #goqueuestall/#goqstall2). {}",
+                        "[session-check] queue idle: {} head(s) deferred (operator-verify), {} stale noise line(s) — operator-gated heads need a human / the noise lines need clearing ({}; #goqueuestall/#goqstall2). {}",
                         deferred,
                         noise,
                         file.display(),

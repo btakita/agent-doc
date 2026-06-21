@@ -1513,18 +1513,22 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                 }
 
-                // `#cleandrainsup`: a `[clean-session]` head asks for a fresh agent
-                // context regardless of the global opt-in. Ordinary Codex heads may
-                // also clear here when the project opted into queue context reset and
-                // the Codex transcript/accretion decision requires fresh context.
-                // The reset decision still runs through prompt/turn/route gates
-                // below, so a live queue edit or in-flight route cannot churn clears.
-                let active_head_is_clean_session = active_head
+                // `#cleandrainsup`/`#qfocsup`: a `[clean-session]` OR `[focused-cycle]`
+                // head asks for a fresh agent context regardless of the global opt-in.
+                // A `[focused-cycle]` head is drained ONLY by this supervisor
+                // clear-and-continue path (the in-session loop defers it), so forcing
+                // the `/clear` here is what gives it the fresh context the tag demands.
+                // Ordinary Codex heads may also clear here when the project opted into
+                // queue context reset and the Codex transcript/accretion decision
+                // requires fresh context. The reset decision still runs through
+                // prompt/turn/route gates below, so a live queue edit or in-flight
+                // route cannot churn clears.
+                let active_head_forces_context_reset = active_head
                     .as_deref()
-                    .map(|head| crate::queue_continuation::head_requires_clean_session(&path, head))
+                    .map(|head| crate::queue_continuation::head_requires_context_reset(&path, head))
                     .unwrap_or(false);
                 let context_reset_reason = if crate::start::decisions::clean_session_head_forces_context_reset(
-                    active_head_is_clean_session,
+                    active_head_forces_context_reset,
                     clear_cooldown_active,
                 ) {
                     context_reset_policy_error_logged = false;

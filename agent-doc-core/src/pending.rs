@@ -1786,13 +1786,26 @@ impl ExecutionContext {
         self.clean_session_required || self.operator_verify_required || self.focused_cycle_required
     }
 
-    /// True when the item is undrainable by the queue loop — it needs a human
-    /// (`[operator-verify]`) or a dedicated operator-initiated cycle
+    /// True when the item is undrainable by the IN-SESSION queue loop — it needs a
+    /// human (`[operator-verify]`) or a dedicated, freshly-cleared cycle
     /// (`[focused-cycle]`). `[clean-session]` is intentionally EXCLUDED: it
     /// drains in place (`#qcontdrain`). This is the single authority for
-    /// "the loop must not auto-drain this head" (`#qstallguard` Layer A).
+    /// "the in-session loop must not auto-drain this head" (`#qstallguard` Layer A).
     pub fn loop_undrainable(&self) -> bool {
         self.operator_verify_required || self.focused_cycle_required
+    }
+
+    /// True when the item is undrainable even by the SUPERVISOR clear-and-continue
+    /// drain — it needs a human (`[operator-verify]`). Unlike
+    /// [`Self::loop_undrainable`], `[focused-cycle]` is NOT supervisor-undrainable
+    /// (`#qfocsup`): the supervisor idle-watch force-`/clear`s the session and
+    /// re-dispatches a `[focused-cycle]` head to a genuinely fresh context, which
+    /// is exactly the fresh cycle the tag demands. So a `[focused-cycle]` item is
+    /// deferred by the in-session loop (which cannot give it fresh context) but
+    /// DRAINED by the supervisor's clear-and-continue path instead of stranding the
+    /// queue idle. `[clean-session]` drains everywhere.
+    pub fn supervisor_undrainable(&self) -> bool {
+        self.operator_verify_required
     }
 }
 
@@ -2933,9 +2946,26 @@ mod tests {
         let oper = item_execution_context("[operator-verify] live drive");
         assert!(oper.loop_undrainable());
 
+        // `#qfocsup`: `[focused-cycle]` is loop_undrainable but SUPERVISOR-drainable
+        // — the supervisor force-`/clear`s and re-dispatches it to a fresh context,
+        // so it must NOT be supervisor_undrainable. Only `[operator-verify]` is.
+        assert!(
+            !focused.supervisor_undrainable(),
+            "[focused-cycle] is drained by the supervisor clear-and-continue path"
+        );
+        assert!(
+            oper.supervisor_undrainable(),
+            "[operator-verify] needs a human — undrainable by any agent scope"
+        );
+        assert!(
+            !clean.supervisor_undrainable(),
+            "[clean-session] drains everywhere"
+        );
+
         // Plain items are fully drainable: the agent may NOT invent a stall.
         let plain = item_execution_context("just implement #6b5h");
         assert!(!plain.loop_undrainable());
+        assert!(!plain.supervisor_undrainable());
         assert!(!plain.is_deferred());
 
         // The tag strips out of display text and coexists with other markers.

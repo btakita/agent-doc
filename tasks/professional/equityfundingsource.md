@@ -76,7 +76,32 @@ When a lender expresses interest in a deal **as a Lending Group**, a **% allocat
 - **Backend was already in place** — reads `GET /api/lender/groups/:id/deals/:dealId` (participation, allocations seeded from defaults), saves `POST …/allocations`. No endpoint or auto-seed changes.
 - **Wiring** — auto-opens on group-interest success; re-open button; both gated on a selected `lending_group_id` (not shown for "Myself").
 - Tests: new `tests/lender-deal-allocation-dialog.test.ts` (GET-prepopulate → POST-save round-trip + UI-wiring grep). Suite **979 pass / 0 fail**; worker build clean. Spec: `#lender-alloc-dialog`.
-<!-- agent:boundary:08f2e7df -->
+> **Queue prompt:** In .../admin/lender-pipeline, why does btak.dev+lender2@gmail.com have the "Stalled 26 days in a pre-investing stage — candidate for outreach." tag?
+
+### Re: why lender2 shows the "Stalled 26 days … candidate for outreach" tag — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, why does btak.dev+lender2@gmail.com
+
+
+**Not a bug — it's the #q2x2 investor-drip outreach flag working as designed.** The tag fires from `investor_is_stalled_()` (`app/equityfundingsource/lib/admin/repo.ts:1375`), rendered in `investor_pipeline.tsx:1151`. An account is stalled when **both** hold:
+
+1. Its pipeline status is a *pre-Lender-Ready* stage — one of `signed_up`, `requirements_review`, `requirements_current`, `requirements_renewal_due`, `requirements_expired` (`INVESTOR_PRE_READY_STATUSES`). A `lender_ready` account is **never** stalled.
+2. `days_since_signup > INVESTOR_STALLED_DAYS` (the threshold is **14** days).
+
+**This account's live prod data** (`users` row `68b25f71…`, queried via cf-wrangler `--remote`):
+
+| field | value | effect |
+|---|---|---|
+| `accredited_confirmed_at` | set (self-attested) | → `investor_requirements_status_` = **current** |
+| `lender_account` | **null** | current + no linked account → status = **`requirements_current`** (a pre-ready stage) |
+| days since signup | **26** | 26 > 14 → stalled |
+
+So lender2 self-attested accreditation (requirements show "Current"), but has **never been linked to a TMO lender account**, leaving them parked in `requirements_current` for 26 days — past the 14-day window — which is exactly the "signed up, cleared requirements, but isn't actually investing yet" cohort the board is meant to surface for outreach.
+
+**To clear the tag:** link a lender account to the user (moves them to **Lender Ready**, which is outside `INVESTOR_PRE_READY_STATUSES`). The flag then drops regardless of age. Verifying accreditation alone won't clear it while `lender_account` stays null.
+<!-- agent:boundary:1d32ee92 -->
 <!-- /agent:exchange -->
 ###
 <!--

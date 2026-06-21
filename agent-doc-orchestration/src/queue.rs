@@ -1467,6 +1467,114 @@ fn bare_id_reference_key(prompt: &QueuePrompt) -> Option<String> {
     }
 }
 
+/// Priority rank of a queue head's leading pin marker: operator pin
+/// (`:pushpin:`) = 2 (highest) > agent pin (`:round_pushpin:`) = 1 > bare = 0.
+/// Used to choose the surviving instance when collapsing pin-variant duplicates
+/// of the same id (#qdedupsync).
+fn do_head_priority_rank(text: &str) -> u8 {
+    if is_prioritized(text) {
+        2
+    } else if is_agent_prioritized(text) {
+        1
+    } else {
+        0
+    }
+}
+
+/// Collapse same-id `do [#id]` / `do #id` directive heads that disagree **only**
+/// on their leading priority marker — a `:pushpin:`-pinned head that accumulated
+/// ALONGSIDE its bare twin (or two different marker spellings of the same id) —
+/// into a single highest-priority instance kept at the group's earliest position
+/// (#qdedupsync / #pushpinaccum).
+///
+/// The backlog→queue mirror and CRDT replay both emit the bare `do [#id]` form;
+/// an operator/agent pin adds a *pinned copy* of the same id instead of replacing
+/// the bare one, so the queue accumulates `:pushpin: do [#id]` AND `do [#id]`
+/// (live repro: this very document held both `:pushpin: do [#6b5hwire]` and a
+/// bare `do [#6b5hwire]`). Unlike [`dedup_live_prompts`], this deliberately
+/// PRESERVES **textually identical** `do [#id]` duplicates — two bare or two
+/// identically-pinned heads can be intentional "run it twice" queue intent
+/// (`#queue-dedup-destroys-intentional-duplicates`). Only a same-id group whose
+/// members are not all identical (they disagree on the pin prefix) is collapsed,
+/// and the surviving entry keeps the strongest pin observed for that id.
+/// `Completed`/`Preset`/fence entries are left untouched.
+pub fn dedup_pin_variant_do_heads(entries: &[QueueEntry]) -> Option<Vec<QueueEntry>> {
+    // Group prompt indices by their normalized `do [#id]` identity, preserving
+    // first-seen order. `dedup_key_for_prompt` returns `Some(id)` only for
+    // `do [#id]`/`do #id` heads (after stripping pins + lowercasing), so free-text
+    // heads are never grouped.
+    let mut groups: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for (idx, entry) in entries.iter().enumerate() {
+        if let QueueEntry::Prompt(prompt) = entry
+            && let Some(id) = dedup_key_for_prompt(prompt)
+        {
+            groups
+                .entry(id.clone())
+                .or_insert_with(|| {
+                    order.push(id);
+                    Vec::new()
+                })
+                .push(idx);
+        }
+    }
+
+    let prompt_text = |idx: usize| match &entries[idx] {
+        QueueEntry::Prompt(p) => p.text.as_str(),
+        _ => unreachable!("grouped index always points at a Prompt entry"),
+    };
+
+    // For each id group with >1 member that are NOT all textually identical:
+    // keep the group's earliest position, but overwrite its text with the
+    // strongest-pin variant (highest rank, earliest on tie); drop the rest.
+    let mut drop: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut keep_text: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+    for id in &order {
+        let idxs = &groups[id];
+        if idxs.len() < 2 {
+            continue;
+        }
+        let first_text = prompt_text(idxs[0]);
+        if idxs.iter().all(|&i| prompt_text(i) == first_text) {
+            // Intentional "run it twice" — identical heads, leave untouched.
+            continue;
+        }
+        let earliest = idxs[0];
+        let best = *idxs
+            .iter()
+            .max_by(|&&a, &&b| {
+                do_head_priority_rank(prompt_text(a))
+                    .cmp(&do_head_priority_rank(prompt_text(b)))
+                    .then_with(|| b.cmp(&a))
+            })
+            .expect("group is non-empty");
+        keep_text.insert(earliest, prompt_text(best).to_string());
+        for &i in idxs {
+            if i != earliest {
+                drop.insert(i);
+            }
+        }
+    }
+
+    if drop.is_empty() {
+        return None;
+    }
+    let deduped: Vec<QueueEntry> = entries
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !drop.contains(i))
+        .map(|(i, entry)| match keep_text.get(&i) {
+            Some(text) if matches!(entry, QueueEntry::Prompt(_)) => QueueEntry::Prompt(QueuePrompt {
+                text: text.clone(),
+                multiline: false,
+            }),
+            _ => entry.clone(),
+        })
+        .collect();
+    Some(deduped)
+}
+
 pub fn first_prompt(entries: &[QueueEntry]) -> Option<&QueuePrompt> {
     entries.iter().find_map(|e| match e {
         QueueEntry::Prompt(p) => Some(p),
@@ -2389,6 +2497,73 @@ mod tests {
             sync_backlog_into_queue(&entries, &ids(&["foo"]), BacklogQueueSyncMode::Prepend)
                 .is_none(),
             "id already present as a pinned head must not be re-prepended"
+        );
+    }
+
+    #[test]
+    fn dedup_pin_variant_do_heads_collapses_pin_plus_bare_twin() {
+        // #qdedupsync live repro: the queue held `:pushpin: do [#6b5hwire]` AND a
+        // bare `do [#6b5hwire]` — same id, differing only by the pin marker (a
+        // pin-accumulation artifact). They collapse to a single instance kept at
+        // the earliest position, carrying the strongest (operator) pin.
+        let entries = parse(concat!(
+            "- do [#6b5h]\n",
+            "- do [#6b5hwire]\n",          // bare twin, earliest for this id
+            "- :pushpin: do [#6b5hwire]\n", // pinned twin → collapse, strongest pin wins
+            "- do [#tb4q]\n",
+        ))
+        .unwrap();
+        let deduped = dedup_pin_variant_do_heads(&entries)
+            .expect("pin-variant `do [#id]` duplicates should collapse");
+        assert_eq!(
+            render(&deduped),
+            concat!(
+                "- do [#6b5h]\n",
+                "- :pushpin: do [#6b5hwire]\n", // kept at earliest position, strongest pin
+                "- do [#tb4q]\n",
+            ),
+            "pin+bare twin collapses to one strongest-pin head at the earliest slot: {deduped:?}"
+        );
+    }
+
+    #[test]
+    fn dedup_pin_variant_do_heads_preserves_identical_run_twice() {
+        // Two textually IDENTICAL `do [#id]` heads are intentional "run it twice"
+        // intent (#queue-dedup-destroys-intentional-duplicates) — they must survive.
+        let entries = parse("- do [#a]\n- do [#a]\n- :pushpin: do [#b]\n").unwrap();
+        assert!(
+            dedup_pin_variant_do_heads(&entries).is_none(),
+            "identical do-dups (no pin disagreement) must be preserved as run-twice intent"
+        );
+    }
+
+    #[test]
+    fn dedup_pin_variant_do_heads_prefers_operator_over_agent_pin() {
+        // When the same id appears with an agent pin AND an operator pin, the
+        // operator pin (`:pushpin:`) is the strongest and survives.
+        let entries = parse(concat!(
+            "- :round_pushpin: do [#x]\n", // agent pin, earliest
+            "- :pushpin: do [#x]\n",       // operator pin → strongest
+        ))
+        .unwrap();
+        let deduped = dedup_pin_variant_do_heads(&entries)
+            .expect("agent+operator pin variants of one id should collapse");
+        assert_eq!(
+            render(&deduped),
+            "- :pushpin: do [#x]\n",
+            "operator pin is strongest and is kept at the earliest slot: {deduped:?}"
+        );
+    }
+
+    #[test]
+    fn dedup_pin_variant_do_heads_ignores_free_text_and_distinct_ids() {
+        // Free-text heads and distinct id heads are never grouped/collapsed.
+        let entries =
+            parse("- do [#a]\n- do [#b]\n- a free text question?\n- #c continue the drain\n")
+                .unwrap();
+        assert!(
+            dedup_pin_variant_do_heads(&entries).is_none(),
+            "distinct ids + free-text must not collapse"
         );
     }
 
@@ -3395,6 +3570,11 @@ mod tests {
             "- do [#c]\nrandom pasted log line\n- do [#d]\n",
             // a real multiline `---` fenced head sandwiched in separator runs
             "---\n---\nmulti line\nhead body\n---\n- do [#e]\n",
+            // #qdedupsync: a pinned + bare same-id `do [#id]` family. render(parse)
+            // itself must be a fixed point (it preserves both heads verbatim — the
+            // collapse is a separate maintenance step, `dedup_pin_variant_do_heads`),
+            // so the round-trip must neither drop nor multiply either variant.
+            "- :pushpin: do [#6b5hwire]\n- do [#6b5hwire]\n",
         ];
         for case in cases {
             let once = normalize(case);

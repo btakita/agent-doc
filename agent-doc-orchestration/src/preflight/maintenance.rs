@@ -1633,6 +1633,34 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         );
     }
 
+    // Collapse pin-variant `do [#id]` duplicates: a `:pushpin:`-pinned head that
+    // accumulated alongside its bare `do [#id]` twin for the same id (the
+    // pin-accumulation artifact — backlog→queue mirror / CRDT replay emit the bare
+    // form, an operator/agent pin adds a pinned copy instead of replacing it).
+    // Keeps a single strongest-pin instance at the earliest position. Unlike the
+    // bare-id dedup above, this targets `do [#id]` directives, but only those that
+    // disagree on the pin prefix — textually identical `do [#id]` duplicates stay
+    // as intentional "run it twice" intent (#qdedupsync / #pushpinaccum).
+    if let Some(deduped_entries) =
+        crate::queue::dedup_pin_variant_do_heads(&activation.entries_after)
+    {
+        let dropped = activation.entries_after.len() - deduped_entries.len();
+        let new_body = crate::queue::render(&deduped_entries);
+        current_content = {
+            let comps = crate::component::parse(&current_content)?;
+            let q = comps
+                .iter()
+                .find(|c| c.name == "queue")
+                .context("queue maintenance: queue component vanished before pin-variant dedup")?;
+            q.replace_content(&current_content, &new_body)
+        };
+        activation.entries_after = deduped_entries;
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: collapsed {dropped} pin-variant duplicate queue head(s) (#qdedupsync)"
+        );
+    }
+
     // Consume start fence if needed
     if activation.consumed_start_fence {
         let new_body = crate::queue::render(&activation.entries_after);

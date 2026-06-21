@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -80,7 +80,28 @@ Verification:
 - `make tmux-ci` — passed locally, 7 ignored tmux/integration tests.
 - `gh run watch 27914059454 --exit-status` in `src/agent-doc` — passed on GitHub Actions CI in 5m14s.
 - `make install` installed `agent-doc 0.34.35`; `agent-doc admin recycle` marked the controller to recycle at the next idle boundary.
-<!-- agent:boundary:9f7d60a4 -->
+
+### Re: harness switch to claude — opus-4-8
+
+You flipped `agent: codex` → `agent: claude`, so this session is now running under Claude Code (Opus 4.8) instead of gpt-5. Acknowledged — picking up the same `agent-doc-bugs2.md` queue.
+
+**Queue state (honest read, no churn).** Every current queue head is either operator-gated or a duplicate of an already-captured item, so there is no agent-drainable *implementation* work this cycle:
+
+- `[#1jec]`, `do [#qcm1verify]`, `do [#tb4q]`, `do [#k7mf]` — all `[operator-verify]`: code shipped+pushed; what remains is a live editor/pane proof at a supervisor-recycle boundary, which the agent cannot perform.
+- `do [#qnodemerge4wire]` — `[focused-cycle]` with an operator live-eyeball gate; needs its own clean cycle + `make check`/`make tmux-ci`, not an in-loop drain.
+- `do [#s81q]` — `[recommended]`, explicitly "confirm scope before implementing", and its build step is blocked by the STOP-cutting-releases gate.
+- The four free-text heads (Stop/Restart menus; JB stall on monsterrodholders; codex input not submitted; stray `/clear` injection) all restate bugs already tracked: `#s81q`/`#restartagentmenu`, `#jbrundispatch`/`#runexitrestart`, `#rdypoll`, and `#jbclrdispdup`/`#jbdisprecycle` respectively.
+
+The queue is also still `admin queue pause`d with the `#rt83/#qflood` "0 drainable work" reason, which matches this read.
+
+I am not looping or re-dispatching — looping here would just reproduce the phantom-pin no-op churn the pause was set to stop. Tell me which you want and I will take it on as a focused cycle: (a) advance/clear the gated `agent:review` items into actionable backlog (the commented directive above the backlog), (b) implement `#s81q` Stop/Restart menus once you confirm scope, or (c) drive one of the operator-verify installs at a recycle boundary and I will check the logs.
+
+Proof:
+- Changed paths: none (no code changed; harness-flip bookkeeping only).
+- Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
+- Verification: none run (no code change).
+- Escalation: none.
+<!-- agent:boundary:03758ee7 -->
 <!-- /agent:exchange -->
 
 ## Queue

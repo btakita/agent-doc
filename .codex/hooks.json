@@ -18,6 +18,11 @@
             "command": "agent-doc hook codex-user-prompt-submit",
             "statusMessage": "Tracking active agent-doc session",
             "type": "command"
+          },
+          {
+            "command": "tsift index --check --exit-code --workspace \"/home/brian/work/btakita/agent-loop\" >/dev/null 2>&1 || tsift index --workspace \"/home/brian/work/btakita/agent-loop\" >/dev/null 2>&1",
+            "statusMessage": "tsift auto-reindex",
+            "type": "command"
           }
         ]
       }

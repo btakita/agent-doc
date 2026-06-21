@@ -139,23 +139,45 @@ Proof:
 - Not bumped/published/installed per STOP-cutting-releases, and not installed mid-session to avoid worsening the finalize-client-newer drift.
 - Operator-verify remainder (`#wd40` review item updated): at a recycle boundary run `make install` + `agent-doc admin recycle` on this fresh-binary/projection_lag session; confirm ops.log shows the recycle fire (and `supervisor_recycle_yield_requested reason=state_flush_drain` if a loop owns the drain), `projection_lag` clears, and the phantom `:pushpin: do [#qnodemerge4wire]` stops reappearing.
 - Escalation: none.
-<!-- agent:boundary:aa4c1511 -->
+
+### Re: queue items auto-struck without explanation — opus-4-8
+
+> **Queue prompt:** I'm typing in a queue item and agent-doc automatically strikes it. This should not happen without a response written into the document explaining why it was auto-struck.
+
+Filed as a bug with a plan — I did **not** rush a fix into the `#ftstrike` strike-heuristic family (it's delicate and interacts with `#qheadstrike` / `#queue-user-edit-overwrite`), so this is plan + backlog per the `#agent-doc-bug` workflow.
+
+**Two failure modes captured:**
+1. **Silent strike** — when a free-text head is struck, nothing in `agent:exchange` explains it, so a line you typed just appears to vanish.
+2. **Striking a mid-typed line** — the response-match heuristic can strike a head you're *still authoring* this turn, before it was ever a complete intended prompt.
+
+**Planned fix (`#qstrikeexplain`):** strike only a head that was present in the preflight baseline AND that the committed response actually answered — brand-new live-buffer heads defer to the cycle that answers them (editor-wins, consistent with `#queue-user-edit-overwrite`) — and deterministically record a one-line "auto-struck queue head: …" note in the response so a strike is never silent. Plan: `tasks/agent-doc/plan-queue-strike-explanation.md`; backlog item `#qstrikeexplain` added.
+
+One nuance worth noting: the strikes you've seen *this* session were for heads I genuinely answered (e.g. "complete #wd40" was struck alongside its `### Re:` response), so those were explained. But the general guarantee you're asking for — never strike without a written explanation, never strike a mid-typed line — is not enforced today, and that's what the plan locks in.
+
+Proof:
+- Changed paths: `tasks/agent-doc/plan-queue-strike-explanation.md` (new plan); backlog `#qstrikeexplain` added.
+- Commands: `agent-doc preflight`, `agent-doc write --pending-add`, `agent-doc finalize --force-disk`.
+- Verification: none (no code changed — plan/backlog capture only).
+- Escalation: confirm scope before I implement `#qstrikeexplain` (it touches the strike heuristic).
+<!-- agent:boundary:2035466a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
+- :pushpin: do [#qnodemerge4wire]
 - [#1jec]
 - do [#qcm1verify]
 - :pushpin: do [#tb4q]
 - :pushpin: do [#k7mf]
-- ~~:pushpin: do [#qauthorderpin]~~
-- :pushpin: do [#qnodemerge4wire]
+- ~~I'm typing in a queue item and agent-doc automatically strikes it. This should not happen without a response written into the document explaining why it was auto-struck.~~
+- ~~complete [#wd40]. Reduce the wait to restart. An immediate restart would be ideal...if we can quickly flush whatever state needs to be cleared.~~
 - Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
 - JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
 - `agent-doc tasks/monsterrodholders.md` was added to the codex input but not submitted. Whatever wrote the prompt should also loop to check the input and submit it if not submitted.
 - As I was writing queue items during a turn, an extra `/clear\n/agent-doc tasks/agent-doc/agent-doc-bugs2.md\n/clear` was written into the input and submitted.
-- do [#s81q]
+- do [#s81q]: Rename "Restart Supervisor" to "Recycle Supervisor". Add Restart command alongside "Recycle Supervisor"
+- do [#qstrikeexplain]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -182,6 +204,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qstrikeexplain] [recommended] #agent-doc-bug Free-text queue-head auto-strike (#ftstrike) must be explained + conservative (operator: "I'm typing in a queue item and agent-doc automatically strikes it. This should not happen without a response written into the document explaining why it was auto-struck."). Two modes: (1) silent strike — a struck free-text head leaves no exchange note, so a typed line just disappears; (2) striking a mid-typed line — the response-match heuristic can strike a head the operator is still authoring this turn. Fix: strike only a baseline-present head the committed response answered (defer brand-new live-buffer heads to the cycle that answers them, per #queue-user-edit-overwrite editor-wins), and deterministically record a one-line 'auto-struck queue head: …' note in the response. Plan: tasks/agent-doc/plan-queue-strike-explanation.md
 - [ ] [#s81q] [recommended] #agent-doc-bug #stopvscodemenu Extend #restartagentmenu (JB Restart Agent; plan tasks/agent-doc/plan-restart-agent.md) per operator request to also add a Stop Agent command and mirror BOTH Stop+Restart into the VSCode extension menus. Delta beyond #restartagentmenu: (1) StopAgentAction.kt + plugin.xml registration on the JB side; (2) VSCode command-palette + editor/title menu contributions for stop+restart wired to the same TerminalUtil/route paths. Decide alongside-vs-replace the existing Restart Supervisor Process action; do not remove without operator confirmation. Bump pluginVersion + build signed/unsigned zips (gated by STOP-cutting-releases). Confirm scope before implementing.
 - [ ] [#k7mf] [operator-verify] #g9d7verify #agent-doc-bug Live editor-less repro of #g9d7/#6b5hprimary (agent-doc submodule 260d61b3). Code shipped+pushed: the run_ipc no-delivery bail routes content_ours to the guarded controller-host disk write when there is no plugin-owner lease (live_editor_endpoint_attached=false), reusing decide_editorless_disk_fallback; a live editor still fails closed. After a make install, run agent-doc finalize in a Claude Code pane with NO JB IDE attached and confirm ops.log shows run_ipc_editorless_disk_fallback transport=disk_fallback editor_endpoint=absent plus a committed cycle, with no --force-disk and no recovery=retry_without_disk_write. Operator-gated: needs a real CLI pane.
 - [ ] [#qnodemerge4wire] [focused-cycle] #agent-doc-bug Supply side of #qnodemerge4 op-capture (consumer shipped: EditorOp + replay_editor_ops + merge_with_editor_ops behind the replay-exactness gate, agent-doc submodule ea84ebab). Remaining: (1) per-document op-capture sidecar persistence (record/load/clear/GC) keyed by the base it was captured against; (2) FFI ingestion entry point agent_doc_record_editor_op (FFI-first, plugins stay thin); (3) wire the live merge_contents_crdt path to load+pass theirs editor ops to merge_with_editor_ops and clear the sidecar after; (4) thin JB DocumentListener.documentChanged + VS Code onDidChangeTextDocument reporters that split replacements into delete+insert and report byte offsets; (5) SimWorld coverage. [operator-verify] live eyeball: a concurrent live edit + agent write converges with zero diff-derived duplication and ops replay == editor-observed state. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4). NOTE byte-offset/Yrs unicode-offset semantics (currently ASCII-gated in the consumer) need verification when wiring non-ASCII edits.

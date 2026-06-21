@@ -174,7 +174,20 @@ Implemented the high-value, low-risk half of my recommendation — **deleting th
 2. **`files_in_path_scope` path-prune:** captured as a `[recommended]` backlog item — a net-new *enhancement* (not cleanup); skip unless you want `--path` sub-narrowing of FTS hits.
 
 Then **Phase 5** is the operator-gated crates.io release. Say **"do #015t"** with a direction (or "release") to continue.
-<!-- agent:boundary:9b500971 -->
+
+### Re: do #015t — Phase 4b path-prune (#ve5f) shipped; remainder is operator-gated — opus-4-8
+
+
+The `#ve5f` enhancement from last cycle — `--path` sub-narrowing of FTS/lexical hits — **was exactly #015t's Phase 4b item (b)** (the `files_in_path_scope` zone-map path-prune). It's done and on `origin/main` (tsift `d908371`, superproject pointer → `d908371`); its response just couldn't persist earlier because the IntelliJ plugin's listener socket for this file had wedged. `#ve5f` is now struck/reaped, so this is the consolidated record. `#015t` itself is **NOT** complete — its remaining items are operator-gated (see below), so it stays `[operator-verify]`.
+
+**What landed for #015t Phase 4b (b):** `tsift search --path <subdir>` now narrows the FTS5/lexical result set to that subdirectory (the FTS path searches the whole index since `content_fts` paths are absolute, so `--path` previously scoped only the symbol prepass). `cmd_search_with_budget` captures the canonical sub-scope; `prune_hits_to_path_scope` drops hits outside it while preserving each survivor's global BM25 `rank`. No-op for `--exact`, skipped for `--federated`, whole-index default for `--path .`. `make check` green; new `prune_path_scope_tests`; live-verified (whole-repo 10 hits → 1 under `--path packages/tsift-search`). SPEC + VERSIONS updated; also synced the stale `opencode-tsift`/`AGENTS.md` `0.1.73` version markers.
+
+**What's left on #015t — both genuinely operator-gated, not agent-drainable:**
+1. **Phase 4b (a) — degraded-read-only engine decision:** keep `TokenIndex::build` as the in-memory live-walk fallback (current) **or** replace that one call site with a live `rg -F` walk and delete the type. This changes degraded-read-only behavior, so it's your design call.
+2. **Phase 5 — the crates.io release** (operator-gated).
+
+The queue's `:pushpin: Implement your recommendations.` head is already answered (the token-index.json deletion cycle) — stale, no action. Tell me **(a) keep / rg -F**, or **"release"**, to move #015t forward.
+<!-- agent:boundary:dc75c801 -->
 <!-- /agent:exchange -->
 
 ## Queue

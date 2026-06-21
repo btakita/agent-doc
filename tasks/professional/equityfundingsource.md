@@ -69,7 +69,7 @@ Already deployed — nothing new to push. EFS `fbabaa9` == `origin/main` is the 
 - **#msg-unify3 / #msg-unify4 — internal data cutover.** Move *live* borrower/lender rows onto `messages` (dual-write → backfill → drop legacy). **Zero visible change** — the unified inbox already shows everything — and it rewrites the *live* borrower-chat write path (Durable Object WebSocket), so it carries real regression risk for **no user-facing benefit right now**. I'd treat these as optional internal cleanup to schedule deliberately, not livestream-grind.
 
 **So:** want me to build **#msg-unify5 (broker thread)** next — the last visible win — and shelve the #msg-unify3/4 cutover as optional cleanup? Or push through the cutover anyway? Either way the queue still has both `deploy` heads (both no-ops now) and the three phase heads; tell me the priority and I'll drive it.
-<!-- agent:boundary:7ea68b70 -->
+<!-- agent:boundary:2ec2620b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,12 +81,11 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#msg-unify2]
-- do [#msg-unify3]
-- do [#msg-unify4]
-- do [#msg-unify5]
+- ~~do [#msg-unify2]~~
+- :pushpin: do [#msg-unify3]
+- :pushpin: do [#msg-unify4]
+- :pushpin: do [#msg-unify5]
 - :pushpin: deploy
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

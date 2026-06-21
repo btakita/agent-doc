@@ -39,7 +39,26 @@ completed
 Compacted content:
 - Archived 2 response topic(s): queue cleanup + next-step direction; #qprtloss and #qnodemerge5 - gpt-5
 - Prior summary/context: prior compacted content: Archived 8 response topic(s): fix #rt83 churn + commit agent-doc files + queue dedup; queue ...
-<!-- agent:boundary:f4b68194 -->
+
+### Re: #1jec — gpt-5
+
+`#1jec` is still an operator-live verification item, not agent-drainable implementation work. I am leaving the backlog item open. The shipped implementation it verifies is `#yzer`: binary reconnect decision plus the JB plugin reconnect re-read path, with the existing SimWorld coverage from that cycle.
+
+Install and test this only at a supervisor recycle boundary. The proof target is:
+
+1. Run `make install`, reinstall JB plugin `0.2.172`, then run `agent-doc admin recycle`.
+2. Repro with a session doc open in JB: kill/restart the supervisor so the binary commits while the plugin is disconnected, then reconnect the plugin.
+3. Expected positive proof: ops.log contains `reconnect_buffer_decision decision=reread_disk #yzer`, the editor buffer equals HEAD, and there is no File Cache Conflict.
+4. Expected preservation proof: if the editor buffer contains genuine unsaved user edits, ops.log contains `decision=keep_buffer` and those edits remain intact.
+
+Preflight warned that `#1jec` semantically overlaps completed item `#yzer`; I am treating that as expected because `#1jec` is the live verification follow-up for the already-shipped `#yzer` work, not a duplicate implementation task.
+
+Proof:
+- Changed paths: none by me before finalize; the worktree already had unrelated dirty files.
+- Commands: `tsift status`, `tsift status --fix`, `tsift index --workspace .`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `git status --short`.
+- Verification: no tests run because no code changed.
+- Escalation: none.
+<!-- agent:boundary:0484f435 -->
 <!-- /agent:exchange -->
 
 ## Queue

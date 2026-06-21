@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -246,7 +246,33 @@ All three pieces of your request are now live: the **advance-step banner** on le
 3. Log in as that lender → dashboard → "Messages from EFS" card should show it; reply back; confirm the reply appears in the admin card.
 
 **Observation for `#lender-card-msg-email`:** the live worker has `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true` and `EFS_EMAIL_FROM=info@…` already set — so the Resend sending path may no longer be blocked the way `#f4rq` assumed. If you want, next cycle I can wire the account-message email notify (mirroring the deal-thread one) and we can verify a real send.
-<!-- agent:boundary:26a2f7bb -->
+
+### Re: Is all communication one table? Full history? Tags/threads? — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Is all communication between admin <-> borrower, admin <-> lender, and admin <-> broker handled in a single table? Will all communication components show the entire conversation history? Can we have tags on each message, or threads, to filter communications by topic?
+
+Short answers: **no, not one table; each surface shows only its own scope's history (no unified per-person view, and brokers have no thread at all); and there are no tags/threads today.** Details:
+
+**1. Not a single table — there are three separate conversation systems (same shape, different keys), plus a contact form and notifications:**
+
+| Party | Table | Keyed on | Where it shows | Live? |
+|---|---|---|---|---|
+| **Admin ↔ borrower** | `chat_messages` (sessions) | loan/session | `/admin/messages` "Portal Messages" + borrower portal | yes — WebSocket (Durable Object) |
+| **Admin ↔ lender (per deal)** | `deal_interest_lender_messages` | deal interest | lender-pipeline card / deal detail; lender's deal page | no (fetch) |
+| **Admin ↔ lender (account)** | `lender_account_messages` *(new)* | lender user | lender card dialog; lender dashboard | no (fetch) |
+| **Admin → broker** | *(none)* — `notifications` table only | — | broker portal notifications | one-way |
+| Public contact form | `contact_messages` | — | `/admin/messages` "Contact Messages" | one-way |
+
+So **admin↔broker is not a two-way thread at all** — brokers only get in-app notifications (+ optional email via `broker/notify.ts`). The three real threads are separate tables that happen to share the same columns (`sender_role`, `body`, `created_at`, attachments).
+
+**2. Full conversation history?** Each component shows the **complete history of its own scope** (a borrower's loan chat, one deal's lender thread, a lender's account thread). But there is **no unified per-person view** — the `/admin/messages` hub shows borrower chat + contact only; a lender's deal messages and account messages live in different screens and aren't merged; brokers have none. An admin can't yet open one place and see "everything exchanged with this person."
+
+**3. Tags / threads to filter by topic?** **Not today.** Every table is a flat chronological list — no `topic`/`tag`/`label` column and no sub-threads. The only filtering is by scope (which session/deal/lender) plus a text search on the borrower chat.
+
+**Recommendation (your call — I didn't build it):** if you want unified comms + topic filtering, the clean path is a single **`messages`** model — `party` (borrower/lender/broker), `scope_type`+`scope_id` (loan/deal/account/none), `sender_role`, `body`, plus a `topic`/`tag` and optional `thread_id` — with the existing three tables migrated onto it and a unified admin **inbox** that groups by person and filters by tag. That also gives brokers a real two-way thread for free. It's a meaningful refactor of three live tables, so I'd want to do it as its own planned cycle. Want me to write that plan (and, if you like, a thin first step: add a `topic` tag + a unified read-view without moving data yet)?
+<!-- agent:boundary:9ac6d1fb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -258,9 +284,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Is all communication between admin <-> borrower, admin <-> lender, and admin <-> broker handled in a single table? Will all communication components show the entire conversation history? Can we have tags on each message, or threads, to filter communications by topic?
-- ~~:pushpin: do [#lender-card-msg-portal]~~
-- ~~:pushpin: do [#lender-card-msg-email]~~
 <!-- /agent:queue -->
 
 ## Backlog

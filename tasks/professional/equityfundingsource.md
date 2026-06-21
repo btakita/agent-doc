@@ -38,7 +38,23 @@ completed
 Compacted content:
 ❯ - Archived 12 response topic(s): what is "Funding Commitments" vs group confirmed % vs selection; lender-portal group allocation dialog + deploy; why lender2 shows the "Stalled 26 days … candidate for outreach" tag; 9 more
 ❯ - Prior summary/context: prior compacted content: Archived 12 response topic(s): Lender Bros 60% committed vs group 100% allocated; deploy #ad...
-<!-- agent:boundary:b6422ac7 -->
+
+### Re: Unified inbox shipped + deployed (#msg-unify2) — opus-4-8
+
+Phase 2 done and **live** (the doc compacted out-of-band mid-cycle; recovered the session and recording this on the compacted doc). Worker version `933a581c-2d9a-40d1-854a-317192df93df`; EFS `fbabaa9`; migration `0096` applied to prod D1.
+
+**What you can see now:** Admin → **Messages → "All Messages"** tab → enter a user ID → their **entire conversation history across every channel** (borrower chat + lender-deal + lender-account) in one chronological thread, each message badged with party + scope and a **topic filter**. Read-only adapter over the live tables — no data moved.
+
+- `lib/messages_unified.ts` — pure adapters + chronological merge + a defensive per-source orchestrator.
+- `GET /api/admin/unified-messages/:id` (+ `?topic=` filter). Smoke: home `200`, route `401` (auth-guarded, live). **1008 tests pass / 0 fail**.
+
+**Where the unification stands:** the operator-facing payoff is live — the **model** (#msg-unify1) + the **unified per-person inbox with topic filtering** (#msg-unify2). Remaining phases are internal/additive:
+
+- **#msg-unify3 / #msg-unify4 — data cutover.** Move *live* borrower/lender rows onto `messages` (dual-write → backfill → dual-read → drop legacy). A live-prod-data migration, so each should be its own deliberate cycle — and it changes nothing you *see* (the inbox already shows everything); it's just collapsing four tables into one.
+- **#msg-unify5 — broker two-way thread** (a new visible feature; brokers get one-way notifications only today).
+
+**Your call:** proceed with **#msg-unify3 borrower cutover** (carefully, dual-write first), do the **#msg-unify5 broker thread** (new visible feature), or call the unification good here — the inbox + model are already live, so the cutover isn't urgent.
+<!-- agent:boundary:c8dbc2ad -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,7 +77,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#msg-unify2] [recommended] Unified admin inbox (read) — an /admin/messages view aggregating the three existing message sources grouped by person with a topic filter, reading via the unified messages_R_ shape. No data move yet. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [ ] [#msg-unify3] [recommended] Borrower cutover — write borrower chat onto the unified messages table (keep the Durable Object live path), backfill chat_messages, dual-read then drop. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [ ] [#msg-unify4] [recommended] Lender cutover — migrate deal_interest_lender_messages + lender_account_messages onto the unified messages table, backfill, dual-read then drop. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [ ] [#msg-unify5] [recommended] Broker two-way thread — give brokers a real messages thread (party=broker) in the broker portal + unified admin inbox (today brokers get one-way notifications only). Plan: src/equityfundingsource-dev/prds/message-unification.md.

@@ -222,7 +222,20 @@ I see your test: you edited the struck `~~do [#qnodemerge4wire]~~` line to `~...
 **2. The session's editor IPC is unreliable right now.** Last cycle the JetBrains plugin listener returned `ack status error` (dead listener) — every `finalize` hits `live_prompt_drift` and recovers via `commit`, and that `content_ours` recovery has been **dropping queue edits** (it dropped `do [#routeretest]` last cycle). That same path could drop your `🧪` edit, which would look exactly like the false-strike bug but is actually the dead listener. For a clean, trustworthy strike test, **restart the JetBrains IDE / Claude session** first to revive the listener — then run the free-text probe in #1.
 
 If your `🧪` edit or any queue line disappears after this commit, that's the dead-listener drop (#queue-user-edit-overwrite via content_ours), not `#ftstrike` — I'll restore it.
-<!-- agent:boundary:d9173951 -->
+
+### Re: 🧪 test line NOT struck — #qstrikeexplain protection confirmed — opus-4-8
+
+Your test passed. The in-flight line `🧪 test edit for [#qnodemerge4wire]` is sitting **un-struck** in the queue after preflight ran all its strike passes. That's exactly the `#qstrikeexplain` fix working:
+
+- It's a **brand-new live-buffer head** (not in the pre-turn baseline), so the free-text `#ftstrike` pass defers it — never strikes a line you're still authoring.
+- Even though it **cites the done id `#qnodemerge4wire`**, the done-id strike correctly left it alone: that pass only strikes `do [#id]` *directive* heads, not a line that merely references an id in prose. So the done-id path was never a false-strike risk here.
+
+I'm deliberately **not** striking it — it's your probe, and I'm preserving it. (If you want to see a strike *correctly* fire: keep a stable free-text head across two cycles, then answer it with a `> **Queue prompt:**` blockquote — that one is baseline-present and answered, so it strikes.)
+
+**On `do [#routeretest]`:** that's the `[operator-verify]` live re-test, and it's genuinely yours to drive — the route/dispatch code is already shipped (`not_dispatched` full-trigger re-send, `send_direct_pane_enter_resubmit_until_stable`, `dispatch_inject attempt=N`), so there's nothing for me to re-implement. Trigger a JB/Codex Run-Agent-Doc on the fresh binary and check `ops.log` for a single `dispatch_inject attempt=1` + a submitted trigger. If it stalls or stacks un-submitted copies, that's a real residual gap and I'll dig into the dispatch path.
+
+IPC note: if you restarted the IDE, this cycle should commit cleanly via the revived listener. If it still drifts, the work is safe in git regardless.
+<!-- agent:boundary:db7e0338 -->
 <!-- /agent:exchange -->
 
 ## Queue

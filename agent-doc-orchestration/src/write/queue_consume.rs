@@ -782,14 +782,47 @@ pub(crate) fn free_text_head_answered_by_response(response_body: &str, head_text
     response_blockquote_text(response_body).contains(&head_norm)
 }
 
+/// True when `head_text`'s normalized prose prefix matches a free-text queue head
+/// present in the stable pre-turn `baseline` document (`#qstrikeexplain` Phase 2).
+///
+/// Gates `#ftstrike` so a head that first appeared in the live buffer THIS turn —
+/// an in-flight operator edit the operator is still authoring — is never
+/// same-cycle struck. The match reuses the same prose-prefix normalization the
+/// answer-match uses, so a baseline head and the current head compare on equal
+/// footing regardless of cosmetic pin/`- ` differences. A head with fewer than
+/// four significant prose words can never be confidently identified in the
+/// baseline (matching the answer-match floor), so it is treated as not-present.
+fn free_text_head_present_in_baseline(baseline: &str, head_text: &str) -> bool {
+    let head_clean = crate::queue::strip_priority_markers(head_text);
+    let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
+    if head_norm.split(' ').filter(|w| !w.is_empty()).count() < 4 {
+        return false;
+    }
+    let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(baseline, "queue") else {
+        return false;
+    };
+    nodes.iter().any(|node| {
+        let base_clean = crate::queue::strip_priority_markers(node.item.text.trim());
+        let base_norm = normalize_for_answer_match(&free_text_head_match_prose(&base_clean));
+        !base_norm.is_empty() && base_norm == head_norm
+    })
+}
+
 /// Node keys of every non-struck free-text queue head that `response_body`
 /// answers, at ANY position in the queue (#ftstrike). Mirrors how
 /// `strike_done_queue_head_prompts` strikes id-backed heads regardless of
 /// position, but matches free-text heads to the answering response instead of a
 /// tracked id outcome.
+///
+/// `baseline` is the stable pre-turn document (the preflight baseline). When
+/// supplied, a candidate head is struck only if it was already present in that
+/// baseline (`#qstrikeexplain` Phase 2 — conservative strike): a head that first
+/// appeared in the live buffer this turn defers to the cycle that actually
+/// answers it. `None` skips the gate (legacy behavior / no baseline available).
 pub(crate) fn answered_free_text_head_node_keys(
     content: &str,
     response_body: &str,
+    baseline: Option<&str>,
 ) -> Result<Vec<String>> {
     if response_body.trim().is_empty() {
         return Ok(Vec::new());
@@ -806,9 +839,24 @@ pub(crate) fn answered_free_text_head_node_keys(
         if text.is_empty() || !queue_prompt_text_is_free_text(content, text) {
             continue;
         }
-        if free_text_head_answered_by_response(response_body, text) {
-            keys.push(node.node_key);
+        if !free_text_head_answered_by_response(response_body, text) {
+            continue;
         }
+        // `#qstrikeexplain` Phase 2 — never strike a head still being authored this
+        // turn. A free-text head that is NOT in the stable pre-turn baseline first
+        // appeared in the live buffer during this turn (an in-flight operator edit);
+        // defer it to the cycle that actually answers it (editor-wins, consistent
+        // with #queue-user-edit-overwrite) instead of striking the line the operator
+        // is typing.
+        if let Some(baseline) = baseline
+            && !free_text_head_present_in_baseline(baseline, text)
+        {
+            eprintln!(
+                "[queue] #qstrikeexplain: deferring free-text head strike — head not in pre-turn baseline (in-flight operator edit)"
+            );
+            continue;
+        }
+        keys.push(node.node_key);
     }
     Ok(keys)
 }
@@ -836,7 +884,15 @@ pub fn strike_answered_free_text_queue_heads(
     if fm.queue_active != Some(true) {
         return Ok(0);
     }
-    let keys = answered_free_text_head_node_keys(&content, response_body)?;
+    // `#qstrikeexplain` Phase 2: the stable pre-turn baseline gates which heads may
+    // be struck — a head absent from it is an in-flight operator edit and must not
+    // be struck this cycle. A missing baseline (rare; preflight writes it each
+    // cycle) skips the gate so legacy strike behavior is preserved.
+    let baseline = match snapshot::baseline_path_for(file) {
+        Ok(path) => std::fs::read_to_string(&path).ok(),
+        Err(_) => None,
+    };
+    let keys = answered_free_text_head_node_keys(&content, response_body, baseline.as_deref())?;
     if keys.is_empty() {
         return Ok(0);
     }
@@ -851,7 +907,8 @@ pub fn strike_answered_free_text_queue_heads(
     // converge on the struck state.
     let new_snapshot = match snapshot::load(file)? {
         Some(snap) => {
-            let snap_keys = answered_free_text_head_node_keys(&snap, response_body)?;
+            let snap_keys =
+                answered_free_text_head_node_keys(&snap, response_body, baseline.as_deref())?;
             if snap_keys.is_empty() {
                 None
             } else {
@@ -3059,7 +3116,7 @@ mod core_tests {
             "- :pushpin: My free-text queue items are not immediately struck as if they are addressed.\n",
             "<!-- /agent:queue -->\n",
         );
-        let keys = answered_free_text_head_node_keys(content, FTSTRIKE_RESPONSE).unwrap();
+        let keys = answered_free_text_head_node_keys(content, FTSTRIKE_RESPONSE, None).unwrap();
         assert_eq!(
             keys.len(),
             2,
@@ -3070,6 +3127,83 @@ mod core_tests {
             !keys.iter().any(|k| k.contains("fullboundary")),
             "id-backed head must not be struck by the free-text pass: {keys:?}"
         );
+    }
+
+    #[test]
+    fn answered_free_text_head_not_struck_when_absent_from_baseline() {
+        // #qstrikeexplain Phase 2: the operator is TYPING a new queue line this turn.
+        // It is answered by the response (it fuzzy-matches a quoted prompt) but is
+        // NOT present in the stable pre-turn baseline, so it must NOT be struck —
+        // it defers to the cycle that actually answers it.
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- :pushpin: My free-text queue items are not immediately struck as if they are addressed.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        // Baseline (pre-turn) does NOT contain that head — it first appeared this turn.
+        let baseline = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- some entirely different earlier queue line about another topic\n",
+            "<!-- /agent:queue -->\n",
+        );
+        // Without the gate the head IS selected (answered).
+        let ungated = answered_free_text_head_node_keys(content, FTSTRIKE_RESPONSE, None).unwrap();
+        assert_eq!(ungated.len(), 1, "answered head selected without the gate");
+        // With the baseline gate the in-flight head is deferred (not struck).
+        let gated =
+            answered_free_text_head_node_keys(content, FTSTRIKE_RESPONSE, Some(baseline)).unwrap();
+        assert!(
+            gated.is_empty(),
+            "a head absent from the pre-turn baseline must not be struck: {gated:?}"
+        );
+    }
+
+    #[test]
+    fn answered_free_text_head_struck_when_present_in_baseline() {
+        // #qstrikeexplain Phase 2: a stable head the operator authored in a PRIOR
+        // turn (present in the baseline) and answered this turn is still struck —
+        // the gate only defers brand-new in-flight heads, never legitimate ones.
+        let head =
+            "- :pushpin: My free-text queue items are not immediately struck as if they are addressed.\n";
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+        );
+        let content = format!("{content}{head}<!-- /agent:queue -->\n");
+        // Baseline contains the SAME head (cosmetic differences must not matter).
+        let baseline = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- My free-text queue items are not immediately struck as if they are addressed.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let gated =
+            answered_free_text_head_node_keys(&content, FTSTRIKE_RESPONSE, Some(baseline)).unwrap();
+        assert_eq!(
+            gated.len(),
+            1,
+            "a baseline-present answered head must still be struck: {gated:?}"
+        );
+    }
+
+    #[test]
+    fn free_text_head_present_in_baseline_ignores_pin_and_dash_cosmetics() {
+        let baseline = concat!(
+            "<!-- agent:queue -->\n",
+            "- My free-text queue items are not immediately struck as if they are addressed.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(free_text_head_present_in_baseline(
+            baseline,
+            ":pushpin: My free-text queue items are not immediately struck as if they are addressed."
+        ));
+        // A different head is not present.
+        assert!(!free_text_head_present_in_baseline(
+            baseline,
+            "An unrelated head about a completely separate matter entirely"
+        ));
     }
 
     #[test]

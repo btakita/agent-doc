@@ -790,7 +790,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // buffer no longer triggers `File Cache Conflict`. Each branch keeps its
         // own `reason=committed_content_lost transport=…` log line, replacing
         // the prior single unconditional `reason=committed_content_lost`.
-        ("agent-doc-orchestration/src/git.rs", "reason=") => 13,
+        // +2 (`#pcwcwarn`): the per-component stale-exchange reconcile logs
+        // `reason=stale_editor_exchange transport=…` on both the editor-IPC and
+        // disk transports, the INVERSE of `#qpcwcmerge` (HEAD wins inside the
+        // agent-owned `exchange`, editor wins outside it).
+        ("agent-doc-orchestration/src/git.rs", "reason=") => 15,
         ("src/orchestrate.rs", "guard_") => 0,
         ("src/orchestrate/dag.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it

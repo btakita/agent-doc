@@ -417,6 +417,97 @@ fn convergence_recovered_editor_wins_outside_response(recovered: &str, snapshot:
     norm(&rec_blanked) == norm(&snap_blanked) && norm(recovered) != norm(snapshot)
 }
 
+/// `#pcwcwarn` — reconcile the agent-owned `exchange` component of a carry-forward
+/// superset working tree back to HEAD when the working tree's `exchange` is HEAD's
+/// PLUS only stale leftover blockquote lines. Returns the reconciled document, or
+/// `None` to leave the working tree alone.
+///
+/// The post-commit working tree reaches this path only when it lost no committed
+/// content (it is a superset of HEAD — the legitimate carry-forward invariant). The
+/// `#pcwcwarn` failure mode is a stale live editor buffer that retains a prior
+/// cycle's `> **Queue prompt:**`-style blockquote INSIDE the `exchange` response
+/// component: `flush_editor_buffer_to_clear_drift` persists the stale buffer, so
+/// the worktree re-drifts every cycle and needs a manual `git checkout HEAD`. The
+/// agent owns `exchange`, so HEAD is authoritative there; this splices HEAD's
+/// `exchange` body into the working tree's `exchange` span, dropping the stale
+/// blockquote while preserving every editor-owned component (queue/backlog/… and
+/// any plugin-defined component) exactly as the working tree has it. It is the
+/// per-component INVERSE of `#qpcwcmerge`
+/// (`convergence_recovered_editor_wins_outside_response`): there the editor wins
+/// OUTSIDE the response; here HEAD wins INSIDE the response.
+///
+/// Deliberately NARROW so it never reconciles legitimate exchange carry-forward
+/// (a compacted `### Session Summary`, an in-progress scratch comment, a typed
+/// follow-up). Fails closed (`None`) unless ALL hold:
+/// - both documents parse and have an `exchange` component,
+/// - the `exchange` bodies differ (normalized) — otherwise the flush path owns it,
+/// - every non-blank HEAD `exchange` line is present in the working `exchange`
+///   (HEAD fully contained — the response lost nothing),
+/// - every working-only `exchange` line (absent from HEAD) is a blockquote (`>`)
+///   line — the stale-quote class; any other novel content (summary heading,
+///   archive bullet, scratch comment, prose) means real carry-forward, so preserve,
+/// - no working-only line is a user `PromptTarget` (defence in depth).
+pub fn reconcile_postcommit_exchange_to_head(working: &str, head: &str) -> Option<String> {
+    let working_comps = crate::component::parse(working).ok()?;
+    let head_comps = crate::component::parse(head).ok()?;
+    let head_exchange = head_comps
+        .iter()
+        .find(|c| c.name == AGENT_RESPONSE_COMPONENT)?;
+    let working_exchange = working_comps
+        .iter()
+        .find(|c| c.name == AGENT_RESPONSE_COMPONENT)?;
+    let head_body = head_exchange.content(head);
+    let working_body = working_exchange.content(working);
+    let norm = |t: &str| crate::git::normalize_transient_agent_doc_markers(t);
+    let head_norm = norm(head_body);
+    let working_norm = norm(working_body);
+    if head_norm == working_norm {
+        return None;
+    }
+    // HEAD must be fully contained in the working exchange (no committed response
+    // content dropped from the tree) — line-set containment over the normalized
+    // bodies so `(HEAD)`/boundary markers do not perturb the comparison.
+    let head_lines: HashSet<&str> = head_norm
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let working_lines: HashSet<&str> = working_norm
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if !head_lines.iter().all(|l| working_lines.contains(l)) {
+        return None;
+    }
+    // Every working-only line must be a stale blockquote — the narrow class this
+    // repair targets. Any other novel line is legitimate exchange carry-forward.
+    let working_only: Vec<&str> = working_lines.difference(&head_lines).copied().collect();
+    if working_only.is_empty() || !working_only.iter().all(|l| l.starts_with('>')) {
+        return None;
+    }
+    // Defence in depth: never drop a genuine new user prompt typed into the tail.
+    let exchange_changes = prompt_bearing_user_changes_between(head_body, working_body);
+    if exchange_changes
+        .iter()
+        .any(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
+    {
+        return None;
+    }
+    let start = working_exchange.open_end;
+    let end = working_exchange.close_start;
+    if !(start <= end
+        && end <= working.len()
+        && working.is_char_boundary(start)
+        && working.is_char_boundary(end))
+    {
+        return None;
+    }
+    let mut out = working.to_string();
+    out.replace_range(start..end, head_body);
+    Some(out)
+}
+
 pub(crate) fn try_editor_converge_live_prompt_drift(
     file: &Path,
     project_root: &Path,
@@ -1193,6 +1284,69 @@ mod core_tests {
         assert!(
             !convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
             "a structural component add must fail closed"
+        );
+    }
+
+    #[test]
+    fn pcwcwarn_reconciles_stale_exchange_blockquote_preserving_queue() {
+        // #pcwcwarn: the working tree (stale editor buffer) carries a prior cycle's
+        // `> **Queue prompt:**` blockquote INSIDE the exchange that HEAD dropped,
+        // AND the operator carried a struck queue head forward. HEAD's exchange is
+        // authoritative; the queue is editor-owned. Reconcile must adopt HEAD's
+        // exchange while preserving the working tree's queue.
+        let head = doc_with_queue_and_exchange(
+            "- a live head\n",
+            "### Re: topic\n\nAnswered cleanly.",
+        );
+        let working = doc_with_queue_and_exchange(
+            "- ~~a live head~~\n",
+            "### Re: topic\n\nAnswered cleanly.\n\n> **Queue prompt:** stale leftover from a prior cycle",
+        );
+        let reconciled = reconcile_postcommit_exchange_to_head(&working, &head)
+            .expect("stale exchange blockquote must reconcile to HEAD");
+        assert!(
+            !reconciled.contains("stale leftover from a prior cycle"),
+            "the stale exchange blockquote must be dropped"
+        );
+        assert!(
+            reconciled.contains("- ~~a live head~~"),
+            "the editor-owned queue (struck head) must be preserved"
+        );
+        // The exchange now matches HEAD; a second pass is a no-op.
+        assert!(
+            reconcile_postcommit_exchange_to_head(&reconciled, &head).is_none()
+                || reconcile_postcommit_exchange_to_head(&reconciled, &head)
+                    .as_deref()
+                    .map(|d| d == reconciled)
+                    .unwrap_or(false),
+            "reconcile must converge"
+        );
+    }
+
+    #[test]
+    fn pcwcwarn_returns_none_when_only_queue_differs() {
+        // The exchange already matches HEAD; the divergence is purely editor-owned
+        // queue carry-forward. Reconcile must NOT fire — the flush path handles it.
+        let head = doc_with_queue_and_exchange("- a head\n", "### Re: x\n\nbody");
+        let working = doc_with_queue_and_exchange("- ~~a head~~\n", "### Re: x\n\nbody");
+        assert!(
+            reconcile_postcommit_exchange_to_head(&working, &head).is_none(),
+            "queue-only divergence with a matching exchange must not reconcile"
+        );
+    }
+
+    #[test]
+    fn pcwcwarn_fails_closed_on_new_user_prompt_in_exchange() {
+        // A genuine post-commit user follow-up typed into the exchange tail must NOT
+        // be dropped by adopting HEAD — fail closed and leave it for the next cycle.
+        let head = doc_with_queue_and_exchange("- a head\n", "### Re: x\n\nbody");
+        let working = doc_with_queue_and_exchange(
+            "- a head\n",
+            "### Re: x\n\nbody\n\n❯ do [#followup] a new directive",
+        );
+        assert!(
+            reconcile_postcommit_exchange_to_head(&working, &head).is_none(),
+            "a new user PromptTarget in the working exchange must fail closed"
         );
     }
 

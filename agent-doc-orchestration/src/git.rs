@@ -2527,6 +2527,69 @@ fn reconcile_postcommit_worktree_to_head(
     }
 }
 
+/// `#pcwcwarn` — persist a per-component `exchange`-to-HEAD reconcile of a stale
+/// editor buffer. Mirrors the lost-content path's editor-IPC-first ordering: when a
+/// JB/VS Code listener is active, push the reconciled buffer (HEAD `exchange` +
+/// editor-owned components) through `refresh_content` so the IDE stops writing the
+/// stale exchange back, and skip the disk write that would pop a File Cache
+/// Conflict (`#pcwcdiskfree`). A failed/no-ack refresh — or no listener at all —
+/// falls back to the authoritative disk write so the worktree still reconciles.
+/// Returns true when the reconcile was persisted via either transport.
+fn try_postcommit_exchange_reconcile(
+    file: &Path,
+    reconciled: &str,
+    stale_working: &str,
+    head_sha: &str,
+    tree_sha: &str,
+) -> bool {
+    let listener_active = file
+        .canonicalize()
+        .ok()
+        .map(|canonical| {
+            let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
+            crate::ipc_socket::is_listener_active(&project_root)
+        })
+        .unwrap_or(false);
+    if listener_active && send_postcommit_editor_refresh(file, reconciled, stale_working) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "postcommit_exchange_reconciled file={} head={} tree_before={} reason=stale_editor_exchange transport=editor_ipc_skipped_disk_write",
+                file.display(),
+                &head_sha[..head_sha.len().min(12)],
+                &tree_sha[..tree_sha.len().min(12)],
+            ),
+        );
+        eprintln!(
+            "[commit] postcommit_worktree_check match=false for {} — editor IPC acked HEAD exchange refresh (editor-owned components preserved); skipping disk write (#pcwcwarn)",
+            file.display()
+        );
+        return true;
+    }
+    match std::fs::write(file, reconciled) {
+        Ok(()) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "postcommit_exchange_reconciled file={} head={} tree_before={} reason=stale_editor_exchange transport=disk",
+                    file.display(),
+                    &head_sha[..head_sha.len().min(12)],
+                    &tree_sha[..tree_sha.len().min(12)],
+                ),
+            );
+            eprintln!(
+                "[commit] postcommit_worktree_check match=false for {} — reconciled stale editor exchange to HEAD on disk (editor-owned components preserved) (#pcwcwarn)",
+                file.display()
+            );
+            true
+        }
+        Err(e) => {
+            eprintln!("[commit] postcommit exchange reconcile write failed: {e}");
+            false
+        }
+    }
+}
+
 fn emit_postcommit_worktree_check(file: &Path) {
     let head_doc = match show_head(file) {
         Ok(Some(head)) => head,
@@ -2623,6 +2686,20 @@ fn emit_postcommit_worktree_check(file: &Path) {
                     send_postcommit_editor_refresh(file, &head_doc, &working);
                 }
             }
+            return;
+        }
+        // #pcwcwarn: the carry-forward superset can be a STALE editor buffer that
+        // carries a prior cycle's content INSIDE the agent-owned `exchange`
+        // response component (e.g. a leftover `> **Queue prompt:**` blockquote).
+        // The agent owns `exchange`, so HEAD is authoritative there; flushing the
+        // editor buffer would persist the stale response and re-drift every cycle.
+        // Reconcile ONLY the `exchange` component to HEAD, preserving every
+        // editor-owned component (queue/backlog/…). Per-component INVERSE of
+        // #qpcwcmerge (which lets the editor win OUTSIDE the response).
+        if let Some(reconciled) =
+            crate::write::reconcile_postcommit_exchange_to_head(&working, &head_doc)
+            && try_postcommit_exchange_reconcile(file, &reconciled, &working, &head_sha, &tree_sha)
+        {
             return;
         }
         // #jb-editor-save-resolves-drift: a carry-forward superset (the working

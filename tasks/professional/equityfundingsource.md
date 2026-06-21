@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -272,7 +272,7 @@ So **admin↔broker is not a two-way thread at all** — brokers only get in-app
 **3. Tags / threads to filter by topic?** **Not today.** Every table is a flat chronological list — no `topic`/`tag`/`label` column and no sub-threads. The only filtering is by scope (which session/deal/lender) plus a text search on the borrower chat.
 
 **Recommendation (your call — I didn't build it):** if you want unified comms + topic filtering, the clean path is a single **`messages`** model — `party` (borrower/lender/broker), `scope_type`+`scope_id` (loan/deal/account/none), `sender_role`, `body`, plus a `topic`/`tag` and optional `thread_id` — with the existing three tables migrated onto it and a unified admin **inbox** that groups by person and filters by tag. That also gives brokers a real two-way thread for free. It's a meaningful refactor of three live tables, so I'd want to do it as its own planned cycle. Want me to write that plan (and, if you like, a thin first step: add a `topic` tag + a unified read-view without moving data yet)?
-<!-- agent:boundary:9ac6d1fb -->
+<!-- agent:boundary:e70262f0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -284,6 +284,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: Do your recommended message unification model.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -68,7 +68,18 @@ Drained the full queue. All six dev items shipped, tested (1076 passing), commit
 - **#portalmsg4** (`468c8fb`) — borrower portal shell mounts the always-visible `<PortalMessages launcher>` (mirroring lender/broker), over the REST `/api/borrower/messages` thread. The live Durable Object realtime chat page is **untouched** — the launcher coexists with it rather than downgrading realtime to polling.
 
 Queue head **deploy** — done (prod deploy above).
-<!-- agent:boundary:e457f914 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+> **Queue prompt:** deploy
+
+Done. Deployed `src/equityfundingsource-dev` to prod Cloudflare (worker version `16126fd8-9dcc-42be-a4c8-9a26e4e16cff`, `https://equityfundingsource.brian-takita.workers.dev`). `cf:d1:migrate:remote` reported **no migrations to apply** (all msgmail/portalmsg work reuses existing tables), and `MESSAGE_EMAIL_INBOUND_ENABLED` is confirmed **absent** from the deployed env, so the inbound email round-trip stays disabled until #msgmail4 is unblocked. Site health check: 301 (root redirect). Full queue drained.
+<!-- agent:boundary:919195e3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,13 +91,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: do [#portalmsg4]~~
-- ~~:pushpin: do [#portalmsg2-dealthreads]~~
-- deploy
-- ~~:pushpin: do [#msgmail1]~~
-- ~~:pushpin: do [#msgmail2]~~
-- ~~do [#msgmail3]~~
-- ~~do [#msgmail4]~~
 <!-- /agent:queue -->
 
 ## Backlog

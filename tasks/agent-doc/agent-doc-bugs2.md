@@ -483,7 +483,25 @@ The queue now carries the five accuracy levers in dependency/priority order, whi
 - The queue is still `paused` (#rt83/#qflood phantom-pin churn). The pause reason is now **stale** — it asks to install 0.34.20 + recycle, but the installed binary is already **0.34.35**. The implementation merge work (`#qnodemerge2`–`5`) is operator-driven focused-cycle work and is gated by STOP-cutting-releases; I won't start it autonomously here.
 
 To actually run the merge implementation, drive a fresh `/clear`'d focused session per item (the backlog notes already say so), or `agent-doc admin queue resume` if you want the supervisor to start handing them out. Exchange is large now (432 lines / 24 sections) — flagging per accretion guidance, not stalling on it.
-<!-- agent:boundary:df2c17b1 -->
+
+### Re: Renamed the term "cell" → "node" (prose + IDs) — opus-4-8
+
+> **Queue prompt:**
+>
+> Rename the term "cell" to "node".
+
+Done — scope was **prose + IDs** (your AskUserQuestion answer). This instruction had been *consumed-without-action* by a degraded-IPC `content_ours` convergence earlier this cycle (struck in the queue but my prior response only covered the five levers), so I performed it explicitly:
+
+- **IDs:** `#qcellmerge1…5` → `#qnodemerge1…5` everywhere (queue heads, backlog, review, exchange, plan, done archive). `#qcm1verify` kept (abbreviation, not the literal term).
+- **Prose:** `cell`/`cells`/`per-cell`/`multi-cell`/`whole-cell`/`AST-cell` → `node`/… across the session doc + `plan-percell-crdt-merge-isolation.md`.
+- **Preserved (word-boundary safe):** the `plan-percell-*` and `plan-cancelled-*` **filename** substrings (not renamed — you scoped IDs, not paths), and the two verbatim quotes of this instruction itself.
+
+**Commits:** session doc `8993aeaa9` (via `reset --from-current` + `agent-doc commit`, since the queue/backlog are IPC-managed); plan + done archive `d2e5ae76b`. **Verified clean:** 0 `qcellmerge` at HEAD, line counts unchanged (572 / 154 — no duplication), symmetric 59/59 and 36/36 rename diffs. Memory updated to the new IDs.
+
+One inconsistency left by design: the plan **file path** still reads `plan-percell-crdt-merge-isolation.md`. Renaming the file is a `git mv` + reference-update across docs — say the word if you want it; I left it to keep scope at "term + IDs."
+
+Note: exchange is large (warn-level accretion) and the queue stays paused — not looping; 8 deferred operator-gated heads remain.
+<!-- agent:boundary:e129511b -->
 <!-- /agent:exchange -->
 
 ## Queue

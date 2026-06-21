@@ -101,7 +101,32 @@ When a lender expresses interest in a deal **as a Lending Group**, a **% allocat
 So lender2 self-attested accreditation (requirements show "Current"), but has **never been linked to a TMO lender account**, leaving them parked in `requirements_current` for 26 days — past the 14-day window — which is exactly the "signed up, cleared requirements, but isn't actually investing yet" cohort the board is meant to surface for outreach.
 
 **To clear the tag:** link a lender account to the user (moves them to **Lender Ready**, which is outside `INVESTOR_PRE_READY_STATUSES`). The flag then drops regardless of age. Verifying accreditation alone won't clear it while `lender_account` stays null.
-<!-- agent:boundary:dfbe59b7 -->
+> **Queue prompt:** Admin "Lender Profile" dialogs should have "Deactivate Lender" instead of "Delete User". "Deactivate Lender" should have a confirmation dialog. Records must not be deleted from the ui...only deactivated.
+
+> **Queue prompt:** deploy
+
+### Re: Deactivate-only admin lender/user management (no UI hard-deletes) + deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Admin "Lender Profile" dialogs should have "Deactivate Lender" instead of "Delete User". "Deactivate Lender" should have a confirmation dialog. Records must not be deleted from the ui...only deactivated.
+
+
+Done and deployed. Replaced every hard-delete path in the admin user / Lender Profile UI with a non-destructive **deactivate**, and shipped it.
+
+**Changes** (`lib/ui--browser--efs/portal/admin/user_management.tsx`):
+
+- **Lender Profile dialog button** — the `Delete User` button is now role-aware: **"Deactivate Lender"** for lenders (`role === 'investor'`), "Deactivate User" otherwise. A deactivated record shows **"Reactivate Lender / User"** instead (reactivation is non-destructive, so no confirmation).
+- **Confirmation dialog** — `DeleteUserModal` → **`DeactivateUserModal`**: "Deactivate lender? — This suspends {name} and revokes their login access. The record is preserved and can be reactivated later — nothing is deleted." Cancel / **Deactivate Lender** buttons.
+- **No deletes from the UI** — removed the `DELETE /api/admin/users/:id` call, the modal, and the table-row trash action. Deactivation flips status to `'suspended'` via the existing non-destructive `PUT /api/admin/users/:id/status`. The table's Suspend/Activate toggle already covered this; its tooltips/toasts are now role-aware ("Lender deactivated" / "reactivated").
+- The backend hard-delete route still exists but is no longer reachable from any admin UI.
+
+**Scope note:** left the separate "Delete lender **request**" action (`lender_management.tsx`) alone — that's a transient pending-request workflow item (approve/deny/delete), not a lender/user record.
+
+**Verification:** suite **980 pass / 0 fail** (added a regression test asserting no DELETE/Delete-button/DeleteUserModal remains, the `/status` deactivate+reactivate wiring, the confirmation dialog, and the role-aware labels; updated the stale `#b0wq` assertion). `bun run build` + `bun run build:worker` clean.
+
+**Deploy:** `equityfundingsource` worker deployed → version `970b2557-44ad-4b84-bc87-3c577e7c7664` at https://equityfundingsource.brian-takita.workers.dev. Code committed `974de08` in the EFS submodule.
+<!-- agent:boundary:18a4540c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -113,7 +138,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Admin "Lender Profile" dialogs should have "Deactivate Lender" instead of "Delete User". "Deactivate Lender" should have a confirmation dialog. Records must not be deleted from the ui...only deactivated.
+- ~~:pushpin: Admin "Lender Profile" dialogs should have "Deactivate Lender" instead of "Delete User". "Deactivate Lender" should have a confirmation dialog. Records must not be deleted from the ui...only deactivated.~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -55,7 +55,7 @@ Selecting a lender/group (`selected_at`, via `PUT …/select`) is the **admin's 
 So the lifecycle is: **interest/proposal** (soft) → **group % split** (intent) → **admin selects funder** (decision, blends rate, TMO) → **lender funds** (`funds` pending = real commitment) → **wire confirmed** (`active` = funded). "100% of the loan will be funded" on selection is the *expectation*; it's realized only once funding commitments covering the loan are submitted and their wires confirmed.
 
 One gap worth flagging (ties to your earlier question): selection sends the lender **no email/notification**, so today nothing automatically tells a selected lender to go submit their funding commitment — that's a manual nudge. Let me know if you want a notification on select.
-<!-- agent:boundary:01003bad -->
+<!-- agent:boundary:39dd2243 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,7 +67,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: What is the "Funding Commitments" tab in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=funds. How does "Funding Commitments" differ from the confirmed % in the lender group? When an admin selects a lender or lender group, 100% of the loan will be funded. Is the lender then committed once the admin selects a lender?~~
 <!-- /agent:queue -->
 
 ## Backlog

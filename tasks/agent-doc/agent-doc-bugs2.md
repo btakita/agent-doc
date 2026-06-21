@@ -126,7 +126,23 @@ Done for all remaining agent-actionable rungs. R1 shipped last cycle; this cycle
 **Only operator live-verify remains** (`#jbdisprecycle` stays as `[operator-verify]` in the backlog): at a recycle boundary run `make install` + `agent-doc admin recycle`, fire JB `Run Agent Doc` on a second doc during the hot-reload burst, and confirm a single `dispatch_start_proof` **with** submit and no stranded `start_session failed`.
 
 Not auto-looping — `queue_continuation_required=false` (only `[operator-verify]` heads remain) and the queue is paused.
-<!-- agent:boundary:83613f14 -->
+
+### Re: do #6b5h — landed the detection primitive; full wiring is a focused phase (#6b5hwire) — opus-4-8
+
+I traced #6b5h to root and landed the foundational fix, but stopped short of flipping the write-guard itself this cycle — that part has a blast radius and regression profile that genuinely needs a focused cycle, and I want to lay out why.
+
+**Root cause (confirmed).** A pure-CLI session sees a *connectable* `ipc.sock` because the project controller hosts a listener that returns error acks with **nothing behind it**. So `is_listener_active()` reports `true`, the "editor IPC listener active → refuse direct disk write" guard stays armed, and every finalize wedges on `no_ack` — even though there is **no editor buffer to protect**. The guard cannot tell a transiently-wedged *real* editor apart from a CLI-only dead-end listener. That missing distinction is the whole bug.
+
+**What I shipped** (agent-doc submodule `8bb5e1e5`, pushed; **not** installed/released per STOP-cutting-releases):
+- `plugin_owner::live_editor_endpoint_attached(file)` — the positive "a real editor is actually attached" signal the guard lacks. It keys off the **owner-pid liveness** of the shipped `#8bfz` plugin-owner lease, **not** heartbeat freshness. That detail matters: the plugin refreshes the lease heartbeat only on patch events, so an idle editor with the doc open has a stale heartbeat but a live pid — gating on freshness would misclassify it as CLI-only and route a disk write straight into its live buffer (the exact File Cache Conflict the guard exists to prevent). A CLI-only session simply never wrote a lease.
+- Pure, unit-tested core (`editor_endpoint_attached_for_lease`) with the live-pid / dead-pid / no-lease / stale-but-live cases pinned. **Zero behavior change to the guard** this cycle, so `make check` is green with no regressions.
+
+**Why I did NOT wire it into the guard yet (the honest part).** Flipping the refuse-disk-write branches to permit a controller-host disk write when no live editor is attached changes the default for "active listener but no lease" — and **~259 existing tests** start a simulated listener *without* seeding a plugin-owner lease and assert the write is refused. Each would need a fresh live-pid lease seeded (they're simulating a real editor) before the flip, or they'll break en masse. Doing that sprawling edit across the most safety-critical path in the product — the one you've flagged as "too much churn and IPC issues" with per-cell CRDT merge as the priority — unattended in one cycle is the wrong risk/reward. It's exactly why you tagged #6b5h `[focused-cycle]`.
+
+**Queued the wiring as `#6b5hwire`** with the precise contract: gate `run_entry.rs` ~L1322 (the headline finalize wedge: `run_ipc` file-IPC fallback → `recovery=retry_without_disk_write`) and the `converge.rs` `no_ack`/`no_ack_content`/`send_failed` branches (the `write --pending-add` wedge) on `!live_editor_endpoint_attached`, seed the ~259 listener tests, add SimWorld `cli_no_editor → disk_write` coverage, and note the one residual edge (a real editor open but wedged before its first-ever patch has no lease — the robust closeout there is a plugin timer-based editor-endpoint heartbeat, a separate rung). Live editor-less repro stays `[operator-verify]`.
+
+Queue is paused and `queue_continuation_required=false` — not auto-looping.
+<!-- agent:boundary:94e146c3 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -78,12 +78,13 @@ On crates.io, add a Trusted Publisher to **both** crate names `tsift-local-model
 **Fallback (Option B — if crates.io rejects pre-config for a nonexistent name):** create them with a personal token, in dependency order. `tsift-local-model` first (`cargo publish -p tsift-local-model`), but `tsift-kg` needs `tsift-core`/`tsift-sqlite`/`tsift-local-model` at `0.1.73` published first — so Option A is strongly preferred.
 
 **After you confirm bootstrap** (a quick `curl`/browser check that both crate names resolve / show a Trusted Publisher), tell me and I'll: re-run `make check`, `git tag v0.1.73 1caaa43`, `git push origin v0.1.73`, then watch the Release run. I'm **not** pushing the tag now — doing so before bootstrap would fail the crates.io job on the two new crates and cascade to `tsift-cli` (a red/partial release).
-<!-- agent:boundary:517f33ca -->
+<!-- agent:boundary:f244041e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- ~~:pushpin: release + publish~~
 - :pushpin: [#015t]
 <!-- /agent:queue -->
 <!--

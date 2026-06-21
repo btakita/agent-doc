@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -187,14 +187,31 @@ The `#ve5f` enhancement from last cycle — `--path` sub-narrowing of FTS/lexica
 2. **Phase 5 — the crates.io release** (operator-gated).
 
 The queue's `:pushpin: Implement your recommendations.` head is already answered (the token-index.json deletion cycle) — stale, no action. Tell me **(a) keep / rg -F**, or **"release"**, to move #015t forward.
-<!-- agent:boundary:e7d9ed77 -->
+
+### Re: keep TokenIndex::build — Phase 4b(a) decided + recorded — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#015t]
+
+
+
+Done — recorded the decision (tsift `1caaa43`, pushed to `origin/main`; superproject pointer committed locally). **No runtime change** — "keep" is the current behavior, so the installed binary is already correct; this cycle makes the decision *durable* so the type isn't later removed as apparent dead weight (the earlier analysis flagged it as a deletion candidate).
+
+**Recorded in three places:**
+- **`TokenIndex` doc comment** (`packages/tsift-search/src/sift.rs`) — why the in-memory rebuild stays over `rg -F`, with an explicit "do not simplify by deleting without re-opening this decision."
+- **`specs/search-navigation.md`** — and I fixed a stale line there that still claimed tsift "defers any native content/FTS table" (the Phase 4 cutover already made FTS5 `content_fts` the default lexical path; the spec hadn't caught up).
+- **VERSIONS.md** (Unreleased).
+
+**Rationale (one line):** both `TokenIndex::build` and `rg -F` are equally *live*, so the choice is parity, not freshness — the rebuild keeps the degraded window's OR-union matching + ranking identical to the healthy FTS path, while `rg -F` would silently drop to literal substring matching with no ranking.
+
+`make check` green. **#015t Phase 4b is now complete** — (b) path-prune shipped (`#ve5f`), (a) decided. The only thing left on #015t is **Phase 5, the operator-gated crates.io release**. Say **"release"** to ship it (note review item `#1yks` still gates it: the two new crates `tsift-local-model` + `tsift-kg` need crates.io Trusted Publishing config before the `v*` tag, or the publish fails on them).
+<!-- agent:boundary:acebd9a5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#ve5f]~~
-- do [#015t]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -203,7 +220,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). Phases 0/1/2 + 3a + 3b + Phase 4 cutover + Phase 4b item 3 (thread precheck freshness) DONE + pushed (tsift 475262b). FTS5 index.db BM25 is the DEFAULT lexical path; run_sift_search/run_search_with_timeout/__search-worker take an fts_index_fresh verdict so the FTS path no longer re-walks the tree on every search; degraded read-only routes to the live TokenIndex fallback. NEXT (Phase 4b remaining, optional): (a) retire TokenIndex build/cache — DEFERRED, the degraded-read-only fallback still needs the live-walk; needs an operator/design decision on degraded-read-only behavior (keep TokenIndex vs live rg -F); (b) files_in_path_scope zone-map path-prune — net-new enhancement, not cleanup. Then Phase 5 = operator-gated crates.io release. Say "do #015t" for (a)/(b) or to ship.
+- [ ] [#015t] [operator-verify] FTS5 content index (plan: tasks/software/plan-tsift-fts5-content-index.md). FTS5 index.db BM25 is the DEFAULT lexical path; degraded read-only routes to the live TokenIndex fallback. Phase 4b COMPLETE: (a) degraded-read-only engine DECIDED 2026-06-20 — keep TokenIndex::build live-rebuild over rg -F for OR-union/ranking parity (tsift 1caaa43); (b) files_in_path_scope path-prune DONE (#ve5f, tsift d908371). NEXT = Phase 5 = operator-gated crates.io release ONLY. Say "release" to ship, or schedule it.
 <!-- /agent:backlog -->
 
 ## Review

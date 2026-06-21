@@ -277,6 +277,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
         .name("idle-queue-watch".into())
         .spawn(move || {
             let path = PathBuf::from(&file);
+            // `#jbdisprecycle`: a freshly-started (post-recycle) supervisor drops
+            // the recycle-in-flight marker so the `route` dispatch guard reopens.
+            // The marker's short TTL is the backstop if a recycler died before
+            // reaching here; clearing on startup makes the common path crisp.
+            crate::recycle_inflight::clear_recycle_inflight(&file);
             let mut last_dispatched: Option<String> = None;
             let mut last_context_reset_head: Option<String> = None;
             let mut last_context_clear_at: Option<u64> = None;
@@ -879,6 +884,20 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                         if do_install {
                             install_stale_since = None;
+                            // `#jbdisprecycle`: mark the project mid-recycle BEFORE the
+                            // rebuild+install (which takes seconds) and the `execve`
+                            // that follows, so a concurrent `route` dispatch defers
+                            // instead of typing a trigger that the recycle drops
+                            // before submit. Refreshed at the reexec boundary; the
+                            // fresh supervisor clears it on watch-loop start.
+                            if let Err(err) = crate::recycle_inflight::mark_recycle_inflight(
+                                &file,
+                                crate::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
+                            ) {
+                                eprintln!(
+                                    "[agent-doc] warning: failed to mark recycle-inflight before auto-install: {err:#}"
+                                );
+                            }
                             log_event(
                                 &mut session_log,
                                 &format!(
@@ -993,6 +1012,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         eprintln!(
                             "[agent-doc] supervisor restart: draining complete, hot-reloading onto freshly-installed agent-doc binary; preserving the live agent child via execve"
                         );
+                        // `#jbdisprecycle`: refresh the recycle-in-flight marker
+                        // immediately before the `execve` so a concurrent dispatch
+                        // defers across the hot-reload boundary.
+                        if let Err(err) = crate::recycle_inflight::mark_recycle_inflight(
+                            &file,
+                            crate::recycle_inflight::RECYCLE_INFLIGHT_RESTART,
+                        ) {
+                            eprintln!(
+                                "[agent-doc] warning: failed to mark recycle-inflight before restart reexec: {err:#}"
+                            );
+                        }
                         match supervisor_perform_reexec(&shared) {
                             Ok(never) => match never {},
                             Err(err) => {
@@ -1308,6 +1338,19 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         eprintln!(
                             "[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary ({recycle_boundary}); preserving the live agent child via execve"
                         );
+                        // `#jbdisprecycle`: refresh the recycle-in-flight marker
+                        // immediately before the `execve` so a concurrent dispatch
+                        // defers across the hot-reload boundary (this is the path
+                        // that emits the `(next_queue_item)`/`(idle)` hot-reload
+                        // lines seen in the live repro).
+                        if let Err(err) = crate::recycle_inflight::mark_recycle_inflight(
+                            &file,
+                            crate::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
+                        ) {
+                            eprintln!(
+                                "[agent-doc] warning: failed to mark recycle-inflight before self-recycle reexec: {err:#}"
+                            );
+                        }
                         match supervisor_perform_reexec(&shared) {
                             Ok(never) => match never {},
                             Err(err) => {

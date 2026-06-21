@@ -42,6 +42,34 @@ pub(crate) fn dispatch_only_starting_pane_not_ready_error(
     )
 }
 
+/// `#jbdisprecycle` — refused-because-supervisor-recycling error. Distinct from
+/// the not-booted-yet error: the pane may already be at a prompt, but the
+/// project supervisor is mid-`execve` hot-reload, so a trigger typed now would
+/// be dropped before submit. Fail closed (don't type) and let the caller retry
+/// once the recycle settles.
+pub(crate) fn dispatch_only_recycle_inflight_error(
+    harness: &HarnessConfig,
+    pane: &str,
+    file: &Path,
+    reason: &str,
+) -> String {
+    format!(
+        "dispatch-only {} reopen refused to inject into pane {} for {} because the project supervisor is mid-recycle (reason={reason}); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary {}",
+        harness.binary,
+        pane,
+        file.display(),
+        blocked_with_unblocker_fields("wait_for_supervisor_recycle_settle")
+    )
+}
+
+/// `#jbdisprecycle` — bound on how long a dispatch waits for an in-flight
+/// supervisor recycle to settle before failing closed. Slightly under the
+/// recycle-inflight marker TTL so a genuinely-stuck recycle surfaces as a
+/// retryable dispatch error rather than hanging the JB action indefinitely.
+const RECYCLE_SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+/// Poll cadence while waiting for the recycle to settle.
+const RECYCLE_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DispatchOnlySendReopenOptions<'a> {
     pub(crate) delivery: DispatchOnlyReopenDelivery,
@@ -58,6 +86,61 @@ pub(crate) fn dispatch_only_send_reopen(
     options: DispatchOnlySendReopenOptions<'_>,
 ) -> Result<String> {
     let delivery = options.delivery;
+
+    // `#jbdisprecycle`: gate BEFORE any pane input. If the project supervisor is
+    // mid-`execve` recycle (lib-install auto-recycle / operator restart), a
+    // trigger typed now is dropped before submit — the live no-submit repro.
+    // Wait a bounded window for the fresh supervisor to settle (it clears the
+    // marker on watch-loop start), then proceed with the normal ready probe.
+    // Fail closed (never type) if it never settles, so the caller retries
+    // instead of stacking an unsubmitted trigger.
+    if crate::recycle_inflight::recycle_inflight_pending(file_path) {
+        let started = std::time::Instant::now();
+        let reason = crate::recycle_inflight::read_recycle_inflight(file_path)
+            .map(|m| m.reason)
+            .unwrap_or_else(|| "unknown".to_string());
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_recycle_inflight_wait file={} pane={} harness={} reason={}",
+                file.display(),
+                pane,
+                harness.binary,
+                reason
+            ),
+        );
+        while crate::recycle_inflight::recycle_inflight_pending(file_path) {
+            if started.elapsed() >= RECYCLE_SETTLE_WAIT {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_recycle_inflight_unsettled file={} pane={} harness={} reason={} waited_ms={}",
+                        file.display(),
+                        pane,
+                        harness.binary,
+                        reason,
+                        started.elapsed().as_millis()
+                    ),
+                );
+                anyhow::bail!(dispatch_only_recycle_inflight_error(
+                    harness, pane, file, &reason
+                ));
+            }
+            std::thread::sleep(RECYCLE_SETTLE_POLL);
+        }
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_recycle_inflight_settled file={} pane={} harness={} reason={} waited_ms={}",
+                file.display(),
+                pane,
+                harness.binary,
+                reason,
+                started.elapsed().as_millis()
+            ),
+        );
+    }
+
     let mut dispatch_pane = pane.to_string();
     let mut log_status = crate::startup_miss::session_log_status(file, session_id)
         .ok()

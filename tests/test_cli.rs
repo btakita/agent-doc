@@ -856,7 +856,14 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // failure.
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof=") => 5,
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof_scope=") => 5,
-        ("agent-doc-orchestration/src/route/dispatch_only.rs", "reason=") => 2,
+        // +4 (#jbdisprecycle): the recycle-in-flight dispatch guard adds four
+        // audited `reason=` tokens — the `dispatch_only_recycle_inflight_error`
+        // message (`reason={reason}`) plus three ops_log lines
+        // (`route_dispatch_only_recycle_inflight_wait/_unsettled/_settled
+        // ... reason={}`). All carry the supervisor recycle reason
+        // (`auto_install_reexec` / `restart_reexec`) so a deferred-then-settled
+        // or fail-closed dispatch is auditable against the marker that gated it.
+        ("agent-doc-orchestration/src/route/dispatch_only.rs", "reason=") => 6,
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "accepted_only") => 9,
         // +1 (`reason=in_flight_coalesce`): #qflood2 `route_dispatch_deduped_pane`
         // logs the benign in-flight dedup before returning deduped-success without a

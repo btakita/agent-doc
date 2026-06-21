@@ -267,7 +267,19 @@ Done, shipped to the agent-doc submodule (`1eefd8e1`). Root cause traced, fixed,
 **Verification:** `make check` green (**4944 tests**, +7 for `#qpcwcmerge` incl. plugin-component + structural-add fail-closed); VS Code `tsc` clean + native tests 11/11 (+5 `parseReconnectDecision`); SPEC aligned.
 
 **To go live:** I'll `make install` + `admin recycle` now (local rebuild, no release) so the running supervisor picks up the fix at its idle boundary. You'll see it directly: subsequent finalizes should commit cleanly with `editor_convergence_succeeded ... resolution=editor_wins_outside_response` in `ops.log` and **no** post-commit worktree drift.
-<!-- agent:boundary:8b5d34a0 -->
+
+### Re: drift fix verified live + clear-session dispatch reports — opus-4-8
+
+**The `#qpcwcmerge` drift fix is live.** This cycle: no `stale_install`, preflight clean, working tree clean, and `~~Fix the plugin drift issue.~~` struck cleanly. If this finalize commits without a `live_prompt_drift` recovery, that's the fix proving itself on the recycled binary.
+
+> **Queue prompt:** JS `Clear Session Context` then JB `Run Agent Doc` does nothing / has a dispatch storm — please enable Run Agent Doc to dispatch immediately.
+
+These two new reports are the **already-tracked `#t3mn` / `#jbclrdispdup`** (done-file, `[operator-verify]`) — the same `#rdypoll` / `#jbrundispatch` dispatch-restack class, reproduced specifically after `Clear Session Context`. One clarification on "dispatch immediately": typing the trigger *immediately* into a still-booting pane is exactly what **causes** the storm + no-submit (the pane isn't at a dispatch-ready prompt, so the keystrokes stack and never submit). The shipped fix is the correct version of "immediate": dispatch the instant the pane shows a harness dispatch-ready prompt and submit exactly once (`not_dispatched` full-trigger re-send + `send_direct_pane_enter_resubmit_until_stable` + `dispatch_inject attempt=1`). The remaining step is a **live-pane re-test on the fresh binary** (operator-gated) — covered by `#routeretest` / `#t3mn`; if it still stalls or storms post-recycle, that's a real residual gap and I'll dig into `route.rs`/`start.rs`.
+
+**`#qstrikenote` design note (so it's built right):** the Phase-1 explanation note must NOT be appended to `agent:exchange` during the strike closeout — that would make the document's exchange differ from `content_ours`, which `#qpcwcmerge` requires to match (it would fall back to the lossy path and re-introduce drift). The note must instead be folded into the response *before* `content_ours` is computed, or carried in a non-exchange surface. I've recorded this so the follow-up cycle implements it without regressing the drift fix.
+
+**Stopping the loop here:** the remaining heads are all operator-gated or design-staged — the route/dispatch cluster (`#t3mn`/`#routeretest`/`#rdypoll`) needs your live-pane verify on the fresh binary, `#s81q` is release-gated plugin work, and `#qstrikenote` needs the design above. No agent-drainable head remains that isn't gated, so looping would just churn. Re-invoke and tell me to take `#qstrikenote` (with the design) or drive a route-cluster live-verify whenever you're ready.
+<!-- agent:boundary:e9dedde2 -->
 <!-- /agent:exchange -->
 
 ## Queue

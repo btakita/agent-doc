@@ -162,7 +162,22 @@ Done — durable per-node CRDT state persistence is implemented, tested, and com
 **Acceptance — all covered by 12 new tests:** round-trip per-component encode/decode, a node's base advances independently, per-node GC on compaction. `make check` green; latest CI on the prior HEAD green.
 
 **Deliberately not done:** the live orchestration merge base is unchanged (still overlay → whole-doc `crdt::merge`). Rewiring the live write path to consume per-node bases is the recursive `#qnodemerge3` rung; the plan's risk note ("not mid-drift, keep whole-doc fallback") argues against rewiring the load-bearing path in this same cycle. This rung lands the durable per-node *base* without altering live merge behavior. Architecture doc (`docs/reference/node-merge-architecture.md`) updated to mark Phase 2 shipped.
-<!-- agent:boundary:1be2d8f5 -->
+
+### Re: continue the queue after /clear — supervisor clear-and-continue for [focused-cycle] (#qfocsup) — opus-4-8
+
+You're right — idling the queue was the bug, and I've fixed the binary so the CPC/supervisor clears the session and continues the queue for dedicated-session heads (agent-doc submodule `67829f3f`, committed locally; not installed/pushed per STOP-cutting-releases).
+
+**Root cause.** A `[focused-cycle]` head was deferred by BOTH drain paths: `ExecutionContext::loop_undrainable()` (= `[operator-verify]` ∪ `[focused-cycle]`) fed the single `deferred_backlog_ids`, which both the in-session loop *and* the supervisor idle-watch head-picker (`live_drainable_continuation_head`) consulted. So when only `[focused-cycle]` heads remained, nobody drained them → idle.
+
+**Fix — split drainability into two scopes (`#qfocsup`):**
+- **In-session loop** still defers `[operator-verify]` + `[focused-cycle]` — the accreted in-session context can't give a focused-cycle item the fresh context it needs, so the loop yields it.
+- **Supervisor** defers `[operator-verify]` **only**. `[focused-cycle]` is now drained by the supervisor's clear-and-continue path: `head_requires_context_reset` (= `[clean-session]` ∪ `[focused-cycle]`) makes the idle-watch force a `/clear` first, then re-dispatch the head to a genuinely fresh session.
+- New `session-check` outcome `deferred_for_supervisor_drain` (`next_action=yield_to_supervisor_clear_and_continue`, class `ok`): a focused-cycle-only queue now reports "queue continues via supervisor," **not** `operator_proof_required`. The skill auto-loop guidance distinguishes the two so an agent never again reports a focused-cycle head as an operator stall.
+
+The handoff: the in-session agent ends its turn → the pane idles → the supervisor idle-watch force-`/clear`s and re-dispatches the focused-cycle head to a fresh session → repeat. New unit tests cover both scopes, the head-picker split, the force-clear set, and the outcome; `make check` green.
+
+**To activate live (operator-gated):** the running supervisor is on the old binary, so this takes effect only after `make install` + `agent-doc admin recycle`. That install is gated by STOP-cutting-releases (no install/release until the per-node merge corruption proves out) — say the word and I'll install + recycle, or hold. Filed `#qfocsupverify` [operator-verify] for the live proof (watch the supervisor clear + re-dispatch `#qnodemerge3` to a fresh session).
+<!-- agent:boundary:1754d2fe -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -61,7 +61,7 @@ The reworded step text also drops the confusing `(Lender Requests page)` parenth
 **Verification.** New `tests/advance-lender-dialog.test.ts` (7 tests) covers the action-marker logic and the dialog wiring; full suite **1024 pass / 0 fail**, `bun run check` (test + build + worker build) green. EFS has no GitHub Actions CI, so local verification is the gate.
 
 **Not deployed.** This is committed + pushed but not yet deployed to the worker — say the word (or `deploy`) and I'll push it live. Tracked as a recommended follow-up.
-<!-- agent:boundary:a106779f -->
+<!-- agent:boundary:793804b9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,6 +79,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#dmz8] [recommended] #advance-lender-deploy Deploy the advance-lender support dialog (#advance-lender, EFS 4f564be) to the EFS worker — committed+pushed, awaiting operator-gated `wrangler deploy`. Outward-facing; operator triggers.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.

@@ -38,7 +38,30 @@ completed
 Compacted content:
 - Archived 6 response topic(s): Unified inbox shipped + deployed (#msg-unify2); deploy; Borrower cutover; 3 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:3bd227df -->
+❯ In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, btak.dev+lender2@gmail.com
+❯ has a notification that is unclear on what it means and what to do next. What is the "Lender requests page"? Please add a link that opens a dialog to support the admin in advancing the lender. Since the lender has not uploaded docs, the admin dialog could be a the missing documents + messaging to the lender to remind the lender and/or support the lender in uploading the corrects docs.
+```
+Compliance hold before funding — to clear it:
+AdminComplete the pending lender request (Lender Requests page) to assign the TMO lender account.
+```
+
+### Re: "Lender Requests page" notification + advance-lender dialog — opus-4-8
+
+**What the notification means.** That lender (`btak.dev+lender2@gmail.com`) is on a *compliance hold before funding* because no **TMO lender account** is linked yet. The "Lender Requests page" it points at is simply the **Lenders** tab on this same Lender Pipeline (`/admin/lender-pipeline?tab=lenders`) — it lists every lender request and is where you type in the TMO account number that clears the hold. The wording was unhelpful because it referenced a page by a name that doesn't appear in the nav and gave you no way to act from the notification.
+
+**What I shipped (`#advance-lender`, EFS `4f564be`, pushed).** The lender-account compliance-hold step in the card dialog is now an actionable **"Advance lender →"** button. It opens a focused support dialog that:
+
+- **Explains the hold** — what a TMO lender account is and what completing the request does, in plain language, plus a clear note that "Lender Requests page" = the **Lenders** tab.
+- **Deep-links to the Lender Requests page** — an "Open Lender Requests page →" button that jumps to the Lenders tab with the pending request auto-opened (`?tab=lenders&attention=pending-lender-requests`), so you land directly on the account-assignment control.
+- **Messages the lender** — reuses the existing onboarding message composer (`LenderAccountMessages`) so you can remind/support the lender right there when docs are missing or wrong.
+- **Shows the lender's documents** — embeds `AdminLenderDocuments` so you can see what's uploaded and what's still missing before assigning the account.
+
+The reworded step text also drops the confusing `(Lender Requests page)` parenthetical and spells out *why* the account isn't linked yet (request pending vs. no request).
+
+**Verification.** New `tests/advance-lender-dialog.test.ts` (7 tests) covers the action-marker logic and the dialog wiring; full suite **1024 pass / 0 fail**, `bun run check` (test + build + worker build) green. EFS has no GitHub Actions CI, so local verification is the gate.
+
+**Not deployed.** This is committed + pushed but not yet deployed to the worker — say the word (or `deploy`) and I'll push it live. Tracked as a recommended follow-up.
+<!-- agent:boundary:a106779f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,6 +73,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Create a master state machine diagram for all flows...public site application + application request from borrower portal + application request from broker portal + deal pipeline + lender pipeline + broker pipeline. Make this master state machine diagram a living document that is updated as we iterate on the workflows.
 <!-- /agent:queue -->
 
 ## Backlog

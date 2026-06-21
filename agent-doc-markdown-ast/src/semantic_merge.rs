@@ -202,17 +202,20 @@ pub fn semantic_merge(base: &str, ours_agent: &str, theirs_operator: &str) -> Se
         &mut requires_ack,
     );
 
-    // `#hap7` / `#qdup` deleted-structure rule: when the operator deleted a node
-    // the agent's content this cycle targeted (an `OperatorDeletedAgentEditedNode`
-    // ack), the deletion stands (already reflected in `merged_body` — the node is
-    // omitted, never resurrected) but we surface the fact as a note in
-    // `agent:exchange` so the operator sees the dropped agent edit this cycle. This
-    // is deliberately derived from the unscoped acks: it is NOT same-node ack
-    // noise to be scoped away, it represents real agent work the operator dropped.
+    // `#hap7` / `#qdup` / `#qnodemerge5`: when the operator's edit wins over
+    // an agent-targeted same node, surface the non-applied agent side in
+    // `agent:exchange`. Deletions and same-node overrides both keep the
+    // operator/editor value; the note makes that conflict visible instead of
+    // silently fabricating a merged text neither side wrote.
     let exchange_notes: Vec<String> = requires_ack
         .iter()
-        .filter(|ack| ack.reason == AckReason::OperatorDeletedAgentEditedNode)
-        .map(|ack| deletion_note(&ack.component, &ack.id))
+        .filter_map(|ack| match ack.reason {
+            AckReason::OperatorDeletedAgentEditedNode => {
+                Some(deletion_note(&ack.component, &ack.id))
+            }
+            AckReason::SameNodeOperatorOverride => Some(conflict_note(ack)),
+            AckReason::OperatorRevivedAgentDeletedNode => None,
+        })
         .collect();
 
     let merged_body = inject_exchange_notes(merged_body, &exchange_notes);
@@ -240,7 +243,14 @@ fn deletion_note(component: &str, id: &str) -> String {
     )
 }
 
-/// Inject `#hap7` deletion notes into the `exchange` component of a merged body.
+/// `#qnodemerge5`: canonical one-line note for a true same-leaf conflict. The
+/// operator/editor value is already the merged value; the note carries the
+/// rejected agent side so the conflict is visible to the operator.
+fn conflict_note(ack: &AckRequest) -> String {
+    format!("> agent-doc conflict: {}.", ack.detail)
+}
+
+/// Inject conflict notes into the `exchange` component of a merged body.
 ///
 /// Notes are appended to the exchange inner, before a trailing
 /// `<!-- agent:boundary:… -->` marker if one is present (same convention as
@@ -254,7 +264,10 @@ fn inject_exchange_notes(body: String, notes: &[String]) -> String {
         return body;
     }
     // Only inject notes not already present anywhere in the body (dedup guard).
-    let fresh: Vec<&String> = notes.iter().filter(|n| !body.contains(n.as_str())).collect();
+    let fresh: Vec<&String> = notes
+        .iter()
+        .filter(|n| !body.contains(n.as_str()))
+        .collect();
     if fresh.is_empty() {
         return body;
     }
@@ -275,9 +288,9 @@ fn inject_exchange_notes(body: String, notes: &[String]) -> String {
         if close_marker_name(trimmed).as_deref() == Some(EXCHANGE_COMPONENT) {
             // Emit the buffered inner with the notes inserted before any trailing
             // boundary marker, then the close marker.
-            let boundary_idx = inner.iter().rposition(|l| {
-                is_boundary_marker(l.trim_end_matches(['\n', '\r']).trim())
-            });
+            let boundary_idx = inner
+                .iter()
+                .rposition(|l| is_boundary_marker(l.trim_end_matches(['\n', '\r']).trim()));
             let mut note_block = String::new();
             // Separate the notes from preceding content with a blank line when the
             // preceding inner content does not already end with one.
@@ -513,7 +526,11 @@ fn merge_frontmatter_owned(
     if !scalar_ok {
         // Conservative whole-block fallback: operator wins if it changed the block.
         let operator_changed = base != theirs;
-        let chosen = if operator_changed { theirs } else { ours.or(theirs) };
+        let chosen = if operator_changed {
+            theirs
+        } else {
+            ours.or(theirs)
+        };
         return chosen.or(base).map(|s| s.to_string());
     }
 
@@ -591,7 +608,10 @@ fn merge_frontmatter_owned(
                         )
                     } else {
                         // unchanged on both
-                        (b.clone().or_else(|| t.clone()).or_else(|| o.clone()), Some(OutcomeKind::Keep))
+                        (
+                            b.clone().or_else(|| t.clone()).or_else(|| o.clone()),
+                            Some(OutcomeKind::Keep),
+                        )
                     }
                 }
             };
@@ -654,6 +674,35 @@ fn item_line(item: &Item) -> String {
     format!("- {raw}")
 }
 
+fn note_snippet(text: &str) -> String {
+    let collapsed = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace('`', "'");
+    const MAX: usize = 220;
+    if collapsed.chars().count() <= MAX {
+        collapsed
+    } else {
+        let mut s = collapsed.chars().take(MAX).collect::<String>();
+        s.push_str("...");
+        s
+    }
+}
+
+fn same_node_conflict_detail(
+    component: &str,
+    id: &str,
+    operator_text: &str,
+    agent_text: &str,
+) -> String {
+    format!(
+        "{component} `#{id}` had concurrent edits; operator version kept: \"{}\"; agent version not merged: \"{}\"",
+        note_snippet(operator_text),
+        note_snippet(agent_text)
+    )
+}
+
 /// Rebuild a single component's inner item lines per the transition outcomes,
 /// returning the lines (without the open/close markers) joined by `\n`.
 #[allow(clippy::too_many_arguments)]
@@ -699,8 +748,11 @@ fn merge_component_items(
                             component: name.to_string(),
                             id: id.clone(),
                             reason: AckReason::SameNodeOperatorOverride,
-                            detail: format!(
-                                "{name} `{id}`: operator content won over the agent's edit"
+                            detail: same_node_conflict_detail(
+                                name,
+                                id,
+                                &item_line(t_item),
+                                &item_line(o),
                             ),
                         });
                     }
@@ -755,8 +807,14 @@ fn merge_component_items(
                         component: name.to_string(),
                         id: id.clone(),
                         reason: AckReason::SameNodeOperatorOverride,
-                        detail: format!(
-                            "{name} `{id}`: both added with different text — operator's version kept"
+                        detail: same_node_conflict_detail(
+                            name,
+                            id,
+                            &item_line(t_item),
+                            find_item(ours_comp, id)
+                                .map(item_line)
+                                .as_deref()
+                                .unwrap_or(""),
                         ),
                     });
                 }
@@ -913,14 +971,8 @@ fn merge_exchange_inner(
         // so the existing bullet-based exchange behavior is preserved exactly.
         let mut out = String::new();
         if let Some(tc) = theirs_comp {
-            let merged = merge_component_items(
-                EXCHANGE_COMPONENT,
-                base_comp,
-                ours_comp,
-                tc,
-                outcomes,
-                acks,
-            );
+            let merged =
+                merge_component_items(EXCHANGE_COMPONENT, base_comp, ours_comp, tc, outcomes, acks);
             for ml in &merged {
                 out.push_str(ml);
                 out.push('\n');
@@ -954,9 +1006,9 @@ fn merge_exchange_inner(
     }
 
     // Find the last boundary-marker line index, if any.
-    let boundary_idx = flat.iter().rposition(|l| {
-        is_boundary_marker(l.trim_end_matches(['\n', '\r']).trim())
-    });
+    let boundary_idx = flat
+        .iter()
+        .rposition(|l| is_boundary_marker(l.trim_end_matches(['\n', '\r']).trim()));
 
     // Build the appended-turns text once, recording an `AppliedAgentAdd` per turn.
     // A trailing boundary-marker line that the block scan swept into the agent's
@@ -964,7 +1016,12 @@ fn merge_exchange_inner(
     // so it is stripped here to avoid emitting a duplicate boundary marker.
     let mut appended = String::new();
     for b in &agent_new {
-        record(outcomes, EXCHANGE_COMPONENT, &b.key, OutcomeKind::AppliedAgentAdd);
+        record(
+            outcomes,
+            EXCHANGE_COMPONENT,
+            &b.key,
+            OutcomeKind::AppliedAgentAdd,
+        );
         let mut block_lines: &[String] = &b.lines;
         while let Some(last) = block_lines.last() {
             let t = last.trim_end_matches(['\n', '\r']).trim();
@@ -1007,7 +1064,10 @@ fn merge_exchange_inner(
 
 /// Recognize an `<!-- agent:boundary:HASH -->` marker line.
 fn is_boundary_marker(trimmed: &str) -> bool {
-    let Some(inner) = trimmed.strip_prefix("<!--").and_then(|s| s.strip_suffix("-->")) else {
+    let Some(inner) = trimmed
+        .strip_prefix("<!--")
+        .and_then(|s| s.strip_suffix("-->"))
+    else {
         return false;
     };
     inner.trim().starts_with("agent:boundary:")
@@ -1189,9 +1249,8 @@ fn merge_components_into_body(
                     // the merge silently lose a free-text queue head, trip the
                     // anti-data-loss gate, and decline forever (the persistent
                     // `live_prompt_drift` churn).
-                    let merged = merge_component_items(
-                        name, base_comp, ours_comp, tc, outcomes, acks,
-                    );
+                    let merged =
+                        merge_component_items(name, base_comp, ours_comp, tc, outcomes, acks);
                     out.push_str(&merge_nonexchange_inner(&component_inner, &merged));
                 }
                 component_inner.clear();
@@ -1750,6 +1809,39 @@ queue: stop
             m.requires_ack[0].reason,
             AckReason::SameNodeOperatorOverride
         );
+        assert!(
+            m.exchange_notes
+                .iter()
+                .any(|n| n.contains("operator version") && n.contains("agent version")),
+            "same-node conflict note must carry both versions: {:?}",
+            m.exchange_notes
+        );
+    }
+
+    #[test]
+    fn same_node_conflict_note_lands_inside_exchange_when_present() {
+        let base = "\
+<!-- agent:queue -->
+- do [#z] orig
+<!-- /agent:queue -->
+<!-- agent:exchange -->
+### Re: prior - gpt-5
+
+Done.
+<!-- /agent:exchange -->
+";
+        let ours = base.replace("orig", "agent version");
+        let theirs = base.replace("orig", "operator version");
+        let m = semantic_merge(base, &ours, &theirs);
+
+        let exchange_inner = component_inner_lines("exchange", &m.merged_doc).join("");
+        assert!(
+            exchange_inner.contains("operator version")
+                && exchange_inner.contains("agent version")
+                && exchange_inner.contains("agent-doc conflict"),
+            "same-node conflict must be visible in exchange:\n{}",
+            m.merged_doc
+        );
     }
 
     #[test]
@@ -1957,8 +2049,16 @@ Answer to B.
             m.merged_doc
         );
         // Operator's disjoint changes applied.
-        assert!(m.merged_doc.contains("queue: stop"), "operator fm flip: {}", m.merged_doc);
-        assert!(m.merged_doc.contains("[#opadd]"), "operator queue add: {}", m.merged_doc);
+        assert!(
+            m.merged_doc.contains("queue: stop"),
+            "operator fm flip: {}",
+            m.merged_doc
+        );
+        assert!(
+            m.merged_doc.contains("[#opadd]"),
+            "operator queue add: {}",
+            m.merged_doc
+        );
         // Existing turns kept, not duplicated.
         assert_eq!(m.merged_doc.matches("### Re: A — opus-4-8").count(), 1);
         assert_eq!(m.merged_doc.matches("### Re: B — opus-4-8").count(), 1);
@@ -2038,10 +2138,16 @@ New turn B.
         let m = semantic_merge(base, ours, &theirs);
 
         // New turn appended.
-        assert!(m.merged_doc.contains("### Re: B — opus-4-8"), "B present: {}", m.merged_doc);
+        assert!(
+            m.merged_doc.contains("### Re: B — opus-4-8"),
+            "B present: {}",
+            m.merged_doc
+        );
         // Exactly one boundary marker.
         assert_eq!(
-            m.merged_doc.matches("<!-- agent:boundary:abc123 -->").count(),
+            m.merged_doc
+                .matches("<!-- agent:boundary:abc123 -->")
+                .count(),
             1,
             "single boundary marker: {}",
             m.merged_doc

@@ -1982,7 +1982,9 @@ fn route_sim_dispatch_defers_during_recycle_then_injects_once_after_settle() {
     world.apply(SimCommand::SupervisorReady).unwrap();
 
     // The supervisor enters its lib-install auto-recycle hot-reload window.
-    world.apply(SimCommand::MarkSupervisorRecycleInflight).unwrap();
+    world
+        .apply(SimCommand::MarkSupervisorRecycleInflight)
+        .unwrap();
     assert!(world.route.recycle_inflight);
 
     // Every dispatch that lands mid-recycle fails closed — no inject, no re-type.
@@ -3543,7 +3545,7 @@ fn full_content_source_proof_sim_rejects_stale_editor_buffers() {
 #[test]
 fn reconnect_buffer_sim_rereads_stale_then_keeps_user_edits() {
     use agent_doc_orchestration::flow::document_mutation::{
-        decide_reconnect_buffer, ReconnectBufferDecision,
+        ReconnectBufferDecision, decide_reconnect_buffer,
     };
     let mut world = SimWorld::new(2_044);
 
@@ -3552,7 +3554,9 @@ fn reconnect_buffer_sim_rereads_stale_then_keeps_user_edits() {
 
     // While disconnected, the binary committed a control-plane edit (queue/status
     // bookkeeping). Disk == HEAD now holds that newer content.
-    world.append_to_exchange("<!-- agent:boundary:reconnect -->\n").unwrap();
+    world
+        .append_to_exchange("<!-- agent:boundary:reconnect -->\n")
+        .unwrap();
     let disk_head = world.doc.clone();
     assert_ne!(prior_committed, disk_head);
 
@@ -3600,7 +3604,7 @@ fn reconnect_buffer_sim_rereads_stale_then_keeps_user_edits() {
 #[test]
 fn editorless_cli_sim_force_disk_but_live_editor_fail_closed() {
     use agent_doc_orchestration::flow::document_mutation::{
-        decide_editorless_disk_fallback, EditorlessDiskFallbackDecision,
+        EditorlessDiskFallbackDecision, decide_editorless_disk_fallback,
     };
     let mut world = SimWorld::new(2_046);
     world.append_to_exchange("❯ finalize me\n").unwrap();
@@ -3834,9 +3838,21 @@ fn semmerge_sim_same_node_conflict_operator_wins_with_ack_in_active_area() {
         !sm.requires_ack.is_empty(),
         "same-node conflict in the active area must ack"
     );
+    let item_lines: Vec<&str> = world
+        .snapshot
+        .lines()
+        .filter(|line| line.starts_with("- do [#a]"))
+        .collect();
+    assert_eq!(
+        item_lines,
+        vec!["- do [#a] OPERATOR EDIT"],
+        "operator content must win the merged node:\n{}",
+        world.snapshot
+    );
     assert!(
-        world.snapshot.contains("OPERATOR EDIT") && !world.snapshot.contains("AGENT EDIT"),
-        "operator content must win the merged doc:\n{}",
+        world.snapshot.contains("agent version not merged")
+            && world.snapshot.contains("AGENT EDIT"),
+        "the rejected agent side must be visible in the conflict note:\n{}",
         world.snapshot
     );
 }
@@ -3937,13 +3953,19 @@ fn hap7_sim_operator_queue_add_during_exchange_turn_no_duplication() {
     let sm = world.converge_semantic_merge(base, &agent_ours, &operator_theirs, Some("exchange"));
 
     assert_eq!(
-        world.snapshot.matches("do [#c] full screen dialogs deploy").count(),
+        world
+            .snapshot
+            .matches("do [#c] full screen dialogs deploy")
+            .count(),
         1,
         "operator queue add must appear exactly once (no #qdup duplication):\n{}",
         world.snapshot
     );
     assert_eq!(
-        world.snapshot.matches("### Re: new turn — opus-4-8").count(),
+        world
+            .snapshot
+            .matches("### Re: new turn — opus-4-8")
+            .count(),
         1,
         "agent's new exchange turn present exactly once:\n{}",
         world.snapshot
@@ -3974,7 +3996,10 @@ fn hap7_sim_operator_deleted_agent_targeted_node_noted_in_exchange() {
         "<!-- /agent:exchange -->\n",
     );
     // Agent (ours): edited its targeted node #x.
-    let agent_ours = base.replace("- do [#x] target node\n", "- do [#x] target node AGENT EDITED\n");
+    let agent_ours = base.replace(
+        "- do [#x] target node\n",
+        "- do [#x] target node AGENT EDITED\n",
+    );
     // Operator (theirs): deleted #x entirely.
     let operator_theirs = base.replace("- do [#x] target node\n", "");
 
@@ -3993,8 +4018,7 @@ fn hap7_sim_operator_deleted_agent_targeted_node_noted_in_exchange() {
         sm.exchange_notes
     );
     assert!(
-        world.snapshot.contains("operator deleted")
-            && world.snapshot.contains("#x"),
+        world.snapshot.contains("operator deleted") && world.snapshot.contains("#x"),
         "the deletion note must land in the converged document:\n{}",
         world.snapshot
     );

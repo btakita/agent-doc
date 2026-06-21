@@ -1221,6 +1221,16 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     let mut source_queue_priority = false;
     let mut queue_tag_attrs_normalized = false;
 
+    // #qprtloss: journal the live queue as soon as it is parsed, before any
+    // convergence/normalization branch can return early and erase an
+    // uncommitted operator prompt from the visible queue.
+    if let Err(err) = crate::queue_journal::record(file, &content) {
+        eprintln!(
+            "[agent-doc] queue_journal: early record failed for {} ({err:#})",
+            file.display()
+        );
+    }
+
     let raw_queue_tag = &current_content[comp.open_start..comp.open_end];
     let normalized_queue_tag = crate::queue::normalize_queue_tag_attrs(raw_queue_tag);
     if normalized_queue_tag != raw_queue_tag {
@@ -2726,7 +2736,10 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
 
         let after = std::fs::read_to_string(&doc).unwrap();
-        assert_eq!(after, content, "queue must be untouched while a foreign edit is in flight");
+        assert_eq!(
+            after, content,
+            "queue must be untouched while a foreign edit is in flight"
+        );
         assert!(
             state.synced_queue_ids.is_empty(),
             "no backlog→queue sync may run while deferred, got {:?}",
@@ -2742,7 +2755,11 @@ mod tests {
         crate::queue_edit_owner::clear_queue_edit_owner_lease(&doc_str);
         let resumed = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(resumed.synced_queue_ids, vec!["alpha".to_string()]);
-        assert!(std::fs::read_to_string(&doc).unwrap().contains("- do [#alpha]"));
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("- do [#alpha]")
+        );
     }
 
     #[test]
@@ -4219,6 +4236,13 @@ mod tests {
         assert!(updated.contains("<!-- agent:queue -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(updated.contains("- do [#newhead]"));
+
+        let missing = crate::queue_journal::replay_missing(&doc, snapshot_content);
+        assert!(
+            missing.iter().any(|entry| entry.text == "do [#newhead]"),
+            "early-return queue maintenance must journal the live edited head before convergence: {:?}",
+            missing
+        );
     }
     #[test]
     fn preflight_adopts_edited_queue_head_when_buffer_settled() {

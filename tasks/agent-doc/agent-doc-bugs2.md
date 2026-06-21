@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -57,7 +57,28 @@ So this is a "no in-session-loop-drainable head" state in practice (the head is 
 1. **`#qnodemerge4wire`** — highest-leverage code progress on the per-cell merge fix; agent-doable parts (1)–(5) land + commit + push, no release ceremony (respects the STOP-cutting-releases gate), live eyeball left to you.
 2. **Operator-verify batch** — you `make install` at a recycle boundary, then drive the live repros for `#1jec`/`#qcm1verify`/`#tb4q`/`#k7mf` and I check the ops.log markers.
 3. **`#s81q`** — confirm scope (alongside-vs-replace Restart Supervisor Process; JB + VSCode both) and I implement the Stop/Restart menus.
-<!-- agent:boundary:d9ab6614 -->
+
+### Re: #qprtloss and #qnodemerge5 - gpt-5
+
+Implemented both fixes.
+
+- #qprtloss: `run_queue_maintenance` now records the queue journal immediately after parsing the live queue, before convergence or normalization can return early and drop an uncommitted operator prompt. The regression test verifies a mid-edit `#newhead` prompt is recoverable through `queue_journal::replay_missing`.
+- #qnodemerge5: semantic merge now keeps the operator text for true same-node conflicts and emits an exchange conflict note with both the kept operator version and rejected agent version. The SimWorld assertion now checks that the merged node stays operator-owned while the rejected agent side remains visible in the note.
+- I also fixed a pre-existing Clippy doc-list indentation issue in the dirty `merge.rs` worktree so `make check` could complete; I did not include that unrelated op-capture file in the feature commit.
+
+Proof:
+
+- `cargo test -p agent-doc-markdown-ast`
+- `cargo test -p agent-doc-orchestration queue_journal -- --nocapture`
+- `cargo test -p agent-doc semmerge_sim_same_node_conflict_operator_wins_with_ack_in_active_area -- --nocapture`
+- `make check` passed: Clippy, 4928 nextest tests, doctests, and the medium sim check.
+- `gh run list --workflow CI --limit 1`: latest CI on `main` was successful (`27911942955`, 2026-06-21T17:25:06Z).
+
+Commits:
+
+- `cf65f876 agent-doc: journal queues and surface conflicts` in `src/agent-doc`, pushed to `btakita/agent-doc main`.
+- `ec4865da5 agent-doc: update agent-doc submodule` in the superproject.
+<!-- agent:boundary:181b6fdd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -66,9 +87,9 @@ So this is a "no in-session-loop-drainable head" state in practice (the head is 
 - ~~do [#6b5h]~~
 - ~~:round_pushpin: do [#6b5hwire]~~
 - [#1jec]
-- do [#qprtloss]
+- ~~do [#qprtloss]~~
 - do [#qcm1verify]
-- do [#qnodemerge5]
+- ~~do [#qnodemerge5]~~
 - :pushpin: do [#tb4q]
 - :pushpin: do [#k7mf]
 - :pushpin: do [#qauthorderpin]
@@ -110,8 +131,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qnodemerge4wire] [focused-cycle] #agent-doc-bug Supply side of #qnodemerge4 op-capture (consumer shipped: EditorOp + replay_editor_ops + merge_with_editor_ops behind the replay-exactness gate, agent-doc submodule ea84ebab). Remaining: (1) per-document op-capture sidecar persistence (record/load/clear/GC) keyed by the base it was captured against; (2) FFI ingestion entry point agent_doc_record_editor_op (FFI-first, plugins stay thin); (3) wire the live merge_contents_crdt path to load+pass theirs editor ops to merge_with_editor_ops and clear the sidecar after; (4) thin JB DocumentListener.documentChanged + VS Code onDidChangeTextDocument reporters that split replacements into delete+insert and report byte offsets; (5) SimWorld coverage. [operator-verify] live eyeball: a concurrent live edit + agent write converges with zero diff-derived duplication and ops replay == editor-observed state. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4). NOTE byte-offset/Yrs unicode-offset semantics (currently ASCII-gated in the consumer) need verification when wiring non-ASCII edits.
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
-- [ ] [#qnodemerge5] [focused-cycle] #agent-doc-bug Surface true conflicts, never fabricate (accuracy lever 5, the safety net). For genuine concurrent edits to the SAME leaf node (information-theoretically underdetermined), do not silently auto-merge text neither side wrote: surface both versions in agent:exchange or a conflict marker for operator resolution. Extends #hap7. Acceptance: a true same-leaf concurrent edit produces an operator-visible conflict, not a fabricated merge; non-conflicting edits never trip it. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 5). Sequenceable after #qnodemerge3. Operator-driven fresh clean session.
-- [ ] [#qprtloss] [focused-cycle] #agent-doc-bug Silent user-prompt loss: a user-typed queue line ("- re #cftk: Would passage... work?") was deleted by preflight queue-convergence during a concurrent admin recycle, and the cycle reported no_changes so the prompt was never answered. Smoking gun: preflight #1 no_changes:false diff_type:simple_question diff:null, then preflight #2 no_changes:true; prior turn logged "converged live editor buffer (auto=false, queue_active=false)" + "admin recycle ... at next idle boundary". Distinct from #6b5h (finalize IPC wedge) — this is preflight-side data loss before any response is composed. Fix dirs: convergence must CRDT-merge (never overwrite) an uncommitted live-buffer queue/exchange edit; no_changes:false + diff:null with non-empty prompt_changes must fail closed (reconstruct from semantic diff, never resolve to no_changes:true); sequence recycle after pending-prompt capture; add SimWorld coverage. Plan: tasks/agent-doc/plan-prompt-loss-queue-convergence.md. DO NOT IMPLEMENT yet.
 - [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
 <!-- /agent:backlog -->
 

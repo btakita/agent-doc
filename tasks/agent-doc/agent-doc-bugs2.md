@@ -321,8 +321,8 @@ This is the merge-layer rung underneath the whole `#editorbufwin`/`#hap7`/`#qdup
 ❯ > :pushpin: Why is there so much drift? Can we tighten the window that causes drift by using evented and reactive techniques? Does the JB + VSCode environments support events whenever a document changes? Can we have a low-latency multi-channel streaming IPC mechanism from the plugin to the CPC? Or would it be better to one stream per document going to the CPC with a thread updating the document model? Can we isolate parts of the document so to reduce conflict? For example, I was typing into this queue item so it should not have any effect on the running job and it should not stall the queue since this is not the current item being run.
 
 
-❯ > **Queue prompt:**
-❯ >
+> **Queue prompt:**
+>
 > :pushpin: We should generalize cell merge. It should be applied to the entire structure of the document AST. So if someone writes a prompt interleaved with an exchange response, the cell is the particular exchange response. The key is isolation of merges. To avoid conflicts and drift. The React Virtual DOM may be a good example of what we are trying to do.435
 
 
@@ -424,7 +424,26 @@ So the design rule is: keys are structural identity, never mutable content; and 
 But "fastest" isn't the real win — **isolation** is. The keyed approach shrinks the ambiguity surface to a single changed leaf cell. No text merge (CRDT or otherwise) is ever 100% on *concurrent edits to the same leaf* — that's the one place a merge can still synthesize text neither side typed. Keyed reconciliation can't eliminate that, but it confines it to one small cell instead of letting it smear across the whole document — which is the entire point of the cell model. So: structural reconciliation is cheap and exact; the irreducible fuzziness lives only at the leaf, where it's smallest.
 
 Net: not magic, but strictly better than blob-merge on all three axes — *if* keys are durable identities with occurrence disambiguation and an explicit ambiguity→whole-cell-merge fallback. I'll bake those two invariants (durable-identity keys, ambiguity fallback) into the `#qcellmerge3` plan's acceptance tests.
-<!-- agent:boundary:212e3459 -->
+❯ Is there a way to make a 100% accurate diff key approach? Are there other algorithms or techniques that could be used to improve the accuracy of the diff key approach?
+### Re: Can the diff-key approach be made 100% accurate — and what other techniques help? — opus-4-8
+
+Short version: **not by improving the *diff* — by stopping diffing.** The accuracy ceiling of "diff a key's old text vs new text and 3-way merge" is fundamental, but it's also avoidable for the common case.
+
+**Why a pure diff-key approach can't hit 100%.** Diffing reconstructs *what changed* by comparing two text snapshots. That reconstruction is a guess — `similar`/Myers diff finds *a* minimal edit script, not necessarily *the* one the user actually performed. Two different real edit sequences can produce the same before/after text, and the diff picks one arbitrarily. On concurrent edits to the same leaf, the "right" merge is genuinely **underdetermined** — no algorithm can recover an intention that isn't in the bytes. That's an information-theoretic limit, not an implementation gap. So "100% accurate diff" is the wrong target.
+
+**The technique that actually removes the inaccuracy — capture ops, don't diff them.** The editor *already knows* the exact operations (insert "x" at offset N, delete range [a,b)) via `DocumentListener.documentChanged` / `onDidChangeTextDocument`. Today we throw that away and re-derive ops from a text diff. If we feed Yrs the **real** ops as they happen, the merge is exact at the character level — no guessing, intention preserved, because we never reconstructed intent in the first place. This is the single highest-leverage change, and it's exactly the evented-reflection direction (`#qcellmerge4`). It converts "merge two final texts" (lossy) into "replay two real op-logs" (lossless). CRDTs (Yrs) and OT are *designed* for op streams; we're currently starving them of the ops.
+
+**Five concrete accuracy levers, in order of leverage:**
+1. **Op-capture via editor events** (above) — eliminates diff-guessing for live edits. Biggest win.
+2. **Finer cells** — push the AST cell down to block → list-item → sentence. "Same leaf" collisions get rarer the smaller the leaf, shrinking the irreducible-ambiguity surface toward zero. (The AST-cell direction, taken further.)
+3. **A correct per-cell base** (`#qcellmerge2`) — most "duplicate insertion" inaccuracy is a *stale base*, not a bad diff. A durable, current 3-way base per cell removes that whole class. Concrete accuracy gain, already planned.
+4. **Move/rename as first-class** — keyed reconciliation already scores here: a block that moved keeps its key, so it's a *move*, not delete+insert (line-diff gets this wrong). Keeping keys = structural-identity (not content-hash) preserves it.
+5. **Surface true conflicts instead of guessing** — for the irreducible remainder (real concurrent same-leaf edits), the *accurate* behavior is to **not silently pick** — present both and let the operator resolve (the `#hap7` "note it in agent:exchange" idea). 100% accuracy by never fabricating a merge that neither side wrote.
+
+**Other algorithm families worth naming:** operational transformation (OT) and op-based CRDTs (Yjs/Yrs, Automerge) — both intention-preserving *given an op stream*; three-way structural/AST merge (e.g. the approach `mergiraf`/GumTree take) which merges parse trees not text lines, avoiding syntactically-broken merges like the split `**bold**` marker the current code has a special-case hack for; and tree-edit-distance with move detection for the structural layer.
+
+**Bottom line:** levers 2–4 push practical accuracy toward ~100% by shrinking and correctly basing the cells; lever 1 (op-capture) removes the diff-guess entirely for live editing; lever 5 handles the theoretical remainder honestly. The keyed-diff approach is the right *structural* layer — the accuracy comes from feeding it real ops and a correct base, plus refusing to guess on genuine conflicts. I'll fold "capture editor ops instead of re-diffing" into `#qcellmerge4` and the "conflict→surface, never fabricate" rule into the `#qcellmerge3` acceptance criteria.
+<!-- agent:boundary:4385405c -->
 <!-- /agent:exchange -->
 
 ## Queue

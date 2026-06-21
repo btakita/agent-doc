@@ -150,7 +150,54 @@ Verification:
 Confidence: high. The reported Advance Lender message rows and the sibling admin message rows now use human-readable timestamps and explicit sender identity, with regression tests covering the omitted surfaces.
 
 Escalation: none.
-<!-- agent:boundary:c39dd65e -->
+
+### Re: Complete Annual Questionnaire dialog + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard > Complete Requirements > Requirements > Complete Questionnaire dialog: Should be full screen. Should have a title "Complete Annual Questionnaire". Instead of having a dropdown, each Verification Type should be rendered inline with its own multi-upload box.
+
+> **Queue prompt:**
+>
+> deploy
+
+Shipped, pushed, and deployed the Complete Requirements questionnaire dialog update.
+
+What changed:
+- The Complete Requirements form now opens as a full-screen dialog with the title `Complete Annual Questionnaire`.
+- Removed the single verification-type dropdown from the questionnaire form.
+- Rendered all verification types inline: income, net worth, institution, and professional.
+- Each verification type now has its own standard multi-file upload box and selected-file list.
+- Upload submission still posts every selected file one request at a time to the existing accreditation upload endpoint, carrying the verification type from the inline section.
+- Updated the Phase 5 Requirements PRD note and regression tests.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/accreditation.tsx`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+- `src/equityfundingsource-dev/tests/multi-upload.test.ts`
+- `src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md`
+- `src/equityfundingsource-dev` submodule pointer
+
+Commits:
+- EFS `7ac2e02` pushed to `origin/main`.
+- Superproject pointer `3edf28717` pushed to `origin/main`.
+
+Verification:
+- `bun test tests/investor-portal-e2e.test.ts -t "dashboard requirements alert opens"` — pass.
+- `bun test tests/investor-portal-e2e.test.ts -t "each verification type"` — pass.
+- `bun test tests/investor-portal-e2e.test.ts` — 46 pass / 0 fail.
+- `bun test tests/multi-upload.test.ts` — 14 pass / 0 fail.
+- `make check` — 1055 pass / 0 fail, browser build green, worker build green. The log still includes the existing expected non-fatal `d1 down` line from the passing outbox-failure test.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists for this repo, so local verification is the gate.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy — no migrations to apply.
+- `make deploy` — deployed production Worker version `7a8a87f3-ce6d-4e5a-9ee4-0c985d9e211d` at `https://equityfundingsource.brian-takita.workers.dev`.
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` — 200.
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard` — 303, the expected protected-route redirect without an authenticated browser session.
+
+Confidence: high. The reported dashboard dialog now uses the full-screen modal path and the form no longer has a hidden verification-type selector; every verification type is directly visible with its own upload target.
+
+Escalation: none.
+<!-- agent:boundary:09e46b7f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -162,7 +209,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message Lender messages do not have the human-readable timestamp of the message. Please ensure all instances of message components across the codebase have the name of the sender and the human-readable timestamp.
+- https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard > Complete Requirements > Requirements > Complete Questionnaire dialog: Should be full screen. Should have a title "Complete Annual Questionnaire". Instead of having a dropdown, each Verification Type should be rendered inline with its own multi-upload box.
 - deploy
 <!-- /agent:queue -->
 

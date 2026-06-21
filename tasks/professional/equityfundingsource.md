@@ -110,7 +110,19 @@ Last feature done and the whole unification is **live**. Worker version `febaf53
 - **#msg-unify3 / #msg-unify4** cutover dual-writes + backfills — live and **soaking**; the only remaining work is the gated dual-read switch + legacy-table drop, which should wait until the dual-writes have proven themselves on live traffic. Nothing forces that step — the unified inbox already shows everything.
 
 Queue should be drained now. The session shipped, end-to-end: the advance-step dialog banner, admin↔lender messaging (both sides), the unified message model + inbox, the borrower/lender cutover dual-writes, and the broker two-way thread — all deployed to prod.
-<!-- agent:boundary:c865c22f -->
+
+### Re: deploy — already live (queue drained) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Already deployed last cycle — nothing new to push. EFS `b581736` == `origin/main`, live as worker version `febaf532-931f-4555-b4ac-7fa0ca40c6c2` (home `200`), no uncommitted/unpushed code.
+
+That was the last queue head, so the queue is now **drained**. The full message unification — model, unified inbox, borrower + lender cutover dual-writes (soaking), and the broker two-way thread — is all live on prod. The only remaining work is the deliberately-gated dual-read switch + legacy-table drop (`#msg-unify3`/`#msg-unify4`), which should wait for the dual-writes to soak.
+
+Nothing left to drain. If you want the dual-read/drop cutover finished later, or anything else, just queue it.
+<!-- agent:boundary:dcba64b1 -->
 <!-- /agent:exchange -->
 ###
 <!--

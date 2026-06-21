@@ -213,7 +213,22 @@ Scope notes (so this isn't oversold):
 - This is the **admin-side** half. The lender can't yet view/reply **in-app** — that's the lender-portal component, filed as **`#lender-card-msg-portal`** (the data model already supports it).
 - **Email-to-lender** notification (so they know to act) is filed as **`#lender-card-msg-email`**; it rides the verified Resend domain gate (`#f4rq`), same as the deal-interest thread.
 - The new table needs migration `0095` applied, which happens on **deploy**. Until then the panel shows a graceful "couldn't load" message rather than erroring the dialog. The preset was commit+push, so I held the deploy — reply `deploy` to push it live (Part 1's banner + this).
-<!-- agent:boundary:8c925010 -->
+
+### Re: Lender-portal messaging — two-way in-app now — opus-4-8
+
+Done. The lender half of the messaging component is built, tested, and pushed, so admin↔lender account messaging is now **two-way in-app**. EFS `e982baf`, superproject pointer `ec4eb46ad`. `#lender-card-msg-portal` is closed.
+
+What shipped (lender/investor portal side):
+- **Lender-facing endpoints** `GET`/`POST /api/investor/messages` — session-scoped to the signed-in lender (`sender_role='lender'`), so a lender only ever sees/writes their own thread. Reuses the same `lender_account_messages` table, attachment storage, and download route.
+- **`LenderAccountMessages` portal component** — a **"Messages from EFS"** card embedded on the lender **dashboard landing** (right under the Requirements alert, where a lender doing onboarding will see it). Thread view (EFS vs "You", with attachments) + a reply composer with up to 5 file attachments.
+- **Tests** — lender-reply round-trip (`sender_role='lender'`, scoped), route registration, and dashboard/component wiring. Full suite **996 pass / 0 fail**; both bundles build clean.
+
+So end-to-end now: an admin opens a lender card → "Message lender" → the lender sees it on their dashboard and can reply with documents; the admin sees the reply back in the card. All in-app, no email dependency.
+
+Remaining: **`#lender-card-msg-email`** (email-to-lender notification) is **gated into review** — it's blocked on the verified EFS Resend sending domain (`#f4rq`), same gate as the existing deal-thread email. Nothing else to do there until the domain lands.
+
+**Not deployed** (preset is commit+push; new table `0095` + these routes apply on deploy). Reply **`deploy`** to push the whole set live (Part 1 banner + admin messaging + this lender portal half).
+<!-- agent:boundary:993db93c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -235,8 +250,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lender-card-msg-portal] [recommended] Lender-portal half of #lender-card-msg: surface the lender_account_messages thread in the lender/investor portal so a lender can view EFS messages and REPLY (sender_role='lender') with document attachments. Data model + admin side already shipped (EFS bb31fe7); needs a lender-portal inbox/thread component + a lender POST route. Plan: src/equityfundingsource-dev/prds/lender-card-messaging.md.
-- [ ] [#lender-card-msg-email] [recommended] Email-to-lender parity for #lender-card-msg account messages (mirror notify_lender_deal_message_): notify the lender by email when an admin posts an account message, like the deal-interest thread does. Rides the verified EFS Resend sending domain gate (#f4rq). Plan: src/equityfundingsource-dev/prds/lender-card-messaging.md.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
@@ -246,6 +259,7 @@ After 20:30
 ## Review
 
 <!-- agent:review -->
+- [/] [#lender-card-msg-email] [recommended] Email-to-lender parity for #lender-card-msg account messages (mirror notify_lender_deal_message_): notify the lender by email when an admin posts an account message, like the deal-interest thread does. Rides the verified EFS Resend sending domain gate (#f4rq). Plan: src/equityfundingsource-dev/prds/lender-card-messaging.md.
 - [/] [#proprate] Lender proposal persists a DEFAULT interest rate never finalized. investor/deal_detail.tsx:362 pre-fills proposal_rate from deal.monthly_interest when deal.proposal_interest_rate==null; submit (:425-435) sends it whenever an amount is present; :421 requires a finite rate, so a lender cannot commit an amount with rate TBD — the pre-filled default (6.5% on d6b78994) persists as if finalized. Duration NOT affected (no proposal_term_months column). DATA CLEANUP DONE 2026-06-20: nulled proposal_interest_rate on the d6b78994/b8ccaa76 row (kept proposal_amount=100000 + proposal_submitted_at; D1 changes=1). CODE FIX still pending operator go: do NOT pre-fill the rate with the deal default; allow proposal_interest_rate=null ("amount committed, rate TBD"); relax :421 validation + admin LoanTermProposalSummary display.
 - [/] [#nthc] [operator-verify] DEPLOYED 2026-06-20 (worker version 17b06176-fc91-44b6-b35d-1cd61beed01b; EFS 8889a4c). Remaining = operator live-verify only: open the Lender Bros group Edit overlay on deal d6b78994, bump lender2 from 0%, confirm the split saves and the "60% confirmed (partial)" badge reconciles.
 - [/] [#pmhf] [recommended] Reuse the rebalancing share editor (lib/ui--browser--efs/portal/shared/lending_groups_alloc.ts: rebalance_stakes_/distribute_evenly_/lock pins) in the per-deal split UI (deal_detail allocations) so per-deal % editing gets the same 100%-balanced, lockable inputs.

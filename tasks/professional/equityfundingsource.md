@@ -197,7 +197,57 @@ Verification:
 Confidence: high. The reported dashboard dialog now uses the full-screen modal path and the form no longer has a hidden verification-type selector; every verification type is directly visible with its own upload target.
 
 Escalation: none.
-<!-- agent:boundary:09e46b7f -->
+
+### Re: Requirements messages + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> In https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard > Requirements: Add a messages component so the lender can talk to the admins about it.
+
+> **Queue prompt:**
+>
+> deploy
+
+Shipped, pushed, and deployed the Requirements-page lender/admin message thread.
+
+What changed:
+- The dedicated lender Requirements page now renders the existing `LenderAccountMessages` thread below the requirements status panel, so lenders can message EFS admins from the onboarding/questionnaire/accreditation workflow.
+- Updated the lender-facing message card copy to explicitly cover onboarding, questionnaire, and accreditation document questions.
+- Documented the Phase 5 Requirements change in the investor dashboard PRD.
+- Added a regression test that locks the Requirements page mount point, support copy, and existing `/api/investor/messages` GET/POST wiring.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/accreditation.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/lender_account_messages.tsx`
+- `src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+- `src/equityfundingsource-dev` submodule pointer
+
+Commits:
+- EFS `dec1a58` pushed to `origin/main`.
+- Superproject pointer `69576865b` pushed to `origin/main`.
+
+Verification:
+- `bun test tests/investor-portal-e2e.test.ts -t "requirements page includes the lender-admin messages thread"` — pass.
+- `bun test tests/investor-portal-e2e.test.ts` — 47 pass / 0 fail.
+- `bun test tests/lender-account-messages.test.ts` — 9 pass / 0 fail.
+- `bun test tests/prd.test.ts` — 8 pass / 0 fail.
+- `git diff --check` — pass.
+- `make check` — 1056 pass / 0 fail, browser build green, worker build green. The log still includes the existing expected non-fatal `d1 down` line from the passing outbox-failure test.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists for this repo, so local verification is the gate.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy — no migrations to apply.
+- `make deploy` — deployed production Worker version `590fc9f9-d097-46d5-929f-60bc3ebfc4ae` at `https://equityfundingsource.brian-takita.workers.dev`.
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` — 200.
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard` — 303, the expected protected-route redirect without an authenticated browser session.
+
+Preflight notes:
+- Preflight warned that the route-owned supervisor binary is stale; this cycle continued through the active Codex finalize path.
+- Preflight also reported legacy gated/review semantic-candidate warnings for existing backlog/review items; they were unrelated to this queue prompt and left untouched.
+
+Confidence: high. The Requirements page now reuses the already-tested account-level message thread and route wiring, with static coverage locking the page placement and copy.
+
+Escalation: none.
+<!-- agent:boundary:5642d179 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -209,7 +259,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard > Complete Requirements > Requirements > Complete Questionnaire dialog: Should be full screen. Should have a title "Complete Annual Questionnaire". Instead of having a dropdown, each Verification Type should be rendered inline with its own multi-upload box.
+- In https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard > Requirements: Add a messages component so the lender can talk to the admins about it.
 - deploy
 <!-- /agent:queue -->
 

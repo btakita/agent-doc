@@ -1126,7 +1126,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // which is a test-assertion string, not a new hot-path flow reason.
         // +1 (#supselfheal Ph2): write_wedged_supervisor_recycle_requested ops-log
         // line carries `reason=repeated_ack_timeout_active_listener` — audited.
-        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 19,
+        // 19 -> 17 (#6b5h): the no_ack / no_ack_content / send_failed converge
+        // refusals were centralized into `refuse_or_editorless_disk_fallback`,
+        // which decides fail-closed (live editor) vs editor-less disk fallback.
+        // The four per-branch `reason=` literals collapsed into the helper's three
+        // (`transport=blocked reason={reason}`, the bail `(reason={reason})`, and
+        // `transport=disk_fallback reason={reason}`), a net -2 audited reduction.
+        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 17,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

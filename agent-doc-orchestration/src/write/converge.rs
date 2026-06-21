@@ -503,6 +503,44 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
 /// so each write site is attributable; see [`converge_document_or_disk`] for
 /// the shared converge-or-disk wrapper every document-mutating write routes
 /// through.
+/// `#6b5h`: at a proven-no-delivery editor-converge refusal point, decide between
+/// failing closed (a live editor buffer must be protected — the `#editorbufwin` /
+/// File Cache Conflict guard) and falling through to the caller's guarded disk
+/// write because there is no live editor endpoint to protect (the pure-CLI /
+/// `#kcb5` case: a controller-hosted socket is *connectable* but no JB plugin
+/// editor is behind it, so every finalize would otherwise wedge on `no_ack`
+/// forever and only `--force-disk` succeeds).
+///
+/// Returns `Ok(false)` — routing the caller to its disk fallback — only when
+/// [`crate::plugin_owner::live_editor_endpoint_attached`] proves there is no live
+/// editor buffer; otherwise it emits the unchanged fail-closed error. The safety
+/// invariant is mechanical: a proven live editor endpoint ALWAYS bails, so this
+/// never clobbers a real editor buffer (preserves `#editorbufwin`). Logs the
+/// chosen transport so each decision is attributable in `ops.log`.
+fn refuse_or_editorless_disk_fallback(file: &Path, source: &str, reason: &str) -> Result<bool> {
+    if crate::plugin_owner::live_editor_endpoint_attached(&file.to_string_lossy()) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} transport=blocked reason={reason} editor_endpoint=live action=refuse_external_disk_write",
+                file.display()
+            ),
+        );
+        anyhow::bail!(
+            "{source}: refused direct disk write for {} while editor IPC listener is active (reason={reason})",
+            file.display()
+        );
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "{source}_writeback file={} transport=disk_fallback reason={reason} editor_endpoint=absent action=editorless_disk_fallback",
+            file.display()
+        ),
+    );
+    Ok(false)
+}
+
 pub fn try_editor_converge(
     file: &Path,
     target: &str,
@@ -642,18 +680,10 @@ pub fn try_editor_converge(
                 std::time::Duration::from_millis(25),
             )?;
             let Some(recovered) = sidecar else {
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "{source}_writeback file={} patch_id={} transport=blocked reason=no_ack_content action=refuse_external_disk_write",
-                        file.display(),
-                        patch_id
-                    ),
-                );
-                anyhow::bail!(
-                    "{source}: refused direct disk write for {} while editor IPC listener is active (reason=no_ack_content)",
-                    file.display()
-                );
+                // `#6b5h`: ack received but no content sidecar proves application —
+                // fail closed for a live editor, else (CLI-only, no editor endpoint)
+                // route to the caller's disk fallback.
+                return refuse_or_editorless_disk_fallback(file, source, "no_ack_content");
             };
             if crate::git::normalize_transient_agent_doc_markers(&recovered)
                 == crate::git::normalize_transient_agent_doc_markers(target)
@@ -694,23 +724,16 @@ pub fn try_editor_converge(
             }
         }
         Ok(None) => {
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "{source}_writeback file={} transport=blocked reason=no_ack action=refuse_external_disk_write",
-                    file.display()
-                ),
-            );
-            anyhow::bail!(
-                "{source}: refused direct disk write for {} while editor IPC listener is active (reason=no_ack)",
-                file.display()
-            );
+            // `#6b5h`: no ack at all — the primary CLI-only wedge. Protect a live
+            // editor buffer; route an editor-less (controller-hosted socket, no
+            // plugin) session to the caller's disk fallback instead of wedging.
+            refuse_or_editorless_disk_fallback(file, source, "no_ack")
         }
         Err(err) => {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "{source}_writeback file={} transport=blocked reason=send_failed error={} action=refuse_external_disk_write",
+                    "{source}_writeback file={} reason=send_failed error={} note=converge_send_error",
                     file.display(),
                     err
                 ),
@@ -718,6 +741,8 @@ pub fn try_editor_converge(
             // `#fcc0e`: feed the de-wedge circuit breaker — a socket ack timeout
             // here counts toward the latch so a repeatedly-wedged listener trips
             // degraded and subsequent converges skip the doomed socket up front.
+            // (Recovery targets a live editor; an editor-less session disk-falls
+            // back below, but recording the socket failure is still harmless.)
             if is_socket_ack_timeout_error(&err) {
                 match record_ipc_socket_ack_timeout(&project_root, file, Some(&patch_id), source) {
                     Ok(true) => {
@@ -739,10 +764,9 @@ pub fn try_editor_converge(
                     ),
                 }
             }
-            anyhow::bail!(
-                "{source}: refused direct disk write for {} while editor IPC listener is active (reason=send_failed)",
-                file.display()
-            );
+            // `#6b5h`: protect a live editor buffer; route an editor-less
+            // (controller-hosted socket, no plugin) session to the disk fallback.
+            refuse_or_editorless_disk_fallback(file, source, "send_failed")
         }
     }
 }
@@ -1359,6 +1383,13 @@ mod core_tests {
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so
+        // the guard fails closed (protects the buffer) rather than treating the
+        // ack-without-content listener as the editor-less CLI-only case.
+        crate::plugin_owner::write_plugin_owner_lease_for_test(
+            doc.to_str().unwrap(),
+            std::process::id(),
+        );
 
         let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .unwrap_err()
@@ -1428,6 +1459,12 @@ mod core_tests {
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so
+        // the guard fails closed instead of taking the editor-less disk fallback.
+        crate::plugin_owner::write_plugin_owner_lease_for_test(
+            doc.to_str().unwrap(),
+            std::process::id(),
+        );
 
         let err = converge_or_disk_write(&doc, &source, &target, "pending_write")
             .unwrap_err()
@@ -1451,6 +1488,41 @@ mod core_tests {
         assert!(
             !log.contains("transport=disk_fallback"),
             "active listener failure must not be logged as a disk fallback:\n{log}"
+        );
+    }
+    #[test]
+    fn converge_document_or_disk_editorless_socket_routes_to_disk_fallback() {
+        // `#6b5h`: a pure-CLI session sees a *connectable* controller-hosted socket
+        // with NO plugin editor behind it (no plugin-owner lease). The ack-without-
+        // content listener proves no delivery, but with no editor buffer to protect
+        // the write must fall through to the guarded disk write instead of wedging
+        // on `no_ack` forever (only `--force-disk` used to succeed).
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+
+        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        // No plugin-owner lease seeded → no live editor endpoint → editor-less.
+
+        converge_document_or_disk(&doc, &target, &source, "queue_consume").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            target,
+            "editor-less CLI session must land the target via the guarded disk write"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_writeback")
+                && log.contains("transport=disk_fallback")
+                && log.contains("editor_endpoint=absent"),
+            "editor-less converge must record the editorless disk fallback:\n{log}"
         );
     }
     #[test]

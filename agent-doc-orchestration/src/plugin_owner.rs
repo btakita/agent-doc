@@ -154,6 +154,30 @@ pub fn live_editor_endpoint_attached(file: &str) -> bool {
     editor_endpoint_attached_for_lease(read_plugin_owner_lease(file), pid_is_live)
 }
 
+/// Test-only: seed a plugin-owner lease for `file` recording the given `pid`,
+/// modelling a real attached editor. Used by write/converge tests to exercise
+/// the fail-closed (live-editor) branch distinctly from the editor-less `#6b5h`
+/// branch. Pass `std::process::id()` for a guaranteed-live owner.
+#[cfg(test)]
+pub fn write_plugin_owner_lease_for_test(file: &str, pid: u32) {
+    let path = plugin_owner_lease_path(file);
+    if let Some(parent) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        panic!("test lease seed: failed to create {}: {e}", parent.display());
+    }
+    if let Err(e) = write_lease_at(
+        &path,
+        &PluginOwnerLease {
+            consumer_id: format!("test-editor-{pid}"),
+            pid,
+            heartbeat_secs: now_secs(),
+        },
+    ) {
+        panic!("test lease seed: failed to write {}: {e}", path.display());
+    }
+}
+
 /// Testable core of [`live_editor_endpoint_attached`]: a live editor is attached
 /// iff an owner lease exists and its owner pid is still live. Pure given the
 /// injected liveness predicate so the decision is unit-testable without spawning

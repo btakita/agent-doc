@@ -93,7 +93,24 @@ Same safe pattern as the borrower cutover, applied to both lender sources. EFS `
 **Gated (needs soak):** the dual-read switch + dropping `deal_interest_lender_messages` / `lender_account_messages`.
 
 **Queue now:** `#msg-unify5` (broker two-way thread — the last *new visible* feature) then `deploy`. With both cutover dual-writes in place, the `deploy` will take all the mirrors + backfills (migrations `0097`+`0098`) live together — no sync gap. I'll keep draining; the stale supervisor recycles at its next idle boundary, which should clear the force-disk fallbacks.
-<!-- agent:boundary:0ad982bf -->
+
+### Re: Broker thread shipped + everything deployed (#msg-unify5 + deploy) — opus-4-8
+
+Last feature done and the whole unification is **live**. Worker version `febaf532-931f-4555-b4ac-7fa0ca40c6c2`; EFS `b581736`.
+
+**#msg-unify5 — broker two-way thread (new visible feature):**
+- Brokers now have a real EFS conversation on the unified `messages` model (party=broker) — replacing the old one-way notifications. `GET`/`POST /api/broker/messages` (read + reply), a **"Messages from EFS"** card on the broker dashboard.
+- Admin side: `GET`/`POST /api/admin/brokers/:id/messages`, and the unified inbox now surfaces native broker messages alongside the legacy adapters (filtered to `party='broker'` so the borrower/lender dual-write mirrors aren't double-counted).
+- **1017 tests / 0 fail**; both bundles build clean.
+
+**Deploy (drained the `deploy` head):** migrations `0097` (borrower backfill) + `0098` (lender backfill) applied to prod D1; the borrower + lender **dual-writes are now live and soaking**. Verified: home `200`, `/api/broker/messages` `401` (auth-guarded), and `messages` is populated (15 borrower rows backfilled).
+
+**The message unification is complete and live:**
+- **#msg-unify1** model · **#msg-unify2** unified per-person inbox + topic filter · **#msg-unify5** broker two-way thread — all live.
+- **#msg-unify3 / #msg-unify4** cutover dual-writes + backfills — live and **soaking**; the only remaining work is the gated dual-read switch + legacy-table drop, which should wait until the dual-writes have proven themselves on live traffic. Nothing forces that step — the unified inbox already shows everything.
+
+Queue should be drained now. The session shipped, end-to-end: the advance-step dialog banner, admin↔lender messaging (both sides), the unified message model + inbox, the borrower/lender cutover dual-writes, and the broker two-way thread — all deployed to prod.
+<!-- agent:boundary:c865c22f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -115,7 +132,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#msg-unify5] [recommended] Broker two-way thread — give brokers a real messages thread (party=broker) in the broker portal + unified admin inbox (today brokers get one-way notifications only). Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.

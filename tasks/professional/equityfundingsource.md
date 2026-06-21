@@ -69,7 +69,19 @@ Already deployed — nothing new to push. EFS `fbabaa9` == `origin/main` is the 
 - **#msg-unify3 / #msg-unify4 — internal data cutover.** Move *live* borrower/lender rows onto `messages` (dual-write → backfill → drop legacy). **Zero visible change** — the unified inbox already shows everything — and it rewrites the *live* borrower-chat write path (Durable Object WebSocket), so it carries real regression risk for **no user-facing benefit right now**. I'd treat these as optional internal cleanup to schedule deliberately, not livestream-grind.
 
 **So:** want me to build **#msg-unify5 (broker thread)** next — the last visible win — and shelve the #msg-unify3/4 cutover as optional cleanup? Or push through the cutover anyway? Either way the queue still has both `deploy` heads (both no-ops now) and the three phase heads; tell me the priority and I'll drive it.
-<!-- agent:boundary:2ec2620b -->
+
+### Re: Borrower cutover — safe step shipped (#msg-unify3) — opus-4-8
+
+Did the **safe, additive** half of the borrower cutover and gated the rest. EFS `411a4da`; **not deployed** (the `deploy` head is later in the queue). #msg-unify3 is gated awaiting prod soak.
+
+**Shipped:**
+- **Dual-write** — new borrower chat messages now mirror into the unified `messages` table via `borrower_chat_message_mirror_`, wired into **both** create paths (REST + the Durable Object realtime). It's `.catch()`-guarded, so a mirror failure can **never** break the live chat write — the existing borrower-chat suite still passes untouched (1010 tests / 0 fail).
+- **Backfill** — migration `0097` copies existing chat history into `messages` (rows prefixed `bk-borrower:` so they're identifiable and never collide with live ids). `chat_messages` is untouched.
+
+**Deliberately NOT done (gated):** the **dual-read switch** (inbox reads `messages` instead of the live adapter) and the **legacy-table drop**. Those need the dual-write to soak in prod first — flipping reads or dropping `chat_messages` before the mirror has proven itself on live traffic would be the reckless part. So `#msg-unify3` stays `[/]` until that soak; nothing user-visible changed (the inbox already shows everything via the adapter).
+
+**Remaining queue:** `#msg-unify4` (lender cutover — same dual-write+backfill pattern, also safe to ship), `#msg-unify5` (broker thread — new visible feature), then `deploy`. I'll keep draining; the dual-write goes live whenever the `deploy` head lands (backfill + dual-write deploy together, so no sync gap).
+<!-- agent:boundary:13cc1cb8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -91,7 +103,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#msg-unify3] [recommended] Borrower cutover — write borrower chat onto the unified messages table (keep the Durable Object live path), backfill chat_messages, dual-read then drop. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [ ] [#msg-unify4] [recommended] Lender cutover — migrate deal_interest_lender_messages + lender_account_messages onto the unified messages table, backfill, dual-read then drop. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [ ] [#msg-unify5] [recommended] Broker two-way thread — give brokers a real messages thread (party=broker) in the broker portal + unified admin inbox (today brokers get one-way notifications only). Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
@@ -103,6 +114,7 @@ After 20:30
 ## Review
 
 <!-- agent:review -->
+- [/] [#msg-unify3] [gated: awaiting dual-write prod soak] Borrower cutover — dual-write (best-effort mirror into messages) + backfill (migration 0097) SHIPPED (EFS 411a4da). Remaining: after the dual-write soaks live, switch the unified inbox to read borrower data from messages (dual-read), then drop chat_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [/] [#lender-card-msg-email] [recommended] Email-to-lender parity for #lender-card-msg account messages (mirror notify_lender_deal_message_): notify the lender by email when an admin posts an account message, like the deal-interest thread does. Rides the verified EFS Resend sending domain gate (#f4rq). Plan: src/equityfundingsource-dev/prds/lender-card-messaging.md.
 - [/] [#proprate] Lender proposal persists a DEFAULT interest rate never finalized. investor/deal_detail.tsx:362 pre-fills proposal_rate from deal.monthly_interest when deal.proposal_interest_rate==null; submit (:425-435) sends it whenever an amount is present; :421 requires a finite rate, so a lender cannot commit an amount with rate TBD — the pre-filled default (6.5% on d6b78994) persists as if finalized. Duration NOT affected (no proposal_term_months column). DATA CLEANUP DONE 2026-06-20: nulled proposal_interest_rate on the d6b78994/b8ccaa76 row (kept proposal_amount=100000 + proposal_submitted_at; D1 changes=1). CODE FIX still pending operator go: do NOT pre-fill the rate with the deal default; allow proposal_interest_rate=null ("amount committed, rate TBD"); relax :421 validation + admin LoanTermProposalSummary display.
 - [/] [#nthc] [operator-verify] DEPLOYED 2026-06-20 (worker version 17b06176-fc91-44b6-b35d-1cd61beed01b; EFS 8889a4c). Remaining = operator live-verify only: open the Lender Bros group Edit overlay on deal d6b78994, bump lender2 from 0%, confirm the split saves and the "60% confirmed (partial)" badge reconciles.

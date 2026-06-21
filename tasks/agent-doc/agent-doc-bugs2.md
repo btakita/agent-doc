@@ -392,20 +392,51 @@ Closing out the rest:
 - **`#qcellmerge2` / `#qcellmerge3` — tagged `[focused-cycle]`** per your earlier choice to drive the big merge-core work in fresh `/clear`'d sessions (the sanctioned binary-read defer tag, so go-mode defers them instead of me re-deriving non-drainability by hand).
 
 After this closeout every remaining queue head is deferred (`[focused-cycle]`/`[operator-verify]`), so the in-session loop has nothing drainable left and stops cleanly — no churn.
-<!-- agent:boundary:8b51e6e1 -->
+
+### Re: Is the keyed-diff approach 100% accurate / conflict-free / fastest? — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Is the diff key approach 100% accurate? Can there be key conflicts? Is this the fastest way to merge?
+
+
+> **Queue prompt:**
+>
+> Is the diff key approach 100% accurate? Can there be key conflicts? Is this the fastest way to merge?
+
+Honest answers, because this is the load-bearing design decision for `#qcellmerge3`.
+
+**1. 100% accurate? No — it's exactly as accurate as the keys are stable and unique.** Keyed reconciliation (React-VDOM-style) is provably correct *only* under two properties: every node has a **stable** key (same logical node → same key across versions) and a **unique** key (distinct nodes → distinct keys within a parent). Where those hold, the match is exact:
+- **Components** (`exchange`/`queue`/`backlog`/…): keyed by name — stable and unique, so 100% (this is what Phase 1 already ships).
+- **List items** (`queue`/`backlog`): keyed by the durable node key the strike paths already use, which is `component:occurrence:id:dupindex` (I saw `queue:3:6b5h:1` vs `:2` in this doc's own semantic diff) — so even duplicate ids are disambiguated by occurrence. Stable for id-items.
+- **`### Re:` blocks**: keyed by heading/prompt identity — stable as long as the heading text isn't rewritten.
+
+The two failure modes are precisely the two properties breaking, and they're the same bugs React has with bad keys:
+
+**2. Yes, key conflicts are real — two kinds:**
+- **Collision** (uniqueness breaks): two genuinely-different nodes hash to the same key — e.g., two free-text queue items with identical text, or two `### Re:` blocks with the same heading. The reconciler would merge them as one node → drop/splice. Mitigation: the key must be `content ⊕ occurrence-index`, never bare content, so identical-text siblings stay distinct (the existing node-key scheme already does this for ids; free-text needs the same occurrence disambiguation).
+- **Instability** (stability breaks): a node's key is derived from content that then edits — the reconciler sees `delete old key + insert new key` instead of an in-place edit, so it loses the edit or duplicates. This is why the key must come from a **durable identity** (the id, or a position-anchored node id), not a hash of the mutable text.
+
+So the design rule is: keys are structural identity, never mutable content; and a node whose key is *ambiguous* (collision it can't disambiguate) must **fall back to the whole-cell text merge** for that node rather than guess — never mis-match. That fallback is what keeps it from ever being *worse* than today's blob merge.
+
+**3. Fastest way? For a correctness-preserving merge, yes — it's the right asymptotics.** Keyed matching is **O(n)** per level (hash keys into a map, like React's O(n) diff vs O(n³) for general tree-edit-distance). It's *faster* than today's whole-document CRDT blob merge in the common case because (a) most cells are byte-identical and short-circuit (Phase 1 already returns early on equal cells), and (b) the expensive 3-way text merge only runs on the handful of leaf cells that actually changed, not the whole file.
+
+But "fastest" isn't the real win — **isolation** is. The keyed approach shrinks the ambiguity surface to a single changed leaf cell. No text merge (CRDT or otherwise) is ever 100% on *concurrent edits to the same leaf* — that's the one place a merge can still synthesize text neither side typed. Keyed reconciliation can't eliminate that, but it confines it to one small cell instead of letting it smear across the whole document — which is the entire point of the cell model. So: structural reconciliation is cheap and exact; the irreducible fuzziness lives only at the leaf, where it's smallest.
+
+Net: not magic, but strictly better than blob-merge on all three axes — *if* keys are durable identities with occurrence disambiguation and an explicit ambiguity→whole-cell-merge fallback. I'll bake those two invariants (durable-identity keys, ambiguity fallback) into the `#qcellmerge3` plan's acceptance tests.
+<!-- agent:boundary:212e3459 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~:pushpin: Is the diff key approach 100% accurate? Can there be key conflicts? Is this the fastest way to merge?~~
 - :pushpin: do [#6b5h]
 - :pushpin: [#1jec]
 - :pushpin: do [#qprtloss]
-- ~~:pushpin: Why does monsterrodholders.md keep on reporting a stale 0.1.0 supervisor if we are using a recent version? `(Housekeeping: recycled a stale 0.1.0 supervisor that was producing the IPC-drift dialogs, and reconciled the agent-loop→boost-client parent pointer.)`~~
-- ~~:pushpin: do [#qcellmerge2]~~
-- ~~:pushpin: do [#qcellmerge3]~~
 - :pushpin: do [#qcm1verify]
-- ~~do [#qdeferstrike]~~
+- do [#qcellmerge2]
+- do [#qcellmerge3]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

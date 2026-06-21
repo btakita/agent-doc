@@ -14,6 +14,67 @@ use crate::start::decisions::{
 
 const CLEAN_SESSION_CONTEXT_RESET_REASON: &str = "active queue head is a [clean-session] item - clearing to give it a fresh agent context (#cleandrainsup)";
 
+/// `#supinstallfeedback` — phases of the supervisor dogfood auto-install, used to
+/// build the user-visible owned-pane status. The rebuild is a ~1-minute blocking
+/// `cargo install` that previously produced NO visible pane feedback: the pane was
+/// left showing the post-`claude exited cleanly` `Press Enter to restart` keepalive
+/// while progress went only to the redirected supervisor stderr / session log, so the
+/// operator perceived a stall ("JB `Run Agent Doc` stalled without feedback").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SupervisorAutoInstallPhase {
+    Started,
+    Succeeded,
+    Failed,
+}
+
+/// Build the owned-pane status message for an auto-install phase. Kept pure +
+/// separate so the wording is unit-testable. The `Started` line explicitly tells
+/// the operator NOT to press Enter (the visible keepalive prompt makes the stalled
+/// rebuild look like it is waiting on a keypress) and that the supervisor restarts
+/// itself when the build lands.
+fn supervisor_auto_install_pane_message(phase: SupervisorAutoInstallPhase) -> &'static str {
+    match phase {
+        SupervisorAutoInstallPhase::Started => {
+            "agent-doc: rebuilding the freshly-committed binary (~1 min) — do NOT press Enter; the supervisor auto-restarts when the build finishes"
+        }
+        SupervisorAutoInstallPhase::Succeeded => {
+            "agent-doc: rebuild complete — recycling onto the fresh binary"
+        }
+        SupervisorAutoInstallPhase::Failed => {
+            "agent-doc: auto-install failed — run the dogfood refresh to rebuild; staying on the current binary"
+        }
+    }
+}
+
+/// Surface the auto-install status on the owned tmux pane so the long blocking
+/// rebuild does not read as a stall (`#supinstallfeedback`). Best-effort: no owned
+/// pane (PTY-only) or a tmux failure falls back to stderr. The `Started` phase
+/// persists (`-d 0`, until the next message/keypress) so it stays visible for the
+/// whole compile; terminal phases use a bounded display time.
+fn surface_supervisor_auto_install_status(
+    shared: &SupervisorShared,
+    phase: SupervisorAutoInstallPhase,
+) {
+    let message = supervisor_auto_install_pane_message(phase);
+    let Some(pane) = shared.inject_pane.as_deref() else {
+        eprintln!("{message}");
+        return;
+    };
+    let delay = if matches!(phase, SupervisorAutoInstallPhase::Started) {
+        "0"
+    } else {
+        "5000"
+    };
+    if let Err(err) = std::process::Command::new("tmux")
+        .args(["display-message", "-t", pane, "-d", delay, message])
+        .status()
+    {
+        eprintln!(
+            "[agent-doc] warning: failed to surface auto-install status on pane {pane}: {err}"
+        );
+    }
+}
+
 fn record_context_clear_prompt_for_hooks(
     shared: &SupervisorShared,
     path: &Path,
@@ -918,6 +979,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 "[agent-doc] supervisor auto-install: rebuilding + installing agent-doc from {} so the next queue item runs on the freshly-committed source",
                                 crate_root.display()
                             );
+                            // #supinstallfeedback: tell the operator the pane is
+                            // rebuilding (not stalled at the restart keepalive).
+                            surface_supervisor_auto_install_status(
+                                &shared,
+                                SupervisorAutoInstallPhase::Started,
+                            );
                             match crate::project_controller::run_supervisor_auto_install(crate_root) {
                                 Ok(()) => {
                                     log_event(
@@ -933,6 +1000,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     );
                                     eprintln!(
                                         "[agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary"
+                                    );
+                                    surface_supervisor_auto_install_status(
+                                &shared,
+                                        SupervisorAutoInstallPhase::Succeeded,
                                     );
                                 }
                                 Err(err) => {
@@ -953,6 +1024,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     );
                                     eprintln!(
                                         "[agent-doc] supervisor auto-install failed ({err}); leaving the rebuild to the operator (run the dogfood refresh) — not re-attempting this session"
+                                    );
+                                    surface_supervisor_auto_install_status(
+                                &shared,
+                                        SupervisorAutoInstallPhase::Failed,
                                     );
                                 }
                             }
@@ -2104,6 +2179,31 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supervisor_auto_install_pane_message_started_warns_against_keypress() {
+        // #supinstallfeedback: the Started message must tell the operator the pane
+        // is rebuilding (not stalled) AND not to press Enter, since the visible
+        // `Press Enter to restart` keepalive otherwise reads as a stall waiting on
+        // a keypress.
+        let started = supervisor_auto_install_pane_message(SupervisorAutoInstallPhase::Started);
+        assert!(started.contains("rebuild"), "must mention the rebuild");
+        assert!(
+            started.contains("do NOT press Enter"),
+            "must warn against the misleading keepalive keypress"
+        );
+        assert!(
+            started.contains("auto-restart"),
+            "must promise the supervisor restarts itself"
+        );
+        // Terminal phases are distinct, non-empty, and name their outcome.
+        let ok = supervisor_auto_install_pane_message(SupervisorAutoInstallPhase::Succeeded);
+        let fail = supervisor_auto_install_pane_message(SupervisorAutoInstallPhase::Failed);
+        assert!(ok.contains("complete") && ok.contains("recycling"));
+        assert!(fail.contains("failed") && fail.contains("current binary"));
+        assert_ne!(started, ok);
+        assert_ne!(ok, fail);
+    }
 
     #[test]
     fn paused_failsafe_drains_only_when_no_loop_owner_holds_a_drainable_head() {

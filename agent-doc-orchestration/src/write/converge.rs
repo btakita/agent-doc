@@ -376,7 +376,10 @@ fn blank_components_except(doc: &str, keep: &[&str]) -> Option<String> {
     spans.sort_by_key(|(start, _)| *start);
     let mut out = doc.to_string();
     for (start, end) in spans.into_iter().rev() {
-        if start <= end && end <= out.len() && out.is_char_boundary(start) && out.is_char_boundary(end)
+        if start <= end
+            && end <= out.len()
+            && out.is_char_boundary(start)
+            && out.is_char_boundary(end)
         {
             out.replace_range(start..end, "");
         }
@@ -1208,8 +1211,10 @@ mod core_tests {
         // operator's live state owns; content_ours (snapshot) still has it active.
         // The exchange (response) is identical. The editor buffer must be accepted
         // (editor-wins outside the response) so HEAD == editor and no post-commit drift.
-        let snapshot = doc_with_queue_and_exchange("- a free-text head\n", "### Re: topic\n\nAnswered.");
-        let recovered = doc_with_queue_and_exchange("- ~~a free-text head~~\n", "### Re: topic\n\nAnswered.");
+        let snapshot =
+            doc_with_queue_and_exchange("- a free-text head\n", "### Re: topic\n\nAnswered.");
+        let recovered =
+            doc_with_queue_and_exchange("- ~~a free-text head~~\n", "### Re: topic\n\nAnswered.");
         assert!(
             convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
             "queue-only divergence with matching response must be accepted"
@@ -1239,8 +1244,10 @@ mod core_tests {
     fn qpcwcmerge_rejects_when_response_differs() {
         // The response itself diverges — NOT safe to accept the editor buffer; the
         // strict content_ours path must own the response component. Fail closed.
-        let snapshot = doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered correctly.");
-        let recovered = doc_with_queue_and_exchange("- ~~head~~\n", "### Re: topic\n\nAnswered DIFFERENTLY.");
+        let snapshot =
+            doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered correctly.");
+        let recovered =
+            doc_with_queue_and_exchange("- ~~head~~\n", "### Re: topic\n\nAnswered DIFFERENTLY.");
         assert!(
             !convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
             "a response (exchange) divergence must fail closed"
@@ -1264,7 +1271,8 @@ mod core_tests {
         // fail closed even if the queue also differs — injected churn outside the
         // editor-owned components is never silently accepted.
         let snapshot = doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered.");
-        let mut recovered = doc_with_queue_and_exchange("- ~~head~~\n", "### Re: topic\n\nAnswered.");
+        let mut recovered =
+            doc_with_queue_and_exchange("- ~~head~~\n", "### Re: topic\n\nAnswered.");
         recovered = recovered.replace("## Queue", "## Queue (tampered interstitial)");
         assert!(
             !convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
@@ -1294,10 +1302,8 @@ mod core_tests {
         // AND the operator carried a struck queue head forward. HEAD's exchange is
         // authoritative; the queue is editor-owned. Reconcile must adopt HEAD's
         // exchange while preserving the working tree's queue.
-        let head = doc_with_queue_and_exchange(
-            "- a live head\n",
-            "### Re: topic\n\nAnswered cleanly.",
-        );
+        let head =
+            doc_with_queue_and_exchange("- a live head\n", "### Re: topic\n\nAnswered cleanly.");
         let working = doc_with_queue_and_exchange(
             "- ~~a live head~~\n",
             "### Re: topic\n\nAnswered cleanly.\n\n> **Queue prompt:** stale leftover from a prior cycle",
@@ -1354,9 +1360,18 @@ mod core_tests {
     fn blank_components_except_clears_others_keeps_exchange() {
         let doc = doc_with_queue_and_exchange("- some head\n", "### Re: x\n\nbody");
         let blanked = blank_components_except(&doc, &[AGENT_RESPONSE_COMPONENT]).unwrap();
-        assert!(!blanked.contains("some head"), "queue content must be blanked");
-        assert!(blanked.contains("### Re: x"), "response content must be preserved");
-        assert!(blanked.contains("<!-- agent:queue -->"), "queue markers stay");
+        assert!(
+            !blanked.contains("some head"),
+            "queue content must be blanked"
+        );
+        assert!(
+            blanked.contains("### Re: x"),
+            "response content must be preserved"
+        );
+        assert!(
+            blanked.contains("<!-- agent:queue -->"),
+            "queue markers stay"
+        );
     }
 
     #[test]

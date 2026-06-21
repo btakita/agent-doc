@@ -218,7 +218,26 @@ Security invariants carry forward: fail-closed without the inbound secret, and t
 **Recommendation:** I can start `#msgmail1` (token + addressing generalization — additive, well-tested, low risk, the borrower path keeps working through the generalized helpers). `#msgmail4` stays operator-gated since it flips on live inbound email. Say the word and I'll build `#msgmail1` → `#msgmail3` in sequence; the prod enable (`#msgmail4`) waits for you. "deploy" in the queue is moot this cycle — the PRD is a planning doc.
 
 (The two earlier frontend phases — `#portalmsg2-dealthreads`, `#portalmsg4` — remain pinned/deferred per your last call; this email work is an independent transport-layer track.)
-<!-- agent:boundary:f1773c94 -->
+
+### Re: #agent-doc-bug — reversed multi --pending-add order — opus-4-8
+
+> **Queue prompt:**
+>
+> The message user's email reply-to should go back to the app email (the sender). A CF worker should process the reply, write the message into the database, and send an email to the admin. The admin should be able to reply to the app email, which writes the message into the database, and sends an email to the user. And so on. All emails should be processable by the app via reply-to.
+
+
+> **Prompt:** The backlog and queue #msgmail* tasks were added in reverse order. #agent-doc-bug
+
+Confirmed and filed a fix **plan** (not implemented, per the `#agent-doc-bug` preset): added `#pendaddorder` to the backlog of `tasks/agent-doc/agent-doc-bugs2.md`.
+
+**The bug:** a single `agent-doc write` with N repeatable `--pending-add` flags **block-prepends in flag order** rather than composing as the documented "at the beginning (repeatable)" per-item prepends. So passing `4,3,2,1` (intending each to prepend → flip to `1,2,3,4`) actually lands `4,3,2,1`, and the `agent:queue` mirror inherits the reversal. That's exactly what happened to `#msgmail1–4`.
+
+**The plan (`#pendaddorder`)** proposes: pick ONE documented semantics for repeatable `--pending-add` (recommend: preserve flag order as the final top-down order — what you read is what you get — and route strict-order callers to the existing `--pending-add-after` chains); update the help text + SKILL.md/pending-ops wording; make the queue mirror order deterministically match the backlog; add a multi-flag + queue-parity test.
+
+**Also fixed the live data:** reordered the backlog to `#msgmail1→#msgmail2→#msgmail3→#msgmail4` via `--pending-reorder` (the other 65 backlog items are untouched). One thing worth flagging — `--pending-reorder` fixed the **backlog** but **not** the `agent:queue` mirror, which is still `msgmail4→1`. That backlog/queue divergence is a second facet of the same bug (the queue mirror doesn't track backlog reordering), and I captured it in `#pendaddorder` point (3). It's harmless here since the `#msgmail` queue heads are awaiting your go, not auto-draining; the backlog (the phasing source of truth) is now correct.
+
+For my own part going forward: I'll use `--pending-add-after` chains for ordered multi-item adds so the order is deterministic regardless of how the batch flag composes.
+<!-- agent:boundary:cffd6840 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -230,7 +249,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The message user's email reply-to should go back to the app email (the sender). A CF worker should process the reply, write the message into the database, and send an email to the admin. The admin should be able to reply to the app email, which writes the message into the database, and sends an email to the user. And so on. All emails should be processable by the app via reply-to.
+- ~~The message user's email reply-to should go back to the app email (the sender). A CF worker should process the reply, write the message into the database, and send an email to the admin. The admin should be able to reply to the app email, which writes the message into the database, and sends an email to the user. And so on. All emails should be processable by the app via reply-to.~~
 - :pushpin: do [#portalmsg4]
 - :pushpin: do [#portalmsg2-dealthreads]
 - deploy
@@ -243,10 +262,10 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#msgmail4] [recommended] Enable email round-trip in prod (ops, operator-gated): configure Cloudflare Email Routing to POST inbound mail to the worker w/ the shared secret; set MESSAGE_EMAIL_INBOUND_ENABLED/_SECRET/_REPLY_TO; verify sending domain (#f4rq). Do not enable blind. Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
-- [ ] [#msgmail3] [recommended] Unified inbound route: generalize POST /api/email/inbound to decode any party token, authorize the sender as a thread participant, write to messages, notify the counterparty. Mocked-inbound tests across borrower/lender/broker/admin. Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
-- [ ] [#msgmail2] [recommended] Outbound Reply-To for all parties: set reply_to + reply hint on lender (account + deal-interest), broker, and admin notify emails using the unified token (mirrors the borrower path). Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
 - [ ] [#msgmail1] Unified reply token + addressing: add the thread token to the unified messages model (reuse thread_id or add reply_token), generalize message_reply_to_ / message_inbound_* from borrower session_id to the unified token, with unit tests. No behavior change. Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
+- [ ] [#msgmail2] [recommended] Outbound Reply-To for all parties: set reply_to + reply hint on lender (account + deal-interest), broker, and admin notify emails using the unified token (mirrors the borrower path). Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
+- [ ] [#msgmail3] [recommended] Unified inbound route: generalize POST /api/email/inbound to decode any party token, authorize the sender as a thread participant, write to messages, notify the counterparty. Mocked-inbound tests across borrower/lender/broker/admin. Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
+- [ ] [#msgmail4] [recommended] Enable email round-trip in prod (ops, operator-gated): configure Cloudflare Email Routing to POST inbound mail to the worker w/ the shared secret; set MESSAGE_EMAIL_INBOUND_ENABLED/_SECRET/_REPLY_TO; verify sending domain (#f4rq). Do not enable blind. Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
 - [ ] [#portalmsg2-dealthreads] [recommended] Finish the admin inline cutover: migrate the per-deal-interest "Lender communication" thread (DealInterestWorkflowList in investor_pipeline.tsx, endpoint /api/admin/deal-interests/:id/lender-messages) and the admin deal-detail borrower+lender threads to <PortalMessages placement="inline">. More entangled than the account thread (deal-interest-scoped, shares borrower-message helpers), so split from #portalmsg2. Advances #portalmsg2.
 - [ ] [#portalmsg4] [recommended] Borrower launcher: migrate borrower application-status messaging (sessions/loan-scoped + Durable Object websocket path) to <PortalMessages placement="launcher">; needs care around the live DO chat path. Advances #portalmsg4.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.

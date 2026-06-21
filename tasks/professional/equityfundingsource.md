@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -60,6 +60,11 @@ One gap worth flagging (ties to your earlier question): selection sends the lend
 
 > **Queue prompt:**
 >
+> :pushpin: deploy
+
+
+> **Queue prompt:**
+>
 > :pushpin: In the lender portal, if a Lender Group is interested in the deal, there should be a dialog for the % allocation. Prepopulate the allocations with the Lender Group default allocations set in the Lender Group.
 
 
@@ -71,7 +76,7 @@ When a lender expresses interest in a deal **as a Lending Group**, a **% allocat
 - **Backend was already in place** — reads `GET /api/lender/groups/:id/deals/:dealId` (participation, allocations seeded from defaults), saves `POST …/allocations`. No endpoint or auto-seed changes.
 - **Wiring** — auto-opens on group-interest success; re-open button; both gated on a selected `lending_group_id` (not shown for "Myself").
 - Tests: new `tests/lender-deal-allocation-dialog.test.ts` (GET-prepopulate → POST-save round-trip + UI-wiring grep). Suite **979 pass / 0 fail**; worker build clean. Spec: `#lender-alloc-dialog`.
-<!-- agent:boundary:039fc560 -->
+<!-- agent:boundary:08f2e7df -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -83,8 +88,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: In the lender portal, if a Lender Group is interested in the deal, there should be a dialog for the % allocation. Prepopulate the allocations with the Lender Group default allocations set in the Lender Group.~~
-- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

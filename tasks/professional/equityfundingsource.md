@@ -37,7 +37,38 @@ completed
 
 Compacted content:
 - Prior summary/context: prior compacted content: Archived 9 response topic(s): One floating context-sensitive message widget to unify portal ...
-<!-- agent:boundary:d2da4991 -->
+
+### Re: drain the queue (email round-trip + portal messaging) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#portalmsg4]
+>
+> :pushpin: do [#portalmsg2-dealthreads]
+>
+> :pushpin: do [#msgmail1]
+>
+> :pushpin: do [#msgmail2]
+>
+> do [#msgmail3]
+>
+> do [#msgmail4]
+
+
+Drained the full queue. All six dev items shipped, tested (1076 passing), committed, pushed, and **deployed to prod** (worker `16126fd8`; no D1 migrations — all changes reuse existing tables).
+
+**Email reply-to round-trip (`src/equityfundingsource-dev`):**
+- **#msgmail1** (`3b3ca27`) — generalized the borrower-only reply plumbing to a party-agnostic thread token + a reversible base64url codec for `(party, scope_type, scope_id, party_user_id)`, charset/length-safe for the plus-address. No behavior change.
+- **#msgmail2** (`cf82e3d`) — lender account + deal-interest notify emails now carry a parseable `Reply-To` thread token + the reply hint (falls back to the admin address when unconfigured).
+- **#msgmail3** (`f3cbe8c`) — `POST /api/email/inbound` now decodes any party's token, authorizes the sender as a thread participant (admin or the owning party only — blocks cross-thread injection), writes to the unified `messages` table, and notifies the counterparty with `Reply-To` so the chain continues. Mocked-inbound tests across lender/admin/broker.
+- **#msgmail4** — gated. Operator prod-ops only: configure Cloudflare Email Routing -> worker, set `MESSAGE_EMAIL_INBOUND_ENABLED` / `_SECRET` / `_REPLY_TO`, verify the sending domain (#f4rq). Inbound left **disabled** in prod (confirmed absent from the deployed env). Unblock to flip it.
+
+**Portal messaging migration:**
+- **#portalmsg2-dealthreads** (`6f6b6fa`) — admin deal-interest lender + borrower threads (investor_pipeline + deal_detail) now use the unified `<PortalMessages inline>`; added the two GET endpoints + `messages[]` to the POST responses; de-entangled the borrower doc-request workflow (kept inline, request-only) from general messaging; removed the dead inline compose code.
+- **#portalmsg4** (`468c8fb`) — borrower portal shell mounts the always-visible `<PortalMessages launcher>` (mirroring lender/broker), over the REST `/api/borrower/messages` thread. The live Durable Object realtime chat page is **untouched** — the launcher coexists with it rather than downgrading realtime to polling.
+
+Queue head **deploy** — done (prod deploy above).
+<!-- agent:boundary:e457f914 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,24 +80,18 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: do [#portalmsg4]
-- :pushpin: do [#portalmsg2-dealthreads]
+- ~~:pushpin: do [#portalmsg4]~~
+- ~~:pushpin: do [#portalmsg2-dealthreads]~~
 - deploy
-- do [#msgmail4]
-- do [#msgmail3]
-- do [#msgmail2]
-- do [#msgmail1]
+- ~~:pushpin: do [#msgmail1]~~
+- ~~:pushpin: do [#msgmail2]~~
+- ~~do [#msgmail3]~~
+- ~~do [#msgmail4]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#msgmail1] Unified reply token + addressing: add the thread token to the unified messages model (reuse thread_id or add reply_token), generalize message_reply_to_ / message_inbound_* from borrower session_id to the unified token, with unit tests. No behavior change. Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
-- [ ] [#msgmail2] [recommended] Outbound Reply-To for all parties: set reply_to + reply hint on lender (account + deal-interest), broker, and admin notify emails using the unified token (mirrors the borrower path). Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
-- [ ] [#msgmail3] [recommended] Unified inbound route: generalize POST /api/email/inbound to decode any party token, authorize the sender as a thread participant, write to messages, notify the counterparty. Mocked-inbound tests across borrower/lender/broker/admin. Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
-- [ ] [#msgmail4] [recommended] Enable email round-trip in prod (ops, operator-gated): configure Cloudflare Email Routing to POST inbound mail to the worker w/ the shared secret; set MESSAGE_EMAIL_INBOUND_ENABLED/_SECRET/_REPLY_TO; verify sending domain (#f4rq). Do not enable blind. Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
-- [ ] [#portalmsg2-dealthreads] [recommended] Finish the admin inline cutover: migrate the per-deal-interest "Lender communication" thread (DealInterestWorkflowList in investor_pipeline.tsx, endpoint /api/admin/deal-interests/:id/lender-messages) and the admin deal-detail borrower+lender threads to <PortalMessages placement="inline">. More entangled than the account thread (deal-interest-scoped, shares borrower-message helpers), so split from #portalmsg2. Advances #portalmsg2.
-- [ ] [#portalmsg4] [recommended] Borrower launcher: migrate borrower application-status messaging (sessions/loan-scoped + Durable Object websocket path) to <PortalMessages placement="launcher">; needs care around the live DO chat path. Advances #portalmsg4.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
@@ -76,6 +101,7 @@ After 20:30
 ## Review
 
 <!-- agent:review -->
+- [/] [#msgmail4] [recommended] Enable email round-trip in prod (ops, operator-gated): configure Cloudflare Email Routing to POST inbound mail to the worker w/ the shared secret; set MESSAGE_EMAIL_INBOUND_ENABLED/_SECRET/_REPLY_TO; verify sending domain (#f4rq). Do not enable blind. Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
 - [/] [#mcme] [recommended] #msg-read-status Email-open-based read receipts on messages — DEFERRED: gated by the operator on "only if we can detect email reads", which EFS cannot today (sends via Cloudflare Email, no open tracking). Needs a ~3-5 day greenfield subsystem: switch message notifications to Resend with open-tracking, add a signed Resend event webhook (email.opened), an email_events table, and message<->email linking, then surface email_opened_at in the message DTO/UI. In-app portal read cursors already exist for borrower chat (chat_sessions.*_last_read_at) but are not email reads.
 - [/] [#msg-unify4] [gated: awaiting dual-write prod soak] Lender cutover — dual-write (best-effort mirror into messages, both lender sources) + backfill (migration 0098) SHIPPED (EFS b5a6a55). Remaining: after soak, switch the inbox to read lender data from messages (dual-read), then drop deal_interest_lender_messages + lender_account_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [/] [#msg-unify3] [gated: awaiting dual-write prod soak] Borrower cutover — dual-write (best-effort mirror into messages) + backfill (migration 0097) SHIPPED (EFS 411a4da). Remaining: after the dual-write soaks live, switch the unified inbox to read borrower data from messages (dual-read), then drop chat_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.

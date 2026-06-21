@@ -19,6 +19,19 @@ rule. This runbook carries the rest.
   persistence or stop on a blocker. Do not keep appending "starting/continuing"
   status prose while the requested work remains undone.
 
+**Draining a free-text queue head — quote it (`#qdeferstrike`).** When you answer a
+free-text queue prompt (a queue head with **no** `#id`), quote it verbatim as a
+`> **Queue prompt:**` blockquote at the top of your response. The position-
+independent strike (`#ftstrike` / `strike_answered_free_text_queue_heads`) matches
+the head's prose against your response's **blockquote** region — a `### Re:` heading
+alone is not enough, so a heading-only answer leaves the head queued and the loop
+churns re-answering it forever. This matters most when the free-text head sits
+*behind* a deferred `[operator-verify]`/`[focused-cycle]` id-head: the leading
+consume stops at that deferred id-head, so the **only** path that can strike the
+free-text item is the blockquote-matched `#ftstrike`. `do [#id]` heads are
+different — they strike by id via `--done <id>` regardless of position and need no
+quote.
+
 **Response header format (template mode):** use `### Re: topic` markdown headers —
 **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use
 h4–h6 for sub-sections within a response.

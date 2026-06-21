@@ -76,7 +76,7 @@ After preflight, run `agent-doc plan <FILE>` and treat `prompt_targets`, `execut
 
 - Address the user's changes naturally in the console; that response is the document response.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest question; answer or group each unresolved prompt in that tail and each unresolved `prompt_target`; treat `content_edit` items as user corrections.
-- Execute from the planning record. If `execution_scope=plan_backlog_only`, stay in plan/backlog capture mode. Otherwise complete the requested repo work before persistence or stop on a blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone.
+- Execute from the planning record. If `execution_scope=plan_backlog_only`, stay in plan/backlog capture mode. Otherwise complete the requested repo work before persistence or stop on a blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone. When draining a free-text queue head (no `#id`), quote it as a `> **Queue prompt:**` blockquote so `#ftstrike` can strike it (see [runbooks/respond.md](runbooks/respond.md), `#qdeferstrike`).
 
 **Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings.
 

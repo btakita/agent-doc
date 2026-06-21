@@ -107,8 +107,41 @@ across every node. `MultiNodeState` makes the base durable *per node*:
   `save_document_crdt` rebuilds and rewrites the sidecar every cycle (so compaction, which routes
   through it, GCs per node), `delete_crdt` removes it, and the rename migration carries it with
   the document. The legacy `<hash>.yrs` and `<hash>.overlay.yrs` are still written for
-  back-compat; the live orchestration merge base is unchanged pending the recursive `#qnodemerge3`
-  rung.
+  back-compat.
+
+## Recursive reconciliation — `reconcile_component` (`#qnodemerge3`)
+
+The Phase 1/2 layers stop at the top-level node (component + interstitial) and run the leaf
+text `merge` on each *whole* component. Phase 3 drills the **same** keyed reconciliation one
+level deeper, inside any component whose body is a sequence of keyed children:
+
+- **List components** (`queue`/`backlog`/`review`/`done`): each `- …` markdown item is a child,
+  keyed by its durable `#id` (the identity the strike paths already use) or, for a free-text item,
+  its normalized text (strike markers / pin glyphs / checkbox stripped, so a strike keys the same).
+  Continuation lines attach to the preceding item; leading text is a reserved preamble child.
+- **`exchange`**: each `### Re:` block is a child keyed by its heading (minus the working-tree-only
+  ` (HEAD)`). A prompt typed into the exchange attaches to the block it falls within, so it
+  reconciles within that block and never cross-splices into another.
+
+`reconcile_component_body` matches `ours`/`theirs`/`base` children by key (React-VDOM style):
+
+- **Matched, different** → leaf `merge` against *that child's own* base. Two edits to different
+  keyed children land in separate sub-trees and can never contend — editing queue item B while
+  item A is the running head leaves A byte-identical, and an interleaved exchange prompt converges
+  alongside a freshly appended `### Re:` block with zero cross-block splice.
+- **Key on one side only** → a pure **insert** (key absent from base — kept, so a concurrent user
+  queue addition is never dropped) or a **delete** (key in base, the other side unchanged — honored
+  for list items; **never** for committed `exchange` blocks, the per-block `#ipc-crdt-response-drift`
+  guard). A modify-vs-delete conflict keeps the surviving content.
+- Order is `order_union`: ours' order is the spine, theirs-only inserts woven in after their nearest
+  placed theirs-predecessor — deterministic for the common append/insert-on-one-side cases.
+
+Segmentation is lossless (`concat(children) == body`) and the whole path is **fail-safe**: an
+unsplittable component, malformed marker framing, ambiguous (duplicate) keys, or any leaf merge
+error falls the component back to the flat whole-component `merge` (current behavior), so Phase 3
+strictly narrows contention without widening the corruption surface. Because the engine lives in
+the shared `merge_aligned_nodes`, both `merge_by_component` (whole-doc base) and
+`MultiNodeState::merge` (per-node base) get the recursion.
 
 ## Roadmap — recursive AST-node merge
 
@@ -120,7 +153,7 @@ Virtual DOM keys its children.
 | --- | --- |
 | `#qnodemerge1` ✅ shipped | Component-scoped merge (`merge_by_component`) — the anti-corruption rung above. |
 | `#qnodemerge2` ✅ shipped | Per-node CRDT **state persistence** — `MultiNodeState` (`crdt.rs`) persists one independent Yrs state per top-level node into a single structured container (`<hash>.nodes.yrs`), the per-component successor to the whole-doc `<hash>.yrs`. Each node carries its own stable base across cycles (an untouched node re-encodes byte-identically; a changed node's base advances on its own). Migrates a legacy whole-doc `<hash>.yrs` lazily, rebuilds (GCs) per node every save/compaction, and follows the document across renames. See *Durable per-node base* below. |
-| `#qnodemerge3` | **Recursive AST-node reconciliation** — one `reconcile(base, ours, theirs)` matching children by durable key and recursing on matched pairs. Queue/backlog items *and* `### Re:` blocks (with interleaved prompts) become nodes; the whole-doc text merge becomes the leaf. |
+| `#qnodemerge3` ✅ shipped | **Recursive AST-node reconciliation** — `reconcile_component` (`crdt.rs`) drills the keyed reconciliation *inside* each component via the shared `merge_aligned_nodes` per-node path. Queue/backlog/review/done items are keyed by their durable `#id` (or normalized text); `### Re:` blocks are keyed by heading. Children are matched by key (React-VDOM style): a matched-but-different child runs the leaf text `merge` against *its own* base child, a key-on-one-side child is a pure insert (kept) or delete (honored only on a clean delete-vs-unchanged; never for committed `exchange` blocks). The whole-component text `merge` stays the leaf and the fallback (unsplittable component, malformed framing, or ambiguous/duplicate keys). See *Recursive reconciliation* below. |
 | `#qnodemerge4` | **Op-capture / evented reflection** (highest-leverage accuracy lever) — feed real editor operations (`DocumentListener.documentChanged` / `onDidChangeTextDocument`) into the per-node model instead of reconstructing edits from a text diff, removing the diff-guess entirely. |
 | `#qnodemerge5` | **Surface true conflicts, never fabricate** — for a genuine concurrent edit to the *same* leaf node (information-theoretically underdetermined), present both versions for operator resolution instead of silently auto-merging text neither side wrote. |
 

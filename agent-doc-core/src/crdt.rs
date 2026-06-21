@@ -524,6 +524,16 @@ where
 
         let merged_text = if ours_slice == theirs_slice {
             ours_slice.to_string()
+        } else if let Some(component_name) = name
+            && let Some(merged) =
+                reconcile_component(component_name, node_base.as_deref(), ours_slice, theirs_slice)
+        {
+            // Phase 3 (#qnodemerge3): recursive keyed reconciliation drilled
+            // *inside* the component, so two edits to different child nodes (queue
+            // items, `### Re:` blocks) reconcile in separate sub-trees and never
+            // contend. Falls back to the flat whole-component `merge` below when
+            // the component has no keyed child structure or keys are ambiguous.
+            merged
         } else {
             let node_base_state = node_base
                 .as_deref()
@@ -533,6 +543,315 @@ where
         merged.push((name.map(str::to_string), merged_text));
     }
     Ok(merged)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 (#qnodemerge3): recursive AST-node keyed reconciliation.
+//
+// The Phase 1/2 layers reconcile a document into top-level nodes (components +
+// interstitials) and run the leaf text `merge` on each whole component. Phase 3
+// drills the *same* keyed reconciliation one level deeper, *inside* a component
+// whose body is a sequence of keyed children:
+//   - `queue`/`backlog`/`review`/`done`: each `- …` list item is a child, keyed
+//     by its durable `#id` (the strike paths' identity) or normalized text.
+//   - `exchange`: each `### Re:` response block is a child, keyed by its heading.
+// Children are matched by key (React-VDOM style): a key present on both sides
+// reconciles against its own base child via the leaf `merge`; a key on only one
+// side is a pure insert (kept) or delete (honored only on a clean
+// delete-vs-unchanged, never for committed `exchange` blocks). Two edits that
+// touch different keyed children therefore can never contend, and an in-progress
+// edit to one queue item cannot stall or drift another.
+// ---------------------------------------------------------------------------
+
+/// Reserved key for the leading text inside a component body before its first
+/// keyed child (e.g. the blank line / preamble before the first list item or
+/// `### Re:` block). Matched positionally-by-key like any other child.
+const PREAMBLE_KEY: &str = "\u{0}::preamble";
+
+/// True for component kinds whose body is a markdown list of keyed items
+/// (`queue`/`backlog`/`review`/`done`), reconciled per item in Phase 3.
+fn is_list_component(name: &str) -> bool {
+    matches!(name, "queue" | "backlog" | "review" | "done")
+}
+
+/// One keyed child within a component body. `text` is the exact source slice so
+/// that `children.iter().map(|c| &c.text).collect::<String>() == body` (lossless
+/// segmentation); `key` is the child's durable identity within the component.
+struct KeyedChild {
+    key: String,
+    text: String,
+}
+
+/// First `[#id]` token in `s` (e.g. `do [#qnodemerge3]` → `qnodemerge3`), the
+/// durable identity the queue/backlog strike paths key off. `None` for a
+/// free-text child with no id.
+fn first_hash_id(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        // `[` and `#` are ASCII, so byte indexing stays on char boundaries.
+        if bytes[i] == b'[' && bytes[i + 1] == b'#' {
+            let rest = &s[i + 2..];
+            if let Some(close) = rest.find(']') {
+                let id = &rest[..close];
+                if !id.is_empty()
+                    && id
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                {
+                    return Some(id.to_string());
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Normalize a list item's identity line for free-text keying: drop the list
+/// marker, checkbox, strike markers, and pin glyphs, and collapse whitespace, so
+/// a struck/edited item still keys to the same child.
+fn normalize_item_text(item: &str) -> String {
+    let first = item.lines().next().unwrap_or("").trim();
+    let mut s = first.strip_prefix("- ").unwrap_or(first).trim_start();
+    for cb in ["[ ]", "[x]", "[X]", "[/]"] {
+        if let Some(r) = s.strip_prefix(cb) {
+            s = r.trim_start();
+            break;
+        }
+    }
+    s.replace("~~", "")
+        .replace(":pushpin:", "")
+        .replace('📌', "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Durable key for a list item: its `#id` when present (stable across strike /
+/// text edits), else its normalized text.
+fn list_item_key(item: &str) -> String {
+    match first_hash_id(item) {
+        Some(id) => format!("id:{id}"),
+        None => format!("txt:{}", normalize_item_text(item)),
+    }
+}
+
+/// Durable key for an `### Re:` exchange block: its heading line minus the
+/// working-tree-only ` (HEAD)` annotation.
+fn exchange_heading_key(block: &str) -> String {
+    let heading = block.lines().next().unwrap_or("").trim();
+    heading
+        .strip_suffix(" (HEAD)")
+        .unwrap_or(heading)
+        .trim_end()
+        .to_string()
+}
+
+/// Split a markdown-list component body into keyed children, one per `- …` item
+/// (continuation lines attach to the preceding item; leading text becomes a
+/// [`PREAMBLE_KEY`] child). Returns `None` when the body has no list item, so
+/// the caller falls back to the flat whole-component merge.
+fn split_list_children(body: &str) -> Option<Vec<KeyedChild>> {
+    let mut starts = Vec::new();
+    let mut pos = 0usize;
+    for line in body.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("- ") || trimmed.trim_end() == "-" {
+            starts.push(pos);
+        }
+        pos += line.len();
+    }
+    if starts.is_empty() {
+        return None;
+    }
+    Some(segment_by_starts(body, &starts, list_item_key))
+}
+
+/// Split an `exchange` component body into keyed children, one per `### Re:`
+/// block (leading text becomes a [`PREAMBLE_KEY`] child). `None` when there is
+/// no `### Re:` heading.
+fn split_exchange_children(body: &str) -> Option<Vec<KeyedChild>> {
+    let mut starts = Vec::new();
+    let mut pos = 0usize;
+    for line in body.split_inclusive('\n') {
+        if line.trim_start().starts_with("### Re:") {
+            starts.push(pos);
+        }
+        pos += line.len();
+    }
+    if starts.is_empty() {
+        return None;
+    }
+    Some(segment_by_starts(body, &starts, exchange_heading_key))
+}
+
+/// Build lossless keyed children from child-start byte offsets: a preamble child
+/// for any leading text, then one child per `[start, next_start)` slice keyed by
+/// `key_of`.
+fn segment_by_starts(body: &str, starts: &[usize], key_of: fn(&str) -> String) -> Vec<KeyedChild> {
+    let mut children = Vec::with_capacity(starts.len() + 1);
+    if starts[0] > 0 {
+        children.push(KeyedChild {
+            key: PREAMBLE_KEY.to_string(),
+            text: body[..starts[0]].to_string(),
+        });
+    }
+    for (i, &s) in starts.iter().enumerate() {
+        let e = starts.get(i + 1).copied().unwrap_or(body.len());
+        let slice = &body[s..e];
+        children.push(KeyedChild {
+            key: key_of(slice),
+            text: slice.to_string(),
+        });
+    }
+    children
+}
+
+/// True when every child key is unique. Keyed reconciliation is only sound with
+/// unique keys; a duplicate (e.g. two identical free-text queue items) makes the
+/// caller fall back to the flat whole-component merge.
+fn keys_unique(children: &[KeyedChild]) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    children.iter().all(|c| seen.insert(c.key.as_str()))
+}
+
+/// Frame a single-component node `text` into `(open_marker, body, close_marker)`
+/// where `body` is the content between the markers. `None` when the text does
+/// not parse as a component (caller falls back to flat merge).
+fn component_framing(text: &str) -> Option<(&str, &str, &str)> {
+    let comps = crate::component::parse(text).ok()?;
+    let comp = comps.iter().min_by_key(|c| c.open_start)?;
+    Some((
+        &text[..comp.open_end],
+        &text[comp.open_end..comp.close_start],
+        &text[comp.close_start..],
+    ))
+}
+
+/// Recursive keyed reconciliation of one component (`#qnodemerge3`). Splits the
+/// component body into keyed children, three-way reconciles them by key, and
+/// reassembles the body inside ours' marker framing. Returns `None` to signal
+/// "fall back to the flat whole-component `merge`" — for an unsplittable
+/// component, malformed framing, or ambiguous (duplicate) keys.
+fn reconcile_component(
+    name: &str,
+    base_text: Option<&str>,
+    ours_text: &str,
+    theirs_text: &str,
+) -> Option<String> {
+    if name != "exchange" && !is_list_component(name) {
+        return None;
+    }
+    let (ours_open, ours_body, ours_close) = component_framing(ours_text)?;
+    let (_, theirs_body, _) = component_framing(theirs_text)?;
+    let base_body = base_text.and_then(|t| component_framing(t).map(|(_, b, _)| b));
+
+    let merged_body = reconcile_component_body(name, base_body, ours_body, theirs_body)?;
+    Some(format!("{ours_open}{merged_body}{ours_close}"))
+}
+
+/// Three-way reconcile a component body's keyed children. `None` falls back to
+/// the flat whole-component merge.
+fn reconcile_component_body(
+    name: &str,
+    base_body: Option<&str>,
+    ours_body: &str,
+    theirs_body: &str,
+) -> Option<String> {
+    let split = |b: &str| -> Option<Vec<KeyedChild>> {
+        if name == "exchange" {
+            split_exchange_children(b)
+        } else {
+            split_list_children(b)
+        }
+    };
+    let ours_children = split(ours_body)?;
+    let theirs_children = split(theirs_body)?;
+    let base_children = base_body.and_then(split).unwrap_or_default();
+
+    if !keys_unique(&ours_children)
+        || !keys_unique(&theirs_children)
+        || !keys_unique(&base_children)
+    {
+        return None;
+    }
+
+    let ours_map: std::collections::HashMap<&str, &KeyedChild> =
+        ours_children.iter().map(|c| (c.key.as_str(), c)).collect();
+    let theirs_map: std::collections::HashMap<&str, &KeyedChild> =
+        theirs_children.iter().map(|c| (c.key.as_str(), c)).collect();
+    let base_map: std::collections::HashMap<&str, &KeyedChild> =
+        base_children.iter().map(|c| (c.key.as_str(), c)).collect();
+
+    let ours_keys: Vec<&str> = ours_children.iter().map(|c| c.key.as_str()).collect();
+    let theirs_keys: Vec<&str> = theirs_children.iter().map(|c| c.key.as_str()).collect();
+    let order = order_union(&ours_keys, &theirs_keys);
+
+    // `exchange` is append-only committed history: a `### Re:` block present in
+    // the base must never be dropped by a stale/divergent side (the
+    // #ipc-crdt-response-drift guard, applied here per block).
+    let protect_deletes = name == "exchange";
+
+    let mut out = String::new();
+    for key in &order {
+        let in_o = ours_map.get(key.as_str());
+        let in_t = theirs_map.get(key.as_str());
+        let in_b = base_map.get(key.as_str());
+        let resolved: Option<String> = match (in_o, in_t) {
+            (Some(o), Some(t)) => {
+                if o.text == t.text {
+                    Some(o.text.clone())
+                } else {
+                    // Matched-but-different child: leaf text merge against its
+                    // own base child. A leaf merge error falls the whole
+                    // component back to the flat merge (returns None).
+                    let base_state = in_b.map(|b| CrdtDoc::from_text(&b.text).encode_state());
+                    Some(merge(base_state.as_deref(), &o.text, &t.text).ok()?)
+                }
+            }
+            // Present only in ours: insert by ours, or delete by theirs.
+            (Some(o), None) => match in_b {
+                None => Some(o.text.clone()),
+                Some(b) if protect_deletes || o.text != b.text => Some(o.text.clone()),
+                Some(_) => None,
+            },
+            // Present only in theirs: insert by theirs, or delete by ours.
+            (None, Some(t)) => match in_b {
+                None => Some(t.text.clone()),
+                Some(b) if protect_deletes || t.text != b.text => Some(t.text.clone()),
+                Some(_) => None,
+            },
+            (None, None) => None,
+        };
+        if let Some(text) = resolved {
+            out.push_str(&text);
+        }
+    }
+    Some(out)
+}
+
+/// Merge two ordered key sequences into a supersequence: ours' order is the
+/// spine, and each theirs-only key is woven in immediately after its nearest
+/// preceding theirs key that is already placed (or at the front). Deterministic
+/// and order-preserving for the common append/insert-on-one-side cases.
+fn order_union(ours_keys: &[&str], theirs_keys: &[&str]) -> Vec<String> {
+    let ours_set: std::collections::HashSet<&str> = ours_keys.iter().copied().collect();
+    let mut result: Vec<String> = ours_keys.iter().map(|s| s.to_string()).collect();
+    for (i, &k) in theirs_keys.iter().enumerate() {
+        if ours_set.contains(k) || result.iter().any(|r| r == k) {
+            continue;
+        }
+        let mut insert_pos = 0usize;
+        for j in (0..i).rev() {
+            if let Some(p) = result.iter().position(|r| r == theirs_keys[j]) {
+                insert_pos = p + 1;
+                break;
+            }
+        }
+        result.insert(insert_pos, k.to_string());
+    }
+    result
 }
 
 /// Encode `text` as a Yrs state with a **fixed** client id, so identical text
@@ -2284,5 +2603,212 @@ Second answer line three.
         assert!(merged.contains("Body."));
         assert!(merged.contains("[#b2]"));
         assert_eq!(state.to_text().unwrap(), merged);
+    }
+
+    // ---- #qnodemerge3: recursive AST-node keyed reconciliation ------------
+
+    #[test]
+    fn reconcile_queue_item_edit_does_not_touch_sibling_item() {
+        // Acceptance (a): the operator edits queue item B (#b2) while item A
+        // (#a1) is the running head and the agent appends an exchange response.
+        // Item A must survive byte-for-byte (no drift, no duplication); item B
+        // carries the operator edit. Two edits to different keyed children must
+        // reconcile in separate sub-trees.
+        let base = doc_with_exchange_queue("Q.", "- :pushpin: do [#a1]\n- :pushpin: do [#b2]");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let ours = doc_with_exchange_queue(
+            "Q.\n\n### Re: q — opus\n\nBody.",
+            "- :pushpin: do [#a1]\n- :pushpin: do [#b2]",
+        );
+        let theirs = doc_with_exchange_queue(
+            "Q.",
+            "- :pushpin: do [#a1]\n- :pushpin: do [#b2] with operator note",
+        );
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(merged.contains("### Re: q"), "exchange edit lost:\n{merged}");
+        assert_eq!(
+            merged.matches("do [#a1]").count(),
+            1,
+            "sibling item A drifted/duplicated:\n{merged}"
+        );
+        assert!(
+            merged.contains("- :pushpin: do [#a1]\n"),
+            "sibling item A text drifted:\n{merged}"
+        );
+        assert!(
+            merged.contains("operator note"),
+            "item B operator edit lost:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn reconcile_exchange_prompt_between_blocks_converges_with_new_block() {
+        // Acceptance (b): a user prompt inserted between two committed `### Re:`
+        // blocks while the agent appends a new block must converge with all three
+        // blocks present and zero cross-block splice (each heading exactly once).
+        let r1 = "### Re: first — opus\n\nFirst answer.\n\n";
+        let r2 = "### Re: second — opus\n\nSecond answer.\n\n";
+        let base = doc_with_exchange_queue(&format!("{r1}{r2}"), "- do [#a1]");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+
+        let r3 = "### Re: third — opus\n\nThird answer.\n\n";
+        let ours = doc_with_exchange_queue(&format!("{r1}{r2}{r3}"), "- do [#a1]");
+        let theirs = doc_with_exchange_queue(
+            &format!("{r1}❯ a prompt typed between blocks\n\n{r2}"),
+            "- do [#a1]",
+        );
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(merged.contains("### Re: first"), "block 1 lost:\n{merged}");
+        assert!(merged.contains("### Re: second"), "block 2 lost:\n{merged}");
+        assert!(merged.contains("### Re: third"), "appended block 3 lost:\n{merged}");
+        assert!(
+            merged.contains("a prompt typed between blocks"),
+            "interleaved operator prompt lost:\n{merged}"
+        );
+        assert_eq!(
+            merged.matches("### Re: first").count(),
+            1,
+            "block 1 cross-spliced/duplicated:\n{merged}"
+        );
+        assert_eq!(
+            merged.matches("### Re: third").count(),
+            1,
+            "block 3 cross-spliced/duplicated:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn reconcile_queue_preserves_concurrent_user_item_addition() {
+        // The #queue-user-edit-overwrite class: the operator adds a new queue item
+        // (theirs) while the agent edits a different item (ours). Keyed
+        // reconciliation treats the new item as a pure insert — never dropped.
+        let base = doc_with_exchange_queue("Q.", "- do [#a1]");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let ours = doc_with_exchange_queue("Q.", "- do [#a1] agent touched");
+        let theirs = doc_with_exchange_queue("Q.", "- do [#a1]\n- do [#user-added]");
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(
+            merged.contains("[#user-added]"),
+            "concurrent user queue addition dropped:\n{merged}"
+        );
+        assert!(
+            merged.contains("agent touched"),
+            "concurrent agent item edit lost:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn reconcile_queue_honors_clean_item_deletion() {
+        // theirs removes item B (clean delete: ours left B == base). The delete is
+        // honored while item A and the agent's exchange edit survive.
+        let base = doc_with_exchange_queue("Q.", "- do [#a1]\n- do [#b2]");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let ours = doc_with_exchange_queue("Q.\n\n### Re: q\n\nBody.", "- do [#a1]\n- do [#b2]");
+        let theirs = doc_with_exchange_queue("Q.", "- do [#a1]");
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(merged.contains("Body."), "exchange edit lost:\n{merged}");
+        let queue_body = merged
+            .split("<!-- agent:queue -->")
+            .nth(1)
+            .and_then(|s| s.split("<!-- /agent:queue -->").next())
+            .unwrap_or("");
+        assert!(queue_body.contains("[#a1]"), "item A lost:\n{queue_body}");
+        assert!(
+            !queue_body.contains("[#b2]"),
+            "clean deletion of item B not honored:\n{queue_body}"
+        );
+    }
+
+    #[test]
+    fn reconcile_exchange_never_drops_committed_block_on_stale_side() {
+        // A stale `theirs` that lost a committed `### Re:` block must not delete it
+        // — committed exchange history is append-only (the per-block
+        // #ipc-crdt-response-drift guard).
+        let r1 = "### Re: first — opus\n\nFirst answer.\n\n";
+        let r2 = "### Re: second — opus\n\nSecond answer.\n\n";
+        let base = doc_with_exchange_queue(&format!("{r1}{r2}"), "- do [#a1]");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        // ours keeps both committed blocks; theirs is stale and dropped block 2.
+        let ours = doc_with_exchange_queue(&format!("{r1}{r2}"), "- do [#a1]\n- do [#new]");
+        let theirs = doc_with_exchange_queue(&r1.to_string(), "- do [#a1]");
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(
+            merged.contains("### Re: second"),
+            "stale side deleted a committed block:\n{merged}"
+        );
+        assert!(merged.contains("[#new]"), "concurrent queue add lost:\n{merged}");
+    }
+
+    #[test]
+    fn reconcile_falls_back_on_duplicate_item_keys() {
+        // Two identical free-text queue items make keys ambiguous → fall back to
+        // the flat whole-component merge (no panic, deterministic, content kept).
+        let base = doc_with_exchange_queue("Q.", "- repeated item\n- repeated item");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let ours = doc_with_exchange_queue("Q.", "- repeated item\n- repeated item\n- new one");
+        let theirs = doc_with_exchange_queue("Q.", "- repeated item\n- repeated item");
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(
+            merged.contains("new one"),
+            "duplicate-key fallback dropped the new item:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn first_hash_id_extracts_durable_id() {
+        assert_eq!(
+            first_hash_id("- :pushpin: do [#qnodemerge3]"),
+            Some("qnodemerge3".to_string())
+        );
+        assert_eq!(
+            first_hash_id("- [ ] [#6b5hwire] some text"),
+            Some("6b5hwire".to_string())
+        );
+        assert_eq!(first_hash_id("- free text no id"), None);
+    }
+
+    #[test]
+    fn list_item_key_stable_across_strike_and_glyphs() {
+        // A struck or pin-glyphed item keys the same as its plain form, so a
+        // strike reconciles as a content edit, not a delete+insert.
+        assert_eq!(list_item_key("- do [#a1]"), list_item_key("- ~~do [#a1]~~"));
+        assert_eq!(
+            list_item_key("- :pushpin: hello world"),
+            list_item_key("- ~~hello world~~")
+        );
+    }
+
+    #[test]
+    fn order_union_weaves_theirs_only_inserts() {
+        let ours = ["a", "b", "c"];
+        let theirs = ["a", "x", "b", "c", "y"];
+        assert_eq!(
+            order_union(&ours, &theirs),
+            vec!["a".to_string(), "x".into(), "b".into(), "c".into(), "y".into()]
+        );
+    }
+
+    #[test]
+    fn split_list_children_is_lossless() {
+        // The segmentation must be exact: concatenating child texts reproduces the
+        // body byte-for-byte (no content gained or lost).
+        let body = "\n- do [#a1]\n  continuation line\n- :pushpin: do [#b2]\n\n";
+        let children = split_list_children(body).unwrap();
+        let joined: String = children.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(joined, body, "list segmentation is not lossless");
+    }
+
+    #[test]
+    fn split_exchange_children_is_lossless() {
+        let body = "\n### Re: a — opus\n\nbody a\n\n### Re: b — opus\n\nbody b\n";
+        let children = split_exchange_children(body).unwrap();
+        let joined: String = children.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(joined, body, "exchange segmentation is not lossless");
     }
 }

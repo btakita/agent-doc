@@ -235,7 +235,15 @@ I'm deliberately **not** striking it — it's your probe, and I'm preserving it.
 **On `do [#routeretest]`:** that's the `[operator-verify]` live re-test, and it's genuinely yours to drive — the route/dispatch code is already shipped (`not_dispatched` full-trigger re-send, `send_direct_pane_enter_resubmit_until_stable`, `dispatch_inject attempt=N`), so there's nothing for me to re-implement. Trigger a JB/Codex Run-Agent-Doc on the fresh binary and check `ops.log` for a single `dispatch_inject attempt=1` + a submitted trigger. If it stalls or stacks un-submitted copies, that's a real residual gap and I'll dig into the dispatch path.
 
 IPC note: if you restarted the IDE, this cycle should commit cleanly via the revived listener. If it still drifts, the work is safe in git regardless.
-<!-- agent:boundary:65b9894e -->
+
+### Re: restart confirmed — JB listener is alive again — opus-4-8
+
+**Confirmed: your restart worked.** This cycle's preflight got `[ipc-socket] queue convergence sent, ack: {"type":"ack","status":"ok"}` and `converged live editor buffer` — the JetBrains plugin listener now responds correctly. Every prior cycle this session returned `ack status error` (dead listener); that's gone. If this response commits cleanly without a `live_prompt_drift` recovery, the editor IPC path is fully healthy end-to-end.
+
+One note on your `🧪` test line: preflight this cycle **did** strike `🧪 test edit for [#qnodemerge4wire]`, but with `source=review_gated` — i.e. it was resolved because it *cites the gated id `#qnodemerge4wire`*, which is correct resolution (the id is done/in-review), **not** the false-strike bug `#qstrikeexplain` fixes. That bug is specifically about striking a brand-new *free-text* head you're still typing; this line was struck for a legitimately different reason (its cited work is resolved).
+
+Continuing now that the transport is healthy. Next agent-doable binary head is `#qstrikenote` (the Phase-1 explicit-strike-note follow-up). I'll pick it up on the next cycle.
+<!-- agent:boundary:588632e2 -->
 <!-- /agent:exchange -->
 
 ## Queue

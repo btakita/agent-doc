@@ -183,27 +183,15 @@ Drained the queue head. Implemented the genuine remaining agent-doable gap and s
 - Note carried: byte-offset vs Yrs unicode-offset semantics still need verification on non-ASCII edits.
 
 No version bump / install / publish (STOP-cutting-releases). Source committed locally for preservation; submodule-pointer bump follows.
-<!-- agent:boundary:f8b408e9 -->
+<!-- agent:boundary:3e1ce836 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
 - ~~:pushpin: do [#qnodemerge4wire]~~
-- [#1jec]
-- do [#qcm1verify]
-- :pushpin: do [#tb4q]
-- :pushpin: do [#k7mf]
-- ~~I'm typing in a queue item and agent-doc automatically strikes it. This should not happen without a response written into the document explaining why it was auto-struck.~~
-- ~~complete [#wd40]. Reduce the wait to restart. An immediate restart would be ideal...if we can quickly flush whatever state needs to be cleared.~~
-- Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
-- JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
-- `agent-doc tasks/monsterrodholders.md` was added to the codex input but not submitted. Whatever wrote the prompt should also loop to check the input and submit it if not submitted.
-- As I was writing queue items during a turn, an extra `/clear\n/agent-doc tasks/agent-doc/agent-doc-bugs2.md\n/clear` was written into the input and submitted.
-- do [#s81q]: Rename "Restart Supervisor" to "Recycle Supervisor". Add Restart command alongside "Recycle Supervisor"
-- do [#qstrikeexplain]
 ---
-JB `Run Agent Doc` stalled without feedback
+:round_pushpin: JB `Run Agent Doc` stalled without feedback
 ```
 claude exited cleanly.
 Press Enter to restart, or 'q' to exit.
@@ -220,6 +208,19 @@ Press Enter to restart, or 'q' to exit.
    Compiling agent-doc v0.34.35 (/home/brian/work/btakita/agent-loop/src/agent-doc)
 ```
 ---
+- [#1jec]
+- :pushpin: do [#tb4q]
+- :pushpin: do [#k7mf]
+- ~~I'm typing in a queue item and agent-doc automatically strikes it. This should not happen without a response written into the document explaining why it was auto-struck.~~
+- ~~complete [#wd40]. Reduce the wait to restart. An immediate restart would be ideal...if we can quickly flush whatever state needs to be cleared.~~
+- Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
+- JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
+- `agent-doc tasks/monsterrodholders.md` was added to the codex input but not submitted. Whatever wrote the prompt should also loop to check the input and submit it if not submitted.
+- As I was writing queue items during a turn, an extra `/clear\n/agent-doc tasks/agent-doc/agent-doc-bugs2.md\n/clear` was written into the input and submitted.
+- do [#qcm1verify]
+- do [#s81q]: Rename "Restart Supervisor" to "Recycle Supervisor". Add Restart command alongside "Recycle Supervisor"
+- ~~do [#qstrikeexplain]~~
+- do [#qstrikenote]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -246,7 +247,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#qstrikeexplain] [recommended] #agent-doc-bug Free-text queue-head auto-strike (#ftstrike) must be explained + conservative (operator: "I'm typing in a queue item and agent-doc automatically strikes it. This should not happen without a response written into the document explaining why it was auto-struck."). Two modes: (1) silent strike — a struck free-text head leaves no exchange note, so a typed line just disappears; (2) striking a mid-typed line — the response-match heuristic can strike a head the operator is still authoring this turn. Fix: strike only a baseline-present head the committed response answered (defer brand-new live-buffer heads to the cycle that answers them, per #queue-user-edit-overwrite editor-wins), and deterministically record a one-line 'auto-struck queue head: …' note in the response. Plan: tasks/agent-doc/plan-queue-strike-explanation.md
+- [ ] [#qstrikenote] [recommended] #agent-doc-bug #qstrikeexplain Phase 1 follow-up: explicit deterministic explanation note when #ftstrike auto-strikes a free-text queue head. Phase 2 (do not strike in-flight/mid-typed heads; baseline-gated) SHIPPED agent-doc submodule 06933b72. The strike already requires the response to quote the struck head in a blockquote; add a binary-injected one-line auto-struck note so the operator sees an explicit statement. Decide deterministic-injection vs a finalize-field per all-deterministic-in-binary. Plus a SimWorld case that a strike emits the note. Plan: tasks/agent-doc/plan-queue-strike-explanation.md (Phase 1 + Phase 3 SimWorld).
 - [ ] [#s81q] [recommended] #agent-doc-bug #stopvscodemenu Extend #restartagentmenu (JB Restart Agent; plan tasks/agent-doc/plan-restart-agent.md) per operator request to also add a Stop Agent command and mirror BOTH Stop+Restart into the VSCode extension menus. Delta beyond #restartagentmenu: (1) StopAgentAction.kt + plugin.xml registration on the JB side; (2) VSCode command-palette + editor/title menu contributions for stop+restart wired to the same TerminalUtil/route paths. Decide alongside-vs-replace the existing Restart Supervisor Process action; do not remove without operator confirmation. Bump pluginVersion + build signed/unsigned zips (gated by STOP-cutting-releases). Confirm scope before implementing.
 - [ ] [#k7mf] [operator-verify] #g9d7verify #agent-doc-bug Live editor-less repro of #g9d7/#6b5hprimary (agent-doc submodule 260d61b3). Code shipped+pushed: the run_ipc no-delivery bail routes content_ours to the guarded controller-host disk write when there is no plugin-owner lease (live_editor_endpoint_attached=false), reusing decide_editorless_disk_fallback; a live editor still fails closed. After a make install, run agent-doc finalize in a Claude Code pane with NO JB IDE attached and confirm ops.log shows run_ipc_editorless_disk_fallback transport=disk_fallback editor_endpoint=absent plus a committed cycle, with no --force-disk and no recovery=retry_without_disk_write. Operator-gated: needs a real CLI pane.
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.

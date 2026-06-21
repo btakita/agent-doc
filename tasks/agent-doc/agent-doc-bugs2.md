@@ -212,7 +212,17 @@ So I did **not** re-implement working code. Instead I filed **`#routeretest` `[o
 **Stopping the loop here.** The remaining drainable heads are not cleanly agent-codeable right now: the route/dispatch/stall family is code-complete pending your live re-test (`#routeretest`/`#rdypoll`), `#s81q` (Stop/Restart menus) is release-gated plugin work needing scope confirmation, and `#qstrikenote` is the Phase-1 explanation-note follow-up I just filed (binary, `[recommended]`). I'm not striking your reports — they stay queued until you confirm them resolved on the fresh binary. Tell me to take `#qstrikenote`, or re-prioritize, whenever you're ready.
 
 **This session shipped:** `#qnodemerge4wire` (op-capture FFI supply side) + `#qstrikeexplain` (free-text strike defers in-flight edits), both pushed, `make check` green at 4937 tests; root-caused + fixed the stale-binary corruption.
-<!-- agent:boundary:bca992a4 -->
+
+### Re: 🧪 your queue test edit on #qnodemerge4wire — opus-4-8
+
+I see your test: you edited the struck `~~do [#qnodemerge4wire]~~` line to `~...~~🧪 [#qnodemerge4wire] test~` and flipped the queue to `go`. I'm **preserving that edit** — not striking it. Two things to make the test actually exercise the fix:
+
+**1. That line is id-backed, so it tests the wrong path.** `#qnodemerge4wire` is a tracked `#id`, so it's governed by the **done-id strike** (`strike_done_queue_head_prompts`), not the **free-text `#ftstrike`** path that `#qstrikeexplain` changed. My fix only gates the free-text strike (heads with no `#id`). To test the in-flight-edit protection, type a **brand-new free-text line** (no `#id`, ≥4 words) into the queue this turn — e.g. `- testing whether agent-doc strikes a line I am still typing`. The fix guarantees that line is **not** struck this cycle because it isn't in the pre-turn baseline, even if a response quotes something similar; it defers to the cycle that actually answers it.
+
+**2. The session's editor IPC is unreliable right now.** Last cycle the JetBrains plugin listener returned `ack status error` (dead listener) — every `finalize` hits `live_prompt_drift` and recovers via `commit`, and that `content_ours` recovery has been **dropping queue edits** (it dropped `do [#routeretest]` last cycle). That same path could drop your `🧪` edit, which would look exactly like the false-strike bug but is actually the dead listener. For a clean, trustworthy strike test, **restart the JetBrains IDE / Claude session** first to revive the listener — then run the free-text probe in #1.
+
+If your `🧪` edit or any queue line disappears after this commit, that's the dead-listener drop (#queue-user-edit-overwrite via content_ours), not `#ftstrike` — I'll restore it.
+<!-- agent:boundary:d9173951 -->
 <!-- /agent:exchange -->
 
 ## Queue

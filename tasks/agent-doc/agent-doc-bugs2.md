@@ -34,38 +34,18 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260621-211542.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260621-213916.md`*
 
 Compacted content:
-- Archived 14 response topic(s): #1jec; do [#qauthorderpin]; harness switch to claude; 11 more
-- Prior summary/context: prior compacted content: Archived 2 response topic(s): queue cleanup + next-step direction; #qprtloss and #qnodemerge...
-
-### Re: do [#pcwcwarn] — opus-4-8
-
-> **Queue prompt:**
->
-> #qstrikenote: apply the design note. As a general heuristic, validation + changes should be applied in a single step.
-
-
-Done. Root-fixed the residual post-commit `#pcwc` worktree drift in the agent-doc submodule (`5f3fc07d`, superproject pointer `db7fc3594`).
-
-**The bug.** When the live editor in-memory buffer retains a prior cycle's `> **Queue prompt:**`-style blockquote *inside* the agent-owned `exchange` response, `emit_postcommit_worktree_check` sees the editor as a SUPERSET of HEAD (it lost no committed content), so it routed to `flush_editor_buffer_to_clear_drift` — which **preserves** the stale exchange. The worktree then re-drifts from HEAD every cycle (manual `git checkout HEAD` needed; `admin recycle` only cleared it via the `#yzer` reconnect-reread).
-
-**The fix** — a per-component post-commit reconcile, the INVERSE of `#qpcwcmerge`. The agent owns `exchange`, so HEAD is authoritative there: `reconcile_postcommit_exchange_to_head` splices HEAD's `exchange` body into the working tree's `exchange` span while preserving every editor-owned component (queue/backlog/… and any plugin-defined component) exactly as the editor has it. It persists editor-IPC-first (push the reconciled buffer via `refresh_content`, skip the disk write that pops a File Cache Conflict — `#pcwcdiskfree`), with an authoritative disk fallback when no listener acks.
-
-**Why it won't clobber legitimate carry-forward.** Deliberately narrow: it fires ONLY when every HEAD `exchange` line is contained in the working `exchange` AND every working-only line is a blockquote (the stale-quote class), with a `PromptTarget` guard as defence in depth. A compacted `### Session Summary`, an in-progress scratch comment, or a typed follow-up never matches → it falls through to the existing flush path unchanged (verified: `finalize_preserves_compacted_exchange_ipc_scratch_comment` stays green).
-
-Tests: 3 new binary cases + FlowCore `reason=` budget +2; `make check` green (4947). Submodule CI (`5f3fc07d`) is in progress — closing out on local evidence per the test-bearing-turn rule.
-
-> **Operator live-verify (cannot be agent-done):** the fix runs in the binary's commit path + editor IPC, so it goes live once the supervisor adopts the new build. Drive one edit-during-finalize cycle with a stale exchange blockquote in a live editor and confirm `ops.log` shows `postcommit_exchange_reconciled … reason=stale_editor_exchange` and ZERO recurring `postcommit_worktree_check match=false` drift.
-<!-- agent:boundary:6d5922cb -->
+- Archived 1 response topic(s): do [#pcwcwarn]
+- Prior summary/context: prior compacted content: Archived 14 response topic(s): #1jec; do [#qauthorderpin]; harness switch to claude; 11 more
+<!-- agent:boundary:3949ed7a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#qstrikenote: apply the design note. As a general heuristic, validation + changes should be applied in a single step.~~
-- do [#pcwcwarn]
 ---
 :round_pushpin: JB `Run Agent Doc` stalled without feedback
 ```
@@ -84,6 +64,7 @@ Press Enter to restart, or 'q' to exit.
    Compiling agent-doc v0.34.35 (/home/brian/work/btakita/agent-loop/src/agent-doc)
 ```
 ---
+- ~~do [#pcwcwarn]~~
 - [#1jec]
 - :pushpin: do [#tb4q]
 - :pushpin: do [#k7mf]
@@ -99,6 +80,7 @@ Press Enter to restart, or 'q' to exit.
 - [#pendaddorder]
 - JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.
 - JS `Clear Session Context` then JB `Run Agent Doc` sometimes has the dispatch storm (multiple duplicate prompts) and no submit.
+- do [#arsm]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

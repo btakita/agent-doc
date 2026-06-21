@@ -185,7 +185,13 @@ Shipped + deployed across all message threads (EFS `6bba0f1` + `17c174b`).
 - Confirmed every remaining `msg-input` message-send textarea (borrower/admin/broker/investor deal-detail + lender-account) is already wired. The remaining `fi`-class textareas (settings, blog/public-content editors, wire instructions, denial reason, vesting/workflow notes) are multi-field form/content editors with no single "send" action and auto-save or a separate Save button — out of the message-submit scope, left as-is.
 
 **Verification.** Extended `tests/msg-send-shortcut.test.ts` with source-level guards for the investor_pipeline boxes (≥3 wired) and the apply form. Full suite **1049 pass / 0 fail**, `bun run check` green (typecheck + browser/worker build). Committed (`59aea65`, submodule pointer `7498d9f4a`), pushed, and **deployed** → live at `https://equityfundingsource.brian-takita.workers.dev`, **Version ID `36501217-0f88-4290-88a8-01361b7d6dc7`**.
-<!-- agent:boundary:7edb597b -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:** deploy
+
+Already deployed this cycle alongside the Ctrl/Cmd+Enter fix — no code changed since, so this drains as already-satisfied. Live worker is **Version ID `36501217-0f88-4290-88a8-01361b7d6dc7`** at `https://equityfundingsource.brian-takita.workers.dev` (build/typecheck green, 1049 tests pass).
+<!-- agent:boundary:3aa35e9c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -197,8 +203,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Ctrl+Enter does not submit the message on https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender. Survey all textareas in the app and add ctrl+enter/cmd+enter keybinding.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

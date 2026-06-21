@@ -166,7 +166,26 @@ Shipped + deployed across all message threads (EFS `6bba0f1` + `17c174b`).
 **`do [#mcme]` — read-status — stays DEFERRED.** `#mcme` is the read-receipts item I filed; you gated it on "only if we can detect email reads," and EFS currently can't: it sends via Cloudflare Email (no open tracking). Doing it properly is a ~3–5 day greenfield subsystem (switch message email to Resend with open-tracking, a signed `email.opened` webhook, an `email_events` table, and message↔email linking). I left it as a `[recommended]` backlog item with the full plan rather than auto-building a multi-day subsystem. Say the word if you want that built.
 
 **Verification:** new `tests/message-avatar-shortcut.test.ts` (16 tests); full suite **1047 pass / 0 fail**, `bun run check` green. **Deployed** → live at `https://equityfundingsource.brian-takita.workers.dev`, **Version ID `6119ba13-9dcc-49ec-8d37-d6ba2a1e86aa`**.
-<!-- agent:boundary:09299f19 -->
+
+### Re: Ctrl/Cmd+Enter submit across all textareas + deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> Ctrl+Enter does not submit the message on https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender. Survey all textareas in the app and add ctrl+enter/cmd+enter keybinding.
+
+
+> **Queue prompt:** Ctrl+Enter does not submit the message on `/admin/lender-pipeline` > Advance Lender. Survey all textareas in the app and add ctrl+enter/cmd+enter keybinding.
+> **Queue prompt:** deploy
+
+**Root cause.** The `message_send_shortcut_match_` helper (Ctrl+Enter on Win/Linux, ⌘+Enter on macOS; `shared/ui.tsx`) was already wired into the deal-detail, borrower, broker, admin-chat, and lender-account message boxes — but **not** into `admin/investor_pipeline.tsx`, which is the Advance Lender / lender-pipeline surface. Its three `msg-input` send boxes had no `onKeyDown`, so Enter just inserted a newline and the only way to send was the button.
+
+**Survey + fixes.**
+- `admin/investor_pipeline.tsx` — imported `message_send_shortcut_match_` and wired all three send boxes: deal-interest **lender** message (`send_lender_message_`), deal-interest **borrower** message (`send_borrower_message_`), and the **Advance Lender support dialog** lender message (`send_`). This fixes the reported bug.
+- `lib/ui--server--efs/apply/index.ts` — the public **/apply** prequalification form had no shortcut (the **/contact** form already did). Added the same contact-form-style `Ctrl/Cmd+Enter → form.requestSubmit()` script + a platform-aware `Ctrl+Enter / ⌘+Enter to submit` hint.
+- Confirmed every remaining `msg-input` message-send textarea (borrower/admin/broker/investor deal-detail + lender-account) is already wired. The remaining `fi`-class textareas (settings, blog/public-content editors, wire instructions, denial reason, vesting/workflow notes) are multi-field form/content editors with no single "send" action and auto-save or a separate Save button — out of the message-submit scope, left as-is.
+
+**Verification.** Extended `tests/msg-send-shortcut.test.ts` with source-level guards for the investor_pipeline boxes (≥3 wired) and the apply form. Full suite **1049 pass / 0 fail**, `bun run check` green (typecheck + browser/worker build). Committed (`59aea65`, submodule pointer `7498d9f4a`), pushed, and **deployed** → live at `https://equityfundingsource.brian-takita.workers.dev`, **Version ID `36501217-0f88-4290-88a8-01361b7d6dc7`**.
+<!-- agent:boundary:7edb597b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -178,6 +197,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~Ctrl+Enter does not submit the message on https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender. Survey all textareas in the app and add ctrl+enter/cmd+enter keybinding.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

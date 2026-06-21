@@ -1661,6 +1661,46 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         );
     }
 
+    // Collapse duplicate FREE-TEXT operator queue lines (#qauthorder). The
+    // id-keyed dedups above are free-text-blind, so a CRDT/backlog-sync re-emit
+    // of an operator's prose line (one without a `do [#id]` directive or a pure
+    // `[#id]` reference) accumulated as a visible duplicate. Free-text repetition
+    // in the queue is overwhelmingly a convergence artifact, so byte-identical
+    // free-text lines (after stripping the cosmetic pin) collapse to the earliest
+    // instance; live vs struck lines are keyed separately.
+    let snapshot_queue_entries: Vec<crate::queue::QueueEntry> = match snapshot::load(file) {
+        Ok(Some(snap)) => crate::component::parse(&snap)
+            .ok()
+            .and_then(|comps| {
+                comps
+                    .iter()
+                    .find(|c| c.name == "queue")
+                    .map(|q| snap[q.open_end..q.close_start].to_string())
+            })
+            .and_then(|body| crate::queue::parse(&body).ok())
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    if let Some(deduped_entries) =
+        crate::queue::dedup_free_text_heads(&activation.entries_after, &snapshot_queue_entries)
+    {
+        let dropped = activation.entries_after.len() - deduped_entries.len();
+        let new_body = crate::queue::render(&deduped_entries);
+        current_content = {
+            let comps = crate::component::parse(&current_content)?;
+            let q = comps
+                .iter()
+                .find(|c| c.name == "queue")
+                .context("queue maintenance: queue component vanished before free-text dedup")?;
+            q.replace_content(&current_content, &new_body)
+        };
+        activation.entries_after = deduped_entries;
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: collapsed {dropped} duplicate free-text queue line(s) (#qauthorder)"
+        );
+    }
+
     // Consume start fence if needed
     if activation.consumed_start_fence {
         let new_body = crate::queue::render(&activation.entries_after);

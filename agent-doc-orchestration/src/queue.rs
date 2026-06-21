@@ -858,6 +858,18 @@ pub fn annotate_manual_queue_additions(
         if is_prioritized(&prompt.text) || is_agent_prioritized(&prompt.text) {
             continue; // operator/agent already pinned it
         }
+        if !prompt.multiline
+            && dedup_key_for_prompt(prompt).is_none()
+            && bare_id_reference_key(prompt).is_none()
+        {
+            // #qauthorder: a brand-new operator FREE-TEXT line is position-locked
+            // at its authored slot by the priority/DAG sort (anchored like an
+            // operator pin via `is_free_text_prompt`) — do NOT inject a
+            // `:pushpin:` the operator never typed. Only id-backed `do [#id]`
+            // operator lines still get the #7r2s auto-pin: they need it to hold
+            // their slot against backlog-rank append-stability.
+            continue;
+        }
         prompt.text = apply_operator_pin(&prompt.text);
         changed = true;
     }
@@ -954,22 +966,27 @@ pub fn sort_prompts_by_priority(
             (2, group, r)
         }
     };
-    let mut movable: Vec<usize> = (0..n)
-        .filter(|&i| entry_priority_tier(&prompts[i]) != 0)
-        .collect();
+    // Anchored slots are position-locked: operator pins (tier 0,
+    // `#queue-operator-pin-position-lock`) AND free-text operator lines
+    // (`#qauthorder` — anchored without a visible pin via `is_free_text_prompt`).
+    // Only the remaining movable prompts reorder, filling the slots not held by
+    // an anchor.
+    let is_anchored =
+        |idx: usize| entry_priority_tier(&prompts[idx]) == 0 || is_free_text_prompt(&prompts[idx]);
+    let mut movable: Vec<usize> = (0..n).filter(|&i| !is_anchored(i)).collect();
     movable.sort_by_key(|&i| key(i));
-    // Reassemble: walk the prompt slots in document order. An operator-pinned
-    // slot keeps its own prompt (anchored); every other slot draws the next
-    // entry from the reordered `movable` queue.
+    // Reassemble: walk the prompt slots in document order. An anchored slot keeps
+    // its own prompt; every other slot draws the next entry from the reordered
+    // `movable` queue.
     let mut mv = movable.into_iter();
     let mut order: Vec<usize> = Vec::with_capacity(n);
-    for (i, prompt) in prompts.iter().enumerate() {
-        if entry_priority_tier(prompt) == 0 {
+    for (i, _prompt) in prompts.iter().enumerate() {
+        if is_anchored(i) {
             order.push(i);
         } else {
             order.push(
                 mv.next()
-                    .expect("movable slot count matches non-operator-pin prompts"),
+                    .expect("movable slot count matches non-anchored prompts"),
             );
         }
     }
@@ -1070,7 +1087,12 @@ pub fn sort_prompts_by_dag(
             (tier, group, r, idx)
         }
     };
-    let is_operator_pin = |idx: usize| entry_priority_tier(&prompts[idx]) == 0;
+    // Anchored slots are position-locked in the DAG order: operator pins (tier 0,
+    // `#queue-operator-pin-position-lock-dag`) AND free-text operator lines
+    // (`#qauthorder`). Only the movable (agent-pin/unpinned `do [#id]`) prompts
+    // reorder around them, in dependency-respecting priority order.
+    let is_anchored =
+        |idx: usize| entry_priority_tier(&prompts[idx]) == 0 || is_free_text_prompt(&prompts[idx]);
 
     // Plain priority-weighted topological order over ALL prompts (Kahn). Used for
     // the no-operator-pin path and as the blocker-outranks-pin fallback. A
@@ -1114,10 +1136,10 @@ pub fn sort_prompts_by_dag(
     // slots with the movable prompts in dependency-respecting priority order. If
     // anchoring would violate a dependency edge, the blocker outranks the pin and
     // we fall back to the plain dependency topo so a dependency is never broken.
-    let order: Vec<usize> = if !(0..n).any(is_operator_pin) {
+    let order: Vec<usize> = if !(0..n).any(is_anchored) {
         plain_order()
     } else {
-        let movable: Vec<usize> = (0..n).filter(|&i| !is_operator_pin(i)).collect();
+        let movable: Vec<usize> = (0..n).filter(|&i| !is_anchored(i)).collect();
         let movable_set: std::collections::HashSet<usize> = movable.iter().copied().collect();
         // Topological order over the movable prompts only; operator-pin
         // prerequisites are placed separately at their anchor slots, so treat
@@ -1157,17 +1179,17 @@ pub fn sort_prompts_by_dag(
                 }
             }
         }
-        // Fill: operator pins keep their document slot; movable prompts fill the
-        // rest in `movable_seq` order.
+        // Fill: anchored slots (operator pins + free-text) keep their document
+        // slot; movable prompts fill the rest in `movable_seq` order.
         let mut anchored: Vec<usize> = Vec::with_capacity(n);
         let mut mv = movable_seq.into_iter();
         for slot in 0..n {
-            if is_operator_pin(slot) {
+            if is_anchored(slot) {
                 anchored.push(slot);
             } else {
                 anchored.push(
                     mv.next()
-                        .expect("movable prompts fill every non-operator-pin slot"),
+                        .expect("movable prompts fill every non-anchored slot"),
                 );
             }
         }
@@ -1573,6 +1595,110 @@ pub fn dedup_pin_variant_do_heads(entries: &[QueueEntry]) -> Option<Vec<QueueEnt
         })
         .collect();
     Some(deduped)
+}
+
+/// True when `entry` is a single-line **free-text operator prompt** — a `Prompt`
+/// that is neither a `do [#id]`/`do #id` directive head nor a pure `[#id]`/`#id`
+/// reference head (`#qauthorder`).
+///
+/// Free-text queue lines are only ever authored by the operator (the binary
+/// emits `do [#id]` heads from the backlog, never prose), so they carry an
+/// implicit position-lock: the priority/DAG sort anchors them at their authored
+/// document slot — exactly like an operator pin (tier 0) — instead of bubbling
+/// them to the top or sinking them under `queue`-attr backlog items. This holds
+/// the slot WITHOUT mutating the line's visible text (no injected `:pushpin:`),
+/// which is the mechanism the operator-authored-order convention requires.
+/// Multiline blocks are excluded (their reordering semantics are unchanged).
+fn is_free_text_prompt(entry: &QueueEntry) -> bool {
+    match entry {
+        QueueEntry::Prompt(p) => {
+            !p.multiline && dedup_key_for_prompt(p).is_none() && bare_id_reference_key(p).is_none()
+        }
+        _ => false,
+    }
+}
+
+/// Dedup key for a free-text operator queue line, or `None` when the entry is
+/// not a single-line free-text prompt (`#qauthorder`).
+///
+/// The tuple's first element distinguishes live (`0`) from struck/`Completed`
+/// (`1`) lines so a genuine "in progress" + "done" pair of the same text is
+/// preserved; id-backed heads (`do [#id]` / pure `[#id]`) return `None` because
+/// they are collapsed by the id-keyed dedups (`dedup_pin_variant_do_heads`,
+/// `dedup_bare_id_reference_heads`). The cosmetic pin marker is stripped and the
+/// text lowercased so a re-emit that only differs by an injected pin or case
+/// still collapses.
+fn free_text_dedup_key(entry: &QueueEntry) -> Option<(u8, String)> {
+    let (variant, prompt) = match entry {
+        QueueEntry::Prompt(p) => (0u8, p),
+        QueueEntry::Completed(p) => (1u8, p),
+        _ => return None,
+    };
+    if prompt.multiline {
+        return None;
+    }
+    if dedup_key_for_prompt(prompt).is_some() || bare_id_reference_key(prompt).is_some() {
+        return None; // id-backed head — handled by the id-keyed dedups
+    }
+    let normalized = strip_priority_markers(&prompt.text);
+    if normalized.is_empty() {
+        return None;
+    }
+    Some((variant, normalized.to_ascii_lowercase()))
+}
+
+/// Collapse duplicate **free-text** operator queue lines that convergence
+/// re-emitted beyond the authored count, keeping the earliest occurrences
+/// (`#qauthorder`).
+///
+/// The id-keyed dedups above (`dedup_bare_id_reference_heads`,
+/// `dedup_pin_variant_do_heads`) are free-text-blind, so a CRDT/backlog-sync
+/// re-emit of an operator's free-text line accumulated as a visible duplicate
+/// (live repro: an operator's "queue items ... not automatically bubbled to the
+/// top" line emitted twice in a single preflight, once struck).
+///
+/// The discriminator between an intentional "run it twice" duplicate
+/// (`#queue-dedup-destroys-intentional-duplicates`) and a convergence artifact
+/// is the **snapshot**: `snapshot_entries` is the committed, operator-authored
+/// queue. A free-text line may appear up to as many times as it does in the
+/// snapshot (at least once is always allowed); any copies BEYOND that authored
+/// multiplicity are a convergence artifact and are dropped. So two committed
+/// `do deploy` lines stay two, but a single committed line re-emitted twice
+/// collapses back to one. Lines are keyed after stripping the cosmetic pin
+/// marker (case-insensitively) so a pin-injected re-emit still collapses; live
+/// and struck (`Completed`) lines are keyed separately so a genuine in-progress
+/// vs done pair survives. `Preset`/`Dispatch`/fence/`Freeform` entries, id-backed
+/// heads, and multiline blocks are left untouched.
+pub fn dedup_free_text_heads(
+    entries: &[QueueEntry],
+    snapshot_entries: &[QueueEntry],
+) -> Option<Vec<QueueEntry>> {
+    // Authored multiplicity per free-text key (how many copies the operator
+    // committed). A line may legitimately appear that many times; at least one
+    // copy is always allowed even for a line absent from the snapshot.
+    let mut authored: std::collections::HashMap<(u8, String), usize> =
+        std::collections::HashMap::new();
+    for entry in snapshot_entries {
+        if let Some(key) = free_text_dedup_key(entry) {
+            *authored.entry(key).or_insert(0) += 1;
+        }
+    }
+    let mut kept: std::collections::HashMap<(u8, String), usize> = std::collections::HashMap::new();
+    let mut deduped = Vec::with_capacity(entries.len());
+    let mut dropped = false;
+    for entry in entries {
+        if let Some(key) = free_text_dedup_key(entry) {
+            let allowed = authored.get(&key).copied().unwrap_or(0).max(1);
+            let seen = kept.entry(key).or_insert(0);
+            if *seen >= allowed {
+                dropped = true;
+                continue;
+            }
+            *seen += 1;
+        }
+        deduped.push(entry.clone());
+    }
+    if dropped { Some(deduped) } else { None }
 }
 
 pub fn first_prompt(entries: &[QueueEntry]) -> Option<&QueuePrompt> {
@@ -1983,11 +2109,16 @@ mod tests {
         let backlog: std::collections::HashSet<String> = ["a".to_string()].into_iter().collect();
         // Held to the tail → already in document order → no reorder.
         assert!(sort_prompts_by_priority(&entries, &rank, &backlog).is_none());
-        // Contrast: without append-stability (empty set) the backlog item DOES
-        // float above the free-text prompt — the pre-fix prepend behavior.
-        let floated = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new())
-            .expect("empty set → backlog item floats up by rank");
-        assert_eq!(render(&floated), "- do [#a]\n- review the spec draft\n");
+        // #qauthorder: the pre-existing free-text line is now position-locked at
+        // its authored slot (anchored without a pin), so even WITHOUT
+        // append-stability (empty backlog set) the `do [#a]` item never floats
+        // above it — the pre-#qauthorder "prepend by rank" escape hatch is gone.
+        // Free-text anchoring subsumes append-stability for the free-text-vs-do
+        // case; append-stability still governs do-vs-do ordering.
+        assert!(
+            sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new()).is_none(),
+            "free-text is position-locked: a backlog item must not bubble above it"
+        );
     }
 
     #[test]
@@ -2469,6 +2600,141 @@ mod tests {
                 "- #sqedit-race continue the drain\n",
             ),
             "bare refs collapse to first; do-directives + free-text preserved: {deduped:?}"
+        );
+    }
+
+    // ---- #qauthorder: operator-authored free-text order ----
+
+    #[test]
+    fn dedup_free_text_heads_collapses_duplicate_operator_line() {
+        // The live repro: an operator's free-text line (committed once) re-emitted
+        // twice by convergence. Free-text dedup collapses the artifact copy back
+        // to the authored count, leaving id-backed heads untouched.
+        let snapshot =
+            parse("- do [#a]\n- keep operator order, do not bubble to the top\n- do [#b]\n")
+                .unwrap();
+        let entries = parse(concat!(
+            "- do [#a]\n",
+            "- keep operator order, do not bubble to the top\n",
+            "- keep operator order, do not bubble to the top\n",
+            "- do [#b]\n",
+        ))
+        .unwrap();
+        let deduped = dedup_free_text_heads(&entries, &snapshot)
+            .expect("artifact copy beyond authored count should collapse");
+        assert_eq!(
+            render(&deduped),
+            "- do [#a]\n- keep operator order, do not bubble to the top\n- do [#b]\n"
+        );
+    }
+
+    #[test]
+    fn dedup_free_text_heads_collapses_pin_variant_and_struck_duplicates() {
+        // A re-emit that only differs by an injected `:pushpin:` still collapses
+        // (the snapshot committed one struck copy; convergence doubled it).
+        let snapshot =
+            parse("- ~~items added by operator stay in document order~~\n").unwrap();
+        let entries = parse(concat!(
+            "- ~~:pushpin: items added by operator stay in document order~~\n",
+            "- ~~items added by operator stay in document order~~\n",
+        ))
+        .unwrap();
+        let deduped = dedup_free_text_heads(&entries, &snapshot)
+            .expect("struck pin-variant artifact copy should collapse");
+        assert_eq!(
+            render(&deduped),
+            "- ~~:pushpin: items added by operator stay in document order~~\n"
+        );
+    }
+
+    #[test]
+    fn dedup_free_text_heads_preserves_intentional_authored_duplicate() {
+        // #queue-dedup-destroys-intentional-duplicates: two identical free-text
+        // lines that the operator COMMITTED (present twice in the snapshot) are
+        // intentional "run it twice" intent and must survive.
+        let snapshot = parse("- do deploy\n- do deploy\n").unwrap();
+        let entries = parse("- do deploy\n- do deploy\n").unwrap();
+        assert!(
+            dedup_free_text_heads(&entries, &snapshot).is_none(),
+            "authored duplicate count must be preserved"
+        );
+    }
+
+    #[test]
+    fn dedup_free_text_heads_preserves_distinct_lines_and_id_heads() {
+        // Distinct free-text lines stay; intentional `do [#id]` duplicates are the
+        // id-keyed dedups' concern, not this one (left untouched here).
+        let entries = parse("- first note\n- second note\n- do [#a]\n- do [#a]\n").unwrap();
+        assert!(
+            dedup_free_text_heads(&entries, &entries).is_none(),
+            "distinct free-text + do-dups → no free-text collapse"
+        );
+    }
+
+    #[test]
+    fn dedup_free_text_heads_keeps_live_and_struck_pair() {
+        // A live + struck line of the same text is a legitimate "in progress +
+        // done" pair (different variant key), not a convergence duplicate.
+        let entries = parse("- review the draft\n- ~~review the draft~~\n").unwrap();
+        assert!(
+            dedup_free_text_heads(&entries, &[]).is_none(),
+            "live + struck same-text pair must be preserved"
+        );
+    }
+
+    #[test]
+    fn annotate_manual_queue_additions_does_not_pin_free_text() {
+        // #qauthorder: a brand-new operator free-text line is NOT auto-pinned (it
+        // is position-locked by the sort instead); a new id-backed `do [#id]`
+        // operator line still gets the #7r2s operator pin.
+        let snapshot = parse("- do [#a]\n").unwrap();
+        let current = parse("- do [#a]\n- hold this slot, do not bubble\n- do [#b]\n").unwrap();
+        let synced: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let pinned = annotate_manual_queue_additions(&snapshot, &current, &synced)
+            .expect("the new id-backed line should still be pinned");
+        assert_eq!(
+            render(&pinned),
+            "- do [#a]\n- hold this slot, do not bubble\n- :pushpin: do [#b]\n",
+            "free-text stays unpinned; the new do-line is operator-pinned"
+        );
+    }
+
+    #[test]
+    fn free_text_operator_line_is_position_locked_in_priority_sort() {
+        // #qauthorder: a free-text line authored between two do-prompts stays at
+        // its slot while the do-prompts reorder around it by rank — it neither
+        // bubbles to the top nor sinks.
+        let entries = parse("- do [#a]\n- operator note in the middle\n- do [#b]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 5u8);
+        rank.insert("b".to_string(), 1u8); // better rank → wants to be first
+        let sorted = sort_prompts_by_priority(&entries, &rank, &std::collections::HashSet::new())
+            .expect("do-prompts reorder around the anchored free-text line");
+        assert_eq!(
+            render(&sorted),
+            "- do [#b]\n- operator note in the middle\n- do [#a]\n",
+            "free-text anchored at slot 1; do-prompts fill the rest by rank"
+        );
+    }
+
+    #[test]
+    fn free_text_operator_line_position_locked_in_dag_path() {
+        // The same anchoring holds on the auto-dag path: a free-text line stays
+        // put while `after=` edges reorder the do-prompts around it.
+        let entries = parse("- do [#a]\n- operator note\n- do [#b]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 1u8);
+        rank.insert("b".to_string(), 5u8);
+        let mut deps: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        deps.insert("a".to_string(), vec!["b".to_string()]); // #a after #b
+        let sorted =
+            sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
+                .expect("dep edge reorders the do-prompts around the anchor");
+        assert_eq!(
+            render(&sorted),
+            "- do [#b]\n- operator note\n- do [#a]\n",
+            "free-text anchored at slot 1; #b precedes #a by edge"
         );
     }
 
@@ -3575,6 +3841,11 @@ mod tests {
             // collapse is a separate maintenance step, `dedup_pin_variant_do_heads`),
             // so the round-trip must neither drop nor multiply either variant.
             "- :pushpin: do [#6b5hwire]\n- do [#6b5hwire]\n",
+            // #qauthorder: a duplicated free-text operator line (one pin-injected,
+            // one struck). render(parse) preserves all variants verbatim — the
+            // collapse is a separate maintenance step (`dedup_free_text_heads`) —
+            // so the round-trip must neither drop nor multiply any line.
+            "- :pushpin: keep operator order\n- keep operator order\n- ~~keep operator order~~\n",
         ];
         for case in cases {
             let once = normalize(case);

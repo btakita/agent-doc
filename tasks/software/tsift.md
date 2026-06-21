@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -116,15 +116,12 @@ You chose **"I publish all 25 now"**, so I did the full manual `0.1.73` publish 
 **`#015t` is now complete** — Phases 0–4b shipped earlier, Phase 5 (this release) is published + tagged. Reaped.
 
 **One optional, non-blocking follow-up for you (future releases only):** add a Trusted Publisher to `tsift-local-model` and `tsift-kg` on crates.io (*Settings → Trusted Publishing* → GitHub `btakita/tsift`, workflow `release.yml`) so the **next** `v*` tag publishes them via CI/OIDC instead of a token. It's tracked in `#1yks`; the release itself no longer depends on it.
-<!-- agent:boundary:af7523f7 -->
+<!-- agent:boundary:8048a7d5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: Use https://crates.io/docs/trusted-publishing to setup trusted publishing for the crates.~~
-- ~~:round_pushpin: Use https://crates.io/docs/trusted-publishing to setup trusted publishing for the crates.~~
-- ~~do [#015t]~~
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -55,7 +55,21 @@ Tests: 1 unit (message wording); `make check` green (4948). Prior `#pcwcwarn` CI
 > **Operator live-verify:** next time a commit triggers the supervisor auto-install, the tmux status line should show the "rebuilding … do NOT press Enter" message instead of a silent pane. Filed as `#supinstallfeedbackverify`.
 
 Note: the rest of this queue head's siblings (dispatch storm after `Clear Session Context`, trigger typed-but-not-submitted, `Stop/Restart Agent` menu items, `Recycle Supervisor` rename) are separate tracked items further down the queue — draining them in order.
-<!-- agent:boundary:3e397697 -->
+
+### Re: clear all gated review items → actionable backlog replacements — opus-4-8
+
+Done — the review is empty and the plan no longer carries any gates. Committed `38b83be05`.
+
+**What I did:** converted all **22 gated review items** (`[/]`) into **ungated, actionable backlog items** (`[ ]`) and cleared `agent:review`. Each replacement preserves its `#id`, its plan path, and — per "I will test, file bugs, and you will check the logs" — its concrete ops.log success marker so your live test proves/disproves it:
+
+- **Operator-test now (code shipped, just needs your live run):** `#jbdisprecycle` (route_dispatch_submit_recycle_settle), `#rdypoll-deploy` (dispatch_inject attempt=1), `#wd40` (supervisor_recycle_yield_requested reason=state_flush_drain), `#qpausemix-verify` (queue_paused_continuation_guidance_emitted), `#tsiftmdcrash-verify` (capability_proof_live_child_preserved), `#sqedit-race` P4 (queue_stale_noise_lines=0), `#gf5n`, `#docdriftgrace`, `#runexitrestart`.
+- **Operator-capture (need a live repro/log capture from you):** `#cyh0` (which action raises File Cache Conflict), `#jbrundispatch`, `#1vhn`.
+- **Still agent code-work (queued, not gated):** `#editorbufwin`, `#hap7`, `#fbwire`, `#qheadstrike`, `#qnodemerge4wire` P4, `#agentreloadrestart` + `#restartagentmenu` (restart-agent, unshipped — these need their logging shipped first, tracked in `#j9ja`).
+
+**JB plugin updates you'll need to install** (for the items whose proof needs plugin code): `#qpauseux` (paused-queue notification render), `#8bfz` (single-owner lease), `#restartagentmenu` (Restart Agent menu), `#qnodemerge4wire` P4 (DocumentListener reporters). I'll flag the exact build when each lands; none are shipped yet.
+
+**Also this cycle:** noted your `#1jec` strike (resolved) and preserved the `:pushpin:` position-locks (`#qauthorder`). The answered JB-stall head (`#supinstallfeedback`, shipped `cf7347a9`) stays at the queue head only because last cycle's `content_ours` drift recovery reverted its strike — no re-work needed.
+<!-- agent:boundary:4bfc0bc8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -133,10 +147,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qheadstrike] strike ALL answered free-text queue heads (not just one/cycle), move the strike onto the committed seam so force-disk/reset->commit recovery paths converge it, and normalize head matching (pushpin glyph + item split). Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md
 - [ ] [#qnodemerge4wire] Phase 4: thin JB DocumentListener.documentChanged + VS Code onDidChangeTextDocument reporters that split a replacement into delete+insert and call the agent_doc_record_editor_op FFI; verify byte-offset/Yrs unicode-offset semantics on non-ASCII edits. Needs plugin build. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4)
 - [ ] [#jbdisprecycle] OPERATOR-TEST (code R1-R4 shipped submodule d21079b7): at a recycle boundary fire JB Run Agent Doc on a 2nd doc during the hot-reload burst; confirm a single dispatch_start_proof WITH submit and no stranded start_session failed. ops.log marker: route_dispatch_submit_recycle_settle.
-- [ ] [#rdypoll-deploy] OPERATOR-TEST (code shipped 138dc658): post-restart JB Run Agent Doc; confirm ops.log shows a single dispatch_inject attempt=1 and ZERO attempt=2 (no re-type stacking). Plan: tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md (D)
-- [ ] [#wd40] OPERATOR-TEST (code shipped 6f1868ca): admin recycle on this fresh-binary/projection_lag session; confirm ops.log supervisor_recycle_yield_requested reason=state_flush_drain then an execve recycle, projection_lag clears, and the phantom pinned do [#qnodemerge4wire] stops reappearing.
-- [ ] [#qpausemix-verify] OPERATOR-TEST (code shipped 2cf7bcee): on a controller-paused queue confirm session-check stderr prints the queue_paused is NOT a contradiction preamble + recorded reason. ops.log marker: queue_paused_continuation_guidance_emitted.
-- [ ] [#tsiftmdcrash-verify] OPERATOR-TEST (code shipped a281ae3e): force a capability-proof failure on a managed OpenCode/Codex session; confirm the harness pane stays alive with capability_proof_live_child_preserved in the session log and NO exit_code=143 kill.
 - [ ] [#sqedit-race] OPERATOR-TEST Phase 4 (Phases 1-3 shipped 3c4c8bbb): after make install + admin recycle, queue prune-noise this doc; confirm queue_stale_noise_lines drops to 0 and sticks across a later preflight. Plan: tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md
 - [ ] [#qpauseux] OPERATOR-TEST (plugin render; needs JB plugin build): install updated plugin, verify a paused-queue block renders as an info/action notification with a Resume button, and the churn-stop/no-submit variant surfaces a restart-supervisor/resume action instead of silence (not a raw red Error toast).
 - [ ] [#8bfz] single live JB plugin consumer per document (per-doc owner lease; non-owners defer patch apply + saveDocument) so concurrent windows cannot race into File Cache Conflicts. Plugin PatchWatcher + binary lease primitive; operator multi-window live test.

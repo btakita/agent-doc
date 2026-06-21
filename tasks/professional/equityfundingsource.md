@@ -55,7 +55,23 @@ Selecting a lender/group (`selected_at`, via `PUT …/select`) is the **admin's 
 So the lifecycle is: **interest/proposal** (soft) → **group % split** (intent) → **admin selects funder** (decision, blends rate, TMO) → **lender funds** (`funds` pending = real commitment) → **wire confirmed** (`active` = funded). "100% of the loan will be funded" on selection is the *expectation*; it's realized only once funding commitments covering the loan are submitted and their wires confirmed.
 
 One gap worth flagging (ties to your earlier question): selection sends the lender **no email/notification**, so today nothing automatically tells a selected lender to go submit their funding commitment — that's a manual nudge. Let me know if you want a notification on select.
-<!-- agent:boundary:dc1a818e -->
+
+### Re: lender-portal group allocation dialog + deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: In the lender portal, if a Lender Group is interested in the deal, there should be a dialog for the % allocation. Prepopulate the allocations with the Lender Group default allocations set in the Lender Group.
+
+
+Shipped + deployed. EFS `481e5ff`, superproject `6a0a19e31`, worker **Version `100d1233-f1b4-4062-ae3b-74c7c6dcc531`**.
+
+When a lender expresses interest in a deal **as a Lending Group**, a **% allocation dialog** now opens automatically, prepopulated with the group's per-member allocations (which the backend auto-seeds from each member's `default_stake_bps`). The lender can adjust the split and save; there's also a **"Set group allocation"** button in the interested-as-group state to re-open it.
+
+- **New `LenderDealAllocationEditorModal`** (`investor/deal_detail.tsx`) mirrors the admin allocation editor — per-member % inputs, a running total, Save disabled if it exceeds 100%. Reuses the shared `bps_to_percent_`/`percent_to_bps_`/`stakes_total_bps_` helpers.
+- **Backend was already in place** — reads `GET /api/lender/groups/:id/deals/:dealId` (participation, allocations seeded from defaults), saves `POST …/allocations`. No endpoint or auto-seed changes.
+- **Wiring** — auto-opens on group-interest success; re-open button; both gated on a selected `lending_group_id` (not shown for "Myself").
+- Tests: new `tests/lender-deal-allocation-dialog.test.ts` (GET-prepopulate → POST-save round-trip + UI-wiring grep). Suite **979 pass / 0 fail**; worker build clean. Spec: `#lender-alloc-dialog`.
+<!-- agent:boundary:039fc560 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,7 +83,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: In the lender portal, if a Lender Group is interested in the deal, there should be a dialog for the % allocation. Prepopulate the allocations with the Lender Group default allocations set in the Lender Group.
+- ~~:pushpin: In the lender portal, if a Lender Group is interested in the deal, there should be a dialog for the % allocation. Prepopulate the allocations with the Lender Group default allocations set in the Lender Group.~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

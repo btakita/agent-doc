@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -110,6 +110,11 @@ Queue is fully drained — no remaining drainable heads (only the gated `#5eq8`,
 
 > **Queue prompt:**
 >
+> deploy
+
+
+> **Queue prompt:**
+>
 > In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender, show which documents are required. Show individual upload field for multiple documents of each type for each document. Also show which documents were uploaded.
 
 
@@ -129,7 +134,7 @@ No schema change — it's backed by the existing `/api/admin/investor-documents`
 **Verification:** new `tests/advance-lender-documents.test.ts` (7 tests: requirements model + checklist wiring); full suite **1031 pass / 0 fail**, `bun run check` (test + build + worker build) green.
 
 **Deployed** (per the `deploy` queue item) to the production EFS worker: `bun run deploy:worker` → live at `https://equityfundingsource.brian-takita.workers.dev`, **Version ID `57e592b8-a297-41b6-9d16-9a9cffefcab5`**. Submodule pointer bumped.
-<!-- agent:boundary:8f931d38 -->
+<!-- agent:boundary:27ffdd93 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,8 +146,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender, show which documents are required. Show individual upload field for multiple documents of each type for each document. Also show which documents were uploaded.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

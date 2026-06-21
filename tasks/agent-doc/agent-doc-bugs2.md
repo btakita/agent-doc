@@ -141,7 +141,19 @@ Done — `#g9d7` / `#6b5hprimary`, the headline finalize wedge, is wired and shi
 CI run `27911942955` is in progress on the new commit (prior run green); local `make check` is the verification evidence.
 
 I drained only the pinned head `#g9d7` this cycle; the queue is paused and the other heads (`#6b5h`, `#1jec`, …) stay queued for their own focused cycles.
-<!-- agent:boundary:26f8295e -->
+
+### Re: drain queue head #6b5h — opus-4-8
+
+Draining `#6b5h` (CLI-only finalize wedge, supervisor-core). Its agent-actionable scope is already shipped and verified — no new code needed this cycle:
+
+- **Both chokepoints gated on `!live_editor_endpoint_attached`:** primary `run_entry.rs:1407-1408` (the run_ipc no-delivery bail → guarded controller-host disk write via `decide_editorless_disk_fallback`) and secondary `converge.rs:521` (the `try_editor_converge` no_ack/send_failed branches). Both route to disk fallback only when no live plugin editor is attached; a live editor still fails closed.
+- **Shipped + pushed:** `#g9d7` is HEAD `260d61b3`, `HEAD == origin/main`, submodule worktree clean. CI run `27911942955` is **green**.
+- **SimWorld coverage present:** `sim_world.rs:3603+` exercises the cli-only-no-editor → disk_write path and the live-editor → fail-closed path against `decide_editorless_disk_fallback`.
+
+The only remainder is the **editor-less live repro**, which cannot be agent-completed (needs a real Claude Code pane with no JB IDE) — that is already queued as `#k7mf` `[operator-verify]` (run `agent-doc finalize` in a no-IDE pane, confirm ops.log `run_ipc_editorless_disk_fallback transport=disk_fallback editor_endpoint=absent` + committed cycle, no `--force-disk`, no `recovery=retry_without_disk_write`). Per STOP-cutting-releases, the `make install` it depends on stays operator-gated.
+
+Marking `#6b5h` done (code-complete; live proof tracked by `#k7mf`).
+<!-- agent:boundary:3f922472 -->
 <!-- /agent:exchange -->
 
 ## Queue

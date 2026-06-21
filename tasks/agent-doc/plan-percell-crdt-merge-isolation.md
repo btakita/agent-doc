@@ -107,17 +107,44 @@ already mutate exactly one node. Phase 3 generalizes node identity below the com
   `### Re:` blocks while the agent appends a new block converges with all three present and
   zero cross-block splice.
 
-### `#qcellmerge4` — Evented reflection (links to the drift answer's Phase 2)
-- "Changes made by agent-doc should immediately be reflected in the document model":
-  push agent-side deltas into the per-cell model on write rather than reconciling at
-  finalize. Couples with the `DocumentListener` / `onDidChangeTextDocument` evented-IPC
-  direction from the drift analysis. Larger; sequence after 1–3 prove out.
+### `#qcellmerge4` — Op-capture / evented reflection (accuracy lever 1: highest leverage)
+- Stop reconstructing edits from a text diff; capture the editor's **real operations**
+  (`DocumentListener.documentChanged` / `onDidChangeTextDocument` — insert@offset,
+  delete-range) and feed those ops to the per-cell Yrs model directly. This removes the
+  diff-guess (Myers diff picks *a* edit script, not necessarily the one the user performed),
+  so live-edit merges become exact/intention-preserving at the character level. Also pushes
+  agent-side deltas into the model on write rather than reconciling at finalize.
+- **Acceptance:** a concurrent live edit + agent write converges with zero diff-derived
+  duplication; ops replay equals editor-observed state.
+
+### `#qcellmerge5` — Surface true conflicts, never fabricate (accuracy lever 5: the safety net)
+- For the irreducible remainder — genuine concurrent edits to the **same** leaf cell, where
+  the merge is information-theoretically underdetermined — do **not** silently auto-merge a
+  text neither side wrote. Surface both versions (note it in `agent:exchange` / a conflict
+  marker) and let the operator resolve. 100% accuracy by refusing to guess (extends the
+  `#hap7` "note structural conflicts in exchange" idea).
+- **Acceptance:** a true same-leaf concurrent edit produces an operator-visible conflict, not
+  a fabricated merge; non-conflicting edits never trip it.
+
+## Accuracy levers → phases (operator's "five concrete accuracy levers", priority order)
+
+The keyed-diff approach reaches ~100% practical accuracy via five levers, mapped to phases
+and ordered by implementation priority (each depends on the prior structural layer; op-capture
+is the highest *leverage* but needs the cells under it first):
+
+1. **Correct per-cell base** (lever 3) → `#qcellmerge2` — removes the stale-base duplication class.
+2. **Finer AST cells** (lever 2) + **first-class moves** (lever 4) → `#qcellmerge3` — shrinks the
+   same-leaf surface; keyed identity treats a moved block as a move, not delete+insert.
+3. **Op-capture / evented** (lever 1, highest leverage) → `#qcellmerge4` — removes diff-guessing entirely.
+4. **Surface conflicts, never fabricate** (lever 5) → `#qcellmerge5` — honest handling of the
+   irreducible same-leaf remainder.
 
 ## Sequencing
 
-`#qcellmerge1` first — it is the highest-leverage anti-corruption rung and is bounded to
-the merge layer. `2` makes the isolation durable across cycles. `3` delivers the
-operator's literal "queue items as cells". `4` is the evented-reflection follow-on.
+`#qcellmerge1` first (shipped) — the anti-corruption rung, bounded to the merge layer. `2`
+makes the isolation durable across cycles (correct base). `3` delivers recursive AST cells +
+moves. `4` is the highest-leverage accuracy win (op-capture) but depends on 2+3. `5` is the
+conflict-surfacing safety net, sequenceable any time after `3`.
 
 ## Risk
 

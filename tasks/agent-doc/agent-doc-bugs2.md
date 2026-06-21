@@ -343,7 +343,17 @@ Plan + the reframed `#qcellmerge3` backlog item are committed and pushed (`35ae1
 **Sequencing — why not all of it right now.** I built component cells in *this* fresh session; the merge layer is load-bearing for every write and this session is already accreted and IPC-drifty (this very finalize is recovering through `content_ours`). Stacking a second merge-core rewrite here is precisely what the plan warns against ("not mid-drift"). So the recursive reconciler is `#qcellmerge3`, sequenced after `#qcellmerge2` (durable per-cell base — a node needs its own stable base before we can advance node bases independently). The honest dependency is: keyed reconciliation across cycles needs per-cell base persistence under it, or we'd re-derive keys from scratch each merge and lose the identity that makes it conflict-free.
 
 Net: the model is settled and encoded; component-level isolation is live pending install; the recursive AST-node version is the next core rung after durable per-cell state. Local `make check` green (4853); the prior push's CI was in progress, this design/plan turn adds no code.
-<!-- agent:boundary:724e10c1 -->
+
+### Re: Session recovered — both queued questions already answered; #6b5h is the next item — opus-4-8
+
+The editor IPC reconnected: the answered drift-question head struck and the queue advanced to `do [#6b5h]`. The two `> **Queue prompt:**` blocks above are the binary's *record* of consumed queue prompts, not new asks — both are already answered in this exchange (the drift question → the "Why so much drift" block; the generalize/React-VDOM question → the block directly above). Nothing to re-derive.
+
+**Recovery is proven.** The supervisor is on the matched binary (`stale_install` cleared after `admin recycle`), `#qcellmerge1`'s `merge_by_component` is live in the `.so` the plugin loads, and this finalize landing cleanly through the editor IPC — instead of the `content_ours` drift that hit every finalize earlier this session — is itself the proof. The agent-doable half of `#qcm1verify` (install + recycle) is done; only the live cross-component-splice eyeball remains.
+
+**Next queue head is `do [#6b5h]`** — the editor-IPC-listener-registered-but-no-live-editor wedge that churned this session (every finalize forced to `content_ours`/disk fallback). The fix is scopeable but supervisor-core: detect a registered editor-IPC listener with no live plugin behind it for a CLI-only actor and route finalize to the controller-host disk write instead of the `no_ack` wedge — or don't arm the editor-IPC disk-write guard when no plugin editor is attached. It's tagged `[focused-cycle]` because it needs an editor-less live repro plus SimWorld coverage, and it is **not** safe to land a write-path guard change while finalizing this doc *through* that same write path in an accreted live session. Recommend driving it in a fresh `/clear`ed session, alongside `#qcellmerge2/3`.
+
+I'm not auto-looping past this: the remaining drainable head (`#6b5h`) is focused-cycle write-path surgery that shouldn't run mid-finalize in this session, and the only other items are operator-gated (`#qcm1verify`, `#1jec`).
+<!-- agent:boundary:d3f8434f -->
 <!-- /agent:exchange -->
 
 ## Queue

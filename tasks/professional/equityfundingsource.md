@@ -218,7 +218,7 @@ Security invariants carry forward: fail-closed without the inbound secret, and t
 **Recommendation:** I can start `#msgmail1` (token + addressing generalization — additive, well-tested, low risk, the borrower path keeps working through the generalized helpers). `#msgmail4` stays operator-gated since it flips on live inbound email. Say the word and I'll build `#msgmail1` → `#msgmail3` in sequence; the prod enable (`#msgmail4`) waits for you. "deploy" in the queue is moot this cycle — the PRD is a planning doc.
 
 (The two earlier frontend phases — `#portalmsg2-dealthreads`, `#portalmsg4` — remain pinned/deferred per your last call; this email work is an independent transport-layer track.)
-<!-- agent:boundary:c0c8380a -->
+<!-- agent:boundary:f1773c94 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -230,9 +230,14 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The message user's email reply-to should go back to the app email (the sender). A CF worker should process the reply, write the message into the database, and send an email to the admin. The admin should be able to reply to the app email, which writes the message into the database, and sends an email to the user. And so on. All emails 
+- The message user's email reply-to should go back to the app email (the sender). A CF worker should process the reply, write the message into the database, and send an email to the admin. The admin should be able to reply to the app email, which writes the message into the database, and sends an email to the user. And so on. All emails should be processable by the app via reply-to.
 - :pushpin: do [#portalmsg4]
 - :pushpin: do [#portalmsg2-dealthreads]
+- deploy
+- do [#msgmail4]
+- do [#msgmail3]
+- do [#msgmail2]
+- do [#msgmail1]
 <!-- /agent:queue -->
 
 ## Backlog

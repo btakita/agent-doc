@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -246,7 +246,7 @@ All three pieces of your request are now live: the **advance-step banner** on le
 3. Log in as that lender → dashboard → "Messages from EFS" card should show it; reply back; confirm the reply appears in the admin card.
 
 **Observation for `#lender-card-msg-email`:** the live worker has `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true` and `EFS_EMAIL_FROM=info@…` already set — so the Resend sending path may no longer be blocked the way `#f4rq` assumed. If you want, next cycle I can wire the account-message email notify (mirroring the deal-thread one) and we can verify a real send.
-<!-- agent:boundary:274379dd -->
+<!-- agent:boundary:26a2f7bb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -258,6 +258,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- :pushpin: Is all communication between admin <-> borrower, admin <-> lender, and admin <-> broker handled in a single table? Will all communication components show the entire conversation history? Can we have tags on each message, or threads, to filter communications by topic?
+- ~~:pushpin: do [#lender-card-msg-portal]~~
+- ~~:pushpin: do [#lender-card-msg-email]~~
 <!-- /agent:queue -->
 
 ## Backlog

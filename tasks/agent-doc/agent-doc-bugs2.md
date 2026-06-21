@@ -39,7 +39,23 @@ completed
 Compacted content:
 - Archived 1 response topic(s): do [#pcwcwarn]
 - Prior summary/context: prior compacted content: Archived 14 response topic(s): #1jec; do [#qauthorderpin]; harness switch to claude; 11 more
-<!-- agent:boundary:3949ed7a -->
+
+### Re: JB Run Agent Doc "stalled without feedback" during auto-install — opus-4-8
+
+> **Queue prompt:** JB `Run Agent Doc` stalled without feedback — pane showed `claude exited cleanly. / Press Enter to restart, or 'q' to exit.` repeated, idle-queue watch reconciled stale busy→ready, then `supervisor auto-install: rebuilding + installing agent-doc … Compiling agent-doc v0.34.35`.
+
+Diagnosed and fixed (`#supinstallfeedback`, agent-doc submodule `cf7347a9`, superproject `baf6a8ec2`).
+
+**What actually happened** (this log is from the prior cycle's own closeout): after my `#pcwcwarn` commit landed, the supervisor's idle-watch detected the source was newer than the installed binary and ran the **dogfood auto-install** — a ~1-minute blocking `cargo install`. During that minute the pane still showed the post-`claude exited cleanly` keepalive `Press Enter to restart, or 'q' to exit`, and **all rebuild progress went to the redirected supervisor stderr / session log** — never to the visible pane. So the keepalive read as a stall waiting on a keypress. Nothing was actually wedged; it was rebuilding.
+
+**Fix:** the auto-install now surfaces its phase on the owned tmux pane via `display-message`, mirroring the existing managed-capability-proof status surface (diagnostics stay out of the child pane transcript; user-visible status goes to the tmux status line). The `Started` line persists (`-d 0`) for the whole compile and says **"rebuilding the freshly-committed binary (~1 min) — do NOT press Enter; the supervisor auto-restarts when the build finishes"**; `Succeeded`/`Failed` use a bounded display time. Best-effort + fail-open (no owned pane → stderr, unchanged).
+
+Tests: 1 unit (message wording); `make check` green (4948). Prior `#pcwcwarn` CI (`5f3fc07d`) **completed green**.
+
+> **Operator live-verify:** next time a commit triggers the supervisor auto-install, the tmux status line should show the "rebuilding … do NOT press Enter" message instead of a silent pane. Filed as `#supinstallfeedbackverify`.
+
+Note: the rest of this queue head's siblings (dispatch storm after `Clear Session Context`, trigger typed-but-not-submitted, `Stop/Restart Agent` menu items, `Recycle Supervisor` rename) are separate tracked items further down the queue — draining them in order.
+<!-- agent:boundary:86eddf1e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -83,6 +99,8 @@ Press Enter to restart, or 'q' to exit.
 - do [#arsm]
 <!-- /agent:queue -->
 <!--
+- 🧪 test edit for [#qnodemerge4wire]
+---
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
 ---
 `'/clear' is disabled while a task is in progress

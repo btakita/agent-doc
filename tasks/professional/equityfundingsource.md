@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,221 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260621-174256.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260621-185358.md`*
 
 Compacted content:
-❯ - Archived 7 response topic(s): "Lender Requests page" notification + advance-lender dialog; Master state-machine living document; Deployed #dmz8; 4 more
-❯ - Prior summary/context: prior compacted content: Archived 6 response topic(s): Unified inbox shipped + deployed (#msg-unify2); deploy; Borrow...
-
-### Re: Advance Lender account-message email + deploy — gpt-5
-
-> **Queue prompt:**
->
-> https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message submission did not send an email to the lender.
-
-
-> **Queue prompt:** https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message submission did not send an email to the lender.
-
-> **Queue prompt:** deploy
-
-Shipped, pushed, and deployed the Advance Lender account-message email fix.
-
-What changed:
-- `admin_lenders_by_id_messages_POST_` now loads the lender email/name and sends `notify_lender_account_message_` after the admin creates a pre-deal lender account message.
-- Added a dedicated lender-account lifecycle email template with subject `Message from Equity Funding Source about your lender account`, reply-to from the admin, and CTA to `/lenders/dashboard`.
-- Extended `tests/lender-account-messages.test.ts` so the admin message route, lifecycle sender, template, and dashboard URL stay wired.
-
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/investor_management/index.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/lifecycle.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/email/templates/lifecycle.ts`
-- `src/equityfundingsource-dev/tests/lender-account-messages.test.ts`
-
-Commits:
-- EFS `bde4d58` pushed to `origin/main`.
-- Superproject pointer `f75e121c4` committed locally.
-
-Verification:
-- `bun test tests/lender-account-messages.test.ts` — 9 pass / 0 fail.
-- `make check` — 1050 pass / 0 fail, browser build green, worker build green.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy — no migrations to apply.
-- `make deploy` — deployed production worker version `7e3353ac-b1e8-4e05-a7d1-8c444313f757` at `https://equityfundingsource.brian-takita.workers.dev`.
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` — 200.
-- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists for this repo, so local verification is the gate.
-
-Confidence: high. The reported path now uses the same lifecycle-email delivery pattern as deal lender messages, but with account-specific copy and the lender dashboard target.
-
-Escalation: none.
-
-### Re: deploy — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-
-> **Queue prompt:** deploy
-
-Already completed by the preceding Advance Lender email fix cycle.
-
-Deployment proof:
-- `make deploy` completed successfully.
-- Production worker version: `7e3353ac-b1e8-4e05-a7d1-8c444313f757`.
-- Live URL: `https://equityfundingsource.brian-takita.workers.dev`.
-- Post-deploy D1 migration check: no migrations to apply.
-- Public smoke test returned HTTP 200.
-
-Changed paths: none in this drain beyond the already-recorded EFS commit `bde4d58` and superproject pointer commit `f75e121c4`.
-
-Commands: reused the already-run deploy and verification commands from the prior response.
-
-Verification: deployment and smoke proof above; no additional code changed in this drain.
-
-Confidence: high.
-
-Escalation: none.
-
-### Re: Message sender timestamps + deploy — gpt-5
-
-> **Queue prompt:**
->
-> https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message Lender messages do not have the human-readable timestamp of the message. Please ensure all instances of message components across the codebase have the name of the sender and the human-readable timestamp.
-
-> **Queue prompt:** deploy
-
-Shipped, pushed, and deployed the message metadata fix.
-
-What changed:
-- Admin embedded lender-account messages in the Lender Pipeline / Advance Lender flow now render a sender avatar, sender label, and human-readable timestamp.
-- Admin deal-interest lender and borrower message rows in both Lender Pipeline and Deal Detail now render the same sender + timestamp header.
-- Borrower Available Deal Conversation rows now include the shared sender avatar alongside the existing sender name and timestamp.
-- `prds/lender-card-messaging.md` now records the UI invariant, and the static message guard covers the previously missed admin workflow surfaces.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/borrower/application_status.tsx`
-- `src/equityfundingsource-dev/prds/lender-card-messaging.md`
-- `src/equityfundingsource-dev/tests/message-avatar-shortcut.test.ts`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
-
-Commits:
-- EFS `d3dd8b9` pushed to `origin/main`.
-- Superproject pointer `cfeae7a68` pushed to `origin/main`.
-
-Verification:
-- `bun test tests/message-avatar-shortcut.test.ts` — 21 pass / 0 fail.
-- `bun test tests/admin-investor-pipeline.test.ts -t "lender card and modal render package"` — pass.
-- `bun test tests/investor-portal-e2e.test.ts -t "admin investor deal tables expose interest counts"` — pass.
-- `make check` — 1055 pass / 0 fail, browser build green, worker build green. The log includes the existing non-fatal `d1 down` message from a passing outbox-failure test.
-- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists for this repo, so local verification is the gate.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy — no migrations to apply.
-- `make deploy` — deployed production Worker version `1346f79d-87b7-41b1-a52e-6c2afe7cd9f0` at `https://equityfundingsource.brian-takita.workers.dev`.
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` — 200.
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline` — 303, the expected protected-route redirect without an authenticated browser session.
-
-Confidence: high. The reported Advance Lender message rows and the sibling admin message rows now use human-readable timestamps and explicit sender identity, with regression tests covering the omitted surfaces.
-
-Escalation: none.
-
-### Re: Complete Annual Questionnaire dialog + deploy — gpt-5
-
-> **Queue prompt:**
->
-> https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard > Complete Requirements > Requirements > Complete Questionnaire dialog: Should be full screen. Should have a title "Complete Annual Questionnaire". Instead of having a dropdown, each Verification Type should be rendered inline with its own multi-upload box.
-
-> **Queue prompt:**
->
-> deploy
-
-Shipped, pushed, and deployed the Complete Requirements questionnaire dialog update.
-
-What changed:
-- The Complete Requirements form now opens as a full-screen dialog with the title `Complete Annual Questionnaire`.
-- Removed the single verification-type dropdown from the questionnaire form.
-- Rendered all verification types inline: income, net worth, institution, and professional.
-- Each verification type now has its own standard multi-file upload box and selected-file list.
-- Upload submission still posts every selected file one request at a time to the existing accreditation upload endpoint, carrying the verification type from the inline section.
-- Updated the Phase 5 Requirements PRD note and regression tests.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/accreditation.tsx`
-- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
-- `src/equityfundingsource-dev/tests/multi-upload.test.ts`
-- `src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md`
-- `src/equityfundingsource-dev` submodule pointer
-
-Commits:
-- EFS `7ac2e02` pushed to `origin/main`.
-- Superproject pointer `3edf28717` pushed to `origin/main`.
-
-Verification:
-- `bun test tests/investor-portal-e2e.test.ts -t "dashboard requirements alert opens"` — pass.
-- `bun test tests/investor-portal-e2e.test.ts -t "each verification type"` — pass.
-- `bun test tests/investor-portal-e2e.test.ts` — 46 pass / 0 fail.
-- `bun test tests/multi-upload.test.ts` — 14 pass / 0 fail.
-- `make check` — 1055 pass / 0 fail, browser build green, worker build green. The log still includes the existing expected non-fatal `d1 down` line from the passing outbox-failure test.
-- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists for this repo, so local verification is the gate.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy — no migrations to apply.
-- `make deploy` — deployed production Worker version `7a8a87f3-ce6d-4e5a-9ee4-0c985d9e211d` at `https://equityfundingsource.brian-takita.workers.dev`.
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` — 200.
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard` — 303, the expected protected-route redirect without an authenticated browser session.
-
-Confidence: high. The reported dashboard dialog now uses the full-screen modal path and the form no longer has a hidden verification-type selector; every verification type is directly visible with its own upload target.
-
-Escalation: none.
-
-### Re: Requirements messages + deploy — gpt-5
-
-> **Queue prompt:**
->
-> In https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard > Requirements: Add a messages component so the lender can talk to the admins about it.
-
-> **Queue prompt:**
->
-> deploy
-
-Shipped, pushed, and deployed the Requirements-page lender/admin message thread.
-
-What changed:
-- The dedicated lender Requirements page now renders the existing `LenderAccountMessages` thread below the requirements status panel, so lenders can message EFS admins from the onboarding/questionnaire/accreditation workflow.
-- Updated the lender-facing message card copy to explicitly cover onboarding, questionnaire, and accreditation document questions.
-- Documented the Phase 5 Requirements change in the investor dashboard PRD.
-- Added a regression test that locks the Requirements page mount point, support copy, and existing `/api/investor/messages` GET/POST wiring.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/accreditation.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/lender_account_messages.tsx`
-- `src/equityfundingsource-dev/prds/rpzm-investor-dashboard-rework.md`
-- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
-- `src/equityfundingsource-dev` submodule pointer
-
-Commits:
-- EFS `dec1a58` pushed to `origin/main`.
-- Superproject pointer `69576865b` pushed to `origin/main`.
-
-Verification:
-- `bun test tests/investor-portal-e2e.test.ts -t "requirements page includes the lender-admin messages thread"` — pass.
-- `bun test tests/investor-portal-e2e.test.ts` — 47 pass / 0 fail.
-- `bun test tests/lender-account-messages.test.ts` — 9 pass / 0 fail.
-- `bun test tests/prd.test.ts` — 8 pass / 0 fail.
-- `git diff --check` — pass.
-- `make check` — 1056 pass / 0 fail, browser build green, worker build green. The log still includes the existing expected non-fatal `d1 down` line from the passing outbox-failure test.
-- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists for this repo, so local verification is the gate.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy — no migrations to apply.
-- `make deploy` — deployed production Worker version `590fc9f9-d097-46d5-929f-60bc3ebfc4ae` at `https://equityfundingsource.brian-takita.workers.dev`.
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` — 200.
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard` — 303, the expected protected-route redirect without an authenticated browser session.
-
-Preflight notes:
-- Preflight warned that the route-owned supervisor binary is stale; this cycle continued through the active Codex finalize path.
-- Preflight also reported legacy gated/review semantic-candidate warnings for existing backlog/review items; they were unrelated to this queue prompt and left untouched.
-
-Confidence: high. The Requirements page now reuses the already-tested account-level message thread and route wiring, with static coverage locking the page placement and copy.
-
-Escalation: none.
-<!-- agent:boundary:5642d179 -->
+❯ - Archived 5 response topic(s): Advance Lender account-message email + deploy; deploy; Message sender timestamps + deploy; 2 more
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+<!-- agent:boundary:7951c621 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -259,8 +50,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard > Requirements: Add a messages component so the lender can talk to the admins about it.
-- deploy
+- Should we just have a context-sensitive message component absolutely positioned in the bottom right corner to unify all messaging in the portal?
 <!-- /agent:queue -->
 
 ## Backlog

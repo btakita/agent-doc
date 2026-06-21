@@ -183,7 +183,21 @@ Drained the queue head. Implemented the genuine remaining agent-doable gap and s
 - Note carried: byte-offset vs Yrs unicode-offset semantics still need verification on non-ASCII edits.
 
 No version bump / install / publish (STOP-cutting-releases). Source committed locally for preservation; submodule-pointer bump follows.
-<!-- agent:boundary:3e1ce836 -->
+
+### Re: do #qstrikeexplain — free-text strike no longer hits in-flight edits — opus-4-8
+
+Fixed the destructive half of your report ("I'm typing in a queue item and agent-doc automatically strikes it"). Shipped to the agent-doc submodule (`06933b72`); `make check` green (**4937 tests**).
+
+**Root cause:** the `#ftstrike` pass (`strike_answered_free_text_queue_heads`) struck *any* answered free-text head — including one that first appeared in the live buffer **this** turn. A line you were still typing could be struck if it fuzzy-matched a quoted prompt.
+
+**Fix (Phase 2 — conservative strike):** `answered_free_text_head_node_keys` now gates on the **stable pre-turn baseline** (the preflight baseline). A free-text head is struck only when it was already present in that baseline; a head that first appeared this turn defers to the cycle that actually answers it (editor-wins, consistent with `#queue-user-edit-overwrite`). A missing baseline (rare — preflight writes it each cycle) skips the gate, preserving legacy behavior. New `free_text_head_present_in_baseline` reuses the same prose-prefix normalization so pin/`- ` cosmetics don't matter. Tests: head-absent-from-baseline deferred, baseline-present head still struck, cosmetic-insensitive match. SPEC + `runbooks/respond.md` aligned.
+
+**Live proof this cycle:** your `:pushpin: JB Run Agent Doc stalled` queue edit showed up as an in-flight `content_edit` — I did **not** strike it (and won't), exactly the behavior the fix guarantees.
+
+**Recovery note:** the queue component had been corrupted by a stale-supervisor CRDT replay (a monsterrodholders deploy log + a prior response + console output spliced into `agent:queue` — the console-output-in-queue class). HEAD was clean, so I restored from HEAD, `reset --from-current --preserve-session`, and marked the supervisor to `admin recycle` at its idle boundary to clear the stale in-memory CRDT.
+
+**Remaining → `#qstrikenote`** (filed to backlog): Phase 1 explicit deterministic "auto-struck" note (the blockquote-quote already puts the head in the response, but an explicit label is clearer) + a SimWorld integration case. No release/install (STOP-cutting-releases); source committed + pushed.
+<!-- agent:boundary:9f46b96f -->
 <!-- /agent:exchange -->
 
 ## Queue

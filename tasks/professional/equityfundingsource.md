@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -272,7 +272,30 @@ So **admin↔broker is not a two-way thread at all** — brokers only get in-app
 **3. Tags / threads to filter by topic?** **Not today.** Every table is a flat chronological list — no `topic`/`tag`/`label` column and no sub-threads. The only filtering is by scope (which session/deal/lender) plus a text search on the borrower chat.
 
 **Recommendation (your call — I didn't build it):** if you want unified comms + topic filtering, the clean path is a single **`messages`** model — `party` (borrower/lender/broker), `scope_type`+`scope_id` (loan/deal/account/none), `sender_role`, `body`, plus a `topic`/`tag` and optional `thread_id` — with the existing three tables migrated onto it and a unified admin **inbox** that groups by person and filters by tag. That also gives brokers a real two-way thread for free. It's a meaningful refactor of three live tables, so I'd want to do it as its own planned cycle. Want me to write that plan (and, if you like, a thin first step: add a `topic` tag + a unified read-view without moving data yet)?
-<!-- agent:boundary:e70262f0 -->
+
+### Re: Unified message model — foundation shipped (#msg-unify1) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: Do your recommended message unification model.
+
+On it. Building this as a refactor of three **live, prod-deployed** message tables in one shot would be reckless on a livestreamed app, so I'm doing it phased and shipped the foundation now. EFS `6a67df1`, superproject pointer bumped. Plan: `src/equityfundingsource-dev/prds/message-unification.md`.
+
+**Shipped — #msg-unify1 (the model):**
+- **Migration `0096`** — one `messages` table for every admin↔party conversation: `party` (borrower/lender/broker), `scope_type`+`scope_id` (account/loan/deal), `party_user_id`, `sender_role`, `body`, **`topic`** (your tag), **`thread_id`** (your sub-thread), plus a unified `message_attachments`. Indexed by person, scope, topic, and thread.
+- **Repo `lib/messages.ts`** — `message_create_` + `messages_R_(filter)` that narrows by any of person / scope / **topic** / **thread**, plus `message_topics_R_` to list a person's topics for a filter UI, and attachment hydration.
+- **Tests** — round-trip, independent topic/thread/person filters, attachments, topics. Full suite **1001 pass / 0 fail**; both bundles build clean.
+- **Additive & safe:** the three live tables (`chat_messages`, `deal_interest_lender_messages`, `lender_account_messages`) are untouched, so nothing breaks.
+
+**Queued the cutover phases** (each its own backlog id, so you can drive them one at a time):
+- **#msg-unify2** — unified admin inbox (read): aggregate the 3 sources into one person-grouped, topic-filtered `/admin/messages` view (no data move yet — the first thing you'd *see*).
+- **#msg-unify3** — borrower cutover onto `messages` (keeps the live WebSocket path).
+- **#msg-unify4** — lender cutover (both lender tables).
+- **#msg-unify5** — broker two-way thread (brokers finally get a real conversation, not just notifications).
+- (#msg-unify6 tags/threads UX, #msg-unify7 backfill+drop legacy — in the plan.)
+
+**Not deployed:** the new tables aren't wired to any route yet, so deploying empty tables this cycle buys nothing — the first deploy-worthy step is **#msg-unify2** (the visible inbox). Want me to take that next?
+<!-- agent:boundary:d2eb2111 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -284,12 +307,19 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- :pushpin: Do your recommended message unification model.
+- do [#msg-unify2]
+- do [#msg-unify3]
+- do [#msg-unify4]
+- do [#msg-unify5]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#msg-unify2] [recommended] Unified admin inbox (read) — an /admin/messages view aggregating the three existing message sources grouped by person with a topic filter, reading via the unified messages_R_ shape. No data move yet. Plan: src/equityfundingsource-dev/prds/message-unification.md.
+- [ ] [#msg-unify3] [recommended] Borrower cutover — write borrower chat onto the unified messages table (keep the Durable Object live path), backfill chat_messages, dual-read then drop. Plan: src/equityfundingsource-dev/prds/message-unification.md.
+- [ ] [#msg-unify4] [recommended] Lender cutover — migrate deal_interest_lender_messages + lender_account_messages onto the unified messages table, backfill, dual-read then drop. Plan: src/equityfundingsource-dev/prds/message-unification.md.
+- [ ] [#msg-unify5] [recommended] Broker two-way thread — give brokers a real messages thread (party=broker) in the broker portal + unified admin inbox (today brokers get one-way notifications only). Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.

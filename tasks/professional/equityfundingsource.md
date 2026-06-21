@@ -134,7 +134,34 @@ No schema change — it's backed by the existing `/api/admin/investor-documents`
 **Verification:** new `tests/advance-lender-documents.test.ts` (7 tests: requirements model + checklist wiring); full suite **1031 pass / 0 fail**, `bun run check` (test + build + worker build) green.
 
 **Deployed** (per the `deploy` queue item) to the production EFS worker: `bun run deploy:worker` → live at `https://equityfundingsource.brian-takita.workers.dev`, **Version ID `57e592b8-a297-41b6-9d16-9a9cffefcab5`**. Submodule pointer bumped.
-<!-- agent:boundary:e42ec316 -->
+
+### Re: Message UX — Ctrl/Cmd+Enter, avatars, local date+time stamps + deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> Ctrl+Enter (Windows + Linux) or Cmd+Enter (OSX) in any message textarea should submit the message.
+
+
+> **Queue prompt:** Ctrl+Enter (Windows + Linux) or Cmd+Enter (OSX) in any message textarea should submit the message.
+
+> **Queue prompt:** All messages should have human-readable date + time stamp in local time.
+
+> **Queue prompt:** deploy
+
+> **Queue prompt:** do [#mcme]
+
+Shipped + deployed across all message threads (EFS `6bba0f1` + `17c174b`).
+
+**Ctrl/Cmd+Enter submit (every message textarea):** there's a shared `message_send_shortcut_match_` helper; 3 composers already used it. Added it to the **2 that didn't** — broker and lender-account — so Ctrl+Enter (Win/Linux) / ⌘+Enter (macOS) now submits in *every* message box, each with a send hint.
+
+**Every message has a human-readable local date + time stamp:** all six threads render via `toLocale*String` (the viewer's local timezone). The four non-chat threads (broker, lender-account, lender deal, unified inbox) now include the **year**; the admin + borrower chat per-message stamps now show the **full date alongside the time** (they previously showed time-only, with the date as a day-separator) — so each message is self-contained.
+
+**Plus avatars (from your earlier answer):** every message now shows a sender **avatar** — a shared `MessageAvatar` initials badge (EFS brand badge for EFS, deterministic-color initials for parties) — next to the name + timestamp, across all six surfaces.
+
+**`do [#mcme]` — read-status — stays DEFERRED.** `#mcme` is the read-receipts item I filed; you gated it on "only if we can detect email reads," and EFS currently can't: it sends via Cloudflare Email (no open tracking). Doing it properly is a ~3–5 day greenfield subsystem (switch message email to Resend with open-tracking, a signed `email.opened` webhook, an `email_events` table, and message↔email linking). I left it as a `[recommended]` backlog item with the full plan rather than auto-building a multi-day subsystem. Say the word if you want that built.
+
+**Verification:** new `tests/message-avatar-shortcut.test.ts` (16 tests); full suite **1047 pass / 0 fail**, `bun run check` green. **Deployed** → live at `https://equityfundingsource.brian-takita.workers.dev`, **Version ID `6119ba13-9dcc-49ec-8d37-d6ba2a1e86aa`**.
+<!-- agent:boundary:dde2ac74 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -146,8 +173,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Ctrl+Enter (Windows + Linux) or Cmd+Enter (OSX) in any message textarea should submit the message.
-- All messages should have human-readable date + time stamp in local time.
+- ~~Ctrl+Enter (Windows + Linux) or Cmd+Enter (OSX) in any message textarea should submit the message.~~
+- ~~All messages should have human-readable date + time stamp in local time.~~
 - deploy
 - do [#mcme]
 <!-- /agent:queue -->

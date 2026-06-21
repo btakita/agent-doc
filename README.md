@@ -112,6 +112,8 @@ flowchart LR
 
 The binary owns all deterministic behavior: component parsing, patch application, CRDT merge, snapshot management, git operations, tmux routing, and IPC writes. The bundled skill / AGENTS instructions are the non-deterministic orchestrator layer — they read the diff, generate responses, and decide what to write.
 
+For how concurrent agent writes and live editor keystrokes merge without splicing content across unrelated regions of the document, see [Document Node-Merge Architecture](docs/reference/node-merge-architecture.md).
+
 **Binary vs. Agent Responsibility:**
 
 | Responsibility | Owner | Why |

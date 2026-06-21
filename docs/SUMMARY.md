@@ -32,5 +32,6 @@
 - [Active Turn Lifecycle And Replay Paths](reference/active-turn-lifecycle-and-replay.md)
 - [IPC](reference/ipc.md)
 - [Full-Document IPC Corruption Chain](reference/full-document-ipc-corruption-chain.md)
+- [Document Node-Merge Architecture](reference/node-merge-architecture.md)
 - [Prompt Duplicate Closeout Repair](reference/prompt-duplicate-closeout-repair.md)
 - [Changelog](reference/changelog.md)

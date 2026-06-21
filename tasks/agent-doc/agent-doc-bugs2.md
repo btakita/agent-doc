@@ -101,7 +101,25 @@ Proof:
 - Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
 - Verification: none run (no code change).
 - Escalation: none.
-<!-- agent:boundary:03758ee7 -->
+
+### Re: commit + push all agent-doc files — opus-4-8
+
+> **Queue prompt:** commit + push all agent-doc files.
+
+Done. Verified green, then committed + pushed both repos.
+
+**Submodule `btakita/agent-doc` (`86acb6fe..b4ac18f0`):** the full accumulated working set — 45 files, +1005/-257. Spans the per-cell CRDT merge path (`crdt.rs`, `merge.rs`, `write/converge.rs`), the `#qnodemerge4` op-capture supply side (new `op_capture.rs`), `plugin_owner` lease, queue consume/continuation, convergence gate/playback, recycle inflight/yield, and route/dispatch.
+
+**Superproject `btakita/agent-loop` (`a9f7ac051..af3e10208`):** submodule pointer → `b4ac18f0`, plus the vendored agent-doc skill+runbook surfaces synced across the claude/codex/cursor/opencode harnesses (adds the new `describe-image` runbook).
+
+**Scope I excluded** (not "agent-doc files") so you can confirm or correct: the `.opencode/commands/tsift-*` command files, the mixed root `AGENTS.md`, `.gitmodules`, and all unrelated dirty submodules/tasks. The session doc itself is owned by `finalize`, not the manual commit.
+
+Proof:
+- Verification: `make check` exit 0 — clippy `-D warnings` clean, 4930 tests passed, doctests + SimWorld medium green.
+- Commands: `git add -A` + `git commit` + `git push origin main` in `src/agent-doc`; precise `git add <agent-doc paths>` + `git commit` + `git push origin main` in the superproject.
+- CI: pushed just now; the GitHub CI run will be queued — local `make check` is the closeout evidence.
+- Escalation: none.
+<!-- agent:boundary:f4e62526 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -142,7 +142,27 @@ I traced #6b5h to root and landed the foundational fix, but stopped short of fli
 **Queued the wiring as `#6b5hwire`** with the precise contract: gate `run_entry.rs` ~L1322 (the headline finalize wedge: `run_ipc` file-IPC fallback → `recovery=retry_without_disk_write`) and the `converge.rs` `no_ack`/`no_ack_content`/`send_failed` branches (the `write --pending-add` wedge) on `!live_editor_endpoint_attached`, seed the ~259 listener tests, add SimWorld `cli_no_editor → disk_write` coverage, and note the one residual edge (a real editor open but wedged before its first-ever patch has no lease — the robust closeout there is a plugin timer-based editor-endpoint heartbeat, a separate rung). Live editor-less repro stays `[operator-verify]`.
 
 Queue is paused and `queue_continuation_required=false` — not auto-looping.
-<!-- agent:boundary:94e146c3 -->
+
+### Re: do [#qnodemerge2] — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#qnodemerge2]
+
+
+Done — durable per-node CRDT state persistence is implemented, tested, and committed (agent-doc submodule `276f6f9e`, local only; push held per STOP-cutting-releases, operator chose Hold).
+
+**What landed**
+- **`MultiNodeState`** (`agent-doc-core/src/crdt.rs`) — one independent Yrs state per top-level node (each `agent:*` component + the interstitial text around them), serialized into a single structured container at `.agent-doc/crdt/<hash>.nodes.yrs`. This is the per-component successor to the whole-doc `<hash>.yrs` blob.
+- **Deterministic per-node encoding** (`encode_text_deterministic`, fixed Yrs client id `0`) so identical text re-encodes byte-identically: an untouched node's base is provably unchanged across a cycle while a changed node's base advances on its own. `Doc::new()`'s random client id made that impossible.
+- **Migration** — `decode_or_migrate` lazily splits a legacy `<hash>.yrs` into per-node states; falls back to a text rebuild if unreadable. A magic+version container header means a per-node file never collides with a legacy whole-doc blob.
+- **Shared loop** — extracted `merge_aligned_nodes` behind both `merge_by_component` and the new stateful `MultiNodeState::merge`; whole-doc `merge` stays the structural-divergence / component-less fallback.
+- **Persistence wiring** (`agent-doc-orchestration/src/snapshot.rs`) — `multinode_crdt_path_for` / `load_multinode_crdt` / `save_multinode_crdt` / `multinode_crdt_state` (sidecar → legacy migration → fallback). `save_document_crdt` also writes the per-node sidecar (rebuilt each cycle, so compaction GCs per node), `delete_crdt` removes it, and the rename migration carries it.
+
+**Acceptance — all covered by 12 new tests:** round-trip per-component encode/decode, a node's base advances independently, per-node GC on compaction. `make check` green; latest CI on the prior HEAD green.
+
+**Deliberately not done:** the live orchestration merge base is unchanged (still overlay → whole-doc `crdt::merge`). Rewiring the live write path to consume per-node bases is the recursive `#qnodemerge3` rung; the plan's risk note ("not mid-drift, keep whole-doc fallback") argues against rewiring the load-bearing path in this same cycle. This rung lands the durable per-node *base* without altering live merge behavior. Architecture doc (`docs/reference/node-merge-architecture.md`) updated to mark Phase 2 shipped.
+<!-- agent:boundary:1be2d8f5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -150,7 +170,7 @@ Queue is paused and `queue_continuation_required=false` — not auto-looping.
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Is the diff key approach 100% accurate? Can there be key conflicts? Is this the fastest way to merge?~~
 - ~~Rename the term "cell" to "node".~~
-- :pushpin: do [#qnodemerge2]
+- ~~:pushpin: do [#qnodemerge2]~~
 - :pushpin: do [#qnodemerge3]
 - :pushpin: do [#qnodemerge4]
 - :pushpin: do [#6b5h]
@@ -161,6 +181,8 @@ Queue is paused and `queue_continuation_required=false` — not auto-looping.
 - ~~Please document the document node merge architecture. Link from the readme. Ensure the document remains up to date if any changes are made.~~
 - ~~:pushpin: JB `Clear Session Context` then JB `Run Agent Doc` still sends duplicate prompts and no submit.~~
 - ~~do [#t3mn]~~
+- :pushpin: do [#6b5hwire]
+- do [#6b5hwire]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -189,7 +211,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#6b5hwire] [focused-cycle] #agent-doc-bug Wire the #6b5h live-editor-endpoint detection into the write-guard so a CLI-only (no live plugin) session stops wedging finalize. Primitive landed+pushed: plugin_owner::live_editor_endpoint_attached (submodule 8bb5e1e5; keys off the #8bfz plugin-owner lease owner-pid liveness, NOT heartbeat freshness so an idle real editor is never misclassified; make check green). Remaining: gate the fail-closed disk-write refusals on !live_editor_endpoint_attached so they route to the controller-host disk write instead of bail. Primary chokepoint run_entry.rs ~L1322 (run_ipc file-IPC fallback, recovery=retry_without_disk_write -- the headline finalize wedge); secondary converge.rs try_editor_converge no_ack/no_ack_content/send_failed branches (covers the write --pending-add wedge). BLAST RADIUS: ~259 listener tests assert active-listener=>refuse and seed NO plugin-owner lease, so each must seed a fresh live-pid lease (they simulate a real editor) before this flips their default; add SimWorld CLI-only-no-editor=>disk_write coverage. Residual edge: a real editor open but wedged before its first-ever patch has no lease yet -- robust fix is a plugin timer-based editor-endpoint heartbeat (separate rung). Live editor-less repro is [operator-verify]: drive a finalize in a Claude Code pane with no JB IDE, confirm transport=cli_no_editor_disk_write + committed, no force-disk.
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
-- [ ] [#qnodemerge2] [focused-cycle] #agent-doc-bug Per-component CRDT state persistence — persist .agent-doc/crdt/<hash>.<component>.yrs (or one multi-node state) so each node carries its own stable base across cycles instead of one whole-doc <hash>.yrs. Migration: decode existing whole-doc state and split, or rebuild per-component lazily. Acceptance: round-trip per-component encode/decode; a node base advances independently; compaction GCs per node. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 2). Builds on shipped #qnodemerge1. Operator chose to drive in a fresh clean session.
 - [ ] [#qnodemerge3] [focused-cycle] #agent-doc-bug Recursive AST-node nodes (keyed reconciliation, generalized) — drill the shipped Phase 1 keyed component reconciliation INSIDE each component so a node is any AST node, reconciled by durable node identity like React Virtual DOM. queue/backlog: each list item is a node; exchange: each Re: block is a node with interleaved prompts as their own nodes. Engine: one recursive reconcile(base,ours,theirs) matching children by key; whole-doc text merge stays the leaf. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 3). Sequenced after #qnodemerge2. Operator chose to drive in a fresh clean session.
 - [ ] [#qnodemerge4] [focused-cycle] #agent-doc-bug Op-capture / evented reflection (accuracy lever 1, highest leverage). Stop reconstructing edits from a text diff; capture the editor real operations (DocumentListener.documentChanged / onDidChangeTextDocument: insert at offset, delete range) and feed those ops to the per-node Yrs model directly, removing the diff-guess so live-edit merges are exact and intention-preserving. Acceptance: a concurrent live edit + agent write converges with zero diff-derived duplication. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4). Depends on #qnodemerge2 + #qnodemerge3. Operator-driven fresh clean session.
 - [ ] [#qnodemerge5] [focused-cycle] #agent-doc-bug Surface true conflicts, never fabricate (accuracy lever 5, the safety net). For genuine concurrent edits to the SAME leaf node (information-theoretically underdetermined), do not silently auto-merge text neither side wrote: surface both versions in agent:exchange or a conflict marker for operator resolution. Extends #hap7. Acceptance: a true same-leaf concurrent edit produces an operator-visible conflict, not a fabricated merge; non-conflicting edits never trip it. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 5). Sequenceable after #qnodemerge3. Operator-driven fresh clean session.

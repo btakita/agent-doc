@@ -358,7 +358,19 @@ The editor IPC reconnected: the answered drift-question head struck and the queu
 **Next queue head is `do [#6b5h]`** — the editor-IPC-listener-registered-but-no-live-editor wedge that churned this session (every finalize forced to `content_ours`/disk fallback). The fix is scopeable but supervisor-core: detect a registered editor-IPC listener with no live plugin behind it for a CLI-only actor and route finalize to the controller-host disk write instead of the `no_ack` wedge — or don't arm the editor-IPC disk-write guard when no plugin editor is attached. It's tagged `[focused-cycle]` because it needs an editor-less live repro plus SimWorld coverage, and it is **not** safe to land a write-path guard change while finalizing this doc *through* that same write path in an accreted live session. Recommend driving it in a fresh `/clear`ed session, alongside `#qcellmerge2/3`.
 
 I'm not auto-looping past this: the remaining drainable head (`#6b5h`) is focused-cycle write-path surgery that shouldn't run mid-finalize in this session, and the only other items are operator-gated (`#qcm1verify`, `#1jec`).
-<!-- agent:boundary:6a03a49a -->
+
+### Re: Why does monsterrodholders.md keep reporting a stale 0.1.0 supervisor? — opus-4-8
+
+Same root cause as the wedge this very session just hit: **a stale-binary supervisor does not self-heal.** A long-lived `agent-doc start` / supervisor process keeps running whatever binary it was launched from. `cargo install` / `lib-install` only replace the on-disk binary and `.so` — they cannot reach into an already-running process and swap its code. So a supervisor spawned long ago from a `0.1.0`-era build keeps executing `0.1.0` code and reporting itself as `0.1.0`, even though `agent-doc --version` on disk is current. The version mismatch between that old supervisor and a current finalize client is what produced the IPC-drift dialogs.
+
+Why it persists rather than auto-correcting:
+- The idle-boundary auto-recycle only fires when the supervisor is **not** `turn_active` (harness idle + debounced grace). A continuously-active session — especially a back-to-back `/loop` drain holding the drain lease — keeps `turn_active` true, so the recycle boundary never arrives. That's `#wd40`: a stale **binary** supervisor is *not* freed by drain-lease expiry; nothing replaces its binary on its own.
+- `lib-install` marks controllers `AGENT_DOC_RECYCLE_ON_INSTALL`, but the mark is only consumed at that idle boundary — which the active session never reaches.
+
+The fix is the **active** recovery, which your housekeeping already did: `agent-doc admin recycle <FILE>` (or a Restart Supervisor) forces the swap at the next boundary. That's exactly what cleared the `stale_install` mismatch on *this* doc earlier in the session.
+
+So `0.1.0` was a genuinely ancient supervisor process for that doc that never reached a recycle boundary — not a version-detection bug. The durable product fix is `#wd40` (auto-recycle a stale-binary supervisor *during* a continuously-active drain by yielding at the next inter-item boundary), so the operator doesn't have to run `admin recycle` by hand. The parenthetical confirms it's already recycled + the agent-loop→boost-client parent pointer reconciled, so nothing is outstanding on monsterrodholders here — this was a "why did it happen" question, and `#wd40` is the open item that prevents the recurrence.
+<!-- agent:boundary:78ffe566 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -1665,6 +1665,67 @@ class PatchWatcher implements vscode.Disposable {
         this.processVcsRefreshSignal(patchesDir);
         void this.processSaveDocumentSignal(patchesDir);
         this.processPendingPatches(patchesDir);
+
+        // #yzer / #evmhplugin: activation is the VS Code analog of the JB plugin's
+        // IPC (re)connect — the editor just opened a buffer the binary may have
+        // advanced past (committed content the buffer never saw) while VS Code was
+        // closed. Reconcile any provably-stale buffer so a later save_document
+        // cannot revert the binary's committed writes. Binary FFI owns the
+        // staleness decision; we only re-read when told to (editor wins otherwise).
+        void this.reconcileStaleBuffersOnReconnect(patchesDir);
+    }
+
+    /**
+     * #yzer / #evmhplugin: reconcile every open markdown buffer under this
+     * patches-dir root whose editor buffer is PROVABLY stale committed content
+     * (the binary advanced disk/HEAD while VS Code was closed). The binary FFI
+     * (`agent_doc_reconnect_buffer_decision`) owns the staleness decision; this
+     * only applies a re-read when told to, so genuine unsynced user edits are
+     * never clobbered (editor wins, #editorbufwin). VS Code parity for the JB
+     * plugin's `reconcileStaleBuffersOnReconnect`.
+     */
+    private async reconcileStaleBuffersOnReconnect(patchesDir: string): Promise<void> {
+        const root = path.dirname(path.dirname(patchesDir));
+        for (const doc of vscode.workspace.textDocuments) {
+            if (doc.languageId !== 'markdown') continue;
+            const filePath = doc.uri.fsPath;
+            if (!filePath.startsWith(root + path.sep)) continue;
+            let decision;
+            try {
+                decision = native.reconnectBufferDecision(root, filePath, doc.getText());
+            } catch (e: any) {
+                this.outputChannel.appendLine(`reconnect: decision FFI failed for ${filePath}: ${e.message}`);
+                continue;
+            }
+            if (!decision || decision.decision !== 'reread_disk' || typeof decision.content !== 'string') {
+                if (decision && decision.decision !== 'in_sync' && decision.decision !== 'keep_buffer') {
+                    this.outputChannel.appendLine(`reconnect: ${filePath} decision=${decision.decision} (buffer kept) #yzer`);
+                }
+                continue;
+            }
+            await this.applyReconnectReread(doc, decision.content);
+        }
+    }
+
+    /**
+     * Re-read committed disk/HEAD content into a stale editor buffer on reconnect
+     * (#yzer). The staleness proof was already established by the binary FFI; this
+     * re-checks the buffer is unchanged before replacing it to avoid racing a
+     * concurrent edit. Mirrors the JB plugin's `applyReconnectReread`.
+     */
+    private async applyReconnectReread(doc: vscode.TextDocument, content: string): Promise<void> {
+        const before = doc.getText();
+        if (before === content) return;
+        const edit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(before.length));
+        edit.replace(doc.uri, fullRange, content);
+        // Race guard: bail if the buffer changed since we read it (a concurrent
+        // user edit) so editor-wins still holds.
+        if (doc.getText() !== before) return;
+        const ok = await vscode.workspace.applyEdit(edit);
+        if (ok) {
+            this.outputChannel.appendLine(`reconnect: reread disk into stale buffer ${doc.uri.fsPath} #yzer`);
+        }
     }
 
     private findPatchesDir(): string | undefined {

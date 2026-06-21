@@ -348,6 +348,75 @@ pub(crate) fn log_write_wedge_requests_supervisor_recycle(file: &Path, source: &
     );
 }
 
+/// The agent's response component in template mode: the single AST node the agent
+/// authors during a response cycle. Every OTHER component — the managed
+/// queue/backlog/review/status AND any component a plugin defines — is owned by
+/// the live editor buffer during a `live_prompt_drift` recovery. Keying the
+/// reconciliation off this one agent-authored node (instead of enumerating
+/// editor-owned component names) keeps it open to arbitrary / plugin-defined
+/// components with no hardcoded allowlist.
+const AGENT_RESPONSE_COMPONENT: &str = "exchange";
+
+/// Blank the *content* (not the markers) of every component whose name is NOT in
+/// `keep`, so two documents that differ only inside those components compare
+/// equal. The kept components' content, the non-component regions (preamble,
+/// frontmatter, interstitial text), and all component markers are preserved for
+/// comparison — only the unkept components' bodies are cleared. Returns `None` if
+/// the document does not parse. Spans are cleared from the end backwards so
+/// earlier byte offsets stay valid. Component-name-agnostic by construction: it
+/// keys off the AST `component::parse` structure, so arbitrary / plugin-defined
+/// components are handled without enumeration.
+fn blank_components_except(doc: &str, keep: &[&str]) -> Option<String> {
+    let comps = crate::component::parse(doc).ok()?;
+    let mut spans: Vec<(usize, usize)> = comps
+        .iter()
+        .filter(|c| !keep.contains(&c.name.as_str()))
+        .map(|c| (c.open_end, c.close_start))
+        .collect();
+    spans.sort_by_key(|(start, _)| *start);
+    let mut out = doc.to_string();
+    for (start, end) in spans.into_iter().rev() {
+        if start <= end && end <= out.len() && out.is_char_boundary(start) && out.is_char_boundary(end)
+        {
+            out.replace_range(start..end, "");
+        }
+    }
+    Some(out)
+}
+
+/// `#qpcwcmerge` — true when the editor-converged `recovered` buffer is safe to
+/// commit even though it is not byte-identical to `snapshot` (`content_ours`),
+/// because every divergence lives INSIDE a component other than the agent's
+/// response component ([`AGENT_RESPONSE_COMPONENT`]). Those other components — the
+/// managed queue/backlog/review/status AND any plugin-defined component — are
+/// owned by the live editor buffer (editor-wins, `#queue-user-edit-overwrite`);
+/// the agent only authored the response. The response component, the document's
+/// non-component regions (preamble/frontmatter/interstitial), and the component
+/// STRUCTURE (a component added or removed shifts the blanked markers and so fails
+/// closed) must all match (normalized). That proves the response landed and no
+/// churn leaked outside the editor-owned components, so committing `recovered`
+/// makes HEAD equal the editor buffer and eliminates the recurring `#pcwc`
+/// post-commit worktree drift — instead of falling back to the `content_ours` disk
+/// write that drops the editor's components. Conservative: any out-of-response
+/// divergence, a structural change, or a parse failure returns false (block).
+///
+/// This is AST-structure-driven and component-name-agnostic: it never enumerates
+/// the editor-owned component names, so a plugin that defines a new component is
+/// reconciled the same way the built-in queue is.
+fn convergence_recovered_editor_wins_outside_response(recovered: &str, snapshot: &str) -> bool {
+    let (Some(rec_blanked), Some(snap_blanked)) = (
+        blank_components_except(recovered, &[AGENT_RESPONSE_COMPONENT]),
+        blank_components_except(snapshot, &[AGENT_RESPONSE_COMPONENT]),
+    ) else {
+        return false;
+    };
+    let norm = |text: &str| crate::git::normalize_transient_agent_doc_markers(text);
+    // Require an actual out-of-response divergence (otherwise the strict
+    // whole-document equality check already accepted it; this branch only handles
+    // the editor-owned-component mismatch case).
+    norm(&rec_blanked) == norm(&snap_blanked) && norm(recovered) != norm(snapshot)
+}
+
 pub(crate) fn try_editor_converge_live_prompt_drift(
     file: &Path,
     project_root: &Path,
@@ -438,6 +507,27 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
                         file.display(),
                         patch_id,
                         recovered.len()
+                    ),
+                );
+                Ok(Some(recovered))
+            } else if convergence_recovered_editor_wins_outside_response(&recovered, snapshot) {
+                // `#qpcwcmerge`: the editor buffer diverges from `content_ours` only
+                // INSIDE components other than the agent's response component — its
+                // live queue + same-cycle auto-strikes, or any plugin-defined
+                // component — while the response and everything else match (the
+                // response landed). Commit the editor buffer (editor-wins outside the
+                // response) so HEAD equals the editor and the recurring post-commit
+                // worktree drift (`#pcwc`) is eliminated, rather than blocking and
+                // falling back to the `content_ours` disk write that drops the
+                // editor's components.
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "[jbstalecache] editor_convergence_succeeded file={} patch_id={} recovered_len={} snap_len={} transport=editor_ipc resolution=editor_wins_outside_response #qpcwcmerge",
+                        file.display(),
+                        patch_id,
+                        recovered.len(),
+                        snapshot.len()
                     ),
                 );
                 Ok(Some(recovered))
@@ -1014,6 +1104,106 @@ mod core_tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    fn doc_with_queue_and_exchange(queue_body: &str, response: &str) -> String {
+        format!(
+            "---\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue_body}\n<!-- /agent:queue -->\n"
+        )
+    }
+
+    #[test]
+    fn qpcwcmerge_accepts_editor_buffer_when_only_queue_differs() {
+        // #qpcwcmerge: the editor buffer (recovered) has a struck queue head the
+        // operator's live state owns; content_ours (snapshot) still has it active.
+        // The exchange (response) is identical. The editor buffer must be accepted
+        // (editor-wins outside the response) so HEAD == editor and no post-commit drift.
+        let snapshot = doc_with_queue_and_exchange("- a free-text head\n", "### Re: topic\n\nAnswered.");
+        let recovered = doc_with_queue_and_exchange("- ~~a free-text head~~\n", "### Re: topic\n\nAnswered.");
+        assert!(
+            convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
+            "queue-only divergence with matching response must be accepted"
+        );
+    }
+
+    #[test]
+    fn qpcwcmerge_accepts_editor_buffer_for_arbitrary_plugin_component() {
+        // AST-driven generality (operator directive): a component a PLUGIN defines —
+        // not in any hardcoded allowlist — must be editor-authoritative exactly like
+        // the built-in queue. Here a `agent:pluginpanel` component diverges while the
+        // response matches → accept the editor buffer.
+        let doc = |panel: &str| {
+            format!(
+                "---\nq: 1\n---\n\n<!-- agent:exchange -->\n### Re: x\n\nbody\n<!-- /agent:exchange -->\n\n<!-- agent:pluginpanel -->\n{panel}\n<!-- /agent:pluginpanel -->\n"
+            )
+        };
+        let snapshot = doc("plugin state v1");
+        let recovered = doc("plugin state v2 (editor-updated)");
+        assert!(
+            convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
+            "a plugin-defined component must be editor-authoritative without an allowlist"
+        );
+    }
+
+    #[test]
+    fn qpcwcmerge_rejects_when_response_differs() {
+        // The response itself diverges — NOT safe to accept the editor buffer; the
+        // strict content_ours path must own the response component. Fail closed.
+        let snapshot = doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered correctly.");
+        let recovered = doc_with_queue_and_exchange("- ~~head~~\n", "### Re: topic\n\nAnswered DIFFERENTLY.");
+        assert!(
+            !convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
+            "a response (exchange) divergence must fail closed"
+        );
+    }
+
+    #[test]
+    fn qpcwcmerge_rejects_when_identical() {
+        // No out-of-response divergence at all → the strict equality check already
+        // accepted it; this branch must not fire (requires a real mismatch).
+        let doc = doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered.");
+        assert!(
+            !convergence_recovered_editor_wins_outside_response(&doc, &doc),
+            "identical docs are handled by the strict path, not this branch"
+        );
+    }
+
+    #[test]
+    fn qpcwcmerge_rejects_when_non_component_region_differs() {
+        // A divergence OUTSIDE any component (here: an interstitial heading) must
+        // fail closed even if the queue also differs — injected churn outside the
+        // editor-owned components is never silently accepted.
+        let snapshot = doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered.");
+        let mut recovered = doc_with_queue_and_exchange("- ~~head~~\n", "### Re: topic\n\nAnswered.");
+        recovered = recovered.replace("## Queue", "## Queue (tampered interstitial)");
+        assert!(
+            !convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
+            "a non-component-region divergence must fail closed"
+        );
+    }
+
+    #[test]
+    fn qpcwcmerge_rejects_structural_component_add() {
+        // The editor added a whole component content_ours lacks → structural change.
+        // Fail closed (conservative): the strict path owns structural divergence.
+        let snapshot = doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered.");
+        let recovered = format!(
+            "{}\n<!-- agent:extra -->\nnew\n<!-- /agent:extra -->\n",
+            doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered.").trim_end()
+        );
+        assert!(
+            !convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
+            "a structural component add must fail closed"
+        );
+    }
+
+    #[test]
+    fn blank_components_except_clears_others_keeps_exchange() {
+        let doc = doc_with_queue_and_exchange("- some head\n", "### Re: x\n\nbody");
+        let blanked = blank_components_except(&doc, &[AGENT_RESPONSE_COMPONENT]).unwrap();
+        assert!(!blanked.contains("some head"), "queue content must be blanked");
+        assert!(blanked.contains("### Re: x"), "response content must be preserved");
+        assert!(blanked.contains("<!-- agent:queue -->"), "queue markers stay");
+    }
 
     #[test]
     fn write_wedged_classifier_trips_only_against_active_listener_at_threshold() {

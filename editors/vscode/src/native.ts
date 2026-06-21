@@ -206,6 +206,7 @@ let _is_tracked: any = null;
 let _resolve_project_path: any = null;
 let _free_string: any = null;
 let _version: any = null;
+let _reconnect_buffer_decision: any = null;
 
 function bindFunctions(): void {
     if (_reposition_boundary_to_end && _normalize_template_structure) return;
@@ -311,6 +312,18 @@ function bindFunctions(): void {
     _resolve_project_path = lib.func('agent_doc_resolve_project_path', FfiProjectPathType, ['str']);
     _free_string = lib.func('agent_doc_free_string', 'void', ['char*']);
     _version = lib.func('agent_doc_version', 'char*', []);
+    try {
+        // #yzer reconnect-reread (VS Code parity with the JB plugin). Optional so an
+        // older cdylib without the symbol does not break the rest of the bindings.
+        _reconnect_buffer_decision = lib.func(
+            'agent_doc_reconnect_buffer_decision',
+            'char*',
+            ['str', 'str', 'str'],
+        );
+    } catch (e: any) {
+        console.log(`[agent-doc/native] reconnect_buffer_decision ABI unavailable: ${e.message}`);
+        _reconnect_buffer_decision = null;
+    }
 }
 
 function verifyVersion(libPath: string): void {
@@ -327,6 +340,68 @@ function verifyVersion(libPath: string): void {
     } catch (e: any) {
         console.log(`[agent-doc/native] agent_doc_version() failed — ABI mismatch at ${libPath}: ${e.message}`);
     }
+}
+
+export interface ReconnectDecision {
+    decision: string;
+    content?: string;
+}
+
+/**
+ * Parse the JSON returned by `agent_doc_reconnect_buffer_decision` into a typed
+ * decision. Pure (no FFI) so it is unit-testable. Returns null on malformed JSON
+ * or a missing/invalid `decision` field (fail safe — the caller keeps the buffer).
+ */
+export function parseReconnectDecision(json: string): ReconnectDecision | null {
+    try {
+        const parsed = JSON.parse(json);
+        if (!parsed || typeof parsed.decision !== 'string') return null;
+        const out: ReconnectDecision = { decision: parsed.decision };
+        if (typeof parsed.content === 'string') out.content = parsed.content;
+        return out;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * #yzer — ask the binary how the editor should reconcile its buffer with disk on
+ * (re)connect. The binary owns the staleness decision (disk==HEAD vs buffer==a
+ * prior commit blob); the plugin is a thin caller and only re-reads when told to,
+ * so genuine unsynced user edits are never clobbered (editor wins, #editorbufwin).
+ * Returns the decision, or null if the FFI is unavailable/errors (fail safe).
+ * VS Code parity for the JB plugin's `agent_doc_reconnect_buffer_decision` usage.
+ */
+export function reconnectBufferDecision(
+    projectRoot: string,
+    filePath: string,
+    buffer: string,
+): ReconnectDecision | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_reconnect_buffer_decision) return null;
+    let ptr: any = null;
+    try {
+        ptr = _reconnect_buffer_decision(projectRoot, filePath, buffer);
+        if (!ptr) return null;
+        const json = koffi.decode(ptr, 'char', -1);
+        return parseReconnectDecision(json);
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] reconnect_buffer_decision error: ${e.message}`);
+        return null;
+    } finally {
+        if (ptr) _free_string(ptr);
+    }
+}
+
+/** Whether the loaded cdylib exposes the reconnect-reread decision FFI. */
+export function hasReconnectBufferDecision(): boolean {
+    try {
+        bindFunctions();
+    } catch {
+        return false;
+    }
+    return Boolean(_reconnect_buffer_decision);
 }
 
 /**

@@ -143,6 +143,43 @@ strictly narrows contention without widening the corruption surface. Because the
 the shared `merge_aligned_nodes`, both `merge_by_component` (whole-doc base) and
 `MultiNodeState::merge` (per-node base) get the recursion.
 
+## Op-capture / evented reflection — `merge_with_editor_ops` (`#qnodemerge4`)
+
+Every layer above still reconstructs the `theirs` (editor) side of a merge from a Myers text
+diff (`compute_edit_ops`). A Myers diff returns *a* minimal edit script — not necessarily the
+edit the user actually performed — so two same-region edits can be mis-attributed and duplicate
+(the `#hap7`/`#qdup` corruption family). Phase 4 removes that guess for the editor side by
+replaying the editor's **real** operations.
+
+- **`EditorOp`** (`crdt.rs`): an absolute-offset editor mutation in **byte** units —
+  `Insert { offset, text }` / `Delete { offset, len }` — matching the editor's
+  `DocumentListener.documentChanged` / `onDidChangeTextDocument` events. A replacement is captured
+  as a `Delete` then an `Insert` at the same offset. Ops are recorded and replayed in editor order,
+  each offset absolute against the buffer *after* all prior ops. `serde`-serializable for the
+  capture sidecar.
+- **`replay_editor_ops(base, ops)`**: reconstructs the editor's final text by applying the ops in
+  sequence, returning `None` on any out-of-bounds or non-char-boundary offset.
+- **`merge_with_editor_ops(base_state, ours, theirs, theirs_ops)`**: same contract as `merge`, but
+  when `theirs_ops` is supplied it feeds the editor's exact ops into the `theirs` CRDT side
+  (`apply_editor_ops`) instead of the diff-guess (`apply_ops`).
+
+**Safety gate (the acceptance invariant "ops replay equals editor-observed state").** The captured
+ops are trusted only when `replay_editor_ops(base_text, ops) == theirs_text` against the *resolved*
+merge base (after stale-base / shared-prefix advancement). If the ops were captured against a
+divergent base (advanced base, a missed event), replay won't match and the merge transparently
+falls back to the diff-guess — never worse than today. A conservative offset-safety guard also
+restricts op-replay to ASCII `base`/`theirs` (Yrs index semantics for non-ASCII are not asserted
+here); per-component merge means a unicode glyph in `queue` never disables op-replay for ASCII
+`exchange` prose. `merge` delegates to `merge_with_editor_ops(.., None)`, so the existing path is
+byte-identical until ops are supplied.
+
+**Status.** The consumer (above) is shipped and unit-tested. The **supply** side is
+`#qnodemerge4wire`: a per-document op-capture sidecar (record/load/clear/GC), an FFI ingestion
+entry point (`agent_doc_record_editor_op`, FFI-first so plugins stay thin), wiring the live
+`merge_contents_crdt` path to consume + clear the sidecar, and the thin JetBrains
+`DocumentListener` / VS Code `onDidChangeTextDocument` reporters. The zero-duplication live
+eyeball (a concurrent live edit + agent write) is `[operator-verify]`.
+
 ## Roadmap — recursive AST-node merge
 
 `merge_by_component` is the component-level (coarsest) rung. The full model applies node
@@ -154,7 +191,7 @@ Virtual DOM keys its children.
 | `#qnodemerge1` ✅ shipped | Component-scoped merge (`merge_by_component`) — the anti-corruption rung above. |
 | `#qnodemerge2` ✅ shipped | Per-node CRDT **state persistence** — `MultiNodeState` (`crdt.rs`) persists one independent Yrs state per top-level node into a single structured container (`<hash>.nodes.yrs`), the per-component successor to the whole-doc `<hash>.yrs`. Each node carries its own stable base across cycles (an untouched node re-encodes byte-identically; a changed node's base advances on its own). Migrates a legacy whole-doc `<hash>.yrs` lazily, rebuilds (GCs) per node every save/compaction, and follows the document across renames. See *Durable per-node base* below. |
 | `#qnodemerge3` ✅ shipped | **Recursive AST-node reconciliation** — `reconcile_component` (`crdt.rs`) drills the keyed reconciliation *inside* each component via the shared `merge_aligned_nodes` per-node path. Queue/backlog/review/done items are keyed by their durable `#id` (or normalized text); `### Re:` blocks are keyed by heading. Children are matched by key (React-VDOM style): a matched-but-different child runs the leaf text `merge` against *its own* base child, a key-on-one-side child is a pure insert (kept) or delete (honored only on a clean delete-vs-unchanged; never for committed `exchange` blocks). The whole-component text `merge` stays the leaf and the fallback (unsplittable component, malformed framing, or ambiguous/duplicate keys). See *Recursive reconciliation* below. |
-| `#qnodemerge4` | **Op-capture / evented reflection** (highest-leverage accuracy lever) — feed real editor operations (`DocumentListener.documentChanged` / `onDidChangeTextDocument`) into the per-node model instead of reconstructing edits from a text diff, removing the diff-guess entirely. |
+| `#qnodemerge4` 🟡 core shipped | **Op-capture / evented reflection** (highest-leverage accuracy lever) — feed real editor operations (`DocumentListener.documentChanged` / `onDidChangeTextDocument`) into the per-node model instead of reconstructing edits from a text diff, removing the diff-guess. The merge **consumer** is shipped: `EditorOp` + `replay_editor_ops` + `merge_with_editor_ops` (`crdt.rs`) replay the editor's exact ops into the `theirs` CRDT side behind a replay-exactness safety gate. Remaining (`#qnodemerge4wire`): the **supply** side — capture-sidecar persistence, the FFI ingestion entry point, and the thin plugin `DocumentListener` / `onDidChangeTextDocument` reporters that record ops live. See *Op-capture / evented reflection* below. |
 | `#qnodemerge5` | **Surface true conflicts, never fabricate** — for a genuine concurrent edit to the *same* leaf node (information-theoretically underdetermined), present both versions for operator resolution instead of silently auto-merging text neither side wrote. |
 
 Accuracy ordering is the dependency order: `2 → 3 → 4`, with `5` sequenceable any time after

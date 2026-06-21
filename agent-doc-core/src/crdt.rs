@@ -127,6 +127,42 @@ impl CrdtDoc {
 /// or theirs as a prefix/substring, the base is stale. In that case, we use
 /// `ours_text` as the base to prevent duplicate insertions.
 pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> Result<String> {
+    merge_inner(base_state, ours_text, theirs_text, None)
+}
+
+/// Op-capture / evented-reflection merge (`#qnodemerge4`).
+///
+/// Same contract as [`merge`], but when `theirs_editor_ops` carries the
+/// editor's *real* operations (captured from `DocumentListener.documentChanged`
+/// / `onDidChangeTextDocument` as insert@offset / delete-range), the `theirs`
+/// side of the merge is built by replaying those exact ops onto the CRDT
+/// instead of reconstructing them from a Myers text diff.
+///
+/// A Myers diff picks *a* minimal edit script, not necessarily the one the user
+/// actually performed — so two same-region edits can be mis-attributed and
+/// duplicate. The captured ops are exact and intention-preserving.
+///
+/// **Safety gate (the acceptance invariant "ops replay equals editor-observed
+/// state"):** the captured ops are used *only* if replaying them onto the
+/// resolved merge base reproduces `theirs_text` byte-for-byte. If the ops were
+/// captured against a different base (stale / advanced base, missed event),
+/// replay will not match and the merge transparently falls back to the
+/// diff-guess — never worse than today.
+pub fn merge_with_editor_ops(
+    base_state: Option<&[u8]>,
+    ours_text: &str,
+    theirs_text: &str,
+    theirs_editor_ops: Option<&[EditorOp]>,
+) -> Result<String> {
+    merge_inner(base_state, ours_text, theirs_text, theirs_editor_ops)
+}
+
+fn merge_inner(
+    base_state: Option<&[u8]>,
+    ours_text: &str,
+    theirs_text: &str,
+    theirs_editor_ops: Option<&[EditorOp]>,
+) -> Result<String> {
     // Short-circuit: if both sides are identical, no merge needed
     if ours_text == theirs_text {
         eprintln!("[crdt] ours == theirs, skipping merge");
@@ -234,6 +270,40 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
         }
     }
 
+    // Op-capture gate (#qnodemerge4): prefer the editor's real ops for `theirs`
+    // when replaying them onto the resolved base reproduces `theirs_text`
+    // exactly. Otherwise (no ops, or ops captured against a divergent base) fall
+    // back to the diff-guess. Validated against the *resolved* `base_text` so a
+    // stale/advanced base correctly disqualifies the captured ops.
+    let theirs_replay_ops = match theirs_editor_ops {
+        // Conservative offset-safety guard: feed real ops to Yrs only when the
+        // base and theirs are ASCII. The op byte-offsets match `apply_ops`'s
+        // byte-cursor convention, but Yrs index/offset semantics for non-ASCII
+        // text are not asserted here, so unicode regions fall back to the
+        // diff-guess (no regression). Per-component merge (#qnodemerge3) means
+        // an emoji in `queue` never disables op-replay for ASCII `exchange`
+        // prose. (#qnodemerge4)
+        Some(ops) if !ops.is_empty() && base_text.is_ascii() && theirs_text.is_ascii() => {
+            match replay_editor_ops(&base_text, ops) {
+                Some(replayed) if replayed == theirs_text => {
+                    eprintln!(
+                        "[crdt] editor_ops_replayed: {} captured op(s) reproduce theirs exactly (#qnodemerge4)",
+                        ops.len()
+                    );
+                    Some(ops)
+                }
+                _ => {
+                    eprintln!(
+                        "[crdt] editor_ops_fallback: {} captured op(s) do not replay to theirs from the resolved base (stale/misaligned) — using diff-guess (#qnodemerge4)",
+                        ops.len()
+                    );
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
+
     // Compute diffs from base to each side
     let ours_ops = compute_edit_ops(&base_text, ours_text);
     let theirs_ops = compute_edit_ops(&base_text, theirs_text);
@@ -274,11 +344,15 @@ pub fn merge(base_state: Option<&[u8]>, ours_text: &str, theirs_text: &str) -> R
         apply_ops(&text, &mut txn, &ours_ops);
     }
 
-    // Apply theirs edits
+    // Apply theirs edits — from the editor's real ops when the gate passed,
+    // otherwise from the diff-guess (#qnodemerge4).
     {
         let text = theirs_doc.get_or_insert_text(TEXT_KEY);
         let mut txn = theirs_doc.transact_mut();
-        apply_ops(&text, &mut txn, &theirs_ops);
+        match theirs_replay_ops {
+            Some(ops) => apply_editor_ops(&text, &mut txn, ops),
+            None => apply_ops(&text, &mut txn, &theirs_ops),
+        }
     }
 
     // Merge: apply theirs' changes into ours
@@ -1328,6 +1402,82 @@ fn compute_edit_ops(from: &str, to: &str) -> Vec<EditOp> {
     ops
 }
 
+/// A real editor operation captured from the editor's change event
+/// (`DocumentListener.documentChanged` / `onDidChangeTextDocument`),
+/// expressed as an absolute-offset mutation in **byte** units — consistent
+/// with the byte-offset cursor convention used throughout this module's Yrs
+/// apply path ([`apply_ops`]).
+///
+/// A replacement (the editor reports an old fragment + a new fragment at the
+/// same offset) is captured as a [`EditorOp::Delete`] of the old length
+/// followed by an [`EditorOp::Insert`] of the new text at the same offset; the
+/// reporter is responsible for that split so replay stays a flat, ordered
+/// sequence. Ops are recorded and replayed in the order the editor performed
+/// them, so each op's offset is absolute against the document state *after* all
+/// prior ops in the sequence (exactly how the editor's own events behave).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum EditorOp {
+    /// Insert `text` at byte `offset`.
+    Insert { offset: usize, text: String },
+    /// Delete `len` bytes starting at byte `offset`.
+    Delete { offset: usize, len: usize },
+}
+
+/// Replay captured editor ops onto `base`, reconstructing the editor's final
+/// text. Ops apply in sequence with each offset absolute against the running
+/// buffer (matching the editor's own event semantics).
+///
+/// Returns `None` if any op is out of bounds or would land on a non-UTF-8
+/// char boundary — the caller treats `None` as "these ops are stale or
+/// misaligned, fall back to the text diff" (the `#qnodemerge4` safety gate).
+/// Returning the reconstructed text lets the merge assert it equals the
+/// editor-observed `theirs` before trusting the ops.
+pub fn replay_editor_ops(base: &str, ops: &[EditorOp]) -> Option<String> {
+    let mut buf = base.to_string();
+    for op in ops {
+        match op {
+            EditorOp::Insert { offset, text } => {
+                if *offset > buf.len() || !buf.is_char_boundary(*offset) {
+                    return None;
+                }
+                buf.insert_str(*offset, text);
+            }
+            EditorOp::Delete { offset, len } => {
+                let end = offset.checked_add(*len)?;
+                if end > buf.len()
+                    || !buf.is_char_boundary(*offset)
+                    || !buf.is_char_boundary(end)
+                {
+                    return None;
+                }
+                buf.replace_range(*offset..end, "");
+            }
+        }
+    }
+    Some(buf)
+}
+
+/// Apply captured editor ops directly to a Yrs text type, in order, as
+/// absolute-offset mutations (insert@offset / remove len@offset). This feeds
+/// the editor's *real* operation sequence into the CRDT so a concurrent agent
+/// edit merges against the user's actual edit boundaries rather than against a
+/// Myers-diff reconstruction (`#qnodemerge4`). Offsets are byte offsets,
+/// consistent with [`apply_ops`]. Callers must validate the ops with
+/// [`replay_editor_ops`] first; this assumes in-bounds, char-aligned offsets.
+fn apply_editor_ops(text: &TextRef, txn: &mut yrs::TransactionMut<'_>, ops: &[EditorOp]) {
+    for op in ops {
+        match op {
+            EditorOp::Insert { offset, text: s } => {
+                text.insert(txn, *offset as u32, s);
+            }
+            EditorOp::Delete { offset, len } => {
+                text.remove_range(txn, *offset as u32, *len as u32);
+            }
+        }
+    }
+}
+
 /// Apply edit operations to a Yrs text type within a transaction.
 fn apply_ops(text: &TextRef, txn: &mut yrs::TransactionMut<'_>, ops: &[EditOp]) {
     let mut cursor: u32 = 0;
@@ -1355,6 +1505,186 @@ mod tests {
         let content = "Hello, world!\nLine two.\n";
         let doc = CrdtDoc::from_text(content);
         assert_eq!(doc.to_text(), content);
+    }
+
+    // ---- #qnodemerge4: op-capture / evented reflection ----
+
+    #[test]
+    fn replay_editor_ops_reconstructs_insert() {
+        let base = "hello world\n";
+        // user typed "!" after "hello"
+        let ops = vec![EditorOp::Insert {
+            offset: 5,
+            text: "!".to_string(),
+        }];
+        assert_eq!(
+            replay_editor_ops(base, &ops).as_deref(),
+            Some("hello! world\n")
+        );
+    }
+
+    #[test]
+    fn replay_editor_ops_reconstructs_delete_and_replace_sequence() {
+        let base = "- do [#foo]\n";
+        // user renamed #foo -> #foobar: delete "foo" then insert "foobar"
+        let ops = vec![
+            EditorOp::Delete {
+                offset: 7,
+                len: 3,
+            },
+            EditorOp::Insert {
+                offset: 7,
+                text: "foobar".to_string(),
+            },
+        ];
+        assert_eq!(
+            replay_editor_ops(base, &ops).as_deref(),
+            Some("- do [#foobar]\n")
+        );
+    }
+
+    #[test]
+    fn replay_editor_ops_sequential_offsets_are_post_prior_op() {
+        // Each op's offset is absolute against the running buffer, like the
+        // editor's own events: insert "X" at 0, then "Y" at 2 (after "Xa").
+        let base = "ab";
+        let ops = vec![
+            EditorOp::Insert {
+                offset: 0,
+                text: "X".to_string(),
+            },
+            EditorOp::Insert {
+                offset: 2,
+                text: "Y".to_string(),
+            },
+        ];
+        assert_eq!(replay_editor_ops(base, &ops).as_deref(), Some("XaYb"));
+    }
+
+    #[test]
+    fn replay_editor_ops_out_of_bounds_is_none() {
+        let base = "short";
+        let insert = vec![EditorOp::Insert {
+            offset: 99,
+            text: "x".to_string(),
+        }];
+        assert_eq!(replay_editor_ops(base, &insert), None);
+        let delete = vec![EditorOp::Delete {
+            offset: 3,
+            len: 99,
+        }];
+        assert_eq!(replay_editor_ops(base, &delete), None);
+    }
+
+    #[test]
+    fn replay_editor_ops_non_char_boundary_is_none() {
+        // "é" is two bytes (0xC3 0xA9); offset 1 splits it.
+        let base = "é";
+        let ops = vec![EditorOp::Insert {
+            offset: 1,
+            text: "x".to_string(),
+        }];
+        assert_eq!(replay_editor_ops(base, &ops), None);
+    }
+
+    #[test]
+    fn editor_op_json_roundtrip() {
+        let ops = vec![
+            EditorOp::Insert {
+                offset: 3,
+                text: "hi".to_string(),
+            },
+            EditorOp::Delete {
+                offset: 0,
+                len: 2,
+            },
+        ];
+        let json = serde_json::to_string(&ops).unwrap();
+        let back: Vec<EditorOp> = serde_json::from_str(&json).unwrap();
+        assert_eq!(ops, back);
+    }
+
+    #[test]
+    fn merge_with_editor_ops_gate_passes_and_preserves_user_edit() {
+        // base: a queue item the user renames while the agent appends a response
+        // to a different region. Editor op for theirs is exact.
+        let base = "<!-- agent:queue -->\n- do [#foo]\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#foo]\n<!-- /agent:queue -->\nAGENT RESPONSE\n";
+        let theirs = "<!-- agent:queue -->\n- do [#foobar]\n<!-- /agent:queue -->\n";
+        let ops = vec![
+            EditorOp::Delete {
+                offset: 28,
+                len: 3,
+            },
+            EditorOp::Insert {
+                offset: 28,
+                text: "foobar".to_string(),
+            },
+        ];
+        // Verify the ops actually reconstruct theirs (the gate input).
+        assert_eq!(replay_editor_ops(base, &ops).as_deref(), Some(theirs));
+
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let merged =
+            merge_with_editor_ops(Some(&base_state), ours, theirs, Some(&ops)).unwrap();
+        // Both edits present, renamed item, no duplication.
+        assert!(merged.contains("- do [#foobar]"), "merged: {merged}");
+        assert!(merged.contains("AGENT RESPONSE"), "merged: {merged}");
+        assert!(!merged.contains("- do [#foo]\n"), "stale item leaked: {merged}");
+        assert_eq!(merged.matches("do [#foobar]").count(), 1, "duplicated: {merged}");
+    }
+
+    #[test]
+    fn merge_with_editor_ops_stale_ops_fall_back_to_diff() {
+        // Ops captured against a DIFFERENT base than the resolved merge base:
+        // replay won't equal theirs, so the merge must fall back to the diff
+        // path and still produce the same result as plain `merge`.
+        let base = "Line A\nLine B\n";
+        let ours = "Line A\nLine B\nAgent line\n";
+        let theirs = "Line A\nLine B edited\n";
+        // Bogus ops that do NOT reconstruct theirs from base.
+        let bogus = vec![EditorOp::Insert {
+            offset: 0,
+            text: "ZZZ".to_string(),
+        }];
+        assert_ne!(replay_editor_ops(base, &bogus).as_deref(), Some(theirs));
+
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let with_ops =
+            merge_with_editor_ops(Some(&base_state), ours, theirs, Some(&bogus)).unwrap();
+        let diff_only = merge(Some(&base_state), ours, theirs).unwrap();
+        assert_eq!(
+            with_ops, diff_only,
+            "stale ops must fall back to the diff-guess result"
+        );
+        // The bogus "ZZZ" must NOT have leaked into the merged output.
+        assert!(!with_ops.contains("ZZZ"), "stale op leaked: {with_ops}");
+    }
+
+    #[test]
+    fn merge_with_editor_ops_none_matches_plain_merge() {
+        // The op-aware entry point with None ops is byte-identical to `merge`.
+        let base = "header\n\nbody\n";
+        let ours = "header\n\nbody\nagent\n";
+        let theirs = "header\n\nbody edited\n";
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        assert_eq!(
+            merge_with_editor_ops(Some(&base_state), ours, theirs, None).unwrap(),
+            merge(Some(&base_state), ours, theirs).unwrap()
+        );
+    }
+
+    #[test]
+    fn merge_with_editor_ops_empty_ops_fall_back() {
+        let base = "x\ny\n";
+        let ours = "x\ny\nagent\n";
+        let theirs = "x\ny edited\n";
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let empty: Vec<EditorOp> = vec![];
+        assert_eq!(
+            merge_with_editor_ops(Some(&base_state), ours, theirs, Some(&empty)).unwrap(),
+            merge(Some(&base_state), ours, theirs).unwrap()
+        );
     }
 
     #[test]

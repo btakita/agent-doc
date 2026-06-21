@@ -39,7 +39,25 @@ completed
 Compacted content:
 - Archived 8 response topic(s): fix #rt83 churn + commit agent-doc files + queue dedup; queue dedup; process the next queue head in order; 5 more
 - Prior summary/context: prior compacted content: Archived 11 response topic(s): Documented the node-merge architecture + captured the JB disp...
-<!-- agent:boundary:27b2a696 -->
+
+### Re: queue cleanup + next-step direction — opus-4-8
+
+Removed the two struck heads `#6b5h` and `#6b5hwire` you cleared — confirmed both are archived in `agent-doc-bugs2.done.md` (the `#6b5h` primary chokepoint shipped as `#g9d7`/`#6b5hprimary`), so that was completed-item cleanup, not lost work. No new prompt rode in with the edit.
+
+**Why I'm not auto-draining the new head.** The queue head is now `[#1jec]`, which is `[operator-verify]` — it needs a `make install` at a supervisor-recycle boundary plus a live JB session, so the in-session loop can't complete it. Walking the rest of the queue, every realistically-reachable item is gated on something the loop must not decide for you:
+
+- **Operator-verify (need install at recycle boundary + live editor):** `#1jec` (yzer/evmh plugin reconnect re-read), `#qcm1verify` (qnodemerge1 component merge), `#tb4q` (qfocsup supervisor clear-and-continue), `#k7mf` (g9d7 editor-less disk fallback).
+- **Explicit hold:** `#qprtloss` is tagged **DO NOT IMPLEMENT yet** in its backlog text — I will not start it even though the binary's coarse drainability filter treats `[focused-cycle]` as drainable.
+- **Merge-core, dedicated-session work:** `#qnodemerge5` (surface true conflicts, "operator-driven fresh clean session") and `#qnodemerge4wire` (op-capture supply side — 5 sub-parts: sidecar persistence, FFI ingestion, live merge wiring, thin JB/VSCode reporters, SimWorld). These are the per-cell CRDT merge fix you want progressed, but they're the corruption-source surface and you've asked to land them in a focused cycle, not the go-loop.
+- **Confirm-before-implement:** `#qauthorderpin` (riskier do-vs-do sort change) and `#s81q` (Stop/Restart agent menus in JB+VSCode — overlaps the free-text head, "confirm scope").
+
+So this is a "no in-session-loop-drainable head" state in practice (the head is operator-verify; the next reachable item is explicitly held). I'm stopping the loop rather than churning a no-op cycle on `#qprtloss`.
+
+**Recommended next move** — pick one and I'll run it as its own focused cycle:
+1. **`#qnodemerge4wire`** — highest-leverage code progress on the per-cell merge fix; agent-doable parts (1)–(5) land + commit + push, no release ceremony (respects the STOP-cutting-releases gate), live eyeball left to you.
+2. **Operator-verify batch** — you `make install` at a recycle boundary, then drive the live repros for `#1jec`/`#qcm1verify`/`#tb4q`/`#k7mf` and I check the ops.log markers.
+3. **`#s81q`** — confirm scope (alongside-vs-replace Restart Supervisor Process; JB + VSCode both) and I implement the Stop/Restart menus.
+<!-- agent:boundary:d9ab6614 -->
 <!-- /agent:exchange -->
 
 ## Queue

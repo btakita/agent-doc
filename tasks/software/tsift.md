@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -80,6 +80,11 @@ On crates.io, add a Trusted Publisher to **both** crate names `tsift-local-model
 **After you confirm bootstrap** (a quick `curl`/browser check that both crate names resolve / show a Trusted Publisher), tell me and I'll: re-run `make check`, `git tag v0.1.73 1caaa43`, `git push origin v0.1.73`, then watch the Release run. I'm **not** pushing the tag now — doing so before bootstrap would fail the crates.io job on the two new crates and cascade to `tsift-cli` (a red/partial release).
 ### Re: #015t — what you need to verify to unblock the v0.1.73 release — opus-4-8
 
+> **Queue prompt:**
+>
+> :pushpin: [#015t]: What do I need to verify?
+
+
 One thing, and it's the `#1yks` gate: **the two new crates `tsift-local-model` and `tsift-kg` must exist on crates.io with a Trusted Publisher configured.** Right now both are **404** (never published); every other tsift crate is already set up. Until these two are bootstrapped, pushing the tag fails their publish job and cascades to `tsift-cli` (which depends on them).
 
 **Do this (crates.io, your browser/passkey 2FA — I can't do 2FA):**
@@ -93,14 +98,12 @@ One thing, and it's the `#1yks` gate: **the two new crates `tsift-local-model` a
 **If crates.io refuses to pre-config a nonexistent crate** (fallback): publish `tsift-local-model` once manually with a personal token to create it (`cargo publish -p tsift-local-model`). `tsift-kg` can't be created standalone — it needs `tsift-core`/`tsift-sqlite`/`tsift-local-model` at `0.1.73` on crates.io first — so the pre-config route above is strongly preferred; with it, CI publishes the whole set in dependency order in one shot.
 
 **Then:** `agent-doc admin queue resume tasks/software/tsift.md` (the queue is currently paused) and tell me — I'll run `make check`, `git tag v0.1.73 1caaa43`, `git push origin v0.1.73`, and watch the Release run. Nothing else is needed from you; `#015t`'s Phases 0–4b are done and pushed, only Phase 5 (this release) remains.
-<!-- agent:boundary:dd412993 -->
+<!-- agent:boundary:fdd283d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~:pushpin: release + publish~~
-- :pushpin: [#015t]: What do I need to verify?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

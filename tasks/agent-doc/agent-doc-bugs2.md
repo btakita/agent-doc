@@ -110,7 +110,23 @@ Done for the agent-actionable core (R1). The no-submit was a real race with a pr
 - **Live-pane verify is yours** (operator-verify): at a recycle boundary, `make install` + `agent-doc admin recycle`, then fire JB `Run Agent Doc` on a second doc during the hot-reload burst — expect a single `dispatch_start_proof` **with** submit and no stranded `start_session failed`.
 
 Plan with the full rung breakdown: `tasks/agent-doc/plan-dispatch-during-recycle.md`. Not auto-looping.
-<!-- agent:boundary:6ab64cf5 -->
+
+### Re: do #jbdisprecycle — R2/R3/R4 shipped — opus-4-8
+
+Done for all remaining agent-actionable rungs. R1 shipped last cycle; this cycle finished R2, R3, and R4, so the dispatch-during-recycle race is now hardened end-to-end. Per the operator-verify rule I did every agent-doable sub-step and left only the live-pane eyeball for you.
+
+**What shipped** (agent-doc submodule `d21079b7`, superproject `3c84f70a9`; pushed, **not** installed/released per STOP-cutting-releases):
+
+- **R2 — `start_session` retry during recycle.** `start/run.rs` now wraps the `start_session` call in a recycle-aware retry: on failure it checks the project-scoped `recycle_inflight` marker; if the supervisor is mid-`execve` recycle it logs `start_session_recycle_retry`, waits the bounded settle window (`wait_for_recycle_settle`, ≤10s), re-runs `ensure_controller_running`, and retries (≤2). A non-recycle failure or an unsettling recycle still surfaces the original terminal error — so the live repro's `start_session failed for tasks/software/tsift.md` becomes a retry instead of a stranding terminal error.
+- **R3 — submit-once spans recycle.** `route/dispatch.rs` adds a settle gate right after the trigger is injected (`dispatch_inject attempt=1`) and the first acceptance poll comes back non-Accepted: if mid-recycle it waits for settle, logs `route_dispatch_submit_recycle_settle ... action=submit_once_after_settle`, and re-polls once — so the budgeted resubmit loops run against the settled supervisor and land the submit exactly once, never re-typing N times (the `#rdypoll` `attempt=2+` restack symptom).
+- **R4 — SimWorld coverage.** New `route_sim_dispatch_defers_during_recycle_then_injects_once_after_settle` models the recycle marker (`RouteModel.recycle_inflight` + `Mark`/`Settle`/`DispatchDuringSupervisorRecycle` SimCommands): 7 dispatches mid-recycle all fail closed (`dispatch_into_recycling_pane`, zero injects, no stacked triggers); after settle the same dispatch injects exactly once (`attempt=1`, never `attempt=2`).
+
+**Verified.** `make check` green — clippy `-D warnings` clean, full suite passes including the SimWorld scenario and 4 new `recycle_inflight` pure-decision unit tests. Latest CI run is green.
+
+**Only operator live-verify remains** (`#jbdisprecycle` stays as `[operator-verify]` in the backlog): at a recycle boundary run `make install` + `agent-doc admin recycle`, fire JB `Run Agent Doc` on a second doc during the hot-reload burst, and confirm a single `dispatch_start_proof` **with** submit and no stranded `start_session failed`.
+
+Not auto-looping — `queue_continuation_required=false` (only `[operator-verify]` heads remain) and the queue is paused.
+<!-- agent:boundary:62cde5a8 -->
 <!-- /agent:exchange -->
 
 ## Queue

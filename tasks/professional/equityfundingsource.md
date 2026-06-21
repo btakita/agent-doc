@@ -154,7 +154,39 @@ Done (committed; not yet deployed). The card dialog now spells out **why** the l
 **Verification:** suite **981 pass / 0 fail** (added a test asserting the lender2 card state — `compliance_hold=true`, `requirements_status=current`, `lender_account_ready=false` — plus the banner/step wiring; a fully-linked accredited lender has no hold). `bun run build` + `bun run build:worker` clean. Committed `4dc5647` in the EFS submodule.
 
 **Deploy:** not deployed this cycle (last cycle's `deploy` was a separate explicit step). Reply `deploy` (or queue it) to push it live so you can see the banner in the dialog.
-<!-- agent:boundary:f8cde3a3 -->
+
+### Re: Card-dialog "what's needed to advance" message + embedded lender messaging — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: On dialogs, there should be a message that indicates what needs to be done to advance the card to the next step. So in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > btak.dev+lender2@gmail.com should have a message that hoists the requirement "No accreditation submission yet — the lender must submit their questionnaire before it can be decided."...assuming that is what is needed. We should also have an embedded messaging component with the lender to help the lender provide the documents.
+
+
+> **Queue prompt:**
+>
+> :pushpin: On dialogs, there should be a message that indicates what needs to be done to advance the card to the next step. So in .../admin/lender-pipeline > btak.dev+lender2@gmail.com should have a message that hoists the requirement "No accreditation submission yet — the lender must submit their questionnaire before it can be decided."...assuming that is what is needed. We should also have an embedded messaging component with the lender to help the lender provide the documents.
+
+
+Two asks. **Part 1 (the advance-to-next-step message) is shipped + pushed.** **Part 2 (embedded pre-deal lender messaging) needs one data-model decision from you before I build it** — details below.
+
+**Why lender2 looked blank.** Last cycle I added an actionable compliance-hold banner to this exact dialog (committed `4dc5647`) but it was **never deployed** — so the live site still shows nothing. That banner only fired when a lender was on a *compliance hold*; the non-blocking stages (Renewal Due, Lender Ready) had no message at all. I've now generalized it so **every** stage's dialog states the next action.
+
+**Part 1 — shipped (`#spec-test-commit-push`: committed + pushed, not deployed).** EFS `4780bf4`, superproject `d0d3420d7`.
+
+- New pure `next_step_hint_(card)` helper + a neutral banner ("**To advance to the next step:**") that renders whenever the card is **not** on a compliance hold — so Renewal Due shows "renew accreditation soon" and Lender Ready shows "eligible to be selected for a deal and funded; no onboarding step remains." The dialog is never blank about the next action.
+- Clarified the `not_started` wording to your phrasing: *"Submit accreditation evidence — no accreditation questionnaire has been submitted yet, so it cannot be decided…"* This is the message that hoists when a lender genuinely hasn't submitted (`signed_up`).
+- The existing red compliance-hold banner is unchanged for blocked stages. Note: lender2's actual blocker (per live D1 last cycle) is the **lender-account** step, not accreditation — they self-attested, so requirements read *Current*. Whichever it really is now, the dialog derives the correct message from card state.
+- Tests: full suite **982 pass / 0 fail** (added next-step-banner coverage for renewal-due + lender-ready cards and the clarified not_started wording). `bun run build` + `bun run build:worker` clean.
+
+**To see it live, reply `deploy`** (the preset was commit+push, so I held the deploy as you've been doing per-cycle).
+
+**Part 2 — embedded lender messaging: one decision needed.** A lender-messaging component **already exists embedded in this dialog**, but it's scoped to a *deal interest* (the "Lender communication" thread on each deal follow-up — message + attachments + email notify, backed by `deal_interest_lender_messages`). The gap your request points at: a lender who's still doing accreditation/onboarding has **no deal interest yet**, so there's no thread to nudge them about documents. Closing that needs a new **user-scoped** (pre-deal) thread — which forks on the data model:
+
+1. **New `lender_account_messages` table** keyed on the lender's `user_id`, mirroring the existing deal-interest message pattern (own route, reuse the attachment + email-notify plumbing). Cleanest separation. **(my recommendation)**
+2. **Generalize the borrower chat** (`chat_sessions`) to accept a `lender` participant role. More reuse, but widens a borrower-specific schema.
+
+Plan written to `src/equityfundingsource-dev/prds/lender-card-messaging.md`; queued as **`#lender-card-msg`**. The in-app thread isn't email-gated, but outbound email-to-lender parity rides the same Resend-domain gate as `#f4rq`/`#xcvg`. **Tell me "option 1" (or 2) and I'll build it** — I didn't want to lay down a new D1 table on a guess.
+<!-- agent:boundary:406fd251 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -166,11 +198,15 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~:pushpin: On dialogs, there should be a message that indicates what needs to be done to advance the card to the next step. So in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > btak.dev+lender2@gmail.com should have a message that hoists the requirement "No accreditation submission yet — the lender must submit their questionnaire before it can be decided."...assuming that is what is needed. We should also have an embedded messaging component with the lender to help the lender provide the documents.~~
+- On dialogs, there should be a message that indicates what needs to be done to advance the card to the next step. So in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > btak.dev+lender2@gmail.com should have a message that hoists the requirement "No accreditation submission yet — the lender must submit their questionnaire before it can be decided."...assuming that is what is needed. We should also have an embedded messaging component with the lender to help the lender provide the documents.
+- do [#lender-card-msg]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lender-card-msg] [recommended] Embedded pre-deal lender messaging in the admin lender-pipeline card dialog so an admin can message a lender about onboarding/accreditation documents BEFORE any deal interest exists. Deal-interest-scoped lender messaging already ships in the dialog (deal_interest_lender_messages / migration 0082); the gap is a user-scoped thread. Plan + data-model fork (recommend new lender_account_messages table vs generalizing borrower chat_sessions): src/equityfundingsource-dev/prds/lender-card-messaging.md. Confirm the data-model choice before building; in-app first, email notify gated on #f4rq/#xcvg.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.

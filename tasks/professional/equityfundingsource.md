@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -66,6 +66,11 @@ The reworded step text also drops the confusing `(Lender Requests page)` parenth
 
 > **Queue prompt:**
 >
+> do [#dmz8]
+
+
+> **Queue prompt:**
+>
 > Create a master state machine diagram for all flows...public site application + application request from borrower portal + application request from broker portal + deal pipeline + lender pipeline + broker pipeline. Make this master state machine diagram a living document that is updated as we iterate on the workflows.
 
 
@@ -88,7 +93,7 @@ Shipped **`docs/master-state-machine.md`** (EFS `f50a422`, pushed) — one livin
 **Verification:** docs-only change; full suite re-run **1024 pass / 0 fail**. Committed + pushed (submodule `f50a422`, superproject pointer bumped). Mermaid diagrams use standard `flowchart` / `stateDiagram-v2` / `sequenceDiagram`-compatible syntax (no mermaid CLI in-repo to render-check, but ordering/labels follow valid syntax).
 
 Next queue head is `do [#dmz8]` (deploy the advance-lender dialog) — outward-facing, operator-gated.
-<!-- agent:boundary:a2f570f2 -->
+<!-- agent:boundary:78e3e6ca -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -100,14 +105,11 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Create a master state machine diagram for all flows...public site application + application request from borrower portal + application request from broker portal + deal pipeline + lender pipeline + broker pipeline. Make this master state machine diagram a living document that is updated as we iterate on the workflows.~~
-- do [#dmz8]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dmz8] [recommended] #advance-lender-deploy Deploy the advance-lender support dialog (#advance-lender, EFS 4f564be) to the EFS worker — committed+pushed, awaiting operator-gated `wrangler deploy`. Outward-facing; operator triggers.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.

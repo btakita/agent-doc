@@ -54,7 +54,22 @@ Phase 2 done and **live** (the doc compacted out-of-band mid-cycle; recovered th
 - **#msg-unify5 — broker two-way thread** (a new visible feature; brokers get one-way notifications only today).
 
 **Your call:** proceed with **#msg-unify3 borrower cutover** (carefully, dual-write first), do the **#msg-unify5 broker thread** (new visible feature), or call the unification good here — the inbox + model are already live, so the cutover isn't urgent.
-<!-- agent:boundary:c8dbc2ad -->
+
+### Re: deploy — already live; checkpoint on the remaining phases — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: deploy
+
+Already deployed — nothing new to push. EFS `fbabaa9` == `origin/main` is the live worker (version `933a581c-2d9a-40d1-854a-317192df93df`); there's no uncommitted/unpushed code since last cycle's deploy. So #msg-unify1 (model) + #msg-unify2 (unified inbox) are both live and verified (home `200`).
+
+**Checkpoint — the operator-facing unification is done and live.** What remains splits cleanly by value vs risk:
+
+- **#msg-unify5 — broker two-way thread.** A genuinely **new, visible** feature: brokers get a real conversation (today they only get one-way notifications), surfaced in the broker portal + the unified inbox. Low risk (additive, like the lender thread I already shipped). **My recommendation for the next real work.**
+- **#msg-unify3 / #msg-unify4 — internal data cutover.** Move *live* borrower/lender rows onto `messages` (dual-write → backfill → drop legacy). **Zero visible change** — the unified inbox already shows everything — and it rewrites the *live* borrower-chat write path (Durable Object WebSocket), so it carries real regression risk for **no user-facing benefit right now**. I'd treat these as optional internal cleanup to schedule deliberately, not livestream-grind.
+
+**So:** want me to build **#msg-unify5 (broker thread)** next — the last visible win — and shelve the #msg-unify3/4 cutover as optional cleanup? Or push through the cutover anyway? Either way the queue still has both `deploy` heads (both no-ops now) and the three phase heads; tell me the priority and I'll drive it.
+<!-- agent:boundary:7ea68b70 -->
 <!-- /agent:exchange -->
 ###
 <!--

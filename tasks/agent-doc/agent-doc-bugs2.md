@@ -77,7 +77,30 @@ New `refuse_or_editorless_disk_fallback` centralizes the `no_ack` / `no_ack_cont
 **Scope honesty:** this is the **secondary** chokepoint (`converge.rs`). The **primary** one — `run_entry.rs` `run_ipc` file-IPC fallback (~L1322, the headline finalize wedge, `recovery=retry_without_disk_write`) — is the next rung, filed as `#6b5hprimary`: it must route the pending `content_ours` to a guarded disk write under the doc-lock (snapshot/CRDT/pending state), so I scoped it separately rather than rush the most safety-critical path. The live editor-less repro stays `[operator-verify]`.
 
 Both rungs go live at the next `make install` (held by the STOP-cutting-releases freeze). I did **not** mark `#6b5h` done — the primary rung remains.
-<!-- agent:boundary:af748134 -->
+
+### Re: dogfood the queue churn in this doc — preserve operator-authored order, stop duplicating — opus-4-8
+
+You added an instruction in the queue, twice, and it's also the live proof of the bug it describes:
+
+> **Queue prompt:** Queue items that are added by operator should be handled in the queue order defined in the document...not automatically bubbled to the top.
+
+> **Queue prompt:** dogfood + fix any agent-doc turn churn issues that occur in this document. Add to AGENTS.md
+
+**The churn this preflight produced (two distinct symptoms, both captured as `#qauthorder`):**
+
+1. **It duplicated your free-text line.** You added that "...not automatically bubbled to the top" line once; the convergence inserted it **twice** (semantic diff shows `queue:3:ft-c3831b31:0` *and* `:1` — same `item_id`). The existing `#qdedupsync` collapse only de-dups `do [#id]` heads; **free-text operator lines have no dedup**, so a CRDT/backlog re-emit leaves a visible duplicate.
+2. **It auto-pins a `:pushpin:` you never typed.** `annotate_manual_queue_additions` (`#7r2s`) pins every operator-added unpinned line so the priority sort holds its slot — but the side effect is a pin glyph you didn't author, and the line then counts as a tier-0 operator pin everywhere downstream.
+
+**On "not bubbled to the top":** the priority sort already *intends* this — operator pins are position-locked (`#queue-operator-pin-position-lock`), so an authored slot is preserved. The bug is the *mechanism*: preserving the slot shouldn't require rewriting your text, and the free-text path has the dedup hole proven above.
+
+**What I did this cycle (dogfood + Add to AGENTS.md):**
+- Added the `#qauthorder` convention to `src/agent-doc/AGENTS.md` (submodule `3670caad`, pushed) — operator-authored queue order is authoritative; hold the slot by stable-identity position-lock, **not** by injecting a pin; free-text lines need the same convergence dedup `do [#id]` heads get.
+- Wrote the focused-cycle plan `tasks/agent-doc/plan-queue-preserve-operator-author-order.md` (superproject `ea9383353`, pushed; submodule pointer bumped) and queued the actionable `#qauthorder` backlog item.
+
+**Why not fix it inline now:** this is the exact convergence machinery actively churning this live doc, and it intersects `#7r2s`, `#queue-operator-pin-position-lock`, `#backlog-queue-append-stable`, `#qdedupsync`, and the DAG sort. A rushed edit here worsens the churn. It's pure preflight/queue logic (unit + SimWorld provable, no live editor), so the focused cycle is the safe path — it lands at the next `make install` (held by the STOP-cutting-releases freeze). `make check` green.
+
+I deliberately did **not** drain `#g9d7` (queue tail) this turn — promoting a tail item over your document-order heads is precisely the bubbling you're objecting to.
+<!-- agent:boundary:9ab7f4d4 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -117,6 +140,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#id] [focused-cycle] #agent-doc-bug #qauthorder Operator-authored queue order is authoritative: queue convergence must keep an operator-added queue line at its document-authored slot (never auto-bubble to top) and never duplicate it. Live proof this session (agent-doc-bugs2.md, one preflight): the free-text operator line was inserted TWICE on convergence (semantic diff node_key queue:3:ft-c3831b31:0 AND :1, same item_id), and annotate_manual_queue_additions (#7r2s, queue.rs:825) injects a :pushpin: the operator never typed in order to hold the slot. Root cause: holding the authored slot currently requires mutating visible text (auto-pin), and free-text lines have no convergence dedup (#qdedupsync / dedup_pin_variant_do_heads only covers do heads). Fix: position-lock operator-authored lines by stable identity WITHOUT injecting a pin glyph; add free-text convergence dedup; assert no pass bubbles an operator line above an earlier operator line. Reconcile with sort_prompts_by_priority position-lock (#queue-operator-pin-position-lock), #7r2s, #backlog-queue-append-stable. Pure preflight/queue logic = unit + SimWorld provable, no live editor. Plan: tasks/agent-doc/plan-queue-preserve-operator-author-order.md
 - [ ] [#g9d7] [focused-cycle] #agent-doc-bug #6b5hprimary — #6b5h primary chokepoint: wire the editor-less disk fallback into run_entry.rs run_ipc file-IPC fallback (~L1322, the headline finalize wedge that bails 'editor IPC did not prove the write ... refusing direct document write' with recovery=retry_without_disk_write). The converge.rs SECONDARY rung landed (submodule 7cd65c02: refuse_or_editorless_disk_fallback gated on plugin_owner::live_editor_endpoint_attached). Remaining: at run_ipc's timeout/no-materialization bail, when !live_editor_endpoint_attached(file), route the pending content_ours to the guarded controller-host disk write + commit instead of bailing (carefully — under doc_lock; manage snapshot/CRDT/pending state; reuse decide_editorless_disk_fallback semantics). BLAST RADIUS: run_ipc refusal tests simulating an active listener without a plugin-owner lease must seed write_plugin_owner_lease_for_test(doc, process::id()). Live editor-less repro (finalize in a Claude Code pane, no JB IDE, confirm transport=disk_fallback editor_endpoint=absent + committed, no force-disk) is [operator-verify].
 - [ ] [#qnodemerge4wire] [focused-cycle] #agent-doc-bug Supply side of #qnodemerge4 op-capture (consumer shipped: EditorOp + replay_editor_ops + merge_with_editor_ops behind the replay-exactness gate, agent-doc submodule ea84ebab). Remaining: (1) per-document op-capture sidecar persistence (record/load/clear/GC) keyed by the base it was captured against; (2) FFI ingestion entry point agent_doc_record_editor_op (FFI-first, plugins stay thin); (3) wire the live merge_contents_crdt path to load+pass theirs editor ops to merge_with_editor_ops and clear the sidecar after; (4) thin JB DocumentListener.documentChanged + VS Code onDidChangeTextDocument reporters that split replacements into delete+insert and report byte offsets; (5) SimWorld coverage. [operator-verify] live eyeball: a concurrent live edit + agent write converges with zero diff-derived duplication and ops replay == editor-observed state. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4). NOTE byte-offset/Yrs unicode-offset semantics (currently ASCII-gated in the consumer) need verification when wiring non-ASCII edits.
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.

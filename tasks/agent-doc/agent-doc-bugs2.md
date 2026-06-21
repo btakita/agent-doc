@@ -144,6 +144,11 @@ I drained only the pinned head `#g9d7` this cycle; the queue is paused and the o
 
 ### Re: drain queue head #6b5h — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#6b5h]
+
+
 Draining `#6b5h` (CLI-only finalize wedge, supervisor-core). Its agent-actionable scope is already shipped and verified — no new code needed this cycle:
 
 - **Both chokepoints gated on `!live_editor_endpoint_attached`:** primary `run_entry.rs:1407-1408` (the run_ipc no-delivery bail → guarded controller-host disk write via `decide_editorless_disk_fallback`) and secondary `converge.rs:521` (the `try_editor_converge` no_ack/send_failed branches). Both route to disk fallback only when no live plugin editor is attached; a live editor still fails closed.
@@ -153,18 +158,17 @@ Draining `#6b5h` (CLI-only finalize wedge, supervisor-core). Its agent-actionabl
 The only remainder is the **editor-less live repro**, which cannot be agent-completed (needs a real Claude Code pane with no JB IDE) — that is already queued as `#k7mf` `[operator-verify]` (run `agent-doc finalize` in a no-IDE pane, confirm ops.log `run_ipc_editorless_disk_fallback transport=disk_fallback editor_endpoint=absent` + committed cycle, no `--force-disk`, no `recovery=retry_without_disk_write`). Per STOP-cutting-releases, the `make install` it depends on stays operator-gated.
 
 Marking `#6b5h` done (code-complete; live proof tracked by `#k7mf`).
-<!-- agent:boundary:3f922472 -->
+<!-- agent:boundary:c8365ab4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#6b5h]
-- :pushpin: [#1jec]
-- :pushpin: do [#qprtloss]
-- :pushpin: do [#qcm1verify]
-- :pushpin: do [#qnodemerge5]
-- :pushpin: do [#6b5hwire]
+- ~~do [#6b5h]~~
+- [#1jec]
+- do [#qprtloss]
+- do [#qcm1verify]
+- do [#qnodemerge5]
 - do [#6b5hwire]
 - do [#tb4q]
 <!-- /agent:queue -->
@@ -201,7 +205,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
 - [ ] [#qnodemerge5] [focused-cycle] #agent-doc-bug Surface true conflicts, never fabricate (accuracy lever 5, the safety net). For genuine concurrent edits to the SAME leaf node (information-theoretically underdetermined), do not silently auto-merge text neither side wrote: surface both versions in agent:exchange or a conflict marker for operator resolution. Extends #hap7. Acceptance: a true same-leaf concurrent edit produces an operator-visible conflict, not a fabricated merge; non-conflicting edits never trip it. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 5). Sequenceable after #qnodemerge3. Operator-driven fresh clean session.
 - [ ] [#qprtloss] [focused-cycle] #agent-doc-bug Silent user-prompt loss: a user-typed queue line ("- re #cftk: Would passage... work?") was deleted by preflight queue-convergence during a concurrent admin recycle, and the cycle reported no_changes so the prompt was never answered. Smoking gun: preflight #1 no_changes:false diff_type:simple_question diff:null, then preflight #2 no_changes:true; prior turn logged "converged live editor buffer (auto=false, queue_active=false)" + "admin recycle ... at next idle boundary". Distinct from #6b5h (finalize IPC wedge) — this is preflight-side data loss before any response is composed. Fix dirs: convergence must CRDT-merge (never overwrite) an uncommitted live-buffer queue/exchange edit; no_changes:false + diff:null with non-empty prompt_changes must fail closed (reconstruct from semantic diff, never resolve to no_changes:true); sequence recycle after pending-prompt capture; add SimWorld coverage. Plan: tasks/agent-doc/plan-prompt-loss-queue-convergence.md. DO NOT IMPLEMENT yet.
-- [ ] [#6b5h] [focused-cycle] #agent-doc-bug Pure-CLI agent-doc session (no live JB editor) wedges every finalize on editor-IPC no_ack, forcing --force-disk. Live repro 2026-06-20, equityfundingsource.md driven from a Claude Code pane (%158) with NO JetBrains IDE running and the controller (controller serve, pid 2014438, 0.34.27) as the sole daemon: admin list shows the doc actor ready with an active editor-IPC listener, but there is no editor endpoint behind it. Every finalize: socket "ack status: error" -> file-IPC fallback writes a patch no editor applies -> no_ack -> recovery=retry_without_disk_write -> fail-closed "refusing direct disk write; editor IPC listener active". Only finalize --force-disk succeeds (commits landed via CRDT merge). Controller-mediated write --pending-add into THIS bugs doc also wedged identically (send_failed) and the foreign-ownership guard required claim --force - the bug plus ownership guard block capturing the bug via the normal path. Never self-heals: actor not orphaned and binary not stale, so neither M1b orphan-reap, drain-lease expiry, nor stale-binary recycle fires. Extends #cyh0/#fcczero, #wd40, #rt83 (queue_control_paused dispatch flood ~2/sec on this doc + orphaned save-document.signal), #editorbufwin. Full report: tasks/agent-doc/ipc-wedge-cli-no-editor.md. Fix direction: detect editor-IPC-listener-registered-but-no-live-editor for a CLI-only actor and route finalize to the controller-host disk write instead of no_ack wedge; OR do not arm the editor-IPC disk-write guard when no plugin editor is attached. Supervisor-core; needs editor-less live repro + SimWorld coverage.
 - [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
 <!-- /agent:backlog -->
 

@@ -58,7 +58,29 @@ Proof:
 - Commands: `tsift status`, `tsift status --fix`, `tsift index --workspace .`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `git status --short`.
 - Verification: no tests run because no code changed.
 - Escalation: none.
-<!-- agent:boundary:0484f435 -->
+
+### Re: do [#qauthorderpin] — gpt-5
+
+Implemented and shipped the no-visible-pin queue anchoring fix for `#qauthorderpin`.
+
+Changes:
+- Added preflight detection of operator-authored queue prompt identities, excluding backlog-sync additions and already-priority-marked lines.
+- Updated priority and auto-DAG queue sorting to anchor those stable identities without mutating visible prompt text, so id-backed operator lines no longer need an injected `:pushpin:` marker to keep their slot.
+- Kept explicit operator pins and free-text anchoring behavior intact, and added queue tests covering identity detection plus priority/DAG slot preservation.
+- Documented the invariant in `SPEC.md`.
+
+Shipped:
+- `src/agent-doc` commit `86acb6fe` pushed to `btakita/agent-doc` `main`: `fix: preserve operator-authored queue slots without pins`
+- parent repo commit `e0e433881` pushed to `btakita/agent-loop` `main`: `agent-doc: update agent-doc submodule`
+
+Verification:
+- `cargo test -p agent-doc-orchestration operator_authored` — passed, 4 tests.
+- `cargo test -p agent-doc-orchestration queue::tests` — passed, 154 tests.
+- `make check` — passed locally, including clippy, nextest (`4930 passed, 239 skipped`), doctests, and SimWorld medium.
+- `make tmux-ci` — passed locally, 7 ignored tmux/integration tests.
+- `gh run watch 27914059454 --exit-status` in `src/agent-doc` — passed on GitHub Actions CI in 5m14s.
+- `make install` installed `agent-doc 0.34.35`; `agent-doc admin recycle` marked the controller to recycle at the next idle boundary.
+<!-- agent:boundary:e858bc68 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -68,7 +90,7 @@ Proof:
 - do [#qcm1verify]
 - :pushpin: do [#tb4q]
 - :pushpin: do [#k7mf]
-- :pushpin: do [#qauthorderpin]
+- ~~:pushpin: do [#qauthorderpin]~~
 - :pushpin: do [#qnodemerge4wire]
 - Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
 - JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
@@ -103,7 +125,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#s81q] [recommended] #agent-doc-bug #stopvscodemenu Extend #restartagentmenu (JB Restart Agent; plan tasks/agent-doc/plan-restart-agent.md) per operator request to also add a Stop Agent command and mirror BOTH Stop+Restart into the VSCode extension menus. Delta beyond #restartagentmenu: (1) StopAgentAction.kt + plugin.xml registration on the JB side; (2) VSCode command-palette + editor/title menu contributions for stop+restart wired to the same TerminalUtil/route paths. Decide alongside-vs-replace the existing Restart Supervisor Process action; do not remove without operator confirmation. Bump pluginVersion + build signed/unsigned zips (gated by STOP-cutting-releases). Confirm scope before implementing.
 - [ ] [#k7mf] [operator-verify] #g9d7verify #agent-doc-bug Live editor-less repro of #g9d7/#6b5hprimary (agent-doc submodule 260d61b3). Code shipped+pushed: the run_ipc no-delivery bail routes content_ours to the guarded controller-host disk write when there is no plugin-owner lease (live_editor_endpoint_attached=false), reusing decide_editorless_disk_fallback; a live editor still fails closed. After a make install, run agent-doc finalize in a Claude Code pane with NO JB IDE attached and confirm ops.log shows run_ipc_editorless_disk_fallback transport=disk_fallback editor_endpoint=absent plus a committed cycle, with no --force-disk and no recovery=retry_without_disk_write. Operator-gated: needs a real CLI pane.
-- [ ] [#qauthorderpin] [recommended] #agent-doc-bug Follow-up to #qauthorder: id-backed do-with-id operator queue lines still get the #7r2s pushpin injected to hold their slot against backlog-rank append-stability. They are correctly position-locked (no bubble/sink) but the marker is visible — the convention prefers a marker-free anchor. Extend the is_free_text_prompt anchor to also cover operator-AUTHORED id-backed lines by threading the operator-authored identity set (computed in annotate_manual_queue_additions) into sort_prompts_by_priority and sort_prompts_by_dag so #7r2s no longer needs to inject a pin. Riskier than the free-text path (touches do-vs-do backlog-rank sorting) — own focused cycle. Confirm before implementing.
 - [ ] [#qnodemerge4wire] [focused-cycle] #agent-doc-bug Supply side of #qnodemerge4 op-capture (consumer shipped: EditorOp + replay_editor_ops + merge_with_editor_ops behind the replay-exactness gate, agent-doc submodule ea84ebab). Remaining: (1) per-document op-capture sidecar persistence (record/load/clear/GC) keyed by the base it was captured against; (2) FFI ingestion entry point agent_doc_record_editor_op (FFI-first, plugins stay thin); (3) wire the live merge_contents_crdt path to load+pass theirs editor ops to merge_with_editor_ops and clear the sidecar after; (4) thin JB DocumentListener.documentChanged + VS Code onDidChangeTextDocument reporters that split replacements into delete+insert and report byte offsets; (5) SimWorld coverage. [operator-verify] live eyeball: a concurrent live edit + agent write converges with zero diff-derived duplication and ops replay == editor-observed state. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4). NOTE byte-offset/Yrs unicode-offset semantics (currently ASCII-gated in the consumer) need verification when wiring non-ASCII edits.
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.

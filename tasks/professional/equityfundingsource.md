@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,83 +33,11 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260621-204023.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260622-014423.md`*
 
 Compacted content:
-- Prior summary/context: prior compacted content: Archived 9 response topic(s): One floating context-sensitive message widget to unify portal ...
-
-### Re: drain the queue (email round-trip + portal messaging) — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: do [#portalmsg4]
->
-> :pushpin: do [#portalmsg2-dealthreads]
->
-> :pushpin: do [#msgmail1]
->
-> :pushpin: do [#msgmail2]
->
-> do [#msgmail3]
->
-> do [#msgmail4]
-
-
-Drained the full queue. All six dev items shipped, tested (1076 passing), committed, pushed, and **deployed to prod** (worker `16126fd8`; no D1 migrations — all changes reuse existing tables).
-
-**Email reply-to round-trip (`src/equityfundingsource-dev`):**
-- **#msgmail1** (`3b3ca27`) — generalized the borrower-only reply plumbing to a party-agnostic thread token + a reversible base64url codec for `(party, scope_type, scope_id, party_user_id)`, charset/length-safe for the plus-address. No behavior change.
-- **#msgmail2** (`cf82e3d`) — lender account + deal-interest notify emails now carry a parseable `Reply-To` thread token + the reply hint (falls back to the admin address when unconfigured).
-- **#msgmail3** (`f3cbe8c`) — `POST /api/email/inbound` now decodes any party's token, authorizes the sender as a thread participant (admin or the owning party only — blocks cross-thread injection), writes to the unified `messages` table, and notifies the counterparty with `Reply-To` so the chain continues. Mocked-inbound tests across lender/admin/broker.
-- **#msgmail4** — gated. Operator prod-ops only: configure Cloudflare Email Routing -> worker, set `MESSAGE_EMAIL_INBOUND_ENABLED` / `_SECRET` / `_REPLY_TO`, verify the sending domain (#f4rq). Inbound left **disabled** in prod (confirmed absent from the deployed env). Unblock to flip it.
-
-**Portal messaging migration:**
-- **#portalmsg2-dealthreads** (`6f6b6fa`) — admin deal-interest lender + borrower threads (investor_pipeline + deal_detail) now use the unified `<PortalMessages inline>`; added the two GET endpoints + `messages[]` to the POST responses; de-entangled the borrower doc-request workflow (kept inline, request-only) from general messaging; removed the dead inline compose code.
-- **#portalmsg4** (`468c8fb`) — borrower portal shell mounts the always-visible `<PortalMessages launcher>` (mirroring lender/broker), over the REST `/api/borrower/messages` thread. The live Durable Object realtime chat page is **untouched** — the launcher coexists with it rather than downgrading realtime to polling.
-
-Queue head **deploy** — done (prod deploy above).
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-
-> **Queue prompt:** deploy
-
-Done. Deployed `src/equityfundingsource-dev` to prod Cloudflare (worker version `16126fd8-9dcc-42be-a4c8-9a26e4e16cff`, `https://equityfundingsource.brian-takita.workers.dev`). `cf:d1:migrate:remote` reported **no migrations to apply** (all msgmail/portalmsg work reuses existing tables), and `MESSAGE_EMAIL_INBOUND_ENABLED` is confirmed **absent** from the deployed env, so the inbound email round-trip stays disabled until #msgmail4 is unblocked. Site health check: 301 (root redirect). Full queue drained.
-> **Queue prompt:** Keep the chat on the websocket. I want realtime messaging if possible. Integrate the message system to support realtime messaging from the ui and email replies.
-
-> **Queue prompt:** deploy
-
-### Re: Realtime websocket messaging for the unified message system — opus-4-8
-
-> **Queue prompt:**
->
-> Keep the chat on the websocket. I want realtime messaging if possible. Integrate the message system to support realtime messaging from the ui and email replies.
-
-
-Done — shipped and deployed to prod. The borrower chat was already on a websocket; the **unified** message threads (lender/broker self-service, the admin operational panels, and inbound email replies) were doing a one-shot fetch with no live updates. They're now on a websocket too.
-
-**What changed (#msgrt1):**
-
-- **New realtime hub** (`PortalMessagesRoom` Durable Object) — modeled on the existing admin-events hub. When any message is written, it sends connected browsers a tiny "something changed" tick (no message body), and each browser refetches its **own** authorized thread. Because the tick is contentless and every refetch is authorized server-side, the shared hub can't leak one user's messages to another. It's best-effort: if the binding is ever missing, the old fetch path still serves messages.
-- **Every write path now ticks the hub** — the central notify chokepoint covers **inbound email replies for all parties** (so an emailed reply now appears live in open tabs) plus borrower and admin replies; in-app lender (deal + account) and broker sends and admin-originated sends are wired too.
-- **`GET /api/portal/messages/realtime/ws`** — any signed-in, non-suspended portal user or admin can connect; it's fail-closed (returns 401 to anonymous callers — verified in prod).
-- **Client** — the `PortalMessages` component subscribes over the reconnecting websocket (auto-reconnect on drop, polling heartbeat as a fallback) and silently refreshes the thread on each tick.
-
-**Verification:** full suite green (1083 tests + 7 new realtime tests), worker + browser bundles build clean, no new type errors (fixed one pre-existing one along the way).
-
-**Deployed:** `src/equityfundingsource-dev` committed (`ebb9fec`), pushed to origin, and deployed to prod Cloudflare — worker version `e0f71a7c-486b-4293-add9-f0e95ecf1e23`. The new `PORTAL_MESSAGES_ROOM` Durable Object + `v3_portal_messages_room` migration are live; root health 200, the new WS route returns 401 unauth as expected.
-
-**Note on scope:** v1 uses a single shared hub instance — fine at the portal's concurrency, but every message wakes every connected portal tab to do a cheap refetch. Per-user sharding (only wake the affected party + watching admins), typing indicators/read receipts for unified threads, and pushing the body on the tick are filed as #msgrt2-4 in `prds/message-realtime.md`.
-> **Queue prompt:** deploy
-
-### Re: deploy — opus-4-8
-
-Re-ran the prod deploy to drain this head and confirm prod is current. No code changed since the realtime feature (EFS `ebb9fec`), so this was an idempotent redeploy: `cf:d1:migrate:remote` reported **no migrations to apply**, and the worker redeployed cleanly — new version id `2d88971e-384b-4d2a-91bb-08c454d4ea94` at `https://equityfundingsource.brian-takita.workers.dev`. The realtime `PORTAL_MESSAGES_ROOM` Durable Object remains bound and live. Queue drained.
-<!-- agent:boundary:06ed8a0a -->
+❯ - Archived 4 response topic(s): drain the queue (email round-trip + portal messaging); deploy; Realtime websocket messaging for the unified message system; 1 more
+<!-- agent:boundary:978a81de -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -121,6 +49,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- I replied to https://mail.google.com/mail/u/1/#inbox/FMfcgzQgMVjNzCbNqqXSGchWJnhWZGKh (chromium-bridge or corky to view) but the message did not appear in the funder portal.
 <!-- /agent:queue -->
 
 ## Backlog

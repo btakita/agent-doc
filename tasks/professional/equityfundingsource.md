@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -145,7 +145,7 @@ Committed (`28300b3`), pushed, **deployed** (worker `addc055c`) — the deploy o
 - An **admin** reply → posts to the thread + realtime tick + emails the party. So the loop continues "and so on."
 
 **One thing only you can finish — the live proof (`#f2w8`/`#msgmail4b`, still gated for that reason):** I can't send a real inbound email through Cloudflare, so please send one test reply to a notification and confirm it lands in the thread. If it doesn't appear, the single thing I can't see from here is the **catch-all routing rule action** on `efs.briantakita.me` — in the Cloudflare dashboard it must be **Email Routing → efs.briantakita.me → catch-all → Send to a Worker → `equityfundingsource`** (the MX/SPF are already correct). Tell me how the test goes and I'll close `#f2w8`.
-<!-- agent:boundary:f5343245 -->
+<!-- agent:boundary:43129297 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -157,6 +157,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Switch the efs email from info@briantakita.me to btak.dev+efs@gmail.com
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

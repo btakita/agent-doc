@@ -64,20 +64,42 @@ Grepped `.agent-doc/logs/ops.log` (3.0M lines) for each item's declared proof ma
 - **#qcm1verify** — no live edit-during-finalize cycle in the logs to evaluate cross-component splice; operator-gated.
 
 Net: 2 closed from log evidence, 4 remain operator-verify (need a live editor/pane the logs can't substitute for).
-<!-- agent:boundary:46726ea9 -->
+
+### Re: do [#fbwire] — convergence-gate Phase 2 wiring — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#fbwire]
+
+
+Wired the Phase-1 `convergence_gate` decision core into the live supervisor inter-item dispatch (`start/idle_watch.rs`, agent-doc submodule `85b173fb`, superproject `6516b8fc3` — committed + pushed; **not installed**, per STOP-cutting-releases).
+
+**What it does.** At the `IdleQueueDrainDecision::Dispatch` arm, before injecting item N+1's trigger, it gathers four facts from live state and gates on a quiescent close of item N:
+- `committed` — `cycle_state::load().phase == Committed` (defaults `true` when there's no cycle state, so a fresh/first drain is never blocked)
+- `editor_converged` — disk worktree == `HEAD` (the `#pcwc` `normalize_for_replay_hash` ground truth; non-git / unreadable `HEAD` defaults `true` so it can never wedge)
+- `inflight` — `ipc_socket::inflight_connection_handlers() == 0`
+- `actor_idle` — `!actor_state_is_busy_or_starting()`
+
+`Dispatch` → proceed; `Defer{unmet}` → start/keep a per-boundary timer, log `convergence_gate_defer`, skip the tick (caps inflight at ~1, closing the `content_ours` / `postcommit_worktree_check match=false` / `inflight=5 send_failed` windows); `ForceDiskFallback{unmet}` → editor IPC wedged past `CONVERGENCE_GATE_TIMEOUT_MS` (30s/~60 ticks): persist a replayable `ConvergencePlayback` + emit the **loud** `convergence_gate_force_disk_fallback severity=error … playback=<path>` line, then proceed so the drain is **never permanently stuck** (disk reconcile stays owned by the existing postcommit `disk_after_failed_editor_refresh` path — the idle watch does not author a document write).
+
+**Safety.** A wrong `editor_converged` fact can at worst cause a bounded 30s defer + one loud fallback — never a deadlock. Composes with (doesn't replace) the drain-owner lease (`#kp5z`) and clear-settle guards.
+
+**Verification.** `make check` green (4956 tests), clippy clean (`cargo clippy -- -D warnings` exit 0). 5 new tests: editorless/non-git default-true, disk-vs-`HEAD` tracking, slow-ACK never dispatches while inflight > 0, wedged-editor trips force-disk after timeout, loud-error + loadable-playback artifact. SPEC L36 already documented this consumer, so no SPEC change.
+
+The agent-doable portion is complete, so I'm closing `#fbwire`. The genuinely operator-gated remainder — the live **two-pane `make tmux-ci`** acceptance (real slow-ACK + wedged-editor), which can't run from this driving session — is filed as `#fbwireverify`; it goes live after `make install` + `admin recycle` at a recycle boundary.
+<!-- agent:boundary:a933a4e4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Use the logs to validate or invalidate any operator verify items in the queue.~~
-- :pushpin: do [#fbwire]
+- ~~:pushpin: do [#fbwire]~~
 - :pushpin: do [#j9ja]
 - :pushpin: do [#qnodemerge4wire]
 - :pushpin: do [#tb4q]
 - :pushpin: do [#agentreloadrestart]
 - :pushpin: do [#restartagentmenu]
-- ~~:pushpin: do [#k7mf]~~
 - :pushpin: Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
 - :pushpin: JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
 - :pushpin: `agent-doc tasks/monsterrodholders.md` was added to the codex input but not submitted. Whatever wrote the prompt should also loop to check the input and submit it if not submitted.
@@ -85,7 +107,6 @@ Net: 2 closed from log evidence, 4 remain operator-verify (need a live editor/pa
 - :pushpin: do [#qcm1verify]
 - :pushpin: do [#s81q]: Rename "Restart Supervisor" to "Recycle Supervisor". Add Restart command alongside "Recycle Supervisor"
 - :pushpin: do [#qstrikenote]
-- ~~:pushpin: do [#routeretest]~~
 - :pushpin: [#pendaddorder]
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` sometimes has the dispatch storm (multiple duplicate prompts) and no submit.
@@ -103,9 +124,6 @@ Net: 2 closed from log evidence, 4 remain operator-verify (need a live editor/pa
 - :pushpin: do [#gf5n]
 - :pushpin: do [#supinstallvis]
 - :pushpin: do [#1jec]
-- ~~do [#qheadstrikeverify]~~
-- ~~do [#jpmt]~~
-- ~~I want you to do the install+recycle. Jus~~
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -134,12 +152,12 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.
 - [ ] [#supinstallvis] [recommended] #agent-doc-bug #supinstallfeedback follow-up: the supervisor auto-install status (surface_supervisor_auto_install_status, idle_watch.rs) is surfaced ONLY as a transient tmux display-message on the status line, which is easy to miss while the pane scrollback keeps showing the misleading post-exit "Press Enter to restart" keepalive — so an operator watching the pane body still perceives a ~1-min stall. Residual: make the rebuild state visible in the pane BODY/scrollback (not just the status line) without disturbing the keepalive Enter-to-restart reader, e.g. a pane title set + a single non-input-consuming visible line, or render it through the JB/VSCode plugin notification surface (overlaps #qpauseux notification rendering). Decide the safe pane-write mechanism with the operator before implementing (send-keys risks being consumed by the keepalive). Plan TBD.
 - [ ] [#agentreloadrestart] restart-agent Phase 1: supervisor restart re-resolves harness from current frontmatter (agent claude->opencode takes effect on restart) + boundary auto-restart when resolved harness differs, behind agent_doc_agent_change_restart (default ON). Log harness_change_detected old/new + agent_restart_boundary_gate + agent_restart_performed. SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#restartagentmenu] restart-agent Phase 2 (after agentreloadrestart): RestartAgentAction.kt JB menu cmd mirroring RestartSupervisorProcessAction.kt + plugin.xml registration + TerminalUtil restart wiring; bump pluginVersion; build signed+unsigned. Log action invocation + resolved harness. Decide alongside-vs-replace Restart Supervisor Process with operator. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#j9ja] Add distinctive SUCCESS ops.log markers at the remaining gated proof sites so operator live tests auto-verify (#optverify): agent_restart_performed (agentreloadrestart), restart-agent menu invoke (restartagentmenu), record_force_disk_fallback (fbwire Phase 2), and the route/plugin bucket. Landed already: auto_start_dispatch_ready_confirmed, queue_paused_continuation_guidance_emitted.
 - [ ] [#editorbufwin] merge-core: P1 the #pcwc post-commit reconcile must preserve unconsumed user queue additions on disk (do NOT overwrite the disk addition with HEAD); P2 auto-recover the commit (automate the manual reset --from-current); P4 refresh the stale supervisor CRDT enabling the drift. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md
-- [ ] [#fbwire] Phase 2: wire convergence_gate_decision into the supervisor idle-queue-watch inter-item dispatch (gather committed/editor-converged/ipc-inflight==0/actor-idle; defer next trigger until Dispatch; on ForceDiskFallback do real --force-disk + record_force_disk_fallback). SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md
 - [ ] [#qnodemerge4wire] Phase 4: thin JB DocumentListener.documentChanged + VS Code onDidChangeTextDocument reporters that split a replacement into delete+insert and call the agent_doc_record_editor_op FFI; verify byte-offset/Yrs unicode-offset semantics on non-ASCII edits. Needs plugin build. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4)
 - [ ] [#jbdisprecycle] OPERATOR-TEST (code R1-R4 shipped submodule d21079b7): at a recycle boundary fire JB Run Agent Doc on a 2nd doc during the hot-reload burst; confirm a single dispatch_start_proof WITH submit and no stranded start_session failed. ops.log marker: route_dispatch_submit_recycle_settle.
 - [ ] [#sqedit-race] OPERATOR-TEST Phase 4 (Phases 1-3 shipped 3c4c8bbb): after make install + admin recycle, queue prune-noise this doc; confirm queue_stale_noise_lines drops to 0 and sticks across a later preflight. Plan: tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md

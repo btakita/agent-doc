@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -133,14 +133,12 @@ Shipped (`#opslogtrack`, agent-doc submodule `50d8f021`, superproject `ec280c65d
 Test: `log_op_appends_doc_and_session_tracking_suffix` (asserts the suffix + that the message stays at the front of the body); `make check` green (4949). Filed `[#opslogtrackverify]` as the non-blocking live check (the suffix goes live once the supervisor recycles onto the freshly-built binary).
 
 Scope note: I targeted `ops.log` (your stated priority — *"especially ops.log"*). The broader stderr/`eprintln!` surface is much larger and unscoped; if you want timestamps there too, say the word and I'll file it.
-<!-- agent:boundary:6d7aa67e -->
+<!-- agent:boundary:e63ce5fc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
-- ~~The end part of the response that breaks down churn with tips shows up in the Claude Code console but not in the document. That part of the response should be in the document.~~
-- ~~:pushpin: All log output should include a timestamp...especially ops.log. ops.log could also include the name of the agent document, the session id, and turn id for easier tracking when working with multiple documents.~~
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - :pushpin: do [#tb4q]
 - :pushpin: do [#k7mf]
 - :pushpin: Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
@@ -175,6 +173,7 @@ Scope note: I targeted `ops.log` (your stated priority — *"especially ops.log"
 - :pushpin: do [#supinstallvis]
 - :pushpin: do [#1jec]
 - do [#qheadstrike]
+- do [#opslogtrackverify]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

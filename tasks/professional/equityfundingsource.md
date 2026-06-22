@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -78,7 +78,29 @@ Escalation: none.
 Next queue head remains `deploy`; I did not deploy in this cycle.
 
 Confidence: high.
-<!-- agent:boundary:fbaed805 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployed the current EFS `main` (`23338d7`) with `make deploy`. The deploy built the Worker, confirmed no remote D1 migrations were pending, uploaded the changed browser asset, and activated Worker version `0cbb834a-b221-435b-a5f5-ba980ec5a834` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Changed paths: none in this deploy cycle.
+
+Commands:
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before deploy
+- `make deploy`
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` after deploy
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+
+Verification: pre-deploy and post-deploy remote D1 checks both reported `No migrations to apply`; the live Worker root returned HTTP `200` after deploy. The EFS working tree is clean and synced with `origin/main`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:6ae966cd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,8 +112,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Do not show "Wiring Instructions (Secure Link)" in a deal until a lender is selected.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -57,15 +57,13 @@ Verified: focused pending-add order tests, `make check` green (4973 nextest test
 Closed as covered by the shipped clear-cooldown auto-trigger fix. In agent-doc `3d110b3a` / superproject `b1169577d`, startup auto-trigger no longer treats an active clear-cooldown marker as a terminal skip; it keeps polling under the existing 30s startup timeout and only fails with `auto_trigger_timeout reason=clear_cooldown_after_30s` if the cooldown never clears.
 
 That is the behavior this queue item asks for: after Clear Session Context, an explicit JB `Run Agent Doc` should dispatch as soon as the clear cooldown clears instead of waiting for a later/manual attempt to re-trigger it. The fix was already verified with `cargo test -p agent-doc-orchestration auto_trigger_clear_cooldown_waits_until_timeout_instead_of_terminal_skip`, `make check`, local clean-worktree install, and the later full `make check`/CI pass from the `#pendaddorder` cycle.
-<!-- agent:boundary:60a42487 -->
+<!-- agent:boundary:2ef5b8a3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - :pushpin: do [#qcm1verify]
-- :pushpin: [#pendaddorder]
-- ~~:pushpin: JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` sometimes has the dispatch storm (multiple duplicate prompts) and no submit.
 - :pushpin: do [#arsm]
 - :pushpin: do [#editorbufwin]

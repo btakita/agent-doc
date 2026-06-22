@@ -1487,6 +1487,38 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
     }
 }
 
+/// Compute the `base_hash` the editor op reporters must stamp on captured ops
+/// (`#qnodemerge4wire`) so the write-time merge accepts them — the SHA256 hex of
+/// the same CRDT merge base text [`merge::merge_contents_crdt_with_ops`]
+/// resolves. The reporter calls this once per edit (cheap; the editor offsets it
+/// pairs with are relative to this base) and passes the result to
+/// [`agent_doc_record_editor_op`].
+///
+/// Returns a NUL-terminated string (the empty-text hash when no snapshot/CRDT
+/// base exists yet), or null on a bad path / resolution error so the reporter
+/// skips op capture for this edit and the merge falls back to the diff-guess —
+/// never worse than today. Caller must free with `agent_doc_free_string`.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_document_base_hash(file_path: *const c_char) -> *mut c_char {
+    let Ok(path) = (unsafe { CStr::from_ptr(file_path) }).to_str() else {
+        eprintln!("[op-capture] agent_doc_document_base_hash: non-UTF-8 path; returning null");
+        return std::ptr::null_mut();
+    };
+    match agent_doc_orchestration::op_capture::current_base_hash(std::path::Path::new(path)) {
+        Ok(hash) => CString::new(hash)
+            .map(|c| c.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
+        Err(e) => {
+            eprintln!("[op-capture] agent_doc_document_base_hash: {e}; returning null");
+            std::ptr::null_mut()
+        }
+    }
+}
+
 fn ffi_normalize_transient_agent_doc_markers(content: &str) -> String {
     content
         .lines()

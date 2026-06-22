@@ -118,6 +118,29 @@ pub fn record_editor_op(doc: &Path, base_hash: &str, op: EditorOp) -> Result<()>
     write_sidecar(doc, &sidecar)
 }
 
+/// Compute the base hash the editor reporters must stamp on captured ops so the
+/// merge will accept them (`#qnodemerge4wire`).
+///
+/// This MUST return `content_hash` of the **exact same base text**
+/// [`crate::merge::merge_contents_crdt_with_ops`] resolves at write time — the
+/// persisted CRDT merge base decoded to text — otherwise the merge's
+/// [`editor_ops_for_base`] gate rejects every op (`sidecar.base_hash !=
+/// content_hash(base_text)`) and the feature silently no-ops. The base both
+/// sides diverge from is the committed snapshot content (the same content
+/// preflight saves as the next write's baseline at a synced point), so we mirror
+/// the merge: snapshot → `crdt_merge_base_state` → `CrdtDoc::decode_state` →
+/// `to_text` → `content_hash`. With no snapshot/CRDT state yet this is the
+/// empty-text hash, matching the merge's `None => String::new()` base.
+pub fn current_base_hash(doc: &Path) -> Result<String> {
+    let snapshot_path = crate::snapshot::path_for(doc)?;
+    let baseline = read_optional_text(&snapshot_path)?.unwrap_or_default();
+    let base = crate::snapshot::crdt_merge_base_state(doc, &baseline)?;
+    let base_text = agent_doc_core::crdt::CrdtDoc::decode_state(&base.state)
+        .map(|d| d.to_text())
+        .unwrap_or_default();
+    Ok(content_hash(&base_text))
+}
+
 /// Return the captured ops for `doc` **only** when they were captured against a
 /// base whose text matches `base_text` (by hash). A mismatch (stale/advanced
 /// base, missed event) returns `None` so the merge falls back to the diff-guess.
@@ -219,6 +242,55 @@ mod tests {
         let doc = dir.path().join("plan.md");
         std::fs::write(&doc, "# plan\n").unwrap();
         (dir, doc)
+    }
+
+    #[test]
+    fn current_base_hash_matches_merge_gate_so_stamped_ops_are_accepted() {
+        // `#qnodemerge4wire` keystone invariant: ops the editor reporters stamp
+        // with `current_base_hash()` MUST pass the write-time merge's
+        // `editor_ops_for_base` gate (`base_hash == content_hash(base_text)`),
+        // otherwise every capture is silently rejected and the feature no-ops.
+        let (_dir, doc) = setup_doc();
+        crate::snapshot::save(&doc, "# base\n\n## section\n").unwrap();
+
+        let base_hash = current_base_hash(&doc).unwrap();
+        record_editor_op(
+            &doc,
+            &base_hash,
+            EditorOp::Insert {
+                offset: 0,
+                text: "x".into(),
+            },
+        )
+        .unwrap();
+
+        // Resolve the SAME base text `merge::merge_contents_crdt_with_ops` resolves.
+        let snapshot = crate::snapshot::path_for(&doc).unwrap();
+        let baseline = read_optional_text(&snapshot).unwrap().unwrap_or_default();
+        let base = crate::snapshot::crdt_merge_base_state(&doc, &baseline).unwrap();
+        let base_text = agent_doc_core::crdt::CrdtDoc::decode_state(&base.state)
+            .map(|d| d.to_text())
+            .unwrap_or_default();
+
+        assert_eq!(
+            base_hash,
+            content_hash(&base_text),
+            "current_base_hash must equal the merge's base_text hash"
+        );
+        let ops = editor_ops_for_base(&doc, &base_text).unwrap();
+        assert!(
+            ops.is_some(),
+            "ops stamped with current_base_hash must pass the merge gate"
+        );
+        assert_eq!(ops.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn current_base_hash_is_empty_text_hash_without_snapshot() {
+        // No snapshot/CRDT base yet → empty-text hash, matching the merge's
+        // `None => String::new()` base so a first-edit capture still aligns.
+        let (_dir, doc) = setup_doc();
+        assert_eq!(current_base_hash(&doc).unwrap(), content_hash(""));
     }
 
     #[test]

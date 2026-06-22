@@ -132,17 +132,61 @@ Verification:
 - `make check` passed.
 - `cargo test -p agent-doc-orchestration has_busy_cue_detects_codex_working_status_with_idle_placeholder` passed.
 - `cargo test -p agent-doc-orchestration ready_prompt_candidate_accepts_codex` passed.
+- parent repo `dc575cd57` records the submodule pointer update.
+- agent-doc submodule `568755be` contains the ACK-gated editor patch fix.
+- Rebuilt the VS Code package with `npm run package` and installed the rebuilt `agent-doc-0.2.31.vsix` with `agent-doc plugin install --local vscode`; it installed via `codium`.
+- Built the JetBrains plugin with `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` and installed it to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`. IntelliJ still needs a restart for that plugin code to load.
+- Installed the native library with `agent-doc lib-install`; it wrote `/home/brian/.cargo/bin/libagent_doc-0.34.35.so`, updated the `libagent_doc.so` symlink, and marked 2 controllers for recycle at the next idle boundary.
+- Rebuilt release artifacts with `cargo build --release`.
+- Reinstalled the CLI from this checkout with `cargo install --path .`; it replaced `/home/brian/.cargo/bin/agent-doc`.
 
 Escalation: none.
 
 Confidence: high for the stale-state/File Cache Conflict patch-loss fix; medium for the route report because the currently observed live slowdown is a genuinely busy actor pane rather than the footer-only readiness case from the pasted log.
-<!-- agent:boundary:f13192ec -->
+
+### Re: build and install status — gpt-5
+
+> **Queue prompt:**
+>
+> equityfundingsource.md has MCP preflight error without diagnostics.
+> ```
+> • The MCP preflight retry failed without diagnostics, so I’m invoking the CLI preflight directly to get the recovery
+>   detail and avoid guessing at the next step.
+> ```
+
+
+> **Queue prompt:** Why did you not build + install the fixes for "Re: editor stale-state rollback and slow Run Agent Doc — gpt-5"?
+
+I should have made the install state explicit before the first closeout. The actual code fix was editor-side, so I initially treated the CLI binary as unchanged and focused on tests plus the JetBrains plugin build. I did build and install the JetBrains plugin during that cycle, but I had not reinstalled every local artifact yet.
+
+I completed the full local install path now.
+
+❯ - Reinstalled the CLI from this checkout with `cargo install --path .`; it replaced `/home/brian/.cargo/bin/agent-doc`.
+❯ - Rebuilt release artifacts with `cargo build --release`.
+❯ - Installed the native library with `agent-doc lib-install`; it wrote `/home/brian/.cargo/bin/libagent_doc-0.34.35.so`, updated the `libagent_doc.so` symlink, and marked 2 controllers for recycle at the next idle boundary.
+❯ - Built the JetBrains plugin with `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` and installed it to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`. IntelliJ still needs a restart for that plugin code to load.
+❯ - Rebuilt the VS Code package with `npm run package` and installed the rebuilt `agent-doc-0.2.31.vsix` with `agent-doc plugin install --local vscode`; it installed via `codium`.
+
+The source commits remain the same.
+
+❯ - agent-doc submodule `568755be` contains the ACK-gated editor patch fix.
+❯ - parent repo `dc575cd57` records the submodule pointer update.
+
+The package version still prints `agent-doc 0.34.35` because `Cargo.toml` was not version-bumped in this fix; the local binary and library are nevertheless rebuilt from the current checkout containing the editor integration changes and current source tree.
+
+Verification already completed in this session includes `npm test`, JetBrains targeted test, JetBrains `test buildPlugin`, the focused Rust IPC/route tests, `make check`, and the latest GitHub Actions `CI` run reporting success.
+<!-- agent:boundary:c9984f33 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~I'm adding queue items into equityfundingsource.md and agent-doc keeps on reverting to a stale state...and I keep on losing my work. As I was typing in this queue item, a JB `File Cache Conflict` occurred and it deleted this entire item.~~
+---
+equityfundingsource.md has MCP preflight error without diagnostics.
+```
+• The MCP preflight retry failed without diagnostics, so I’m invoking the CLI preflight directly to get the recovery
+  detail and avoid guessing at the next step.
+```
 ---
 JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
 ```
@@ -194,47 +238,15 @@ JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The se
 [route] target tmux session: 0
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
-~~~done
-[#freshqueueauth]: These heads are not stale. I just typed them in.
-```
-• The doctor confirms the stale queue heads are why the document is still blocked. I’m removing only those two queue
-  lines, leaving the newly added backlog rows and the review history intact.
-• Edited tasks/monsterrodholders.md (+0 -2)
-    45  <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-    46 -- [#rotate-exposed-secrets]: There was no livestream. Make sure the token is scrubbed from the logs. Apply this
-         same logic for any "livestream" concerns. I don't livestream this.
-    47 -- Add actionable items to advance gated backlog items.
-    46  <!-- /agent:queue -->
-```
-```
-• Doctor now classifies the remaining MRH closeout as an editor-convergence/operator-proof issue, with a stale
-  supervisor recovery suggested. I’ll run the non-mutating preflight probe once; if it still blocks, this is an
-  explicit closeout blocker rather than a code/document task blocker.
-```
-- ~~:round_pushpin: do [#freshqueueauth]~~
-These heads are not stale. I just typed them in.
-```
-• The doctor confirms the stale queue heads are why the document is still blocked. I’m removing only those two queue
-  lines, leaving the newly added backlog rows and the review history intact.
-• Edited tasks/monsterrodholders.md (+0 -2)
-    45  <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-    46 -- [#rotate-exposed-secrets]: There was no livestream. Make sure the token is scrubbed from the logs. Apply this
-         same logic for any "livestream" concerns. I don't livestream this.
-    47 -- Add actionable items to advance gated backlog items.
-    46  <!-- /agent:queue -->
-```
-- ~~JB `Run Agent Doc` on monsterrodholders.md stalls (no prompt) and does not submit (prompt sent but no submit).~~
-- do [#cancelturnverify]
-- ~~I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.~~ — auto-struck: answered this cycle (#ftstrike)
-- Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?
+---
+— auto-struck: answered this cycle (#ftstrike)
+- ~~Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?~~
 - :pushpin: do [#qcm1verify]
 - :pushpin: do [#arsm]
 - :pushpin: do [#1jec]
 - do [#fbwireverify]
 - do [#qnodemerge4verify]
 - do [#tb4q]
-~~~
-- ~~:pushpin: do [#mrh-response-loss-stalled-queue]~~
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#tb4q]

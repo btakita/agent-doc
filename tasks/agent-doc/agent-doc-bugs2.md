@@ -233,35 +233,36 @@ Verification:
 - passive CI check per operator instruction: latest CI for `25df5810` was `in_progress` at the time of closeout, not waited on
 
 Note: the local `src/agent-doc` checkout still has pre-existing unrelated dirty files. I staged and pushed only the scoped reboot-stall fix; I did not revert or bundle those other edits.
-<!-- agent:boundary:a7a0cd93 -->
+
+### Re: CI handling and AGENTS.md bloat
+
+> **Queue prompt:**
+>
+> Fix the root cause of the stall of auto-starting agent-doc sessions after I rebooted my machine.
+
+
+I did the passive CI check you asked for. The latest CI run for `25df5810` was `in_progress` at the time checked, so there was no red result to fix in this turn. If a later passive check shows red, the next agent should treat that as actionable and fix it rather than ignore it.
+
+I agree with the AGENTS.md concern. The file is carrying too many operational directives inline, which makes it easy for agents to miss the small number of mandatory rules. The better shape is probably a short top-level menu: hard invariants and stop conditions up front, then links to focused runbooks for agent-doc, tsift, CI, and commit/push behavior. That keeps the prompt load small while preserving the detailed procedures where agents can deliberately open them.
+
+I did not edit AGENTS.md in this cycle. The document queue now has an explicit AGENTS.md simplification prompt, so that should be handled as its own focused item.
+<!-- agent:boundary:7e869213 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~Fix the root cause of the stall of auto-starting agent-doc sessions after I rebooted my machine.~~
+- Why am I unable to sync with equityfundingsource.md? Fix the root cause. I have not been able to connect to equityfundingsource.md since rebooting. There also is no obvious recovery path for the operator. I attempted a recovery with opencode but now it does not sync. `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`. We need a way to recover that "just works" for individual sessions.
+- Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?
 - :pushpin: do [#qcm1verify]
 - :pushpin: do [#arsm]
-- ~~:pushpin: do [#editorbufwin]~~
-- ~~:pushpin: do [#jbdisprecycle]~~
-- ~~:pushpin: do [#sqedit-race]: Validate if the fix is successful by looking at the logs. No `queue_stale_noise_lines` means success.~~
-- ~~:pushpin: do [#qpauseux]~~
-- ~~:pushpin: do [#8bfz]~~
-- ~~:pushpin: do [#cyh0]~~
-- ~~:pushpin: do [#1vhn]~~
-- ~~:pushpin: do [#jbrundispatch]~~
-- ~~:pushpin: do [#docdriftgrace]~~
-- ~~:pushpin: do [#runexitrestart]~~
-- ~~:pushpin: do [#gf5n]~~
-- ~~:pushpin: do [#supinstallvis]~~
 - :pushpin: do [#1jec]
 - do [#fbwireverify]
 - do [#qnodemerge4verify]
-- ~~do [#arrkillguard]~~
-- ~~do [#arrcodexproof]~~
 - do [#tb4q]
 - do [#cancelturnverify]
-- ~~do [#recyclerename]~~
-- ~~do [#ftqpartialdup]~~
+- ~~do [#agentfrontpersist]~~
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

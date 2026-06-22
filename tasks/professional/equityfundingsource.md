@@ -177,7 +177,36 @@ So you can't make a Gmail address the *sender*. But there are good options depen
 
 
 Nothing to deploy this cycle. This "deploy" was paired with the sender switch above, which I held off on (you can't send *from* a Gmail address — see the previous response for the viable options). No repo change was made, and prod is already current — worker `addc055c`, EFS submodule `28300b3`, with the inbound email round-trip enabled. Once you pick option 1/2/3 for the sender, I'll make that change and deploy it together. Queue drained.
-<!-- agent:boundary:7a86abd7 -->
+> **Queue prompt:** Make the from email address efs@efs.briantakita.me. How do I verify for email sending? Please automate whatever you can via the api or chromium-bridge. Have efs@efs.briantakita.me route to btak.dev+efs@gmail.com
+> **Queue prompt:** Verify the email sending works.
+
+### Re: efs@efs.briantakita.me sending + routing — opus-4-8
+
+> **Queue prompt:**
+>
+> Make the from email address efs@efs.briantakita.me. How do I verify for email sending? Please automate whatever you can via the api or chromium-bridge. Have efs@efs.briantakita.me route to btak.dev+efs@gmail.com
+
+
+Half done, and I hit a real wall on the other half. Here's the honest status.
+
+**✅ Inbound routing is live and verified.** `efs@efs.briantakita.me` now forwards to `btak.dev+efs@gmail.com`:
+- Added `btak.dev+efs@gmail.com` as a Cloudflare Email Routing destination, clicked the verification link (landed in the `btak.dev@gmail.com` inbox via plus-addressing) → **Verified**.
+- Created the routing rule `efs@efs.briantakita.me → btak.dev+efs@gmail.com` → **Active**. The existing catch-all (→ Protonmail) and the `reply+{token}@efs.briantakita.me` portal-reply worker round-trip (#msgmail4b) are untouched — a specific-address rule only matches that exact address.
+
+**❌ Outbound *from* `efs@efs.briantakita.me` is blocked by a Cloudflare limitation.** I changed the three `*_FROM` vars to `efs@efs.briantakita.me`, deployed, and fired a real contact-form send. Cloudflare rejected it: `400 email.sending.error.email.invalid`. I immediately reverted + redeployed and confirmed prod email is healthy again (an apex `info@briantakita.me` test inquiry landed in `btak.dev@gmail.com`). Net change to prod sending: **zero** — it's back exactly where it was.
+
+**How verification actually works here (your question):** EFS sends through **Cloudflare Email Service** (the beta "Email Sending" product), and that product verifies a sender by **onboarding a whole zone** — it auto-writes the DKIM (`cf2024-1._domainkey`), SPF, DMARC and `cf-bounce` records, then sends are allowed from that zone. The `briantakita.me` zone is already onboarded (Status: Enabled, DNS: Configured). The catch: **`efs.briantakita.me` is a *subdomain* of that zone, not a separate zone**, and Email Service's onboarding picker only lists zones — searching "efs" returns *No results*. So there is no way to "verify `efs.briantakita.me` for sending" inside Cloudflare Email Service. That's exactly why the send 400'd.
+
+**So `efs@efs.briantakita.me` as a sender needs a design choice — your call (filed as `#efssubsend`):**
+
+- **(A) Resend** *(my recommendation)* — `RESEND_API_KEY` is already in the env and this is the `#f4rq` direction. Resend verifies *subdomains* fine. Work: add `efs.briantakita.me` in Resend (a few DNS records I can add via the Cloudflare API), then wire `email_send_or_capture_` to use Resend for the send. Code change + redeploy, but no Cloudflare zone surgery.
+- **(B) Make `efs.briantakita.me` its own Cloudflare zone**, then onboard it in Email Service. Cloudflare-native, but it means moving the `efs` DNS — including the MX/routing this subdomain relies on — into a new zone, which risks the inbound round-trip I just set up. Higher blast radius.
+- **(C) Send from `efs@briantakita.me` (apex)** — works *right now* with zero new infra (the apex zone is already onboarded; it's just a different mailbox name). Inbound to `efs@efs.briantakita.me` still routes to your Gmail. The only difference from what you asked: the visible From is `@briantakita.me`, not `@efs.briantakita.me`.
+
+Tell me A, B, or C and I'll finish it + verify a live send end-to-end. I'd go with **A**.
+
+(Queue note: this doc's queue was operator-paused for flood earlier; these two prompts are the new work that unblocked it. Not auto-looping — this needs your decision.)
+<!-- agent:boundary:0ae44dce -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -189,11 +218,15 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~Make the from email address efs@efs.briantakita.me. How do I verify for email sending? Please automate whatever you can via the api or chromium-bridge. Have efs@efs.briantakita.me route to btak.dev+efs@gmail.com~~
+- ~~Verify the email sending works.~~
+- do [#g6d0]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#g6d0] #efssubsend [recommended] Outbound from efs@efs.briantakita.me is blocked: Cloudflare Email Service (current EFS sender) only sends from onboarded ZONES, and efs.briantakita.me is a subdomain of the briantakita.me zone (zone picker returns no results; live test returned 400 email.invalid). Pick a path: (A) Resend — RESEND_API_KEY already in env, supports subdomain senders, aligns with #f4rq; needs efs.briantakita.me verified in Resend (DNS) + wiring email_send to Resend; (B) make efs.briantakita.me its own Cloudflare zone then onboard it (risks the inbound efs routing/#msgmail4b reply worker that lives on the subdomain); (C) send from efs@briantakita.me apex (works now, zero infra). Inbound efs@efs.briantakita.me -> btak.dev+efs@gmail.com is already live.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.

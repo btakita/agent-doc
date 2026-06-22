@@ -334,7 +334,7 @@ Verification: confirmed the Available Deal prompt had already been answered in t
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:8135e1b1 -->
+<!-- agent:boundary:27eb4fe1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -359,7 +359,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#due-diligence-package] After a lender is selected, send the lender a Due Diligence Package and support lender document requests with deal-dialog status/audit visibility.
 <!-- /agent:backlog -->
 
 ## Review
@@ -394,6 +393,7 @@ After 20:30
 ## Completed / Reaped
 
 <!-- agent:icebox -->
+- [ ] [#due-diligence-package] After a lender is selected, send the lender a Due Diligence Package and support lender document requests with deal-dialog status/audit visibility.
 - [ ] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [ ] [#ghl-stage-bridge] [recommended] Implement an event-driven GHL stage bridge from EFS Deal Pipeline state to HighLevel contacts/opportunities/workflows for Processing, Underwriting, Terms negotiation, and Closing while keeping EFS/D1 canonical for loan, lender-selection, borrower portal, document, audit, and funding state.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

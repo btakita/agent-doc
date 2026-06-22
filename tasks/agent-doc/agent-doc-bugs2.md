@@ -206,7 +206,34 @@ No code change was made in this cycle; the next step is operator confirmation th
 I gated `#ftqpartialdup` for a focused reproduction cycle. It asks whether the shipped `#hap7` / `#gf5n` structural-node merge fixes also cover a same-node free-text partial-duplication shape. That needs the actual equityfundingsource repro shape or a distilled same-node/free-text merge fixture; if `#hap7` does not cover it, the fix is a new conflict guard/regression.
 
 I did not mark it done based only on the broader `#hap7` coverage, because this item is specifically about partial duplication within the same free-text queue item.
-<!-- agent:boundary:b484d402 -->
+
+### Re: Fix post-reboot agent-doc auto-start stall
+
+> **Queue prompt:** Fix the root cause of the stall of auto-starting agent-doc sessions after I rebooted my machine.
+
+Root cause: the `#qflood` stale-supervisor churn stop can leave a durable document-scope `queue_paused` row behind. After a machine reboot, the supervisor PID named in that pause is gone, but the old recovery path only cleared the pause when a newer actor transition or a different current supervisor PID proved ownership had moved on. With no fresh supervisor lease yet, auto-start/auto-dispatch could keep honoring the stale pause and strand the queue.
+
+Fix: controller dispatch now clears a stale-supervisor churn pause when all three conditions hold: the reason classifies as stale-supervisor churn, it names a PID that is no longer alive, and the pause row predates the current system boot. This keeps deliberate operator pauses and spent-preset pauses fail-closed, and it preserves the existing restart-redirect path for ordinary stale-supervisor recovery where the pause was created after boot.
+
+Implementation landed in `agent-doc-orchestration/src/project_controller/rpc.rs`, with a regression in `agent-doc-orchestration/src/project_controller.rs` that models a pre-reboot pause timestamp plus a dead named PID. The specs in `specs/02-document-format.md` and `specs/07-orchestration-commands.md` now state the reboot timestamp guard.
+
+`#agentfrontpersist` is also resolved: the frontmatter `agent:` change handling is covered by the existing `#agentreloadrestart` path on `origin/main`, which re-resolves the harness launch spec on restart and spawns the newly selected harness instead of reverting the user-edited frontmatter.
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration dispatch_clears_stale_supervisor_pause_when_named_pid_is_dead_after_reboot`
+- `cargo test -p agent-doc-orchestration dispatch_queue_paused_stale_supervisor_emits_restart_redirect_marker`
+- `cargo test -p agent-doc-orchestration stale_supervisor_pause`
+- `cargo test -p agent-doc-orchestration agent_change_restart`
+- `cargo test -p agent-doc-orchestration harness_change_forces_fresh_spawn_predicate`
+- `make check` in the working checkout: 4974 passed, 239 skipped
+- `make install`: installed `agent-doc 0.34.35`, installed `libagent_doc-0.34.35.so`, marked controllers for idle recycle
+- clean worktree on `origin/main` plus the fix: `make check` passed, 4976 passed, 239 skipped
+- pushed verified submodule commit `25df5810` to `btakita/agent-doc` `main`
+- passive CI check per operator instruction: latest CI for `25df5810` was `in_progress` at the time of closeout, not waited on
+
+Note: the local `src/agent-doc` checkout still has pre-existing unrelated dirty files. I staged and pushed only the scoped reboot-stall fix; I did not revert or bundle those other edits.
+<!-- agent:boundary:a7a0cd93 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -263,7 +290,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#agentfrontpersist] #agent-doc-bug Preserve user-edited session frontmatter `agent:` on equityfundingsource.md: when the operator changes `agent: claude` to `agent: codex`, agent-doc must not rewrite it back to `claude`; distinguish explicit frontmatter edits from route/harness reconciliation. Related #arrkillguard/#agentreloadrestart; needs repro/log capture and regression.
 - [ ] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.

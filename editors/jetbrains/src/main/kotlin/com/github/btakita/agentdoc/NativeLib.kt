@@ -426,6 +426,34 @@ interface AgentDocLib : Library {
         bufferContent: String,
     ): Pointer?
 
+    /**
+     * Record one real editor operation for CRDT-based op replay
+     * (`#qnodemerge4wire`). `offset`/`deleteLen` are UTF-8 BYTE units — the
+     * reporter converts the editor's UTF-16 offset/length first. `opKind` is
+     * `"insert"` (with `insertText`, `deleteLen=0`) or `"delete"` (with
+     * `insertText=null`, `deleteLen=byteLen`). A replacement is reported as a
+     * delete then an insert at the same offset. `baseHash` comes from
+     * [agent_doc_document_base_hash]. Returns 1 on success, 0 on any error
+     * (bad input/offset) so the reporter can ignore and fall back to the
+     * diff-guess.
+     */
+    fun agent_doc_record_editor_op(
+        filePath: String,
+        baseHash: String,
+        opKind: String,
+        offset: Long,
+        insertText: String?,
+        deleteLen: Long,
+    ): Int
+
+    /**
+     * Compute the base hash captured ops must be stamped with so the write-time
+     * merge accepts them (`#qnodemerge4wire`) — the SHA256 hex of the resolved
+     * CRDT merge base text. Returns a string pointer (null on error → skip op
+     * capture this edit). Caller must free with [agent_doc_free_string].
+     */
+    fun agent_doc_document_base_hash(filePath: String): Pointer?
+
     /** Free a string returned by any agent_doc_* function. */
     fun agent_doc_free_string(ptr: Pointer?)
 

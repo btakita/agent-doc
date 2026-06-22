@@ -99,6 +99,8 @@ function resetBindings(): void {
     _resolve_project_path = null;
     _free_string = null;
     _version = null;
+    _record_editor_op = null;
+    _document_base_hash = null;
 }
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
@@ -207,6 +209,8 @@ let _resolve_project_path: any = null;
 let _free_string: any = null;
 let _version: any = null;
 let _reconnect_buffer_decision: any = null;
+let _record_editor_op: any = null;
+let _document_base_hash: any = null;
 
 function bindFunctions(): void {
     if (_reposition_boundary_to_end && _normalize_template_structure) return;
@@ -324,6 +328,20 @@ function bindFunctions(): void {
         console.log(`[agent-doc/native] reconnect_buffer_decision ABI unavailable: ${e.message}`);
         _reconnect_buffer_decision = null;
     }
+    try {
+        // #qnodemerge4wire Phase 4 editor-op reporters. Optional so an older
+        // cdylib without the symbols does not break the rest of the bindings.
+        _record_editor_op = lib.func(
+            'agent_doc_record_editor_op',
+            'int32',
+            ['str', 'str', 'str', 'int64', 'str', 'int64'],
+        );
+        _document_base_hash = lib.func('agent_doc_document_base_hash', 'char*', ['str']);
+    } catch (e: any) {
+        console.log(`[agent-doc/native] editor-op capture ABI unavailable: ${e.message}`);
+        _record_editor_op = null;
+        _document_base_hash = null;
+    }
 }
 
 function verifyVersion(libPath: string): void {
@@ -391,6 +409,75 @@ export function reconnectBufferDecision(
         return null;
     } finally {
         if (ptr) _free_string(ptr);
+    }
+}
+
+/**
+ * #qnodemerge4wire Phase 4: convert a VS Code UTF-16 change range (offset+length
+ * in the OLD document text) to the UTF-8 BYTE units the EditorOp capture expects.
+ * Pure + exported for unit testing the non-ASCII offset semantics. `byteOffset`
+ * is the UTF-8 length of the prefix before the change; `deleteBytes` is the UTF-8
+ * length of the replaced span.
+ */
+export function utf16RangeToUtf8Bytes(
+    oldText: string,
+    rangeOffset: number,
+    rangeLength: number,
+): { byteOffset: number; deleteBytes: number } {
+    const byteOffset = Buffer.byteLength(oldText.slice(0, rangeOffset), 'utf-8');
+    const deleteBytes = Buffer.byteLength(
+        oldText.slice(rangeOffset, rangeOffset + rangeLength),
+        'utf-8',
+    );
+    return { byteOffset, deleteBytes };
+}
+
+/**
+ * #qnodemerge4wire Phase 4: resolve the base hash captured editor ops must be
+ * stamped with so the write-time merge accepts them (null when unavailable →
+ * the reporter skips capture and the merge falls back to the diff-guess).
+ */
+export function documentBaseHash(filePath: string, projectRoot?: string): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_document_base_hash) return null;
+    let ptr: any = null;
+    try {
+        ptr = _document_base_hash(filePath);
+        if (!ptr) return null;
+        return koffi.decode(ptr, 'char', -1);
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] document_base_hash error: ${e.message}`);
+        return null;
+    } finally {
+        if (ptr) _free_string(ptr);
+    }
+}
+
+/**
+ * #qnodemerge4wire Phase 4: record one real editor op for CRDT-based op replay.
+ * `offset`/`deleteLen` are UTF-8 BYTE units (the caller converts from VS Code's
+ * UTF-16 offsets). `opKind` is `'insert'` (with `insertText`, `deleteLen=0`) or
+ * `'delete'` (with `insertText=null`, `deleteLen=byteLen`). Returns true when the
+ * op was durably recorded.
+ */
+export function recordEditorOp(
+    filePath: string,
+    baseHash: string,
+    opKind: 'insert' | 'delete',
+    offset: number,
+    insertText: string | null,
+    deleteLen: number,
+    projectRoot?: string,
+): boolean {
+    if (!ensureLoaded(projectRoot)) return false;
+    bindFunctions();
+    if (!_record_editor_op) return false;
+    try {
+        return _record_editor_op(filePath, baseHash, opKind, offset, insertText ?? '', deleteLen) === 1;
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] record_editor_op error: ${e.message}`);
+        return false;
     }
 }
 

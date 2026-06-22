@@ -62,6 +62,60 @@ const FOCUS_CLI_TIMEOUT_MS = 750;
 const ROUTE_CANCEL_WAIT_MS = 5_000;
 const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
 
+// #qnodemerge4wire Phase 4: per-document text shadow (the previous full text).
+// VS Code's onDidChangeTextDocument carries only rangeLength (UTF-16) for the
+// deleted span, not the old fragment text, so we keep the prior text to compute
+// the deleted UTF-8 byte length and the byte offset of a change.
+const editorOpShadows = new Map<string, string>();
+
+/**
+ * #qnodemerge4wire Phase 4: report a markdown document change as byte-offset
+ * editor op(s) for CRDT-aligned merge. Converts VS Code's UTF-16 offsets to
+ * UTF-8 bytes against the document shadow (the pre-change text). Only single
+ * content-change events are captured (the common keystroke/paste/delete case);
+ * multi-change events are skipped (the merge's replay gate would reject
+ * misaligned ops anyway — safe diff-guess fallback). The shadow is refreshed to
+ * the new text every event regardless. Best-effort; never throws into the
+ * typing path.
+ */
+function reportEditorChange(
+    fsPath: string,
+    newText: string,
+    changes: readonly vscode.TextDocumentContentChangeEvent[],
+    projectRoot: string | undefined,
+): void {
+    try {
+        const oldText = editorOpShadows.get(fsPath);
+        // Always refresh the shadow so the next event has the correct prior text.
+        editorOpShadows.set(fsPath, newText);
+        // No prior shadow (first edit after open) or a multi-change event: skip
+        // capture this edit and let the merge fall back to the diff-guess.
+        if (oldText === undefined || changes.length !== 1) return;
+
+        const change = changes[0];
+        // rangeOffset/rangeLength are UTF-16 units in the OLD doc — convert against
+        // the shadow (old text) to the UTF-8 byte offset + deleted byte length.
+        const { byteOffset, deleteBytes } = native.utf16RangeToUtf8Bytes(
+            oldText,
+            change.rangeOffset,
+            change.rangeLength,
+        );
+
+        const baseHash = native.documentBaseHash(fsPath, projectRoot);
+        if (!baseHash) return;
+
+        // A replacement is delete(old bytes) then insert(new text) at the same offset.
+        if (change.rangeLength > 0) {
+            native.recordEditorOp(fsPath, baseHash, 'delete', byteOffset, null, deleteBytes, projectRoot);
+        }
+        if (change.text.length > 0) {
+            native.recordEditorOp(fsPath, baseHash, 'insert', byteOffset, change.text, 0, projectRoot);
+        }
+    } catch (e: any) {
+        console.warn(`[agent-doc] reportEditorChange skipped: ${e?.message ?? e}`);
+    }
+}
+
 class CliCancelledError extends Error {
     constructor() {
         super('cancelled');
@@ -1650,12 +1704,13 @@ class PatchWatcher implements vscode.Disposable {
                 // the CLI visible-write reconcile guard can positively confirm the
                 // editor buffer equals on-disk content instead of inferring from a
                 // digest. Mirrors TypingTracker.documentChanged in the JB plugin.
-                native.documentChangedDigestContent(
-                    fsPath,
-                    text,
-                    this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined,
-                    EDITOR_ID,
-                );
+                const projectRoot = this.patchesDir
+                    ? path.dirname(path.dirname(this.patchesDir))
+                    : undefined;
+                native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID);
+                // #qnodemerge4wire Phase 4: report the real editor op so a concurrent
+                // agent merge aligns to the user's actual edit boundaries.
+                reportEditorChange(fsPath, text, e.contentChanges, projectRoot);
             }
         });
 

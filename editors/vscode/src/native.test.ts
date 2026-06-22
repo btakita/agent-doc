@@ -3,7 +3,13 @@ import assert from 'node:assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { libMtimeChanged, writePidLock, removePidLock, parseReconnectDecision } from './native';
+import {
+    libMtimeChanged,
+    writePidLock,
+    removePidLock,
+    parseReconnectDecision,
+    utf16RangeToUtf8Bytes,
+} from './native';
 
 describe('parseReconnectDecision (#yzer reconnect-reread, VS Code/JB parity)', () => {
     it('parses a reread_disk decision with content', () => {
@@ -32,6 +38,37 @@ describe('parseReconnectDecision (#yzer reconnect-reread, VS Code/JB parity)', (
     it('ignores a non-string content field', () => {
         const out = parseReconnectDecision(JSON.stringify({ decision: 'reread_disk', content: 42 }));
         assert.deepStrictEqual(out, { decision: 'reread_disk' });
+    });
+});
+
+describe('utf16RangeToUtf8Bytes (#qnodemerge4wire non-ASCII offset semantics)', () => {
+    it('ASCII: byte units equal UTF-16 units', () => {
+        // "hello world", insert at offset 5 (UTF-16) → byte offset 5, no delete.
+        assert.deepStrictEqual(utf16RangeToUtf8Bytes('hello world', 5, 0), {
+            byteOffset: 5,
+            deleteBytes: 0,
+        });
+    });
+
+    it('multibyte prefix: byte offset exceeds the UTF-16 offset', () => {
+        // "café " — é is 2 UTF-8 bytes (1 UTF-16 unit). UTF-16 offset 5 (after
+        // "café ") → 6 bytes. A delete of the next 2 UTF-16 units of "日本"
+        // (each 3 bytes) → 6 delete bytes.
+        const old = 'café 日本';
+        assert.deepStrictEqual(utf16RangeToUtf8Bytes(old, 5, 2), {
+            byteOffset: 6,
+            deleteBytes: 6,
+        });
+    });
+
+    it('astral plane (surrogate pairs): emoji counts its real UTF-8 bytes', () => {
+        // "a😀b": 😀 is 1 codepoint = 2 UTF-16 units = 4 UTF-8 bytes. UTF-16
+        // offset 1 is before the emoji → 1 byte; deleting the emoji's 2 UTF-16
+        // units → 4 delete bytes.
+        assert.deepStrictEqual(utf16RangeToUtf8Bytes('a😀b', 1, 2), {
+            byteOffset: 1,
+            deleteBytes: 4,
+        });
     });
 });
 

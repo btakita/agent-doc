@@ -335,6 +335,27 @@ One.
     }
 
     @Test
+    fun `file patch success requires ack content before deleting patch file`() {
+        val patchWatcherPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val patchWatcher = Files.readString(patchWatcherPath)
+
+        assertTrue(patchWatcher.contains("private fun writeAckContent(patchId: String?, content: String, filePath: String? = null): Boolean"))
+        assertTrue(patchWatcher.contains("FFI unavailable, cannot write ack-content"))
+        assertTrue(patchWatcher.contains("if (!writeAckContent(patch.patchId, document.text, patch.file))"))
+        assertTrue(patchWatcher.contains("return writeAckContent(patch.patchId, result, patch.file)"))
+
+        val applied = patchWatcher.indexOf("val applied = try", patchWatcher.indexOf("fun processPatchFile"))
+        val appliedDelete = patchWatcher.indexOf("if (applied) {", applied)
+        val deletePatch = patchWatcher.indexOf("patchFile.delete()", appliedDelete)
+
+        assertTrue(applied >= 0 && applied < appliedDelete)
+        assertTrue(deletePatch > appliedDelete)
+    }
+
+    @Test
     fun `handles line at very start of user region`() {
         // First line of the user region (no leading newline before it)
         val doc = "<!-- agent:exchange patch=append -->\nFirst line.\nSecond line.\n<!-- /agent:exchange -->\n"

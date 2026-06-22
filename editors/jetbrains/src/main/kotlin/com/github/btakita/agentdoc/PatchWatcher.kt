@@ -590,8 +590,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             LOG.info("[socket] save_document: flushed ${document.textLength} chars to disk for $filePath")
         }
         val content = savedContent ?: return false
-        writeAckContent(patchId, content, filePath)
-        return true
+        return writeAckContent(patchId, content, filePath)
     }
 
     /**
@@ -892,16 +891,18 @@ class PatchWatcher(private val project: Project) : Disposable {
      * snapshot source instead of the 200ms sleep + re-read heuristic.
      * Keyed by patch_id (not file path) — all path logic lives in Rust.
      */
-    private fun writeAckContent(patchId: String?, content: String, filePath: String? = null) {
-        if (patchId == null) return
-        val root = filePath?.let { resolveRootFor(it) } ?: project.basePath ?: return
+    private fun writeAckContent(patchId: String?, content: String, filePath: String? = null): Boolean {
+        if (patchId == null) return true
+        val root = filePath?.let { resolveRootFor(it) } ?: project.basePath ?: return false
         val lib = AgentDocLib.get() ?: run {
-            LOG.debug("[ack-content] FFI unavailable, skipping ack-content write")
-            return
+            LOG.warn("[ack-content] FFI unavailable, cannot write ack-content for patch_id $patchId")
+            return false
         }
         if (!lib.agent_doc_write_ack_content(root, patchId, content)) {
             LOG.warn("[ack-content] FFI write_ack_content returned false for patch_id $patchId")
+            return false
         }
+        return true
     }
 
     private fun awaitIdleBeforeDocumentMutation(filePath: String, operation: String): Boolean {
@@ -1124,7 +1125,9 @@ class PatchWatcher(private val project: Project) : Disposable {
             ) { payload -> NativePatching.patchContentAlreadyCommitted(patch.file, payload) }
         ) {
             LOG.info("[patch-watcher] dedup: response patch_id ${patch.patchId} already present in live disk/committed content — skipping stale replay")
-            writeAckContent(patch.patchId, diskContent ?: content, patch.file)
+            if (!writeAckContent(patch.patchId, diskContent ?: content, patch.file)) {
+                return false
+            }
             lastApplyWasNoOp = true
             return true
         }
@@ -1198,7 +1201,9 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         if (result == content) {
             LOG.warn("Patch produced no changes for ${patch.file}")
-            writeAckContent(patch.patchId, document.text, patch.file)
+            if (!writeAckContent(patch.patchId, document.text, patch.file)) {
+                return false
+            }
             lastApplyWasNoOp = true
             return true
         }
@@ -1240,7 +1245,9 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (wasDeferredForConflict) {
             refreshVisualHighlightersAfterFileCacheConflict(targetFile, "applied")
         }
-        writeAckContent(patch.patchId, document.text, patch.file)
+        if (!writeAckContent(patch.patchId, document.text, patch.file)) {
+            return false
+        }
         // Note: do NOT call agent_doc_commit here. The plugin committing within the IPC
         // window races with the skill's `agent-doc commit` call, causing the binary commit
         // to be a no-op (FFI already committed). The binary's git::commit handles boundary
@@ -1362,7 +1369,9 @@ class PatchWatcher(private val project: Project) : Disposable {
                 ) { payload -> NativePatching.patchContentAlreadyCommitted(patch.file, payload) }
             ) {
                 LOG.info("[patch-watcher] dedup: VFS response patch_id ${patch.patchId} already present in disk/committed content — skipping stale replay")
-                writeAckContent(patch.patchId, content, patch.file)
+                if (!writeAckContent(patch.patchId, content, patch.file)) {
+                    return false
+                }
                 lastApplyWasNoOp = true
                 return true
             }
@@ -1457,8 +1466,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 LOG.warn("VFS patch produced no changes for ${patch.file}")
                 lastApplyWasNoOp = true
             }
-            writeAckContent(patch.patchId, result, patch.file)
-            return true
+            return writeAckContent(patch.patchId, result, patch.file)
         } catch (e: Exception) {
             LOG.warn("Failed to apply patch via VFS for ${patch.file}", e)
             return false

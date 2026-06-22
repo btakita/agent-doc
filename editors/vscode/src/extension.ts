@@ -1956,8 +1956,7 @@ class PatchWatcher implements vscode.Disposable {
         this.outputChannel.appendLine(
             `save_document: flushed ${content.length} chars to disk for ${filePath}`,
         );
-        this.writeAckContent(patchId, content, patchesDir);
-        return true;
+        return this.writeAckContent(patchId, content, patchesDir);
     }
 
     /**
@@ -1969,16 +1968,18 @@ class PatchWatcher implements vscode.Disposable {
         patchId: string | undefined,
         content: string,
         patchesDir: string,
-    ): void {
+    ): boolean {
         if (!patchId) {
-            return;
+            return true;
         }
         const sidecar = ackContentSidecarPath(patchesDir, patchId);
         try {
             fs.mkdirSync(path.dirname(sidecar), { recursive: true });
             fs.writeFileSync(sidecar, content);
+            return true;
         } catch (e) {
             this.outputChannel.appendLine(`save_document: ack-content write failed: ${e}`);
+            return false;
         }
     }
 
@@ -2278,8 +2279,17 @@ class PatchWatcher implements vscode.Disposable {
             }
         }
 
-        await document.save();
-        return true;
+        const saved = await document.save();
+        if (!saved) {
+            this.outputChannel.appendLine(`PatchWatcher: save failed for ${patch.file}`);
+            return false;
+        }
+        const patchesDir = patchFilePath ? path.dirname(patchFilePath) : this.patchesDir;
+        if (!patchesDir) {
+            this.outputChannel.appendLine(`PatchWatcher: no patches dir for ack-content ${patch.file}`);
+            return false;
+        }
+        return this.writeAckContent(patch.patch_id, document.getText(), patchesDir);
     }
 
     private verifyApplyProof(

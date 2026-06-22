@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.36
+
+- **Editor file-IPC patches are no longer deleted without ACK-content proof (`#ackcontent-delete`).** JetBrains and VS Code patch watchers now treat the `*.ack-content` write as part of patch success for response patches and `save_document`: if the editor cannot write the ACK-content sidecar (missing FFI/root, write failure, or failed document save), `applyPatch` returns false and the single-use patch file stays in place for binary retry instead of being deleted with only a transient editor-buffer mutation. This closes the observed stale-state/File Cache Conflict path where a live editor consumed `.agent-doc/patches/<id>.json`, failed to leave the ACK-content proof, and the binary later saw `no_ack` with no patch left to replay. Source guard tests cover both editor integrations.
+
 ## 0.34.35
 
 - **`#freshqueueauth` — fresh operator queue heads stay authoritative unless an explicit removal proof exists.** `queue consume` now tells agents the safe next operation for an id-backed head: complete/gate it through closeout, explicitly acknowledge a correction head with the new `agent-doc queue consume --ack-id <id>` path, or leave it queued. `--ack-id` strikes an exact id-backed queue head while preserving the still-open backlog item, so correction/acknowledgement heads tied to open work can be cleared without falsely marking the work done. `queue prune-noise`, session-check guidance, and queue removal ops logs now use predicate/proof wording (`base_hash`, `source_component`, `operation`, `proof`) so fresh drainable operator prompts are not described as stale/noise unless the exact noise/orphan predicate was proven.

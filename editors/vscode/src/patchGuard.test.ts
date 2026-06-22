@@ -81,6 +81,22 @@ describe('patchGuard', () => {
         assert.ok(source.includes('typing debounce timed out before reposition'));
     });
 
+    it('requires ack-content proof before file patch apply can delete the patch file', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const applyIdx = source.indexOf('const applied = await this.applyPatch(patch, uri.fsPath)');
+        const deleteIdx = source.indexOf('fs.unlinkSync(uri.fsPath)', source.indexOf('if (applied) {'));
+        const saveIdx = source.indexOf('const saved = await document.save();');
+        const ackIdx = source.indexOf('return this.writeAckContent(patch.patch_id, document.getText(), patchesDir);');
+
+        assert.ok(applyIdx >= 0);
+        assert.ok(deleteIdx > applyIdx);
+        assert.ok(saveIdx >= 0);
+        assert.ok(ackIdx > saveIdx);
+        assert.ok(source.includes('private writeAckContent('));
+        assert.ok(source.includes('): boolean {'));
+        assert.ok(source.includes('return this.writeAckContent(patchId, content, patchesDir);'));
+    });
+
     it('rejects stale editor apply proofs when content or version changed', () => {
         const proof = createEditorApplyProof('before', 7);
 

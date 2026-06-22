@@ -340,6 +340,23 @@ impl AutoTriggerMonitor {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutoTriggerCooldownAction {
+    Wait,
+    Timeout,
+}
+
+fn auto_trigger_clear_cooldown_action(
+    monitor: &mut AutoTriggerMonitor,
+    now: Instant,
+) -> AutoTriggerCooldownAction {
+    if monitor.note_no_prompt(now) {
+        AutoTriggerCooldownAction::Timeout
+    } else {
+        AutoTriggerCooldownAction::Wait
+    }
+}
+
 pub mod decisions;
 mod idle_watch;
 
@@ -1424,10 +1441,25 @@ fn spawn_auto_trigger_thread(
                     &mut session_log,
                     &mut clear_cooldown_logged,
                 ) {
-                    shared
-                        .auto_trigger_outcome
-                        .store(AutoTriggerOutcome::SkippedClearCooldown as u8, Ordering::Relaxed);
-                    return;
+                    match auto_trigger_clear_cooldown_action(&mut monitor, Instant::now()) {
+                        AutoTriggerCooldownAction::Wait => continue,
+                        AutoTriggerCooldownAction::Timeout => {
+                            shared
+                                .auto_trigger_outcome
+                                .store(AutoTriggerOutcome::Timeout as u8, Ordering::Relaxed);
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "auto_trigger_timeout harness={} reason=clear_cooldown_after_30s",
+                                    harness.binary
+                                ),
+                            );
+                            eprintln!(
+                                "[agent-doc] auto-trigger: timed out waiting for clear cooldown to expire"
+                            );
+                            return;
+                        }
+                    }
                 }
                 if current_child_prompt_visible(&shared, &harness) {
                     if shared.capability_proof_gate() == CapabilityProofGate::Pending {
@@ -3733,6 +3765,25 @@ Done.
         assert!(monitor.note_no_prompt(start + Duration::from_millis(5)));
         assert!(!monitor.note_no_prompt(start + Duration::from_millis(10)));
         assert_eq!(monitor.stop_outcome(), AutoTriggerOutcome::Timeout);
+    }
+    #[test]
+    fn auto_trigger_clear_cooldown_waits_until_timeout_instead_of_terminal_skip() {
+        let start = Instant::now();
+        let mut monitor = AutoTriggerMonitor::new(start, Duration::from_millis(5));
+
+        assert_eq!(
+            auto_trigger_clear_cooldown_action(&mut monitor, start + Duration::from_millis(4)),
+            AutoTriggerCooldownAction::Wait
+        );
+        assert_eq!(
+            auto_trigger_clear_cooldown_action(&mut monitor, start + Duration::from_millis(5)),
+            AutoTriggerCooldownAction::Timeout
+        );
+        assert_eq!(
+            auto_trigger_clear_cooldown_action(&mut monitor, start + Duration::from_millis(10)),
+            AutoTriggerCooldownAction::Wait,
+            "timeout is reported once; the caller exits after recording it"
+        );
     }
     #[test]
     fn auto_trigger_thread_cancels_cleanly_before_prompt_poll() {

@@ -33,164 +33,11 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260622-065618.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260622-084631.md`*
 
 Compacted content:
-❯ - Archived 14 response topic(s): email reply didn't appear in the funder portal; reply-to app email + token, and which domain for staging; subdomain reply@efs.briantakita.me + keeping Protonmail on the root; 11 more
-❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: post-compaction state + the "queue all gated items" directive — opus-4-8
-
-> **Queue prompt:**
->
-> Add actionable items into the queue for all gated backlog and review items.
-
-
-Housekeeping first: the exchange was compacted (14 topics archived to `...-20260622-065618.md`). It landed with a stale snapshot/CRDT (53KB snapshot vs 20KB visible file), so I rebuilt the sidecars from the compacted file (`reset --from-current --preserve-session`) and committed the compacted state cleanly (`2967960f7`) rather than letting a plain commit un-compact it.
-
-> **Queue prompt:** Add actionable items into the queue for all gated backlog and review items.
-
-On this — I want to confirm scope before bulk-expanding, because "all gated items" = **4 gated backlog + 26 gated review = 30 items**, and a straight dump would flood the go-queue with work that can't actually drain:
-
-- **Several are already done/superseded.** Preflight's semantic matcher flags ~5 review items as resolved by shipped work: `#5q7z`→`#37ah`, `#dropbox-sync-adapter`→`#dropbox-sync-contract`, `#dzmm-writeback-replay`→`#37ah`, `#zwws-vestings-local`→`#zwws-local-first`, `#lender-card-msg-email`→`#lender-card-msg`. Queuing these re-does finished work.
-- **Several are operator-gated, not agent-actionable.** e.g. `#5q7z-ship` is live-verify only; `#cutover-checklist`/`#e1kb` execution waits on creds (`#m6ch`); `#67v2-aa-local` is gated on `#dzmm`. Queued as `go` they'd just churn (the `#goqueuestall` pattern).
-
-So rather than flood, tell me which you want and I'll do it in one pass:
-- **(A)** Queue only the genuinely agent-actionable gated items; tag the operator-gated ones so go-mode defers them; close the superseded ones. (my recommendation)
-- **(B)** Queue a specific subset you name.
-- **(C)** Literally all 30, churn and all.
-
-The queue is currently **paused** (stale qflood guard), so nothing auto-drains while we settle this.
-
-**Separately — heads-up that affects this whole session:** preflight warns the installed `agent-doc` binary + cdylib **predate source commit `fefc5f2a`**, so the live tmux/JetBrains supervisor is running older code. That's the likely cause of the repeated finalize IPC socket wedges and the go-mode queue churn this session. Recommend `make install` in `src/agent-doc` (rebuilds binary + cdylib) then an `admin recycle` to pick it up — I held off doing it unprompted since it's a build on a live session.
-> **Queue prompt:** Option A
-
-### Re: Option A — gated-item triage applied — opus-4-8
-
-> **Queue prompt:**
->
-> Option A
-
-
-Done. Triaged all 30 gated items (4 backlog + 26 review) per Option A:
-
-**Closed (committed `5c1168133`):**
-- `#cftk` — already marked RESOLVED 2026-06-20 (D1 token confirmed active).
-- `#msgmail4` — "enable email round-trip in prod" is exactly what shipped this session: inbound enabled, apex `efs@briantakita.me → worker` rule live, sender verified, round-trip live-tested.
-
-**Un-gated to actionable (now drainable):**
-- `#cmtsec` — small UI tweak (gate the "Committed amount" block on `proposal_amount != null` or relabel "Proposed terms").
-- `#cutover-checklist` — write (not execute) the custom-domain + Workspace-SSO cutover checklist doc.
-- `#pmhf` is the third agent-actionable one (reuse the rebalancing share editor in the per-deal split UI) but sits in `agent:review`; say "promote #pmhf" and I'll move + do it.
-
-**Left gated (genuinely operator/externally blocked, ~22):** TMO writeback chain (`#dzmm`/`#dzmm-writeback-replay`/`#67v2`/`#67v2-auto-advance`/`#67v2-aa-local`/`#zwws*`) needs `#7a4d`+`#k2xg`; cutover/SSO (`#efs-cutover-sso-plan`/`#next-steps`/`#214f`) and `#xcvg*` need `#m6ch` creds / a comms-path decision; `#jnzs*` await Judith; `#msg-unify3/4` await dual-write soak; `#dropbox-sync-adapter` needs Dropbox access; `#5eq8` is design-blocked; `#nthc`/`#dealtab500`/`#5q7z*`/`#proprate` are operator-verify or need a business-rule decision. These correctly stay in review rather than churning the go-queue.
-
-**Two blockers before the un-gated items can auto-drain:** the queue is still **paused** (stale qflood guard — say "unpause" and I'll clear it), and the installed binary is **stale vs `fefc5f2a`** (every `finalize` this session wedged the IPC socket and recovered via `--force-disk`). Recommend `make install` in `src/agent-doc` + `admin recycle` before resuming the drain.
-
-### Re: #cmtsec lender proposal display — gpt-5
-
-> **Queue prompt:**
->
-> do [#cmtsec]
-
-Done. The admin lender proposal summary now distinguishes proposed terms from actual committed amounts: the deal detail and loan detail admin views label the group as proposed terms, only render the `Committed amount` field when `proposal_amount` is present, and show points when points are the submitted term.
-
-> **Queue prompt:**
->
-> [#5q7z-ship]: confirmed
-
-Treated this as operator verification complete and closed `#5q7z-ship`.
-
-> **Queue prompt:**
->
-> [#67v2-aa-local]: auto-advance confirmed
-
-Treated this as the go signal for `#67v2-aa-local`; it is already open/actionable, so I left it queued for the next drain. I did not mark it done because the auto-advance implementation work has not run in this cycle.
-
-Proof:
-- Changed paths: `lib/ui--browser--efs/portal/admin/deal_detail.tsx`, `lib/ui--browser--efs/portal/admin/loan_detail.tsx`, `prds/equity-funding-source-lending-portal-prd.md`, `tests/admin-investor-pipeline.test.ts`.
-- Commands: focused `bun test tests/admin-investor-pipeline.test.ts`; full `make check`; `gh run list --workflow CI --limit 1`; `gh workflow list`.
-- Verification: focused test passed; full `make check` passed with 1095 tests plus app and worker builds. GitHub has no workflow named `CI`, and `gh workflow list` returned no workflows, so there was no remote CI run to inspect.
-- Commits pushed: EFS submodule `d6f37dc` (`fix(admin): clarify lender proposal terms (#cmtsec)`), parent pointer `d24137b9b` (`chore: update efs submodule for cmtsec`).
-- Escalation: none. Preflight still warns that the installed `agent-doc` binary/cdylib are stale relative to source; I left that build/recycle work out of this product-code cycle.
-- Confidence: high.
-
-### Re: queued #67v2-aa-local while queue is paused — gpt-5
-
-`#67v2-aa-local` is present in the go queue, but this cycle did not start implementation because the agent-doc queue is still paused and preflight reports `queue_continuation_required=false` with `queue_drainable_head_count=0`. The current pause reason is the qflood guard / no-op closeout protection; the binary is explicitly telling this session not to auto-drain until the operator adds new work or unblocks the gated path.
-
-I left the backlog and review state unchanged. `#67v2-aa-local` remains queued/open, but its own backlog text still depends on the `#67v2` Kanban stage work being built first, while the TMO replay side remains gated on `#dzmm`.
-
-Proof:
-- Changed paths: none outside the agent-doc session document closeout.
-- Commands: `tsift status`; `agent-doc --version`; `agent-doc preflight`; `agent-doc read`; `agent-doc plan`.
-- Verification: preflight and plan completed; no product code changed, so no app tests were run.
-- Escalation: none.
-- Confidence: high.
-
-### Re: #67v2-aa-local admin pipeline auto-advance — gpt-5
-
-Done. Shipped the local half of the #67v2 admin pipeline auto-advance work.
-
-Implemented:
-- Pure stage requirement rules in `app/equityfundingsource/lib/admin/repo.ts`: selected lender, borrower intent, processing/underwriting completion signals, final-doc notarization, and funding completion.
-- `POST /api/admin/pipeline/auto-advance`: scans all loans or one `loan_id`, supports `dry_run`, advances one stage per eligible loan, writes a `loan_status_auto_advance` activity log, and enqueues a pending `tmo_cache_outbox` `update_loan_status` row.
-- Replay remains gated on `#7a4d/#dzmm`: the auto-advance route does not call `tmo_loan_status_sync_` and does not add a replay worker.
-- Updated the #67v2 PRD Phase C and added focused pipeline tests for the rules, decision gating, route wiring, write/audit/outbox order, and no-direct-TMO-sync guard.
-
-Proof:
-- Changed paths: `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts`, `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/loan_management/index.ts`, `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/routes.ts`, `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`, `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`, plus the parent submodule pointer.
-- Commands: `tsift status`; focused `bun test tests/admin-pipeline.test.ts`; `git diff --check`; full `make check`; `gh run list --workflow CI --limit 1`; `gh workflow list`; commits and pushes for the EFS submodule and parent repo.
-- Verification: focused pipeline suite passed; full `make check` passed with 1098 tests plus app and worker builds. GitHub has no workflow named `CI`, and `gh workflow list` returned no workflows, so there was no remote CI run to inspect.
-- Commits pushed: EFS submodule `0454e1a` (`feat(admin): add pipeline auto-advance rules (#67v2)`), parent pointer `6219fc4b5` (`chore: update efs submodule for 67v2 auto-advance`).
-- Escalation: none.
-- Confidence: high.
-
-### Re: do [#67v2-aa-local] closeout repair — gpt-5
-
-The `#67v2-aa-local` work was completed in the immediately preceding closeout: the local auto-advance rules and admin route are shipped, tested, committed, and pushed. This repair closeout only answers the dangling tail prompt left after the prior force-disk finalize; no product code changed.
-
-Proof remains: focused `bun test tests/admin-pipeline.test.ts` passed, full `make check` passed, `git diff --check` was clean, and GitHub has no configured `CI` workflow to inspect.
-❯ do [#67v2-aa-local]
-
-### Re: do [#67v2-aa-local] live-buffer convergence — gpt-5
-
-This is the same already-completed queue head. The implementation, verification, submodule commit, parent pointer commit, push, and prior repair response are already recorded; this closeout only converges the live editor buffer so the dangling prompt is no longer treated as unresolved.
-
-No product code changed in this convergence write.
-
-### Re: admin secure-message email endpoint — gpt-5
-
-> **Queue prompt:**
->
-> In the admin email, do not CC all admins. Only send to the configured admin endpoint email btak.dev+efs@gmail.com.
-
-Done. Admin-facing secure-message email notifications now route to one configured endpoint instead of the active admin account list. In-app admin notifications still fan out to the owner/all-admin recipients as before; only the outbound admin email `to` list changed.
-
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/borrower/messages/notify.ts`
-- `src/equityfundingsource-dev/tests/borrower-message-notify.test.ts`
-- `src/equityfundingsource-dev/wrangler.toml`
-- `src/equityfundingsource-dev/.dev.vars.example`
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev/prds/message-email-roundtrip.md`
-- `src/equityfundingsource-dev` parent submodule pointer
-
-Commands:
-- `bun test tests/borrower-message-notify.test.ts`
-- `git diff --check`
-- `make check`
-- `gh run list --workflow CI --limit 1`
-- `gh workflow list`
-
-Verification: focused notification test passed. Full `make check` passed with 1099 tests plus app and worker builds. GitHub has no workflow named `CI`, and `gh workflow list` returned no workflows, so there was no remote CI run to inspect.
-
-Commits pushed: EFS submodule `b1e614a` (`fix(messages): route admin emails to endpoint`) and parent pointer `b5e34dc55` (`chore: update efs submodule for admin email endpoint`).
-
-Escalation: none.
-
-Confidence: high.
-<!-- agent:boundary:93102f33 -->
+- Archived 8 response topic(s): post-compaction state + the "queue all gated items" directive; Option A; #cmtsec lender proposal display; 5 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 <!-- /agent:exchange -->
 ###
 <!--
@@ -203,7 +50,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~In the admin email, do not CC all admins. Only send to the configured admin endpoint email btak.dev+efs@gmail.com.~~ — auto-struck: answered this cycle (#ftstrike)
-- "In-app admin notifications still fan out to the owner/all-admin recipients as before". Do not fan out to all admins. Instead, only the configured admin endpoint email btak.dev+efs@gmail.com.
+- ~~"In-app admin notifications still fan out to the owner/all-admin recipients as before". Do not fan out to all admins. Instead, only the configured admin endpoint email btak.dev+efs@gmail.com.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

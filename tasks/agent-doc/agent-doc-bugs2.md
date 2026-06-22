@@ -77,7 +77,13 @@ The live-verification items `#fbwireverify`, `#qnodemerge4verify`, `#tb4q`, `#ca
 `#fccd` remains open. Its blocker is live supervisor/editor state: the installed CLI is `agent-doc 0.34.37`, recycle is marked, and immediate supervisor restart refused because pane `%3` is alive-busy. The Clear Session Cache behavior still needs retest after the supervisor reaches an idle recycle boundary.
 
 No source files changed in this closeout. No tests were needed for these blocker/gating updates.
-<!-- agent:boundary:75d4e617 -->
+
+### Re: closeout write repair — gpt-5
+
+This write absorbs the live queue-convergence changes left after the stale-supervisor recovery path.
+
+No source files changed in this repair write. The remaining actionable queue heads, including `#98t4` and `#fccd`, stay open.
+<!-- agent:boundary:252fd016 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -187,9 +193,6 @@ Error: dispatch-only codex reopen refused to inject into pane %24 for tasks/prof
   entry.
 ```
 ---
-- ~~:pushpin: do [#fbwireverify]~~
-- :pushpin: do [#qnodemerge4verify]
-- :pushpin: do [#tb4q]
 ---
 :pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
 ```
@@ -197,13 +200,8 @@ Error: dispatch-only codex reopen refused to inject into pane %24 for tasks/prof
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
 ---
-- :pushpin: do [#cancelturnverify]
-- :pushpin: do [#qcm1verify]
-- :pushpin: do [#arsm]
-- :pushpin: do [#jjds]
 - :pushpin: do [#98t4]
 - :pushpin: do [#fccd]
-- ~~:pushpin: do [#1jec]~~
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.

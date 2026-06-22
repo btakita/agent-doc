@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -86,7 +86,7 @@ Done. Triaged all 30 gated items (4 backlog + 26 review) per Option A:
 **Left gated (genuinely operator/externally blocked, ~22):** TMO writeback chain (`#dzmm`/`#dzmm-writeback-replay`/`#67v2`/`#67v2-auto-advance`/`#67v2-aa-local`/`#zwws*`) needs `#7a4d`+`#k2xg`; cutover/SSO (`#efs-cutover-sso-plan`/`#next-steps`/`#214f`) and `#xcvg*` need `#m6ch` creds / a comms-path decision; `#jnzs*` await Judith; `#msg-unify3/4` await dual-write soak; `#dropbox-sync-adapter` needs Dropbox access; `#5eq8` is design-blocked; `#nthc`/`#dealtab500`/`#5q7z*`/`#proprate` are operator-verify or need a business-rule decision. These correctly stay in review rather than churning the go-queue.
 
 **Two blockers before the un-gated items can auto-drain:** the queue is still **paused** (stale qflood guard — say "unpause" and I'll clear it), and the installed binary is **stale vs `fefc5f2a`** (every `finalize` this session wedged the IPC socket and recovered via `--force-disk`). Recommend `make install` in `src/agent-doc` + `admin recycle` before resuming the drain.
-<!-- agent:boundary:2bf85c7f -->
+<!-- agent:boundary:2fd7f655 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,6 +98,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#cmtsec]
 <!-- /agent:queue -->
 
 ## Backlog

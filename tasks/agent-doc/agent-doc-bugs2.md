@@ -55,12 +55,30 @@ Changed paths: none in the agent-doc source tree; this cycle only persists the s
 Verification: `cargo test -p agent-doc-orchestration repair_materialization_requires_captured_response_block`, `cargo test -p agent-doc-orchestration ready_prompt_candidate_accepts_codex_context_use_footer_without_prompt`, and `cargo test -p agent-doc-orchestration direct_pane_enter_resubmit_retries_at_least_once_per_second` all passed. Latest GitHub Actions CI is green: run `27987503460`, `completed/success`, pushed on 2026-06-22T22:11:42Z.
 
 Escalation: none. Confidence: high that this queue head is stale duplicated queue text from the interrupted closeout, not an unfixed materialization path in the current tree.
-<!-- agent:boundary:aa9b55e8 -->
+
+### Re: ACK-mismatch queue consume recovery and 0.34.38 install — gpt-5
+
+> **Queue prompt:**
+>
+> When rebuilding the binary + library, wait for both to complete before replacing the existing binary + library.
+
+
+Fixed the root cause in `src/agent-doc`. The queue-consume ACK mismatch path still refuses the unsafe disk write, but for the narrow stale queued-prompt exchange artifact it now sends a hash/length-guarded editor refresh back to the pre-consume buffer. It skips that refresh when the ACK content contains real concurrent user drift, so user edits stay editor-owned.
+
+Shipped as `agent-doc 0.34.38`: bumped `Cargo.toml`, `pyproject.toml`, `Cargo.lock`, and `VERSIONS.md`; committed `e25cb0ea` in `src/agent-doc`; pushed `main` and tag `v0.34.38`. `make install-full` completed after both optimized binary and shared library builds finished; the installed CLI reports `agent-doc 0.34.38`, and `libagent_doc-0.34.38.so` is installed.
+
+Verification passed locally: focused queue-consume ACK mismatch tests, the related editor IPC convergence test, the FlowCore guard test, and full `make check` with `4996/4996` tests passing. GitHub Actions were still running when checked: CI run `27990070960` and Release run `27990078204`; no `v0.34.38` PyPI run had appeared yet.
+
+Parent superproject commit `3c2cc2fa3` updates the `src/agent-doc` pointer, but pushing parent `main` is blocked because this worktree is ahead `86` and behind `15` relative to `origin/main`; I did not rebase over unrelated dirty work. `#98t4` remains open as the separate publish-packaging blocker and was restored to an active queue item rather than being falsely consumed.
+
+Supervisor recycle was requested for the superproject controller.
+<!-- agent:boundary:0d7e850e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~When rebuilding the binary + library, wait for both to complete before replacing the existing binary + library.~~
 ---
 :pushpin: Fix the root cause of this issue that occurred in this document.
 ```

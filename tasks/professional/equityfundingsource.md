@@ -273,7 +273,7 @@ Yes — done. EFS now sends from **`efs@briantakita.me`** via Cloudflare Email S
 No Resend, no plan change, no zone surgery. Inbound `efs@efs.briantakita.me → btak.dev+efs@gmail.com` is untouched and still live.
 
 The only thing you don't get this way is the literal `efs.briantakita.me` *subdomain* in the From — that needs CF Enterprise (Subdomain Setup) or Resend, both of which we set aside. Closing `#g6d0` as done.
-<!-- agent:boundary:be734b6b -->
+<!-- agent:boundary:1337e779 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -299,7 +299,6 @@ After 20:30
 ## Review
 
 <!-- agent:review -->
-- [/] [#g6d0] #efssubsend Send from efs@efs.briantakita.me via Cloudflare Email Service (operator-selected path). BLOCKED on a decision: CF Email Sending is zone-scoped and efs.briantakita.me is a subdomain, so it needs to become its own CF zone (NS delegation) + onboard for sending, which means migrating the efs inbound MX/routing into the new zone. Resend path (A) was reverted (EFS c5af4aa). Test-first: verify a live efs@ send before flipping the worker *_FROM vars off info@briantakita.me. Awaiting operator confirm on the subdomain-zone approach vs efs@briantakita.me apex.
 - [/] [#msgmail4] [recommended] Enable email round-trip in prod (ops, operator-gated): configure Cloudflare Email Routing to POST inbound mail to the worker w/ the shared secret; set MESSAGE_EMAIL_INBOUND_ENABLED/_SECRET/_REPLY_TO; verify sending domain (#f4rq). Do not enable blind. Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
 - [/] [#mcme] [recommended] #msg-read-status Email-open-based read receipts on messages — DEFERRED: gated by the operator on "only if we can detect email reads", which EFS cannot today (sends via Cloudflare Email, no open tracking). Needs a ~3-5 day greenfield subsystem: switch message notifications to Resend with open-tracking, add a signed Resend event webhook (email.opened), an email_events table, and message<->email linking, then surface email_opened_at in the message DTO/UI. In-app portal read cursors already exist for borrower chat (chat_sessions.*_last_read_at) but are not email reads.
 - [/] [#msg-unify4] [gated: awaiting dual-write prod soak] Lender cutover — dual-write (best-effort mirror into messages, both lender sources) + backfill (migration 0098) SHIPPED (EFS b5a6a55). Remaining: after soak, switch the inbox to read lender data from messages (dual-read), then drop deal_interest_lender_messages + lender_account_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.

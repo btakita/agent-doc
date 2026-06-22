@@ -87,7 +87,27 @@ Wired the Phase-1 `convergence_gate` decision core into the live supervisor inte
 **Verification.** `make check` green (4956 tests), clippy clean (`cargo clippy -- -D warnings` exit 0). 5 new tests: editorless/non-git default-true, disk-vs-`HEAD` tracking, slow-ACK never dispatches while inflight > 0, wedged-editor trips force-disk after timeout, loud-error + loadable-playback artifact. SPEC L36 already documented this consumer, so no SPEC change.
 
 The agent-doable portion is complete, so I'm closing `#fbwire`. The genuinely operator-gated remainder — the live **two-pane `make tmux-ci`** acceptance (real slow-ACK + wedged-editor), which can't run from this driving session — is filed as `#fbwireverify`; it goes live after `make install` + `admin recycle` at a recycle boundary.
-<!-- agent:boundary:a933a4e4 -->
+
+### Re: do [#j9ja] — SUCCESS ops.log markers for operator auto-verify — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#j9ja]
+
+
+Audited the four proof sites #j9ja names; two were actionable, two are blocked on unbuilt parent features.
+
+**Shipped this cycle** (agent-doc submodule `2367d883`, superproject `a2e989d3f`; committed + pushed, **not installed**):
+- `convergence_gate_converged_dispatch` — new distinctive SUCCESS marker in the `#fbwire` Phase 2 convergence gate (`idle_watch.rs` Dispatch arm). Emitted **only when the gate had been deferring** (the meaningful "boundary converged after waiting on the editor/IPC" signal), so the `#fbwireverify` slow-ACK live test auto-verifies (`convergence_gate_defer …` → `convergence_gate_converged_dispatch waited_ms=…`) while the steady-state quiescent dispatch stays quiet. `make check` green (4956), clippy clean.
+
+**Already present** (no work needed): `route_dispatch_submit_recycle_settle` (route/dispatch.rs:831, the `#jbdisprecycle` route bucket), plus the two #j9ja already lists — `auto_start_dispatch_ready_confirmed`, `queue_paused_continuation_guidance_emitted`.
+
+**Blocked — code sites don't exist yet** (gating #j9ja):
+- `agent_restart_performed` — only `harness_change_detected` + `agent_restart_boundary_gate` (with `note=phase1b_execution_pending`) exist today; the restart *execution* is `#agentreloadrestart` Phase 1b, not built. The marker must be emitted by that execution path when it lands.
+- restart-agent menu-invoke marker — `#restartagentmenu` (`RestartAgentAction.kt`) isn't built.
+
+I gated `#j9ja` rather than closing it: the two remaining markers belong inside `#agentreloadrestart` Phase 1b and `#restartagentmenu` and should be added when those features are implemented. Un-gates when they land.
+<!-- agent:boundary:3e5ad1a2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -95,7 +115,7 @@ The agent-doable portion is complete, so I'm closing `#fbwire`. The genuinely op
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Use the logs to validate or invalidate any operator verify items in the queue.~~
 - ~~:pushpin: do [#fbwire]~~
-- :pushpin: do [#j9ja]
+- ~~:pushpin: do [#j9ja]~~
 - :pushpin: do [#qnodemerge4wire]
 - :pushpin: do [#tb4q]
 - :pushpin: do [#agentreloadrestart]
@@ -124,6 +144,7 @@ The agent-doable portion is complete, so I'm closing `#fbwire`. The genuinely op
 - :pushpin: do [#gf5n]
 - :pushpin: do [#supinstallvis]
 - :pushpin: do [#1jec]
+- do [#fbwireverify]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -156,7 +177,6 @@ What are #next-steps to fix bugs?
 - [ ] [#supinstallvis] [recommended] #agent-doc-bug #supinstallfeedback follow-up: the supervisor auto-install status (surface_supervisor_auto_install_status, idle_watch.rs) is surfaced ONLY as a transient tmux display-message on the status line, which is easy to miss while the pane scrollback keeps showing the misleading post-exit "Press Enter to restart" keepalive — so an operator watching the pane body still perceives a ~1-min stall. Residual: make the rebuild state visible in the pane BODY/scrollback (not just the status line) without disturbing the keepalive Enter-to-restart reader, e.g. a pane title set + a single non-input-consuming visible line, or render it through the JB/VSCode plugin notification surface (overlaps #qpauseux notification rendering). Decide the safe pane-write mechanism with the operator before implementing (send-keys risks being consumed by the keepalive). Plan TBD.
 - [ ] [#agentreloadrestart] restart-agent Phase 1: supervisor restart re-resolves harness from current frontmatter (agent claude->opencode takes effect on restart) + boundary auto-restart when resolved harness differs, behind agent_doc_agent_change_restart (default ON). Log harness_change_detected old/new + agent_restart_boundary_gate + agent_restart_performed. SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#restartagentmenu] restart-agent Phase 2 (after agentreloadrestart): RestartAgentAction.kt JB menu cmd mirroring RestartSupervisorProcessAction.kt + plugin.xml registration + TerminalUtil restart wiring; bump pluginVersion; build signed+unsigned. Log action invocation + resolved harness. Decide alongside-vs-replace Restart Supervisor Process with operator. Plan: tasks/agent-doc/plan-restart-agent.md
-- [ ] [#j9ja] Add distinctive SUCCESS ops.log markers at the remaining gated proof sites so operator live tests auto-verify (#optverify): agent_restart_performed (agentreloadrestart), restart-agent menu invoke (restartagentmenu), record_force_disk_fallback (fbwire Phase 2), and the route/plugin bucket. Landed already: auto_start_dispatch_ready_confirmed, queue_paused_continuation_guidance_emitted.
 - [ ] [#editorbufwin] merge-core: P1 the #pcwc post-commit reconcile must preserve unconsumed user queue additions on disk (do NOT overwrite the disk addition with HEAD); P2 auto-recover the commit (automate the manual reset --from-current); P4 refresh the stale supervisor CRDT enabling the drift. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md
 - [ ] [#qnodemerge4wire] Phase 4: thin JB DocumentListener.documentChanged + VS Code onDidChangeTextDocument reporters that split a replacement into delete+insert and call the agent_doc_record_editor_op FFI; verify byte-offset/Yrs unicode-offset semantics on non-ASCII edits. Needs plugin build. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4)
 - [ ] [#jbdisprecycle] OPERATOR-TEST (code R1-R4 shipped submodule d21079b7): at a recycle boundary fire JB Run Agent Doc on a 2nd doc during the hot-reload burst; confirm a single dispatch_start_proof WITH submit and no stranded start_session failed. ops.log marker: route_dispatch_submit_recycle_settle.
@@ -181,6 +201,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#j9ja] [/] [blocked] #optverify SUCCESS ops.log markers so operator live tests auto-verify. SHIPPED this cycle: convergence_gate_converged_dispatch (agent-doc submodule 2367d883 — #fbwire Phase 2 success-after-defer in idle_watch.rs, emitted only when the gate had been deferring; auto-verifies #fbwireverify slow-ACK). Already exists: route_dispatch_submit_recycle_settle (route/dispatch.rs:831), auto_start_dispatch_ready_confirmed, queue_paused_continuation_guidance_emitted. BLOCKED (code sites do not exist yet): agent_restart_performed — add inside #agentreloadrestart Phase 1b restart EXECUTION (today only harness_change_detected + agent_restart_boundary_gate note=phase1b_execution_pending exist); restart-agent menu-invoke marker — add inside #restartagentmenu RestartAgentAction. Un-gate + close when those two parent features land and their markers are added.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->
